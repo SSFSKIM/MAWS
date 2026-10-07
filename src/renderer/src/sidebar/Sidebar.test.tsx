@@ -821,7 +821,7 @@ describe('a released session’s row', () => {
     const id = idOf('Settings idle probe');
     const at = new Date(2026, 8, 29, 14, 2).toISOString();
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at, limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
     expand('proj-claude-usage-menubar');
     render(<Sidebar />);
     const mark = within(row('Settings idle probe')).getByText('released');

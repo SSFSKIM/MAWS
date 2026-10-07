@@ -851,7 +851,7 @@ describe('a released session resumes on Send', () => {
     live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_000_000 } : null } } });
   const released = (appSessionId: AppSessionId) => {
     exitedBy(appSessionId, 'budget');
-    useSessions.getState().applyDigest(digest(appSessionId, { phase: 'idle', released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } }));
+    useSessions.getState().applyDigest(digest(appSessionId, { phase: 'idle', released: { at: '2026-09-29T14:02:00.000Z', reason: 'budget', limitKiB: 8_388_608 } }));
   };
   let off: () => void = () => {};
   afterEach(() => off());

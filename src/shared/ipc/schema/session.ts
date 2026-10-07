@@ -311,7 +311,9 @@ export const SessionDigestSchema = z.strictObject({
   // C12 start: the memory budget's released mark (charter §4.4; D1): the session's last exit was a release, and it has
   // not launched, been archived, or been taken by a terminal or background job since. Absent means not released. Main's
   // in-memory state of this app run (D-16), never persisted; the phase reads `idle` while it is set.
-  released: z.strictObject({ at: z.string(), limitKiB: z.number().int() }).optional(),
+  // E10: `reason` tells the budget's release from the supervisor's idle release (no app connected), whose `limitKiB` is
+  // null: the renderer words the two apart.
+  released: z.strictObject({ at: z.string(), reason: z.enum(['budget', 'idle']), limitKiB: z.number().int().nullable() }).optional(),
   // C12 end
 });
 export type SessionDigest = z.infer<typeof SessionDigestSchema>;

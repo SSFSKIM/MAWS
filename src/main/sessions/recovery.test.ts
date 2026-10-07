@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import { BootstrapNotes } from './intents';
 import type { SetupIntent } from '@shared/sessions/intent';
 import { SessionHarness } from '../../../test/support/session-harness';
 
@@ -251,5 +252,306 @@ describe('handoff recovery', () => {
     await h.service.startSession(id, { message: null, options: {} });
     expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
     expect(h.host.calledWith('session.send')).toHaveLength(1);
+  });
+});
+
+// E10 (Design 5, "Startup recovery with kept sessions"): a keep-quit leaves the sessions running on the detached
+// supervisor, so a relaunch reads `engine.sessions` before recovering. An intent whose row is live is handed off; a live
+// bootstrap row is stopped and forgotten; when the host cannot be read nothing destructive runs until it streams again.
+describe('recovery with kept sessions (E10)', () => {
+  let h: SessionHarness;
+  let id: AppSessionId;
+  beforeEach(async () => {
+    h = await new SessionHarness().start();
+    h.trustDirectory(h.work);
+    id = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).appSessionId;
+  });
+  afterEach(() => h.dispose());
+
+  const pinOf = () => intentFile(h, id)!.progress.engineSessionId as SessionId;
+  const start = () => h.service.startSession(id, { message: MESSAGE, options: {} });
+  const bound = () => h.until(() => h.index.sessions.get(id)?.engineSessionId === pinOf());
+  const nothingRelaunchedOrResent = () => {
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.send')).toEqual([]);
+  };
+  // the record stays bound to the row's engine id, the intent goes as handed off, and nothing else touches the row
+  const handedOff = (pin: SessionId) => {
+    expect(intentFile(h, id)).toBeNull();
+    expect(h.events).toContainEqual({ name: 'session.intent.changed', payload: { appSessionId: id, intent: null } });
+    expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+    expect(h.removed(id)).toBe(false);
+    expect(h.host.calledWith('fs.unbind')).toEqual([]);
+    expect(h.host.calledWith('session.stop')).toEqual([]);
+    expect(h.host.forgotten).not.toContain(id);
+    expect(h.host.table.get(id)!.process).not.toBe('exited');
+  };
+
+  it('a live row whose first message never reached C3 is handed off, not failed and removed', async () => {
+    h.host.send = 'hang'; // without a kept row this is "not started": the record removed, the intent failed
+    await start();
+    await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+    await bound();
+    const pin = pinOf();
+    await h.restart({ keep: true });
+    nothingRelaunchedOrResent();
+    handedOff(pin);
+    expect(h.host.calledWith('session.queue.list')).toEqual([]); // the live row settles it: C3's queue is the host's
+  });
+
+  it('a live row still initializing is handed off', async () => {
+    h.host.script = () => ({ ready: false });
+    await start();
+    await h.until(() => intentFile(h, id)?.progress.launch != null);
+    await bound();
+    const pin = pinOf();
+    await h.restart({ keep: true });
+    nothingRelaunchedOrResent();
+    handedOff(pin);
+  });
+
+  it('a first message C3 queued on a live row is left to the host', async () => {
+    h.host.send = 'persist-then-hang';
+    await start();
+    await h.until(() => (h.host.disk.queues.get(id) ?? []).length > 0);
+    await bound();
+    const pin = pinOf();
+    await h.restart({ keep: true });
+    nothingRelaunchedOrResent();
+    handedOff(pin);
+    expect(h.host.disk.queues.get(id)).toHaveLength(1);
+  });
+
+  it('a row that exited while the app was away recovers as today', async () => {
+    h.host.send = 'hang';
+    await start();
+    await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+    await bound();
+    const pin = pinOf();
+    h.host.exitNow(id);
+    await h.restart({ keep: true });
+    nothingRelaunchedOrResent();
+    expect(h.index.sessions.get(id)).toBeNull();
+    await h.until(() => h.removed(id));
+    expect(intentFile(h, id)).toMatchObject({ message: MESSAGE, progress: { engineSessionId: pin, lastFailure: { phase: 'launching', message: 'MAWS quit before the session started' } } });
+  });
+
+  it('a live trust bootstrap is stopped and forgotten, and its intent fails at trusting as a quit leaves it', async () => {
+    const untrusted = h.dir('untrusted');
+    const other = (await h.service.create({ projectId: null, location: { kind: 'directory', path: untrusted } })).appSessionId;
+    h.host.script = (spec) => (spec.appSessionId !== other ? { ready: false } : {}); // the bootstrap stays initializing
+    await h.service.startSession(other, { message: MESSAGE, options: { trust: 'accepted' } });
+    await h.until(() => intentFile(h, other)?.progress.bootstrap != null && h.host.table.size > 0);
+    const bootstrapId = intentFile(h, other)!.progress.bootstrap!.appSessionId;
+    await h.until(() => h.host.table.get(bootstrapId)?.process === 'initializing');
+    await h.restart({ keep: true });
+    expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: bootstrapId, reason: 'stop' }]);
+    expect(h.host.forgotten).toEqual([bootstrapId]);
+    expect(h.host.table.has(bootstrapId)).toBe(false);
+    expect(intentFile(h, other)).toMatchObject({ message: MESSAGE, progress: { bootstrap: null, lastFailure: { phase: 'trusting', message: 'MAWS quit before the session started' } } });
+    expect(h.host.launches).toEqual([]);
+  });
+
+  it('a live trust bootstrap is stopped and forgotten by a deferred recovery too, after its intent is marked', async () => {
+    const other = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('untrusted') } })).appSessionId;
+    h.host.script = (spec) => (spec.appSessionId !== other ? { ready: false } : {});
+    await h.service.startSession(other, { message: MESSAGE, options: { trust: 'accepted' } });
+    await h.until(() => intentFile(h, other)?.progress.bootstrap != null && h.host.table.size > 0);
+    const bootstrapId = intentFile(h, other)!.progress.bootstrap!.appSessionId;
+    await h.until(() => h.host.table.get(bootstrapId)?.process === 'initializing');
+    await h.restart({ keep: true, unavailable: true });
+    expect(h.host.calledWith('session.stop')).toEqual([]);
+    h.host.becomeReady();
+    await h.service.listIntents();
+    expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: bootstrapId, reason: 'stop' }]);
+    expect(h.host.forgotten).toEqual([bootstrapId]);
+    expect(intentFile(h, other)).toMatchObject({ progress: { bootstrap: null, lastFailure: { phase: 'trusting', message: 'MAWS quit before the session started' } } });
+  });
+
+  it("a resume's noted bootstrap with a live row is stopped and forgotten, its note removed", async () => {
+    const notes = new BootstrapNotes(join(h.userData, 'sessions', 'bootstraps'));
+    const bootstrapId = '00000000-0000-4000-8000-0000000b0075' as AppSessionId;
+    await notes.put({ bootstrapId, appSessionId: id, at: '2026-10-06T00:00:00.000Z' });
+    h.host.reserve(bootstrapId, { process: 'ready' });
+    await h.restart({ keep: true });
+    expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: bootstrapId, reason: 'stop' }]);
+    expect(h.host.forgotten).toEqual([bootstrapId]);
+    expect(await notes.list()).toEqual([]);
+  });
+
+  describe('when engine.sessions cannot be answered (the host is crashed, waiting or held)', () => {
+    const notes = () => new BootstrapNotes(join(h.userData, 'sessions', 'bootstraps'));
+    const deadBootstrap = '00000000-0000-4000-8000-0000000dead0' as AppSessionId;
+    let pin: SessionId;
+    let interrupted: AppSessionId;
+    beforeEach(async () => {
+      h.host.send = 'hang';
+      await start();
+      await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+      await bound();
+      pin = pinOf();
+      // a start the quit cut short before any record (a recovery marks it failed), and a bootstrap a run left noted
+      interrupted = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('later') } })).appSessionId;
+      writeFileSync(join(h.userData, 'sessions', 'intents', `${interrupted}.json`), JSON.stringify({ ...intentFile(h, interrupted)!, message: MESSAGE }));
+      await notes().put({ bootstrapId: deadBootstrap, appSessionId: interrupted, at: '2026-10-06T00:00:00.000Z' });
+    });
+
+    it('nothing is marked, removed or forgotten; the next ready runs recovery, and commands wait for it', async () => {
+      const before = [intentFile(h, id), intentFile(h, interrupted)];
+      await h.restart({ keep: true, unavailable: true });
+      expect([intentFile(h, id), intentFile(h, interrupted)]).toEqual(before);
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+      expect(h.removed(id)).toBe(false);
+      expect(await notes().list()).toHaveLength(1);
+      expect(h.host.calls.map((c) => c.name)).toEqual(['engine.sessions']); // no forget, no queue read, no stop
+      expect((await h.service.listIntents()).map((i) => i.appSessionId).sort()).toEqual([id, interrupted].sort()); // the service answers meanwhile
+
+      h.host.becomeReady();
+      const listed = await h.service.listIntents(); // waits for the recovery the ready started
+      expect(listed.map((i) => i.appSessionId)).toEqual([interrupted]);
+      handedOff(pin);
+      expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+      expect(await notes().list()).toEqual([]);
+      expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]);
+      nothingRelaunchedOrResent();
+    });
+
+    it('a start of an intent recovery has not reached reconciles it first, so it never rolls back a kept session', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      await expect(h.service.startSession(id, { message: null, options: {} })).rejects.toThrow('reconciliation failed: the engine host is not connected');
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin }); // no rollback removed it
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(h.host.calledWith('session.launch')).toEqual([]);
+      h.host.becomeReady();
+      await h.service.listIntents();
+      handedOff(pin);
+    });
+
+    const DRAFT = { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-10-06T00:00:00.000Z' } };
+
+    it('a re-run does not read a trust card start made meanwhile as a quit; an interrupted start with only its draft patched still gets its card', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      const card = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('untrusted') } })).appSessionId;
+      expect(await h.service.startSession(card, { message: MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+      await h.service.patch(interrupted, DRAFT);
+      h.host.becomeReady();
+      await h.service.listIntents();
+      handedOff(pin); // what the deferring boot left is still recovered
+      expect(intentFile(h, card)).toMatchObject({ message: MESSAGE, progress: { lastFailure: null } });
+      expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+      expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]); // the noted bootstrap too
+    });
+
+    // the kept session must be handed off whatever touched its intent, or a later start's rollback stops and removes it
+    const keptAfterStart = async () => {
+      handedOff(pin);
+      await h.service.startSession(id, { message: null, options: {} });
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+      expect(h.host.table.get(id)!.process).toBe('ready');
+    };
+
+    it.each([
+      ['patched', () => h.service.patch(id, DRAFT)],
+      ['renamed', () => h.service.rename(id, 'Kept')],
+    ])('a kept intent %s while recovery waits is handed off when the host returns', async (_, touch) => {
+      await h.restart({ keep: true, unavailable: true });
+      h.host.table.set(id, { ...h.host.table.get(id)!, process: 'ready' });
+      await touch().catch(() => {}); // a rename fails while the host is unreachable; its lock still touched the id
+      h.host.becomeReady();
+      await h.service.listIntents();
+      await keptAfterStart();
+    });
+
+    it('a kept intent locked by a command during the re-run stays owed: settled after it, and reconciled before a start', async () => {
+      let reads = 0;
+      // reads: the boot's (refused), the re-run's, then the follow-up's (refused: the host is unreachable again)
+      await h.restart({ keep: true, unavailable: true, onCall: (name) => name === 'engine.sessions' && (reads += 1) === 3 && (h.host.unavailable = true) });
+      h.host.table.set(id, { ...h.host.table.get(id)!, process: 'ready' });
+      h.host.becomeReady();
+      const patched = h.service.patch(id, DRAFT); // holds the lock while it waits for the re-run
+      await h.service.listIntents();
+      await patched;
+      await h.until(() => reads === 3 && intentFile(h, id)?.progress.lastFailure != null); // the follow-up ran after the patch
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin }); // not settled while unreadable
+      h.host.unavailable = false;
+      await h.service.startSession(id, { message: null, options: {} }); // reconciles it first: handed off, never set up
+      expect(intentFile(h, id)).toBeNull();
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+      expect(h.host.table.get(id)!.process).toBe('ready');
+    });
+
+    it('a streaming during the boot’s table read reads it again rather than waiting for the next one', async () => {
+      let reads = 0;
+      await h.restart({
+        keep: true,
+        unavailable: true,
+        onCall: (name) => {
+          if (name !== 'engine.sessions') return;
+          reads += 1;
+          if (reads === 1) h.host.becomeReady({ reachable: false }); // it streams while this read fails
+          else h.host.unavailable = false;
+        },
+      });
+      expect(reads).toBe(2);
+      handedOff(pin);
+    });
+
+    it('a streaming while the deferral reads the bootstrap notes runs the recovery, never losing the wakeup', async () => {
+      const list = BootstrapNotes.prototype.list;
+      let reads = 0;
+      const spy = vi.spyOn(BootstrapNotes.prototype, 'list').mockImplementation(async function (this: BootstrapNotes) {
+        reads += 1;
+        if (reads === 1) h.host.becomeReady(); // the host streams while the deferring boot reads its notes
+        return list.call(this);
+      });
+      try {
+        await h.restart({ keep: true, unavailable: true });
+        await h.service.listIntents(); // waits for the recovery the streaming owed
+        handedOff(pin);
+        expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+        expect(await notes().list()).toEqual([]);
+        expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a re-run whose step fails logs it and goes on with the rest', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      const list = vi.spyOn(BootstrapNotes.prototype, 'list').mockRejectedValueOnce(new Error('EACCES: the notes are unreadable'));
+      try {
+        h.host.becomeReady();
+        await h.service.listIntents();
+        handedOff(pin);
+        expect(intentFile(h, interrupted)).toMatchObject({ progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+      } finally {
+        list.mockRestore();
+      }
+    });
+
+    it('a deferred recovery passes over an intent whose start is in flight', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      h.hangPut = (intent) => intent.appSessionId === interrupted && intent.progress.lastFailure === null; // its start holds at its first write
+      void h.service.startSession(interrupted, { message: null, options: {} });
+      await h.until(() => h.gateReached);
+      h.host.becomeReady();
+      await h.service.listIntents();
+      handedOff(pin);
+      expect(intentFile(h, interrupted)!.progress.lastFailure).toBeNull(); // never marked "MAWS quit before the session started"
+    });
+
+    it('a ready while the host still cannot be read defers recovery again; a later ready runs it', async () => {
+      await h.restart({ unavailable: true });
+      h.host.becomeReady({ reachable: false }); // streaming, but the table read fails again (a stalled request)
+      await h.service.listIntents();
+      expect(intentFile(h, id)!.progress.lastFailure).toBeNull();
+      expect(h.removed(id)).toBe(false);
+      h.host.becomeReady();
+      await h.service.listIntents();
+      expect(h.removed(id)).toBe(true); // no live row on this host: as today, the record goes and the intent fails
+      expect(intentFile(h, id)).toMatchObject({ progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+    });
   });
 });

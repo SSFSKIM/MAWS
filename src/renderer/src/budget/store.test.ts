@@ -29,8 +29,14 @@ describe('the budget’s words', () => {
   it('names the release’s time and budget on the mark and in Session info', () => {
     const at = new Date(2026, 8, 29, 14, 2).toISOString(); // 14:02 on the host's clock
     expect(clockTime(at)).toBe('14:02');
-    expect(BUDGET.markTitle({ at, limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
-    expect(BUDGET.releasedLine({ at, limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under 8 GB');
+    expect(BUDGET.markTitle({ at, reason: 'budget', limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(BUDGET.releasedLine({ at, reason: 'budget', limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under 8 GB');
+  });
+
+  it('names an idle release (E10: the supervisor idle clock) by its time, with no budget', () => {
+    const at = new Date(2026, 9, 6, 14, 2).toISOString();
+    expect(BUDGET.markTitle({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while idle · Send resumes it');
+    expect(BUDGET.releasedLine({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while idle');
   });
 
   it('says why each session holds work, counting where a count helps', () => {

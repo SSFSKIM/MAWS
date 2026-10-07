@@ -4,6 +4,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { parsePsTree, ProcessTable } from './process-table';
 import { EngineSession } from './session';
+import type { LiveRow } from './live-ledger'; // E10
 // C12 start
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -673,3 +674,211 @@ describe('process table (C12): the cap never exceeds itself when exit times tie 
   });
 });
 // C12 end
+
+// E10 start: the supervisor's idle-row release (E10 execution document, §Design 1 "Idle exit, and idle rows"): while no
+// app is connected, or under an armed exit-when-idle (the policy's `active`), a ready row that has held no hard reason
+// for the idle time is stopped with reason `idle`, a release like the budget's. Its clock starts at the later of the
+// moment its last hard reason cleared and the moment the release became active.
+describe('process table (E10): the idle-row release', () => {
+  const IDLE_MS = 60_000;
+  const T0 = new Date('2026-10-06T10:00:00.000Z');
+  type Scripted = ReturnType<typeof scriptedSession>;
+  const tasks = (list: unknown[], uuid: string) => ({ type: 'system', subtype: 'background_tasks_changed', tasks: list, uuid, session_id: 's' });
+  const TASK = { task_id: 't-1', task_type: 'local_agent', description: 'work' };
+  const engineState = (state: string, uuid: string) => ({ type: 'system', subtype: 'session_state_changed', state, uuid, session_id: 's' });
+
+  // Ready rows under one table, the clock faked; end_session is never answered, so a released row stays `exiting`.
+  async function idleTable(names: string[], opts: { exitedRowsMax?: number } = {}) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(T0);
+    const logs: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: opts.exitedRowsMax, log: (line) => void logs.push(line) });
+    const s: Record<string, Scripted> = {};
+    for (const [i, name] of names.entries()) {
+      s[name] = scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid: 700 + i }, responder: handshakeResponder({ end_session: () => null }) });
+      table.reserve(name as AppSessionId, () => s[name]!.session);
+    }
+    await Promise.all(Object.values(s).map((x) => x.session.start()));
+    await vi.advanceTimersByTimeAsync(0);
+    return { table, s, logs };
+  }
+  const lifecycle = (x: Scripted) => x.session.lifecycle;
+
+  it('stops a ready row with no hard reason once the idle time has passed since the release became active, as reason idle', async () => {
+    const { table, s, logs } = await idleTable(['a']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(logs).toEqual(['idle release of a: no hard reason for 60000 ms with no app connected or exit-when-idle armed']);
+    expect(s.a!.transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']); // `idle` never goes on the wire
+    s.a!.transport.exit(0);
+    await s.a!.session.exited;
+    expect(s.a!.session.status().exit).toMatchObject({ reason: 'idle', release: null });
+    expect(table.takeReleased('a' as AppSessionId)).toBe(true); // its next launch reconnects as process_exit, as a budget release's
+  });
+
+  it('keeps a row while it holds a hard reason, and starts its clock when the last one clears', async () => {
+    const { table, s } = await idleTable(['a']);
+    s.a!.transport.push(tasks([TASK], 'b-1'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.a!.session.status().keepAlive).toEqual(['background_tasks']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(3 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.transport.push(tasks([], 'b-2'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a hard reason that comes and goes inside the idle time restarts the clock', async () => {
+    const { table, s } = await idleTable(['a']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    s.a!.transport.push(tasks([TASK], 'b-1'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    s.a!.transport.push(tasks([], 'b-2'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a row the engine says is working is not idle (running), even with no hard reason', async () => {
+    const { table, s } = await idleTable(['a']);
+    s.a!.transport.push(engineState('running', 'st-1'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.a!.session.status()).toMatchObject({ engineState: 'running', keepAlive: [] });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(3 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.transport.push(engineState('idle', 'st-2'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('releases nothing while inactive (a client connected), however long the row has been idle; activation starts the clock', async () => {
+    const { table, s } = await idleTable(['a']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: false });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true }); // the client left
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a client connecting cancels the clock; one leaving again starts it afresh; a new idle time keeps the activation', async () => {
+    const { table, s } = await idleTable(['a']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 10);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: false });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    table.setIdleRelease({ idleMs: 2 * IDLE_MS, active: true }); // host.configure while away: same activation, longer time
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('never releases with no idle time (never)', async () => {
+    const { table, s, logs } = await idleTable(['a']);
+    table.setIdleRelease({ idleMs: null, active: true });
+    await vi.advanceTimersByTimeAsync(100 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(logs).toEqual([]);
+  });
+
+  it('an idle-released row is in the released set, so it survives exited-row pruning until its archive', async () => {
+    const { table, s } = await idleTable(['a', 'b', 'c'], { exitedRowsMax: 1 });
+    s.b!.transport.push(tasks([TASK], 'b-1')); // b and c hold work and are stopped by hand
+    s.c!.transport.push(tasks([TASK], 'c-1'));
+    await vi.advanceTimersByTimeAsync(0);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect([s.a, s.b, s.c].map((x) => lifecycle(x!))).toEqual(['exiting', 'ready', 'ready']);
+    s.a!.transport.exit(0);
+    await s.a!.session.exited;
+    for (const x of [s.b!, s.c!]) {
+      vi.setSystemTime(Date.now() + 1_000);
+      const stopping = x.session.stop('stop');
+      x.transport.exit(0);
+      await stopping;
+    }
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['a', 'c']); // b went at the cap; the released a stayed
+    expect(table.release('a' as AppSessionId)).toBe(true); // the archive's release takes the released id with the row
+    expect(table.takeReleased('a' as AppSessionId)).toBe(false);
+  });
+});
+// E10 end
+
+// E10 start: the orphan ledger's rows (E10 execution document, §Design 1 "The orphan ledger and sweep")
+describe('process table (E10): the orphan ledger', () => {
+  type Scripted = ReturnType<typeof scriptedSession>;
+  function ledgerTable() {
+    const procStartOf = vi.fn((pid: number): string | null => `T${pid}`);
+    const logs: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', procStartOf, log: (line) => void logs.push(line) });
+    const writes: LiveRow[][] = [];
+    const launch = async (name: string, pid: number): Promise<Scripted> => {
+      const s = scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid } });
+      table.reserve(name as AppSessionId, () => s.session);
+      await s.session.start();
+      return s;
+    };
+    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId });
+    return { table, procStartOf, logs, writes, launch, row, record: () => table.recordLive((rows) => void writes.push([...rows])) };
+  }
+
+  it('writes nothing until it records, then the live rows at once', async () => {
+    const { table, writes, launch, row, record } = ledgerTable();
+    const a = await launch('a', 701);
+    expect(writes).toEqual([]);
+    record();
+    expect(writes).toEqual([[row(a, 701)]]);
+    expect(table.list()).toHaveLength(1);
+  });
+
+  it('rewrites at every launch and exit, and only then: statuses that leave the live set as it was write nothing', async () => {
+    const { writes, launch, row, record, procStartOf } = ledgerTable();
+    record();
+    expect(writes).toEqual([[]]);
+    const a = await launch('a', 701);
+    const b = await launch('b', 702);
+    expect(writes.at(-1)).toEqual([row(a, 701), row(b, 702)]);
+    const count = writes.length;
+    a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: 'u-1', session_id: 's' });
+    await flush();
+    expect(writes).toHaveLength(count);
+    a.transport.exit(0);
+    await a.session.exited;
+    expect(writes.at(-1)).toEqual([row(b, 702)]);
+    expect(writes).toHaveLength(count + 1);
+    expect(procStartOf.mock.calls.map(([pid]) => pid)).toEqual([701, 702]); // once per process
+  });
+
+  it('records a start time it cannot read as empty, and a failed write is logged and retried at the next change', async () => {
+    const { table, logs, procStartOf, launch } = ledgerTable();
+    procStartOf.mockReturnValueOnce(null);
+    let fail = true;
+    const writes: LiveRow[][] = [];
+    table.recordLive((rows) => {
+      if (fail) throw new Error('disk full');
+      writes.push([...rows]);
+    });
+    const a = await launch('a', 701);
+    expect(logs.some((line) => line.includes('disk full'))).toBe(true);
+    expect(logs.filter((line) => line.includes('start time'))).toEqual([expect.stringContaining('pid 701')]); // the '' leaves a trace
+    fail = false;
+    const b = await launch('b', 702);
+    expect(writes.at(-1)!.map((r) => [r.appSessionId, r.procStart])).toEqual([[a.session.status().appSessionId, ''], [b.session.status().appSessionId, 'T702']]);
+  });
+});
+// E10 end

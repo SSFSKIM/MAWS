@@ -127,6 +127,7 @@ describe('panel host registry and instances', () => {
     });
     render(<TestHost />);
     expect(probe.created.map((i) => i.instanceId)).toEqual(['t:pinned01', 't:aaaaaaaa']);
+    expect(probe.created.map((i) => i.restored)).toEqual([true, true]); // E10: shown restored refs say so
     probe.veto = (id) => id === 't:aaaaaaaa';
     act(() => off());
     await settle();
@@ -306,10 +307,10 @@ describe('panel host transitions', () => {
       { id: a, params: 2 },
       { id: pin, params: 4 },
     ]);
-    expect(probe.created.map((i) => [i.instanceId, i.params])).toEqual([
-      [a, 1],
-      [b, 3],
-      [pin, undefined],
+    expect(probe.created.map((i) => [i.instanceId, i.params, i.restored])).toEqual([
+      [a, 1, undefined],
+      [b, 3, undefined],
+      [pin, undefined, undefined], // E10: no params, and still not restored
     ]);
   });
 
@@ -326,14 +327,14 @@ describe('panel host transitions', () => {
     const spies = spyLayout();
     const main = useLayout.getState().main;
     act(() => void expect(panelHost.addTool('s', { appSessionId: B, params: 'p1', activate: false })).toBe('s:bbbbbbbb'));
-    expect(probe.created).toEqual([expect.objectContaining({ appSessionId: B, instanceId: 's:bbbbbbbb', params: undefined })]);
+    expect(probe.created).toEqual([expect.objectContaining({ appSessionId: B, instanceId: 's:bbbbbbbb', params: undefined, restored: true })]);
     expect(probe.opens).toEqual([{ id: 's:bbbbbbbb', params: 'p1' }]);
     expect(spies.openSession).not.toHaveBeenCalled();
     expect(useLayout.getState().main).toBe(main);
     expect(panelOf(B)!.activeTabId).toBeNull();
 
     act(() => void expect(panelHost.addTool('s', { appSessionId: C, params: 'p2' })).toBe('s:cccccccc'));
-    expect(probe.created.at(-1)).toEqual(expect.objectContaining({ appSessionId: C, instanceId: 's:cccccccc', params: undefined }));
+    expect(probe.created.at(-1)).toEqual(expect.objectContaining({ appSessionId: C, instanceId: 's:cccccccc', params: undefined, restored: true }));
     expect(probe.opens.at(-1)).toEqual({ id: 's:cccccccc', params: 'p2' });
     expect(spies.openSession.mock.calls).toEqual([[C]]);
     expect(panelOf(C)!.activeTabId).toBe('s:cccccccc');

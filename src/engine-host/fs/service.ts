@@ -742,9 +742,7 @@ export class FsService {
       .catch((error: unknown) => console.error(`[fs] cannot check the contested transcript ${path}:`, error instanceof Error ? error.message : error));
   }
 
-  private send: HostEmit = (name, payload) => {
-    if (!this.stopped) this.emit(name, payload);
-  };
+  private send: HostEmit = (name, payload) => !this.stopped && this.emit(name, payload);
 }
 
 // The whole lines appended to `path` since `offset` (at most CONTEST_READ_BYTES of them), parsed where they parse, and

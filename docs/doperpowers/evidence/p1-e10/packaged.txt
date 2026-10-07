@@ -1,0 +1,34 @@
+E10 Task 4.3: the packaged check (e2e/supervisor-packaged.spec.ts, pnpm e2e:supervisor:packaged; unsigned build:app).
+Written whole by the spec on every run; the gate results are in the execution document's Concrete Steps.
+Executable: /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
+
+electron-fuses read --app /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app:
+Analyzing app: MAWS.app
+Fuse Version: v1
+  RunAsNode is Enabled
+  EnableCookieEncryption is Disabled
+  EnableNodeOptionsEnvironmentVariable is Enabled
+  EnableNodeCliInspectArguments is Enabled
+  EnableEmbeddedAsarIntegrityValidation is Disabled
+  OnlyLoadAppFromAsar is Disabled
+  LoadBrowserProcessSpecificV8Snapshot is Disabled
+  GrantFileProtocolExtraPrivileges is Enabled
+  WasmTrapHandlers is Enabled
+
+The packaged app launched through launchMaws with MAWS_HOST_MODE=detached (scratch userData):
+  host.status.transport: detached
+  host.status.supervisor.mode: detached
+  host.status.state: ready; matches: same
+  supervisor pid (host.status and supervisor/host.lock): 15520; app pid 15141; pgid 15520
+  ps -o command=: maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-SOFFzgbF.js --detached /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-packaged-1heTEs/ud/supervisor
+  ps -o comm= (follows argv0): maws-supervisor
+  ps -o ucomm= (the kernel's name, the executable's): MAWS
+  executable (lsof -d txt, realpath): /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
+
+Results (every assertion held):
+  RunAsNode is Enabled
+  transport === 'detached' and supervisor.mode === 'detached'
+  argv0 is maws-supervisor; the chunk is under MAWS.app/Contents/Resources/app.asar/
+  the executable lies inside MAWS.app/Contents/MacOS/ and is the app binary itself
+  the supervisor leads its own process group; no console error
+  an unbusy quit stopped the supervisor (pid gone)

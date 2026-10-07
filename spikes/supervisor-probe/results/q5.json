@@ -1,0 +1,93 @@
+{
+ "question": "Q5",
+ "source": "results/q1-parent-killed.json",
+ "engine": {
+  "bin": "/Users/new/.local/share/claude/versions/2.1.291",
+  "version": "2.1.291"
+ },
+ "rowWhileParentAlive": {
+  "pid": 74108,
+  "sessionId": "eb3f9765-71a7-4c5a-9d12-3d0c127945e7",
+  "entrypoint": "sdk-ts",
+  "kind": "interactive",
+  "cwdIsScratch": false,
+  "keys": [
+   "cwd",
+   "entrypoint",
+   "kind",
+   "messagingSocketPath",
+   "name",
+   "nameSince",
+   "nameSource",
+   "peerFeatures",
+   "peerProtocol",
+   "pid",
+   "pidDomain",
+   "procStart",
+   "sessionId",
+   "startedAt",
+   "status",
+   "statusUpdatedAt",
+   "updatedAt",
+   "version"
+  ]
+ },
+ "rowAfterParentDeath": {
+  "pid": 74108,
+  "sessionId": "eb3f9765-71a7-4c5a-9d12-3d0c127945e7",
+  "entrypoint": "sdk-ts",
+  "kind": "interactive",
+  "cwdIsScratch": false,
+  "keys": [
+   "cwd",
+   "entrypoint",
+   "kind",
+   "messagingSocketPath",
+   "name",
+   "nameSince",
+   "nameSource",
+   "peerFeatures",
+   "peerProtocol",
+   "pid",
+   "pidDomain",
+   "procStart",
+   "sessionId",
+   "startedAt",
+   "status",
+   "statusUpdatedAt",
+   "updatedAt",
+   "version"
+  ]
+ },
+ "checks": [
+  {
+   "label": "parent alive: the engine is a session leader whose parent is the wrapper",
+   "ok": true
+  },
+  {
+   "label": "parent alive: the row names the engine pid",
+   "ok": true
+  },
+  {
+   "label": "parent alive: entrypoint sdk-ts, kind interactive",
+   "ok": true
+  },
+  {
+   "label": "parent dead: the engine reparented to launchd (PPID 1) within the first 100 ms sample",
+   "ok": true
+  },
+  {
+   "label": "parent dead: the row is unchanged in pid, session, entrypoint",
+   "ok": true
+  },
+  {
+   "label": "the row has no field naming a parent",
+   "ok": true
+  },
+  {
+   "label": "the row was gone no later than the engine vanished from ps (it outlived the parent, per the parent-dead check, and did not outlive the engine)",
+   "ok": true
+  }
+ ],
+ "allOk": true
+}

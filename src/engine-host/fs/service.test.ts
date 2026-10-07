@@ -51,6 +51,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
         const checked = validateEventPayload(name, payload);
         if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
         emitted.push({ name, payload } as Emitted);
+        return true;
       },
       watch,
       startScanFallbackMs,
@@ -247,7 +248,10 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       let release!: (files: ListedTranscript[]) => void;
       const list = vi.spyOn(Discovery.prototype, 'list').mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
       const reads = vi.spyOn(Discovery.prototype, 'summarizeOne');
-      service = new FsService({ paths: fixture.paths, emit: (name, payload) => void emitted.push({ name, payload } as Emitted), watch: deafWatch });
+      service = new FsService({ paths: fixture.paths, emit: (name, payload) => {
+        emitted.push({ name, payload } as Emitted);
+        return true;
+      }, watch: deafWatch });
       const starting = service.start();
       if (when.startsWith('while')) await expect.poll(() => list.mock.calls.length).toBe(1);
       const scanning = service.scan([]); // a cold index: main knows nothing
@@ -651,6 +655,7 @@ describe('filesystem state service: a contested session (W7)', () => {
         const checked = validateEventPayload(name, payload);
         if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
         emitted.push({ name, payload } as Emitted);
+        return true;
       },
       holders: { ownPids: () => new Set([process.pid]) },
     });
@@ -704,6 +709,7 @@ describe('filesystem state service: a contested session (W7)', () => {
         const checked = validateEventPayload(name, payload);
         if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
         emitted.push({ name, payload } as Emitted);
+        return true;
       },
       holders: { ownPids: () => new Set([process.pid]) },
     });

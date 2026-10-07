@@ -15,12 +15,13 @@ import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath } from './select-source';
 import { stubSource } from './stub-source';
+import { FoldFilter, resyncDigests } from './resync'; // E10
 
 export interface SessionsOptions {
   env: Record<string, string | undefined>;
   packaged: boolean;
   appRoot: string;
-  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch'>; // C12: onState
+  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'>; // C12: onState; E10: setResync
   indexSource?: SessionSource; // C4's IndexSessionSource: the records, projects and seed digests, and the unread rule
   // E3 (Design §5): app events kept elsewhere than the read model, answered with its own by `session.appEvents` (the
   // side-thread rows, re-synthesised from the index)
@@ -37,12 +38,22 @@ export interface Sessions {
 // C12: at each engine-host generation change (the host leaving `ready`) the statuses it sent are forgotten, since a
 // replacement host starts with none of their processes, as the budget store re-reads per generation (whole-branch
 // review); the read model's `engine` event lets a quit wait re-read.
-export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent' | 'onState'>): SessionSource { // C12: onState
+// E10: the engine host's resync (resync.ts) is registered here, run by the supervisor between each connect and its
+// `ready` line: every row's status and launch folded before the host streams. The batches that follow pass the fold
+// filter, so the burst's tail and live events fold once, in order, after what the resync folded.
+export function hostEventSource(
+  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'setResync'>, // C12: onState; E10: setResync
+  log: (line: string) => void = (line) => console.log(`[sessions] ${line}`), // E10
+): SessionSource {
   return {
     start(writer) {
       const held = new Set<AppSessionId>(); // C12: ids this host generation sent a status for
+      // E10 start
+      const filter = new FoldFilter();
+      hosts.setResync('engine-host', (dispatch, signal) => resyncDigests({ dispatch, signal, writer, filter, held, log }));
+      // E10 end
       const offs = [
-        hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => writer.fold(appSessionId, events)),
+        hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => writer.fold(appSessionId, filter.pass(appSessionId, events))), // E10: the filter
         hosts.onEvent('session.status', ({ status }) => (held.add(status.appSessionId), writer.applyEngineStatus(status))), // C12: held
         // C12 start
         hosts.onState('engine-host', (state) => {
@@ -54,7 +65,10 @@ export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent' | 'onState
         // C4's replay runs have no engine status; their progress says the host is playing the session's events live.
         hosts.onEvent('session.replay.progress', ({ appSessionId }) => writer.observeReplay(appSessionId as AppSessionId)),
       ];
-      return () => offs.forEach((off) => off());
+      return () => {
+        hosts.setResync('engine-host', null); // E10
+        offs.forEach((off) => off());
+      };
     },
   };
 }

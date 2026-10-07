@@ -6,7 +6,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
 import { routingFacts } from '../../gateway/routing-facts';
 import { useGateway } from '../../gateway/store';
 import type { PanelToolContext } from '../../panel/tool';
@@ -59,7 +59,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // C3 samples the context at ready and after every turn into the digest (debt wave 3); the engine's summary is read
   // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
   const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V9;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V10;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status

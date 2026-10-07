@@ -40,7 +40,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'fs.scanProgress', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -184,6 +184,76 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().engine.has('c' as AppSessionId)).toBe(true);
     fake.event('session.status', { appSessionId: 'a', status: status('a', { process: 'exited' }) });
     expect(stores.sessions.getState().engine.get(A)?.process).toBe('exited');
+  });
+
+  // E10 (X13 "Main's resync"): after a supervisor crash and restart, Stop all or Restart now, the windows stay open and
+  // the page reads the process table again when the engine host is back, once per transition into ready.
+  it('reads the engine table again when the engine host regains ready, once per transition', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('engine.sessions', [status('a')]);
+    const reads = () => fake.calls.filter((c) => c === 'invoke engine.sessions').length;
+    expect(reads()).toBe(1);
+    fake.event('engine.hostState', { state: 'restarting', pid: null, restarts: 0, revision: 2 });
+    expect(reads()).toBe(1);
+    fake.event('engine.hostState', { state: 'ready', pid: 4242, restarts: 0, revision: 3 });
+    expect(reads()).toBe(2);
+    fake.event('engine.hostState', { state: 'ready', pid: 4242, restarts: 0, revision: 4 }); // no transition
+    expect(reads()).toBe(2);
+    await fake.reply('engine.sessions', [status('b')]);
+    expect(stores.sessions.getState().engine.get('b' as AppSessionId)?.process).toBe('ready');
+    fake.event('engine.hostState', { state: 'crashed', pid: null, restarts: 1, revision: 5 });
+    fake.event('engine.hostState', { state: 'ready', pid: 4343, restarts: 1, revision: 6 });
+    expect(reads()).toBe(3);
+  });
+
+  // E10: as main does (C12, `hostEventSource`), the page forgets the statuses a host generation sent when the host leaves
+  // ready, so a session the crashed supervisor ran reads not live even when the successor no longer lists it.
+  const RESTARTING = { state: 'restarting', pid: null, restarts: 0, revision: 2 } as const;
+  const READY = { state: 'ready', pid: 4242, restarts: 0, revision: 3 } as const;
+  it('a session the crashed supervisor ran reads not live once the host left ready, and stays so when the successor lists nothing', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('engine.sessions', [status('a', { engineState: 'running' })]);
+    expect(stores.sessions.getState().engine.get(A)?.process).toBe('ready');
+    fake.event('engine.hostState', RESTARTING);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+    fake.event('engine.hostState', READY);
+    await fake.reply('engine.sessions', []);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+  });
+
+  it('a reconnect to the same supervisor: the burst’s status keeps the session live whichever side of the re-read it lands', async () => {
+    for (const burstFirst of [true, false]) {
+      const { fake, stores, disconnect } = setup();
+      await fake.reply('engine.sessions', [status('a')]);
+      fake.event('engine.hostState', RESTARTING);
+      fake.event('engine.hostState', READY);
+      const burst = () => fake.event('session.status', { appSessionId: 'a', status: status('a', { engineState: 'running' }) });
+      if (burstFirst) burst();
+      await fake.reply('engine.sessions', [status('a', { engineState: 'running' })]);
+      if (!burstFirst) burst();
+      expect(stores.sessions.getState().engine.get(A)).toMatchObject({ process: 'ready', engineState: 'running' });
+      disconnect();
+    }
+  });
+
+  it('applies no engine table read before the host last left ready (the departed host’s answer)', async () => {
+    const { fake, stores } = setup(); // the connect-time read, still unanswered
+    fake.event('engine.hostState', RESTARTING);
+    await fake.reply('engine.sessions', [status('a')]);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+    fake.event('engine.hostState', READY);
+    await fake.reply('engine.sessions', [status('b')]);
+    expect([...stores.sessions.getState().engine.keys()]).toEqual(['b']);
+  });
+
+  it('applies no re-read answer that lands after disconnect', async () => {
+    const { fake, stores, disconnect } = setup();
+    await fake.reply('engine.sessions', []);
+    fake.event('engine.hostState', { state: 'restarting', pid: null, restarts: 0, revision: 2 });
+    fake.event('engine.hostState', { state: 'ready', pid: 4242, restarts: 0, revision: 3 });
+    disconnect();
+    await fake.reply('engine.sessions', [status('a')]);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
   });
 
   it('ignores replies and events after disconnect', async () => {

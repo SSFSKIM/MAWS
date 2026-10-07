@@ -87,6 +87,9 @@ import { connectDeliverables } from './tools/deliverables/store';
 import { openDeliverable } from './tools/maws/actions';
 import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
 // E2 end
+// E10 start
+import { connectSupervisorNotices } from './app/supervisor-notices';
+// E10 end
 // E4a start
 import { browserTool } from './tools/browser/BrowserTool';
 import { BrowserTab } from './tools/browser/BrowserTab';
@@ -224,6 +227,10 @@ export function App() {
   useEffect(() => connectDeliverables(), []);
   useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
   // E2 end
+  // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
+  // connects the hosts store app-wide (Diagnostics and Settings read it too)
+  useEffect(() => connectSupervisorNotices(), []);
+  // E10 end
   // E4a start: the Browser tool and its main tab, registered once and never unregistered (C8a's rule above), and the
   // window's mirror of main's browser tabs (the list, then its events)
   useEffect(() => {

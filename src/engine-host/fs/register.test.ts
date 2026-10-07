@@ -39,6 +39,7 @@ describe('the engine host serves fs.* through the host protocol', () => {
     createHostRuntime((on, emit) => {
       service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: fixture.configHome });
     }).serve(fake.port);
+    fake.deliver({ t: 'ready' }); // main has pulled what it needs (E10): events flow from here
 
     const response = async (id: string) => {
       await expect.poll(() => fake.posted.some((m) => m.t === 'res' && m.id === id)).toBe(true);
@@ -105,6 +106,7 @@ describe('the engine host serves fs.* through the host protocol', () => {
     createHostRuntime((on, emit) => {
       service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: fixture.configHome });
     }).serve(fake.port);
+    fake.deliver({ t: 'ready' }); // main has pulled what it needs (E10): events flow from here
     const response = async (id: string) => {
       await expect.poll(() => fake.posted.some((m) => m.t === 'res' && m.id === id)).toBe(true);
       return fake.posted.find((m) => m.t === 'res' && m.id === id)!;

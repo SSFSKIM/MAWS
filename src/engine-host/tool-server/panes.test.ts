@@ -55,4 +55,13 @@ describe('the pane bridge (residue 3)', () => {
     aborted.abort();
     expect(await bridge.request(req('r3'), aborted.signal)).toEqual({ error: 'show_pane: the request was withdrawn' });
   });
+
+  it('fails at once with appNotOpen when no client is connected, asking no window (E10)', async () => {
+    const shown: PaneShowRequest[] = [];
+    const bridge = new PaneBridge({ show: (r) => shown.push(r), hasClient: () => false });
+    expect(await bridge.request(req('r1'), new AbortController().signal)).toEqual({ error: TOOL_ERRORS.appNotOpen('show_pane') });
+    expect(TOOL_ERRORS.appNotOpen('show_pane')).toBe('show_pane: MAWS is not open; the pane cannot be shown');
+    expect(shown).toEqual([]);
+    expect(bridge.pending).toBe(0);
+  });
 });

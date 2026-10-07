@@ -1068,3 +1068,101 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     store.detach(source.key!);
   });
 });
+
+// E10 (Task 4.1's crash screenshot): a host that dies takes its engine processes along and sends no exit for them, and
+// a successor that never ran the session never will. The session's source closes what its live stream left running.
+describe('ipcSource after the engine host is lost (E10)', () => {
+  const liveIds = (events: SessionEvent[]) => events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+  // A turn mid-tool, as a supervisor's kill -9 leaves it: started, a Bash call with no result, no end.
+  const midTurn = () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'git log --oneline' });
+    return liveIds(b.events);
+  };
+  const divider = () => useTranscriptStore.getState().rows(APP).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider')!;
+  const exitRows = () => useTranscriptStore.getState().rows(APP).filter((row) => row.kind === 'error' && row.scope === 'exit');
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  async function hydrated(events: SessionEvent[]) {
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, APP);
+    const attached = useTranscriptStore.getState().attach(source.key!, source);
+    fake.calls[0].answer({ ok: true, value: { events, lastSeq: events.length, complete: true } } as never);
+    await attached;
+    return { fake, source };
+  }
+  const table = (fake: ReturnType<typeof fakeClient>, ids: AppSessionId[]) => {
+    const call = fake.calls.find((candidate) => candidate.name === 'engine.sessions' && !candidate.answered)!;
+    call.answered = true;
+    call.answer({ ok: true, value: ids.map((appSessionId) => ({ appSessionId })) } as never);
+  };
+
+  it('a successor that does not list the session closes its running turn as stopped, with one crash exit row', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    expect(divider().state).toBe('working');
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'engine.sessions']);
+    table(fake, ['other' as AppSessionId]);
+    await flush();
+    expect(divider().state).toBe('stopped');
+    expect(useTranscriptStore.getState().entries[APP].working).toBe(false);
+    expect(exitRows()).toMatchObject([{ severity: 'error', text: 'Session process exited (crash)' }]);
+    // a later departure finds nothing running: no second read, no second row
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    await flush();
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+    expect(exitRows()).toHaveLength(1);
+    useTranscriptStore.getState().detach(source.key!);
+  });
+
+  it('a host that still lists the session (a same-pid reconnect) speaks for it: the turn keeps working', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, [APP]);
+    await flush();
+    expect(divider().state).toBe('working');
+    expect(exitRows()).toEqual([]);
+    useTranscriptStore.getState().detach(source.key!);
+  });
+
+  it('a session whose process already exited, or that the stream never showed running, is not asked about', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Done.');
+    b.end(['u1']);
+    b.emit('process.exited', { code: 0, signal: null, reason: 'stop', lostAttentionCount: 0, budget: null });
+    const { fake, source } = await hydrated(liveIds(b.events));
+    fake.emit('engine.hostState', { state: 'crashed' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    useTranscriptStore.getState().detach(source.key!);
+
+    const disk = midTurn().map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null })); // read from disk: not ours to run
+    const second = await hydrated(disk);
+    second.fake.emit('engine.hostState', { state: 'restarting' } as never);
+    second.fake.emit('engine.hostState', { state: 'ready' } as never);
+    await flush();
+    expect(second.fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    useTranscriptStore.getState().detach(second.source.key!);
+  });
+
+  it('a table read asked before a later departure says nothing; the next ready asks again', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    table(fake, []); // stale: the host left again meanwhile
+    await flush();
+    expect(divider().state).toBe('working');
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []);
+    await flush();
+    expect(divider().state).toBe('stopped');
+    useTranscriptStore.getState().detach(source.key!);
+  });
+});

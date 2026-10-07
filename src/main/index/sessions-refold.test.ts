@@ -108,6 +108,7 @@ describe('refolding linked worktrees under their main checkout', () => {
       dispatch: async () => ({ ok: true, value: undefined }) as CommandResult<CommandName>,
       onEvent: (() => () => {}) as SourceHost['onEvent'],
       onState: () => () => {},
+      onStreaming: () => () => {}, // E10
       snapshot: () => ({ state: 'starting', pid: null, restarts: 0, revision: 1 }),
     };
     const emit = (name: EventName, payload: unknown) => (seen.emitted.push({ name, payload }), true);

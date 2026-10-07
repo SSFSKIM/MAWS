@@ -30,7 +30,7 @@ const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discard
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // `hold`: a host sequence or steer withdrawal stopped holding the queue
 export type SteerPriority = 'now' | 'next';
 export type PauseReason = QueuePauseReason; // C7: the whole closed set the queue journals (QUEUE_PAUSE_REASONS)
-export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'; // C12: a release pauses nothing, like `stop`
+export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' | 'idle'; // C12: a release pauses nothing, like `stop` (E10: an idle release either)
 
 export interface MessageQueueDeps {
   appSessionId: AppSessionId;

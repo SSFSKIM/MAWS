@@ -65,6 +65,7 @@ import { saveTextFile } from './files/save-text';
 import { captureChords } from './settings/capture-chords';
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
+import { startHostConfigure } from './settings/host-configure'; // E10
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -92,6 +93,9 @@ import { sideThreadEvents, startSideThreads } from './side/side-threads';
 import { appWindows } from './windows';
 import { registerDeliverableScheme, startDeliverables } from './deliverables';
 // E2 end
+// E10 start
+import { engineQuitDeps } from './lifecycle/engine-quit';
+// E10 end
 // E4a start
 import { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import { startBrowser } from './browser';
@@ -278,7 +282,12 @@ void startWithProfileLock(app, () => {
   // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
   const sessionService = new SessionService({
     index,
-    host: { dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), ready: () => engineHostSettled(hosts) },
+    host: {
+      dispatch: hosts.dispatch,
+      onEvent: (name, listener) => hosts.onEvent(name, listener),
+      ready: () => engineHostSettled(hosts),
+      onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
+    },
     git: createGitRunner(),
     worktrees,
     intents,
@@ -339,6 +348,16 @@ void startWithProfileLock(app, () => {
     // C12 end
   });
   app.on('will-quit', engineConfigure.stop); // C12: .stop
+  // E10: the supervisor's idle time, pushed beside engine.configure at every ready
+  const stopHostConfigure = startHostConfigure({
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    hostState: () => hosts.snapshot('engine-host'),
+    onHostState: (listener) => hosts.onState('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
+    env: process.env,
+  });
+  app.on('will-quit', stopHostConfigure);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
@@ -440,7 +459,7 @@ void startWithProfileLock(app, () => {
     publish: (waiting) => void emit('layout.quitWait', { waiting }),
     log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,
     // C12 end
-    ask: (report, asked /* E5 */) =>
+    ask: (report, asked /* E5 */, keep /* E10 */) =>
       askToQuit(
         report,
         {
@@ -451,15 +470,12 @@ void startWithProfileLock(app, () => {
           },
         },
         asked,
+        keep,
       ),
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
-    // C3's command) has nothing to stop.
-    shutdownEngine: async () => {
-      const result = await hosts.dispatch('engine-host', 'engine.shutdown', { graceMs: 5000 });
-      if (!result.ok && result.error.code !== 'unknown_command' && result.error.code !== 'host_unavailable') {
-        console.warn('[quit-guard] engine.shutdown failed', result.error);
-      }
-    },
+    // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
+    // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
+    ...engineQuitDeps(hosts, () => settings.state().settings),
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
@@ -475,6 +491,8 @@ void startWithProfileLock(app, () => {
   app.on('activate', () => {
     if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
+  // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
+  // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting)
   app.on('will-quit', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
   // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.

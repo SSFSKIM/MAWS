@@ -725,14 +725,18 @@ describe('session service', () => {
     it('archives a session released under the memory budget through the host, and no other exited session', async () => {
       const released = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa4), directory: h.work })).record;
       const stopped = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa5), directory: h.work })).record;
-      const exit = (reason: 'budget' | 'stop') => ({ code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_100_000 } : null });
+      const idled = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa6), directory: h.work })).record; // E10
+      const exit = (reason: 'budget' | 'stop' | 'idle') => ({ code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_100_000 } : null });
       h.host.reserve(released.appId, { cwd: h.work, process: 'exited', exit: exit('budget') });
       h.host.reserve(stopped.appId, { cwd: h.work, process: 'exited', exit: exit('stop') });
+      h.host.reserve(idled.appId, { cwd: h.work, process: 'exited', exit: exit('idle') }); // E10: the supervisor's idle release
       h.host.disk.stores.add(released.appId);
       expect(await h.service.archive(stopped.appId)).toEqual({ archived: true });
       expect(h.host.calledWith('session.stop')).toEqual([]);
       expect(await h.service.archive(released.appId)).toEqual({ archived: true });
       expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: released.appId, reason: 'archive' }]);
+      expect(await h.service.archive(idled.appId)).toEqual({ archived: true });
+      expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: released.appId, reason: 'archive' }, { appSessionId: idled.appId, reason: 'archive' }]);
       expect(h.host.disk.stores.has(released.appId)).toBe(true);
     });
     // C12 end

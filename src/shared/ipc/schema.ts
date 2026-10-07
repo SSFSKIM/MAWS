@@ -37,6 +37,9 @@ import * as side from './schema/side';
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
+// E10 start
+import * as host from './schema/host';
+// E10 end
 // E4a start
 import * as browser from './schema/browser';
 // E4a end
@@ -121,6 +124,9 @@ export const commands = {
   // E2 start
   ...deliverables.commands,
   // E2 end
+  // E10 start
+  ...host.commands,
+  // E10 end
   // E4a start
   ...browser.commands,
   // E4a end
@@ -155,6 +161,9 @@ export const events = {
   // E2 start
   ...deliverables.events,
   // E2 end
+  // E10 start
+  ...host.events,
+  // E10 end
   // E4a start
   ...browser.events,
   // E4a end
@@ -162,6 +171,38 @@ export const events = {
 
 export type CommandName = keyof typeof commands;
 export type EventName = keyof typeof events;
+
+// E10 start: the events the engine host emits, and only those (E10 execution document, §Design 2). They cross the
+// main ↔ engine-host wire, so they enter the wire fingerprint (`wire-fingerprint.ts`); the host runtime refuses to emit
+// an event outside the list, so the list cannot drift from the emitters. Main-emitted events (`engine.hostState`,
+// `deliverables.console`, settings, layout, git…) never cross the socket and stay out.
+export const HOST_EVENTS = [
+  'session.eventBatch',
+  'session.status',
+  'session.queue',
+  'session.brokerItems',
+  'session.catalogChanged',
+  'session.operation',
+  'session.forgotten',
+  'session.replay.progress',
+  'engine.budget',
+  'fs.sessionChanged',
+  'fs.sessionRemoved',
+  'fs.holderChanged',
+  'fs.scanProgress',
+  'fs.followState',
+  'fs.subagentsChanged',
+  'fs.workflowChanged',
+  'fs.tasksChanged',
+  'fs.foreignWrite',
+  'plugins.operation',
+  'plugins.changed',
+  'deliverables.changed',
+  'maws.pane.show',
+  'maws.artifact.capture',
+  'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
+] as const satisfies readonly EventName[];
+// E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;
 export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;

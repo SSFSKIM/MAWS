@@ -24,7 +24,8 @@ import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
-import { markInterrupted, reconcileIntent } from './recovery';
+import type { BootstrapNote } from './intents';
+import { liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
 // E3 start
@@ -60,6 +61,12 @@ export class IntentRefused extends Error {
   }
 }
 
+// E10: what a start reads of an intent (its message and progress), compared across a deferred recovery: a draft edit
+// leaves it, a start or a release changes it.
+function startState(intent: SetupIntent): string {
+  return JSON.stringify([intent.message, intent.progress]);
+}
+
 export class SessionService {
   private setup: Setup | null = null;
   private readyPromise: Promise<void> | null = null;
@@ -68,6 +75,16 @@ export class SessionService {
   private readonly startingNames = new Set<string>(); // new-worktree directory names a start in flight holds (claimWorktreeName)
   private readonly resumeMessages = new Map<string, FirstMessage>(); // a resume's message, retained behind a card
   private readonly reconcileFailures = new Map<string, string>(); // ids whose start-time reconciliation failed
+  // E10: the start-time recovery, deferred while the host's table cannot be read, re-run when the host streams again.
+  // `unrecovered` is what the deferring boot left: its intents with their message and progress, and its bootstrap
+  // notes. `unreconciled` is every intent the recovery still owes a reconciliation, kept until one ran (a start runs it
+  // first); `startedSince`, the ids a start or a take-over began on since the deferring boot.
+  private unrecovered: { intents: ReadonlyMap<string, string>; notes: ReadonlySet<string> } | null = null;
+  private readonly unreconciled = new Set<string>();
+  private readonly startedSince = new Set<string>();
+  private recovering: Promise<void> | null = null;
+  private streamed = false; // the host streamed while a recovery's table read was in flight
+  private offReady: (() => void) | null = null;
   private readonly manifests: DeletionManifests;
   private readonly now: () => string;
   private readonly log: (message: string) => void;
@@ -80,7 +97,8 @@ export class SessionService {
 
   // D-16 at start: every `self` holder is stale (C3 owns no process yet) and is reset before anything else, then the
   // intents load, stale bootstrap ids are forgotten, and intents whose record exists are reconciled. `intent.list` and
-  // every command wait for it.
+  // every command wait for it. E10: a row the supervisor kept is re-marked `self` by its status in the connect burst,
+  // and the recovery reads the host's table first (`recover`).
   start(): Promise<void> {
     if (this.readyPromise) return this.readyPromise;
     try {
@@ -96,6 +114,7 @@ export class SessionService {
 
   // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart).
   dispose(): void {
+    this.offReady?.();
     for (const watch of [...(this.setup?.watches ?? [])]) watch.halt();
   }
 
@@ -124,23 +143,133 @@ export class SessionService {
     };
     await this.deps.intents.load();
     await this.deps.host.ready?.();
-    // a start the quit cut short before any record is marked failed, so its tab offers Retry (recovery.ts)
-    for (const intent of this.deps.intents.list()) {
-      await markInterrupted(this.s, intent).catch((error: unknown) => this.log(`${intent.appSessionId}: could not mark the interrupted start: ${error instanceof Error ? error.message : String(error)}`));
-    }
-    // nothing is reserved at start, so every bootstrap id a previous run left is forgotten
-    for (const intent of this.deps.intents.list()) {
-      const bootstrap = intent.progress.bootstrap;
-      if (bootstrap === null) continue;
-      if (await this.forgetQuietly(bootstrap.appSessionId)) await this.putIntent({ ...intent, progress: { ...intent.progress, bootstrap: null } });
-    }
-    for (const note of await this.deps.bootstraps.list()) {
-      if (await this.forgetQuietly(note.bootstrapId)) await this.deps.bootstraps.remove(note.bootstrapId);
-    }
     for (const manifest of await this.manifests.list()) {
       this.log(`a deletion of ${manifest.appSessionId} was interrupted (${manifest.trashed.length} of ${manifest.paths.length} moved); session.delete finishes it`);
     }
-    for (const intent of this.deps.intents.list()) await this.reconcileOne(intent);
+    this.offReady = this.deps.host.onReady?.(() => {
+      this.streamed = true;
+      this.rerunDeferred();
+    }) ?? null;
+    await this.recover();
+  }
+
+  // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
+  private rerunDeferred(): void {
+    if (this.unrecovered === null || this.recovering !== null) return;
+    this.recovering = this.recover()
+      .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => (this.recovering = null));
+  }
+
+  // The start-time recovery (recovery.ts). E10: it reads the host's live rows first; when `engine.sessions` cannot be
+  // answered (a host crashed, waiting on an incompatible supervisor or held by a lock), a kept session may be live where
+  // main cannot see it, so none of the steps runs (nothing marked failed, no record removed, no bootstrap forgotten)
+  // and the recovery runs again the next time the host streams (at once when it streamed during the read). A re-run
+  // happens mid-app, so it acts only on what the deferring boot left, and each step passes over what it could misread:
+  // - marking and bootstrap retirement: an intent a start began on since (a trust card's start holds its message with no
+  //   record, which would read as a quit), whose message or progress changed, or that is locked or starting;
+  // - reconciliation reads the live table and the record, which no command misleads, so it passes over only an id that
+  //   is locked or starting; that id stays owed (`unreconciled`), settled under its lock once the re-run ends, and a
+  //   start reconciles it first meanwhile.
+  // Each item's failure is logged and the rest go on.
+  private async recover(): Promise<void> {
+    let live: LiveRows | null = null;
+    while (live === null) {
+      this.streamed = false;
+      try {
+        live = await liveRows(this.deps.host.dispatch);
+      } catch (error) {
+        if (this.streamed) continue; // the host streamed while the read was in flight: read again
+        if (this.unrecovered === null) {
+          const intents = this.deps.intents.list();
+          for (const intent of intents) this.unreconciled.add(intent.appSessionId);
+          this.unrecovered = { intents: new Map(intents.map((i) => [i.appSessionId, startState(i)])), notes: new Set((await this.bootstrapNotes()).map((n) => n.bootstrapId)) };
+        }
+        this.log(`recovery waits for the engine host (engine.sessions: ${error instanceof Error ? error.message : String(error)}); nothing is failed, removed or forgotten until it answers`);
+        // a streaming during the notes read found nothing owed yet and left the re-run to this run: start it now
+        if (this.streamed) this.rerunDeferred();
+        return;
+      }
+    }
+    const scope = this.unrecovered; // null: the boot's own run, before any command could act
+    const idle = (id: string) => !this.starting.has(id) && (scope === null || !this.locks.has(id));
+    // decided once, before the steps' own writes change an intent; each step re-reads it
+    const markable = this.deps.intents.list()
+      .filter((i) => idle(i.appSessionId) && (scope === null || (!this.startedSince.has(i.appSessionId) && scope.intents.get(i.appSessionId) === startState(i))))
+      .map((i) => i.appSessionId);
+    const current = (id: AppSessionId): SetupIntent | null => (idle(id) ? this.deps.intents.get(id) : null);
+    const each = async (what: string, id: string, step: () => Promise<unknown>) => {
+      try {
+        await step();
+      } catch (error) {
+        this.log(`${id}: could not ${what}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    // a start the quit cut short before any record is marked failed, so its tab offers Retry (recovery.ts)
+    for (const id of markable) {
+      const intent = current(id);
+      if (intent !== null) await each('mark the interrupted start', id, () => markInterrupted(this.s, intent));
+    }
+    // every bootstrap id a previous run left is forgotten; one whose row is live is stopped first (nothing drives it)
+    for (const id of markable) {
+      const intent = current(id);
+      const bootstrap = intent?.progress.bootstrap ?? null;
+      if (intent === null || bootstrap === null) continue;
+      await each('retire its bootstrap', id, async () => {
+        if (await this.retireBootstrap(bootstrap.appSessionId, live)) await this.putIntent({ ...intent, progress: { ...intent.progress, bootstrap: null } });
+      });
+    }
+    for (const note of await this.bootstrapNotes()) {
+      if (this.starting.has(note.appSessionId) || (scope !== null && !scope.notes.has(note.bootstrapId))) continue;
+      await each('retire the bootstrap', note.bootstrapId, async () => {
+        if (await this.retireBootstrap(note.bootstrapId, live)) await this.deps.bootstraps.remove(note.bootstrapId);
+      });
+    }
+    // every intent the recovery owes, and every reconciliation that failed (a start's included)
+    const owed = scope === null ? this.deps.intents.list().map((i) => i.appSessionId) : [...this.unreconciled];
+    for (const id of new Set<string>([...owed, ...this.reconcileFailures.keys()]) as Set<AppSessionId>) {
+      const intent = this.deps.intents.get(id);
+      if (intent === null) this.unreconciled.delete(id);
+      else if (idle(id)) await this.reconcileOne(intent, live);
+    }
+    this.unrecovered = null;
+    this.startedSince.clear();
+    if (this.unreconciled.size > 0) void this.settleUnreconciled().catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  // The reconciliations a re-run passed over (their id locked or starting), each under its id's lock once the command
+  // holding it is done (it may be waiting for the re-run, so this never runs inside it). A start reconciles first.
+  private async settleUnreconciled(): Promise<void> {
+    for (const id of [...this.unreconciled] as AppSessionId[]) {
+      await this.serial(id, async () => {
+        const intent = this.deps.intents.get(id);
+        if (intent === null) this.unreconciled.delete(id);
+        else if (this.unreconciled.has(id) && !this.starting.has(id)) await this.reconcileOne(intent, null);
+      });
+    }
+  }
+
+  private async bootstrapNotes(): Promise<BootstrapNote[]> {
+    try {
+      return await this.deps.bootstraps.list();
+    } catch (error) {
+      this.log(`the bootstrap notes could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  // A bootstrap id a previous run left: forgotten, after a stop when its row is live (a trust bootstrap the supervisor
+  // kept running through a keep-quit). False (logged) when the host refuses or cannot answer; the id stays noted.
+  private async retireBootstrap(bootstrapId: AppSessionId, live: LiveRows): Promise<boolean> {
+    if (live.has(bootstrapId)) {
+      try {
+        await hostCall(this.deps.host.dispatch, 'session.stop', { appSessionId: bootstrapId, reason: 'stop' });
+      } catch (error) {
+        this.log(`could not stop the bootstrap ${bootstrapId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    }
+    return this.forgetQuietly(bootstrapId);
   }
 
   private get s(): Setup {
@@ -150,6 +279,7 @@ export class SessionService {
 
   private async ready(): Promise<Setup> {
     await (this.readyPromise ?? this.start());
+    await this.recovering; // E10: a deferred recovery the host's return started
     return this.s;
   }
 
@@ -379,6 +509,7 @@ export class SessionService {
     await this.ready();
     if (this.starting.has(appSessionId)) return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
     this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
     try {
       return await this.serial(appSessionId, async () => {
         const record = this.deps.index.sessions.get(appSessionId);
@@ -430,6 +561,7 @@ export class SessionService {
     // never both pass their guards for one checkout.
     this.refuseWhileStarting(appSessionId);
     this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
     const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
     let release: (() => void) | null = null;
     let handedOff = false;
@@ -439,10 +571,12 @@ export class SessionService {
         return await this.rejectIntent(appSessionId, { status: 'invalid', appSessionId, field: 'location', message: `a worktree named ${location.name} is being created by another start` });
       }
       release = await this.lock(appSessionId);
-      // a reconciliation that failed at start is re-run first, never the setup in its place
+      // a reconciliation that failed at start is re-run first, never the setup in its place; E10: so is one the recovery
+      // still owes (an intent with a record, whose row a supervisor kept may still run: a setup's rollback would stop it)
       const intentBefore = this.deps.intents.get(appSessionId);
-      if (intentBefore !== null && this.reconcileFailures.has(appSessionId)) {
-        const failure = await this.reconcileOne(intentBefore);
+      const owed = this.unreconciled.has(appSessionId) && this.deps.index.sessions.get(appSessionId) !== null;
+      if (intentBefore !== null && (this.reconcileFailures.has(appSessionId) || owed)) {
+        const failure = await this.reconcileOne(intentBefore, null);
         if (failure !== null) throw new Error(failure);
       }
       const intent = this.deps.intents.get(appSessionId);
@@ -630,11 +764,13 @@ export class SessionService {
 
   // ---- reconciliation ---------------------------------------------------------------------------------------------
 
-  // One intent's reconciliation; answers the failure's message (kept for the tab's Retry) or null.
-  private async reconcileOne(intent: SetupIntent): Promise<string | null> {
+  // One intent's reconciliation; answers the failure's message (kept for the tab's Retry) or null. `live` null: the
+  // host's live rows are read here (a Retry of a failed reconciliation), a read failure failing this reconciliation.
+  private async reconcileOne(intent: SetupIntent, live: LiveRows | null): Promise<string | null> {
     try {
-      await reconcileIntent(this.s, intent);
+      await reconcileIntent(this.s, intent, live ?? (await liveRows(this.s.dispatch)));
       this.reconcileFailures.delete(intent.appSessionId);
+      this.unreconciled.delete(intent.appSessionId); // E10
       return null;
     } catch (error) {
       const message = `reconciliation failed: ${error instanceof Error ? error.message : String(error)}`;

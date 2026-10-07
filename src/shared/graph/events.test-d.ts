@@ -29,7 +29,7 @@ describe('session events are EventBase & EventPayload', () => {
   // C12 start
   it("process.exited carries MAWS's budget reason and the release's budget and sum", () => {
     type Exited = Extract<SessionEvent, { kind: 'process.exited' }>;
-    expectTypeOf<Exited['reason']>().toEqualTypeOf<'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'>();
+    expectTypeOf<Exited['reason']>().toEqualTypeOf<'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' | 'idle'>(); // E10: idle
     expectTypeOf<Exited['budget']>().toEqualTypeOf<{ limitKiB: number; totalKiB: number } | null>();
   });
   // C12 end

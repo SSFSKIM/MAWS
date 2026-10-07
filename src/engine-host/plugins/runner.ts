@@ -79,6 +79,7 @@ interface Operation {
   state: 'queued' | 'running' | 'ended';
   abort: 'cancelled' | 'stopped' | null; // asked while running, whether or not its CLI was spawned yet
   group: OwnedGroup | null; // while its CLI's process group is owned
+  latest: PluginsOperationEvent | null; // E10: its last event, which a connecting client is sent again (null while queued)
 }
 
 const FAILED_WORDS = { timeout: `the CLI was still running after ${CLI_TIMEOUT_MS / 60_000} minutes and was stopped`, cancelled: 'cancelled before the CLI finished', stopped: 'stopped with the engine host' } as const;
@@ -179,6 +180,7 @@ export class PluginsRunner {
   private readonly groups = new Set<OwnedGroup>(); // every process group a read or a mutation still owns
   private closed = false; // `stop` ran: nothing new runs
   private queue: Promise<void> = Promise.resolve();
+  private readonly idleListeners = new Set<() => void>(); // E10
 
   constructor(private readonly deps: PluginsRunnerDeps) {
     this.spawn = deps.spawn ?? nodeSpawn;
@@ -197,7 +199,7 @@ export class PluginsRunner {
     if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
     const argv = commandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
-    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null };
+    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null };
     this.operations.set(op.opId, op);
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
@@ -213,6 +215,34 @@ export class PluginsRunner {
     if (!op || op.state === 'ended') return false;
     this.abort(op, 'cancelled', KILL_GRACE_MS);
     return true;
+  }
+
+  // E10: the latest event of every operation that has started and not completed (`reloading` included), in start order,
+  // for the connect burst: a client that was away learns where each stands (the renderer keeps the last line, not a log).
+  running(): PluginsOperationEvent[] {
+    return [...this.operations.values()].flatMap((op) => (op.latest ? [op.latest] : []));
+  }
+
+  // E10: whether the runner holds anything (a queued or running operation, a process group a read or a mutation still
+  // owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear each time it holds nothing again.
+  busy(): boolean {
+    return this.operations.size > 0 || this.groups.size > 0;
+  }
+
+  onIdle(listener: () => void): () => void {
+    this.idleListeners.add(listener);
+    return () => this.idleListeners.delete(listener);
+  }
+
+  private settledOne(): void {
+    if (this.busy()) return;
+    for (const listener of this.idleListeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn(`[engine-host] plugins idle listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   // The host stops: nothing new runs, every queued operation is dropped, every operation still preparing completes
@@ -235,7 +265,10 @@ export class PluginsRunner {
   private async run(op: Operation): Promise<void> {
     if (op.state !== 'queued') return; // cancelled while it waited
     op.state = 'running';
-    const emit = (event: Omit<PluginsOperationEvent, 'opId' | 'action' | 'target'>) => this.deps.emit({ opId: op.opId, action: op.action, target: op.target, ...event });
+    const emit = (event: Omit<PluginsOperationEvent, 'opId' | 'action' | 'target'>) => {
+      op.latest = { opId: op.opId, action: op.action, target: op.target, ...event }; // E10
+      this.deps.emit(op.latest);
+    };
     emit({ phase: 'started' });
     const ended = await this.exec(op.argv, op.cwd, (line) => emit({ phase: 'output', line }), op);
     op.state = 'ended';
@@ -256,6 +289,7 @@ export class PluginsRunner {
     op.state = 'ended';
     this.operations.delete(op.opId);
     this.deps.emit({ opId: op.opId, action: op.action, target: op.target, phase: 'done', outcome, ...(reload && { reload }) });
+    this.settledOne(); // E10
   }
 
   // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line; `op` is told of the group it owns.
@@ -336,6 +370,7 @@ export class PluginsRunner {
         this.groups.delete(group);
         if (op) op.group = null;
         resolve(ended);
+        this.settledOne(); // E10: a read's group was the last thing held
       };
       child.on('error', (error) => {
         if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message }); // the spawn itself failed

@@ -10,7 +10,7 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
-import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
 
 const A = 'session-a' as AppSessionId;
 const KiB = 1024;
@@ -416,9 +416,11 @@ describe('terminal registry reattaches without a gap', () => {
     const held = new Map([kept, slow].map((info) => [info.ptyId, deferred<PtyAttach>()]));
     ipc.handlers['pty.attach'] = (input) => held.get((input as { ptyId: PtyId }).ptyId)!.promise;
     const heard: Adopting[][] = [];
-    const adopted = registry.adopt((info) => info.appSessionId === A, (adopting) => heard.push(adopting));
+    const answered: boolean[] = [];
+    const adopted = registry.adopt((info) => info.appSessionId === A, (adopting, listed) => (heard.push(adopting), answered.push(listed)));
     await settle();
     expect(heard.map((adopting) => adopting.map(({ label }) => label))).toEqual([['terminal:kept', 'terminal:slow']]);
+    expect(answered).toEqual([true]);
     const [first, second] = heard[0];
     expect(registry.get(first.id)?.info.label).toBe('terminal:kept'); // the handle exists before its attach answers
     registry.release(second.id);
@@ -429,6 +431,17 @@ describe('terminal registry reattaches without a gap', () => {
     await expect(first.attached).resolves.toBe(first.id);
     await expect(second.attached).resolves.toBeNull(); // released before its attach answered: nothing restored
     await expect(adopted).resolves.toEqual([first.id]);
+  });
+
+  // E10: the page tells "the host listed no pty for this tab" (a relaunch) from "the host could not say".
+  it('tells onListed when pty.list failed, with nothing claimed', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.list'] = () => fail('host_unavailable', 'pty-host is restarting; cannot answer pty.list');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onListed = vi.fn();
+    await expect(registry.adopt(undefined, onListed)).resolves.toEqual([]);
+    expect(onListed).toHaveBeenCalledExactlyOnceWith([], false);
+    log.mockRestore();
   });
 
   it('adopts only what the page accepts, and a dead pty as exited with its screen', async () => {
@@ -844,7 +857,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V9, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });
@@ -880,7 +893,7 @@ describe('terminal font from the root --font-mono', () => {
     registry.unmount(hidden.id);
     const fit = vi.spyOn(shown.renderer, 'fit');
     currentFont = { ...MONO, family: '"MesloLGM Nerd Font Mono", "SF Mono", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V9, appearance: { ...SETTINGS_DEFAULTS_V9.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, appearance: { ...SETTINGS_DEFAULTS_V10.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
     expect(shown.renderer.font.family).toBe(currentFont.family);
     expect(hidden.renderer.font.family).toBe(currentFont.family);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -914,7 +927,7 @@ describe('terminal font from the root --font-mono', () => {
     const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
     registry.mount(id, parent()); // its renderer is being created with the font of this moment
     currentFont = { ...MONO, family: '"Changed", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V9, appearance: { ...SETTINGS_DEFAULTS_V9.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, appearance: { ...SETTINGS_DEFAULTS_V10.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
     await settle();
     const renderer = registry.get(id)!.renderer as FakeRenderer;
     expect(renderer.options.font.family).toBe('mono');

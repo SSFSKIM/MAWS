@@ -33,6 +33,9 @@ import * as side from './names/side';
 // E2 start
 import * as deliverables from './names/deliverables';
 // E2 end
+// E10 start
+import * as host from './names/host';
+// E10 end
 // E4a start
 import * as browser from './names/browser';
 // E4a end
@@ -58,6 +61,9 @@ export const NAMESPACES = [
   // E2 start
   'deliverables',
   // E2 end
+  // E10 start
+  'host',
+  // E10 end
   // E4a start
   'browser',
   // E4a end
@@ -74,13 +80,14 @@ export const NAMES = {
   scm, // E6
   side, // E3
   deliverables, // E2
+  host, // E10
   browser, // E4a
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
-export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number];
-export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = engine.mainOnlyCommands;
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number]; // E10: host's
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands];
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops

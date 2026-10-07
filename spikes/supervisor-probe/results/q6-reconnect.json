@@ -1,0 +1,1239 @@
+{
+ "question": "Q6",
+ "run": "reconnect",
+ "date": "2026-10-06T22:55:25.833Z",
+ "engine": {
+  "bin": "/Users/new/.local/share/claude/versions/2.1.292",
+  "version": "2.1.292"
+ },
+ "model": "haiku",
+ "electron": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+ "notes": [
+  {
+   "ms": 363,
+   "line": "wire ea3bd7913e54d017 read from the supervisor's refuse"
+  }
+ ],
+ "supervisor": {
+  "pid": 2711,
+  "lock": {
+   "pid": 2711,
+   "procStart": "Tue Oct  6 22:55:25 2026",
+   "protocol": 1,
+   "buildId": "90059eef880c4dbc",
+   "socketPath": "/private/tmp/maws-e0a-e10-q6-udfJE9/userData/supervisor/host.sock",
+   "startedAt": "2026-10-06T22:55:26.118Z"
+  },
+  "chunk": "out/main/index-BOX184sL.js",
+  "chunkBuildId": "90059eef880c4dbc",
+  "buildIdMatchesLock": true,
+  "ps": {
+   "pid": 2711,
+   "ppid": 2638,
+   "pgid": 2711,
+   "stat": "Ss",
+   "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/out/main/index-BOX184sL.js --"
+  }
+ },
+ "c1": {
+  "welcome": {
+   "t": "welcome",
+   "protocol": 1,
+   "buildId": "90059eef880c4dbc",
+   "wire": "ea3bd7913e54d017",
+   "pid": 2711,
+   "startedAt": "2026-10-06T22:55:26.118Z",
+   "liveSessions": 0,
+   "rows": 0
+  },
+  "binaryInfo": {
+   "path": "/Users/new/.local/share/claude/versions/2.1.292",
+   "testedVersion": "2.1.283",
+   "version": "2.1.292",
+   "ok": true,
+   "error": null
+  }
+ },
+ "launch": {
+  "appSessionId": "017d8602-da2a-4e9a-bfb7-d6c5672b0b9d",
+  "launchId": "ncqnmidu",
+  "enginePid": 2801,
+  "engineSessionId": "84c2a2ee-b2ad-43b2-bfd6-7047a0f81017",
+  "readyMs": 757
+ },
+ "send": {
+  "ms": 757,
+  "answer": {
+   "messageUuid": "069b7d5a-6f5b-4600-9e09-517a32adea17",
+   "disposition": "sent",
+   "queueId": "3ab25f3a-e9ce-4ab6-ab3e-b71e03821ffe"
+  }
+ },
+ "disconnect": {
+  "ms": 5762,
+  "sinceSendMs": 5005,
+  "closedMs": 5763,
+  "firstSleep": {
+   "pid": 3982,
+   "ppid": 3979,
+   "pgid": 3979,
+   "command": "sleep 6",
+   "ms": 4460
+  },
+  "turnOpen": true,
+  "eventsAfterEnd": 0
+ },
+ "reconnect": {
+  "ms": 10822,
+  "sinceSendMs": 10065,
+  "absenceMs": 5060,
+  "welcome": {
+   "t": "welcome",
+   "protocol": 1,
+   "buildId": "90059eef880c4dbc",
+   "wire": "ea3bd7913e54d017",
+   "pid": 2711,
+   "startedAt": "2026-10-06T22:55:26.118Z",
+   "liveSessions": 1,
+   "rows": 1
+  },
+  "engineDuringAbsence": {
+   "pid": 2801,
+   "ppid": 2711,
+   "pgid": 2801,
+   "stat": "Ss",
+   "command": "/Users/new/.local/share/claude/versions/2.1.292 -p --input-format stream-json --output-format stream-json --verbose --pe"
+  },
+  "burstLines": [
+   "session.status",
+   "session.queue",
+   "session.brokerItems",
+   "session.catalogChanged",
+   "session.eventBatch",
+   "engine.budget",
+   "plugins.changed",
+   "host.supervisorStatus"
+  ]
+ },
+ "turnEndedMs": 22800,
+ "q6": {
+  "counts": {
+   "firstConnection": 34,
+   "burst": 3,
+   "live": 32,
+   "snapshot": 69,
+   "snapshotComplete": true,
+   "snapshotLastSeq": 123
+  },
+  "firstConnectionLast": {
+   "id": "65:1",
+   "kind": "tool.use",
+   "seq": 65
+  },
+  "burstFirst": {
+   "id": "69:0",
+   "kind": "task.started",
+   "seq": 69
+  },
+  "burstLast": {
+   "id": "71:0",
+   "kind": "tool.result",
+   "seq": 71
+  },
+  "liveFirst": {
+   "id": "75:0",
+   "kind": "assistant.block.delta",
+   "seq": 75
+  },
+  "expectedBurstFirst": {
+   "id": "69:0",
+   "kind": "task.started",
+   "seq": 69
+  },
+  "burstBatchSizes": [
+   3
+  ],
+  "burstKinds": [
+   "task.started",
+   "task.notification",
+   "tool.result"
+  ],
+  "duplicates": [],
+  "otherLaunchIds": [],
+  "firstMismatch": null,
+  "checks": {
+   "burstNotEmpty": true,
+   "burstBeginsRightAfterFirstConnection": true,
+   "noDuplicate": true,
+   "concatenationEqualsSnapshot": true,
+   "firstConnectionIsPrefix": true
+  },
+  "pass": true
+ },
+ "timeline": [
+  {
+   "id": "14:0",
+   "kind": "plugin.panes",
+   "seq": 14
+  },
+  {
+   "id": "16:0",
+   "kind": "plugin.panes",
+   "seq": 16
+  },
+  {
+   "id": "25:0",
+   "kind": "user.message",
+   "seq": 25
+  },
+  {
+   "id": "26:0",
+   "kind": "context.sample",
+   "seq": 26
+  },
+  {
+   "id": "27:0",
+   "kind": "session.state",
+   "seq": 27
+  },
+  {
+   "id": "28:0",
+   "kind": "command.lifecycle",
+   "seq": 28
+  },
+  {
+   "id": "29:0",
+   "kind": "command.lifecycle",
+   "seq": 29
+  },
+  {
+   "id": "29:1",
+   "kind": "turn.started",
+   "seq": 29
+  },
+  {
+   "id": "30:0",
+   "kind": "session.init",
+   "seq": 30
+  },
+  {
+   "id": "36:0",
+   "kind": "assistant.block.delta",
+   "seq": 36
+  },
+  {
+   "id": "37:0",
+   "kind": "assistant.block.delta",
+   "seq": 37
+  },
+  {
+   "id": "40:0",
+   "kind": "assistant.block.complete",
+   "seq": 40
+  },
+  {
+   "id": "43:0",
+   "kind": "assistant.block.delta",
+   "seq": 43
+  },
+  {
+   "id": "44:0",
+   "kind": "assistant.block.delta",
+   "seq": 44
+  },
+  {
+   "id": "45:0",
+   "kind": "assistant.block.delta",
+   "seq": 45
+  },
+  {
+   "id": "46:0",
+   "kind": "assistant.block.delta",
+   "seq": 46
+  },
+  {
+   "id": "47:0",
+   "kind": "assistant.block.complete",
+   "seq": 47
+  },
+  {
+   "id": "50:0",
+   "kind": "assistant.block.delta",
+   "seq": 50
+  },
+  {
+   "id": "51:0",
+   "kind": "assistant.block.delta",
+   "seq": 51
+  },
+  {
+   "id": "52:0",
+   "kind": "assistant.block.delta",
+   "seq": 52
+  },
+  {
+   "id": "53:0",
+   "kind": "assistant.block.delta",
+   "seq": 53
+  },
+  {
+   "id": "54:0",
+   "kind": "assistant.block.delta",
+   "seq": 54
+  },
+  {
+   "id": "55:0",
+   "kind": "assistant.block.delta",
+   "seq": 55
+  },
+  {
+   "id": "56:0",
+   "kind": "assistant.block.delta",
+   "seq": 56
+  },
+  {
+   "id": "57:0",
+   "kind": "assistant.block.delta",
+   "seq": 57
+  },
+  {
+   "id": "58:0",
+   "kind": "assistant.block.delta",
+   "seq": 58
+  },
+  {
+   "id": "59:0",
+   "kind": "assistant.block.delta",
+   "seq": 59
+  },
+  {
+   "id": "60:0",
+   "kind": "assistant.block.delta",
+   "seq": 60
+  },
+  {
+   "id": "61:0",
+   "kind": "assistant.block.delta",
+   "seq": 61
+  },
+  {
+   "id": "62:0",
+   "kind": "assistant.block.delta",
+   "seq": 62
+  },
+  {
+   "id": "63:0",
+   "kind": "assistant.block.delta",
+   "seq": 63
+  },
+  {
+   "id": "64:0",
+   "kind": "assistant.block.delta",
+   "seq": 64
+  },
+  {
+   "id": "65:0",
+   "kind": "assistant.block.complete",
+   "seq": 65
+  },
+  {
+   "id": "65:1",
+   "kind": "tool.use",
+   "seq": 65
+  },
+  {
+   "id": "69:0",
+   "kind": "task.started",
+   "seq": 69
+  },
+  {
+   "id": "70:0",
+   "kind": "task.notification",
+   "seq": 70
+  },
+  {
+   "id": "71:0",
+   "kind": "tool.result",
+   "seq": 71
+  },
+  {
+   "id": "75:0",
+   "kind": "assistant.block.delta",
+   "seq": 75
+  },
+  {
+   "id": "77:0",
+   "kind": "assistant.block.complete",
+   "seq": 77
+  },
+  {
+   "id": "80:0",
+   "kind": "assistant.block.delta",
+   "seq": 80
+  },
+  {
+   "id": "81:0",
+   "kind": "assistant.block.delta",
+   "seq": 81
+  },
+  {
+   "id": "82:0",
+   "kind": "assistant.block.delta",
+   "seq": 82
+  },
+  {
+   "id": "83:0",
+   "kind": "assistant.block.delta",
+   "seq": 83
+  },
+  {
+   "id": "84:0",
+   "kind": "assistant.block.delta",
+   "seq": 84
+  },
+  {
+   "id": "85:0",
+   "kind": "assistant.block.delta",
+   "seq": 85
+  },
+  {
+   "id": "86:0",
+   "kind": "assistant.block.delta",
+   "seq": 86
+  },
+  {
+   "id": "87:0",
+   "kind": "assistant.block.delta",
+   "seq": 87
+  },
+  {
+   "id": "88:0",
+   "kind": "assistant.block.delta",
+   "seq": 88
+  },
+  {
+   "id": "89:0",
+   "kind": "assistant.block.delta",
+   "seq": 89
+  },
+  {
+   "id": "90:0",
+   "kind": "assistant.block.delta",
+   "seq": 90
+  },
+  {
+   "id": "91:0",
+   "kind": "assistant.block.delta",
+   "seq": 91
+  },
+  {
+   "id": "92:0",
+   "kind": "assistant.block.delta",
+   "seq": 92
+  },
+  {
+   "id": "93:0",
+   "kind": "assistant.block.delta",
+   "seq": 93
+  },
+  {
+   "id": "94:0",
+   "kind": "assistant.block.delta",
+   "seq": 94
+  },
+  {
+   "id": "95:0",
+   "kind": "assistant.block.delta",
+   "seq": 95
+  },
+  {
+   "id": "96:0",
+   "kind": "assistant.block.complete",
+   "seq": 96
+  },
+  {
+   "id": "96:1",
+   "kind": "tool.use",
+   "seq": 96
+  },
+  {
+   "id": "100:0",
+   "kind": "task.started",
+   "seq": 100
+  },
+  {
+   "id": "101:0",
+   "kind": "task.notification",
+   "seq": 101
+  },
+  {
+   "id": "102:0",
+   "kind": "tool.result",
+   "seq": 102
+  },
+  {
+   "id": "106:0",
+   "kind": "assistant.block.delta",
+   "seq": 106
+  },
+  {
+   "id": "108:0",
+   "kind": "assistant.block.complete",
+   "seq": 108
+  },
+  {
+   "id": "111:0",
+   "kind": "assistant.block.delta",
+   "seq": 111
+  },
+  {
+   "id": "112:0",
+   "kind": "assistant.block.complete",
+   "seq": 112
+  },
+  {
+   "id": "116:0",
+   "kind": "turn.ended",
+   "seq": 116
+  },
+  {
+   "id": "116:1",
+   "kind": "usage.sample",
+   "seq": 116
+  },
+  {
+   "id": "119:0",
+   "kind": "command.lifecycle",
+   "seq": 119
+  },
+  {
+   "id": "120:0",
+   "kind": "session.state",
+   "seq": 120
+  },
+  {
+   "id": "123:0",
+   "kind": "context.sample",
+   "seq": 123
+  }
+ ],
+ "arrivals": [
+  {
+   "conn": "C1",
+   "ms": 365,
+   "name": "engine.budget",
+   "phase": "burst",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 365,
+   "name": "plugins.changed",
+   "phase": "burst",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 365,
+   "name": "host.supervisorStatus",
+   "phase": "burst",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 406,
+   "name": "host.supervisorStatus",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 410,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 411,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 415,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 734,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 736,
+   "name": "session.catalogChanged",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 736,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 740,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 741,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 741,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 744,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "14:0 plugin.panes",
+    "16:0 plugin.panes"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 744,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 745,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 754,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 754,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 756,
+   "name": "session.queue",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 757,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 757,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 757,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 759,
+   "name": "session.queue",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 759,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "25:0 user.message"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "26:0 context.sample"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "27:0 session.state"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "28:0 command.lifecycle",
+    "29:0 command.lifecycle",
+    "29:1 turn.started"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 803,
+   "name": "session.queue",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 804,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "30:0 session.init"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 804,
+   "name": "session.catalogChanged",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 804,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 806,
+   "name": "session.status",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 1794,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "36:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 2473,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "37:0 assistant.block.delta",
+    "40:0 assistant.block.complete",
+    "43:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 2495,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "44:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 2520,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "45:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 2542,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "46:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 2695,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "47:0 assistant.block.complete",
+    "50:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 3034,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "51:0 assistant.block.delta",
+    "52:0 assistant.block.delta",
+    "53:0 assistant.block.delta",
+    "54:0 assistant.block.delta",
+    "55:0 assistant.block.delta",
+    "56:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 3178,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "afterEnd": false,
+   "events": [
+    "57:0 assistant.block.delta",
+    "58:0 assistant.block.delta",
+    "59:0 assistant.block.delta",
+    "60:0 assistant.block.delta",
+    "61:0 assistant.block.delta",
+    "62:0 assistant.block.delta",
+    "63:0 assistant.block.delta",
+    "64:0 assistant.block.delta",
+    "65:0 assistant.block.complete",
+    "65:1 tool.use"
+   ]
+  },
+  {
+   "conn": "C1",
+   "ms": 3292,
+   "name": "fs.scanProgress",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 3296,
+   "name": "fs.sessionChanged",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 3296,
+   "name": "fs.scanProgress",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 5611,
+   "name": "fs.scanProgress",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C1",
+   "ms": 5611,
+   "name": "fs.scanProgress",
+   "phase": "live",
+   "afterEnd": false
+  },
+  {
+   "conn": "C2",
+   "ms": 10822,
+   "name": "session.status",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10822,
+   "name": "session.queue",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10823,
+   "name": "session.brokerItems",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10823,
+   "name": "session.catalogChanged",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10824,
+   "name": "session.eventBatch",
+   "phase": "burst",
+   "events": [
+    "69:0 task.started",
+    "70:0 task.notification",
+    "71:0 tool.result"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 10824,
+   "name": "engine.budget",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10824,
+   "name": "plugins.changed",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 10824,
+   "name": "host.supervisorStatus",
+   "phase": "burst"
+  },
+  {
+   "conn": "C2",
+   "ms": 11381,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "75:0 assistant.block.delta",
+    "77:0 assistant.block.complete",
+    "80:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 11602,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "81:0 assistant.block.delta",
+    "82:0 assistant.block.delta",
+    "83:0 assistant.block.delta",
+    "84:0 assistant.block.delta",
+    "85:0 assistant.block.delta",
+    "86:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 11798,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "87:0 assistant.block.delta",
+    "88:0 assistant.block.delta",
+    "89:0 assistant.block.delta",
+    "90:0 assistant.block.delta",
+    "91:0 assistant.block.delta",
+    "92:0 assistant.block.delta",
+    "93:0 assistant.block.delta",
+    "94:0 assistant.block.delta",
+    "95:0 assistant.block.delta",
+    "96:0 assistant.block.complete",
+    "96:1 tool.use"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 11954,
+   "name": "fs.sessionChanged",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 14814,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "100:0 task.started"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 20320,
+   "name": "session.status",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 20321,
+   "name": "engine.budget",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 21836,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "101:0 task.notification",
+    "102:0 tool.result"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 21987,
+   "name": "fs.sessionChanged",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22785,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "106:0 assistant.block.delta",
+    "108:0 assistant.block.complete",
+    "111:0 assistant.block.delta"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 22800,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "112:0 assistant.block.complete",
+    "116:0 turn.ended",
+    "116:1 usage.sample"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 22800,
+   "name": "session.status",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22800,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "119:0 command.lifecycle",
+    "120:0 session.state"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 22800,
+   "name": "session.status",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22801,
+   "name": "session.status",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22802,
+   "name": "session.queue",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22805,
+   "name": "session.eventBatch",
+   "phase": "live",
+   "events": [
+    "123:0 context.sample"
+   ]
+  },
+  {
+   "conn": "C2",
+   "ms": 22805,
+   "name": "session.status",
+   "phase": "live"
+  },
+  {
+   "conn": "C2",
+   "ms": 22857,
+   "name": "fs.sessionChanged",
+   "phase": "live"
+  }
+ ],
+ "engineSessionId": "84c2a2ee-b2ad-43b2-bfd6-7047a0f81017",
+ "stop": [
+  {
+   "supervisor": "S1",
+   "answer": {
+    "stopped": 1,
+    "forced": 0
+   },
+   "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 24261
+   },
+   "lockLeft": false,
+   "socketLeft": false
+  }
+ ],
+ "survivorsAfterStop": [],
+ "wire": "ea3bd7913e54d017",
+ "supervisors": [
+  {
+   "label": "S1",
+   "pid": 2711,
+   "chunkBuildId": "90059eef880c4dbc",
+   "servingMs": 315,
+   "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 24261
+   }
+  }
+ ],
+ "hostLog": [
+  "2026-10-06T22:55:26.113Z supervisor 0.0.0 pid 2711 build 90059eef880c4dbc starting in <scratch>/userData/supervisor",
+  "2026-10-06T22:55:26.140Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)",
+  "2026-10-06T22:55:26.142Z listening on <scratch>/userData/supervisor/host.sock",
+  "2026-10-06T22:55:26.195Z refused wire probe-placeholder from appPid 2638 (this supervisor's is ea3bd7913e54d017)",
+  "2026-10-06T22:55:26.196Z client connected: appPid 2638 build 90059eef880c4dbc",
+  "2026-10-06T22:55:26.197Z error: [host] 3 events dropped while no client was ready",
+  "2026-10-06T22:55:31.595Z client disconnected",
+  "2026-10-06T22:55:33.240Z error: [host] dropping events until a client is ready (first: session.eventBatch)",
+  "2026-10-06T22:55:36.655Z client connected: appPid 2638 build 90059eef880c4dbc",
+  "2026-10-06T22:55:36.655Z error: [host] 5 events dropped while no client was ready",
+  "2026-10-06T22:55:49.940Z [supervisor] stop all asked (grace 3000 ms); the supervisor exits after answering",
+  "2026-10-06T22:55:50.085Z exiting (stopAll)"
+ ],
+ "cost": {
+  "usage": {
+   "input": 26,
+   "output": 416,
+   "cacheWrite": 22807,
+   "cacheRead": 44857,
+   "messages": 3
+  },
+  "estimatedUsd": 0.0351
+ },
+ "ownerFileDelta": {
+  "before": 25,
+  "after": 25,
+  "added": [],
+  "removed": [],
+  "same": true,
+  "pythonSame": true
+ },
+ "cleanup": {
+  "started": [
+   2711,
+   2801,
+   2836,
+   2840,
+   2841,
+   2843,
+   2844,
+   3306,
+   3388,
+   3585,
+   3632,
+   3633,
+   3666,
+   3634,
+   3786,
+   3789,
+   3790,
+   3803,
+   3835,
+   3791,
+   3934,
+   3979,
+   3982
+  ],
+  "stillAlive": [],
+  "psMatches": [],
+  "scratchRemoved": true
+ },
+ "elapsedMs": 24399
+}

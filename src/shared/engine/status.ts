@@ -22,8 +22,8 @@ export const EngineSessionStatusSchema = z.strictObject({
   pendingPlan: z.string().nullable(), // a clear_and_implement plan kept for retry after the pre-plan mode could not be restored (M3 review)
   process: z.enum(['starting', 'initializing', 'ready', 'exiting', 'exited']),
   exit: z.strictObject({
-    code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), at: z.string(),
-    release: z.strictObject({ limitKiB: z.number().int(), totalKiB: z.number().int() }).nullable(), // C12: the budget and the sum at a release; non-null exactly when the reason is `budget`
+    code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */, 'idle' /* E10 */]), at: z.string(),
+    release: z.strictObject({ limitKiB: z.number().int(), totalKiB: z.number().int() }).nullable(), // C12: the budget and the sum at a release; non-null exactly when the reason is `budget` (E10: an `idle` release, the supervisor's, has none)
   }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']), // session_state_changed; 'unknown' before the first frame
   activity: z.enum(['compacting', 'requesting']).nullable(), // system/status

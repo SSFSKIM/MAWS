@@ -110,6 +110,9 @@ export interface EngineSessionOptions {
   // E1: where the `maws` tools record deliverables (the launcher's FileDeliverableStore; in memory by default). E2: built
   // with the session's announcement, so every write the store settles reaches the windows as `deliverables.changed`.
   deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
+  // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
+  // once with `appNotOpen` while it is false. Absent, always connected.
+  hasClient?: () => boolean;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -174,7 +177,7 @@ export class EngineSession {
   private starting: Promise<void> | null = null;
   private processState: ProcessState = 'starting';
   private exitInfo: EngineSessionStatus['exit'] = null;
-  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | null = null; // C12: 'budget'
+  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' | null = null; // C12: 'budget'; E10: 'idle'
   // C12 start: the release a budget stop carries until the exit; the last use (the launch until the first command)
   private release: BudgetRelease | null = null;
   private lastUsedAt: string;
@@ -215,8 +218,8 @@ export class EngineSession {
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
-    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
-    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS }); // E2
+    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }), hasClient: opts.hasClient /* E10 */ });
+    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: opts.hasClient /* E10 */ }); // E2
     const announce: OnDeliverableWritten = (record, change) => this.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
     this.askTable = new AskTable({
       onChange: () => {
@@ -265,7 +268,7 @@ export class EngineSession {
         if (!this.handshakeDone || !this.client) return false;
         this.surface.detach(this.client); // R2: off the roster first, on the same pipe
         // C12: `budget` is MAWS's own reason and never goes to the engine; a release ends the process as a stop does
-        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
+        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === 'idle' /* E10 */ || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
         return true;
       },
       stopResult: () => this.stopResult(),
@@ -474,16 +477,18 @@ export class EngineSession {
   // never replaces a recorded reason; an explicit stop, archive or quit replaces a recorded release, so an archive or
   // quit during a release's ladder exits as itself; explicit reasons keep the first among themselves. The one ladder
   // already running keeps its end_session.
-  stop(reason?: 'stop' | 'archive' | 'quit', opts?: { graceMs?: number }): Promise<StopResult>;
+  // E10: `idle`, the supervisor's idle-row release, is a release like the budget's (MAWS's own reason, `stop` on the
+  // wire, never replacing a recorded reason, replaced by an explicit one) with no budget detail.
+  stop(reason?: 'stop' | 'archive' | 'quit' | 'idle', opts?: { graceMs?: number }): Promise<StopResult>;
   stop(reason: 'budget', opts: { graceMs?: number; release: BudgetRelease }): Promise<StopResult>;
-  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
+  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
-    if (reason === 'budget') {
+    if (reason === 'budget' || reason === 'idle') {
       if (this.stopReason === null) {
-        this.stopReason = 'budget';
-        this.release = opts.release ?? null;
+        this.stopReason = reason;
+        this.release = reason === 'budget' ? (opts.release ?? null) : null;
       }
-    } else if (this.stopReason === null || this.stopReason === 'budget') {
+    } else if (this.stopReason === null || this.stopReason === 'budget' || this.stopReason === 'idle') {
       this.stopReason = reason;
       this.release = null;
     }

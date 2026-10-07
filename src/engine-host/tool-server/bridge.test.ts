@@ -51,4 +51,20 @@ describe('the host bridge (E2 Design §7: E1 residue 3 generalised)', () => {
     expect(await bridge.request(ask('r3'), aborted.signal)).toEqual({ kind: 'withdrawn' });
     expect(sent.map((r) => r.requestId)).toEqual(['r1', 'r2']);
   });
+
+  // E10 (§Design 4, X13): with no app connected nothing can answer, so the request fails at once instead of waiting out
+  // its deadline; it is never sent (an event with no client is dropped anyway)
+  it('settles noClient at once and sends nothing when no client is connected; with one it asks as before', async () => {
+    const sent: Ask[] = [];
+    let connected = false;
+    const bridge = new HostBridge<Ask, string>({ send: (r) => sent.push(r), answerMs: 1000, hasClient: () => connected });
+    expect(await bridge.request(ask('r1'), new AbortController().signal)).toEqual({ kind: 'noClient' });
+    expect(bridge.pending).toBe(0);
+    expect(sent).toEqual([]);
+    connected = true;
+    const outcome = bridge.request(ask('r2'), new AbortController().signal);
+    expect(sent).toEqual([ask('r2')]);
+    bridge.answer('r2' as RequestId, 'yes');
+    expect(await outcome).toEqual({ kind: 'answered', answer: 'yes' });
+  });
 });

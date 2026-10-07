@@ -19,20 +19,26 @@ export function clockTime(iso: string): string {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+// E10: the mark also says the supervisor's idle release (its idle clock: no app connected, or exit-when-idle armed after an
+// update), which has no limit and its own neutral words (Decision Log: "Stopped at HH:MM while idle").
 export interface Released {
   at: string;
-  limitKiB: number;
+  reason: 'budget' | 'idle';
+  limitKiB: number | null;
 }
 
 export const BUDGET = {
   mark: 'released',
-  markTitle: (r: Released) => `Released at ${clockTime(r.at)} to stay under the ${gb(r.limitKiB)} memory budget · Send resumes it`,
+  markTitle: (r: Released) =>
+    r.reason === 'budget' && r.limitKiB !== null
+      ? `Released at ${clockTime(r.at)} to stay under the ${gb(r.limitKiB)} memory budget · Send resumes it`
+      : `Stopped at ${clockTime(r.at)} while idle · Send resumes it`,
   // Session info
   budgetLabel: 'Memory budget',
   budgetLine: (totalKiB: number, limitKiB: number, sessions: number) => `${gb(totalKiB)} of ${gb(limitKiB)} · ${plural(sessions, 'session')}`,
   budgetOffLine: (totalKiB: number, sessions: number) => `Off · ${gb(totalKiB)} · ${plural(sessions, 'session')}`, // W7: the totals, no limit
   releasedLabel: 'Process',
-  releasedLine: (r: Released) => `Released at ${clockTime(r.at)} to stay under ${gb(r.limitKiB)}`,
+  releasedLine: (r: Released) => (r.reason === 'budget' && r.limitKiB !== null ? `Released at ${clockTime(r.at)} to stay under ${gb(r.limitKiB)}` : `Stopped at ${clockTime(r.at)} while idle`),
   // The banner (one per crossing of the host's two-sample flag)
   banner: (held: number) => `Memory budget exceeded · ${plural(held, 'session holds', 'sessions hold')} work MAWS will not stop`,
   review: 'Review…',

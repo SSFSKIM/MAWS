@@ -7,7 +7,7 @@ import type { EngineTransport } from './transport';
 // The termination ladder's waits (Exit policy): the end_session grace, then SIGTERM, then SIGKILL; 7 s worst case.
 export const LADDER_MS = { endSession: 3_000, term: 3_000, kill: 1_000 } as const;
 
-export type ExitReason = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'; // C12: `budget`, a release under the memory budget
+export type ExitReason = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' | 'idle'; // C12: `budget`, a release under the memory budget; E10: `idle`, the supervisor's idle-row release
 export interface ExitSummary { code: number | null; signal: string | null; reason: ExitReason; lostAttentionCount: number }
 export interface StopResult { exited: boolean; code: number | null; signal: string | null }
 

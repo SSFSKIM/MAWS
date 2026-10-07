@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { captureShellEnvironment, parseNulSeparatedEnv, runShellCapture, SHELL_CAPTURE_TIMEOUT_MS } from './shell-env';
+import { captureShellEnvironment, invalidateShellEnvironment, parseNulSeparatedEnv, runShellCapture, SHELL_CAPTURE_TIMEOUT_MS } from './shell-env';
 
 let dir: string;
 beforeEach(() => {
@@ -96,5 +96,19 @@ describe('login-shell environment capture (X6)', { timeout: 15_000 }, () => {
     expect(second).toBe(first);
     expect(first.MAWS_ONCE).toMatch(/^\d+$/);
     expect(SHELL_CAPTURE_TIMEOUT_MS).toBe(5_000);
+  });
+
+  // E10 (§Design 1 "Long-lived host hygiene"): a supervisor outlives the app, so a client's connect is when the owner is
+  // back; the cached capture is dropped then and the next launch captures the shell again, once
+  it('captures again, once, after the cache is invalidated', async () => {
+    const shell = fakeShell('printf "MAWS_ONCE=%s\\0PATH=/x\\0" "$$"');
+    invalidateShellEnvironment(); // whatever an earlier case cached
+    const first = await captureShellEnvironment({ shell, timeoutMs: SHELL_CAPTURE_TIMEOUT_MS });
+    invalidateShellEnvironment();
+    const second = await captureShellEnvironment({ shell, timeoutMs: SHELL_CAPTURE_TIMEOUT_MS });
+    const third = await captureShellEnvironment({ shell, timeoutMs: SHELL_CAPTURE_TIMEOUT_MS });
+    expect(second).not.toBe(first);
+    expect(second.MAWS_ONCE).not.toBe(first.MAWS_ONCE); // another shell ran
+    expect(third).toBe(second);
   });
 });

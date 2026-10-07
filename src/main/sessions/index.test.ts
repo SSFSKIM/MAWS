@@ -97,7 +97,7 @@ describe('answers cannot outlive attention', () => {
   });
 });
 
-const hosts = { dispatch: vi.fn(async () => ({ ok: true as const, value: { outcome: 'delivered' as const } })), onEvent: () => () => {}, onState: () => () => {} }; // C12: onState
+const hosts = { dispatch: vi.fn(async () => ({ ok: true as const, value: { outcome: 'delivered' as const } })), onEvent: () => () => {}, onState: () => () => {}, onStreaming: () => () => {}, setResync: () => {} }; // C12: onState; E10: onStreaming, setResync
 
 describe('launch mode reaches the page', () => {
   afterEach(() => handlers.clear());
