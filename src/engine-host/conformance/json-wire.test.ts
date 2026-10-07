@@ -191,9 +191,9 @@ function renderFailuresAfterJson(request: Record<string, unknown>, answer: UiRen
   const output = renderAnswerOf(answer, request.props as Record<string, unknown>);
   const json = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
   const inputCopy = validateCommandInput('session.ui.render', json(input) as never);
-  if (!inputCopy.ok) failures.push(`input: ${JSON.stringify(inputCopy.issues).slice(0, 300)}`);
+  if (!inputCopy.ok) failures.push(`input: ${JSON.stringify(inputCopy.error).slice(0, 300)}`);
   const outputCopy = validateCommandOutput('session.ui.render', json(output));
-  if (!outputCopy.ok) failures.push(`output: ${JSON.stringify(outputCopy.issues).slice(0, 300)}`);
+  if (!outputCopy.ok) failures.push(`output: ${JSON.stringify(outputCopy.error).slice(0, 300)}`);
   const component = request.component;
   if (isTranscriptSite(component) && parseTranscriptProps(component, output.props, request.props as never) !== null && parseTranscriptProps(component, json(output).props, request.props as never) === null) {
     failures.push(`output props: ${component} reads as the renderer reads it, and not after JSON`);
