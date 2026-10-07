@@ -95,13 +95,13 @@ describe('cutSnapshot', () => {
     expect(cutSnapshot(GITHUB, { maxChars: BROWSER_SNAPSHOT_MAX_CHARS_CEILING })).toMatchObject({ text: GITHUB, truncated: false, omitted: null });
   });
 
-  it('cuts GitHub at the default 24,000 keeping about half its refs, with the landmarks in the outline', () => {
+  it('cuts GitHub at the default 24,000 keeping over two fifths of its refs, with the landmarks in the outline', () => {
     const cut = cutSnapshot(GITHUB, { maxChars: BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT });
     expect(cut).toMatchObject({ truncated: true, chars: GITHUB.length, lines: linesOf(GITHUB).length, refs: countRefs(GITHUB) });
     expect(cut.text.length).toBeLessThanOrEqual(BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT);
     const kept = (cut.refs - cut.omitted!.refs) / cut.refs;
-    expect(kept).toBeGreaterThan(0.42);
-    expect(kept).toBeLessThan(0.52);
+    expect(kept).toBeGreaterThan(0.4); // 43 % (E4-0's 47 % had no outline beside the body)
+    expect(kept).toBeLessThan(0.5);
     const { header, outline } = partsOf(cut.text);
     expect(header).toBe(SNAPSHOT_OUTLINE_HEADER);
     for (const landmark of ['- banner [ref=f1e8]', '- navigation "Global" [ref=f1e23]', '- main [ref=f1e343]', '- contentinfo [ref=f1e966]'])
