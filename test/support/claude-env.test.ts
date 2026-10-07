@@ -35,7 +35,27 @@ describe('ownerPlugins', () => {
       { name: 'cc-plugin-agents-md', source: 'cc-plugin-agents-md@builtin' },
       { name: 'cc-plugin-telemetry', source: 'cc-plugin-telemetry@builtin' },
     ];
-    expect(ownerPlugins(init)).toEqual(['prompt-autosave@inline']);
-    expect(ownerPlugins(init.slice(1))).toEqual([]);
+    expect(ownerPlugins(init, [])).toEqual(['prompt-autosave@inline']);
+    expect(ownerPlugins(init.slice(1), [])).toEqual([]);
+  });
+
+  it('leaves out a plugin the sitting installed under its own scratch, in either spelling of /tmp', () => {
+    // pass3/e8-plugins-reload-settle's init: the plugin E8's probe installed from its scratch market, reported under
+    // /tmp while the run's directories were realpaths under /private/tmp
+    const init = [
+      { name: 'e8-probe', path: '/tmp/e8-g0/run1/market/plugins/e8-probe', source: 'e8-probe@e8-scratch' },
+      { name: 'cached', path: '/private/tmp/maws-s2-config-x/plugins/cache/m/cached/1.0.0', source: 'cached@m' },
+      { name: 'prompt-autosave', path: '/Users/owner/.claude/mods/prompt-autosave', source: 'prompt-autosave@inline' },
+      { name: 'cc-plugin-telemetry', path: 'builtin', source: 'cc-plugin-telemetry@builtin' },
+    ];
+    expect(ownerPlugins(init, ['/private/tmp/e8-g0/run1', '/tmp/maws-s2-config-x'])).toEqual(['prompt-autosave@inline']);
+  });
+
+  it("counts a plugin under a sibling of the scratch, or with no path, as the owner's", () => {
+    const init = [
+      { name: 'neighbour', path: '/tmp/maws-s2-config-xy/plugins/neighbour', source: 'neighbour@m' },
+      { name: 'unplaced', source: 'unplaced@m' },
+    ];
+    expect(ownerPlugins(init, ['/tmp/maws-s2-config-x'])).toEqual(['neighbour@m', 'unplaced@m']);
   });
 });

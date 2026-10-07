@@ -251,7 +251,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const [init] = ofKind(events, 'session.init');
       expect(init!.tools).toEqual(expect.arrayContaining(['mcp__maws__send_file', 'mcp__maws__ask', 'mcp__maws__show_pane']));
       expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
-      expect(ownerPlugins(init!.plugins), 'none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
+      expect(ownerPlugins(init!.plugins, [sc.root]), 'none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
       note(`G1: session.init (the journal's system/init) lists ${init!.tools.length} tools, ${JSON.stringify(init!.tools.filter((t) => t.startsWith('mcp__')))}; mcp_servers ${JSON.stringify(init!.mcpServers)}; plugins ${JSON.stringify(init!.plugins)} (none of the owner's)`);
       const [delivered] = ofKind(events, 'maws.delivery.file');
       const path = join(sc.repo, 'hello.txt');

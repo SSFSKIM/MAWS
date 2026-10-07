@@ -116,6 +116,13 @@ export function initPlugins(events: SessionEvent[]): { name: string; source: str
   return init ? init.plugins : null;
 }
 
+// The plugin list of the journal's first engine `system/init` frame, with each plugin's `path` (which the normalized
+// event drops), or null before one.
+export function journalInitPlugins(rows: JournalRow[]): { name: string; source: string; path?: string }[] | null {
+  const init = rows.find((row) => row.direction === 'in' && (row.frame as { type?: unknown }).type === 'system' && (row.frame as { subtype?: unknown }).subtype === 'init');
+  return init ? ((init.frame as { plugins?: { name: string; source: string; path?: string }[] }).plugins ?? []) : null;
+}
+
 // The engine's transcript of one session in the scratch home, redacted, under `<userData>/exports/<name>.jsonl`; null
 // when the scratch home holds none.
 export function exportTranscript(g: LiveGate, name: string, engineSessionId: string): { dest: string; source: string; text: string } | null {
@@ -145,8 +152,9 @@ export async function closeSession(
   await host.shutdown().catch((error: unknown) => report(`shutdown failed: ${String(error)}`));
   let costUsd: number | null = null;
   let exported: string | null = null;
-  if (session.journalPath) {
-    costUsd = journalCost(readJournal(session.journalPath)).costUsd;
+  const rows = session.journalPath ? readJournal(session.journalPath) : null;
+  if (rows) {
+    costUsd = journalCost(rows).costUsd;
     report(`journal: ${session.journalPath} (total_cost_usd ${costUsd.toFixed(4)})`);
     const dir = join(g.userData, 'exports');
     mkdirSync(dir, { recursive: true });
@@ -159,11 +167,12 @@ export async function closeSession(
       report(transcript ? `exported: ${transcript.dest} (transcript ${transcript.source})` : `no transcript for ${session.transcript.engineSessionId} under ${join(g.home, 'projects')}`);
     }
   }
-  const plugins = initPlugins(host.events(session.appSessionId));
+  // the journal's list carries each plugin's path, so one the sitting installed under its own scratch is told apart
+  const plugins = (rows && journalInitPlugins(rows)) ?? initPlugins(host.events(session.appSessionId));
   report(`init plugins: ${JSON.stringify(plugins)}`);
   const after = a15();
   report(`A-15 after: ${after.length} keys, ${JSON.stringify(after) === JSON.stringify(g.a15Before) ? 'identical' : `CHANGED: ${JSON.stringify(after)}`}`);
-  expect(ownerPlugins(plugins ?? []), 'the engine loaded none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
+  expect(ownerPlugins(plugins ?? [], [g.home, g.userData]), 'the engine loaded none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
   expect(after, 'the A-15 delta: no scratch project in the owner file').toEqual(g.a15Before);
   return { costUsd, exported };
 }

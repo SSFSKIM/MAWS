@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { initPlugins, openGate, scratchRepo, type LiveGate } from './harness';
+import type { JournalRow } from '@shared/wire/journal';
+import { initPlugins, journalInitPlugins, openGate, scratchRepo, type LiveGate } from './harness';
 
 vi.mock('../../support/engine-pin', () => ({ ENGINE_BIN: '/unused/offline-engine', ENGINE_VERSION: '2.1.283' }));
 
@@ -43,5 +44,14 @@ describe('the shared live harness', () => {
     const init = (plugins: { name: string; source: string }[]) => ({ kind: 'session.init', plugins }) as unknown as SessionEvent;
     expect(initPlugins([])).toBeNull();
     expect(initPlugins([init([{ name: 'cc-plugin-telemetry', source: 'cc-plugin-telemetry@builtin' }]), init([])])).toEqual([{ name: 'cc-plugin-telemetry', source: 'cc-plugin-telemetry@builtin' }]);
+  });
+
+  it("reads the plugin list of the journal's first init with each plugin's path, null before one", () => {
+    const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '2026-10-07T00:00:00.000Z', frame });
+    const init = (plugins?: unknown[]) => ({ type: 'system', subtype: 'init', ...(plugins && { plugins }) });
+    const plugins = [{ name: 'e8-probe', path: '/tmp/run/market/plugins/e8-probe', source: 'e8-probe@e8-scratch', version: '0.1.0' }];
+    expect(journalInitPlugins([row(1, 'out', { type: 'control_request' })])).toBeNull();
+    expect(journalInitPlugins([row(1, 'out', init([])), row(2, 'in', { type: 'system', subtype: 'status' }), row(3, 'in', init(plugins)), row(4, 'in', init([]))])).toEqual(plugins);
+    expect(journalInitPlugins([row(1, 'in', init())])).toEqual([]);
   });
 });
