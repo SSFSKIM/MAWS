@@ -8,6 +8,7 @@ import {
   BROWSER_AGENT_IDLE_MS,
   BROWSER_ANSWER_MS,
   BROWSER_BRIDGE_IDLE_MS,
+  BROWSER_DIALOG_EXCERPT_MAX_CHARS,
   BROWSER_DIALOG_MESSAGE_MAX_CHARS,
   BROWSER_DIALOGS_MAX,
   BROWSER_EVAL_MAX_CHARS,
@@ -35,9 +36,13 @@ import {
   BrowserTargetSchema,
   browserTargetText,
   browserToolResultSchemaOf,
+  BrowserWaitReasonSchema,
   isBrowserToolName,
   LANDMARK_ROLES,
 } from './browser';
+import { SessionEventSchema } from '../graph/events';
+import { BrowserNoticeSchema } from '../ipc/schema/browser';
+import { BrowserWaitingSchema } from '../ipc/schema/maws';
 import { MAWS_TOOL_ANNOTATIONS, MAWS_TOOL_NAMES, MAWS_TOOLS, mawsToolList, parseToolArguments, TOOL_ERRORS } from './tools';
 
 const TAB = 'b_0123456789ab';
@@ -122,10 +127,12 @@ describe('X9 as E4c extends it: the six browser tools', () => {
     expect({
       BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_SNAPSHOT_MAX_CHARS_CEILING, BROWSER_SNAPSHOT_OUTLINE_MAX_LINES, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES,
       BROWSER_ANSWER_MS, BROWSER_ACTION_TIMEOUT_MS, BROWSER_LOCATE_MS, BROWSER_AGENT_IDLE_MS, BROWSER_BRIDGE_IDLE_MS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX,
+      BROWSER_DIALOG_EXCERPT_MAX_CHARS,
     }).toEqual({
       BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT: 24_000, BROWSER_SNAPSHOT_MAX_CHARS_CEILING: 64_000, BROWSER_SNAPSHOT_OUTLINE_MAX_LINES: 40, BROWSER_EVAL_MAX_CHARS: 16_000,
       BROWSER_SCREENSHOT_MAX_BYTES: 3_670_016, BROWSER_ANSWER_MS: 30_000, BROWSER_ACTION_TIMEOUT_MS: 10_000, BROWSER_LOCATE_MS: 2_000, BROWSER_AGENT_IDLE_MS: 10_000,
       BROWSER_BRIDGE_IDLE_MS: 300_000, BROWSER_DIALOG_MESSAGE_MAX_CHARS: 500, BROWSER_DIALOGS_MAX: 10,
+      BROWSER_DIALOG_EXCERPT_MAX_CHARS: 200,
     });
   });
 });
@@ -243,6 +250,20 @@ describe('the browser tools\' results', () => {
     expect(BrowserActResultSchema.safeParse({ ...act, waitedFor: 'sheet' }).success).toBe(false);
   });
 
+  // Task 1.4 (Decision Log 44 (d)): one waiting reason for the results, the X1 event and the IPC; one excerpt bound for
+  // the dialog notice
+  it('shares one waiting-reason enum and one dialog excerpt bound with the event and the IPC', () => {
+    expect(BrowserWaitReasonSchema.options).toEqual(['human', 'cover']);
+    expect(BrowserActResultSchema.shape.waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
+    expect(BrowserNavigateResultSchema.shape.waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
+    expect(BrowserWaitingSchema.unwrap()).toBe(BrowserWaitReasonSchema);
+    const action = SessionEventSchema.options.find((option) => option.shape.kind.value === 'maws.browser.action')!;
+    expect((action.shape as unknown as { waitedFor: { unwrap(): unknown } }).waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
+    const notice = { appSessionId: 'a', tabId: TAB, kind: 'dialogAnswered', dialogType: 'alert' } as const;
+    expect(BrowserNoticeSchema.safeParse({ ...notice, excerpt: 'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS) }).success).toBe(true);
+    expect(BrowserNoticeSchema.safeParse({ ...notice, excerpt: 'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS + 1) }).success).toBe(false);
+  });
+
   it('browser_snapshot reports the cut; browser_eval the value; browser_screenshot the file', () => {
     const snapshot = { ...page, root: null, rootMatches: null, chars: 47_125, lines: 900, refs: 310, truncated: true, omitted: { lines: 420, refs: 160 } };
     expect(BrowserSnapshotResultSchema.safeParse(snapshot).success).toBe(true);
@@ -291,6 +312,11 @@ describe('the browser tools\' error texts', () => {
     // Decision Log 30: css alone matched one element whose role or name disagrees; the fallback is not taken
     expect(e.targetNotFound('browser_act', { css: '#save', role: 'button', name: 'Save' }, { role: 'button', name: 'Cancel' })).toBe('browser_act: {css: "#save"} matches one element, button "Cancel", not button "Save"');
     expect(e.targetNotFound('browser_act', { css: '#save', role: 'link' }, { role: 'button', name: 'Save' })).toBe('browser_act: {css: "#save"} matches one element, button "Save", not link');
+    // Task 1.4 (Decision Log 44 (d)): the disagreement names what the locator wanted, never a bare "not": an empty name
+    // is named as such, and a locator with neither role nor name cannot carry `found` (a type error)
+    expect(e.targetNotFound('browser_act', { css: '#save', name: '' }, { role: 'button', name: 'Save' })).toBe('browser_act: {css: "#save"} matches one element, button "Save", not ""');
+    // @ts-expect-error a locator with neither role nor name cannot disagree with the element css matched
+    void (() => e.targetNotFound('browser_act', { css: '#save' }, { role: 'button', name: 'Save' }));
     expect(e.humanHasPage('browser_act')).toBe('browser_act: the user has the page; the action was cancelled before they handed it back');
     expect(e.navigationFailed('browser_navigate', 'http://nope.invalid/', 'dns', 'ERR_NAME_NOT_RESOLVED')).toBe('browser_navigate: http://nope.invalid/ failed to load (dns, ERR_NAME_NOT_RESOLVED)');
     expect(e.downloadRefused('browser_act', 'https://a.b/f.zip', 'f.zip')).toBe('browser_act: https://a.b/f.zip started a download (f.zip), which MAWS refuses for the agent; the user downloads files');

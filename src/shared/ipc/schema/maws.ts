@@ -13,7 +13,7 @@ import type { CommandSpec } from './common';
 // E4c start
 import { ToolUseIdSchema } from '../../graph/ids';
 import { BrowserTabIdSchema } from '../../browser/tab';
-import { BROWSER_TOOL_NAMES } from '../../maws/browser';
+import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../../maws/browser';
 // E4c end
 
 export const MawsPaneShowSchema = z.strictObject({
@@ -72,7 +72,7 @@ export type MawsBrowserRequest = z.infer<typeof MawsBrowserRequestSchema>;
 export const MawsBrowserCancelSchema = z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema });
 export type MawsBrowserCancel = z.infer<typeof MawsBrowserCancelSchema>;
 
-export const BrowserWaitingSchema = z.enum(['human', 'cover']).nullable(); // null: no longer waiting
+export const BrowserWaitingSchema = BrowserWaitReasonSchema.nullable(); // null: no longer waiting
 export const MawsBrowserProgressSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   toolUseId: ToolUseIdSchema.nullable(),

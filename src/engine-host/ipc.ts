@@ -133,6 +133,7 @@ export interface EngineIpcDeps {
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
+  onClientGone?: (hook: () => void) => () => void; // E4c: the runtime's, fired when a ready client goes
 }
 
 export interface EngineIpc {
@@ -222,6 +223,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     appVersion: deps.appVersion ?? 'unknown',
     log,
     hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
+    onClientGone: deps.onClientGone, // E4c: each session's browser bridge settles its requests when the app goes
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
@@ -242,6 +244,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('deliverableChanged', (change) => emit('deliverables.changed', change));
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request));
       // E2 end
+      // E4c start: the browser tools' requests and cancellations, which main handles (maws.browser.request, .cancel)
+      session.on('browserRequest', (request) => emit('maws.browser.request', request));
+      session.on('browserCancel', (cancel) => emit('maws.browser.cancel', cancel));
+      // E4c end
     },
   });
 
@@ -726,6 +732,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
   handleMaws('maws.artifact.captured', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerCapture(requestId as RequestId, result) ?? 'not_pending' })); // E2
+  // E4c start: main's answer to a browser request, and its report that the request waits on the person or a cover
+  handleMaws('maws.browser.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerBrowser(requestId as RequestId, result) ?? 'not_pending' }));
+  handleMaws('maws.browser.waiting', async ({ appSessionId, requestId, waiting }) => ({ outcome: table.get(appSessionId as AppSessionId)?.browserWaiting(requestId as RequestId, waiting) ?? 'not_pending' }));
+  // E4c end
   // E1 end
 
   // E3 start: the side-question log's commands. The log lives as long as the session's process does here (an exited

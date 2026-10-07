@@ -13,6 +13,20 @@ import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
+// E4c start
+import {
+  browserToolResultSchemaOf,
+  isBrowserToolName,
+  type BrowserActInput,
+  type BrowserNavigateInput,
+  type BrowserScreenshotInput,
+  type BrowserSnapshotInput,
+  type BrowserTabsInput,
+  type BrowserTarget,
+  type BrowserToolName,
+  type BrowserWaitReason,
+} from '@shared/maws/browser';
+// E4c end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
 
@@ -233,6 +247,14 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
     return;
   }
   // E2 end
+  // E4c start: `maws.browser.action` for an admitted browser tool call the host answered, a success that parses as the
+  // tool's result or a refusal (its text the `error`), so the row's facts come from the journal (E4c Design §10)
+  if (isBrowserToolName(call.tool)) {
+    const action = browserActionOf(call.tool, call.args, isError ? null : json, isError ? text : null);
+    if (action !== null) out.emit({ kind: 'maws.browser.action', toolUseId: call.toolUseId, requestId, ...action }, attribution);
+    return;
+  }
+  // E4c end
   if (call.tool === 'ask' && call.askId !== null && openAsks.has(call.askId)) {
     const parsed = AskResultSchema.safeParse(json);
     if (!parsed.success || parsed.data.status !== 'answered') return;
@@ -257,6 +279,73 @@ export function mapMawsAskMeta(meta: Record<string, unknown>, out: EventSink, at
     out.emit({ kind: 'maws.ask.cancelled', askId, toolUseId, reason: meta.reason }, attribution);
   }
 }
+
+// E4c start: what one browser call did, from its arguments (the action and its target) and its answer (the page, the
+// timing, the deliverable, the waits); null when the answer is a success that is not the tool's result.
+type BrowserAction = Omit<Extract<EventPayload, { kind: 'maws.browser.action' }>, 'kind' | 'toolUseId' | 'requestId'>;
+
+function browserActionOf(tool: BrowserToolName, rawArgs: unknown, json: unknown, error: string | null): BrowserAction | null {
+  const args = parseToolArguments(tool, rawArgs);
+  if (!args.ok) return null;
+  const call = browserCallOf(tool, args.data);
+  let result: BrowserResultFields | null = null;
+  if (error === null) {
+    const parsed = browserToolResultSchemaOf(tool).safeParse(json);
+    if (!parsed.success) return null;
+    result = parsed.data as BrowserResultFields;
+  }
+  return {
+    tool, action: call.action, tabId: result?.tabId ?? call.tabId, target: call.target,
+    url: result?.url ?? null, title: result?.title ?? null, ms: result?.ms ?? null, deliverableId: result?.deliverableId ?? null, error,
+    waitedFor: result?.waitedFor ?? null, waitedMs: result?.waitedMs ?? null,
+  };
+}
+
+// The fields of the six results the event reads (each result has some of them).
+interface BrowserResultFields {
+  tabId?: string | null;
+  url?: string | null;
+  title?: string | null;
+  ms?: number;
+  deliverableId?: string;
+  waitedFor?: BrowserWaitReason | null;
+  waitedMs?: number | null;
+}
+
+// A target as the row names it: a ref, or a locator's css.
+const targetOf = (target: BrowserTarget): string => (typeof target === 'string' ? target : target.css);
+
+// The action is `args.action` for tabs and act, back/forward/reload or `url` for navigate, else the tool's noun; the
+// target is the act's (or screenshot's) ref or css, the URL navigated to or opened, the snapshot's root, the
+// screenshot's `page` or `fullPage`.
+function browserCallOf(tool: BrowserToolName, input: unknown): { action: string; tabId: string | null; target: string | null } {
+  switch (tool) {
+    case 'browser_tabs': {
+      const args = input as BrowserTabsInput;
+      return { action: args.action, tabId: args.tabId ?? null, target: args.url ?? null };
+    }
+    case 'browser_navigate': {
+      const args = input as BrowserNavigateInput;
+      const named = args.url === 'back' || args.url === 'forward' || args.url === 'reload';
+      return { action: named ? args.url : 'url', tabId: args.tabId, target: named ? null : args.url };
+    }
+    case 'browser_snapshot': {
+      const args = input as BrowserSnapshotInput;
+      return { action: 'snapshot', tabId: args.tabId, target: args.root ?? null };
+    }
+    case 'browser_act': {
+      const args = input as BrowserActInput;
+      return { action: args.action, tabId: args.tabId, target: targetOf(args.target) };
+    }
+    case 'browser_eval':
+      return { action: 'eval', tabId: (input as { tabId: string }).tabId, target: null };
+    case 'browser_screenshot': {
+      const args = input as BrowserScreenshotInput;
+      return { action: 'screenshot', tabId: args.tabId, target: args.target !== undefined ? targetOf(args.target) : args.fullPage === true ? 'fullPage' : 'page' };
+    }
+  }
+}
+// E4c end
 
 function parseJson(text: string): unknown {
   try {

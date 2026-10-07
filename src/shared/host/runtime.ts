@@ -23,7 +23,8 @@ export type HostOn = <N extends CommandName>(name: N, handler: (input: CommandIn
 // E10: true when the event was written to a connected, ready client; false when it was refused or dropped.
 export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
 // E10: a register is handed the runtime's client hooks too (the engine host's connect burst, its bridges' fail-fast)
-export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient'>;
+// E4c: and the client's going (the browser bridge settles its pending requests on it)
+export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */>;
 export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
@@ -75,6 +76,22 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
   const connectHooks: (() => void)[] = [];
   let dropped = 0; // events dropped since the last ready client; logged once when the stretch starts and ends
   // E10 end
+  // E4c start: the hooks told a ready client went, once per client, from the three places the runtime learns it
+  const goneHooks = new Set<() => void>();
+  const clientGone = () => {
+    for (const hook of [...goneHooks]) {
+      try {
+        hook();
+      } catch (error) {
+        console.error('[host] a client-gone hook failed', error);
+      }
+    }
+  };
+  const onClientGone = (hook: () => void) => {
+    goneHooks.add(hook);
+    return () => void goneHooks.delete(hook);
+  };
+  // E4c end
   // Which host this is. `runHost`'s signature does not name it, so the first registration fixes it and every later
   // one must match: a handler registered in the wrong host fails at load instead of sitting unreachable, since main
   // routes each command to its registry owner.
@@ -112,12 +129,13 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     ready = false;
     console.error(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`);
     dropped += 1;
+    clientGone(); // E4c
     return false;
   };
 
   const hasClient = () => port !== null && ready; // E10
   const onConnect = (hook: () => void) => void connectHooks.push(hook); // E10
-  register(on, emit, { onConnect, hasClient });
+  register(on, emit, { onConnect, hasClient, onClientGone /* E4c */ });
 
   // E10 start
   const setReady = () => {
@@ -144,8 +162,10 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
 
   return {
     serve(p) {
+      const replaced = ready; // E4c: a ready client this one replaces is gone
       port = p;
       ready = false; // E10
+      if (replaced) clientGone(); // E4c
       p.on('message', ({ data }) => {
         // E10: the client's ready line; one from a port this runtime no longer serves is stale and ignored
         if (HostReadySchema.safeParse(data).success) {
@@ -163,13 +183,16 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     },
     // E10 start
     detach() {
+      const wasReady = ready; // E4c
       port = null;
       ready = false;
+      if (wasReady) clientGone(); // E4c
     },
     setReady,
     hasClient,
     onConnect,
     // E10 end
+    onClientGone, // E4c
   };
 
   async function answer({ id, name, input }: HostRequest): Promise<HostMessage> {
@@ -219,3 +242,11 @@ export function runHost(hostVersion: string, register: HostRegister): void {
 export function hostPing(hostVersion: string): HostPing {
   return { pid: process.pid, uptimeMs: Math.round(process.uptime() * 1000), hostVersion };
 }
+
+// E4c start (E4c execution document, Decision Log 31 and 43; X13): the runtime tells who asked when a ready client goes
+// (its socket closed, a new client replaced it, or a write to it failed), once per client, so a request waiting on the
+// app settles rather than holding an engine turn on a main that is gone. Returns the unsubscribe.
+export interface HostRuntime {
+  onClientGone(hook: () => void): () => void;
+}
+// E4c end

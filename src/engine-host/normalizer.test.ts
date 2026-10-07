@@ -775,3 +775,77 @@ describe('peer messages (E7)', () => {
   });
 });
 // E7 end
+
+// E4c start (E4c execution document, Design §10; Task 1.4): `maws.browser.action` from the host's answer to an admitted
+// browser tool call, so a journal rebuild reproduces the row's facts (tab, target, URL, title, ms, deliverable, waits,
+// error); a refused call, and a call the engine withdrew (never answered), yield nothing.
+describe('maws.browser.action (E4c)', () => {
+  const TAB = 'b_0123456789ab';
+  const UUID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
+  const page = { status: 'ok', tabId: TAB, url: 'http://127.0.0.1:17391/form.html', title: 'E4c order form', ms: 42 };
+  let n = 0;
+  const pair = (name: string, args: unknown, content: unknown[], isError = false, toolUseId: string | null = `toolu_${n + 1}`) => {
+    const requestId = `r${++n}`;
+    const params = { name, arguments: args, ...(toolUseId !== null && { _meta: { 'claudecode/toolUseId': toolUseId } }) };
+    return [
+      inRow({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: n, method: 'tools/call', params } } }),
+      outRow({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { mcp_response: { jsonrpc: '2.0', id: n, result: { content, ...(isError && { isError: true }) } } } } }),
+    ];
+  };
+  const json = (value: unknown) => ({ type: 'text', text: JSON.stringify(value, null, 2) });
+  const none = { deliverableId: null, error: null, waitedFor: null, waitedMs: null };
+
+  it('maps each tool’s answer: action, tab, target, page and timing from the call and the first JSON block', () => {
+    n = 0;
+    const summary = { tabId: TAB, url: page.url, title: page.title, selected: true, loaded: true, control: 'agent', owner: 'self' };
+    const header = { ...page, root: 'main', rootMatches: 1, chars: 120, lines: 4, refs: 3, truncated: false, omitted: null };
+    const shot = { ...page, deliverableId: UUID, path: `/u/deliverables/app-1/screenshots/${UUID}.png`, width: 1, height: 1, bytes: 9, mimeType: 'image/png', target: null, fullPage: true };
+    const rows = [
+      ...pair('browser_tabs', { action: 'open', url: page.url }, [json({ status: 'ok', action: 'open', tabId: TAB, url: page.url, title: page.title, tabs: [summary], ms: 120 })]),
+      ...pair('browser_tabs', { action: 'list' }, [json({ status: 'ok', action: 'list', tabId: null, url: null, title: null, tabs: [summary], ms: 1 })]),
+      ...pair('browser_navigate', { tabId: TAB, url: 'back' }, [json({ ...page, waitedFor: null, waitedMs: null })]),
+      ...pair('browser_navigate', { tabId: TAB, url: page.url }, [json({ ...page, waitedFor: null, waitedMs: null })]),
+      ...pair('browser_snapshot', { tabId: TAB, root: 'main' }, [json(header), { type: 'text', text: '- main [ref=e1]' }]),
+      ...pair('browser_act', { tabId: TAB, action: 'click', target: 'e12' }, [json({ ...page, action: 'click', target: { ref: 'e12', role: 'button', name: 'Submit' }, navigated: true, waitedFor: 'human', waitedMs: 3012 })]),
+      ...pair('browser_act', { tabId: TAB, action: 'fill', target: { css: '#name', role: 'textbox' }, value: 'Ada' }, [json({ ...page, action: 'fill', target: { css: '#name', role: 'textbox', matches: 1 }, navigated: false, waitedFor: null, waitedMs: null })]),
+      ...pair('browser_eval', { tabId: TAB, expression: 'document.title' }, [json({ ...page, value: 'E4c order form', truncated: false })]),
+      ...pair('browser_screenshot', { tabId: TAB, fullPage: true }, [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }, json(shot)]),
+      ...pair('browser_screenshot', { tabId: TAB, target: { css: '#reference' } }, [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }, json({ ...shot, target: { css: '#reference', matches: 1 }, fullPage: false })], false, null),
+    ];
+    const events = only(feed(make(), rows), 'maws.browser.action');
+    const at = { url: page.url, title: page.title, ms: 42 };
+    expect(events.map(({ kind, toolUseId, requestId, tool, action, tabId, target, url, title, ms, deliverableId, error, waitedFor, waitedMs }) => ({ kind, toolUseId, requestId, tool, action, tabId, target, url, title, ms, deliverableId, error, waitedFor, waitedMs }))).toEqual([
+      { kind: 'maws.browser.action', toolUseId: 'toolu_1', requestId: 'r1', tool: 'browser_tabs', action: 'open', tabId: TAB, target: page.url, ...at, ms: 120, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_2', requestId: 'r2', tool: 'browser_tabs', action: 'list', tabId: null, target: null, url: null, title: null, ms: 1, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_3', requestId: 'r3', tool: 'browser_navigate', action: 'back', tabId: TAB, target: null, ...at, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_4', requestId: 'r4', tool: 'browser_navigate', action: 'url', tabId: TAB, target: page.url, ...at, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_5', requestId: 'r5', tool: 'browser_snapshot', action: 'snapshot', tabId: TAB, target: 'main', ...at, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_6', requestId: 'r6', tool: 'browser_act', action: 'click', tabId: TAB, target: 'e12', ...at, ...none, waitedFor: 'human', waitedMs: 3012 },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_7', requestId: 'r7', tool: 'browser_act', action: 'fill', tabId: TAB, target: '#name', ...at, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_8', requestId: 'r8', tool: 'browser_eval', action: 'eval', tabId: TAB, target: null, ...at, ...none },
+      { kind: 'maws.browser.action', toolUseId: 'toolu_9', requestId: 'r9', tool: 'browser_screenshot', action: 'screenshot', tabId: TAB, target: 'fullPage', ...at, ...none, deliverableId: UUID },
+      { kind: 'maws.browser.action', toolUseId: null, requestId: 'r10', tool: 'browser_screenshot', action: 'screenshot', tabId: TAB, target: '#reference', ...at, ...none, deliverableId: UUID },
+    ]);
+    // a rebuild of the same rows reproduces every event
+    expect(only(feed(make(), rows), 'maws.browser.action')).toEqual(events);
+  });
+
+  it('maps an error answer with its text, the tab and target from the call; a screenshot without a target is the page', () => {
+    n = 0;
+    const refusal = `browser_screenshot: no tab "${TAB}" in this session; call browser_tabs {action: "list"}`;
+    const events = only(feed(make(), pair('browser_screenshot', { tabId: TAB }, [{ type: 'text', text: refusal }], true)), 'maws.browser.action');
+    expect(events).toMatchObject([{ tool: 'browser_screenshot', action: 'screenshot', tabId: TAB, target: 'page', url: null, title: null, ms: null, deliverableId: null, error: refusal, waitedFor: null, waitedMs: null }]);
+  });
+
+  it('yields nothing for a refused call, a malformed success, or a call the engine withdrew', () => {
+    n = 0;
+    const events = feed(make(), [
+      ...pair('browser_tabs', { action: 'open' }, [{ type: 'text', text: 'browser_tabs: invalid arguments: url: open needs a url' }], true), // refused at admission
+      ...pair('browser_act', { tabId: TAB, action: 'click', target: 'e1' }, [json({ status: 'ok' })]), // not the tool's result
+      pair('browser_eval', { tabId: TAB, expression: '1' }, [])[0]!, // withdrawn: no answer row
+      inRow({ type: 'control_cancel_request', request_id: `r${n}` }),
+    ]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+  });
+});
+// E4c end

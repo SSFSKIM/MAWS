@@ -14,6 +14,9 @@ import {
   BrowserTabSchema,
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
+// E4c start
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
+// E4c end
 import type { CommandSpec } from './common';
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
@@ -51,7 +54,7 @@ export const BrowserNoticeSchema = z.strictObject({
   count: z.number().int().min(0).optional(),
   // E4c start: `dialogAnswered`'s dialog kind and the start of its message, page text shown as plain text
   dialogType: z.enum(['alert', 'confirm']).optional(),
-  excerpt: z.string().max(200).optional(),
+  excerpt: z.string().max(BROWSER_DIALOG_EXCERPT_MAX_CHARS).optional(),
   // E4c end
 });
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;

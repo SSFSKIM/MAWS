@@ -338,3 +338,74 @@ describe('host runtime client hooks', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('engine.hostState is not in HOST_EVENTS'));
   });
 });
+
+// E4c start (E4c execution document, Decision Log 31 and 43; X13): the client's going, which the browser bridge settles
+// its pending requests on. The runtime learns a ready client left in three places: the socket closed (`detach`), a new
+// client replaced it (`serve`), or a write to it failed; each fires the hooks once per ready client.
+describe('host runtime: a ready client going (E4c)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  const ITEMS = { appSessionId: 'app-1', items: [] } as never;
+
+  function host() {
+    let emit!: HostEmit;
+    let gone = 0;
+    let unsubscribe!: () => void;
+    const runtime = createHostRuntime((on, e, client) => {
+      on('engine.ping', async () => PING);
+      emit = e;
+      unsubscribe = client.onClientGone(() => void gone++);
+    });
+    return { runtime, emit: () => emit('session.brokerItems', ITEMS), gone: () => gone, unsubscribe: () => unsubscribe() };
+  }
+
+  it('fires once when a ready client detaches, and not for a client that never said ready', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port);
+    h.runtime.detach();
+    expect(h.gone()).toBe(0); // served, never ready: nothing was asked of it
+    h.runtime.serve(fakePort().port);
+    h.runtime.setReady();
+    h.runtime.detach();
+    h.runtime.detach();
+    expect(h.gone()).toBe(1);
+  });
+
+  it('fires once when a second serve replaces a ready client', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port);
+    h.runtime.setReady();
+    h.runtime.serve(fakePort().port);
+    expect(h.gone()).toBe(1);
+    expect(h.runtime.hasClient()).toBe(false);
+  });
+
+  it('fires once when a write to the client fails, and not again at the close that follows', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakePort();
+    let writable = true;
+    const port: HostPort = { ...fake.port, postMessage: (message) => (writable ? void fake.posted.push(message) : false) };
+    const h = host();
+    h.runtime.serve(port);
+    h.runtime.setReady();
+    expect(h.emit()).toBe(true);
+    writable = false;
+    expect(h.emit()).toBe(false);
+    expect(h.gone()).toBe(1);
+    expect(h.emit()).toBe(false);
+    h.runtime.detach();
+    expect(h.gone()).toBe(1);
+  });
+
+  it('an unsubscribed hook is not called', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.unsubscribe();
+    h.runtime.serve(fakePort().port);
+    h.runtime.setReady();
+    h.runtime.detach();
+    expect(h.gone()).toBe(0);
+  });
+});
+// E4c end

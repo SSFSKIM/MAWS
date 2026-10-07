@@ -980,3 +980,31 @@ describe('normaliser: side questions (E3, pass3/p1-side-question-session)', () =
     expect(events.filter((e) => e.seq === 91 || e.seq === 96 || e.seq === 129)).toEqual([]); // the three `control_request_progress` rows
   });
 });
+
+// E4c start (E4c execution document, Acceptance G4; Decision Log 44 (c)): a session MAWS did not launch has no browser
+// tools. A launch is MAWS's when its initialize declares the `maws` SDK server; every other recorded launch (the terminal
+// arm of C12's probe, every pre-E1 fixture) names no `mcp__maws__browser_*` tool anywhere: not in its init's tool list,
+// not in the tools a request to the API carried (the terminal arm's meta rows), not in a call.
+describe('G4: no launch MAWS did not make lists a browser tool (E4c)', () => {
+  const declaresMaws = (rows: ReturnType<typeof loadJournal>) =>
+    rows.some((row) => {
+      const request = (row.frame as { type?: unknown; request?: { subtype?: unknown; sdkMcpServers?: unknown } }).request;
+      return row.direction === 'out' && request?.subtype === 'initialize' && Array.isArray(request.sdkMcpServers) && request.sdkMcpServers.includes('maws');
+    });
+
+  it('every non-MAWS launch fixture names no mcp__maws__browser_* tool, and its init lists none', async () => {
+    const outside: string[] = [];
+    for (const pass of FIXTURE_PASSES) {
+      for (const name of listJournals(pass)) {
+        const rows = loadJournal(pass, name);
+        if (declaresMaws(rows)) continue;
+        outside.push(`${pass}/${name}`);
+        expect(JSON.stringify(rows).match(/mcp__maws__browser_[a-z_]*/g), `${pass}/${name}`).toBeNull();
+        for (const init of ofKind((await run(pass, name)).events, 'session.init')) expect(init.tools.filter((tool) => tool.startsWith('mcp__maws__browser_')), `${pass}/${name}`).toEqual([]);
+      }
+    }
+    expect(outside).toContain('pass3/launch-env-terminal'); // the terminal arm is among them, so the pin is not vacuous
+    expect(outside.length).toBeGreaterThan(100);
+  });
+});
+// E4c end

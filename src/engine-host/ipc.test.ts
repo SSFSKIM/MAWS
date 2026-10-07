@@ -1024,3 +1024,64 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
   });
 });
 // E2 end
+// E4c start: the browser tools' bridge through the host's IPC (E4c execution document, Design §3; Task 1.4): the request
+// and the cancellation relayed for main, its answer and its waiting report taken by command, and the app's going
+// settling a paused request (X13)
+describe('the browser bridge over IPC (E4c)', () => {
+  const TAB = 'b_0123456789ab';
+  const answeredOf = (transport: ReturnType<typeof scriptedTransport>, requestId: string) =>
+    (transport.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === requestId) as { response: { response: { mcp_response: { result: unknown } } } } | undefined)?.response.response.mcp_response.result;
+  const call = (transport: ReturnType<typeof scriptedTransport>, requestId: string, name: string, args: unknown) =>
+    transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name, arguments: args, _meta: { 'claudecode/toolUseId': `toolu_${requestId}` } } } } });
+
+  it('relays a request as maws.browser.request and a withdrawal as maws.browser.cancel; maws.browser.waiting and maws.browser.answer reach the call', async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    expect(MAWS_DEADLINE_SHAPES['maws.browser.answer']).toBe('immediate');
+    expect(MAWS_DEADLINE_SHAPES['maws.browser.waiting']).toBe('immediate');
+    expect(await host.call('maws.browser.answer', { appSessionId: 'app-none', requestId: 'r1', result: { ok: false, error: 'x' } })).toEqual({ outcome: 'not_pending' });
+    expect(await host.call('maws.browser.waiting', { appSessionId: 'app-none', requestId: 'r1', waiting: 'human' })).toEqual({ outcome: 'not_pending' });
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+
+    call(transport, 'mcp-act', 'browser_act', { tabId: TAB, action: 'click', target: 'e5' });
+    await until(() => host.emitted.some((e) => e.name === 'maws.browser.request'), 'the browser request');
+    expect(host.emitted.find((e) => e.name === 'maws.browser.request')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-act', toolUseId: 'toolu_mcp-act', tool: 'browser_act', args: { tabId: TAB, action: 'click', target: 'e5' } });
+    expect(await host.call('maws.browser.waiting', { appSessionId: id, requestId: 'mcp-act', waiting: 'human' })).toEqual({ outcome: 'delivered' });
+    const result = { status: 'ok', tabId: TAB, url: 'http://127.0.0.1:17391/form.html', title: 'E4c order form', ms: 40, action: 'click', target: { ref: 'e5' }, navigated: true, waitedFor: 'human', waitedMs: 1800 };
+    expect(await host.call('maws.browser.answer', { appSessionId: id, requestId: 'mcp-act', result: { ok: true, result } })).toEqual({ outcome: 'delivered' });
+    expect(await host.call('maws.browser.answer', { appSessionId: id, requestId: 'mcp-act', result: { ok: true, result } })).toEqual({ outcome: 'not_pending' });
+    await until(() => answeredOf(transport, 'mcp-act') !== undefined, 'the answer');
+    expect(answeredOf(transport, 'mcp-act')).toEqual({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+
+    call(transport, 'mcp-eval', 'browser_eval', { tabId: TAB, expression: 'document.title' });
+    await until(() => host.emitted.filter((e) => e.name === 'maws.browser.request').length === 2, 'the second request');
+    transport.push({ type: 'control_cancel_request', request_id: 'mcp-eval' });
+    await until(() => host.emitted.some((e) => e.name === 'maws.browser.cancel'), 'the cancel');
+    expect(host.emitted.find((e) => e.name === 'maws.browser.cancel')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-eval' });
+    expect(await host.call('maws.browser.answer', { appSessionId: id, requestId: 'mcp-eval', result: { ok: false, error: 'late' } })).toEqual({ outcome: 'not_pending' });
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+    expect(answeredOf(transport, 'mcp-eval')).toBeUndefined();
+  });
+
+  // X13: the runtime's client-gone hook reaches each session's browser bridge through the launcher
+  it('settles a paused browser request appNotOpen when the app goes', async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const gone = new Set<() => void>();
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), onClientGone: (hook) => (gone.add(hook), () => gone.delete(hook)) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    call(transport, 'mcp-act', 'browser_act', { tabId: TAB, action: 'click', target: 'e5' });
+    await until(() => host.emitted.some((e) => e.name === 'maws.browser.request'), 'the browser request');
+    await host.call('maws.browser.waiting', { appSessionId: id, requestId: 'mcp-act', waiting: 'human' });
+    for (const hook of [...gone]) hook();
+    await until(() => answeredOf(transport, 'mcp-act') !== undefined, 'the answer');
+    expect(answeredOf(transport, 'mcp-act')).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('browser_act') }], isError: true });
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
+// E4c end

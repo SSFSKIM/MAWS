@@ -4,6 +4,7 @@
 // engine host and the normaliser admit a call by the same schema; main formats its refusals from the same texts.
 // This module never imports `tools.ts` (which imports it).
 import * as z from 'zod';
+import { BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '../browser/dialog';
 import { BrowserLocatorSchema, locatorText, roleNameText, type BrowserLocator } from '../browser/locator';
 import { BrowserControlSchema, BrowserTabIdSchema } from '../browser/tab';
 import type { LoadErrorKind } from '../browser/errors';
@@ -27,9 +28,9 @@ export const BROWSER_ACTION_TIMEOUT_MS = 10_000; // the readiness wait, not coun
 export const BROWSER_LOCATE_MS = 2_000; // how long a locator with no match waits before targetNotFound
 export const BROWSER_AGENT_IDLE_MS = 10_000; // `control: 'agent'` lapses to idle this long after the last action
 export const BROWSER_BRIDGE_IDLE_MS = 300_000; // a driver with no command for this long closes
-// Decision Log 33 and A-42: the page dialogs MAWS answered during a call, reported in its result as plain text
-export const BROWSER_DIALOGS_MAX = 10;
-export const BROWSER_DIALOG_MESSAGE_MAX_CHARS = 500;
+// Decision Log 33 and A-42: the page dialogs MAWS answered during a call, reported in its result as plain text (and the
+// excerpt a hidden tab's notice carries); defined in a leaf module the notice schema imports too
+export { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '../browser/dialog';
 
 // Annotations (A-31): the three tools that change the page are not read-only, so the permission modes gate them (eval
 // included); the reads carry the maws default (`MAWS_TOOL_ANNOTATIONS`, equal by test).
@@ -106,7 +107,12 @@ export const BrowserResolvedTargetSchema = z.union([
 ]);
 export type BrowserResolvedTarget = z.infer<typeof BrowserResolvedTargetSchema>;
 
-const waited = { waitedFor: z.enum(['human', 'cover']).nullable(), waitedMs: count.nullable() };
+// Why an action waited (Design §6 and §8): the person held the page, or a sheet covered it. One enum for the results, the
+// X1 event and the IPC (Decision Log 44 (d)).
+export const BrowserWaitReasonSchema = z.enum(['human', 'cover']);
+export type BrowserWaitReason = z.infer<typeof BrowserWaitReasonSchema>;
+
+const waited = { waitedFor: BrowserWaitReasonSchema.nullable(), waitedMs: count.nullable() };
 const onPage = { status: z.literal('ok'), tabId: BrowserTabIdSchema, url: z.string(), title: z.string(), ms: count };
 
 // `owner` (P-24, Decision Log 29): a side thread also reaches its parent session's tabs, marked `parent`.
@@ -212,7 +218,25 @@ export function browserTargetText(target: BrowserTarget): string {
 }
 
 const on = (action: string, target: string) => (target === '' ? action : `${action} on ${target}`);
+
 const SNAPSHOT_AGAIN = '; call browser_snapshot again and use a ref from it';
+
+// A locator that names an element by role or name, which is what can disagree with the element its css matched.
+export type NamedBrowserLocator = BrowserLocator & ({ role: string } | { name: string });
+// What such a locator wanted, as the disagreement names it: an empty name is printed as `""`, never dropped.
+const wantedText = (locator: NamedBrowserLocator) =>
+  [locator.role, locator.name === undefined ? undefined : JSON.stringify(locator.name)].filter((part) => part !== undefined).join(' ');
+
+// No element; or (Decision Log 30) css alone matched exactly one element, `found`, whose role or name is not the
+// locator's, so nothing was acted on. Several matches are never an error (the result's `matches`). Only a locator with
+// a role or a name can disagree (Decision Log 44 (d)).
+function targetNotFound(tool: BrowserToolName, locator: BrowserLocator): string;
+function targetNotFound(tool: BrowserToolName, locator: NamedBrowserLocator, found: { role: string; name: string }): string;
+function targetNotFound(tool: BrowserToolName, locator: BrowserLocator, found?: { role: string; name: string }): string {
+  return found === undefined
+    ? `${tool}: no element matches ${locatorText(locator)} (0 matches)`
+    : `${tool}: ${locatorText({ css: locator.css })} matches one element, ${roleNameText(found)}, not ${wantedText(locator as NamedBrowserLocator)}`;
+}
 
 export const BROWSER_TOOL_ERRORS = {
   tabNotFound: (tool: BrowserToolName, tabId: string) => `${tool}: no tab "${tabId}" in this session; call browser_tabs {action: "list"}`,
@@ -221,12 +245,7 @@ export const BROWSER_TOOL_ERRORS = {
   tabCrashed: (tool: BrowserToolName, tabId: string) => `${tool}: the page in tab "${tabId}" crashed; call browser_navigate {tabId, url: "reload"} to revive it`,
   staleRef: (tool: BrowserToolName, ref: string, reason: 'previous-document' | 'missing') =>
     `${tool}: ref "${ref}" ${reason === 'previous-document' ? 'is stale: it belongs to a previous document' : 'is stale or missing in the current snapshot'}${SNAPSHOT_AGAIN}`,
-  // No element; or (Decision Log 30) css alone matched exactly one element, `found`, whose role or name is not the
-  // locator's, so nothing was acted on. Several matches are never an error (the result's `matches`).
-  targetNotFound: (tool: BrowserToolName, locator: BrowserLocator, found?: { role: string; name: string }) =>
-    found === undefined
-      ? `${tool}: no element matches ${locatorText(locator)} (0 matches)`
-      : `${tool}: ${locatorText({ css: locator.css })} matches one element, ${roleNameText(found)}, not ${roleNameText(locator)}`,
+  targetNotFound,
   // Internal (an abort): the action was cancelled while the person held the page; nothing is written.
   humanHasPage: (tool: BrowserToolName) => `${tool}: the user has the page; the action was cancelled before they handed it back`,
   // `kind`: E4a's classification; `code`: Chromium's error description (its number when the description is empty).

@@ -21,7 +21,7 @@ import { PaneSchema } from '../maws/panes';
 import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
 // E1 end
 // E4c start
-import { BROWSER_TOOL_NAMES } from '../maws/browser';
+import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../maws/browser';
 // E4c end
 // E3 start
 import { AnchorSchema } from '../anchor/anchor';
@@ -309,7 +309,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('maws.browser.action', {
     toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, tool: z.enum(BROWSER_TOOL_NAMES), action: z.string(), tabId: nullableString(), target: nullableString(),
     url: nullableString(), title: nullableString(), ms: z.number().int().min(0).nullable(), deliverableId: nullableString(), error: nullableString(),
-    waitedFor: z.enum(['human', 'cover']).nullable(), waitedMs: z.number().int().min(0).nullable(),
+    waitedFor: BrowserWaitReasonSchema.nullable(), waitedMs: z.number().int().min(0).nullable(),
   }),
   // E4c end
 ]);
