@@ -426,8 +426,8 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
 
 // E5 start: the unsaved files each window pushed, and Save all's round trip. A window's set is its whole dirty set, sent
 // on every change of it (`layout.unsavedFiles`); main trusts it as the window's last word and never reads the disk for
-// it, and forgets it when the window navigates (a reload starts from an empty viewer) or closes, as `files.*` releases
-// a window's watches. Save all sends one request to every window and waits for an answer to it from each window that
+// it, and forgets it when the window navigates (a reload starts from an empty viewer), its renderer crashes (E11) or
+// it closes, as `files.*` releases a window's watches. Save all sends one request to every window and waits for an answer to it from each window that
 // held files when it was sent; a window that closes or navigates meanwhile is not waited on, and one that never
 // answers is waited on for SAVE_ALL_BOUND_MS. It settles with that request's answers' failures by path, which the
 // question asked next names; an answer to another request (one already settled) records none. A window's saves push
@@ -440,6 +440,7 @@ export interface UnsavedFilesSender {
   readonly id: number;
   once(event: 'destroyed', listener: () => void): unknown;
   on(event: 'did-navigate', listener: () => void): unknown;
+  on(event: 'render-process-gone', listener: () => void): unknown; // E11
 }
 
 export interface UnsavedFiles {
@@ -468,6 +469,7 @@ export function trackUnsavedFiles(): UnsavedFiles {
         followed.add(sender);
         sender.once('destroyed', () => forget(id));
         sender.on('did-navigate', () => forget(id));
+        sender.on('render-process-gone', () => forget(id)); // E11: a crashed renderer's edits are gone; Save all waits for none
       }
       sets.set(id, [...paths]);
     },

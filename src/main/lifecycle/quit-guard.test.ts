@@ -989,6 +989,23 @@ describe('the unsaved files each window pushes', () => {
     expect(two.listenerCount('destroyed')).toBe(1);
   });
 
+  it('forgets a window whose renderer crashed, so Save all does not wait on it (E11: its edits are already lost)', async () => {
+    const files = trackUnsavedFiles();
+    const one = windowOf(1);
+    const two = windowOf(2);
+    files.update(one, ['/r/a.ts']);
+    files.update(two, ['/r/b.ts']);
+    const send = vi.fn();
+    const done = files.saveAll(send);
+    one.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 133 });
+    expect(files.paths()).toEqual(['/r/b.ts']);
+    files.done(two, send.mock.calls[0]![0] as string, []);
+    await done; // settles without the crashed window's answer, well inside SAVE_ALL_BOUND_MS
+    files.update(one, ['/r/a.ts']); // a reloaded renderer pushes again; listeners stay attached once
+    expect(files.paths()).toEqual(['/r/a.ts', '/r/b.ts']);
+    expect(one.listenerCount('render-process-gone')).toBe(1);
+  });
+
   it('Save all asks every window and settles once each window holding files has answered that request, with their failures', async () => {
     const files = trackUnsavedFiles();
     const one = windowOf(1);
