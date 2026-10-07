@@ -120,6 +120,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'layout.quitWait':
         return { waiting: null };
       // C12 end
+      // E4a start: the browser store's first list at connect (no tabs)
+      case 'browser.tabs.list':
+        return { tabs: [], selected: {} };
+      // E4a end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
