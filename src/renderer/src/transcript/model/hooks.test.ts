@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
-import { builder, type Builder } from './test-events';
+import { builder, uuid, type Builder } from './test-events';
 
 type Finish = { outcome: 'success' | 'error' | 'cancelled'; exitCode: number | null; stdout?: string; stderr?: string };
 const hook = (b: Builder, id: string, name: string, event: string, finish: Finish | null) => {
@@ -92,5 +92,40 @@ describe('hooks in the transcript', () => {
       ['error', 'Hook PostToolUse:Bash failed · exit 1 · lint crashed'],
       ['notice', 'Hook MessageDisplay was cancelled'],
     ]);
+  });
+
+  // E11 (W-C): a hook read from disk is named after the record it came from (C4's backfill: the meta "Stop hook
+  // feedback:" record's uuid); a retraction naming that uuid removes the notice with the branch or file that held it.
+  it('a sibling branch that replaces a feedback-and-answer branch drops the hook notice with the answer', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'First answer.');
+    hook(b, 'fb1', 'Stop', 'Stop', { outcome: 'success', exitCode: 0, stdout: '{"decision":"block","reason":"Say REPROMPTED and stop"}' });
+    b.text('m3', 0, 'REPROMPTED');
+    expect(notices(rowsFor(b))).toHaveLength(1);
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('fb1'), uuid('m3-u0')], reason: 'transcript_branch', fallbackModel: null });
+    b.text('m4', 0, 'Replacement answer.');
+    b.end(['u1']);
+    const rows = rowsFor(b);
+    expect(notices(rows)).toEqual([]);
+    expect(rows.filter((row) => row.kind === 'assistant_text').map((row) => row.kind === 'assistant_text' && row.markdown)).toEqual(['First answer.', 'Replacement answer.']);
+  });
+
+  it('a rewritten file that removes only the feedback record drops its notice from the turn that held it, a later turn current', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'First answer.');
+    hook(b, 'fb1', 'Stop', 'Stop', { outcome: 'success', exitCode: 0, stdout: '{"decision":"block","reason":"Say REPROMPTED and stop"}' });
+    b.text('m3', 0, 'REPROMPTED');
+    b.end(['u1']);
+    b.turn('u2');
+    hook(b, 'h2', 'UserPromptSubmit', 'UserPromptSubmit', { outcome: 'error', exitCode: 2, stderr: 'BLOCKED' });
+    b.text('m5', 0, 'Second.');
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('fb1')], reason: 'transcript_rewritten', fallbackModel: null });
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(withAllExpanded(state));
+    expect(notices(rows).map((row) => row.id)).toEqual(['hook:h2']); // another hook's notice stays
+    const retraction = rows.find((row) => row.kind === 'boundary' && row.boundaryKind === 'retraction');
+    expect(retraction?.turnId).toBe(state.order[0]); // the boundary sits in the turn the record left
   });
 });

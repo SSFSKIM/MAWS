@@ -687,7 +687,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       case 'hook': {
         // A hook that ran and let things go on, or is still running, shows nothing; one that got in the way is a notice
-        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1).
+        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1). One read from disk is
+        // named after its record (C4's backfill), and goes when a retraction removes that record (a sibling branch, a
+        // rewritten file).
+        if (retracted.has(item.hookId)) break;
         const rec = hooks.get(item.hookId)!;
         const notice = hookNotice(rec);
         const at = (rec.started ?? rec.finished)!;

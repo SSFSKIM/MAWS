@@ -644,7 +644,8 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'hook.callback_resolved':
       return; // requests to the host, C7's; nothing in the transcript
     case 'boundary.retraction': {
-      const owners = new Set(event.retractedMessageUuids.map((uuid) => index.messages.get(uuid)).filter((id): id is TurnId => id !== undefined));
+      // a disk hook is named after its record's uuid (C4's backfill), so a retraction may name a hook's turn
+      const owners = new Set(event.retractedMessageUuids.map((uuid) => index.messages.get(uuid) ?? index.hooks.get(uuid)).filter((id): id is TurnId => id !== undefined));
       if (owners.size === 0) {
         if (!pushRouted(null)) batch.loose(event);
       } else {
