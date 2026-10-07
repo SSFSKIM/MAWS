@@ -158,15 +158,30 @@ describe('transcript records map to X1 events', () => {
     expect(compactions[1]).toMatchObject({ trigger: 'manual', preTokens: 0, logicalParentUuid: null, at: at(4) }); // no timestamp: the previous event's `at`
   });
 
-  it('maps API errors to the same unknown frame as the live normalizer, not an invented error row', () => {
-    const events = mapAll([rec({
-      type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1),
-      level: 'error', error: { message: 'Connection unavailable', formatted: 'Connection unavailable', connection: {}, isNetworkDown: true, rateLimits: null, noResponse: null },
-      retryInMs: 1000, retryAttempt: 1, maxRetries: 3, source: 'api',
-    })]);
-    const live = mapSystemFrame({ type: 'system', subtype: 'api_error' }, { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() });
+  // The transcript keeps the `api_error` record; stdout carries only the engine's `api_retry` twin of it (the headless
+  // filter drops `api_error`; 2.1.292 cli.pretty.js:191483-191484 builds the twin, `Wyn` :728815 names the error). The
+  // disk record must make the event the live twin makes, so one API error is one retry row on both paths.
+  it('maps an API error record to the api.retry event the live path makes from its api_retry twin', () => {
+    const registry = { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() };
+    const cases = [
+      { error: { message: '529 {"type":"error","error":{"type":"overloaded_error"}}', status: 529, formatted: 'Overloaded', connection: null, isNetworkDown: false, rateLimits: null, noResponse: null },
+        twin: { attempt: 2, max_retries: 10, retry_delay_ms: 1234, error_status: 529, error: 'overloaded' }, retryAttempt: 2, maxRetries: 10, retryInMs: 1234 },
+      { error: { message: 'Connection unavailable', formatted: 'Connection unavailable', connection: {}, isNetworkDown: true, rateLimits: null, noResponse: null },
+        twin: { attempt: 1, max_retries: 3, retry_delay_ms: 1000, error_status: null, error: 'unknown' }, retryAttempt: 1, maxRetries: 3, retryInMs: 1000 },
+      { error: { message: 'Too many requests', status: 429, formatted: 'Rate limited', connection: null, isNetworkDown: false, rateLimits: { rateLimitType: 'five_hour' }, noResponse: null },
+        twin: { attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: 429, error: 'rate_limit' }, retryAttempt: 1, maxRetries: 3, retryInMs: 500 },
+    ];
+    for (const { error, twin, retryAttempt, maxRetries, retryInMs } of cases) {
+      const events = mapAll([rec({ type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1), level: 'error', error, retryInMs, retryAttempt, maxRetries, source: 'request_retry' })]);
+      const live = mapSystemFrame({ type: 'system', subtype: 'api_retry', ...twin }, registry);
+      expect(live.payloads).toHaveLength(1);
+      expect(events).toEqual([{ id: 'error', sessionId: SESSION, at: at(1), seq: null, agentId: null, parentToolUseId: null, ...live.payloads[0] }]);
+    }
+  });
+
+  it('keeps an API error record without its retry counters as an unknown frame', () => {
+    const events = mapAll([rec({ type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1), level: 'error', error: { message: 'x' } })]);
     expect(events).toEqual([{ id: 'error', sessionId: SESSION, at: at(1), seq: null, agentId: null, parentToolUseId: null, kind: 'frame.unknown', frameType: 'system', subtype: 'api_error' }]);
-    expect(events).toMatchObject(live.payloads);
   });
 
   it('maps refusals from camelCase disk fields to the live retraction payloads, with absent-field defaults', () => {

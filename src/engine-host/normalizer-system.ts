@@ -57,6 +57,29 @@ const one = (payload: EventPayload, agentId: AgentId | null = null): SystemMappi
 const asTaskId = (id: string) => id as TaskId;
 const emptyToNull = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
 
+const apiRetryPayload = (f: SystemApiRetryFrame): EventPayload => (
+  { kind: 'api.retry', attempt: f.attempt, maxRetries: f.max_retries, retryDelayMs: f.retry_delay_ms, errorStatus: f.error_status ?? null, error: f.error }
+);
+
+// The engine's `api_retry` twin of a `system/api_error` record, or null for a record without its retry counters. Only
+// the twin reaches stdout (the headless filter drops `api_error`, research/sdk-wire-gap.md "Internal records that are
+// not stdout") and only the record reaches the transcript, so the disk backfill rebuilds the twin here and both paths
+// make one `api.retry` event. The twin and its error kind as 2.1.292 builds them: cli.pretty.js:191483-191484, `Wyn` at
+// :728815 (the same in 2.1.287, `rin`).
+export function apiRetryOfApiError(record: Record<string, unknown>): EventPayload | null {
+  const { retryAttempt, maxRetries, retryInMs } = record;
+  const error = record.error as { status?: unknown; message?: unknown; isCloudCredentialError?: unknown } | undefined;
+  if (typeof retryAttempt !== 'number' || typeof maxRetries !== 'number' || typeof retryInMs !== 'number' || typeof error !== 'object' || error === null) return null;
+  const status = typeof error.status === 'number' ? error.status : null;
+  const kind = status === 529 || (typeof error.message === 'string' && error.message.includes('"type":"overloaded_error"')) ? 'overloaded'
+    : status === 429 ? 'rate_limit'
+    : status === 401 || status === 403 ? 'authentication_failed'
+    : status !== null && status >= 408 ? 'server_error'
+    : error.isCloudCredentialError ? 'cloud_credential_error'
+    : 'unknown';
+  return apiRetryPayload({ type: 'system', subtype: 'api_retry', attempt: retryAttempt, max_retries: maxRetries, retry_delay_ms: retryInMs, error_status: status, error: kind });
+}
+
 // R1: how long the engine would show a toast whose frame names no time (its documented default, 2.1.287).
 export const ENGINE_TOAST_TIMEOUT_MS = 4000;
 
@@ -93,10 +116,8 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
       const f = frame as SystemModelRefusalNoFallbackFrame;
       return one({ kind: 'boundary.retraction', retractedMessageUuids: [], reason: f.content ?? 'model refusal', fallbackModel: null });
     }
-    case 'api_retry': {
-      const f = frame as SystemApiRetryFrame;
-      return one({ kind: 'api.retry', attempt: f.attempt, maxRetries: f.max_retries, retryDelayMs: f.retry_delay_ms, errorStatus: f.error_status ?? null, error: f.error });
-    }
+    case 'api_retry':
+      return one(apiRetryPayload(frame as SystemApiRetryFrame));
     case 'informational': {
       const f = frame as SystemInformationalFrame;
       return one({ kind: 'notice.posted', level: f.level ?? 'info', text: f.content, key: null });

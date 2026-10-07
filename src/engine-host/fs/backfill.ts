@@ -8,6 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, Sess
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
+import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
@@ -432,10 +433,13 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
         isEchoReceipt: false,
       });
       return;
-    case 'api_error':
-      // Live also leaves this unmapped; retain its compatibility signal rather than inventing an error row.
-      events.push({ ...base(), kind: 'frame.unknown', frameType: 'system', subtype });
+    case 'api_error': {
+      // The event live makes from the engine's `api_retry` twin of this record (normalizer-system.ts); a record without
+      // its retry counters stays a compatibility signal.
+      const retry = apiRetryOfApiError(record);
+      events.push(retry === null ? { ...base(), kind: 'frame.unknown', frameType: 'system', subtype } : { ...base(), ...retry });
       return;
+    }
     case 'model_refusal_fallback':
     case 'model_refusal_no_fallback':
       // Disk uses camelCase (the live stream uses snake_case). No-fallback retracts no messages on the live path.
