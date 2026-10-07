@@ -1,0 +1,17 @@
+command: pnpm test --maxWorkers=4
+head: 610c5fed70f0ddb6b90230b48abd341ebb85cf81
+started (UTC): 2026-10-07T21:31:52Z
+load at start: { 4.18 4.84 5.40 }
+slot: eligible: load 4.18 after 0s
+ended (UTC): 2026-10-07T21:34:43Z
+--- summary lines
+ Test Files  706 passed | 1 skipped (707)
+      Tests  9831 passed | 1 skipped (9832)
+Type Errors  no errors
+--- warning lines in the log (each count should be 0)
+MODULE_TYPELESS_PACKAGE_JSON: 0
+Closing file descriptor on garbage collection: 0
+DEP0137 (FileHandle closed on GC): 0
+ExperimentalWarning (SQLite et al.): 1
+any (node:<pid>) warning line: 0
+--- exit code: 0

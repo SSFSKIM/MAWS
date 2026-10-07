@@ -1,0 +1,13 @@
+command: pnpm build:app
+head: 610c5fed70f0ddb6b90230b48abd341ebb85cf81
+started (UTC): 2026-10-07T21:31:18Z
+load at start: { 4.99 5.04 5.49 }
+slot: eligible: load 4.99 after 0s
+ended (UTC): 2026-10-07T21:31:52Z
+--- summary lines
+✓ built in 1.40s
+✓ built in 31ms
+✓ built in 22.92s
+  • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+  • skipped macOS code signing  reason=identity explicitly is set to null
+--- exit code: 0

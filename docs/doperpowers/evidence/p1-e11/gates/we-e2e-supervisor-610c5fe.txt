@@ -1,0 +1,18 @@
+command: pnpm e2e:supervisor
+head: 610c5fed70f0ddb6b90230b48abd341ebb85cf81
+started (UTC): 2026-10-07T21:36:38Z
+load at start: { 9.25 7.38 6.33 }
+slot: eligible: load 9.25 after 0s
+ended (UTC): 2026-10-07T21:39:15Z
+--- summary lines
+  8 passed (2.2m)
+--- git status --porcelain docs/doperpowers/evidence after the run, before any restore
+?? docs/doperpowers/evidence/p1-e11/gates/we-buildapp-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-deliverables-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-supervisor-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-tools-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-fixtures-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-lint-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-typecheck-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-units-610c5fe.txt
+--- exit code: 0

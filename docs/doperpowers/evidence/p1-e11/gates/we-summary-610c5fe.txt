@@ -1,0 +1,18 @@
+typecheck exit 0 21:30:51
+lint exit 0 21:31:18
+buildapp exit 0 21:31:52
+units exit 0 21:34:43
+fixtures exit 0 21:34:44
+e2e-tools exit 0 21:35:25
+e2e-deliverables exit 0 21:36:38
+e2e-supervisor exit 0 21:39:15
+e2e-code exit 0 21:41:00
+e2e-side exit 0 21:41:56
+e2e-settings exit 0 21:42:40
+e2e-browser exit 0 21:43:27
+e2e-browser-comment exit 0 21:44:20
+e2e-browser-import exit 0 21:45:15
+e2e-browser-tools exit 0 21:46:29
+e2e-supervisor:packaged exit 0 21:46:34
+survivors (pgrep -fl maws-supervisor): 0
+done 21:46:34

@@ -1,0 +1,11 @@
+command: node --test spikes/protocol-probe/fixtures.test.mjs spikes/protocol-probe/probe-initialize.test.mjs spikes/protocol-probe/sdk-mcp.test.mjs
+head: 610c5fed70f0ddb6b90230b48abd341ebb85cf81
+started (UTC): 2026-10-07T21:34:43Z
+load at start: { 7.37 5.74 5.64 }
+slot: none (not a heavy command)
+ended (UTC): 2026-10-07T21:34:44Z
+--- summary lines
+# tests 167
+# pass 167
+# fail 0
+--- exit code: 0

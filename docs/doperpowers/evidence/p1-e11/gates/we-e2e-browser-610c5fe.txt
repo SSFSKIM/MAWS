@@ -1,0 +1,22 @@
+command: pnpm e2e:browser
+head: 610c5fed70f0ddb6b90230b48abd341ebb85cf81
+started (UTC): 2026-10-07T21:42:40Z
+load at start: { 7.70 7.27 6.62 }
+slot: eligible: load 7.70 after 0s
+ended (UTC): 2026-10-07T21:43:27Z
+--- summary lines
+  8 passed (19.3s)
+--- git status --porcelain docs/doperpowers/evidence after the run, before any restore
+?? docs/doperpowers/evidence/p1-e11/gates/we-buildapp-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-browser-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-code-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-deliverables-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-settings-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-side-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-supervisor-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-e2e-tools-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-fixtures-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-lint-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-typecheck-610c5fe.txt
+?? docs/doperpowers/evidence/p1-e11/gates/we-units-610c5fe.txt
+--- exit code: 0
