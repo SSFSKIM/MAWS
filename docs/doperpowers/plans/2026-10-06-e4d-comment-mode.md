@@ -10,7 +10,7 @@ To see it: open a session, add Browser from the panel's "+", load a page, press 
 
 ## Progress
 
-- [ ] M0 — Re-pin against E4a as landed (and E4c's `locator.ts` if landed); merge master
+- [x] M0 — Re-pin against E4a as landed (and E4c's `locator.ts` if landed); merge master (2026-10-06 23:35, reviewed: one round, the findings folded into the document at bacf5ee0)
 - [ ] M1 — Shared: the naming module, the comment protocol, X10's fields and the tag, the `browser.comment.*` IPC
 - [ ] M2 — The preload's hover and pick; main: the mode, the report gate, the crop, the context-menu entry, the seam
 - [ ] M3 — Renderer: the Comment toggle, the composer call, the chip and thread header openers, copy
@@ -420,7 +420,7 @@ Seams found absent, each added later in an E4d block: `locator.ts`'s `BrowserLoc
 
 ## Surprises & Discoveries
 
-- 2026-10-06 (M0): E4a's browser preload has never run with a body (`src/preload/browser.ts` is `export {};`), so e2e case 1 is the first proof that it loads in a tab; `electron.vite.config.ts`'s `EMPTY_BUNDLE` filter for it goes dead once E4d fills it (a file outside E4d's list: noted for the architect). E4a's `shootBrowser` e2e helper writes only under `p1-e4a`, so E4d's shots need their own helper.
+- 2026-10-06 (M0): E4a's browser preload has never run with a body (`src/preload/browser.ts` is `export {};`), so e2e case 1 is the first proof that it loads in a tab; `electron.vite.config.ts`'s `EMPTY_BUNDLE` filter for it goes dead once E4d fills it (a file outside E4d's list: noted for the architect). E4a's `shootBrowser` e2e helper writes only under `p1-e4a`, so E4d's shots need their own helper. Cases 2 and 9 need E3's replay journal (`MAWS_E2E_REPLAY_FIXTURES`, `e2e/side.spec.ts:102`) while E4a's `launchBrowserScene` launches with a fixed env: the route is the `process.env` hand-off `launchBrowserScene` already uses for `MAWS_E2E_SAVE_PATH` (`e2e/support/browser-scene.ts:52-58`) (M0's review).
 
 ## Outcomes & Retrospective
 
