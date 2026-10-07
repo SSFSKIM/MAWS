@@ -28,6 +28,7 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   const listeners = new Set<(record: { appId: AppSessionId }, cause: string) => void>();
   const index = {
     unavailable,
+    browserHistory: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
     sessions: {
       get: (id: AppSessionId) => (known.includes(id) ? { appId: id } : null),
       onChange: (listener: (record: { appId: AppSessionId }, cause: string) => void) => {

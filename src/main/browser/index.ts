@@ -1,6 +1,6 @@
 // The browser's side of main (E4a execution document, Design §1, §2, §9; Interfaces "Main"), started from
 // `src/main/index.ts` once the index is open: the tab store over `<userData>/browser/tabs.json`, the partitions, the
-// views and `browser.*`. Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a
+// views, each view's navigation (history and favicons included) and `browser.*`. Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a
 // tab whose session the index does not know is dropped from the file. Main never waits on the renderer.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,9 +10,12 @@ import type { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import type { Index } from '../index/index';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
+import { Favicons } from './favicon';
+import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
 import { readTabsFile, TabsFileWriter, type TabsFile } from './persist';
 import { registerBrowserHandlers } from './register';
+import { browserSeam } from './seam';
 import { TabStore, type BrowserEmit } from './tabs';
 import { createTabView, ViewManager } from './view';
 import { focusEmulationMode } from './visibility';
@@ -22,10 +25,10 @@ export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
 export interface BrowserDeps {
   userData: string;
   settings(): BrowserSettings; // read when a tab opens; settings 11's `browser` section once it lands (Task 3.5)
-  index: Pick<Index, 'sessions' | 'unavailable'>;
+  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
-  env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION
+  env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E and MAWS_E2E_OPEN_LOG (the seam, seam.ts)
   // The imported Chrome profiles, for a new tab's partition and `browser.profiles.list` alike: `profiles.json` read
   // from disk by default; E4b's block hands its in-memory owner here (Decision Log 40).
   profiles?(): BrowserProfile[];
@@ -71,7 +74,14 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     focusEmulation: focusEmulationMode(env),
   });
 
-  registerBrowserHandlers({ store, views, profiles, register });
+  const seam = browserSeam(env);
+  const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
+  const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });
+  store.onViewCreated((entry) => {
+    navigator.attach(entry);
+  });
+
+  registerBrowserHandlers({ store, views, navigator, history: index.browserHistory, profiles, register });
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });

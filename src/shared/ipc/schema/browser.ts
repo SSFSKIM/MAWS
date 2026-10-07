@@ -35,11 +35,12 @@ export type BrowserTabsChanged = z.infer<typeof BrowserTabsChangedSchema>;
 export const BrowserChromeCommandSchema = z.strictObject({ tabId: BrowserTabIdSchema, command: z.enum(['focusAddress', 'openFind', 'closeFind']) });
 export type BrowserChromeCommand = z.infer<typeof BrowserChromeCommandSchema>;
 
-// A transient chrome notice (4 s), never an app toast (E4a Design §3 and Decision Log 28).
+// A transient chrome notice (4 s), never an app toast (E4a Design §3 and Decision Log 28). `refusedScheme` is a page's
+// own top-level navigation main refused (`name`: the scheme, such as `zoommtg:`), the chrome's refused-scheme line.
 export const BrowserNoticeSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   tabId: BrowserTabIdSchema.nullable(),
-  kind: z.enum(['tabsCap', 'profileMissing', 'partitionFallback', 'downloadRefusedAgent', 'tabsFileBroken']),
+  kind: z.enum(['tabsCap', 'profileMissing', 'partitionFallback', 'downloadRefusedAgent', 'tabsFileBroken', 'refusedScheme']),
   name: z.string().optional(),
   count: z.number().int().min(0).optional(),
 });

@@ -45,6 +45,9 @@ export interface TabEntry {
   // The view shows a document of the tab's own: false from creation, after a load error or a crash, until the next
   // committed navigation, so neither a blank view nor Chromium's own error page is ever shown in the pane.
   committed: boolean;
+  // The chrome's find bar is open for this tab (main opened it on ⌘F in the page, or a find request arrived), so Esc in
+  // the page closes it rather than reaching the page (keys.ts).
+  findOpen: boolean;
 }
 
 export type TabPatch = Partial<Omit<BrowserTab, 'tabId' | 'appSessionId'>>;
@@ -427,7 +430,7 @@ export class TabStore {
   }
 
   private blankEntry(tab: BrowserTab): TabEntry {
-    return { tab, view: null, placement: null, host: null, visible: false, committed: false };
+    return { tab, view: null, placement: null, host: null, visible: false, committed: false, findOpen: false };
   }
 
   private newTab(tabId: string, appSessionId: AppSessionId, partition: string): BrowserTab {
