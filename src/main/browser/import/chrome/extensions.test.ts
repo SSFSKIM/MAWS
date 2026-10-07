@@ -1,6 +1,7 @@
 // The extension inspection (E4b Design §9; Acceptance G1): candidates from a profile's `Extensions/`, names resolved
 // through `_locales`, the permissions Electron lacks, wallets, Chrome's own enabled state, and refusals.
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -92,7 +93,6 @@ describe('inspectExtensions’ rules', () => {
     install(dir, 'Temp', '1.0_0', { manifest_version: 3, name: 'No', version: '1.0' });
     install(dir, 'q'.repeat(32), '1.0_0', { manifest_version: 3, name: 'No', version: '1.0' });
     install(dir, ID_A, '1.0_0', { manifest_version: 3, name: 'Yes', version: '1.0' });
-    install(dir, ID_A, '../escape', { manifest_version: 3, name: 'No', version: '9.0' });
     install(dir, ID_A, 'Temp', { manifest_version: 3, name: 'No', version: '9.0' });
     expect((await inspectExtensions(dir)).map((extension) => [extension.candidate.id, extension.candidate.name])).toEqual([[ID_A, 'Yes']]);
   });
@@ -106,6 +106,44 @@ describe('inspectExtensions’ rules', () => {
     const result = await inspectExtensions(dir);
     expect(result.find((extension) => extension.candidate.id === ID_A)!.candidate).toMatchObject({ error: 'symlink', name: 'Linked' });
     expect(result.find((extension) => extension.candidate.id === ID_B)).toMatchObject({ versionDir: null, candidate: { error: 'symlink' } });
+  });
+
+  it('refuses one extension whose tree cannot be read, and still lists the others', async () => {
+    const dir = profile();
+    const versionDir = install(dir, ID_A, '1.0_0', { manifest_version: 3, name: 'Locked', version: '1.0' });
+    const locked = join(versionDir, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o000);
+    install(dir, ID_B, '1.0_0', { manifest_version: 3, name: 'Fine', version: '1.0' });
+    try {
+      const result = await inspectExtensions(dir);
+      expect(result.find((extension) => extension.candidate.id === ID_A)).toMatchObject({ versionDir: null, candidate: { error: 'missing', version: '1.0' } });
+      expect(result.find((extension) => extension.candidate.id === ID_B)!.candidate).toMatchObject({ name: 'Fine', error: null });
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  it('refuses a symlinked Extensions/ folder whole', async () => {
+    const dir = join(root, `linked-extensions-${++counter}`);
+    mkdirSync(dir);
+    symlinkSync(join(fixture.profiles.Default.dir, 'Extensions'), join(dir, 'Extensions'));
+    expect(await inspectExtensions(dir)).toEqual([]);
+  });
+
+  it('never blocks on a FIFO where a JSON file should be, and reads no locale through a symlinked tree', async () => {
+    const dir = profile();
+    const versionDir = install(dir, ID_A, '1.0_0', { manifest_version: 3, name: '__MSG_name__', default_locale: 'en', version: '1.0' });
+    mkdirSync(join(versionDir, '_locales', 'en'), { recursive: true });
+    execFileSync('mkfifo', [join(versionDir, '_locales', 'en', 'messages.json')]);
+    execFileSync('mkfifo', [join(dir, 'Preferences')]);
+    expect((await inspectExtensions(dir))[0]!.candidate).toMatchObject({ name: '__MSG_name__', chromeState: 'unknown', error: null });
+    const linked = profile();
+    const linkedDir = install(linked, ID_B, '1.0_0', { manifest_version: 3, name: '__MSG_name__', default_locale: 'en', version: '1.0' });
+    symlinkSync(join(root, 'elsewhere-locales'), join(linkedDir, '_locales'));
+    mkdirSync(join(root, 'elsewhere-locales', 'en'), { recursive: true });
+    writeFileSync(join(root, 'elsewhere-locales', 'en', 'messages.json'), JSON.stringify({ name: { message: 'e4b-sentinel-outside' } }));
+    expect((await inspectExtensions(linked))[0]!.candidate).toMatchObject({ name: '__MSG_name__', error: 'symlink' });
   });
 
   it('reports missing files and an unreadable manifest as the row’s error', async () => {

@@ -59,6 +59,25 @@ describe('reading a staged cookie store', () => {
   });
 });
 
+describe('reading an older cookie store', () => {
+  it('reads a store without has_cross_site_ancestor (before version 23), taking it as false', () => {
+    const file = join(root, 'Cookies-v22');
+    const db = new DatabaseSync(file);
+    try {
+      db.exec("CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR); INSERT INTO meta VALUES('version','22')");
+      db.exec('CREATE TABLE cookies(creation_utc INTEGER NOT NULL,host_key TEXT NOT NULL,top_frame_site_key TEXT NOT NULL,name TEXT NOT NULL,value TEXT NOT NULL,encrypted_value BLOB NOT NULL,path TEXT NOT NULL,expires_utc INTEGER NOT NULL,is_secure INTEGER NOT NULL,is_httponly INTEGER NOT NULL,last_access_utc INTEGER NOT NULL,has_expires INTEGER NOT NULL,is_persistent INTEGER NOT NULL,priority INTEGER NOT NULL,samesite INTEGER NOT NULL,source_scheme INTEGER NOT NULL,source_port INTEGER NOT NULL,last_update_utc INTEGER NOT NULL,source_type INTEGER NOT NULL)');
+      db.prepare('INSERT INTO cookies VALUES (0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, 0, 0, 1, 0, 2, 443, 0, 0)').run('embed.test', 'https://example.test', 'old', 'plain-value', new Uint8Array(), '/');
+      const read = readCookieRows(db);
+      expect(read.storeVersion).toBe(22);
+      expect(read.rows).toHaveLength(1);
+      expect(read.rows[0]!.hasCrossSiteAncestor).toBe(false);
+      expect(decodeCookieRow(read.rows[0]!, key, read.storeVersion, NOW)).toMatchObject({ kind: 'partitioned', cdp: { partitionKey: { topLevelSite: 'https://example.test', hasCrossSiteAncestor: false } } });
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('decodeCookieRow on the fixture’s five rows', () => {
   it('decodes 3 plain, 1 partitioned and 1 SameSite=None-without-Secure skip (the probe’s counts)', () => {
     const decodes = rows.map((candidate) => decodeCookieRow(candidate, key, storeVersion, NOW));

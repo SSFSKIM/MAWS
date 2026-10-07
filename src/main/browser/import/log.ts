@@ -5,11 +5,14 @@
 // eslint.config.js forbids the others; log.test.ts pins it). Under MAWS_E2E=1 with MAWS_E2E_IMPORT_LOG set, every line
 // is also appended to that file, the e2e's fallback when main's own streams are not readable.
 import { appendFileSync } from 'node:fs';
-import type { ImportedExtension, ImportPhase, KeychainOutcome } from '@shared/browser/import';
+import type { CookieSkipReason, HistorySkipReason, ImportedExtension, ImportPhase, KeychainOutcome } from '@shared/browser/import';
+
+// The extension skips the report counts (Design §10).
+type ExtensionSkipReason = Extract<ImportedExtension['status'], 'copyFailed' | 'loadFailed'>;
 
 export type ImportLogEvent =
   | { kind: 'phase'; importId: string; phase: ImportPhase; done: number; total: number }
-  | { kind: 'skip'; category: 'history' | 'cookies' | 'extensions'; reason: string; host?: string | null }
+  | { kind: 'skip'; category: 'history' | 'cookies' | 'extensions'; reason: CookieSkipReason | HistorySkipReason | ExtensionSkipReason; host?: string | null }
   | { kind: 'keychain'; outcome: KeychainOutcome | 'cancelled'; exitCode?: number | null }
   | { kind: 'extension'; id: string; status: ImportedExtension['status']; background?: ImportedExtension['background'] }
   | { kind: 'error'; where: string; code: string; message?: string };

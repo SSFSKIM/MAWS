@@ -46,12 +46,14 @@ export type CookieDecode =
   | { kind: 'partitioned'; cdp: NetworkSetCookieParams; host: string; decrypted: boolean }
   | { kind: 'skipped'; reason: CookieDecodeSkipReason; host: string; decrypted: boolean };
 
-const COLUMNS =
-  'host_key, top_frame_site_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, has_expires, samesite, source_scheme, has_cross_site_ancestor';
+const COLUMNS = 'host_key, top_frame_site_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, has_expires, samesite, source_scheme';
 
 export function readCookieRows(db: DatabaseSync): { storeVersion: number; rows: ChromeCookieRow[] } {
   const version = storeVersion(db);
-  const rows = allRows(db, `SELECT ${COLUMNS} FROM cookies`).map(
+  // `has_cross_site_ancestor` arrived with store version 23; an older store's partitioned rows read it as false.
+  const present = new Set(allRows(db, 'PRAGMA table_info(cookies)').map((column) => column.name));
+  const ancestor = present.has('has_cross_site_ancestor') ? 'has_cross_site_ancestor' : '0 AS has_cross_site_ancestor';
+  const rows = allRows(db, `SELECT ${COLUMNS}, ${ancestor} FROM cookies`).map(
     (row): ChromeCookieRow => ({
       hostKey: String(row.host_key ?? ''),
       topFrameSiteKey: String(row.top_frame_site_key ?? ''),

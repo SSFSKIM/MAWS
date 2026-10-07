@@ -27,7 +27,7 @@ describe('formatImportLog', () => {
 
   it('cannot print a value through a field meant for a code, a host or an id', () => {
     const events: ImportLogEvent[] = [
-      { kind: 'skip', category: 'cookies', reason: `wrongKey ${SECRET}`, host: `example.test/${SECRET}` },
+      { kind: 'skip', category: 'cookies', reason: `wrongKey ${SECRET}` as 'wrongKey', host: `example.test/${SECRET}` },
       { kind: 'extension', id: SECRET, status: 'loaded' },
       { kind: 'error', where: `x ${SECRET}`, code: `E ${SECRET}`, message: `failed https://example.test/${SECRET}?value=${SECRET}` },
       { kind: 'phase', importId: SECRET, phase: 'history', done: 1, total: 2 },

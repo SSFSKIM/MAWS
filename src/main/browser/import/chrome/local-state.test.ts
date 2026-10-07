@@ -1,5 +1,6 @@
 // The profile picker's source (E4b Design §2): `Local State`'s `profile.info_cache`, `profile.last_used`, the
 // SingletonLock hint and the profile directory's admission rules, over the synthetic user data directory.
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,6 +63,10 @@ describe('readChromeProfiles', () => {
     expect(notJson).toMatchObject({ found: true, profiles: [], error: 'invalid' });
     expect(JSON.stringify(notJson)).not.toContain('sentinel');
     expect(await readChromeProfiles(userData({ profile: 7 }))).toMatchObject({ found: true, profiles: [], error: 'invalid' });
+    const fifo = join(root, `ud-fifo-${++counter}`);
+    mkdirSync(fifo);
+    execFileSync('mkfifo', [join(fifo, 'Local State')]);
+    expect(await readChromeProfiles(fifo)).toMatchObject({ found: true, profiles: [], error: 'unreadable' }); // never blocks
     const big = userData('');
     writeFileSync(join(big, 'Local State'), Buffer.alloc(LOCAL_STATE_MAX_BYTES + 1, 0x20));
     expect(await readChromeProfiles(big)).toMatchObject({ found: true, profiles: [], error: 'tooLarge' });

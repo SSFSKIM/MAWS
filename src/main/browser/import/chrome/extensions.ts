@@ -27,7 +27,8 @@ export interface InspectedExtension {
 
 export async function inspectExtensions(profilePath: string): Promise<InspectedExtension[]> {
   const root = join(profilePath, 'Extensions');
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const isRealDirectory = await lstat(root).then((info) => info.isDirectory(), () => false); // a symlinked Extensions/ is refused whole
+  const entries = isRealDirectory ? await readdir(root, { withFileTypes: true }).catch(() => []) : [];
   const chromeState = await chromeStates(profilePath);
   const found: InspectedExtension[] = [];
   for (const entry of entries) {
@@ -53,12 +54,14 @@ async function inspectOne(idDir: string, id: string, chromeState: ExtensionCandi
   if (chosen.symlink) return refused(id, chosen.version, 'symlink', chromeState);
 
   const versionDir = join(idDir, chosen.name);
-  const tree = await walk(versionDir);
+  const tree = await walk(versionDir).catch(() => null); // a tree that cannot be read is this extension's failure only
+  if (tree === null) return refused(id, chosen.version, 'missing', chromeState);
   const manifest = objectOr(await readJson(join(versionDir, 'manifest.json'), MANIFEST_MAX_BYTES));
   const manifestVersion = manifest?.manifest_version;
   if (!manifest || (manifestVersion !== 2 && manifestVersion !== 3)) return refused(id, chosen.version, tree.symlink ? 'symlink' : 'manifest', chromeState);
 
-  const messages = await localeMessages(versionDir, manifest.default_locale);
+  // O_NOFOLLOW guards only a path's last component, so a tree holding a symlink is never read past its manifest.
+  const messages = tree.symlink ? new Map<string, string>() : await localeMessages(versionDir, manifest.default_locale);
   const name = bounded(resolve(manifest.name, messages)) || id;
   const description = resolve(manifest.description, messages);
   const candidate: ExtensionCandidate = {
@@ -186,7 +189,7 @@ const objectOr = (value: unknown): Record<string, unknown> | null => (value !== 
 async function readJson(file: string, maxBytes: number): Promise<unknown> {
   let handle;
   try {
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a FIFO never blocks; isFile refuses it
   } catch {
     return null;
   }

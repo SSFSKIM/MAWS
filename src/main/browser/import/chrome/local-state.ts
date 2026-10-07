@@ -3,6 +3,7 @@
 // Of each profile only `name`, `gaia_name` and `user_name` are read. A profile directory is admitted only when it is a
 // key of `info_cache`, matches Chrome's pattern, and its real directory stays under the user data directory.
 // `SingletonLock` (the symlink Chrome holds while it runs) is a hint, never a block (Decision Log 14).
+import { constants } from 'node:fs';
 import { lstat, open, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
@@ -103,7 +104,7 @@ async function admitted(root: string, userDataDir: string, profileDir: string): 
 async function readCapped(file: string): Promise<{ text: string } | 'missing' | 'unreadable' | 'tooLarge'> {
   let handle;
   try {
-    handle = await open(file, 'r');
+    handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK); // a FIFO never blocks; isFile refuses it
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
   }
