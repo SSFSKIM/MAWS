@@ -53,8 +53,11 @@ export function SupervisorRow() {
   };
   return (
     <div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1">
-      <output aria-label={ROW.label} className="flex min-w-0 items-center gap-2">
-        <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotOf(status)}`} />
+      {/* the dot sits on the first line's centre when the status wraps (a long socket path): one line box tall */}
+      <output aria-label={ROW.label} className="flex min-w-0 items-start gap-2">
+        <span aria-hidden className="flex h-[1lh] shrink-0 items-center">
+          <span className={`size-2 rounded-full ${dotOf(status)}`} />
+        </span>
         {describeSupervisor(status)}
       </output>
       {status?.state === 'crashed' && (
