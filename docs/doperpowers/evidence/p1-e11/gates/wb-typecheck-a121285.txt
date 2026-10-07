@@ -1,0 +1,8 @@
+command: pnpm typecheck
+head: a121285d360c3a50d5d070aceb9cef427288e897
+started (UTC): 2026-10-07T17:37:21Z
+load at start: { 6.06 6.82 7.00 }
+slot: eligible: load 6.06 after 0s
+ended (UTC): 2026-10-07T17:38:05Z
+--- summary lines
+--- exit code: 0
