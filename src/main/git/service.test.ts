@@ -187,6 +187,26 @@ describe('git service answers status, branches, diff and log', () => {
     await expect(service.diff({ directory: repo.root, scope: 'worktree', base: 'main' })).rejects.toThrow("base applies to scope 'all' only");
   });
 
+  // E11 (tracker row E6 · C4 "diff prefix config reshapes git.diff headers"): every scope pins a/ and b/, as untracked does
+  it.each<{ settings: [string, string][] }>([
+    { settings: [['diff.mnemonicPrefix', 'true']] },
+    { settings: [['diff.noprefix', 'true']] },
+    { settings: [['diff.srcPrefix', 'old:'], ['diff.dstPrefix', 'new:']] },
+  ])('answers a/ and b/ headers in every scope whatever the configuration asks for ($settings)', async ({ settings }) => {
+    await repo.git('checkout', '-q', '-b', 'feature');
+    await repo.write('README.md', 'staged\n');
+    await repo.git('commit', '-q', '-am', 'feature');
+    for (const [key, value] of settings) await repo.git('config', key, value);
+    await repo.write('README.md', 'staged again\n');
+    await repo.git('add', 'README.md');
+    await repo.write('README.md', 'and the worktree\n');
+    const headers = ['diff --git a/README.md b/README.md', '--- a/README.md', '+++ b/README.md'];
+    for (const input of [{ scope: 'worktree' }, { scope: 'staged' }, { scope: 'all' }, { scope: 'all', base: 'main' }] as const) {
+      const lines = (await service.diff({ directory: repo.root, ...input })).patch.split('\n');
+      for (const header of headers) expect(lines, JSON.stringify(input)).toContain(header);
+    }
+  });
+
   it('logs with a limit; the root commit has no parents', async () => {
     const [commit] = (await service.log({ directory: repo.root, limit: 1 })).commits;
     expect(commit).toMatchObject({ author: 'MAWS Fixture', subject: 'initial', parents: [] });
