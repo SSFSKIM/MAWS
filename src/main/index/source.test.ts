@@ -357,6 +357,32 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       fake.fire('fs.sessionRemoved', { sessionId: s.sessionId, appSessionId: null });
       expect(index.sessions.getByEngineId(s.sessionId)).toMatchObject({ archived: true });
     });
+
+    // W-B review M3: applying a first launch's burst at the stop runs git synchronously for every directory still cold,
+    // stalling the quit; the next launch's fs.scan re-reports those transcripts, since the index never recorded their
+    // sizes, so the stop drops the queue.
+    it('the stop drops what is still queued rather than applying it, and a later drain applies nothing', async () => {
+      const fake = scriptedHost();
+      let release: () => void = () => {};
+      source = new IndexSessionSource(index, fake.host, {
+        emit,
+        tickMs: 5,
+        warmLinkedWorktrees: () => new Promise<void>((resolve) => (release = resolve)),
+      });
+      stop = source.start(recordingWriter().writer);
+      release(); // the start's own warm-up
+      await settle();
+      const burst = [summary({ directory: '/work/a' }), summary({ directory: '/work/b' })];
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      await settle(); // the drain's warm-up is out
+      stop();
+      stop = null;
+      expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId))).toEqual([null, null]);
+      release();
+      await settle();
+      expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId))).toEqual([null, null]);
+      expect(index.sessions.bindings()).toEqual([]);
+    });
   });
 
   it('a tick\'s project and record events go out in revision order: the project a new record joins comes first', async () => {

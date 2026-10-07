@@ -14,9 +14,11 @@
 // per directory the cache had not seen; the transactions were the rest. So the summaries are queued, the directories
 // they name are answered off main's thread first (`warmLinkedWorktrees`, child processes), and they are then applied
 // up to DISCOVERY_BATCH to a transaction instead of one each: under 1 s of main's time for the same burst. Anything
-// else that touches the index from here (another host event, a visibility report, the holder fold, the refold, the stop) applies
+// else that touches the index from here (another host event, a visibility report, the holder fold, the refold) applies
 // the queue first, at once (git synchronously for a directory still cold, as before), so the index sees every change in
-// the order the host sent it. A batch that fails is applied again one summary to a transaction, so one bad summary
+// the order the host sent it. The stop drops the queue instead (W-B review M3): applying a first launch's burst there
+// would run that git inside the quit, and the next launch's `fs.scan` re-reports every dropped transcript, since the
+// index never recorded its size and mtime. A batch that fails is applied again one summary to a transaction, so one bad summary
 // costs only itself, as before.
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -151,8 +153,8 @@ export class IndexSessionSource implements SessionSource {
     this.stopped = false;
     return () => {
       stopped = true;
-      this.applyDiscoveries(); // E11: what the host sent before the stop is the index's
       this.stopped = true;
+      this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
       for (const off of this.offs) off();
       this.offs = [];
       if (this.timer) clearTimeout(this.timer);
