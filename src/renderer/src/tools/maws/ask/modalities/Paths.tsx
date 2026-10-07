@@ -1,6 +1,6 @@
 // A file or folder question (E1 M4): a button that opens main's native picker (`layout.pickFiles`, from the session's
 // directory, several at once when the question says `multiple`) and the chosen absolute paths, each with a remove
-// glyph. Only the paths are kept: whatever bytes main reads for an image or a PDF are dropped.
+// glyph. Only the paths are kept, so main is asked for paths alone (E11: `pathsOnly`, no image or PDF bytes read).
 import { ipc } from '../../../../ipc/client';
 import { CardButton } from '../../../../request-card/controls';
 import { SHEET } from '../copy';
@@ -16,7 +16,7 @@ export function Paths({ question, draft, disabled, edit, directory }: ModalityPr
   const folder = question.modality === 'folder';
   const multiple = question.multiple === true;
   const pick = async () => {
-    const result = await ipc.invoke('layout.pickFiles', { kind: folder ? 'directory' : 'files', directory, multiple });
+    const result = await ipc.invoke('layout.pickFiles', { kind: folder ? 'directory' : 'files', directory, multiple, pathsOnly: true });
     if (!result.ok) {
       console.warn(`[maws] layout.pickFiles refused: ${result.error.message}`);
       return;

@@ -204,7 +204,8 @@ export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 // mediaType `inode/directory` and no data. Key `usage.banners`: the dismissed banner keys, newest last.
 export const PickedFileSchema = z.strictObject({ path: z.string(), name: z.string(), bytes: z.number().int(), mediaType: z.string().nullable(), data: z.string().nullable() });
 export type PickedFile = z.infer<typeof PickedFileSchema>;
-export const PickFilesInputSchema = z.strictObject({ kind: z.enum(['files', 'photos', 'directory']), directory: z.string().nullable(), multiple: z.boolean() });
+// E11: `pathsOnly` answers every file by path alone, its bytes never read (the Question sheet keeps only paths)
+export const PickFilesInputSchema = z.strictObject({ kind: z.enum(['files', 'photos', 'directory']), directory: z.string().nullable(), multiple: z.boolean(), pathsOnly: z.boolean().optional() });
 export type PickFilesInput = z.infer<typeof PickFilesInputSchema>;
 export const UsageBannersSchema = z.array(z.string()).max(50);
 const c7Commands = {
