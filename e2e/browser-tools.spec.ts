@@ -23,7 +23,8 @@
 // passes MAWS_HARNESS=0, so the window is the product app. MAWS_E4C_SHOTS=1 writes the evidence shots of (2b).
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { BROWSER_HANDBACK_IDLE_MS } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
 import { browserIn, chipOf, expectOnPane, noticesIn, pageAt, paneIn, paneRect, showPane, tabAt, tabsOf, tabState, viewOf, type BrowserScene } from './support/browser-scene';
@@ -59,11 +60,35 @@ test.describe.configure({ timeout: 180_000 });
 const FIXTURE = `${PASS3}/p1-maws-browser.jsonl`;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PARKED = { x: 0, y: 0, width: 1280, height: 800 }; // agent/visible.ts PARKED_BOUNDS
-const HANDBACK_MS = 3_000; // BROWSER_HANDBACK_IDLE_MS
+const HANDBACK_MS = BROWSER_HANDBACK_IDLE_MS;
 const doneUrl = (s: BrowserScene) => s.server.url(`/done.html?${new URLSearchParams({ name: ORDER.name, email: ORDER.email }).toString()}`); // the form's GET
 const coveredOf = async (s: BrowserScene, tabId: string) => (await tabState(s, tabId)).tab?.covered;
 const controlNow = async (s: BrowserScene, tabId: string) => (await controlOf(s, tabId))?.control;
 const hasCursor = () => document.querySelector('maws-agent-cursor') !== null;
+
+// The agent cursor's layer opacity as its inline style sets it ('1' shown, '0' hidden or faded), read over a CDP session:
+// the overlay lives in a closed shadow root, which DOM.getDocument's pierce reaches and the page's own world cannot.
+async function cursorLayerOpacity(page: Page): Promise<string | null> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    type Node = { nodeName: string; attributes?: string[]; children?: Node[]; shadowRoots?: Node[] };
+    const { root } = (await cdp.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: Node };
+    const find = (node: Node): Node | null => (node.nodeName === 'MAWS-AGENT-CURSOR' ? node : [...(node.children ?? []), ...(node.shadowRoots ?? [])].map(find).find(Boolean) ?? null);
+    const layer = find(root)?.shadowRoots?.[0]?.children?.find((child) => child.nodeName === 'DIV');
+    const style = layer?.attributes?.[layer.attributes.indexOf('style') + 1] ?? '';
+    return /(?:^|;)\s*opacity:\s*([^;!\s]+)/.exec(style)?.[1] ?? null;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+// The row of the session's k-th browser tool call (0-based), found by its tool use: the transcript is virtualized, so a
+// position among the rows rendered is not the call's.
+async function browserRow(s: BrowserScene, id: AppSessionId, k: number): Promise<Locator> {
+  let toolUseId: string | undefined;
+  await expect.poll(async () => (toolUseId = ofKind(await s.events(id), 'tool.use').filter((use) => use.toolName.startsWith('mcp__maws__browser_'))[k]?.toolUseId)).toBeDefined();
+  return s.pane.locator(`[id$="-browser:${toolUseId!}"] section.transcript-browser-action`);
+}
 
 // The rows' headings for the recording's seven calls (Design §10; transcript/model/copy.ts): pages by host, elements by
 // role and quoted name, a snapshot's size from the recorded result.
@@ -120,7 +145,19 @@ test('(2) G1: the recording replayed against the real app: main’s live answers
     const formPage = await pageAt(s, s.server.url('/form.html'));
     await expect.poll(() => formPage.evaluate(hasCursor)).toBe(true);
     await allowNext(s, id); // browser_act fill Email
+    const actionRows = s.pane.locator('section.transcript-browser-action');
+    await expect.poll(async () => ofKind(await s.events(id), 'maws.browser.action').length).toBe(4);
+    // the Submit click's readiness wait, held a moment by the page's own script (an `input` event every 400 ms keeps the
+    // button disabled; no input reaches the page, so nobody takes it): the row runs, with no waiting line
+    await formPage.evaluate(() => {
+      const email = document.querySelector('input[name="email"]')!;
+      (window as unknown as { hold: number }).hold = window.setInterval(() => email.dispatchEvent(new Event('input')), 400);
+    });
     await allowNext(s, id); // browser_act click Submit
+    await expect((await browserRow(s, id, 4))).toHaveAttribute('data-state', 'running');
+    await expect((await browserRow(s, id, 4)).locator('p[role="status"]')).toHaveCount(0);
+    await shootE4c(s, 'row-running', { pane: paneIn(browserIn(s, 'panel')), page: formPage });
+    await formPage.evaluate(() => clearInterval((window as unknown as { hold: number }).hold));
     await allowNext(s, id); // browser_snapshot
     await allowNext(s, id); // browser_screenshot
     await idle(s, id);
@@ -159,7 +196,6 @@ test('(2) G1: the recording replayed against the real app: main’s live answers
     await expect(donePage.locator('#reference')).toHaveText(`Thanks, ${ORDER.name}. Your reference is ${ORDER.reference}.`);
 
     // the rows (persistent: in view with the turn folded), the screenshot's with Open
-    const actionRows = s.pane.locator('section.transcript-browser-action');
     await expect(actionRows.locator('[data-browser-heading]')).toHaveText(recordedHeadings(s));
     await expect(actionRows).toHaveCount(7);
     for (let k = 0; k < 7; k++) await expect(actionRows.nth(k)).toHaveAttribute('data-state', 'done');
@@ -192,7 +228,7 @@ test('(2b) the replay under a sheet and under the person: the Email fill waits o
     await allowNext(s, id); // browser_snapshot
     await allowNext(s, id); // browser_act fill Name
     const actionRows = s.pane.locator('section.transcript-browser-action');
-    await expect(actionRows.nth(2)).toHaveAttribute('data-state', 'done');
+    await expect.poll(async () => ofKind(await s.events(id), 'maws.browser.action').length).toBe(3);
     const panel = browserIn(s, 'panel');
     const pane = paneIn(panel);
     const formPage = await pageAt(s, s.server.url('/form.html'));
@@ -206,14 +242,13 @@ test('(2b) the replay under a sheet and under the person: the Email fill waits o
     await menu(s.maws.app, 'palette.open');
     await expect.poll(() => coveredOf(s, tab)).toBe(true);
     await allowByCommand(s, id, fillEmail);
-    await expect(actionRows.nth(3).locator('p[role="status"]')).toHaveText(/^Waiting · a sheet covers the page · /);
+    await expect((await browserRow(s, id, 3)).locator('p[role="status"]')).toHaveText(/^Waiting · a sheet covers the page · /);
     await expect.poll(() => waitsOf(s, tab)).toEqual(['cover']);
     await s.page.waitForTimeout(1_000);
     await s.page.keyboard.press('Escape');
     await expect.poll(() => coveredOf(s, tab)).toBe(false);
-    await expect(actionRows.nth(3)).toHaveAttribute('data-state', 'done');
-    await expect(actionRows.nth(3).locator('[data-browser-took]')).toContainText('under a sheet');
-    await expect(actionRows.nth(3).locator('p[role="status"]')).toHaveCount(0);
+    // answered (the row is read at the end: while a request docks the transcript may not have every row mounted)
+    await expect.poll(async () => ofKind(await s.events(id), 'maws.browser.action').length).toBe(4);
 
     // the Submit click while the person has the page: their click on the heading takes it from the agent; the call then
     // waits at its pause point, the row and the chrome say so; further clicks keep it theirs while the shots are taken
@@ -225,20 +260,23 @@ test('(2b) the replay under a sheet and under the person: the Email fill waits o
     await expect(slot).toContainText('You have the page');
     await allowByCommand(s, id, clickSubmit);
     await person();
-    await expect(actionRows.nth(4).locator('p[role="status"]')).toHaveText(/^Waiting · you have the page · /);
-    await expect(actionRows.nth(4)).toHaveAttribute('data-state', 'running');
+    await expect((await browserRow(s, id, 4)).locator('p[role="status"]')).toHaveText(/^Waiting · you have the page · /);
+    await expect((await browserRow(s, id, 4))).toHaveAttribute('data-state', 'running');
     await shootE4c(s, 'row-waiting', { pane, page: formPage, before: async () => void (await person()) });
     await shootE4c(s, 'chrome-human', { pane, page: formPage, clip: panel, before: async () => void (await person()) });
     await person();
     await slot.getByRole('button', { name: 'Hand back' }).click();
-    await expect(actionRows.nth(4)).toHaveAttribute('data-state', 'done');
-    await expect(actionRows.nth(4).locator('[data-browser-took]')).toContainText('for you');
-    await expect(actionRows.nth(4).locator('p[role="status"]')).toHaveCount(0);
+    await expect.poll(async () => ofKind(await s.events(id), 'maws.browser.action').length).toBe(5);
     await allowNext(s, id); // browser_snapshot
     await allowNext(s, id); // browser_screenshot
     await idle(s, id);
 
+    // the rows as they stand: the fill says it waited under a sheet, the click that it waited for the person, no
+    // waiting line left on either
     await expect(actionRows.locator('[data-browser-heading]')).toHaveText(recordedHeadings(s));
+    await expect((await browserRow(s, id, 3)).locator('[data-browser-took]')).toContainText('under a sheet');
+    await expect((await browserRow(s, id, 4)).locator('[data-browser-took]')).toContainText('for you');
+    await expect(actionRows.locator('p[role="status"]')).toHaveCount(0);
     const events = ofKind(await s.events(id), 'maws.browser.action');
     expect(events.map((e) => [e.action, e.waitedFor, e.error])).toEqual([
       ['open', null, null],
@@ -289,6 +327,7 @@ test('(3) G2: the person’s click during an act’s readiness wait takes the pa
     if (!answer?.ok) throw new Error('the click failed');
     expect(answer.result.waitedMs as number).toBeGreaterThanOrEqual(1_500);
     expect(click.settledAt()! - clickedAt).toBeGreaterThanOrEqual(HANDBACK_MS - 100);
+    expect(click.settledAt()! - clickedAt).toBeLessThan(HANDBACK_MS + 1_500);
     test.info().annotations.push({ type: 'resolved after the click (ms)', description: String(click.settledAt()! - clickedAt) });
     expect(await waitsOf(s, tab)).toEqual(['human', null]);
     expect(await controlNow(s, tab)).toBe('agent');
@@ -351,6 +390,7 @@ test('(5) no agent, no takeover: a click on a page no agent holds leaves it idle
     const answer = await act.promise;
     expect(answer).toMatchObject({ ok: true, result: { action: 'click', waitedFor: 'human' } });
     expect(act.settledAt()! - clickedAt).toBeGreaterThanOrEqual(HANDBACK_MS - 100);
+    expect(act.settledAt()! - clickedAt).toBeLessThan(HANDBACK_MS + 1_500);
     test.info().annotations.push({ type: 'resolved after the click (ms)', description: String(act.settledAt()! - clickedAt) });
     await expect(page.locator('#count')).toHaveText('1');
     expect(await waitsOf(s, tab)).toEqual(['human', null]);
@@ -383,6 +423,7 @@ test('(6) the OOPIF item: a human click into a cross-site frame takes the page f
     const answer = await act.promise;
     expect(answer).toMatchObject({ ok: true, result: { action: 'click', target: { ref: frameButton }, waitedFor: 'human' } });
     expect(act.settledAt()! - clickedAt).toBeGreaterThanOrEqual(HANDBACK_MS - 100);
+    expect(act.settledAt()! - clickedAt).toBeLessThan(HANDBACK_MS + 1_500);
     // the agent's click into the frame: consumed from the in-flight table, the agent's
     await expect(frame.locator('#count')).toHaveText('2');
     expect((await inputsOf(s, tab)).slice(-2)).toEqual(['mouse/agent', 'mouse/agent']);
@@ -419,26 +460,33 @@ test('(7) the cover: an act under the palette waits, uncounted, and resumes when
     await expect(page.locator('#count')).toHaveText('1');
     expect(await waitsOf(s, tab)).toEqual(['cover', null]);
 
-    // Decision Log 77 (b): the cursor drew where the agent clicked (the page's own picture shows its blue), then the
-    // palette covers the pane and a viewport screenshot takes the capturePage route: the pane's size, no cursor blue
+    // Decision Log 77 (b): the cursor drew where the agent clicked (the page's own picture shows its blue: the detector
+    // sees it when it is there)
     const seen = await bluePixels(s, { base64: (await page.screenshot()).toString('base64') });
     expect(seen.blue, 'the cursor is drawn before the cover').toBeGreaterThan(0);
     const bounds = (await viewOf(s, tab))!.bounds!;
     const rect = await paneRect(pane);
+    // a fresh act draws it again; at once the palette covers the pane, and the overlay is still shown under the cover
+    // (its idle fade has not begun), so the frame painted before the cover has the cursor in it: a capture without
+    // cursor blue that still shows the page is a fresh frame, neither that stale one nor a blank one
+    await agentOk(s, id, 'browser_act', { tabId: tab, action: 'click', target: { css: '#slow' } });
     await menu(s.maws.app, 'palette.open');
     await expect.poll(() => coveredOf(s, tab)).toBe(true);
+    const overlay = await cursorLayerOpacity(page);
+    expect(overlay, 'the cursor overlay is shown when the cover comes').not.toBe('0');
     const shot = await agentOk(s, id, 'browser_screenshot', { tabId: tab });
     const picture = await bluePixels(s, { path: shot.image!.path });
     expect([picture.width, picture.height]).toEqual([bounds.width, bounds.height]);
     expect(Math.abs(picture.width - rect.width) <= 1 && Math.abs(picture.height - rect.height) <= 1, JSON.stringify({ picture, rect })).toBe(true);
     expect(shot.result).toMatchObject({ width: bounds.width, height: bounds.height, mimeType: 'image/png', fullPage: false, target: null });
     expect(picture.blue, 'no cursor blue in the covered capture').toBe(0);
+    expect(picture.dark, 'the covered capture shows the page (its text)').toBeGreaterThan(100);
     const raw = await s.maws.app.evaluate(async ({ screen, webContents }, url) => {
       const contents = webContents.getAllWebContents().find((w) => w.getURL() === url)!;
       const image = await contents.capturePage();
       return { capturePage: image.getSize(), scaleFactor: screen.getPrimaryDisplay().scaleFactor };
     }, SLOW);
-    test.info().annotations.push({ type: 'covered capture', description: JSON.stringify({ answer: [picture.width, picture.height], seenBefore: [seen.width, seen.height, seen.blue], ...raw }) });
+    test.info().annotations.push({ type: 'covered capture', description: JSON.stringify({ answer: [picture.width, picture.height], seenBefore: [seen.width, seen.height, seen.blue], overlay, dark: picture.dark, ...raw }) });
     await s.page.keyboard.press('Escape');
     await expect.poll(() => coveredOf(s, tab)).toBe(false);
   });
@@ -457,8 +505,12 @@ async function actsWhileUnplaced(s: BrowserScene, id: AppSessionId, tabId: strin
   const shot = await agentOk(s, id, 'browser_screenshot', { tabId });
   expect(shot.result).toMatchObject({ width: PARKED.width, height: PARKED.height, mimeType: 'image/png', fullPage: false, target: null });
   expect(shot.image).toMatchObject({ width: PARKED.width, height: PARKED.height, mimeType: 'image/png' });
-  expect(existsSync(shot.image!.path)).toBe(true);
-  expect(existsSync(join(s.maws.userData, 'deliverables', id, `${shot.result.deliverableId as string}.json`))).toBe(false);
+  const decoded = await bluePixels(s, { path: shot.image!.path });
+  expect([decoded.width, decoded.height]).toEqual([PARKED.width, PARKED.height]); // the file itself, decoded
+  expect(decoded.dark).toBeGreaterThan(0); // the page, not a blank picture
+  expect(typeof shot.result.deliverableId).toBe('string');
+  const records = join(s.maws.userData, 'deliverables', id);
+  expect(existsSync(records) ? readdirSync(records).filter((name) => name.endsWith('.json')) : []).toEqual([]); // no record
   expect(await viewOf(s, tabId)).toMatchObject({ bounds: PARKED, attached: false, owner: null });
 }
 

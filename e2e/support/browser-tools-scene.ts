@@ -204,19 +204,21 @@ export async function allowByCommand(s: Scene, id: AppSessionId, requestId: Requ
   await expect.poll(async () => ofKind(await s.events(id), 'permission.resolved').length, { timeout: 30_000 }).toBe(answered + 1);
 }
 
-// How many pixels of a PNG are the agent cursor's accent blue (#2f6feb), its glow over a light page included, counted in
-// main through nativeImage (a BGRA bitmap): the picture's size in pixels and the count.
-export async function bluePixels(s: Scene, png: { path: string } | { base64: string }): Promise<{ width: number; height: number; blue: number }> {
+// How many pixels of a PNG are the agent cursor's accent blue (#2f6feb), its glow over a light page included, and how many
+// are dark (a light page's text), counted in main through nativeImage (a BGRA bitmap), with the picture's size in pixels.
+export async function bluePixels(s: Scene, png: { path: string } | { base64: string }): Promise<{ width: number; height: number; blue: number; dark: number }> {
   return s.maws.app.evaluate(({ nativeImage }, png) => {
     const image = 'path' in png ? nativeImage.createFromPath(png.path) : nativeImage.createFromBuffer(Buffer.from(png.base64, 'base64'));
     const { width, height } = image.getSize();
     const bitmap = image.toBitmap();
     let blue = 0;
+    let dark = 0;
     for (let k = 0; k < bitmap.length; k += 4) {
       const [b, g, r] = [bitmap[k]!, bitmap[k + 1]!, bitmap[k + 2]!];
       if (b > 180 && b - r > 60 && b - g > 30) blue++;
+      if (r < 80 && g < 80 && b < 80) dark++;
     }
-    return { width, height, blue };
+    return { width, height, blue, dark };
   }, png);
 }
 
