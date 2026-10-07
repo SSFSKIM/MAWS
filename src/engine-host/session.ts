@@ -480,9 +480,10 @@ export class EngineSession {
     this.touch();
   }
 
-  // E8 (D-13): a successful reload_plugins answer, published as the status an init frame would publish.
+  // E8 (D-13): a successful reload_plugins answer, published as the status and the catalogue an init frame would publish.
   noteReload(answer: ReloadPluginsResponse): void {
     this.tracker.applyReload(answer);
+    this.publishCatalog();
     this.touch();
   }
 

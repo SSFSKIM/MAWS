@@ -1,8 +1,9 @@
 // Reload mods and Reload skills (E8 execution document, M2; parent G3): `reload_plugins` and `reload_skills` as C3's
 // session operations, from `/plugins` and the panel's Plugins section, with one operation line for whichever ran last:
 // `Working…`, then `Reloaded · N commands · N agents · N plugins · N errors` or `Reloaded · N skills`, or the error in
-// the operation's words. A reload's answer also replaces the session's loaded plugins (M1's `applyReload`), so the
-// "Loaded in this session" list and the panel's count follow it at once.
+// the operation's words. A reload's answer also replaces the session's loaded plugins and its catalogue's commands and
+// agents (the host's `applyReload`), so the "Loaded in this session" list, the panel's count and the slash palette
+// follow it at once.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ReloadPluginsResponseSchema, ReloadSkillsResponseSchema } from '@shared/wire/control';

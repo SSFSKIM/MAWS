@@ -5,6 +5,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { StdinFrame } from '@shared/wire/frames';
+import { ReloadPluginsResponseSchema } from '@shared/wire/control';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
@@ -1184,6 +1185,29 @@ describe('catalog answers and publishes from handshake state (C7)', () => {
     expect(names(published.at(-1)!.commands).at(-1)).toBe('maws-probe');
     published[2]!.commands.length = 0; // a listener cannot reach into the session's state
     expect(session.catalog().commands).toHaveLength(53);
+  });
+
+  // E11 W-D (tracker row E8 · catalogue): a reload_plugins answer's commands and agents are the catalogue now, so a
+  // command an install or uninstall moved reaches the palette before the next turn's system/init
+  it('pass3/e8-plugins-reload: a reload answer replaces the catalogue’s commands and agents and publishes it; an identical answer publishes nothing', async () => {
+    const rows = loadJournal('pass3', 'e8-plugins-reload');
+    const answerAt = (seq: number) => ReloadPluginsResponseSchema.parse((rows.find((r) => r.seq === seq)!.frame as { response: { response: unknown } }).response.response);
+    const { capabilities: _surface, ...init } = (rows.find((r) => r.seq === 4)!.frame as { response: { response: Record<string, unknown> } }).response.response; // no ui_surface_v1 attach to script
+    const { session } = setup({ responder: defaultResponder({ initialize: () => ({ response: init }) }) });
+    const published: Catalog[] = [];
+    session.on('catalog', (catalog) => published.push(catalog));
+    await session.start();
+    expect(names(session.catalog().commands)).toContain('e8-probe:e8-ping');
+    session.noteReload(answerAt(54)); // after the uninstall: the plugin's two commands are gone
+    expect(published.map((c) => c.revision)).toEqual([1, 2]);
+    expect(names(published.at(-1)!.commands)).not.toContain('e8-probe:e8-ping');
+    expect(published.at(-1)!.commands).toEqual(answerAt(54).commands);
+    expect(published.at(-1)!.agents).toEqual(answerAt(54).agents);
+    session.noteReload(answerAt(59)); // the same lists again
+    expect(published.map((c) => c.revision)).toEqual([1, 2]);
+    session.noteReload(answerAt(31)); // installed again
+    expect(published.map((c) => c.revision)).toEqual([1, 2, 3]);
+    expect(names(published.at(-1)!.commands)).toEqual(expect.arrayContaining(['e8-probe:e8-ping', 'e8-probe:e8-hello']));
   });
 
   it('pass2/prewarm: commands_changed before the initialize response publishes, its identical repeats do not, then the response and the first init', async () => {

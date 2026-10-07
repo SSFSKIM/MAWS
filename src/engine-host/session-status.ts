@@ -121,9 +121,12 @@ export class SessionStatusTracker {
   }
 
   // E8 (D-13): a successful reload_plugins answer is the session's plugins now, before the next turn's system/init; the
-  // answer carries only a count of errors, so the last init's errors and warnings stay.
+  // answer carries only a count of errors, so the last init's errors and warnings stay. Its commands and agents, in the
+  // initialize response's shape, are the catalogue's (a plugin's skills are among the commands); the skills and terminal
+  // commands lists come only from system/init.
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
+    this.setCatalog({ commands: answer.commands, agents: answer.agents });
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {
