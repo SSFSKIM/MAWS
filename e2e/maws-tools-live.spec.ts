@@ -6,14 +6,16 @@
 // request card docked in the composer, every ask through the Question sheet (the folder through main's pick seam),
 // the delivery row's two buttons through the open seam (nothing opens on this Mac). The owner's ~/.claude.json is read
 // only, for the A-15 delta before the first launch and after every session. Writes the plain-text evidence
-// (docs/doperpowers/evidence/p1-e1/live-sitting.txt) and the screenshots in both themes (`e1-<surface>-<theme>.png`).
+// (`live-sitting.txt`) and the screenshots in both themes (`e1-<surface>-<theme>.png`) into the directory
+// MAWS_E1_LIVE_OUT names (E11 W-E: a re-run records into its own directory, E1's committed evidence untouched),
+// docs/doperpowers/evidence/p1-e1/ when it is unset.
 // It spends money; run on purpose only, after a build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
@@ -33,7 +35,7 @@ import { sidebarOf, sidebarRow } from './support/sidebar';
 test.skip(process.env.MAWS_E1_LIVE !== '1', 'the E1 live sitting runs only under MAWS_E1_LIVE=1');
 test.describe.configure({ timeout: 1_500_000 });
 
-const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e1');
+const EVIDENCE = process.env.MAWS_E1_LIVE_OUT ? resolve(process.env.MAWS_E1_LIVE_OUT) : join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e1');
 const EVIDENCE_FILE = join(EVIDENCE, 'live-sitting.txt');
 const TURN_MS = 300_000;
 
