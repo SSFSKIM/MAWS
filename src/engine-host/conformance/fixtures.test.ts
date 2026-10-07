@@ -92,7 +92,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // through MAWS's own host
     const e2 = ['p1-maws-artifacts', 'p1-sdk-mcp-image'];
     // E2 end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2].sort());
+    // E4c start: M4's browser tools recorded live through MAWS's own host, main played by the stand-in
+    const e4c = ['p1-maws-browser'];
+    // E4c end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -635,6 +638,9 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E2 start: M2's pass3/p1-maws-artifacts (a create and an update)
       'maws.delivery.artifact',
       // E2 end
+      // E4c start: M4's pass3/p1-maws-browser (open, two snapshots, two fills, a click, a screenshot)
+      'maws.browser.action',
+      // E4c end
     ].sort());
     void kinds;
   });
@@ -1005,6 +1011,63 @@ describe('G4: no launch MAWS did not make lists a browser tool (E4c)', () => {
     }
     expect(outside).toContain('pass3/launch-env-terminal'); // the terminal arm is among them, so the pin is not vacuous
     expect(outside.length).toBeGreaterThan(100);
+  });
+});
+
+// M4's live recording (E4c execution document, Design §13, Acceptance G1; test/live/maws-browser.live.test.ts): the
+// browser tools through MAWS's own host on the installed engine, main played by the stand-in from the snapshots the real
+// app generated. The generic case above admits it; these pin what the browser tools' traffic yields.
+describe('normaliser: the browser tools recorded live (E4c M4, pass3/p1-maws-browser)', () => {
+  type Block = { type: string; text?: string; data?: string; mimeType?: string; source?: { media_type?: string } };
+  const answerOf = (rows: { direction: string; frame: unknown }[], requestId: string) =>
+    (rows.find((r) => r.direction === 'out' && (r.frame as { type?: string; response?: { request_id?: string } }).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === requestId)?.frame as
+      | { response: { response: { mcp_response: { result: { content: Block[]; isError?: boolean } } } } }
+      | undefined)?.response.response.mcp_response;
+  const DONE_URL = 'http://127.0.0.1:17391/done.html?name=Ada+Lovelace&email=ada%40example.test';
+
+  it('seven maws.browser.action events, open to screenshot, each at its admitted answer with no error', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-browser');
+    const actions = ofKind(events, 'maws.browser.action');
+    expect(actions.map((e) => [e.tool, e.action, e.tabId, e.target, e.error])).toEqual([
+      ['browser_tabs', 'open', 'b_000000000001', 'http://127.0.0.1:17391/form.html', null],
+      ['browser_snapshot', 'snapshot', 'b_000000000001', null, null],
+      ['browser_act', 'fill', 'b_000000000001', 'e7', null],
+      ['browser_act', 'fill', 'b_000000000001', 'e10', null],
+      ['browser_act', 'click', 'b_000000000001', 'e12', null],
+      ['browser_snapshot', 'snapshot', 'b_000000000001', null, null],
+      ['browser_screenshot', 'screenshot', 'b_000000000001', 'page', null],
+    ]);
+    expect(actions.map((e) => [e.url, e.ms])).toEqual([
+      ['http://127.0.0.1:17391/form.html', 120], ['http://127.0.0.1:17391/form.html', 60], ['http://127.0.0.1:17391/form.html', 40], ['http://127.0.0.1:17391/form.html', 40],
+      [DONE_URL, 40], [DONE_URL, 60], [DONE_URL, 80],
+    ]);
+    expect(actions.map((e) => e.deliverableId === null)).toEqual([true, true, true, true, true, true, false]);
+    for (const e of actions) {
+      const use = ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId);
+      expect(use?.toolName).toBe(`mcp__maws__${e.tool}`);
+      expect(seq(e)).toBeGreaterThan(seq(use));
+      expect(answerOf(rows, e.requestId)?.result.isError).toBeUndefined();
+    }
+  });
+
+  it('a snapshot answers the JSON header then the page text; the screenshot an image then its JSON, with the engine’s pointer text between in the tool_result', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-browser');
+    const actions = ofKind(events, 'maws.browser.action');
+    const snapshots = actions.filter((e) => e.action === 'snapshot').map((e) => answerOf(rows, e.requestId)!.result.content);
+    expect(snapshots.map((content) => content.map((b) => b.type))).toEqual([['text', 'text'], ['text', 'text']]);
+    expect(snapshots[0]![1]!.text).toContain('button "Submit" [disabled] [ref=e12]');
+    expect(snapshots[1]![1]!.text).toContain('Your reference is MAWS-7731.');
+    const shot = actions.at(-1)!;
+    const answer = answerOf(rows, shot.requestId)!;
+    expect(answer.result.content.map((b) => b.type)).toEqual(['image', 'text']);
+    expect(Buffer.from(answer.result.content[0]!.data!, 'base64').subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(JSON.parse(answer.result.content[1]!.text!)).toMatchObject({ status: 'ok', url: DONE_URL, deliverableId: shot.deliverableId, width: 64, height: 64, mimeType: 'image/png', target: null, fullPage: false });
+    const [result] = ofKind(events, 'tool.result').filter((e) => e.toolUseId === shot.toolUseId);
+    const blocks = result!.content as Block[];
+    expect(blocks.map((b) => b.type)).toEqual(['image', 'text', 'text']);
+    expect(blocks[1]!.text).toMatch(/^\[Image: source: \/.*\/tool-results\/mcp-maws-blob-[^/]+\.png\]$/);
+    // the model read the page: its one-line reply names the reference and the picture
+    expect(ofKind(events, 'turn.ended').at(-1)?.resultText).toMatch(/MAWS-7731.*image/i);
   });
 });
 // E4c end
