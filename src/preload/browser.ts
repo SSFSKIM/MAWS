@@ -7,3 +7,12 @@
 // `require` no file of its own, so it must never share a module with the app's preload (`index.ts`): Rollup would split
 // the shared module into a chunk both would fail to load (`bundle.test.ts` checks the build).
 export {};
+// E4d start: comment mode's hover UI and pick (E4d execution document, Design §3): one listener on main's
+// `browser:preload:comment`, one report per arm on `browser:preload:pick`; nothing exposed to the page (no
+// contextBridge). `browser-comment.ts` and the two shared modules it reads are imported from here alone, and are zod-free
+// and outside `@shared/ipc/`, so Rollup inlines them and no chunk is shared with the app preload.
+import { ipcRenderer } from 'electron';
+import { installCommentMode } from './browser-comment';
+
+installCommentMode(ipcRenderer);
+// E4d end
