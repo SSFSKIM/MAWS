@@ -1,6 +1,6 @@
 // The browser's views (E4a execution document, Design §3; A-33's placement and cover protocol as E4-0 measured it): one
-// `WebContentsView` per loaded tab, created in the tab's partition with the browser preload (sandboxed, isolated, no
-// Node), and laid over the pane that owns it.
+// `WebContentsView` per loaded tab, created in the tab's partition (whose session runs the browser preload; sandboxed,
+// isolated, no Node), and laid over the pane that owns it.
 //
 // Placement has one owner. A pane reports `browser.view.place` with its own token; a report with `claim` makes that pane
 // the owner, and a report from any other pane is ignored, `null` included, so a pane that lost the view can neither move
@@ -21,7 +21,7 @@
 // their views hidden; the fresh renderer's panes claim again on mount. A closing window gives its views up; the tabs
 // live on, unplaced.
 import { join } from 'node:path';
-import { WebContentsView, type BrowserWindow, type NativeImage, type WebContents, type WebPreferences } from 'electron';
+import { WebContentsView, type BrowserWindow, type NativeImage, type Session, type WebContents, type WebPreferences } from 'electron';
 import { BROWSER_PLACEHOLDER_MAX_BYTES, type BrowserTab } from '@shared/browser/tab';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { Partitions } from './partition';
@@ -30,22 +30,33 @@ import type { FocusEmulationMode } from './visibility';
 
 // out/preload/browser.js beside the app window's out/preload/index.js (main is bundled into out/main/index.js).
 export const BROWSER_PRELOAD = join(__dirname, '../preload/browser.js');
+export const BROWSER_PRELOAD_ID = 'maws-browser';
 const PLACEHOLDER_JPEG_QUALITY = 80;
 
-// MAWS's own preferences for every page (pass two's construction): the browser preload, sandboxed and isolated, no Node.
-// A page's `window.open` child gets these over whatever the page asked for (window-open.ts); its partition is its
-// opener's, which Chromium's child already shares.
-export function tabWebPreferences(preload = BROWSER_PRELOAD): WebPreferences {
+// The browser preload belongs to the partition, not to the page (Decision Log 56): registered once on each browser
+// partition's session when the partition is prepared (index.ts), it runs in the main frame of every page there, a tab
+// adopted from a page's `window.open` included, where a preload named in the page's own preferences (the open handler's
+// override) never ran. No page names it as well, which would run it twice.
+export function registerBrowserPreload(ses: Pick<Session, 'getPreloadScripts' | 'registerPreloadScript'>, filePath = BROWSER_PRELOAD): void {
+  if (ses.getPreloadScripts().some((script) => script.id === BROWSER_PRELOAD_ID)) return; // Electron throws on a repeated id
+  ses.registerPreloadScript({ type: 'frame', id: BROWSER_PRELOAD_ID, filePath });
+}
+
+// MAWS's own preferences for every page (pass two's construction, less the preload, which is the partition's): sandboxed
+// and isolated, no Node, and `nodeIntegrationInSubFrames` left off, so no subframe runs the preload. A page's
+// `window.open` child gets these over whatever the page asked for (window-open.ts); its partition is its opener's, which
+// Chromium's child already shares.
+export function tabWebPreferences(): WebPreferences {
   // safeDialogs: a page looping alert() is offered Chrome's "prevent additional dialogs" after the first
-  return { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true };
+  return { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true };
 }
 
 // A tab's view in its partition; or, for an adopted `window.open` child, the view over Chromium's child webContents.
-export function createTabView(partitions: Pick<Partitions, 'session'>, preload = BROWSER_PRELOAD): (tab: BrowserTab, adopted?: WebContents) => WebContentsView {
+export function createTabView(partitions: Pick<Partitions, 'session'>): (tab: BrowserTab, adopted?: WebContents) => WebContentsView {
   return (tab, adopted) => {
-    partitions.session(tab.partition); // prepared before its first page loads
+    partitions.session(tab.partition); // prepared (its preload registered) before its first page loads
     if (adopted) return new WebContentsView({ webContents: adopted });
-    return new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences(preload) } });
+    return new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences() } });
   };
 }
 

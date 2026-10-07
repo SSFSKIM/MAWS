@@ -3,9 +3,10 @@
 // replay (no engine). The first live run of main's browser code: views laid over panes, the cover, adoption of a page's
 // window.open, the attribution seams behind the pop-up gate and the clipboard carve-out, errors, persistence.
 //
-// (1) show_pane, links and window.open, a main tab and the one owner, a popup closing itself; (2) error pages;
-// (3) refused addresses; (4) the cover; (5) placement under resizes; (6) a relaunch restores tabs suspended;
-// (7) permissions, the clipboard, a download, find, Esc; (8) the chrome in both themes (shots under MAWS_E4A_SHOTS=1).
+// (1) show_pane, links and window.open, the browser preload once per page and never in a subframe, a main tab and the one
+// owner, a popup closing itself; (2) error pages; (3) refused addresses; (4) the cover; (5) placement under resizes;
+// (6) a relaunch restores tabs suspended; (7) permissions, the clipboard, a download, find, Esc; (8) the chrome in both
+// themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -17,8 +18,8 @@ import { closeScene, scratchProject, seamLines, show, type Scene } from './suppo
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import {
-  address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, resizeWindow,
-  shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
+  address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
+  preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
 test.describe.configure({ timeout: 180_000 });
@@ -71,18 +72,10 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     expect((await tabsOf(s, id)).selected).toBe(c);
     const pageC = await pageAt(s, C);
     await expect(pageC.locator('#opener')).toHaveText('true');
-    // MAWS's own webPreferences reached the adopted child (overrideBrowserWindowOptions; Electron reports no preload
-    // here, for any view), in its opener's partition
-    expect(
-      await s.maws.app.evaluate(({ webContents }, urls) =>
-        urls.map((url) => {
-          const wc = webContents.getAllWebContents().find((w) => w.getURL() === url)!;
-          const prefs = (wc as unknown as { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences(); // not in the typings
-          return { sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, nodeIntegration: prefs.nodeIntegration, webSecurity: prefs.webSecurity, storage: wc.session.storagePath?.split('/').pop() };
-        }), [A, C]),
-    ).toEqual(Array(2).fill({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, storage: 'maws-browser' }));
-    // safeDialogs: a tab's own page reports it; Electron 44.4.5 reports an adopted child's as false although the same
-    // override reaches the child's other preferences (a probe's defaultFontSize did), so the child's is recorded only
+    // safeDialogs: a tab's own page reports it; Electron 44.4.5 reports an adopted child's as false (a control run's
+    // override of nodeIntegrationInSubFrames was not reported on the child either, while a probe's defaultFontSize did
+    // apply), and a per-page preference has no session-level route, so the child's is recorded only; E4c's dialog wrap
+    // (A-42) is the lever (Decision Log 56)
     const [ownDialogs, childDialogs] = await s.maws.app.evaluate(({ webContents }, urls) =>
       urls.map((url) => (webContents.getAllWebContents().find((w) => w.getURL() === url) as unknown as { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences().safeDialogs), [A, C]);
     expect(ownDialogs).toBe(true);
@@ -95,6 +88,51 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     await expect(chipsIn(panel)).toHaveCount(4);
     expect((await tabsOf(s, id)).selected).toBe(a);
     expect((await viewOf(s, a))?.visible).toBe(true);
+
+    // the browser preload ran exactly once in each page's document: the tab's own (A), the target="_blank" and ⌘-click
+    // tabs (both at B) and the window.open child (C); the page's own world cannot see its count (Decision Log 56)
+    const pagesAtB = () => s.maws.app.windows().filter((p) => !p.isClosed() && p.url() === B);
+    await expect.poll(() => pagesAtB().length).toBe(2);
+    for (const page of pagesAtB()) await expect(page.locator('#heading')).toHaveText('Page B');
+    const once = { main: 1, subframes: [] };
+    expect({ A: await preloadRunsAt(s, A), B: await preloadRunsAt(s, B), C: await preloadRunsAt(s, C) }).toEqual({ A: [once], B: [once, once], C: [once] });
+    expect(await pageA.evaluate(() => '__mawsBrowserPreloadRuns' in globalThis)).toBe(false);
+    // it is the partition session's, named in no page's preferences, which keep MAWS's sandbox and isolation with Node in
+    // no frame, adopted children included, all in the opener's partition
+    expect(
+      await s.maws.app.evaluate(
+        ({ webContents }, urls) =>
+          webContents
+            .getAllWebContents()
+            .filter((wc) => urls.includes(wc.getURL()))
+            .map((wc) => {
+              const prefs = (wc as unknown as { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences(); // not in the typings
+              return {
+                url: wc.getURL(),
+                sandbox: prefs.sandbox,
+                contextIsolation: prefs.contextIsolation,
+                nodeIntegration: prefs.nodeIntegration,
+                nodeIntegrationInSubFrames: prefs.nodeIntegrationInSubFrames,
+                webSecurity: prefs.webSecurity,
+                storage: wc.session.storagePath?.split('/').pop(),
+                sessionPreloads: wc.session.getPreloadScripts().map(({ id, type, filePath }) => `${id} ${type} ${filePath.split('/').slice(-3).join('/')}`),
+              };
+            })
+            .sort((x, y) => x.url.localeCompare(y.url)),
+        [A, B, C],
+      ),
+    ).toEqual(
+      [A, B, B, C].map((url) => ({
+        url,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        nodeIntegrationInSubFrames: false,
+        webSecurity: true,
+        storage: 'maws-browser',
+        sessionPreloads: ['maws-browser frame out/preload/browser.js'],
+      })),
+    );
 
     // Open in tab: a browser main tab shows the same tab; the panel's pane says where it went
     await overflow(s, panel, 'Open in tab');
@@ -154,6 +192,16 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     await s.page.keyboard.press('Escape');
     await expect(s.page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
     await expectOnPane(s, c, paneIn(panel), 'panel');
+
+    // a subframe runs no preload (nodeIntegrationInSubFrames stays off): a page with a same-origin frame runs it once, in
+    // its main frame
+    const F = s.server.url('/framed.html');
+    const PLAIN = s.server.url('/plain.html');
+    await showPane(s, { appSessionId: id, requestId: 'e4a-show-framed', target: F });
+    await tabAt(s, id, F);
+    const framed = await pageAt(s, F);
+    await expect(framed.frameLocator('#sub').locator('#plain')).toHaveText('A page with no title');
+    expect(await preloadRuns(framed)).toEqual({ main: 1, subframes: [{ url: PLAIN, runs: 0 }] });
   });
 });
 
