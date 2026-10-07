@@ -3,8 +3,9 @@
 // would), each within a deadline and a size bound, until one is an image, and hands the chrome a `data:` URL of the
 // icon's original bytes, since the app's CSP admits only `data:` images and ICO and SVG, which most sites serve, decode
 // in an `<img>` but not through `nativeImage` (an SVG in image context runs no script). The format is the bytes' own,
-// read by signature; a body that is not one of the six formats is no icon, whatever its content type says. Results,
-// misses included, are cached per (partition, icon URL), least recently used first out.
+// read by signature; a body that is not one of the six formats is no icon, whatever its content type says. Definitive
+// answers, misses included, are cached per (partition, icon URL), least recently used first out; a failure that may
+// pass (a throw, the deadline, a 5xx) is tried again next time.
 
 export const FAVICON_MAX_BYTES = 64 * 1024;
 export const FAVICON_FETCH_MS = 5000;
@@ -61,24 +62,30 @@ export class Favicons {
       this.cache.set(key, hit);
       return hit;
     }
-    const icon = await this.fetchOne(partition, url);
+    const { icon, definitive } = await this.fetchOne(partition, url);
+    if (!definitive) return icon;
     this.cache.set(key, icon);
     while (this.cache.size > FAVICON_CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
     return icon;
   }
 
-  private async fetchOne(partition: string, url: string): Promise<string | null> {
-    if (/^data:/i.test(url)) return dataUrlBytes(url);
-    if (!/^https?:/i.test(url)) return null;
+  // `definitive`: the answer is the resource's own (an image, a body that is none, a 404 or 410, too large), so it is
+  // cached; a throw, the deadline or any other status may answer otherwise next time, so it is not.
+  private async fetchOne(partition: string, url: string): Promise<{ icon: string | null; definitive: boolean }> {
+    if (/^data:/i.test(url)) return { icon: dataUrlBytes(url), definitive: true };
+    if (!/^https?:/i.test(url)) return { icon: null, definitive: true };
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), this.deadlineMs);
     try {
       const response = await this.fetchIn(partition, url, { signal: abort.signal });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        return { icon: null, definitive: response.status === 404 || response.status === 410 };
+      }
       const bytes = await readCapped(response, FAVICON_MAX_BYTES);
-      return bytes === null ? null : faviconDataUrl(bytes);
+      return { icon: bytes === null ? null : faviconDataUrl(bytes), definitive: true };
     } catch {
-      return null;
+      return { icon: null, definitive: false };
     } finally {
       clearTimeout(timer);
     }

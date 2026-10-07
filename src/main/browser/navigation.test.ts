@@ -29,6 +29,8 @@ class FakeWebContents extends EventEmitter {
   readonly stop = vi.fn();
   readonly close = vi.fn();
   readonly isDestroyed = () => false;
+  loading = false;
+  readonly isLoading = () => this.loading;
   readonly getZoomFactor = () => this.zoom;
   readonly setZoomFactor = vi.fn((factor: number) => void (this.zoom = factor));
   readonly findInPage = vi.fn(() => 1);
@@ -309,6 +311,112 @@ describe('navigation: the load-error lifecycle (E4a Design §5, Decision Log 23)
     expect(h.navigator.navigate(id, 'reload')).toBe(true);
     expect(wc.reload).toHaveBeenCalledTimes(1);
     expect(h.tab(id).loading).toBe(true);
+  });
+});
+
+describe('navigation: a navigation that never lands (Stop, Esc, a download, an abort)', () => {
+  it('navigate → stop → did-stop-loading: the address returns to the committed page', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    h.navigator.navigate(id, { url: 'https://slow.test/' });
+    expect(h.tab(id).url).toBe('https://slow.test/');
+    h.navigator.navigate(id, 'stop');
+    fail(wc, 'https://slow.test/', -3, 'ERR_ABORTED');
+    wc.emit('did-stop-loading');
+    expect(h.tab(id)).toMatchObject({ url: 'https://a.test/', loading: false, loadError: null });
+    expect(h.entry(id).committed).toBe(true);
+    // Reload now reloads the page shown, and the next commit is not counted as the cancelled typed navigation
+    expect(h.navigator.navigate(id, 'reload')).toBe(true);
+    expect(wc.reload).toHaveBeenCalled();
+  });
+
+  it('a typed URL that became a download (-3 then did-stop-loading) leaves the page and is no typed visit', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    h.navigator.navigate(id, { url: 'https://a.test/file.bin', typed: true });
+    fail(wc, 'https://a.test/file.bin', -3, 'ERR_ABORTED');
+    wc.emit('did-stop-loading');
+    expect(h.tab(id).url).toBe('https://a.test/');
+    commit(wc, 'https://a.test/next');
+    expect(h.history.visit).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://a.test/next', { typed: false, at: 1_000_000 });
+  });
+
+  it('error → navigate → stop: the error page comes back with its URL', () => {
+    const h = harness();
+    const id = h.open('http://127.0.0.1:1/');
+    const wc = h.wc(id);
+    fail(wc, 'http://127.0.0.1:1/', -102, 'ERR_CONNECTION_REFUSED');
+    const error = h.tab(id).loadError;
+    h.navigator.navigate(id, { url: 'https://slow.test/' });
+    expect(h.tab(id).loadError).toBeNull();
+    h.navigator.navigate(id, 'stop');
+    wc.emit('did-stop-loading');
+    expect(h.tab(id)).toMatchObject({ url: 'http://127.0.0.1:1/', loadError: error, loading: false });
+    expect(h.entry(id).committed).toBe(false);
+  });
+
+  it('crash → reload → stop: the crash page comes back; a second command keeps the first\'s stash', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    wc.emit('render-process-gone', {}, { reason: 'oom', exitCode: 1 });
+    h.navigator.navigate(id, 'reload');
+    h.navigator.navigate(id, { url: 'https://b.test/' });
+    wc.emit('did-stop-loading');
+    expect(h.tab(id)).toMatchObject({ url: 'https://a.test/', crashed: { reason: 'oom' } });
+  });
+
+  it('a stop after a commit or a failure restores nothing; a crash mid-navigation stands', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    h.navigator.navigate(id, { url: 'http://127.0.0.1:1/' });
+    fail(wc, 'http://127.0.0.1:1/', -102, 'ERR_CONNECTION_REFUSED');
+    wc.emit('did-stop-loading');
+    expect(h.tab(id)).toMatchObject({ url: 'http://127.0.0.1:1/', loadError: { kind: 'refused' } });
+
+    h.navigator.navigate(id, { url: 'https://b.test/' });
+    wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 11 });
+    wc.emit('did-stop-loading');
+    expect(h.tab(id).crashed).toEqual({ reason: 'crashed' });
+    expect(h.tab(id).loadError).toBeNull();
+  });
+
+  it('a title that arrives while a navigation is pending names the committed page\'s row, not the target\'s', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    h.navigator.navigate(id, { url: 'https://b.test/' });
+    wc.emit('page-title-updated', {}, 'Page A', true);
+    expect(h.history.setTitle).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://a.test/', 'Page A');
+  });
+
+  it('a same-document move reads loading from the view; a typed fragment counts as typed, a page\'s pushState does not', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    wc.emit('did-start-loading');
+    wc.loading = false; // Back within the document: no did-stop-loading follows
+    wc.emit('did-navigate-in-page', {}, 'https://a.test/#one', true, 1, 1);
+    expect(h.tab(id).loading).toBe(false);
+
+    h.navigator.navigate(id, { url: 'https://b.test/', typed: true });
+    wc.emit('did-navigate-in-page', {}, 'https://a.test/#pushed', true, 1, 1); // the old page's own pushState
+    expect(h.history.visit).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://a.test/#pushed', { typed: false, at: 1_000_000 });
+    commit(wc, 'https://b.test/');
+    expect(h.history.visit).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://b.test/', { typed: true, at: 1_000_000 });
+
+    h.navigator.navigate(id, { url: 'https://b.test/#two', typed: true });
+    wc.emit('did-navigate-in-page', {}, 'https://b.test/#two', true, 1, 1);
+    expect(h.history.visit).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://b.test/#two', { typed: true, at: 1_000_000 });
   });
 });
 

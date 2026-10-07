@@ -49,7 +49,7 @@ export interface NavigatorDeps {
 }
 
 export class Navigator {
-  private readonly typed = new WeakSet<TabEntry>(); // the address field's navigation, until its commit or failure
+  private readonly typed = new WeakMap<TabEntry, string>(); // the address field's navigation (its URL), until it lands
   private readonly killing = new WeakSet<TabEntry>(); // Stop page killed the renderer: its exit is not a crash
   private readonly faviconRequests = new WeakMap<TabEntry, number>();
   private readonly now: () => number;
@@ -71,7 +71,7 @@ export class Navigator {
       if (!checked.ok) return false;
       this.typed.delete(entry);
       if (!store.load(tabId, checked.url)) return false;
-      if (to.typed) this.typed.add(entry);
+      if (to.typed) this.typed.set(entry, checked.url);
       return true;
     }
     switch (to) {
@@ -192,19 +192,22 @@ export class Navigator {
       if (live()) store.update(tabId, { loading: true });
     });
     wc.on('did-stop-loading', () => {
-      if (live()) store.update(tabId, { loading: false, ...historyFlags(wc) });
+      if (!live()) return;
+      this.typed.delete(entry); // a typed navigation that never landed
+      store.loadStopped(tabId, historyFlags(wc)); // one that neither committed nor failed: the tab returns to what it showed
     });
     wc.on('did-navigate', (_event, url) => {
       if (!live()) return;
-      const typed = this.consumeTyped(entry);
+      const typed = this.typed.delete(entry); // after redirects the URL is not the typed one, but the navigation is
       store.navigationCommitted(tabId, { url: ownUrl(url), ...historyFlags(wc) });
       store.update(tabId, { title: committedTitle(wc, url), zoom: roundZoom(wc.getZoomFactor()) });
       this.visit(entry, url, typed);
     });
     wc.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!live() || !isMainFrame) return;
-      const typed = this.consumeTyped(entry);
-      store.update(tabId, { url: ownUrl(url), ...historyFlags(wc) });
+      // the typed navigation only when this is it (a fragment typed on the same page), not a page's own pushState
+      const typed = this.typed.get(entry) === normalisedUrl(url) && this.typed.delete(entry);
+      store.navigatedInPage(tabId, { url: ownUrl(url), ...historyFlags(wc), loading: wc.isLoading() });
       this.visit(entry, url, typed);
     });
     wc.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
@@ -215,8 +218,10 @@ export class Navigator {
     wc.on('page-title-updated', (_event, title) => {
       if (!live()) return;
       store.update(tabId, { title });
-      const { partition, url } = entry.tab;
-      if (validateBrowserUrl(url).ok) this.safely(() => this.deps.history.setTitle(partition, url, title));
+      // the title is the committed document's, never a pending navigation's target (whose row it would mislabel)
+      const { partition } = entry.tab;
+      const url = entry.committedUrl;
+      if (url !== null && validateBrowserUrl(url).ok) this.safely(() => this.deps.history.setTitle(partition, url, title));
     });
     wc.on('page-favicon-updated', (_event, favicons) => {
       if (!live()) return;
@@ -274,10 +279,6 @@ export class Navigator {
 
   // ---- internals ------------------------------------------------------------------------------------------------------
 
-  private consumeTyped(entry: TabEntry): boolean {
-    return this.typed.delete(entry);
-  }
-
   private visit(entry: TabEntry, url: string, typed: boolean): void {
     if (!validateBrowserUrl(url).ok) return; // about:blank never reaches the history
     const { partition } = entry.tab;
@@ -295,6 +296,12 @@ export class Navigator {
 }
 
 const historyFlags = (wc: WebContents) => ({ canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
+
+// A URL as `validateBrowserUrl` writes it (what a typed navigation's target was recorded as).
+const normalisedUrl = (url: string) => {
+  const checked = validateBrowserUrl(url);
+  return checked.ok ? checked.url : url;
+};
 
 // The URL a tab records: `about:blank` (an adopted child's empty document) is the empty tab's ''.
 const ownUrl = (url: string) => (url === 'about:blank' ? '' : url);

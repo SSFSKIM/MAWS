@@ -10,6 +10,7 @@ const { CommandFailure } = await import('../ipc/router');
 const { TabStore } = await import('./tabs');
 const { registerBrowserHandlers } = await import('./register');
 const { ViewManager } = await import('./view');
+const { Navigator } = await import('./navigation');
 
 const A = 'App-A' as AppSessionId;
 
@@ -88,17 +89,37 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(downloads.reveal).toHaveBeenCalledWith(tab.tabId);
   });
 
-  it('a navigator command for an unknown tab answers invalid_input', () => {
-    const real = new TabStore({ emit: () => {}, createView: () => ({}) as never, resolvePartition: () => DEFAULT_PARTITION, schedule: () => {} });
-    const { call, navigator } = setup();
-    navigator.zoom.mockImplementation((tabId: string) => real.require(tabId).tab.zoom);
-    let thrown: unknown;
-    try {
-      call('browser.tabs.zoom', { tabId: 'b_ffffffffffff', action: 'in' });
-    } catch (error) {
-      thrown = error;
+  it('each navigator command for an unknown tab answers invalid_input (the real navigator over the store)', () => {
+    const store = new TabStore({ emit: () => {}, createView: () => ({}) as never, resolvePartition: () => DEFAULT_PARTITION, schedule: () => {} });
+    const navigator = new Navigator({ store, history: { visit: vi.fn(), setTitle: vi.fn() }, favicons: { resolve: vi.fn() }, emit: () => {}, seam: { line: vi.fn(), openExternal: vi.fn() } });
+    const handlers = new Map<string, (input: unknown, context: unknown) => unknown>();
+    registerBrowserHandlers({
+      store,
+      views: { place: vi.fn(), cover: vi.fn(async () => {}) },
+      navigator,
+      downloads: { reveal: vi.fn() },
+      history: { suggest: vi.fn(() => []) },
+      profiles: () => [],
+      register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
+    });
+    const tabId = 'b_ffffffffffff';
+    const inputs: [string, unknown][] = [
+      ['browser.tabs.navigate', { tabId, to: 'reload' }],
+      ['browser.tabs.zoom', { tabId, action: 'in' }],
+      ['browser.tabs.find', { tabId, text: 'x' }],
+      ['browser.tabs.dismiss', { tabId, notice: 'popups' }],
+      ['browser.tabs.devtools', { tabId }],
+    ];
+    for (const [name, input] of inputs) {
+      let thrown: unknown;
+      try {
+        handlers.get(name)!(input, { sender: {} });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, name).toBeInstanceOf(CommandFailure);
+      expect((thrown as InstanceType<typeof CommandFailure>).error, name).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
     }
-    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
   it('suggests from the history, and nothing when the index fails', () => {

@@ -56,12 +56,24 @@ export interface TabEntry {
   // committed navigation, so neither a blank view nor Chromium's own error page is ever shown in the pane. An adopted
   // `about:blank` child starts true: its opener may write into that document without ever navigating it.
   committed: boolean;
+  // The URL of the document the view last committed (cross-document or in-page); null before the first commit. What a
+  // navigation that never lands returns the address field to, and the URL a page's title belongs to.
+  committedUrl: string | null;
+  // What a navigation command cleared (the URL it replaced, the error or crash page), kept until that navigation commits
+  // or fails; restored when loading stops with neither (Stop, Esc, a URL that became a download, an abort).
+  pending: PendingNavigation | null;
   // The tab's one CDP attachment (debugger.ts), made with its view and gone with it; attached only when someone asks.
   debugger: TabDebugger | null;
   input: TabInputSeam;
   // The chrome's find bar is open for this tab (main opened it on ⌘F in the page, or a find request arrived), so Esc in
   // the page closes it rather than reaching the page (keys.ts).
   findOpen: boolean;
+}
+
+export interface PendingNavigation {
+  url: string;
+  loadError: BrowserTab['loadError'];
+  crashed: BrowserTab['crashed'];
 }
 
 export type TabPatch = Partial<Omit<BrowserTab, 'tabId' | 'appSessionId'>>;
@@ -360,8 +372,12 @@ export class TabStore {
   // ---- the load-error lifecycle (Design §5, Decision Log 23) -----------------------------------------------------------
 
   // Any navigation command (an address, Back, Forward, Reload, E4c's navigate): the error and crash pages give way at
-  // once, and the view stays hidden until the new document commits when what it shows now is not the tab's own.
+  // once, and the view stays hidden until the new document commits when what it shows now is not the tab's own. What
+  // the command cleared is kept until its navigation lands (`loadStopped`); a second command keeps the first's.
   beginNavigation(tabId: string, patch: TabPatch = {}): void {
+    const entry = this.require(tabId);
+    const { url, loadError, crashed } = entry.tab;
+    entry.pending ??= { url, loadError, crashed };
     this.update(tabId, { ...patch, loading: true, loadError: null, crashed: null, failed: null });
   }
 
@@ -369,7 +385,29 @@ export class TabStore {
   navigationCommitted(tabId: string, { url, canGoBack, canGoForward }: { url: string; canGoBack: boolean; canGoForward: boolean }): void {
     const entry = this.require(tabId);
     entry.committed = true;
+    entry.committedUrl = url;
+    entry.pending = null;
     this.update(tabId, { url, canGoBack, canGoForward, loadError: null, crashed: null, denied: [], blockedPopups: 0 });
+  }
+
+  // A main-frame `did-navigate-in-page` (a fragment, `history.pushState`, Back or Forward within the document): the same
+  // document at another URL. `loading` is read from the view: a same-document move may come with no loading events.
+  navigatedInPage(tabId: string, { url, canGoBack, canGoForward, loading }: { url: string; canGoBack: boolean; canGoForward: boolean; loading: boolean }): void {
+    const entry = this.require(tabId);
+    entry.committedUrl = url;
+    entry.pending = null;
+    this.update(tabId, { url, canGoBack, canGoForward, loading });
+  }
+
+  // `did-stop-loading`. A navigation that ended with neither a commit nor a failure (Stop, Esc, a URL that became a
+  // download, an abort) returns the tab to what it showed: the committed page's URL, else the error or crash page the
+  // command cleared, with the URL it had.
+  loadStopped(tabId: string, { canGoBack, canGoForward }: { canGoBack: boolean; canGoForward: boolean }): void {
+    const entry = this.require(tabId);
+    const { pending } = entry;
+    entry.pending = null;
+    const restored: TabPatch = !pending ? {} : entry.committed && entry.committedUrl !== null ? { url: entry.committedUrl } : { ...pending };
+    this.update(tabId, { loading: false, canGoBack, canGoForward, ...restored });
   }
 
   // A main-frame `did-fail-load`: the failed URL stays in the address field and the view is hidden; -3 is never an error.
@@ -378,6 +416,7 @@ export class TabStore {
     if (kind === null) return;
     const entry = this.require(tabId);
     entry.committed = false;
+    entry.pending = null;
     const { url, code, description, canGoBack, canGoForward } = failure;
     this.update(tabId, { url, canGoBack, canGoForward, loading: false, loadError: { url, host: hostOf(url), kind, code, description } });
   }
@@ -387,6 +426,7 @@ export class TabStore {
   rendererGone(tabId: string, reason: string): void {
     const entry = this.require(tabId);
     entry.committed = false;
+    entry.pending = null; // the crash page stands; a stop that follows restores nothing over it
     entry.debugger?.detach();
     this.update(tabId, { crashed: { reason }, loading: false, unresponsive: false });
   }
@@ -455,6 +495,8 @@ export class TabStore {
     entry.view = null;
     entry.debugger = null;
     entry.committed = false;
+    entry.committedUrl = null;
+    entry.pending = null;
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
 
@@ -511,7 +553,7 @@ export class TabStore {
   }
 
   private blankEntry(tab: BrowserTab): TabEntry {
-    return { tab, view: null, placement: null, host: null, visible: false, committed: false, debugger: null, input: new TabInputSeam(), findOpen: false };
+    return { tab, view: null, placement: null, host: null, visible: false, committed: false, committedUrl: null, pending: null, debugger: null, input: new TabInputSeam(), findOpen: false };
   }
 
   private newTab(tabId: string, appSessionId: AppSessionId, partition: string): BrowserTab {

@@ -116,10 +116,36 @@ describe('Favicons: fetch in order, sniff, bound, cache', () => {
     expect(fetchIn.mock.calls.map(([, url]) => url)).toEqual(['https://s.test/i.png']);
   });
 
-  it('a fetch that throws is a miss, not a failure', async () => {
-    const favicons = new Favicons(async () => {
+  it('a fetch that throws is a miss, not a failure, and is tried again next time', async () => {
+    const fetchIn = vi.fn(async (): Promise<Response> => {
       throw new Error('net::ERR_FAILED');
     });
+    const favicons = new Favicons(fetchIn);
     expect(await favicons.resolve('persist:maws-browser', ['https://s.test/x.ico'])).toBeNull();
+    expect(await favicons.resolve('persist:maws-browser', ['https://s.test/x.ico'])).toBeNull();
+    expect(fetchIn).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches only definitive answers: a 404 or 410 is, a 5xx, a 403 and a timeout are not', async () => {
+    vi.useFakeTimers();
+    try {
+      const statuses: Record<string, number> = { gone: 410, missing: 404, broken: 503, forbidden: 403 };
+      const fetchIn = vi.fn((_partition: string, url: string, init: { signal: AbortSignal }) => {
+        const name = /\/(\w+)\.ico$/.exec(url)![1]!;
+        if (name === 'slow') return new Promise<Response>((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        return Promise.resolve(response(HTML, { status: statuses[name] }));
+      });
+      const favicons = new Favicons(fetchIn, 5000);
+      const urls = ['https://s.test/gone.ico', 'https://s.test/missing.ico', 'https://s.test/broken.ico', 'https://s.test/forbidden.ico', 'https://s.test/slow.ico'];
+      for (let round = 0; round < 2; round++) {
+        const pending = favicons.resolve('persist:maws-browser', urls);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await pending).toBeNull();
+      }
+      const calls = fetchIn.mock.calls.map(([, url]) => /\/(\w+)\.ico$/.exec(url)![1]);
+      expect(calls).toEqual(['gone', 'missing', 'broken', 'forbidden', 'slow', 'broken', 'forbidden', 'slow']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
