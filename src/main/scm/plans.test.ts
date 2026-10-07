@@ -211,6 +211,8 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
     it.each<[string, (w: World) => void, string, RegExp]>([
       ['not a repository', (w) => { w.status = new NotARepositoryError(); }, 'not_repository', /Not a git repository/],
       ['detached', (w) => { w.status = statusOf({ branch: null }); }, 'detached', /detached/],
+      // E11 (tracker row E6 "two short windows"): an unborn branch is refused at planning, not by the push in the Output
+      ['a branch with no commits yet', (w) => { w.status = statusOf({ head: '', upstream: null, ahead: 0 }); w.upstream = null; }, 'unborn', /^main has no commits yet/],
       ['no remote', (w) => { w.remotes = []; }, 'no_remote', /no remote/],
       ['an unknown asked remote', () => {}, 'no_remote', /"elsewhere"/],
       ['several remotes, none origin, none upstream', (w) => { w.remotes = ['a', 'b']; w.upstream = null; }, 'no_remote', /Choose/],

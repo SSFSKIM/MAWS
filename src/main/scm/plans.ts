@@ -146,6 +146,8 @@ export async function planPush(sources: PlanSources, { remote: asked }: Pick<Scm
   if (isRefusal(status)) return status;
   const branch = status.branch;
   if (branch === null) return refusal('detached', 'HEAD is detached; check out a branch to push it');
+  // E11: an unborn branch has nothing to push; git's own error would only show in the Output after the confirm
+  if (status.head === '') return refusal('unborn', `${branch} has no commits yet; commit first, then push`);
   const upstream = await upstreamOf(sources);
   const remote = await chooseRemote(sources, asked, upstream.remote);
   if (isRefusal(remote)) return remote;

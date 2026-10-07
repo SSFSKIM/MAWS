@@ -158,8 +158,23 @@ test.describe('source control over a scratch repository', () => {
       expect(operators.length, 'the added lines draw their operator').toBeGreaterThanOrEqual(UNTRACKED_TEXT.length);
       expect(operators.every((operator) => operator.trim() === '+'), `every line added: ${JSON.stringify(operators)}`).toBe(true);
 
-      // Stage, then Unstage
-      await button(row(p, 'unstaged', 'src/app.ts'), 'Stage src/app.ts').click();
+      // Stage, then Unstage. E11 (tracker row E6 "two short windows"): the stage's git.changed comes from main's
+      // refresh of the watcher, within one status read of the stage's own answer, not from the watcher's 250 ms
+      // trailing debounce after the index write (the buttons stage below; this one is timed through the bridge)
+      const timed = await p.page.evaluate(async ([appSessionId, repoRoot]) => {
+        let changedAt: number | null = null;
+        const off = window.maws.on('git.changed', (event) => {
+          if ((event as { repoRoot: string }).repoRoot === repoRoot && changedAt === null) changedAt = performance.now();
+        });
+        const answer = await window.maws.invoke('scm.stage', { appSessionId, paths: ['src/app.ts'] } as never);
+        const answeredAt = performance.now();
+        for (let waited = 0; changedAt === null && waited < 5_000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+        off();
+        return { ok: answer.ok, gap: changedAt === null ? null : changedAt - answeredAt };
+      }, [scratch.appSessionId, scratch.dir] as const);
+      expect(timed.ok).toBe(true);
+      expect(timed.gap, 'git.changed arrived').not.toBeNull();
+      expect(timed.gap!, `git.changed ${Math.round(timed.gap!)} ms after the stage answered`).toBeLessThan(250);
       await expect(row(p, 'staged', 'src/app.ts')).toBeVisible();
       await expect(row(p, 'unstaged', 'src/app.ts')).toHaveCount(0);
       expect(gitNames(scratch, '--cached'), 'git agrees').toEqual(['src/app.ts', 'src/staged.ts']);
