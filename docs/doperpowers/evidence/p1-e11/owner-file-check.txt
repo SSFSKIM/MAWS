@@ -1,0 +1,11 @@
+E11 owner-file check (spec A-15): the /tmp and /private/tmp project keys of ~/.claude.json, read-only.
+Command: python3 -c "import json;d=json.load(open('/Users/new/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))" | shasum
+Harness form (p1-common.mjs digest: sha1 of the sorted keys joined by newlines, first 12 hex): 770eae07f620
+
+M0.3 baseline (2026-10-07, master f0691bf9, no engine run): 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  (identical to the authoring baseline in docs/doperpowers/evidence/p1-e2/owner-file-check.txt; the 25th key,
+  /private/tmp/cua-accept, is the owner's); 129 project keys in all.
+Relay: GET http://127.0.0.1:8641/api/hello -> 200 (2026-10-07, no engine run).
+Helpers: /tmp/maws-review/waitload20.sh printed "eligible: load 5.61 after 0s"; /tmp/maws-review/with-slot.sh present.
+Install: the worktree's node_modules is a symlink to the main checkout's (brief: shared node_modules; no install on
+  the shared tree; the main checkout's package.json and pnpm-lock.yaml are byte-equal to this branch's at f0691bf9, cmp).
