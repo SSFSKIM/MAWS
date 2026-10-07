@@ -13,7 +13,7 @@ import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { MAWS_TOOL_USE } from './classify'; // E2
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
-import { firstJsonBlock } from './cells'; // E2
+import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
@@ -1252,14 +1252,7 @@ interface BrowserResultFields {
 function textAfterJson(content: string | ContentBlock[]): string | null {
   if (typeof content === 'string') return null;
   const texts = content.filter((block) => block.type === 'text').map((block) => str(block.text));
-  const first = texts.findIndex((text) => {
-    try {
-      const value: unknown = JSON.parse(text);
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
-    } catch {
-      return false;
-    }
-  });
+  const first = texts.findIndex((text) => jsonObjectOf(text) !== null);
   const after = first < 0 ? [] : texts.slice(first + 1);
   return after.length === 0 ? null : after.join('\n');
 }
