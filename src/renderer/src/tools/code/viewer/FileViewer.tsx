@@ -30,13 +30,28 @@ type FileTab = Extract<TabRef, { kind: 'file' }>;
 const bar = 'flex h-8 shrink-0 items-center gap-2 border-b border-border bg-bg px-3 text-ui-sm';
 const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';
 
-export function FileViewer({ tab }: { tab: FileTab }) {
-  if (tab.appSessionId === null) return <NoSession path={tab.path} />;
-  const lead = (
-    <span className="min-w-0 flex-1 truncate font-mono text-fg-muted" title={tab.path}>
-      {tab.path}
+// The path at the bar's start: its directory truncates first and the basename stays whole, so the controls, which keep
+// their size, take the directory's width and never the file's name (E11 W-D: the merge bar at a ~600 px viewer). The
+// lead's least width is the basename's, in the mono font's character widths (a name past 40 characters may still be
+// cut; the title carries the whole path).
+const NAME_MIN_CH = 40;
+
+function PathLead({ path }: { path: string }) {
+  const cut = path.lastIndexOf('/') + 1;
+  const name = path.slice(cut);
+  return (
+    <span data-path-lead className="flex flex-1 overflow-hidden font-mono text-fg-muted" style={{ minWidth: `${Math.min(name.length, NAME_MIN_CH)}ch` }} title={path}>
+      {cut > 0 ? <span className="min-w-0 truncate">{path.slice(0, cut)}</span> : null}
+      <span data-path-name className="min-w-0 shrink-0 truncate">
+        {name}
+      </span>
     </span>
   );
+}
+
+export function FileViewer({ tab }: { tab: FileTab }) {
+  if (tab.appSessionId === null) return <NoSession path={tab.path} />;
+  const lead = <PathLead path={tab.path} />;
   return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} />;
 }
 
