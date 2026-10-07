@@ -23,7 +23,7 @@ import { EmptyState, SuspendedPage } from './pages/EmptyState';
 import { ErrorPage } from './pages/ErrorPage';
 import { ShownElsewhere } from './pages/ShownElsewhere';
 import { paneRect, Placement, type PlacementMode } from './placement';
-import { useBrowser } from './store';
+import { onShowRequest, useBrowser } from './store';
 
 const PANE = 'relative h-full w-full overflow-hidden bg-bg';
 
@@ -97,6 +97,14 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   }, [tabId, surface, ownerAtMount]);
 
   useEffect(() => placement.current?.observe(owner), [owner]);
+  // the overflow menu's "Open in tab" or "Show in panel" naming this pane's tab and surface: as "Show here"
+  useEffect(
+    () =>
+      onShowRequest((request) => {
+        if (request.tabId === tabId && request.surface === surface) placement.current?.showHere();
+      }),
+    [tabId, surface],
+  );
   useEffect(() => onOwns?.(mode === 'owner'), [mode, onOwns]);
   useEffect(() => () => onOwns?.(false), [onOwns]);
 

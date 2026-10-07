@@ -17,7 +17,8 @@ import { installFakeMain, ok, type Handler } from '../../../test-support/code';
 import { BROWSER_COPY } from '../copy';
 import { coverPane, resetCovering } from '../covering';
 import { registerChromeExtra, type ChromeExtraProps } from '../extras';
-import { browser, connectBrowser, raiseNotice, resetBrowser } from '../store';
+import { panelHost } from '../../../panel/host';
+import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
 
 const A = 'app-a' as AppSessionId;
@@ -404,7 +405,11 @@ describe('the tab strip', () => {
   });
 
   it('in a main tab a chip opens that tab’s own main tab, and "+" moves to the new tab’s', async () => {
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
+    // the new tab is in the store by the time its main tab opens, so that tab never reads "That tab was closed"
+    const listedAtOpen: (string[] | undefined)[] = [];
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {
+      listedAtOpen.push(browser.getState().sessions.get(A)?.tabs.map((listed) => listed.tabId));
+    });
     render(<Chrome appSessionId={A} surface="main" tab={tabs()[0]!} tabs={tabs()} />);
     fireEvent.click(screen.getAllByRole('tab')[1]!);
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.newTabAction }));
@@ -414,6 +419,7 @@ describe('the tab strip', () => {
       { kind: 'browser', appSessionId: A, browserTabId: T2 },
       { kind: 'browser', appSessionId: A, browserTabId: T2 },
     ]);
+    expect(listedAtOpen[1]).toContain(T2);
   });
 });
 
@@ -439,9 +445,29 @@ describe('the overflow menu', () => {
     await wait(0);
     expect(writeText).toHaveBeenCalledWith('https://example.com/a');
     expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['urlCopied']);
+    const shows: unknown[] = [];
+    onTestFinished(onShowRequest((request) => shows.push(request)));
+    openTab.mockImplementation(() => void shows.push('openTab'));
     await menu(user);
     await user.click(screen.getByRole('menuitem', { name: BROWSER_COPY.menu.openInTab }));
     expect(openTab).toHaveBeenCalledWith({ kind: 'browser', appSessionId: A, browserTabId: T1 });
+    // a main tab already showing the tab elsewhere ("Shown in another pane") takes the page: the request follows the open
+    expect(shows).toEqual(['openTab', { tabId: T1, surface: 'main' }]);
+  });
+
+  it('Show in panel adds the Browser tool on the tab, then asks the panel’s pane to take the page', async () => {
+    const user = userEvent.setup();
+    const shows: unknown[] = [];
+    onTestFinished(onShowRequest((request) => shows.push(request)));
+    const addTool = vi.spyOn(panelHost, 'addTool').mockImplementation(() => {
+      shows.push('addTool');
+      return 'tool';
+    });
+    show({ tab: tab(), surface: 'main' });
+    await menu(user);
+    await user.click(screen.getByRole('menuitem', { name: BROWSER_COPY.menu.showInPanel }));
+    expect(addTool).toHaveBeenCalledWith('browser', { appSessionId: A, params: { tabId: T1, appSessionId: A } });
+    expect(shows).toEqual(['addTool', { tabId: T1, surface: 'panel' }]);
   });
 
   const disabledItems = async (user: ReturnType<typeof userEvent.setup>) =>

@@ -13,7 +13,7 @@ import { installFakeMain, ok } from '../../test-support/code';
 import { BROWSER_COPY } from './copy';
 import { resetCovering } from './covering';
 import { BrowserPane } from './Pane';
-import { browser, resetBrowser } from './store';
+import { browser, requestShow, resetBrowser } from './store';
 
 const A = 'app-a' as AppSessionId;
 const PLACEHOLDER = 'data:image/jpeg;base64,AAAA';
@@ -117,6 +117,25 @@ describe('placement', () => {
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.showHere }));
     expect(places().at(-1)).toEqual({ tabId: T1, paneId, surface: 'panel', rect: { x: 0, y: 0, width: 500, height: 500 }, claim: true });
     rerender(<BrowserPane tab={tab({ placedIn: { paneId, surface: 'panel' } })} surface="panel" />);
+    expect(screen.queryByText(BROWSER_COPY.shownElsewhere)).toBeNull();
+  });
+
+  it('a request to show its tab on its surface claims the view back, as Show here does; any other request is not its own', async () => {
+    const { rerender } = render(<BrowserPane tab={tab()} surface="main" />);
+    await frames();
+    const paneId = places()[0]!.paneId as string;
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId, surface: 'main' } })} surface="main" />);
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'panel-pane', surface: 'panel' } })} surface="main" />);
+    expect(screen.getByText(BROWSER_COPY.shownElsewhere)).toBeTruthy();
+    const count = places().length;
+    act(() => {
+      requestShow(T1, 'panel');
+      requestShow('b_000000000009', 'main');
+    });
+    expect(places()).toHaveLength(count);
+    act(() => requestShow(T1, 'main'));
+    expect(places().at(-1)).toEqual({ tabId: T1, paneId, surface: 'main', rect: { x: 10, y: 21, width: 300, height: 199 }, claim: true });
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId, surface: 'main' } })} surface="main" />);
     expect(screen.queryByText(BROWSER_COPY.shownElsewhere)).toBeNull();
   });
 

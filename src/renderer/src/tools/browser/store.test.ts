@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { BROWSER_COPY } from './copy';
-import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, raiseNotice, resetBrowser, tabTitle } from './store';
+import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, onShowRequest, raiseNotice, requestShow, resetBrowser, tabOpened, tabTitle } from './store';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -81,6 +81,31 @@ describe('connectBrowser', () => {
     off();
     fake.event('browser.chrome.command', { tabId: T1, command: 'closeFind' });
     expect(heard.mock.calls).toEqual([[{ tabId: T1, command: 'openFind' }]]);
+  });
+
+  it('a tab this window opened is listed at once, selected, and a list asked before it does not drop it', async () => {
+    await fake.reply('browser.tabs.list', { tabs: [browserTab(T1, A)], selected: { [A]: T1 } });
+    listSession(A, fake.client); // out while the tab opens
+    tabOpened(browserTab(T2, A));
+    expect(sessionOf(A)).toEqual({ tabs: [browserTab(T1, A), browserTab(T2, A)], selected: T2 });
+    await fake.reply('browser.tabs.list', { tabs: [browserTab(T1, A)], selected: { [A]: T1 } });
+    expect(sessionOf(A)).toEqual({ tabs: [browserTab(T1, A), browserTab(T2, A)], selected: T2 });
+    // main's own event is the newer word: once it listed the tab, the open's answer changes nothing
+    fake.event('browser.tabs.changed', { appSessionId: A, tabs: [browserTab(T1, A), browserTab(T2, A, { title: 'Newer' })], selected: T2 });
+    tabOpened(browserTab(T2, A));
+    expect(sessionOf(A)!.tabs[1]).toMatchObject({ title: 'Newer' });
+    // a session the store has not heard of yet
+    tabOpened(browserTab(T3, B));
+    expect(sessionOf(B)).toEqual({ tabs: [browserTab(T3, B)], selected: T3 });
+  });
+
+  it('relays a request to show a tab on a surface to every listener until it unsubscribes', () => {
+    const heard = vi.fn();
+    const off = onShowRequest(heard);
+    requestShow(T1, 'panel');
+    off();
+    requestShow(T1, 'main');
+    expect(heard.mock.calls).toEqual([[{ tabId: T1, surface: 'panel' }]]);
   });
 
   it('disconnecting stops every event', async () => {

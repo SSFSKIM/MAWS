@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useLayout } from '../../stores/layout';
+import { tabOpened } from './store';
 
 type Answer<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -29,9 +30,11 @@ export function place(report: CommandInput<'browser.view.place'>): void {
 
 // ---- the chrome's (Task 3.3) -------------------------------------------------------------------------------------------
 
-// A new tab of the session, selected: the tab main made, or null when it refused.
+// A new tab of the session, selected: the tab main made (already in the store, so whatever the caller opens on it finds
+// it), or null when it refused.
 export async function openTab(appSessionId: AppSessionId, url: string | null): Promise<BrowserTab | null> {
   const value = quietly('opening a tab')(await ipc.invoke('browser.tabs.open', { appSessionId, url, select: true }));
+  if (value) tabOpened(value.tab);
   return value?.tab ?? null;
 }
 

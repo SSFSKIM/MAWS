@@ -12,7 +12,7 @@ import { panelHost } from '../../../panel/host';
 import { closeTab, inspect, openExternal, openMainTab, zoom } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { MoreIcon } from '../icons';
-import { raiseNotice } from '../store';
+import { raiseNotice, requestShow } from '../store';
 
 export interface OverflowMenuProps {
   appSessionId: AppSessionId;
@@ -36,6 +36,13 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, onFind }: Overf
       () => raiseNotice({ appSessionId, tabId: tab.tabId, kind: 'urlCopied' }),
       (error: unknown) => console.warn('[browser] copying the URL failed', error),
     );
+  // The tab on the other surface, and the page with it: that surface's pane may already be mounted on the tab and saying
+  // "Shown in another pane" (Open in tab, then Show in panel), and it is asked to take the view, as its Show here would.
+  const showOn = (target: 'panel' | 'main', tab: BrowserTab) => {
+    if (target === 'main') openMainTab(appSessionId, tab.tabId);
+    else panelHost.addTool('browser', { appSessionId, params: { tabId: tab.tabId, appSessionId } });
+    requestShow(tab.tabId, target);
+  };
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -78,11 +85,11 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, onFind }: Overf
           </Item>
           <Separator />
           {surface === 'panel' ? (
-            <Item disabled={tab === null} onSelect={() => tab && openMainTab(appSessionId, tab.tabId)}>
+            <Item disabled={tab === null} onSelect={() => tab && showOn('main', tab)}>
               {copy.openInTab}
             </Item>
           ) : (
-            <Item disabled={tab === null} onSelect={() => tab && panelHost.addTool('browser', { appSessionId, params: { tabId: tab.tabId, appSessionId } })}>
+            <Item disabled={tab === null} onSelect={() => tab && showOn('panel', tab)}>
               {copy.showInPanel}
             </Item>
           )}

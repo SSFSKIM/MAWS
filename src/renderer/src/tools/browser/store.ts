@@ -10,7 +10,8 @@
 //   routed by session (Decision Log 44 (f)) and gone after BROWSER_NOTICE_MS.
 //
 // Main's `browser.chrome.command` (⌘L, ⌘F, Esc pressed inside a page) is relayed to the chrome through
-// `onChromeCommand`, since it is a one-shot instruction rather than state.
+// `onChromeCommand`, and the overflow menu's "Open in tab" and "Show in panel" ask the target surface's mounted pane to
+// take the page through `requestShow`, since both are one-shot instructions rather than state.
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { BrowserTab } from '@shared/browser/tab';
@@ -93,6 +94,15 @@ function applyChanged({ appSessionId, tabs, selected }: BrowserTabsChanged): voi
   setSessions(new Map([[appSessionId as AppSessionId, { tabs, selected }]]));
 }
 
+// A tab this window just opened (`browser.tabs.open`, selected), listed before main's event says so, so a surface
+// opened on it at once never reads it as gone. Main's event is the newer word: a tab it already listed is left as is.
+export function tabOpened(tab: BrowserTab): void {
+  const appSessionId = tab.appSessionId as AppSessionId;
+  const current = sessionTabs(browser.getState(), appSessionId);
+  if (current.tabs.some((listed) => listed.tabId === tab.tabId)) return;
+  setSessions(new Map([[appSessionId, { tabs: [...current.tabs, tab], selected: tab.tabId }]]));
+}
+
 // Lists every session (`appSessionId` absent) or one, applying the answer where nothing moved meanwhile.
 function list(client: MawsBridge, appSessionId?: AppSessionId): void {
   const asked = new Map(versions);
@@ -147,6 +157,26 @@ const commandListeners = new Set<(command: BrowserChromeCommand) => void>();
 export function onChromeCommand(listener: (command: BrowserChromeCommand) => void): () => void {
   commandListeners.add(listener);
   return () => void commandListeners.delete(listener);
+}
+
+// ---- show requests -----------------------------------------------------------------------------------------------------
+
+export interface ShowRequest {
+  tabId: string;
+  surface: 'panel' | 'main';
+}
+
+const showListeners = new Set<(request: ShowRequest) => void>();
+
+// The tab's page to the pane of that surface: a pane already mounted there (showing "Shown in another pane") claims the
+// view back as its "Show here" does; a pane that mounts afterwards claims on its own.
+export function requestShow(tabId: string, surface: 'panel' | 'main'): void {
+  showListeners.forEach((listener) => listener({ tabId, surface }));
+}
+
+export function onShowRequest(listener: (request: ShowRequest) => void): () => void {
+  showListeners.add(listener);
+  return () => void showListeners.delete(listener);
 }
 
 // ---- the connection ----------------------------------------------------------------------------------------------------
@@ -204,5 +234,6 @@ export function resetBrowser(): void {
   for (const timer of noticeTimers.values()) clearTimeout(timer);
   noticeTimers.clear();
   commandListeners.clear();
+  showListeners.clear();
   browser.setState(initial());
 }
