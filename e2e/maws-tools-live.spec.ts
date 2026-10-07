@@ -9,7 +9,7 @@
 // (docs/doperpowers/evidence/p1-e1/live-sitting.txt) and the screenshots in both themes (`e1-<surface>-<theme>.png`).
 // It spends money; run on purpose only, after a build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -26,6 +26,7 @@ import { assertConfigHomeSafe } from '../test/live/support/live';
 import { journal, mainResults, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { clearToasts, eventsOf, ofKind, recordEvents, seedTranscripts, shootThemes } from './support/maws-tools';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_E1_LIVE !== '1', 'the E1 live sitting runs only under MAWS_E1_LIVE=1');
@@ -33,7 +34,6 @@ test.describe.configure({ timeout: 1_500_000 });
 
 const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e1');
 const EVIDENCE_FILE = join(EVIDENCE, 'live-sitting.txt');
-const THEMES = ['light', 'dark'] as const;
 const TURN_MS = 300_000;
 
 const PROMPTS = {
@@ -95,21 +95,10 @@ function scratch(titles: string[]): Scratch & { engineIds: string[] } {
   git('init', '-q');
   git('add', '-A');
   git('commit', '-qm', 'seed');
-  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
-  mkdirSync(project, { recursive: true });
-  const engineIds = titles.map((title, k) => {
-    const sessionId = randomUUID();
-    const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: `2026-10-06T0${k}:00:00.000Z`, cwd: repo, sessionId, version: '2.1.291' };
-    writeFileSync(join(project, `${sessionId}.jsonl`), `${JSON.stringify(first)}\n`);
-    return sessionId;
-  });
-  return { root, config, repo, engineIds };
+  return { root, config, repo, engineIds: seedTranscripts(config, repo, titles) };
 }
 
 // ---- the app ---------------------------------------------------------------------------------------------------------
-
-type Ev<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
-const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Ev<K> => e.kind === kind);
 
 interface Sitting {
   maws: MawsLaunch;
@@ -119,16 +108,6 @@ interface Sitting {
   pane: Locator;
   panel: Locator;
   events(id: string): Promise<SessionEvent[]>;
-}
-
-async function recordEvents(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __e1?: { appSessionId: string; events: unknown[] }[] };
-    if (w.__e1) return;
-    const log: { appSessionId: string; events: unknown[] }[] = [];
-    w.__e1 = log;
-    window.maws.on('session.eventBatch', (payload) => log.push(payload as { appSessionId: string; events: unknown[] }));
-  });
 }
 
 const statusOf = async (s: Sitting, id: string) => value(await invoke(s.page, 'session.status', { appSessionId: id as never }));
@@ -211,29 +190,9 @@ async function end(s: Sitting, session: Session, before: { digest: string }, cos
   expect(after.digest, 'the A-15 delta: no scratch project in the owner file').toBe(before.digest);
 }
 
-// A toast ("<session> needs you") lands over the panel's bottom edge, where the sheet's Submit bar sits: cleared first.
-// Every open toast dismissed, then none left open (a closing one still animates out over the bar), so the next click
-// lands on the sheet.
-async function clearToasts(page: Page): Promise<void> {
-  const region = page.getByRole('region', { name: /^Notifications/ });
-  const open = region.locator('li[data-state="open"]');
-  await expect(async () => {
-    for (const dismiss of await open.getByRole('button', { name: 'Dismiss' }).all()) await dismiss.click({ timeout: 2_000 }).catch(() => undefined);
-    await expect(region.locator('li')).toHaveCount(0, { timeout: 1_000 });
-  }).toPass({ timeout: 20_000 });
-}
-
-async function shoot(s: Sitting, surface: string): Promise<void> {
-  await clearToasts(s.page);
-  for (const theme of THEMES) {
-    value(await invoke(s.page, 'settings.set', { theme }));
-    await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
-    await s.page.waitForTimeout(200);
-    await s.page.screenshot({ path: join(EVIDENCE, `e1-${surface}-${theme}.png`) });
-  }
-  value(await invoke(s.page, 'settings.set', { theme: 'light' }));
-  await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
-}
+// `e1-<surface>-<theme>.png` beside the evidence text, in both themes (a toast over the panel's bottom edge, where the
+// sheet's Submit bar sits, is cleared first).
+const shoot = (s: Sitting, surface: string) => shootThemes(s.page, (theme) => join(EVIDENCE, `e1-${surface}-${theme}.png`));
 
 const sheetOf = (s: Sitting) => s.panel.locator('[data-ask-sheet]');
 const capsuleOf = (s: Sitting) => s.pane.locator('section.transcript-ask').last();
@@ -270,7 +229,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       maws, page, scratch: sc, openLog,
       pane: page.locator('[data-region="main"] [data-pane="0"]'),
       panel: page.locator('[data-region="panel"]'),
-      events: (id) => page.evaluate((appSessionId) => ((window as unknown as { __e1: { appSessionId: string; events: SessionEvent[] }[] }).__e1 ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id),
+      events: (id) => eventsOf(page, id),
     });
     let ids: string[] = [];
     await expect
