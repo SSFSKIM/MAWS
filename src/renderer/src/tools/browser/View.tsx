@@ -5,7 +5,7 @@
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Chrome } from './chrome/Chrome';
-import { BROWSER_COPY } from './copy';
+import { BrowserPane } from './Pane';
 import { listSession, sessionTabs, useBrowser } from './store';
 
 export interface BrowserViewProps {
@@ -24,8 +24,8 @@ export function BrowserView({ appSessionId, surface, browserTabId }: BrowserView
   return (
     <div data-browser-view={surface} className="flex h-full min-h-0 flex-col bg-bg">
       <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} />
-      <div className="relative min-h-0 flex-1">
-        {gone ? <p className="m-0 p-4 text-center text-ui text-fg-muted">{BROWSER_COPY.tabGone}</p> : <div data-browser-pane="" className="h-full bg-bg" />}
+      <div className="min-h-0 flex-1">
+        <BrowserPane tab={tab} surface={surface} gone={gone} />
       </div>
     </div>
   );
