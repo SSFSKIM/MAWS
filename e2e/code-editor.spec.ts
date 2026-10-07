@@ -2,8 +2,9 @@
 // run by `pnpm e2e:code` beside the code tools spec over the harness build: the product in stub mode over the scratch
 // repository, each case in its own launch. Typing goes through CodeMirror's content element, the disk is read with
 // `readFileSync` after each save, an external change is a `writeFileSync` on the scratch file, and its notice is
-// awaited with the measured wait. The last case scans both themes for other-theme colours and writes the six
-// screenshots of the editor, the merge view and the conflict view into the evidence directory.
+// awaited with the measured wait. The last case scans both themes for other-theme colours and, under MAWS_E5_SHOTS=1
+// (E11 W-E: a gate run leaves the committed evidence alone), writes the six screenshots of the editor, the merge view
+// and the conflict view into the evidence directory.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
@@ -15,7 +16,7 @@ import { MEASURED_WAIT_MS } from './support/latency';
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
 const TYPED = '// typed by the owner';
-const SHOTS = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e5/shots');
+const SHOTS = process.env.MAWS_E5_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e5/shots') : null;
 
 const read = (p: Product, relative: string) => readFileSync(p.scratch.path(relative), 'utf8');
 const write = (p: Product, relative: string, content: string) => writeFileSync(p.scratch.path(relative), content);
@@ -328,7 +329,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
   });
 
   test('the editor, the notice, the merge view and the conflict view use tokens only in both themes', async () => {
-    mkdirSync(SHOTS, { recursive: true });
+    if (SHOTS !== null) mkdirSync(SHOTS, { recursive: true });
     await withProduct(async (p) => {
       await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
       await expect.poll(() => p.page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([1280, expect.any(Number)]);
@@ -337,7 +338,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
         await p.page.mouse.move(0, 0);
         await frames(p.page);
         const box = (await viewer.boundingBox())!;
-        await p.page.screenshot({ path: join(SHOTS, `e5-${view}-${theme}.png`), clip: box });
+        if (SHOTS !== null) await p.page.screenshot({ path: join(SHOTS, `e5-${view}-${theme}.png`), clip: box });
       };
       const scan = async (theme: string, view: string) => expect(await otherThemeColours(p.page), `${theme}: ${view}`).toEqual([]);
 
