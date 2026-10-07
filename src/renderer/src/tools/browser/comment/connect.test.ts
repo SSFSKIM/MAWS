@@ -1,18 +1,23 @@
 // E4d (Task 3.2): what this window does with main's comment-mode events (E4d execution document, Design §6 and §8): a
 // `changed` moves the toggle's store and a refused pick says the element could not be named; a `picked` opens E3's
 // comment composer through E5's seam on the anchor main built, for the tab's session, and says when the crop is missing.
+// With no sheet over the page, what a refused or unavailable arm says is a line in the tab's chrome, never a toast: the
+// toast viewport covers a panel's page, which would freeze it to a still picture (Decision Log 35).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { useNotices } from '../../../stores/notices';
-import { T1, T2 } from '../../../test-support/browser';
+import { browserTab, T1, T2, T3 } from '../../../test-support/browser';
 import { registerCommentComposer } from '../../code/anchor/anchor';
+import { noticeText } from '../chrome/Notices';
+import { browser, resetBrowser } from '../store';
 import { connectBrowserComment } from './connect';
 import { COMMENT_COPY } from './copy';
 import { resetCommentMode, useCommentMode } from './store';
 
 const A = 'app-a' as AppSessionId;
+const B = 'app-b' as AppSessionId;
 const ANCHOR: Anchor = {
   kind: 'browser-element',
   locator: '#increment',
@@ -32,9 +37,17 @@ let unregister: () => void;
 const opened = vi.fn();
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
 const armed = () => [...useCommentMode.getState().armed];
+const notices = () => browser.getState().notices.map(({ appSessionId, tabId, kind }) => ({ appSessionId, tabId, kind }));
 
 beforeEach(() => {
   resetCommentMode();
+  resetBrowser();
+  browser.setState({
+    sessions: new Map([
+      [A, { tabs: [browserTab(T1, A)], selected: T1 }],
+      [B, { tabs: [browserTab(T2, B)], selected: T2 }],
+    ]),
+  });
   useNotices.setState({ notices: [] });
   opened.mockReset();
   unregister = registerCommentComposer(opened);
@@ -44,6 +57,7 @@ beforeEach(() => {
 afterEach(() => {
   disconnect();
   unregister();
+  resetBrowser();
 });
 
 describe('connectBrowserComment', () => {
@@ -56,24 +70,35 @@ describe('connectBrowserComment', () => {
     fake.event('browser.comment.changed', { tabId: T2, on: false, reason: 'escape' });
     expect(armed()).toEqual([]);
     expect(toasts()).toEqual([]);
+    expect(notices()).toEqual([]);
   });
 
-  it('a tab whose page never confirmed the arm, or never answered a menu pick, says Comment is unavailable there (Decision Log 34)', () => {
+  it('a tab whose page never confirmed the arm, or never answered a menu pick, says Comment is unavailable in its chrome (Decision Log 34, 35)', () => {
     fake.event('browser.comment.changed', { tabId: T1, on: false, reason: 'unavailable' });
     expect(armed()).toEqual([]);
-    expect(toasts()).toEqual([['warning', COMMENT_COPY.unavailable]]);
-    expect(COMMENT_COPY.unavailable).toBe('Comment isn’t available on this page');
+    expect(notices()).toEqual([{ appSessionId: A, tabId: T1, kind: 'commentUnavailable' }]);
+    expect(noticeText({ kind: 'commentUnavailable' })).toBe('Comment isn’t available on this page');
+    expect(toasts()).toEqual([]);
   });
 
-  it('a refused pick says the element could not be named, armed or not (the context menu’s one-shot)', () => {
+  it('a refused pick says in the tab’s chrome that the element could not be named, armed or not (the context menu’s one-shot)', () => {
     fake.event('browser.comment.changed', { tabId: T1, on: true, reason: 'armed' });
     fake.event('browser.comment.changed', { tabId: T1, on: false, reason: 'refused' });
     expect(armed()).toEqual([]);
     fake.event('browser.comment.changed', { tabId: T2, on: false, reason: 'refused' });
-    expect(toasts()).toEqual([
-      ['warning', COMMENT_COPY.cannotName],
-      ['warning', COMMENT_COPY.cannotName],
+    expect(notices()).toEqual([
+      { appSessionId: A, tabId: T1, kind: 'commentCannotName' },
+      { appSessionId: B, tabId: T2, kind: 'commentCannotName' },
     ]);
+    expect(noticeText({ kind: 'commentCannotName' })).toBe(COMMENT_COPY.cannotName);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('a tab this window does not list has no chrome here to say it in: nothing is raised', () => {
+    fake.event('browser.comment.changed', { tabId: T3, on: false, reason: 'refused' });
+    fake.event('browser.comment.changed', { tabId: T3, on: false, reason: 'unavailable' });
+    expect(notices()).toEqual([]);
+    expect(toasts()).toEqual([]);
   });
 
   it('a pick opens E3’s composer on main’s anchor for the tab’s session, its crop attached, no toast', () => {
@@ -105,8 +130,10 @@ describe('connectBrowserComment', () => {
     disconnect();
     fake.event('browser.comment.changed', { tabId: T1, on: true, reason: 'armed' });
     fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'failed' });
+    fake.event('browser.comment.changed', { tabId: T1, on: false, reason: 'refused' });
     expect(armed()).toEqual([]);
     expect(opened).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
+    expect(notices()).toEqual([]);
   });
 });

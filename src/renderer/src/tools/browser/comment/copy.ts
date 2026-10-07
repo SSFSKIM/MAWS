@@ -1,7 +1,7 @@
 // E4d: every sentence comment mode shows in the app window (E4d execution document, Design §14): the chrome's Comment
-// toggle, the toasts after a pick, and the transcript's and the Side pane's page openers. The words the in-page hover UI
-// and the native context menu use are main's and the preload's (`COMMENT_WORDS`); they are re-exported here so one
-// place holds every word comment mode shows.
+// toggle, the chrome lines and toasts after a pick, and the transcript's and the Side pane's page openers. The words the
+// in-page hover UI and the native context menu use are main's and the preload's (`COMMENT_WORDS`); they are re-exported
+// here so one place holds every word comment mode shows.
 export { COMMENT_WORDS } from '@shared/browser/comment-protocol';
 
 export const COMMENT_COPY = {
