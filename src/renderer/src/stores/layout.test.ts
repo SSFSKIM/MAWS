@@ -64,6 +64,18 @@ describe('layout and settings migrate', () => {
     warn.mockRestore();
   });
 
+  // E11 W-D (tracker row E5 "dirty file tab pruned silently"): hydration drops only session and agent tabs of unknown
+  // sessions, so a file tab (whose buffer may be dirty, if it opened before the read) is never dropped by it
+  it('hydrating keeps a file tab of an unknown session, saved or opened before the read', async () => {
+    const file = (path: string) => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId: 'gone', pinned: false });
+    const saved = { ...persistedMain, panes: [{ tabs: [session('gone'), file('/r/saved.ts')], activeTabId: 'session:gone' }] };
+    const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? saved : null }) });
+    const store = createLayoutStore();
+    store.getState().openTab({ kind: 'file', path: '/r/early.ts', line: null, appSessionId: 'gone' as AppSessionId });
+    await store.getState().hydrate(fake.client, () => false);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['file:/r/saved.ts', 'file:/r/early.ts']);
+  });
+
   it('falls back to the default for a malformed main.tabs (a null pane or tab) and still hydrates', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { store } = await hydrate({ 'main.tabs': { ...persistedMain, panes: [{ tabs: [null], activeTabId: 'x' }, null] } });

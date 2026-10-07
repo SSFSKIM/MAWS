@@ -10,6 +10,7 @@ import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
+import { allTabs } from '../../../stores/layout-model';
 import { fakeHash, installDisk, type DiskFile } from '../../../test-support/code-disk';
 import { useFiles } from '../files/store';
 import { openFile } from '../open-file';
@@ -475,6 +476,20 @@ describe('editor', () => {
       expect(entry('/r/f0.ts').dirty).toBe(true); // the least recently used, passed over
       act(() => useLayout.getState().closeTab('file:/r/f0.ts'));
       expect(useViewer.getState().entries.has('file:/r/f0.ts')).toBe(false);
+    });
+
+    // E11 W-D (tracker row E5 "dirty file tab pruned silently"): no path but a guarded close drops a file tab; its
+    // session's removal closes only the session's own session and agent tabs, so the edits stay in the tab
+    it('keeps a dirty file tab, its entry and its document when its session is removed', async () => {
+      const { shown } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      await waitFor(() => expect(entry().dirty).toBe(true));
+      shown.unmount();
+      act(() => useLayout.getState().dropSession(A));
+      expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).toContain(`file:${APP}`);
+      expect(entry()).toMatchObject({ dirty: true, text: 'const a = 1;\n' });
+      render(<FileViewer tab={fileTab(APP)} />);
+      await waitFor(() => expect(doc()).toBe('// mine\nconst a = 1;\n'));
     });
 
     it('keeps a dirty tab’s document when it is rebound to another session, re-reading under it into theirs', async () => {

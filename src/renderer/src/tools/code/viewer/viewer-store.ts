@@ -235,7 +235,8 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go. E5: the
-    // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked).
+    // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked). A
+    // file tab leaves the layout only by a guarded close: a session's removal and hydration keep file tabs (E11 W-D).
     const prune = () => {
       const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
