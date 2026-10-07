@@ -103,6 +103,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
         return {
           action: 'allow',
           outlivesOpener: true,
+          // the browser preload is not among these: a child never ran one named here, so it is the partition's (view.ts)
           overrideBrowserWindowOptions: { webPreferences: childPreferences },
           // Chromium's child is in the options; the view must adopt that very webContents (Electron checks)
           createWindow: (options) => adoptChild(entry, url, decision.select, (options as { webContents?: WebContents }).webContents),

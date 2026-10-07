@@ -7,8 +7,8 @@
 //   clipboard write from a timer), each writing its outcome into `#clipboard`, a download link to `/file.bin`, the word
 //   `needle` three times, a `keydown` recorder into `#keys`, and a two-second `requestAnimationFrame` count in `#frames`;
 // - `/b.html` and `/c.html` (each writes whether `window.opener` is set into `#opener`; `/c.html` also has a button
-//   opening `/c.html?popup=1` with `window.open` and one calling `window.close()`), `/plain.html` (no title), and
-//   `/favicon.ico` (a PNG);
+//   opening `/c.html?popup=1` with `window.open` and one calling `window.close()`), `/plain.html` (no title),
+//   `/framed.html` (a same-origin frame of `/plain.html`, for the preload's main-frame rule), and `/favicon.ico` (a PNG);
 // - `/file.bin` (4 KiB), `/drop` (the socket destroyed: Chromium's ERR_EMPTY_RESPONSE, a generic error), `/slow` (never
 //   answers, for Stop).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -85,6 +85,7 @@ const HTML: Record<string, string> = {
       `<p><button id="open-popup" onclick="window.open('/c.html?popup=1')">Open a popup</button> <button id="close" onclick="window.close()">Close this page</button></p>`,
     OPENER_SCRIPT,
   ),
+  '/framed.html': page('Framed', '<h1 id="heading">Framed</h1><iframe id="sub" src="/plain.html" title="Plain"></iframe>'),
 };
 
 // A loopback port nothing listens on (bound, read, closed), for a refused connection. Not a fixed low port: Chromium
