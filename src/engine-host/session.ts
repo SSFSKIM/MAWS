@@ -604,6 +604,11 @@ export class EngineSession {
     this.touch();
   }
 
+  // E11: whether the broker retired this request id (its tombstone), so the stream keeps no event for its re-delivery.
+  requestRetired(requestId: string): boolean {
+    return this.broker.retiredReason(requestId as RequestId) !== null;
+  }
+
   // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
   brokerItems(): AttentionItem[] {
     return [...this.broker.snapshot(), ...this.askItems.values()];

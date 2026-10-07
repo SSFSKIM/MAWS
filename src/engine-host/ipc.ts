@@ -230,6 +230,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
         emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
+        retired: (requestId) => session.requestRetired(requestId), // E11
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));

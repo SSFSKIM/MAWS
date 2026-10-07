@@ -212,6 +212,45 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     stream.brokerItems([item]); // forgotten once its item left the list: a later listing finds nothing to answer
     expect(stream.pendingRequest(requestId)).toBeNull();
   });
+
+  // E11 (tracker row E1 "stream keeps request events of never-listed items"): a request the broker retires without
+  // listing it keeps no event. A later listing of the same id is the probe: an event still held would answer it.
+  it('drops the event of a request the broker retired while the process was exiting, at the exit', async () => {
+    const run = await replayedSession('pass1', 'permission-roundtrip', (row, { session, ready, fixture, transport }) => {
+      const frame = row.frame as { type: string };
+      if (frame.type === 'user' && row.seq === 4) void ready().then(() => session.send((fixture.find((r) => r.seq === 4)!.frame as { message: { content: string } }).message.content));
+      else transport.kill('SIGTERM');
+    });
+    const requested = run.events.find((e) => e.kind === 'permission.requested')!;
+    const status = run.session.status();
+    const stream = new SessionStream({ appSessionId: status.appSessionId, launchId: 'L', sessionId: null, journalPath: join(dir, 'L.jsonl'), emit: recorder().emit });
+    stream.events(run.events); // the broker retired it at its accept (the process exiting) and never listed it
+    stream.status({ ...status, process: 'exited' });
+    const requestId = (requested as { requestId: string }).requestId as never;
+    stream.brokerItems([{ id: 'a' as never, appSessionId: status.appSessionId, sessionId: null, kind: 'permission' as const, request: { requestId, toolUseId: null, taskId: null, agentId: null }, summary: 's', createdAt: 't', state: 'pending' as const, stateChangedAt: 't', expiresAt: null }]);
+    expect(stream.pendingRequest(requestId)).toBeNull();
+  });
+
+  it('keeps no event for a re-delivered request whose id the broker already retired', async () => {
+    const run = await replayedSession('pass1', 'permission-roundtrip', (row, { session, ready, fixture, transport }) => {
+      const frame = row.frame as { type: string };
+      if (frame.type === 'user' && row.seq === 4) void ready().then(() => session.send((fixture.find((r) => r.seq === 4)!.frame as { message: { content: string } }).message.content));
+      else transport.kill('SIGTERM');
+    });
+    const requested = run.events.find((e) => e.kind === 'permission.requested')!;
+    const requestId = (requested as { requestId: string }).requestId as never;
+    const retired = new Set<string>();
+    const stream = new SessionStream({ appSessionId: run.session.status().appSessionId, launchId: 'L', sessionId: null, journalPath: join(dir, 'L.jsonl'), emit: recorder().emit, retired: (id) => retired.has(id) });
+    const item = { id: 'a' as never, appSessionId: run.session.status().appSessionId, sessionId: null, kind: 'permission' as const, request: { requestId, toolUseId: null, taskId: null, agentId: null }, summary: 's', createdAt: 't', state: 'pending' as const, stateChangedAt: 't', expiresAt: null };
+    stream.events([requested]);
+    stream.brokerItems([item]);
+    expect(stream.pendingRequest(requestId)).toEqual(requested);
+    retired.add(requestId); // answered and retired: its item leaves the list, and its event with it
+    stream.brokerItems([]);
+    stream.events([requested]); // the engine delivers the same request id again; the broker ignores a retired id
+    stream.brokerItems([item]);
+    expect(stream.pendingRequest(requestId)).toBeNull();
+  });
 });
 
 // C12 start: the exited-history cap (C12 execution document, M1 task 5)

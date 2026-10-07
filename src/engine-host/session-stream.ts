@@ -5,7 +5,8 @@
 // the ring has evicted is rebuilt from the launch's journal through a fresh Normalizer, which reproduces the live
 // events exactly (ids and seq included) because every event derives from a journal row; a rebuilt page stops at its
 // limit and the next page resumes where it stopped. The originating `*.requested` event of each live broker item is
-// kept aside for `session.pendingRequest`, whatever the ring has evicted since. C12: once the launch has exited, its
+// kept aside for `session.pendingRequest`, whatever the ring has evicted since, and dropped once its item has left the
+// list, or without a listing when the broker retired the request unlisted (a re-delivered retired id; the exit). C12: once the launch has exited, its
 // ring keeps only the last EXITED_RING events (the budget's exited-history cap); older ranges rebuild from the journal.
 import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
@@ -45,6 +46,8 @@ export interface SessionStreamOptions {
   // payload too, and a batch refused while the client is there can never be delivered, so it is skipped (absent: false
   // means the client is gone)
   hasClient?: () => boolean;
+  // E11: whether the broker has retired this request id; a re-delivered request it ignores keeps no event (absent: none)
+  retired?: (requestId: string) => boolean;
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -98,7 +101,11 @@ export class SessionStream {
   }
 
   events(batch: SessionEvent[]): void {
-    for (const event of batch) if (isRequested(event)) this.requests.set((event as { requestId: string }).requestId, event);
+    for (const event of batch) {
+      if (!isRequested(event)) continue;
+      const { requestId } = event as { requestId: string };
+      if (!this.opts.retired?.(requestId)) this.requests.set(requestId, event);
+    }
     this.ring.push(...batch);
     if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) this.trim(this.ringSize); // trims in chunks, never one shift per event
     this.pending.push(...batch);
@@ -118,6 +125,7 @@ export class SessionStream {
   status(status: EngineSessionStatus): void {
     this.flush();
     if (status.process === 'exited' && this.ring.length > this.exitedRingSize) this.trim(this.exitedRingSize); // C12: an exited launch's events are all in
+    if (status.process === 'exited') this.requests.clear(); // E11: nothing of the launch can be pending, listed or not (a request accepted while exiting never is)
     this.opts.emit('session.status', { appSessionId: this.opts.appSessionId, status });
   }
 
