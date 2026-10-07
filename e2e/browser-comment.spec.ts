@@ -22,7 +22,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
-import { address, browserIn, expectOnPane, launchBrowserScene, openBrowser, pageAt, paneIn, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
+import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, pageAt, paneIn, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/deliverables-scene';
@@ -216,6 +216,10 @@ const clicksHeard = async (page: Page) =>
     .map((e) => e.type)
     .join(',');
 // Nothing reached the page while the shield was up (any type, moves and the wheel included), and no press or click at all.
+// "While the shield was up" stands for "while armed" because the preload adds the shield and starts blocking in one
+// synchronous task (its `arm`), and removes it and stops blocking in another (its `teardown`): no event can fall between
+// the two, so an unmarked entry was heard while the page was unarmed. A preload that split them would make this check
+// unsound.
 async function expectPageHeardNothing(page: Page, what = 'no pointer, mouse or wheel event reached the page while armed'): Promise<void> {
   expect((await heard(page)).filter((e) => e.shielded).map((e) => e.type), what).toEqual([]);
   expect(await clicksHeard(page), 'no press or click reached the page').toBe('');
@@ -457,6 +461,10 @@ const TARGETS: Target[] = [
   { target: 'icon-button' },
   { target: 'placeholder-input' },
   { target: 'article-header', role: null, name: null },
+  // Decision Log 35: an input inside its own label is named by the label alone (as Playwright names it), and a button in
+  // a row whose password input holds a value; no anchor field may carry either value
+  { target: 'label-wrapped', role: 'textbox', name: 'Email' },
+  { target: 'pin-show', role: 'button', name: 'Show' },
 ];
 
 test('3. G2’s proof without E4c: for each target picked, css alone matches exactly the picked element, and E4c’s css-and-role expression counts one', async () => {
@@ -478,6 +486,7 @@ test('3. G2’s proof without E4c: for each target picked, css alone matches exa
       if (want.css !== undefined) expect(anchor.css, want.target).toBe(want.css);
       if (want.role !== undefined) expect(anchor.role ?? null, `${want.target}: role`).toBe(want.role);
       if (want.name !== undefined) expect(anchor.name ?? null, `${want.target}: name`).toBe(want.name);
+      expect(JSON.stringify(anchor), `${want.target}: no control’s value`).not.toMatch(/hunter2|a@b\.c/u);
       // css alone: one match, the element the person clicked
       const byCss = page.locator(`css=${anchor.css}`);
       await expect(byCss, `${want.target}: css=${anchor.css}`).toHaveCount(1);
@@ -636,8 +645,8 @@ test('7. a navigation disarms; a report from the earlier arm is dropped and coun
 // ---- (7b, 7c) armed means acknowledged (Decision Log 34) ----------------------------------------------------------------
 
 // A tab whose preload never acknowledges the arm is refused: the toggle is never pressed, main ends the arming after
-// ARM_ACK_MS with `unavailable` and the toast says so, no shield stays in the page, and main holds the tab neither armed
-// nor arming (so the page hearing a click then is the mode being off, not a hole in it).
+// ARM_ACK_MS with `unavailable` and the tab's chrome says so, no shield stays in the page, and main holds the tab neither
+// armed nor arming (so the page hearing a click then is the mode being off, not a hole in it).
 async function expectRefusedArm(s: BrowserScene, view: Locator, tabId: string, page: Page): Promise<void> {
   const toggle = toggleOf(view);
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -648,12 +657,14 @@ async function expectRefusedArm(s: BrowserScene, view: Locator, tabId: string, p
     .poll(async () => (await recorded(s)).changed.filter((c) => c.payload.tabId === tabId).at(-1)?.payload, { timeout: 5_000, message: 'the arming ends unavailable' })
     .toEqual({ tabId, on: false, reason: 'unavailable' });
   expect((await recorded(s)).changed.filter((c) => c.payload.tabId === tabId && c.payload.on), 'never told on').toEqual([]);
-  await expect(s.page.getByRole('region', { name: /^Notifications/ }).getByText(COMMENT_COPY.unavailable)).toBeVisible();
+  // said in the tab's chrome, never in a toast, whose viewport would cover the panel's page and freeze it (Decision Log 35)
+  await expect(noticesIn(view).filter({ hasText: COMMENT_COPY.unavailable }), 'the chrome line').toHaveAttribute('data-browser-notice', 'commentUnavailable');
+  await expect(s.page.locator('[data-toast-viewport]').getByText(COMMENT_COPY.unavailable), 'no toast').toHaveCount(0);
+  expect((await tabState(s, tabId)).tab?.covered, 'the page is not covered while the line shows').toBe(false);
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect(commentNodes(page), 'no shield left in the page').toHaveCount(0);
   const state = await stateOf(s, tabId);
   expect({ armed: state.armed, arming: state.arming }).toEqual({ armed: false, arming: false });
-  await clearToasts(s.page);
 }
 
 test('7b. armed means acknowledged: a tab whose preload never confirms the arm is refused as unavailable (the seam’s ignoreAcks on an ordinary tab)', async () => {
