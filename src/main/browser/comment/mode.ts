@@ -1,10 +1,13 @@
 // Comment mode's state and gate in main (E4d execution document, Design §1, §2, §8, §9; A-33): which tab is armed,
 // what turns it off, and whether a message on the preload's channel is the person's pick.
 //
-// One tab is armed at a time. Arming sends the tab's preload a fresh epoch and inserts the crosshair; an Esc in the
-// page (native keys only: `before-input-event` never hears a CDP key), a navigation to another document, a crash, the
-// view going, or the agent taking the page (`setControl`, through the store's synchronous `onUpdated`) disarms it. The
-// context menu's `pickAt` asks for one report at a point without arming.
+// One tab is armed at a time, and armed means acknowledged (Decision Log 34): the toggle sends the tab's preload a fresh
+// epoch and the tab is only *arming* until the preload answers that its shield is up; then it is armed, the crosshair
+// inserted and the change told. No answer within ARM_ACK_MS (a page with no preload: an adopted `window.open` tab) ends
+// the arming as `unavailable`. An Esc in the page (native keys only: `before-input-event` never hears a CDP key), a
+// navigation to another document, a crash, the view going, or the agent taking the page (`setControl`, through the
+// store's synchronous `onUpdated`) ends an arm or an arming. The context menu's `pickAt` asks for one report at a point
+// without arming; no answer within PICK_AT_MS is `unavailable` too, so a menu Comment is never silent.
 //
 // The gate: a message counts only when it comes from a tab's own webContents, carries the tab's current epoch, and
 // answers the arm (once) or the pending `pickAt` (once, within PICK_AT_MS); anything else is dropped and counted, never
@@ -15,8 +18,8 @@
 import { randomBytes } from 'node:crypto';
 import type { Event, Input, WebContents, WebContentsView } from 'electron';
 import type { Anchor } from '@shared/anchor/anchor';
-import { browserElementAnchor, PreloadMessageSchema, type CommentDisarmReason } from '@shared/browser/comment';
-import { COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload } from '@shared/browser/comment-protocol';
+import { browserElementAnchor, PickArmedSchema, PreloadMessageSchema, type CommentDisarmReason } from '@shared/browser/comment';
+import { ARM_ACK_MS, COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload } from '@shared/browser/comment-protocol';
 import type { BrowserCommentSetResult } from '@shared/ipc/schema/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { Crop } from './crop';
@@ -34,17 +37,25 @@ export interface CommentModeDeps {
   requestId?(): string;
 }
 
+// What the e2e seam reads: `arming` while main waits for the preload's acknowledgement, `armed` after it.
 export interface CommentTabState {
   armed: boolean;
+  arming: boolean;
   epoch: number;
   dropped: number;
 }
 
-interface TabState extends CommentTabState {
+type Timer = ReturnType<typeof setTimeout>;
+
+interface TabState {
+  phase: 'off' | 'arming' | 'armed';
+  epoch: number;
+  dropped: number;
   taken: boolean; // the arm's one report was accepted
-  view: WebContentsView | null; // the view armed, while armed
-  css: Promise<string | null> | null; // the inserted crosshair's key
-  pending: { requestId: string; at: number } | null; // the context menu's pick, awaiting its one report
+  view: WebContentsView | null; // the view armed, while arming or armed
+  css: Promise<string | null> | null; // the inserted crosshair's key, once armed
+  ackTimer: Timer | null; // the arming's ARM_ACK_MS
+  pending: { requestId: string; at: number; timer: Timer } | null; // the context menu's pick, awaiting its one report
 }
 
 type Via = 'arm' | 'pickAt';
@@ -86,18 +97,20 @@ export class CommentMode {
     const refusal = this.refusal(entry, { placed: true });
     if (refusal !== null) return { on: false, reason: refusal };
     const state = this.stateOf(tabId);
-    if (state.armed) return { on: true, reason: 'ok' };
+    if (state.phase === 'armed') return { on: true, reason: 'ok' };
+    if (state.phase === 'arming') return { on: false, reason: 'arming' };
     if (this.armedTab !== null) this.disarm(this.armedTab, 'other'); // one picker at a time (Decision Log 17)
     const view = entry.view!;
     state.epoch += 1;
-    state.armed = true;
+    state.phase = 'arming';
     state.taken = false;
     state.view = view;
-    state.css = view.webContents.insertCSS(CURSOR_CSS).catch(() => null);
+    state.ackTimer = setTimeout(() => {
+      if (state.phase === 'arming') this.disarm(tabId, 'unavailable');
+    }, ARM_ACK_MS);
     this.armedTab = tabId;
     this.toPreload(view, { type: 'arm', epoch: state.epoch });
-    this.deps.emit('browser.comment.changed', { tabId, on: true, reason: 'armed' });
-    return { on: true, reason: 'ok' };
+    return { on: false, reason: 'arming' }; // `changed {on: true}` follows the acknowledgement
   }
 
   // ---- the context menu's one-shot pick (CSS px of the viewport) -------------------------------------------------------
@@ -107,7 +120,14 @@ export class CommentMode {
     if (!entry || this.refusal(entry, { placed: false }) !== null) return false;
     const state = this.stateOf(tabId);
     const requestId = this.newRequestId();
-    state.pending = { requestId, at: this.now() };
+    this.dropPending(state);
+    // no answer at all (a page with no preload) is said, not dropped in silence; a late one is dropped at the gate
+    const timer = setTimeout(() => {
+      if (state.pending?.requestId !== requestId) return;
+      state.pending = null;
+      if (state.phase === 'off') this.deps.emit('browser.comment.changed', { tabId, on: false, reason: 'unavailable' });
+    }, PICK_AT_MS);
+    state.pending = { requestId, at: this.now(), timer };
     this.toPreload(entry.view!, { type: 'pickAt', x, y, requestId, epoch: state.epoch });
     return true;
   }
@@ -123,6 +143,10 @@ export class CommentMode {
     }
     const { tabId } = entry.tab;
     const state = this.stateOf(tabId);
+    if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'armed') {
+      if (!this.acknowledge(entry, state, message)) state.dropped += 1;
+      return;
+    }
     const via = this.claim(entry, state, message);
     if (via === null) {
       state.dropped += 1;
@@ -145,7 +169,7 @@ export class CommentMode {
       entry.view === view &&
       state.epoch === epoch &&
       entry.tab.control !== 'agent' &&
-      (via === 'pickAt' || (state.armed && state.taken));
+      (via === 'pickAt' || (state.phase === 'armed' && state.taken));
     if (!current) {
       if (screenshot) this.deps.discard(screenshot.path);
       return; // whatever ended the mode meanwhile has told the renderer
@@ -182,8 +206,8 @@ export class CommentMode {
 
   state(tabId: string): CommentTabState | null {
     if (!this.deps.store.entry(tabId) && !this.states.has(tabId)) return null;
-    const { armed, epoch, dropped } = this.stateOf(tabId);
-    return { armed, epoch, dropped };
+    const { phase, epoch, dropped } = this.stateOf(tabId);
+    return { armed: phase === 'armed', arming: phase === 'arming', epoch, dropped };
   }
 
   // Messages from a webContents that is no tab's.
@@ -194,6 +218,10 @@ export class CommentMode {
   dispose(): void {
     this.disposed = true;
     for (const off of this.unhook) off();
+    for (const state of this.states.values()) {
+      if (state.ackTimer !== null) clearTimeout(state.ackTimer);
+      this.dropPending(state);
+    }
     this.states.clear(); // the pages are closed next; nothing is told after the quit began
     this.armedTab = null;
   }
@@ -210,6 +238,20 @@ export class CommentMode {
     return null;
   }
 
+  // The preload's word that the shield is up, for this arming: from the tab's own page (the caller resolved it), with
+  // the arming's epoch, to the view armed. Anything else answers nothing.
+  private acknowledge(entry: TabEntry, state: TabState, message: unknown): boolean {
+    const ack = PickArmedSchema.safeParse(message);
+    if (!ack.success || state.phase !== 'arming' || ack.data.epoch !== state.epoch || entry.view !== state.view || entry.tab.control === 'agent') return false;
+    const view = state.view!;
+    if (state.ackTimer !== null) clearTimeout(state.ackTimer);
+    state.ackTimer = null;
+    state.phase = 'armed';
+    state.css = view.webContents.insertCSS(CURSOR_CSS).catch(() => null);
+    this.deps.emit('browser.comment.changed', { tabId: entry.tab.tabId, on: true, reason: 'armed' });
+    return true;
+  }
+
   // Which request a message answers: the arm's one report (no request id), or the pending pickAt's; null when neither.
   // Claiming spends the request, so a second answer is dropped whatever it carries.
   private claim(entry: TabEntry, state: TabState, message: unknown): Via | null {
@@ -218,10 +260,10 @@ export class CommentMode {
     if (epoch !== state.epoch) return null;
     if (state.pending !== null && requestId === state.pending.requestId) {
       const late = this.now() - state.pending.at > PICK_AT_MS;
-      state.pending = null;
+      this.dropPending(state);
       return late ? null : 'pickAt';
     }
-    if (state.armed && !state.taken && requestId === null) {
+    if (state.phase === 'armed' && !state.taken && requestId === null) {
       state.taken = true;
       return 'arm';
     }
@@ -230,7 +272,7 @@ export class CommentMode {
 
   // A pick main cannot build an anchor from: the mode ends with `refused`, which the renderer toasts.
   private refuse(tabId: string, state: TabState, via: Via): void {
-    if (via === 'arm' || state.armed) this.disarm(tabId, 'refused');
+    if (via === 'arm' || state.phase !== 'off') this.disarm(tabId, 'refused');
     else this.deps.emit('browser.comment.changed', { tabId, on: false, reason: 'refused' });
   }
 
@@ -246,15 +288,24 @@ export class CommentMode {
   private end(tabId: string, reason: CommentDisarmReason): void {
     const state = this.states.get(tabId);
     if (!state) return;
-    state.pending = null;
+    this.dropPending(state);
     this.disarm(tabId, reason);
   }
 
+  private dropPending(state: TabState): void {
+    if (state.pending !== null) clearTimeout(state.pending.timer);
+    state.pending = null;
+  }
+
+  // Ends an arm or an arming: the preload told (it may have put its shield up before its acknowledgement arrived), the
+  // crosshair removed, the change told (for an arming, the `on: false` the toggle already shows, with the reason).
   private disarm(tabId: string, reason: CommentDisarmReason): void {
     const state = this.states.get(tabId);
-    if (!state?.armed) return;
+    if (!state || state.phase === 'off') return;
     const { view, css } = state;
-    state.armed = false;
+    if (state.ackTimer !== null) clearTimeout(state.ackTimer);
+    state.ackTimer = null;
+    state.phase = 'off';
     state.taken = false;
     state.view = null;
     state.css = null;
@@ -273,7 +324,7 @@ export class CommentMode {
 
   private stateOf(tabId: string): TabState {
     let state = this.states.get(tabId);
-    if (!state) this.states.set(tabId, (state = { armed: false, epoch: 0, dropped: 0, taken: false, view: null, css: null, pending: null }));
+    if (!state) this.states.set(tabId, (state = { phase: 'off', epoch: 0, dropped: 0, taken: false, view: null, css: null, ackTimer: null, pending: null }));
     return state;
   }
 
@@ -294,7 +345,8 @@ export class CommentMode {
         return;
       }
       if (input.type !== 'keyDown' || input.key !== 'Escape' || input.meta || input.control || input.alt || input.shift) return;
-      if (!this.states.get(tabId)?.armed) return;
+      const phase = this.states.get(tabId)?.phase;
+      if (phase === undefined || phase === 'off') return;
       event.preventDefault();
       escapeTaken = true;
       this.disarm(tabId, 'escape');
@@ -312,8 +364,9 @@ export class CommentMode {
       if (live()) this.end(tabId, 'crashed');
     });
     wc.once('destroyed', () => {
-      if (this.states.get(tabId)?.view === view) this.end(tabId, 'closed');
-      if (!this.deps.store.entry(tabId)) this.states.delete(tabId); // the tab is gone, not only its page
+      const gone = !this.deps.store.entry(tabId); // the tab is gone, not only its page
+      if (gone || this.states.get(tabId)?.view === view) this.end(tabId, 'closed');
+      if (gone) this.states.delete(tabId);
     });
   }
 }

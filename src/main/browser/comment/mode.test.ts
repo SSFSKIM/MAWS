@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserControl, BrowserTab } from '@shared/browser/tab';
-import { COMMENT_CHANNEL, PICK_AT_MS, type PickReport } from '@shared/browser/comment-protocol';
+import { ARM_ACK_MS, COMMENT_CHANNEL, PICK_AT_MS, type PickReport } from '@shared/browser/comment-protocol';
 import { eventChannel } from '@shared/ipc/schema';
 import type { TabEntry } from '../tabs';
 import type { Crop } from './crop';
@@ -118,6 +118,19 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  mode.dispose(); // its timers with it
+  vi.useRealTimers();
+});
+
+// The toggle's arm as the person sees it: main asks, the page's preload confirms the shield is up (Decision Log 34).
+const ack = (tabId: string, epoch = mode.state(tabId)!.epoch) => mode.receive(store.entry(tabId)!.view!.webContents as never, { type: 'armed', epoch });
+const arm = (tabId: string) => {
+  const answer = mode.set(tabId, true);
+  if (answer.reason === 'arming') void ack(tabId);
+  return answer;
+};
+
 const changes = () => emitted.filter(([name]) => name === 'browser.comment.changed').map(([, payload]) => payload);
 const picked = (send: ReturnType<typeof vi.fn>) => send.mock.calls.filter(([channel]) => channel === eventChannel('browser.comment.picked')).map(([, payload]) => payload);
 const key = (wc: FakeContents, input: Record<string, unknown>) => {
@@ -127,15 +140,89 @@ const key = (wc: FakeContents, input: Record<string, unknown>) => {
 };
 
 describe('arming (Design §2): browser.comment.set', () => {
-  it('arms a placed tab with a page: the epoch to the preload, the crosshair inserted, the change told', () => {
+  it('arms a placed tab with a page in two steps: the epoch to the preload, then armed only at its acknowledgement (Decision Log 34)', async () => {
     const { wc } = store.add(A);
-    expect(mode.set(A, true)).toEqual({ on: true, reason: 'ok' });
+    expect(mode.set(A, true)).toEqual({ on: false, reason: 'arming' });
     expect(wc.sent()).toEqual([{ type: 'arm', epoch: 1 }]);
-    expect(wc.insertCSS).toHaveBeenCalledExactlyOnceWith('* { cursor: crosshair !important }');
+    expect(mode.state(A)).toEqual({ armed: false, arming: true, epoch: 1, dropped: 0 });
+    expect(changes()).toEqual([]); // nothing presses the toggle yet
+    expect(wc.insertCSS).not.toHaveBeenCalled(); // no crosshair over a page that may have no shield
+    expect(mode.set(A, true)).toEqual({ on: false, reason: 'arming' }); // still waiting: nothing sent again
+    expect(wc.sent()).toHaveLength(1);
+    await ack(A);
+    expect(mode.state(A)).toEqual({ armed: true, arming: false, epoch: 1, dropped: 0 });
     expect(changes()).toEqual([{ tabId: A, on: true, reason: 'armed' }]);
-    expect(mode.state(A)).toEqual({ armed: true, epoch: 1, dropped: 0 });
+    expect(wc.insertCSS).toHaveBeenCalledExactlyOnceWith('* { cursor: crosshair !important }');
     expect(mode.set(A, true)).toEqual({ on: true, reason: 'ok' }); // already armed: nothing again
     expect(wc.sent()).toHaveLength(1);
+  });
+
+  it('takes the acknowledgement only from the tab\'s own page, for the current epoch, while arming, once', async () => {
+    const { wc } = store.add(A);
+    const other = store.add(B);
+    await mode.receive(wc as never, { type: 'armed', epoch: 0 }); // nothing asked
+    mode.set(A, true);
+    await mode.receive(new FakeContents() as never, { type: 'armed', epoch: 1 }); // no tab's page
+    await mode.receive(other.wc as never, { type: 'armed', epoch: 1 }); // another tab's page
+    await mode.receive(wc as never, { type: 'armed', epoch: 0 }); // a stale epoch
+    await mode.receive(wc as never, { type: 'armed', epoch: 1, extra: true }); // not the message
+    await mode.receive(wc as never, report()); // a report before the acknowledgement is never expected
+    expect(mode.state(A)).toEqual({ armed: false, arming: true, epoch: 1, dropped: 4 });
+    expect(mode.state(B)!.dropped).toBe(1);
+    expect(mode.foreignDropped()).toBe(1);
+    expect(changes()).toEqual([]);
+    await ack(A);
+    await ack(A); // once
+    expect(mode.state(A)).toEqual({ armed: true, arming: false, epoch: 1, dropped: 5 });
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('ends an arming no page confirms within ARM_ACK_MS as unavailable, and takes no late acknowledgement', async () => {
+    vi.useFakeTimers();
+    const { wc } = store.add(A);
+    mode.set(A, true);
+    vi.advanceTimersByTime(ARM_ACK_MS - 1);
+    expect(changes()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(changes()).toEqual([{ tabId: A, on: false, reason: 'unavailable' }]);
+    expect(wc.sent()).toEqual([{ type: 'arm', epoch: 1 }, { type: 'disarm' }]);
+    expect(mode.state(A)).toMatchObject({ armed: false, arming: false });
+    await ack(A, 1);
+    expect(mode.state(A)).toMatchObject({ armed: false, dropped: 1 });
+    expect(mode.set(A, true)).toEqual({ on: false, reason: 'arming' }); // a later click tries again
+  });
+
+  it('an acknowledged arm is not ended by its timer', () => {
+    vi.useFakeTimers();
+    store.add(A);
+    arm(A);
+    vi.advanceTimersByTime(ARM_ACK_MS * 2);
+    expect(changes()).toEqual([{ tabId: A, on: true, reason: 'armed' }]);
+  });
+
+  it('whatever ends an arm ends an arming, its timer with it', () => {
+    vi.useFakeTimers();
+    const tabs = ['b_000000000001', 'b_000000000002', 'b_000000000003', 'b_000000000004', 'b_000000000005', 'b_000000000006'];
+    const pages = tabs.map((tabId) => store.add(tabId).wc);
+    store.add(B);
+    const end = [
+      () => mode.set(tabs[0], false),
+      () => key(pages[1], {}),
+      () => pages[2].emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://x.test/' }),
+      () => store.setControl(tabs[3], 'agent'),
+      () => store.destroyView(tabs[4]),
+      () => mode.set(B, true), // another tab's arming
+    ];
+    const reasons = ['toggle', 'escape', 'navigated', 'agent', 'closed', 'other'];
+    tabs.forEach((tabId, i) => {
+      mode.set(tabId, true);
+      end[i]();
+      expect(mode.state(tabId), reasons[i]).toMatchObject({ arming: false });
+      expect(changes().filter((c) => (c as { tabId: string }).tabId === tabId)).toEqual([{ tabId, on: false, reason: reasons[i] }]);
+    });
+    const told = emitted.length;
+    vi.advanceTimersByTime(ARM_ACK_MS * 2);
+    expect(emitted.slice(told).map(([, p]) => (p as { tabId: string; reason: string }).reason)).toEqual(['unavailable']); // B's own arming, unconfirmed
   });
 
   it('refuses with the reason, and changes nothing, for a tab that cannot be picked on', () => {
@@ -155,7 +242,7 @@ describe('arming (Design §2): browser.comment.set', () => {
 
   it('turns off on the toggle: the preload told, the crosshair removed, the change told', async () => {
     const { wc } = store.add(A);
-    mode.set(A, true);
+    arm(A);
     expect(mode.set(A, false)).toEqual({ on: false, reason: 'ok' });
     expect(wc.sent()).toEqual([{ type: 'arm', epoch: 1 }, { type: 'disarm' }]);
     await vi.waitFor(() => expect(wc.removeInsertedCSS).toHaveBeenCalledExactlyOnceWith(`css-${wc.id}`));
@@ -171,14 +258,14 @@ describe('arming (Design §2): browser.comment.set', () => {
   it('keeps one armed tab at a time, and a new arm a new epoch', () => {
     const a = store.add(A);
     store.add(B);
-    mode.set(A, true);
-    mode.set(B, true);
+    arm(A);
+    arm(B);
     expect(a.wc.sent()).toEqual([{ type: 'arm', epoch: 1 }, { type: 'disarm' }]);
     expect(changes().slice(1)).toEqual([
       { tabId: A, on: false, reason: 'other' },
       { tabId: B, on: true, reason: 'armed' },
     ]);
-    mode.set(A, true);
+    arm(A);
     expect(mode.state(A)).toMatchObject({ armed: true, epoch: 2 });
     expect(mode.state(B)).toMatchObject({ armed: false });
   });
@@ -188,7 +275,7 @@ describe('what disarms (Design §2, §8)', () => {
   it('Esc in the page, natively: taken from the page with its keyUp, and only while armed and unmodified', () => {
     const { wc } = store.add(A);
     expect(key(wc, {})).not.toHaveBeenCalled(); // unarmed: the page's
-    mode.set(A, true);
+    arm(A);
     expect(key(wc, { meta: true })).not.toHaveBeenCalled();
     expect(key(wc, { key: 'a', code: 'KeyA' })).not.toHaveBeenCalled();
     expect(key(wc, {})).toHaveBeenCalledOnce();
@@ -199,7 +286,7 @@ describe('what disarms (Design §2, §8)', () => {
 
   it('a main-frame navigation to another document, with a new epoch; an in-page or subframe one does not', () => {
     const { wc } = store.add(A);
-    mode.set(A, true);
+    arm(A);
     wc.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false, url: URL_ });
     wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true, url: `${URL_}#x` });
     expect(mode.state(A)).toMatchObject({ armed: true, epoch: 1 });
@@ -210,11 +297,11 @@ describe('what disarms (Design §2, §8)', () => {
 
   it('a crash, and the view going (a close or a suspension), with nothing sent to a page that is gone', () => {
     const a = store.add(A);
-    mode.set(A, true);
+    arm(A);
     a.wc.emit('render-process-gone', {}, { reason: 'crashed' });
     expect(changes().at(-1)).toEqual({ tabId: A, on: false, reason: 'crashed' });
     store.add(B);
-    mode.set(B, true);
+    arm(B);
     store.destroyView(B);
     expect(changes().at(-1)).toEqual({ tabId: B, on: false, reason: 'closed' });
     expect(changes().filter((c) => (c as { tabId: string }).tabId === B)).toHaveLength(2); // the `destroyed` that follows adds nothing
@@ -222,7 +309,7 @@ describe('what disarms (Design §2, §8)', () => {
 
   it('the agent taking the page: disarmed inside setControl, before it returns (Decision Log 26(a))', () => {
     const { wc } = store.add(A);
-    mode.set(A, true);
+    arm(A);
     store.setControl(A, 'human');
     expect(mode.state(A)!.armed).toBe(true);
     store.setControl(A, 'agent');
@@ -234,7 +321,7 @@ describe('what disarms (Design §2, §8)', () => {
   it('an arm made while a navigation is in flight ends when the new document commits (its preload starts disarmed)', () => {
     const { wc } = store.add(A);
     wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://127.0.0.1:4000/b.html' });
-    mode.set(A, true);
+    arm(A);
     const { epoch } = mode.state(A)!;
     wc.emit('did-navigate', {}, 'http://127.0.0.1:4000/b.html', 200, 'OK');
     expect(mode.state(A)).toMatchObject({ armed: false, epoch: epoch + 1 });
@@ -243,9 +330,14 @@ describe('what disarms (Design §2, §8)', () => {
     expect(changes()).toHaveLength(2);
   });
 
-  it('stops listening at dispose, and tells nothing afterwards', () => {
+  it('stops listening at dispose, and tells nothing afterwards, no timer included', () => {
+    vi.useFakeTimers();
+    store.add(B);
+    mode.set(B, true); // an arming whose timer is running
+    store.add('b_000000000001');
+    mode.pickAt('b_000000000001', 1, 1); // a pickAt whose timer is running
     const { wc } = store.add(A);
-    mode.set(A, true);
+    arm(A);
     const told = emitted.length;
     mode.dispose();
     expect(store.listeners()).toBe(0);
@@ -255,6 +347,7 @@ describe('what disarms (Design §2, §8)', () => {
     wc.emit('render-process-gone', {}, { reason: 'crashed' });
     wc.destroyed = true;
     wc.emit('destroyed');
+    vi.advanceTimersByTime(PICK_AT_MS + ARM_ACK_MS);
     expect(emitted).toHaveLength(told);
   });
 });
@@ -264,7 +357,7 @@ describe('the report gate (Design §8, §9)', () => {
     const { wc, send } = store.add(A);
     const shot = { path: '/u/browser/crops/b_aaaaaaaaaaaa-1-abcd.png', width: 192, height: 60 };
     capture.mockResolvedValueOnce({ crop: 'attached', screenshot: shot });
-    mode.set(A, true);
+    arm(A);
     await mode.receive(wc as never, report());
     expect(capture).toHaveBeenCalledExactlyOnceWith(store.entry(A), report().rect);
     expect(picked(send)).toEqual([
@@ -295,12 +388,12 @@ describe('the report gate (Design §8, §9)', () => {
     const { wc, send } = store.add(A);
     const stranger = new FakeContents();
     await mode.receive(wc as never, report()); // not armed
-    mode.set(A, true);
+    arm(A);
     await mode.receive(stranger as never, report()); // a sender not in the tab map
     await mode.receive(wc as never, report({ epoch: 0 })); // a stale epoch
     await mode.receive(wc as never, report({ requestId: 'r9' })); // a pickAt nobody asked for
     await mode.receive(wc as never, 'junk'); // nothing to match it to
-    expect(mode.state(A)).toEqual({ armed: true, epoch: 1, dropped: 4 });
+    expect(mode.state(A)).toEqual({ armed: true, arming: false, epoch: 1, dropped: 4 });
     expect(mode.foreignDropped()).toBe(1);
     const first = mode.receive(wc as never, report());
     await mode.receive(wc as never, report()); // a second report for one arm, while the first is cropped
@@ -320,7 +413,7 @@ describe('the report gate (Design §8, §9)', () => {
     for (const message of cases) {
       const tabId = `b_${String(cases.indexOf(message)).padStart(12, '0')}`;
       const { wc, send } = store.add(tabId);
-      mode.set(tabId, true);
+      arm(tabId);
       await mode.receive(wc as never, message);
       expect(changes().at(-1)).toEqual({ tabId, on: false, reason: 'refused' });
       expect(picked(send)).toEqual([]);
@@ -331,7 +424,7 @@ describe('the report gate (Design §8, §9)', () => {
   it('a page URL that is not http(s) refuses the pick', async () => {
     const { wc } = store.add(A);
     wc.url = 'chrome-error://chromewebdata/';
-    mode.set(A, true);
+    arm(A);
     await mode.receive(wc as never, report());
     expect(changes().at(-1)).toEqual({ tabId: A, on: false, reason: 'refused' });
   });
@@ -339,7 +432,7 @@ describe('the report gate (Design §8, §9)', () => {
   it('drops the pick as closed when the owner window is gone, and lets its crop go', async () => {
     const { wc, win, send } = store.add(A);
     capture.mockResolvedValueOnce({ crop: 'attached', screenshot: { path: '/u/c.png', width: 2, height: 2 } });
-    mode.set(A, true);
+    arm(A);
     win.destroyed = true;
     await mode.receive(wc as never, report());
     expect(picked(send)).toEqual([]);
@@ -358,7 +451,7 @@ describe('the report gate (Design §8, §9)', () => {
         if (interrupt === 'close') store.destroyView(tabId);
         return { crop: 'attached', screenshot: { path: `/u/${interrupt}.png`, width: 2, height: 2 } };
       });
-      mode.set(tabId, true);
+      arm(tabId);
       await mode.receive(wc as never, report());
       expect(picked(send)).toEqual([]);
       expect(discard).toHaveBeenLastCalledWith(`/u/${interrupt}.png`);
@@ -370,7 +463,7 @@ describe('the report gate (Design §8, §9)', () => {
     const { wc, send } = store.add(A);
     const long = `/u/${'x'.repeat(1001)}.png`; // over AnchorScreenshotSchema's path cap
     capture.mockResolvedValueOnce({ crop: 'attached', screenshot: { path: long, width: 2, height: 2 } });
-    mode.set(A, true);
+    arm(A);
     await mode.receive(wc as never, report());
     const [payload] = picked(send) as { crop: string; anchor: { screenshot?: unknown } }[];
     expect(payload.crop).toBe('failed');
@@ -382,7 +475,7 @@ describe('the report gate (Design §8, §9)', () => {
     const { wc, send } = store.add(A, { appSessionId: '' as never }); // AppSessionIdSchema refuses an empty id
     capture.mockResolvedValueOnce({ crop: 'attached', screenshot: { path: '/u/x.png', width: 2, height: 2 } });
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mode.set(A, true);
+    arm(A);
     await mode.receive(wc as never, report());
     expect(picked(send)).toEqual([]);
     expect(changes().map((c) => (c as { reason: string }).reason)).toEqual(['armed', 'refused']);
@@ -394,7 +487,7 @@ describe('the report gate (Design §8, §9)', () => {
   it('passes the crop outcome through when there is no picture', async () => {
     const { wc, send } = store.add(A);
     capture.mockResolvedValueOnce({ crop: 'tooLarge' });
-    mode.set(A, true);
+    arm(A);
     await mode.receive(wc as never, report());
     expect(picked(send)).toMatchObject([{ crop: 'tooLarge' }]);
   });
@@ -423,6 +516,20 @@ describe('pickAt (Design §7): the context menu\'s one-shot pick', () => {
     await mode.receive(wc as never, report({ epoch: 1, requestId: 'r2' }));
     expect(picked(send)).toEqual([]);
     expect(mode.state(A)!.dropped).toBe(3);
+  });
+
+  it('a pickAt no page answers within PICK_AT_MS says Comment is unavailable; an answered one says nothing more', async () => {
+    vi.useFakeTimers();
+    const { wc } = store.add(A);
+    mode.pickAt(A, 1, 1);
+    vi.advanceTimersByTime(PICK_AT_MS - 1);
+    expect(changes()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(changes()).toEqual([{ tabId: A, on: false, reason: 'unavailable' }]);
+    mode.pickAt(A, 1, 1);
+    await mode.receive(wc as never, report({ epoch: 0, requestId: 'r2' }));
+    vi.advanceTimersByTime(PICK_AT_MS * 2);
+    expect(changes()).toHaveLength(1);
   });
 
   it('refuses a tab with no page or under the agent, and tells a refused answer', async () => {
