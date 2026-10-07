@@ -226,8 +226,8 @@ export function browserTargetText(target: BrowserTarget): string {
   return typeof target === 'string' ? target : locatorText(target);
 }
 
-const on = (action: string, target: string) => (target === '' ? action : `${action} on ${clipErrorDetail(target)}`);
 const clip = clipErrorDetail;
+const on = (action: string, target: string) => (target === '' ? action : `${action} on ${clip(target)}`);
 
 const SNAPSHOT_AGAIN = '; call browser_snapshot again and use a ref from it';
 
