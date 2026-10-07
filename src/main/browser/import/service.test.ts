@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { CookiesSetDetails, Session } from 'electron';
 import { afterEach, beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension, ImportPhase, ImportReport } from '@shared/browser/import';
@@ -39,7 +40,7 @@ interface Emitted {
 
 function fakeSession(userData: string, storageDirName = 'maws-chrome-default') {
   const jar: CookiesSetDetails[] = [];
-  const loaded = new Map<string, { id: string }>();
+  const loaded = new Map<string, { id: string; path: string }>();
   const ses = {
     storagePath: join(userData, 'Partitions', storageDirName),
     cookies: {
@@ -88,13 +89,13 @@ function fakeView(listed?: () => unknown[]) {
 
 // The extensions phase Task 2.4 implements: here each chosen extension is "copied" into the partition folder and, unless
 // a wallet, "loaded" into the fake session.
-function fakeExtensions(loaded: Map<string, { id: string }>, { waitForAbortAfter }: { waitForAbortAfter?: number } = {}) {
+function fakeExtensions(loaded: Map<string, { id: string; path: string }>, { waitForAbortAfter }: { waitForAbortAfter?: number } = {}) {
   return vi.fn<ImportExtensions>(async ({ extensions, partitionFolder, signal, progress }) => {
     const records: ImportedExtension[] = [];
     for (const [i, { candidate }] of extensions.entries()) {
       if (signal.aborted) break;
       mkdirSync(join(partitionFolder, 'extensions', candidate.id), { recursive: true });
-      if (!candidate.wallet) loaded.set(candidate.id, { id: candidate.id });
+      if (!candidate.wallet) loaded.set(candidate.id, { id: candidate.id, path: join(partitionFolder, 'extensions', candidate.id) });
       records.push({
         id: candidate.id, chromeId: null, name: candidate.name, version: candidate.version, enabled: !candidate.wallet, wallet: candidate.wallet,
         unsupportedPermissions: candidate.unsupportedPermissions, status: candidate.wallet ? 'off' : 'loaded', error: null,
@@ -373,6 +374,115 @@ describe('BrowserImportService', () => {
     const report = await finished;
     expect(report).toMatchObject({ outcome: 'done', history: null, extensions: null, cookies: { imported: 0, keychain: 'skipped', error: 'SQLITE_NOTADB' } });
     expect(keychain).not.toHaveBeenCalled();
+  });
+
+  it('answers start before any progress event: the run begins on the next turn', async () => {
+    const svc = service();
+    const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true });
+    await Promise.resolve();
+    expect(emitted).toEqual([]);
+    expect((await finished).outcome).toBe('done');
+  });
+
+  it('fails a partition whose storage directory is not an imported profile’s without touching that session', async () => {
+    session = fakeSession(userData, 'maws-browser');
+    const { report } = await importAll(service());
+    expect(report).toMatchObject({ outcome: 'failed', failure: 'partitionUnavailable' });
+    expect(session.ses.clearStorageData).not.toHaveBeenCalled();
+    expect(session.ses.extensions.getAllExtensions).not.toHaveBeenCalled();
+  });
+
+  it('rolls back only the extensions loaded from the partition’s folder', async () => {
+    session.loaded.set('elsewhere', { id: 'elsewhere', path: join(userData, 'not-this-import', 'elsewhere') });
+    extensions = fakeExtensions(session.loaded, { waitForAbortAfter: 1 });
+    const svc = service();
+    onEmit = (event) => {
+      if (event.payload.phase === 'extensions' && event.payload.done === 1) svc.cancel(svc.running()!.importId);
+    };
+    await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
+    expect(session.ses.extensions.removeExtension).toHaveBeenCalledTimes(1);
+    expect(session.ses.extensions.removeExtension).toHaveBeenCalledWith(fixture.extensions.probe.id);
+    expect([...session.loaded.keys()]).toEqual(['elsewhere']);
+  });
+
+  it('zeroes the key when the Keychain answers allowed after the owner cancelled', async () => {
+    const svc: BrowserImportService = service({
+      keychain: async () => {
+        svc.cancel(svc.running()!.importId);
+        const key = deriveKey(fixture.password);
+        keys.push(key);
+        return { outcome: 'allowed', key };
+      },
+    });
+    const { report } = await importAll(svc);
+    expect(report.outcome).toBe('cancelled');
+    expect(keys[0]!.every((byte) => byte === 0)).toBe(true);
+    expect(session.jar).toEqual([]);
+  });
+
+  it('does not ask the Keychain for an empty cookie store', async () => {
+    const svc = service();
+    const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
+    const db = new DatabaseSync(join(userData, 'browser', 'import', inspection.inspectionId, 'Cookies'));
+    db.exec('DELETE FROM cookies');
+    db.close();
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const report = await finished;
+    expect(keychain).not.toHaveBeenCalled();
+    expect(report).toMatchObject({ outcome: 'done', cookies: { imported: 0, keychain: 'skipped', error: null } });
+    expect(Object.values(report.cookies!.skipped).every((n) => n === 0)).toBe(true);
+    expect(phases()).not.toContain('keychain');
+  });
+
+  it('fails the run and rolls back when the record cannot be written, announcing no change', async () => {
+    const put = vi.fn(() => Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' })));
+    const { report } = await importAll(service({ profiles: { get: (dir) => profiles.get(dir), list: () => profiles.list(), put } }));
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(report).toMatchObject({ outcome: 'failed', failure: 'recordUnwritable' });
+    expect(ImportReportSchema.safeParse(report).success).toBe(true);
+    expect(historyOf()).toEqual([]);
+    expect(session.ses.clearStorageData).toHaveBeenCalled();
+    expect(emitted.some((e) => e.name === 'browser.import.changed')).toBe(false);
+    expect(stagingLeft()).toEqual([]);
+  });
+
+  it('keeps a written record whole when announcing the change fails', async () => {
+    const svc = service({
+      emit: (name, payload) => {
+        if (name === 'browser.import.changed') throw new Error('no window');
+        emitted.push({ name, payload } as Emitted);
+        return true;
+      },
+    });
+    const { report } = await importAll(svc);
+    expect(report.outcome).toBe('done');
+    expect(profiles.get('Default')).not.toBeNull();
+    expect(historyOf()).toHaveLength(4);
+    expect(session.ses.clearStorageData).not.toHaveBeenCalled();
+    expect(emitted.at(-1)!.name).toBe('browser.import.finished');
+  });
+
+  it('hears a cancel between history batches, and rolls back the batches written', async () => {
+    const big = buildChromeUserData(join(root, 'ChromeBig'));
+    const db = new DatabaseSync(big.profiles.Default.history.file);
+    const insert = db.prepare('INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES (?, NULL, 1, 0, 13300000000000000, 0)');
+    for (let i = 0; i < 1200; i++) insert.run(`https://bulk.test/${i}`);
+    db.close();
+    let clock = 0;
+    const importRows = vi.spyOn(index.browserHistory, 'importRows');
+    const svc = service({ now: () => (clock += 1000) }); // every progress event passes the throttle
+    onEmit = (event) => {
+      if (event.payload.phase === 'history' && event.payload.done === 500) svc.cancel(svc.running()!.importId);
+    };
+    const inspection = await svc.inspect({ userDataDir: big.dir, profileDir: 'Default' });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: true, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const report = await finished;
+    expect(report.outcome).toBe('cancelled');
+    expect(importRows).toHaveBeenCalledTimes(1);
+    expect(report.history!.imported).toBe(498); // the first batch: the fixture's four importable rows and 494 bulk ones
+    expect(keychain).not.toHaveBeenCalled();
+    expect(historyOf()).toEqual([]);
   });
 
   describe('start refuses', () => {

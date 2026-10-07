@@ -9,8 +9,9 @@
 // them): the partitions (Decision Log 31), the history store, the profiles store, `emit`, the Keychain, the import
 // view's factory, and the extensions phase (extensions-loader.ts, Task 2.4).
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Session } from 'electron';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
@@ -34,7 +35,7 @@ import { classifyHistoryRow, historyStoreCounts, readHistoryRows, type ImportedH
 import { cookieStoreCounts, readCookieRows } from './chrome/cookies';
 import { inspectExtensions, type InspectedExtension } from './chrome/extensions';
 import { readChromeProfiles } from './chrome/local-state';
-import { importCookies, planCookies, type CookiesBlock } from './cookies-import';
+import { importCookies, planCookies, type CookiePlan, type CookiesBlock } from './cookies-import';
 import type { KeychainResult } from './keychain';
 import { importLog, type ImportLogEvent } from './log';
 import type { ImportedProfiles } from './profiles';
@@ -258,6 +259,7 @@ export class BrowserImportService {
     };
     let ses: Session | null = null;
     let storageDirName = '';
+    await nextTurn(); // `start` answers `{ importId }` before any event of the run
     try {
       progress('copying', 0, 1);
       try {
@@ -266,7 +268,10 @@ export class BrowserImportService {
       } catch {
         ses = null;
       }
-      if (ses === null || !STORAGE_DIR.test(storageDirName)) throw new RunFailure('partitionUnavailable');
+      if (ses === null || !STORAGE_DIR.test(storageDirName)) {
+        ses = null; // a session the guard refused is never rolled back: it may not be this profile's
+        throw new RunFailure('partitionUnavailable');
+      }
       progress('copying', 1, 1);
 
       if (categories.history && !signal.aborted) report.history = await this.importHistory(inspection.history, partition, signal, progress);
@@ -296,11 +301,18 @@ export class BrowserImportService {
       if (report.outcome === 'done') {
         try {
           await this.deps.profiles.put(this.recordOf(report, inspection, storageDirName));
-          this.deps.emit('browser.import.changed', { profiles: this.deps.profiles.list() });
         } catch (error) {
           report.outcome = 'failed';
           report.failure = 'recordUnwritable';
           this.log({ kind: 'error', where: 'record', code: codeOf(error) });
+        }
+      }
+      // Announced only once the record stands; a failed announcement never undoes a written record.
+      if (report.outcome === 'done') {
+        try {
+          this.deps.emit('browser.import.changed', { profiles: this.deps.profiles.list() });
+        } catch (error) {
+          this.log({ kind: 'error', where: 'changed', code: codeOf(error) });
         }
       }
       if (report.outcome !== 'done' && ses !== null) await this.rollback(ses, partition, partitionFolder);
@@ -352,23 +364,22 @@ export class BrowserImportService {
     const read = this.readStore(staged.file, readCookieRows);
     if (!read.ok) return emptyCookies('skipped', read.code);
     const rows = read.value.rows.length;
+    if (rows === 0) return emptyCookies('skipped', null); // nothing to decrypt: the Keychain is never asked
 
     progress('keychain', 0, 1);
     const answer = await this.deps.keychain(signal);
-    this.log({ kind: 'keychain', outcome: answer.outcome, exitCode: answer.outcome === 'denied' ? answer.exitCode : null });
-    progress('keychain', 1, 1);
-    if (answer.outcome === 'cancelled' || signal.aborted) {
-      if (answer.outcome === 'allowed') answer.key.fill(0);
-      run.controller.abort(); // the Keychain step was cancelled: so is the run
-      return emptyCookies('skipped', null, rows);
-    }
-    if (answer.outcome !== 'allowed') return emptyCookies(answer.outcome, answer.outcome === 'denied' ? answer.error : null);
-
-    let plan;
+    let plan: CookiePlan;
     try {
+      this.log({ kind: 'keychain', outcome: answer.outcome, exitCode: answer.outcome === 'denied' ? answer.exitCode : null });
+      progress('keychain', 1, 1);
+      if (answer.outcome === 'cancelled' || signal.aborted) {
+        run.controller.abort(); // the Keychain step was cancelled: so is the run
+        return emptyCookies('skipped', null, rows);
+      }
+      if (answer.outcome !== 'allowed') return emptyCookies(answer.outcome, answer.outcome === 'denied' ? answer.error : null);
       plan = planCookies(read.value.rows, answer.key, read.value.storeVersion, this.now());
     } finally {
-      answer.key.fill(0); // the key exists for the decode only, and is never written, logged or sent
+      if (answer.outcome === 'allowed') answer.key.fill(0); // the key exists for the decode only, and is never written, logged or sent
     }
     if (plan.wrongKey) this.log({ kind: 'keychain', outcome: 'wrongKey' });
     return importCookies({
@@ -382,12 +393,21 @@ export class BrowserImportService {
     });
   }
 
-  // Undoes a cancelled or failed run (Design §14): the partition was fresh at start, so everything in it is this run's.
-  // Each step is attempted whatever the one before did.
+  // Undoes a cancelled or failed run (Design §14): the partition was fresh at start, so its history and storage are this
+  // run's; of its extensions, the ones loaded from the partition's own folder are. Each step is attempted whatever the
+  // one before did.
   private async rollback(ses: Session, partition: string, partitionFolder: string): Promise<void> {
+    const roots = [partitionFolder, realOrNull(partitionFolder)].filter((root): root is string => root !== null).map((root) => root + sep);
     const steps: [string, () => unknown][] = [
       ['history', () => this.deps.history.removePartition(partition)],
-      ['extensions', () => ses.extensions.getAllExtensions().forEach((extension) => ses.extensions.removeExtension(extension.id))],
+      [
+        'extensions',
+        () => {
+          for (const extension of ses.extensions.getAllExtensions()) {
+            if (roots.some((root) => extension.path.startsWith(root))) ses.extensions.removeExtension(extension.id);
+          }
+        },
+      ],
       ['storage', () => ses.clearStorageData()],
       ['cookies', () => ses.cookies.flushStore()],
       ['folder', () => rm(partitionFolder, { recursive: true, force: true })],
@@ -503,3 +523,12 @@ function codeOf(error: unknown): string {
 }
 
 const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+// The folder's real path (Electron may report an extension's path resolved), or null when it does not exist.
+function realOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
