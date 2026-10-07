@@ -307,8 +307,10 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   const tabId = id ?? mintTabId(tool.id);
   const ref: PanelTabRef = { id: tabId, toolId: tool.id, pinned: pin };
   createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: tabId, params });
-  if (activate && target !== null && shownSession() !== target) layout().openSession(target);
+  // The tab is written before its session is shown, so a synchronous reaction to that switch which adds the same
+  // single-instance tool finds this tab rather than making a second one.
   writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
+  if (activate && target !== null && shownSession() !== target) layout().openSession(target);
   if (activate && (target !== null || shownSession() === null)) requestFocus(tabId);
   if (activate) reveal();
   return tabId;

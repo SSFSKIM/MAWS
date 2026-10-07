@@ -43,8 +43,7 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
   let disposed = false;
 
   // The session just shown: the sheet for the last of its waiting asks still pending, if any. Run after the layout
-  // write that showed it has finished: a panel `addTool` opens the session before writing its own tab, and the sheet
-  // must land on that tab, not on a second one.
+  // write that showed it has finished, outside that write's subscribers.
   const shown = (appSessionId: AppSessionId) => {
     const asks = waiting.get(appSessionId);
     if (disposed || asks === undefined || shownSession() !== appSessionId) return;

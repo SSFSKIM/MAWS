@@ -363,7 +363,7 @@ describe('panel host transitions', () => {
     expect(panelOf(A)).toBeUndefined();
   });
 
-  it('activate for a target not shown opens the session once, then selects the new tab in its list', () => {
+  it('activate for a target not shown writes the new tab selected in its list, then opens the session once', () => {
     register(probeTool('t').tool);
     render(<TestHost />);
     const spies = spyLayout();
@@ -371,9 +371,27 @@ describe('panel host transitions', () => {
     act(() => void (id = panelHost.addTool('t', { appSessionId: B })));
     expect(spies.openSession.mock.calls).toEqual([[B]]);
     const write = spies.updatePanelTabs.mock.calls.findIndex(([target]) => target === B);
-    expect(spies.openSession.mock.invocationCallOrder[0]).toBeLessThan(spies.updatePanelTabs.mock.invocationCallOrder[write]);
+    expect(spies.updatePanelTabs.mock.invocationCallOrder[write]).toBeLessThan(spies.openSession.mock.invocationCallOrder[0]);
     expect(panelOf(B)!.activeTabId).toBe(id);
     expect(screen.getByTestId(`body:${id}`).textContent).toContain(`t · ${B} · unpinned · visible · focus 1`);
+  });
+
+  it('a synchronous reaction to the session switch that adds the same single-instance tool finds the new tab', () => {
+    const { tool, probe } = probeTool('s', { multiInstance: false });
+    register(tool);
+    render(<TestHost />);
+    const reacted: string[] = [];
+    const off = useLayout.subscribe((state, before) => {
+      if (state.main === before.main || reacted.length > 0) return;
+      reacted.push(panelHost.addTool('s', { appSessionId: B, params: 'again' }));
+    });
+    let id = '';
+    act(() => void (id = panelHost.addTool('s', { appSessionId: B, params: 'first' })));
+    off();
+    expect(reacted).toEqual([id]);
+    expect(panelOf(B)!.tabs.map((t) => t.id)).toEqual([id]);
+    expect(probe.created).toHaveLength(1);
+    expect(probe.opens).toEqual([{ id, params: 'again' }]);
   });
 
   describe('the hydration barrier', () => {
