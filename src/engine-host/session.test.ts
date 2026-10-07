@@ -1192,7 +1192,8 @@ describe('catalog answers and publishes from handshake state (C7)', () => {
   it('pass3/e8-plugins-reload: a reload answer replaces the catalogue’s commands and agents and publishes it; an identical answer publishes nothing', async () => {
     const rows = loadJournal('pass3', 'e8-plugins-reload');
     const answerAt = (seq: number) => ReloadPluginsResponseSchema.parse((rows.find((r) => r.seq === seq)!.frame as { response: { response: unknown } }).response.response);
-    const { capabilities: _surface, ...init } = (rows.find((r) => r.seq === 4)!.frame as { response: { response: Record<string, unknown> } }).response.response; // no ui_surface_v1 attach to script
+    const init = { ...(rows.find((r) => r.seq === 4)!.frame as { response: { response: Record<string, unknown> } }).response.response };
+    delete init.capabilities; // no ui_surface_v1 attach to script here
     const { session } = setup({ responder: defaultResponder({ initialize: () => ({ response: init }) }) });
     const published: Catalog[] = [];
     session.on('catalog', (catalog) => published.push(catalog));
