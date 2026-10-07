@@ -247,6 +247,40 @@ describe('editor', () => {
       expect(unusable()).toBeNull();
     });
 
+    // W-D review I1: a disk version on offer that the disk no longer holds is withdrawn when the disk turns unusable, so
+    // the bar says why instead of offering Reload and Keep mine against it.
+    it('withdraws an earlier theirs when a later change on disk cannot be theirs, and says why', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB };
+      changed(disk);
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.getAttribute('data-disk-unusable')).toBe('head'));
+      expect(theirsNotice()).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+      expect(entry()).toMatchObject({ dirty: true, theirs: null, diskUnusable: 'head' });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+    });
+
+    it('withdraws an earlier theirs when a save’s conflict read finds the disk unusable, and says why', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB }; // no event
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.getAttribute('data-disk-unusable')).toBe('head'));
+      expect(theirsNotice()).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+      expect(entry()).toMatchObject({ dirty: true, saving: false, theirs: null, diskUnusable: 'head' });
+      expect(disk.files[APP]).toEqual({ text: 'log line\n', bytes: 5 * MiB }); // nothing written
+    });
+
     it('leaves theirs empty when a change event’s read answers the baseline’s own hash', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('// mine\n');

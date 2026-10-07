@@ -279,8 +279,9 @@ export function createViewerStore(client: MawsBridge) {
       const ready = { status: 'ready' as const, error: null, removed: false, loadingMore: false, diskUnusable: null };
       const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore && entry.diskUnusable === null;
       if (unsaved(entry)) {
-        // E11 W-D: a disk version the editor cannot take is not offered, and the bar says why
-        if (!isEditable(read)) return patch(tabId, { ...ready, diskUnusable: unusableReason(read) });
+        // E11 W-D: a disk version the editor cannot take is not offered, and the bar says why; a theirs shown earlier is
+        // withdrawn, the disk no longer holding it (W-D review I1)
+        if (!isEditable(read)) return patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
         const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
         if (differs) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
         if (!settledAlready) patch(tabId, ready);
@@ -426,12 +427,12 @@ export function createViewerStore(client: MawsBridge) {
         text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8,
       };
       // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered;
-      // the bar says why (E11 W-D).
+      // the bar says why (E11 W-D), and a theirs shown earlier is withdrawn, the disk no longer holding it (W-D review I1).
       patch(
         tabId,
         isEditable(file)
           ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' }, diskUnusable: null }
-          : { saving: false, saveError: EDITOR_COPY.conflictOnSave, diskUnusable: unusableReason(file) },
+          : { saving: false, saveError: EDITOR_COPY.conflictOnSave, theirs: null, diskUnusable: unusableReason(file) },
       );
       return true;
     };
