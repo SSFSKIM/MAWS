@@ -5,11 +5,12 @@
 // not post an OS notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
+import { tabId } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { registerAction } from '../keymap/actions-runtime';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { nextNeedsYou } from './derive';
@@ -33,9 +34,16 @@ function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
   openInFocusedPane(appSessionId as AppSessionId);
 }
 
+// E11 (W-C; E1's live sitting): a session whose tab is in front in a pane has its request on screen already, the
+// docked card (C7) or, for an ask, the Question sheet E1 opens for the shown session; a toast would only cover the
+// panel's action bar. A file tab of the session does not count: the docked card is in the session's own pane.
+const requestOnScreen = (appSessionId: AppSessionId): boolean =>
+  currentSet(useLayout.getState().main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
+
 function fallbackToast({ appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {
   if (delivery !== 'fallback') return;
   const id = appSessionId as AppSessionId;
+  if (requestOnScreen(id)) return;
   const attention = useAttention.getState();
   // The item may still sit in the buffer of an outstanding attention snapshot.
   const items = [...(attention.bySession.get(id) ?? []), ...(attention.pendingReplacements?.get(id) ?? [])];

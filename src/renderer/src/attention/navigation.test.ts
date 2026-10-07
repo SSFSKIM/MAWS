@@ -94,6 +94,21 @@ describe('the fallback toast', () => {
     fake.event('attention.notified', { appSessionId: idOf('Fix sidebar drag'), attentionId: 'att-x' as AttentionId, delivery: 'os', at: '2026-09-28T10:00:00Z' });
     expect(useNotices.getState().notices).toEqual([]);
   });
+
+  // E11 (W-C; E1's live sitting): the session in front of the reader shows its own request (the docked card, or the
+  // Question sheet E1 opens for the shown session), so a toast would only cover the panel's action bar
+  it('posts no toast for the shown session, and still one for another session', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];
+    useLayout.getState().openSession(fix.appSessionId);
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices).toEqual([]);
+    fake.event('attention.notified', { appSessionId: plan.appSessionId, attentionId: plan.id, delivery: 'fallback', at: plan.createdAt });
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`]);
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId }); // the docked card is not in a file tab
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
+  });
 });
 
 it.each(['next', 'notification'] as const)('restores main when attention arrives through %s while the panel is maximized', (via) => {
