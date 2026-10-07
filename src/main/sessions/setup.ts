@@ -280,8 +280,9 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
 
 // E3 start (Design §3 and §5): the thread's title through the engine, so a terminal's picker says what it is (the
 // index's override when the engine refuses: the copied history would otherwise title it by the parent's prompt), then
-// its row in the parent's transcript. Nothing here rolls back: the thread runs whatever the bookkeeping does.
-async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage): Promise<void> {
+// its row in the parent's transcript. Nothing here rolls back: the thread runs whatever the bookkeeping does. E11: the
+// start-time recovery binds a thread the quit cut short here too (recovery.ts); each step is idempotent.
+export async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage): Promise<void> {
   const title = sideThreadTitle(lineage);
   await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title }).catch((error: unknown) => {
     s.log(`the side thread ${appSessionId} is named in the index, since the engine refused: ${messageOf(error)}`);
