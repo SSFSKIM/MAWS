@@ -5,8 +5,9 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload, HostState } from '@shared/ipc/schema';
 import type { MawsBrowserAnswerResult, MawsBrowserRequest } from '@shared/ipc/schema/maws';
-import { BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
+import { BROWSER_ANSWER_MS, BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
 import { TOOL_ERRORS } from '@shared/maws/tools';
+import { BrowserBridge } from '../../../engine-host/tool-server/browser-bridge';
 import { TabStore } from '../tabs';
 import type { BrowserCall, CallContext } from './handlers';
 import { BrowserRequests, e2eTabIds, reachableSessions, startBrowserAgent } from './index';
@@ -210,6 +211,80 @@ describe('BrowserRequests: ending a request', () => {
     h.runs[0].settle(OK(1));
     await flush();
     expect(h.requests.pendingFor(TAB)).toBe(false);
+  });
+});
+
+// A request queued on a tab behind one that waits on the person or a cover waits too: main tells the host and the row
+// the head's reason for it, so its deadline pauses and its line reads truthfully, and lifts it when the head resumes or
+// ends. Time queued behind a head that works still counts against the queued request's deadline.
+describe('BrowserRequests: a queued request waits with the head of its tab', () => {
+  it("mirrors the head's wait onto the requests queued on its tab, at enqueue too, and lifts it when the head resumes or its turn ends", async () => {
+    const h = harness();
+    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
+    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'back' }), 'host');
+    void h.requests.accept(request(3, 'browser_navigate', { tabId: OTHER, url: 'reload' }), 'host');
+    await flush();
+    const head = h.runs[0];
+    head.ctx.waiting(TAB, 'human');
+    expect(h.reports).toEqual([[rid(1), TAB, 'human'], [rid(2), TAB, 'human']]); // the other tab's request is not touched
+    void h.requests.accept(request(4, 'browser_navigate', { tabId: TAB, url: 'forward' }), 'host'); // joins a paused queue
+    expect(h.reports.at(-1)).toEqual([rid(4), TAB, 'human']);
+    h.reports.length = 0;
+    head.ctx.waiting(TAB, null);
+    head.ctx.waiting(TAB, 'cover');
+    expect(h.reports).toEqual([
+      [rid(1), TAB, null], [rid(2), TAB, null], [rid(4), TAB, null],
+      [rid(1), TAB, 'cover'], [rid(2), TAB, 'cover'], [rid(4), TAB, 'cover'],
+    ]);
+    h.reports.length = 0;
+    head.settle(OK(1)); // its turn ends while it still waits (an answer the cover wait gave up on)
+    await flush();
+    expect(h.reports).toEqual([[rid(2), TAB, null], [rid(4), TAB, null]]);
+    expect(h.runs.at(-1)!.call.requestId).toBe(rid(2));
+    h.reports.length = 0;
+    h.requests.cancel(A, rid(4)); // a cancelled request is told nothing more
+    h.runs.at(-1)!.ctx.waiting(TAB, 'human');
+    h.runs.at(-1)!.ctx.waiting(TAB, null);
+    expect(h.reports).toEqual([[rid(2), TAB, 'human'], [rid(2), TAB, null]]);
+  });
+
+  it('a request queued past 30 s behind a held head does not time out at the host; its deadline runs from the resume', async () => {
+    vi.useFakeTimers();
+    const { runs, run } = deferredRuns();
+    const entries = new Map([[TAB, { tab: { tabId: TAB } }]]);
+    // the host's bridge and main's requests wired to each other as the IPC does (each closure runs after both exist)
+    const bridge = new BrowserBridge({
+      send: (sent) => void requests.accept({ appSessionId: A, ...sent }, 'host'),
+      cancel: (requestId) => void requests.cancel(A, requestId),
+    });
+    const requests = new BrowserRequests({
+      run,
+      answer: (call, result) => void bridge.answer(call.requestId as RequestId, result),
+      report: (call, _tabId, reason) => void bridge.waiting(call.requestId as RequestId, reason),
+      control: { requestPending: vi.fn() },
+      store: { entry: (tabId: string) => entries.get(tabId) as never },
+      reaches: () => true,
+      now: Date.now,
+    });
+    const ask = (n: number) => {
+      const outcome: { kind?: string } = {};
+      void bridge.request({ requestId: rid(n), toolUseId: null, tool: 'browser_navigate', args: { tabId: TAB, url: 'reload' } }, new AbortController().signal).then(({ kind }) => (outcome.kind = kind));
+      return outcome;
+    };
+    const first = ask(1);
+    const second = ask(2);
+    await vi.advanceTimersByTimeAsync(0);
+    runs[0].ctx.waiting(TAB, 'human'); // the person holds the page
+    await vi.advanceTimersByTimeAsync(5 * BROWSER_ANSWER_MS);
+    expect([first.kind, second.kind]).toEqual([undefined, undefined]);
+    runs[0].ctx.waiting(TAB, null); // handed back: both deadlines run again, whole
+    await vi.advanceTimersByTimeAsync(BROWSER_ANSWER_MS - 1);
+    expect(second.kind).toBeUndefined();
+    runs[0].settle(OK(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.kind).toBe('answered');
+    await vi.advanceTimersByTimeAsync(1); // the head worked for the whole re-armed deadline: the residual the queue accepts
+    expect(second.kind).toBe('timeout');
   });
 });
 

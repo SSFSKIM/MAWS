@@ -2,7 +2,8 @@
 // started inside `startBrowser`'s E4c block, where the tab store and E4a's Navigator are in scope. It takes every
 // `maws.browser.request` the engine host emits, runs it on the session's tab one request at a time per tab (two
 // sessions' tabs run side by side), and answers through `maws.browser.answer`; a wait on the person or a cover is
-// reported through `maws.browser.waiting` (the host pauses its deadline) and `maws.browser.progress` (the row's line).
+// reported through `maws.browser.waiting` (the host pauses its deadline) and `maws.browser.progress` (the row's line),
+// for the request that waits and for every request queued behind it on that tab.
 //
 // Every request has an AbortController, aborted by the host's `maws.browser.cancel` (its call was abandoned or timed
 // out), by the tab's close (the request answers `tabClosed`), and by the engine host's connection going (any state but
@@ -65,11 +66,16 @@ interface Pending {
   appSessionId: AppSessionId;
   tabId: string | null;
   controller: AbortController;
+  call: BrowserCall;
+  via: Via;
+  started: boolean; // its turn has begun (it is no longer queued)
+  mirrored: BrowserWaitReason | null; // while queued: the head's wait last told for it
 }
 
 export class BrowserRequests {
   private readonly pending = new Map<string, Pending>();
   private readonly tails = new Map<string, Promise<unknown>>(); // per tab: the last request's end
+  private readonly headWaits = new Map<string, BrowserWaitReason>(); // per tab: what its running request waits on
 
   constructor(private readonly deps: BrowserRequestsDeps) {}
 
@@ -94,16 +100,23 @@ export class BrowserRequests {
     }
     const key = keyOf(appSessionId, requestId);
     const controller = new AbortController();
-    this.pending.set(key, { appSessionId, tabId, controller });
+    const pending: Pending = { appSessionId, tabId, controller, call, via, started: false, mirrored: null };
+    this.pending.set(key, pending);
     const entry = tabId === null ? undefined : this.deps.store.entry(tabId);
     if (entry) this.deps.control.requestPending(entry, 1);
+    const headWait = tabId === null ? undefined : this.headWaits.get(tabId);
+    if (headWait !== undefined) this.mirror(pending, headWait); // joins the queue of a tab whose request waits
 
     const turn = this.turnOf(tabId, async () => {
       if (controller.signal.aborted) return null; // cancelled while queued: never run
+      pending.started = true;
       const ctx: CallContext = {
         signal: controller.signal,
         startedAt: this.deps.now(),
-        waiting: (waitTab, reason) => this.deps.report(call, waitTab, reason, via),
+        waiting: (waitTab, reason) => {
+          this.deps.report(call, waitTab, reason, via);
+          if (tabId !== null) this.headWaiting(tabId, reason);
+        },
       };
       try {
         return await this.deps.run(call, ctx);
@@ -111,6 +124,8 @@ export class BrowserRequests {
         if (controller.signal.aborted) return null;
         const [action, target] = describeCall(call);
         return answerOfError(error, call.tool, action, target);
+      } finally {
+        if (tabId !== null) this.headWaiting(tabId, null); // the next turn starts on its own deadline
       }
     });
     let result: MawsBrowserAnswerResult | null;
@@ -148,6 +163,24 @@ export class BrowserRequests {
   pendingFor(tabId: string, exceptSession?: AppSessionId): boolean {
     for (const pending of this.pending.values()) if (pending.tabId === tabId && pending.appSessionId !== exceptSession) return true;
     return false;
+  }
+
+  // The request running on the tab waits on the person or a cover, or no longer does: every request queued behind it
+  // waits with it, so the host pauses their deadlines too and their rows read the same line (a side thread acting in
+  // its parent's tab, or two calls the engine runs side by side on one tab). Time queued behind a head that works
+  // still counts against a queued request's deadline.
+  private headWaiting(tabId: string, reason: BrowserWaitReason | null): void {
+    if (reason === null) this.headWaits.delete(tabId);
+    else this.headWaits.set(tabId, reason);
+    for (const pending of this.pending.values()) {
+      if (pending.tabId === tabId && !pending.started && !pending.controller.signal.aborted) this.mirror(pending, reason);
+    }
+  }
+
+  private mirror(pending: Pending, reason: BrowserWaitReason | null): void {
+    if (pending.mirrored === reason) return; // a null to a request never told a wait would re-arm its deadline whole
+    pending.mirrored = reason;
+    this.deps.report(pending.call, pending.tabId!, reason, pending.via);
   }
 
   // A tab's requests run in order; a request with no tab (list, open) runs at once.
