@@ -1,5 +1,6 @@
 import {spawn,execFileSync,execFile} from 'node:child_process';
 import {probeInitialize} from './probe-initialize.mjs';
+import {sdkMcpAnswer} from './sdk-mcp.mjs';
 import {mkdtempSync,writeFileSync,appendFileSync,readFileSync,mkdirSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {randomUUID} from 'node:crypto';
@@ -24,11 +25,13 @@ export class Probe {
  this.closed=new Promise(resolve=>this.child.on('close',(code,signal)=>{clearInterval(this.sampler);if(buffer)this.note({event:'unterminated_stdout',text:buffer});this.note({event:'exit',code,signal,peakRSSKiB:this.peakRSSKiB,peakTreeRSSKiB:this.peakTreeRSSKiB});this.exited=true;for(const w of this.waiters)w.fail(new Error('child exited'));for(const p of this.pending.values())p.fail(new Error('child exited'));resolve({code,signal});}));
  this.sampler=setInterval(()=>execFile('ps',['-o','rss=','-p',String(this.child.pid)],(e,s)=>{if(!e)this.peakRSSKiB=Math.max(this.peakRSSKiB,Number(s.trim())||0);try{if(!this.exited)this.peakTreeRSSKiB=Math.max(this.peakTreeRSSKiB,processTree(this.child.pid).reduce((a,r)=>a+r.rssKiB,0));}catch{}}),1000);
  this.on('can_use_tool',r=>({behavior:'deny',message:'Probe has no handler for this tool.'}));
+ this.servers={};this.on('mcp_message',r=>sdkMcpAnswer(this.servers,r)); // E11 W-E: serves what `serve` registered, refuses any other server
  }
  log(direction,frame){const row={seq:++this.seq,direction,at:new Date().toISOString(),frame};appendFileSync(this.file,redact(JSON.stringify(row))+'\n');return row;}
  tree(label){const procs=processTree(this.child.pid);const total=procs.reduce((a,r)=>a+r.rssKiB,0);this.note({event:'process_tree',label,totalRSSKiB:total,count:procs.length,procs});return total;}
  note(frame){this.log('meta',frame);}
  on(subtype,handler){this.handlers.set(subtype,handler);return this;}
+ serve(name,server){this.servers[name]=server;return this;} // an SDK MCP server the scenario hosts (sdk-mcp.mjs)
  receive(frame){const row=this.log('in',frame);this.frames.push(row);if(frame.session_id)this.sessionId=frame.session_id;
  if(frame.type==='control_response'){const p=this.pending.get(frame.response.request_id);if(p){this.pending.delete(frame.response.request_id);p.done(frame.response);}}
  for(const w of [...this.waiters])if(row.seq>w.after&&w.test(frame))w.done(frame);

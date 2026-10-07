@@ -52,10 +52,7 @@ export default async()=>{
  let fixture;
  try{
   const p=await launch('p1-sdk-mcp-image',run,{provenance:PROVENANCE},async(p,{sessionId})=>{
-   p.on('mcp_message',r=>{
-    if(r.server_name!=='maws')throw new Error('SDK MCP server not hosted here: '+r.server_name);
-    return {mcp_response:serve(r.message,calls)??{jsonrpc:'2.0',result:{},id:0}};
-   });
+   p.serve('maws',{handle:message=>serve(message,calls)}); // answered by the harness's handshake (sdk-mcp.mjs)
    // every permission allowed once (no updatedPermissions), the probe server's tool only
    p.on('can_use_tool',r=>{
     p.note({event:'permission_asked',tool:r.tool_name,input:r.input});
