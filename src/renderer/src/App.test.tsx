@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SUPERVISOR_NOTICES } from './app/copy';
+import { updatedStatus } from './test-support/host-status';
 
 const HOSTS: Record<'engine.hostState' | 'pty.hostState', HostState> = {
   'engine.hostState': { state: 'ready', pid: 1111, restarts: 0, revision: 1 },
@@ -43,7 +45,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V9, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V10, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -55,6 +57,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'engine.hostState':
       case 'pty.hostState':
         return HOSTS[name];
+      // E10: the supervisor's status the hosts store reads at connect (the engine host in the app, as under the harness)
+      case 'host.status':
+        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
       case 'fs.state':
         return {
           configHome: '/Users/new/.claude',
@@ -209,6 +214,16 @@ describe('hosts in the diagnostics strip', () => {
     expect(pty()).toBe('pty host · restarting');
     act(() => main.send('pty.hostState', { state: 'ready', pid: 4444, restarts: 1, revision: 4 }));
     expect(pty()).toBe('pty host · ready · pid 4444');
+  });
+
+  // E10: the root connects the hosts store, so the supervisor's banners show wherever the window is.
+  it('shows the supervisor row, and the update banner when an older build serves live sessions', async () => {
+    const main = fakeMain('light');
+    await renderApp();
+    expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toBe('supervisor · utility · starting · no unexpected exit');
+    act(() => main.send('host.status', updatedStatus(2)));
+    expect(screen.getByText(SUPERVISOR_NOTICES.updated(2))).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toContain('build differs · 2 sessions held');
   });
 
   it('shows the shell data counts once the stores have loaded (C5 M1)', async () => {

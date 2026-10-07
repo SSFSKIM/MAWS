@@ -1,0 +1,133 @@
+{
+ "question": "Q2",
+ "node": "v22.23.2",
+ "cases": {
+  "A_nodeParentGroupKilled": {
+   "before": {
+    "parent": {
+     "pid": 35256,
+     "ppid": 35245,
+     "pgid": 35256,
+     "stat": "Ss",
+     "sessionLeader": true,
+     "command": "/Users/new/.nvm/versions/node/v22.23.2/bin/node /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs"
+    },
+    "child": {
+     "pid": 35258,
+     "ppid": 35256,
+     "pgid": 35258,
+     "stat": "Ss",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child node-parent"
+    }
+   },
+   "groupKill": "sent",
+   "after": {
+    "parent": null,
+    "child": {
+     "pid": 35258,
+     "ppid": 1,
+     "pgid": 35258,
+     "stat": "Ss",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child node-parent"
+    },
+    "childAlive": true,
+    "msAfterKill": 510
+   },
+   "childLog": "{\"child\":35258,\"tag\":\"node-parent\",\"execPath\":\"/Users/new/.nvm/versions/node/v22.23.2/bin/node\",\"node\":\"v22.23.2\",\"electron\":null}"
+  },
+  "B_electronAppQuit": {
+   "before": {
+    "app": {
+     "pid": 35449,
+     "ppid": 35245,
+     "pgid": 35449,
+     "stat": "Rs",
+     "sessionLeader": true,
+     "command": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron /Users/new/Developer/"
+    },
+    "child": {
+     "pid": 35504,
+     "ppid": 35449,
+     "pgid": 35504,
+     "stat": "Rs",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child electron-quit"
+    }
+   },
+   "appExit": {
+    "code": 0,
+    "signal": null,
+    "msToExit": 315,
+    "groupKillAfterQuit": "ESRCH"
+   },
+   "after": {
+    "app": null,
+    "child": {
+     "pid": 35504,
+     "ppid": 1,
+     "pgid": 35504,
+     "stat": "Ss",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child electron-quit"
+    },
+    "childAlive": true
+   },
+   "childLog": "{\"child\":35504,\"tag\":\"electron-quit\",\"execPath\":\"/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\",\"node\":\"v24.21.0\",\"electron\":\"44.4.5\"}",
+   "appStderrLines": 0
+  },
+  "C_electronAppGroupKilled": {
+   "before": {
+    "app": {
+     "pid": 35715,
+     "ppid": 35245,
+     "pgid": 35715,
+     "stat": "Rs",
+     "sessionLeader": true,
+     "command": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron /Users/new/Developer/"
+    },
+    "child": {
+     "pid": 35731,
+     "ppid": 35715,
+     "pgid": 35731,
+     "stat": "Rs",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child electron-hold"
+    }
+   },
+   "appExit": {
+    "groupKill": "sent",
+    "code": null,
+    "signal": "SIGKILL",
+    "msToExit": 514
+   },
+   "after": {
+    "app": null,
+    "child": {
+     "pid": 35731,
+     "ppid": 1,
+     "pgid": 35731,
+     "stat": "Ss",
+     "sessionLeader": true,
+     "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/spikes/supervisor-probe/q2-detach.mjs --child electron-hold"
+    },
+    "childAlive": true
+   },
+   "childLog": "{\"child\":35731,\"tag\":\"electron-hold\",\"execPath\":\"/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\",\"node\":\"v24.21.0\",\"electron\":\"44.4.5\"}",
+   "appStderrLines": 0
+  }
+ },
+ "cleanup": {
+  "started": [
+   35256,
+   35258,
+   35449,
+   35504,
+   35715,
+   35731
+  ],
+  "stillAlive": [],
+  "scratchRemoved": true
+ }
+}

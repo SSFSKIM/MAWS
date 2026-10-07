@@ -231,9 +231,9 @@ describe('a budget exit reads idle with the released mark', () => {
   it('the exited status of a release maps to idle with the mark, keeping an existing mark', () => {
     const working = { ...emptyDigest(APP), phase: 'working' as const, activity: 'Thinking' };
     const released = applyStatusToDigest(working, releasedStatus());
-    expect(released).toMatchObject({ phase: 'idle', activity: null, released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } });
-    const earlier = { ...released, released: { at: '2026-09-29T13:00:00.000Z', limitKiB: 4_194_304 } };
-    expect(applyStatusToDigest(earlier, releasedStatus()).released).toEqual({ at: '2026-09-29T13:00:00.000Z', limitKiB: 4_194_304 });
+    expect(released).toMatchObject({ phase: 'idle', activity: null, released: { at: '2026-09-29T14:02:00.000Z', reason: 'budget', limitKiB: 8_388_608 } });
+    const earlier = { ...released, released: { at: '2026-09-29T13:00:00.000Z', reason: 'budget' as const, limitKiB: 4_194_304 } };
+    expect(applyStatusToDigest(earlier, releasedStatus()).released).toEqual({ at: '2026-09-29T13:00:00.000Z', reason: 'budget', limitKiB: 4_194_304 });
   });
 
   it('every other exit keeps today’s mapping, with no mark', () => {
@@ -246,7 +246,7 @@ describe('a budget exit reads idle with the released mark', () => {
 
   it('the process.exited event of a release folds to idle with the mark and no pending requests', () => {
     const exited = ev('process.exited', { reason: 'budget', budget: RELEASE, at: '2026-09-29T14:02:00.000Z' });
-    expect(run([ev('turn.started', {}), ev('turn.ended', {}), exited])).toMatchObject({ phase: 'idle', activity: null, pendingRequests: 0, released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } });
+    expect(run([ev('turn.started', {}), ev('turn.ended', {}), exited])).toMatchObject({ phase: 'idle', activity: null, pendingRequests: 0, released: { at: '2026-09-29T14:02:00.000Z', reason: 'budget', limitKiB: 8_388_608 } });
     expect(run([ev('process.exited', { reason: 'stop' })]).released).toBeUndefined();
   });
 
@@ -257,6 +257,16 @@ describe('a budget exit reads idle with the released mark', () => {
       expect(d.phase).toBe('starting');
       expect(d.released).toBeUndefined();
     }
+  });
+
+  // E10: the supervisor's idle release is a release like the budget's, with no budget detail
+  it('an idle release reads idle with the mark, its reason idle and no limit, from the status and from the event', () => {
+    const idleStatus = { ...status(APP, { process: 'exited', exit: { reason: 'idle', release: null } }), exit: { code: 0, signal: null, reason: 'idle' as const, at: '2026-10-06T14:02:00.000Z', release: null } };
+    const working = { ...emptyDigest(APP), phase: 'working' as const, activity: 'Thinking' };
+    expect(applyStatusToDigest(working, idleStatus)).toMatchObject({ phase: 'idle', activity: null, released: { at: '2026-10-06T14:02:00.000Z', reason: 'idle', limitKiB: null } });
+    const exited = ev('process.exited', { reason: 'idle', budget: null, at: '2026-10-06T14:02:00.000Z' });
+    expect(run([ev('turn.started', {}), ev('turn.ended', {}), exited])).toMatchObject({ phase: 'idle', activity: null, pendingRequests: 0, released: { at: '2026-10-06T14:02:00.000Z', reason: 'idle', limitKiB: null } });
+    expect(applyStatusToDigest(applyStatusToDigest(emptyDigest(APP), idleStatus), status(APP, { process: 'starting' })).released).toBeUndefined();
   });
 });
 // C12 end

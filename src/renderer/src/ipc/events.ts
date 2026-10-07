@@ -59,6 +59,8 @@ export function connectShell(
   const freshness = createFreshness();
   let connected = true;
   const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload) => connected && listener(payload));
+  let hostState: EventPayload<'engine.hostState'>['state'] | null = null; // E10: the engine host's last state heard
+  let departures = 0; // E10: how often the engine host was heard leaving ready; a table read before the latest is stale
 
   // In arrival order; consecutive changes and consecutive digests go to the store as one call each.
   const apply = (queue: Queued[]) => {
@@ -109,6 +111,19 @@ export function connectShell(
     on('session.status', (e) => sessions().applyStatus(e)),
     on('attention.changed', (e) => attention().applyChanged(e)),
     on('attention.notified', (e) => attention().applyNotified(e)),
+    // E10: after a reconnect with windows open (a supervisor's crash and restart, Stop all, Restart now) the process
+    // table is read again when the engine host regains ready, once per transition (X13 "Main's resync"). A host leaving
+    // ready takes its statuses along, as in main: the successor's table (and its connect burst, which main relays after
+    // the ready event) says again what is live, and a session it no longer runs reads not live.
+    on('engine.hostState', ({ state }) => {
+      const regained = state === 'ready' && hostState !== 'ready';
+      hostState = state;
+      if (state !== 'ready') {
+        departures++;
+        sessions().forgetStatuses();
+      }
+      if (regained) readEngineTable();
+    }),
   ];
 
   // Replies apply only while this connection is live; the stores' own revisions decide against events.
@@ -125,8 +140,15 @@ export function connectShell(
     }
   };
 
-  // C3's process table, so a live session reads live after a reload before its next status (debt wave 3).
-  void answer('engine.sessions', client.invoke('engine.sessions', undefined), (statuses) => sessions().applyStatuses(statuses));
+  // C3's process table, so a live session reads live after a reload before its next status (debt wave 3); read again
+  // when the engine host regains ready (E10, above).
+  const readEngineTable = () => {
+    const asked = departures;
+    void answer('engine.sessions', client.invoke('engine.sessions', undefined), (statuses) => {
+      if (asked === departures) sessions().applyStatuses(statuses);
+    });
+  };
+  readEngineTable();
 
   attention().beginSnapshot();
   void answer('attention.list', client.invoke('attention.list', undefined), (items) => attention().applySnapshot(items)).then(() => {

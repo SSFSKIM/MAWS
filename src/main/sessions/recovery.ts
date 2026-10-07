@@ -10,19 +10,36 @@
 // (b) none: the message never reached C3. The provisional record is removed as rollback removes it (the tab survives
 //     through C5's retention, whose predicate is the retained intent), and the intent stays failed with its message,
 //     its pin and any worktree, for the failure card's Retry.
+//
+// E10 (Design 5, "Startup recovery with kept sessions"): sessions no longer die with the app. A keep-quit leaves them
+// running on the detached supervisor, so recovery reads the host's table first (`liveRows`): an intent whose row is
+// live is handed off before any fact is read (its record stays as C4 bound it, and a first message C3 queued is the
+// host's to deliver), and the boot stops a live bootstrap row before forgetting it (service.ts). One path serves both
+// host modes: a utility host never holds a row at an app start, so there the live set is empty and nothing changes.
 import type { AppSessionId } from '@shared/graph/ids';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
+import type { HostDispatch } from '../ipc/router';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
 import { reconcileWorktree } from './intent-rules';
 import { retainedWorktree, type Setup } from './setup';
 
 export type Reconciled = 'none' | 'handed_off' | 'not_started';
 
-export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Reconciled> {
+// The host's live rows by app id (`process` not `exited`); throws when `engine.sessions` cannot be answered.
+export type LiveRows = ReadonlyMap<AppSessionId, EngineSessionStatus>;
+
+export async function liveRows(dispatch: HostDispatch): Promise<LiveRows> {
+  const table = await hostCall(dispatch, 'engine.sessions', undefined);
+  return new Map(table.filter((row) => row.process !== 'exited').map((row) => [row.appSessionId, row]));
+}
+
+export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveRows): Promise<Reconciled> {
   const appSessionId = intent.appSessionId;
   const record = s.sessions.get(appSessionId);
   if (record === null) return 'none'; // nothing reached `launching`
+  if (live.has(appSessionId)) return handOff(s, appSessionId); // E10: the row ran on while the app was away
   const pin = intent.progress.engineSessionId;
   const sent = intent.progress.send !== null;
   const transcript = pin !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, pin)));
@@ -34,9 +51,7 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Re
       if (transcript) s.sessions.bindEngineId(appSessionId, pin!);
       else if (record.engineSessionId !== null) s.sessions.unbindEngineId(appSessionId);
     }
-    await s.intents.remove(appSessionId);
-    s.emit('session.intent.changed', { appSessionId, intent: null });
-    return 'handed_off';
+    return handOff(s, appSessionId);
   }
 
   s.sessions.remove(appSessionId);
@@ -45,6 +60,12 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Re
   await s.intents.put(next);
   s.emit('session.intent.changed', { appSessionId, intent: next });
   return 'not_started';
+}
+
+async function handOff(s: Setup, appSessionId: AppSessionId): Promise<Reconciled> {
+  await s.intents.remove(appSessionId);
+  s.emit('session.intent.changed', { appSessionId, intent: null });
+  return 'handed_off';
 }
 
 // An intent with no record whose start was cut short: the app quit in the `worktree` or `trusting` phase, or while a

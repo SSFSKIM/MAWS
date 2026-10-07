@@ -87,6 +87,9 @@ import { connectDeliverables } from './tools/deliverables/store';
 import { openDeliverable } from './tools/maws/actions';
 import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
 // E2 end
+// E10 start
+import { connectSupervisorNotices } from './app/supervisor-notices';
+// E10 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -219,6 +222,10 @@ export function App() {
   useEffect(() => connectDeliverables(), []);
   useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
   // E2 end
+  // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
+  // connects the hosts store app-wide (Diagnostics and Settings read it too)
+  useEffect(() => connectSupervisorNotices(), []);
+  // E10 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

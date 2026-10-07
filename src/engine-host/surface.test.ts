@@ -219,7 +219,7 @@ describe('the X2 surface commands (R2)', () => {
     await session.start();
     const { registerEngineIpc } = await import('./ipc');
     const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
-    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => {}, {
+    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => true, {
       userData: '/tmp/maws-r2-unused', replayEnabled: false, table: { get: () => session, list: () => [session], onBudget: () => {}, onDropped: () => {} } as never,
     });
     const call = (name: string, input: Record<string, unknown>) => handlers.get(name)!({ appSessionId: 'app-s', ...input });
@@ -250,7 +250,7 @@ describe('the X2 surface commands (R2)', () => {
     const { R2_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
     const { commands } = await import('@shared/ipc/schema');
     const handlers = new Set<string>();
-    registerEngineIpc((name) => void handlers.add(name), () => {}, { userData: '/tmp/maws-r2-unused', replayEnabled: false });
+    registerEngineIpc((name) => void handlers.add(name), () => true, { userData: '/tmp/maws-r2-unused', replayEnabled: false });
     expect(Object.keys(R2_DEADLINE_SHAPES).sort()).toEqual([...R2_SESSION_COMMANDS].sort());
     for (const name of R2_SESSION_COMMANDS) {
       expect(handlers.has(name), name).toBe(true);
@@ -264,7 +264,7 @@ describe('the X2 surface commands (R2)', () => {
     await session.start();
     const { registerEngineIpc } = await import('./ipc');
     const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
-    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => {}, {
+    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => true, {
       userData: '/tmp/maws-r2-unused', replayEnabled: false, table: { get: () => session, list: () => [session], onBudget: () => {}, onDropped: () => {} } as never,
     });
     await expect(handlers.get('session.ui.render')!({ appSessionId: 'app-s', component: 'AbovePrompt', instanceId: 'above-prompt', props: {} })).rejects.toThrow(/no engine surface/);

@@ -12,7 +12,8 @@ export interface PanelToolInit<P = void> {
   appSessionId: AppSessionId | null; // the target session; null only for a pinned tool opened with no session shown
   session: SessionRecord | null; // C5's X1 record for it: directory, additionalDirectories, worktree, holder
   instanceId: string; // the PanelTabRef.id; C9 uses it as the terminal label
-  params: P; // the addTool call's params; `undefined` for a tab restored from layout.json (every P is void or all-optional)
+  params: P; // the addTool call's params, `undefined` when it gave none; `undefined` too for a tab restored from layout.json (every P is void or all-optional)
+  restored?: true; // E10: set only for a tab restored from layout.json (the host's restore path); a tab an addTool opened has none
 }
 
 export interface PanelToolContext {

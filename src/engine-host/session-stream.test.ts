@@ -12,6 +12,10 @@ import { replayedSession } from './conformance/session-harness';
 import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
 import { SessionStream } from './session-stream';
+// E10 start
+import { status as engineStatus } from '../../test/support/builders';
+import { ev } from '../../test/support/events';
+// E10 end
 
 let dir: string;
 beforeEach(async () => {
@@ -30,6 +34,7 @@ function recorder() {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
     emitted.push({ name, payload });
+    return true;
   };
   return { emitted, emit };
 }
@@ -239,3 +244,189 @@ describe('an exited stream keeps a bounded ring (C12)', () => {
   });
 });
 // C12 end
+
+// E10 start: the delivered cursor and the connect burst (E10 execution document, §Design 3 "The delivered cursor",
+// Task 2.1). The fake client reports each emit written while connected and dropped while not, as the runtime's emit does.
+describe('the delivered cursor and the connect burst (E10)', () => {
+  const APP = 'app-burst' as AppSessionId;
+  const row = (seq: number, i = 0): SessionEvent => ev('session.state', { id: `${APP}:L:${seq}:${i}`, sessionId: 'sess-burst', seq });
+  const rows = (from: number, count: number): SessionEvent[] => Array.from({ length: count }, (_, k) => row(from + k));
+  const CATALOG = { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 };
+  const STATE = { status: engineStatus(APP), queue: { entries: [], paused: false }, brokerItems: [], catalog: CATALOG };
+
+  function client() {
+    const emitted: Emitted[] = [];
+    const state = { connected: true, writesLeft: Infinity, refuse: null as ((events: SessionEvent[]) => boolean) | null };
+    const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
+      const checked = validateEventPayload(name, payload);
+      if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
+      if (!state.connected || state.writesLeft <= 0) return false;
+      if (name === 'session.eventBatch' && state.refuse?.((payload as { events: SessionEvent[] }).events)) return false; // the runtime's refusal of an invalid payload
+      state.writesLeft -= 1;
+      emitted.push({ name, payload });
+      return true;
+    };
+    const batches = () => emitted.filter((e) => e.name === 'session.eventBatch').map((e) => (e.payload as { events: SessionEvent[] }).events.map((x) => x.id));
+    const delivered = () => batches().flat();
+    return { emitted, emit, state, batches, delivered };
+  }
+
+  function stream(emit: ReturnType<typeof client>['emit'], extra: { ringSize?: number; log?: (line: string) => void; hasClient?: () => boolean } = {}) {
+    return new SessionStream({ appSessionId: APP, launchId: 'L', sessionId: null, journalPath: join(dir, 'L.jsonl'), emit, ...extra });
+  }
+
+  it('with no client nothing is delivered, and the ready that follows delivers the whole ring after the row’s state', async () => {
+    vi.useFakeTimers();
+    const fake = client();
+    fake.state.connected = false;
+    const s = stream(fake.emit);
+    s.events(rows(1, 3));
+    await vi.advanceTimersByTimeAsync(16);
+    expect(s.delivered).toBeNull();
+    fake.state.connected = true;
+    s.republish(STATE);
+    expect(fake.emitted.map((e) => e.name)).toEqual(['session.status', 'session.queue', 'session.brokerItems', 'session.catalogChanged', 'session.eventBatch']);
+    expect(fake.emitted[3]!.payload).toEqual({ appSessionId: APP, launchId: 'L', catalog: CATALOG });
+    expect(fake.delivered()).toEqual(rows(1, 3).map((e) => e.id));
+    expect(s.delivered).toEqual({ index: 2, id: `${APP}:L:3:0` });
+  });
+
+  it('publishes no queue for a queue not yet recovered and no catalog before the first one', () => {
+    const fake = client();
+    const s = stream(fake.emit);
+    s.republish({ ...STATE, queue: null, catalog: null });
+    expect(fake.emitted.map((e) => e.name)).toEqual(['session.status', 'session.brokerItems']);
+  });
+
+  it('a ready after partial delivery delivers only the tail; a row split across two live batches is delivered exactly once', async () => {
+    vi.useFakeTimers();
+    const fake = client();
+    const s = stream(fake.emit);
+    // 600 events, the 500th and 501st one row (seq 500), so the live batch at 500 splits it
+    const many = [...rows(1, 499), row(500, 0), row(500, 1), ...rows(501, 99)];
+    s.events(many);
+    expect(fake.batches().map((b) => b.length)).toEqual([500]);
+    fake.state.connected = false;
+    await vi.advanceTimersByTimeAsync(16); // the rest, dropped
+    s.events(rows(600, 50)); // and more while no client is connected
+    await vi.advanceTimersByTimeAsync(16);
+    fake.state.connected = true;
+    s.republish(STATE);
+    expect(fake.batches().map((b) => b.length)).toEqual([500, 150]);
+    expect(fake.delivered()).toEqual([...many, ...rows(600, 50)].map((e) => e.id)); // once each, in order
+  });
+
+  it('a trim after delivery moves the cursor with the ring: the ready delivers exactly the tail', () => {
+    const fake = client();
+    const s = stream(fake.emit, { ringSize: 10 });
+    s.events(rows(1, 8));
+    s.flush();
+    expect(s.delivered).toEqual({ index: 7, id: `${APP}:L:8:0` });
+    fake.state.connected = false;
+    s.events(rows(9, 5)); // 13 events: past the ring's slack, trimmed to the last 10
+    expect(s.delivered).toEqual({ index: 4, id: `${APP}:L:8:0` });
+    fake.state.connected = true;
+    s.republish(STATE);
+    expect(fake.batches().at(-1)).toEqual(rows(9, 5).map((e) => e.id));
+  });
+
+  it('events pending in the batch window at ready are delivered once, by the burst', async () => {
+    vi.useFakeTimers();
+    const fake = client();
+    const s = stream(fake.emit);
+    s.events(rows(1, 2));
+    s.flush();
+    s.events(rows(3, 3)); // pending, the timer armed
+    s.republish(STATE);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(fake.delivered()).toEqual(rows(1, 5).map((e) => e.id));
+    expect(fake.emitted.at(-1)!.name).toBe('session.eventBatch'); // the burst's; the timer sent nothing after it
+    expect(fake.batches()).toHaveLength(2);
+  });
+
+  it('a ring that rolled past the cursor logs tail_gap with the ids and delivers what it holds', () => {
+    const fake = client();
+    const lines: string[] = [];
+    const s = stream(fake.emit, { ringSize: 10, log: (line) => lines.push(line) });
+    s.events(rows(1, 2));
+    s.flush();
+    fake.state.connected = false;
+    s.events(rows(3, 20)); // 22 events: trimmed to the last 10, past the delivered one
+    expect(s.delivered).toBeNull();
+    fake.state.connected = true;
+    s.republish(STATE);
+    expect(fake.batches().at(-1)).toEqual(rows(13, 10).map((e) => e.id));
+    expect(lines).toEqual([expect.stringContaining('tail_gap')]);
+    expect(lines[0]).toContain(`${APP}:L:3:0`); // the first event lost to the client
+    expect(lines[0]).toContain(`${APP}:L:12:0`); // and the last
+    s.republish(STATE);
+    expect(lines).toHaveLength(1); // logged once
+  });
+
+  it('a second ready delivers nothing twice, and nothing the burst delivered is flushed again', async () => {
+    vi.useFakeTimers();
+    const fake = client();
+    const s = stream(fake.emit);
+    fake.state.connected = false;
+    s.events(rows(1, 4));
+    fake.state.connected = true;
+    s.republish(STATE);
+    s.republish(STATE);
+    await vi.advanceTimersByTimeAsync(50);
+    s.flush();
+    expect(fake.batches()).toEqual([rows(1, 4).map((e) => e.id)]);
+    s.events(rows(5, 1));
+    s.flush();
+    expect(fake.delivered()).toEqual(rows(1, 5).map((e) => e.id));
+  });
+
+  it('a client lost during the burst keeps the cursor at the last batch written; the next ready sends the rest', () => {
+    const fake = client();
+    const s = stream(fake.emit, { hasClient: () => fake.state.connected && fake.state.writesLeft > 0 });
+    fake.state.connected = false;
+    s.events(rows(1, 1_200));
+    s.flush();
+    fake.state.connected = true;
+    fake.state.writesLeft = 4 + 1; // the row's four state events and one batch
+    s.republish(STATE);
+    expect(fake.batches().map((b) => b.length)).toEqual([500]);
+    expect(s.delivered).toEqual({ index: 499, id: `${APP}:L:500:0` });
+    fake.state.writesLeft = Infinity;
+    s.republish(STATE);
+    expect(fake.batches().map((b) => b.length)).toEqual([500, 500, 200]);
+    expect(fake.delivered()).toEqual(rows(1, 1_200).map((e) => e.id));
+  });
+
+  // Task 2.1's review: the runtime answers false for an invalid payload as well as for a client gone; a refused batch
+  // with the client still there is skipped, or one bad event would strand the rest of the row's tail at every connect
+  it('a batch refused while the client stays connected is skipped with a log line, and the rest of the tail still goes', () => {
+    const fake = client();
+    const lines: string[] = [];
+    const s = stream(fake.emit, { log: (line) => lines.push(line), hasClient: () => fake.state.connected });
+    fake.state.connected = false;
+    s.events(rows(1, 1_200));
+    s.flush();
+    fake.state.connected = true;
+    fake.state.refuse = (events) => events.some((e) => e.id === `${APP}:L:700:0`);
+    s.republish(STATE);
+    expect(fake.batches().map((b) => b.length)).toEqual([500, 200]); // 501..1000 refused
+    expect(fake.delivered()).toEqual([...rows(1, 500), ...rows(1_001, 200)].map((e) => e.id));
+    expect(lines).toEqual([expect.stringContaining(`refused a batch of 500 (${APP}:L:501:0 .. ${APP}:L:1000:0)`)]);
+    expect(s.delivered).toEqual({ index: 1_199, id: `${APP}:L:1200:0` });
+    s.republish(STATE);
+    expect(fake.batches()).toHaveLength(2); // nothing resent
+  });
+
+  it('a live batch refused while the client stays connected moves the cursor past it, so no burst resends it', () => {
+    const fake = client();
+    const s = stream(fake.emit, { log: () => {}, hasClient: () => fake.state.connected });
+    fake.state.refuse = (events) => events.some((e) => e.id === `${APP}:L:2:0`);
+    s.events(rows(1, 3));
+    s.flush();
+    expect(s.delivered).toEqual({ index: 2, id: `${APP}:L:3:0` });
+    fake.state.refuse = null;
+    s.republish(STATE);
+    expect(fake.batches()).toEqual([]);
+  });
+});
+// E10 end

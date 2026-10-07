@@ -8,6 +8,7 @@ import type { CommandName, EventName } from './schema';
 
 export type HostMessage =
   | { t: 'hello' } // main → host, carries the MessagePort in `ports`
+  | { t: 'ready' } // main → host, on the port (E10): main has pulled what it needs; the host emits no event before it
   | { t: 'req'; id: string; name: CommandName; input: unknown } // main → host
   | { t: 'res'; id: string; ok: true; value: unknown } // host → main
   | { t: 'res'; id: string; ok: false; error: IpcError }
@@ -19,6 +20,7 @@ export type HostMessage =
 const id = z.string().min(1);
 
 export const HostHelloSchema = z.strictObject({ t: z.literal('hello') });
+export const HostReadySchema = z.strictObject({ t: z.literal('ready') }); // E10 (A-29 (3)): additive to C1's envelope
 export const HostRequestSchema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown() });
 export const HostResponseSchema = z.union([
   z.strictObject({ t: z.literal('res'), id, ok: z.literal(true), value: z.unknown() }),

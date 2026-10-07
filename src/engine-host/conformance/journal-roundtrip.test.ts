@@ -94,6 +94,7 @@ describe('journal round-trips into the same graph', () => {
     const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
     const emit: HostEmit = (name, payload) => {
       if (name === 'session.eventBatch') batches.push((payload as { events: SessionEvent[] }).events);
+      return true;
     };
     registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: resolve(__dirname, '../../..'), ringSize: 10 });
     const call = (name: string, input: Record<string, unknown>) => handlers.get(name)!({ appSessionId: 'app-ring', ...input }) as Promise<Record<string, unknown>>;

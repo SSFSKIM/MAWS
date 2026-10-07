@@ -30,7 +30,9 @@ export type HostEvents = <N extends EventName>(name: N, listener: (payload: Even
 
 export interface SessionServiceDeps {
   index: { sessions: SessionStore; projects: Pick<ProjectStore, 'list'>; sideThreads?: SideThreadStore }; // E3: sideThreads
-  host: { dispatch: HostDispatch; onEvent: HostEvents; ready?: () => Promise<void> }; // ready: the engine host answers
+  // ready: the engine host answers (E10: streams, or has crashed); onReady: each later time it streams again (E10: the
+  // start-time recovery deferred while `engine.sessions` could not be answered runs then)
+  host: { dispatch: HostDispatch; onEvent: HostEvents; ready?: () => Promise<void>; onReady?: (listener: () => void) => () => void };
   git: GitRun;
   worktrees: WorktreeService;
   intents: IntentStore & { load(): Promise<void> };

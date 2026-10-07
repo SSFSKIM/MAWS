@@ -34,6 +34,7 @@ function bridged(readSource?: SourceReader) {
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
     seen.push({ name, payload: checked.value });
     listeners.get(name)?.forEach((l) => l(checked.value));
+    return true;
   };
   const bound = new Map<AppSessionId, SessionId>();
   const bindings: ReplayBindings = {

@@ -26,8 +26,8 @@ const ENDED = 'show_pane: the session ended';
 export class PaneBridge {
   private readonly bridge: HostBridge<PaneShowRequest, MawsPaneAnswerResult>;
 
-  constructor(deps: { show: (request: PaneShowRequest) => void; answerMs?: number }) {
-    this.bridge = new HostBridge({ send: deps.show, answerMs: deps.answerMs ?? PANE_ANSWER_MS });
+  constructor(deps: { show: (request: PaneShowRequest) => void; answerMs?: number; hasClient?: () => boolean /* E10 */ }) {
+    this.bridge = new HostBridge({ send: deps.show, answerMs: deps.answerMs ?? PANE_ANSWER_MS, hasClient: deps.hasClient });
   }
 
   get pending(): number {
@@ -45,6 +45,8 @@ export class PaneBridge {
         return { error: WITHDRAWN };
       case 'ended':
         return { error: ENDED };
+      case 'noClient':
+        return { error: TOOL_ERRORS.appNotOpen('show_pane') }; // E10
     }
   }
 

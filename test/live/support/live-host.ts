@@ -82,6 +82,7 @@ export class LiveHost {
       on: (_event, listener) => void (this.deliver = (data) => listener({ data })),
     };
     runtime.serve(port);
+    runtime.setReady(); // E10: main's ready line, sent once it pulled what it needs; events flow from here
     this.ipc = ipc;
     this.fs = fs;
   }

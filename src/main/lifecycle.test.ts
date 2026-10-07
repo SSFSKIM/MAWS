@@ -80,6 +80,7 @@ vi.mock('./side/side-threads', () => ({ startSideThreads: () => () => {}, sideTh
 // C10 end
 // C11 start: the engine host's binary configuration follows the settings, which this test replaces
 vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator
+vi.mock('./settings/host-configure', () => ({ startHostConfigure: () => () => {} })); // E10: its sibling
 vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
 // C11 end
 

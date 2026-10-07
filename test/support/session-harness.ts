@@ -21,7 +21,7 @@ import { SessionService } from '../../src/main/sessions/service';
 import type { SessionServiceDeps } from '../../src/main/sessions/context'; // C12
 import type { C10Settings } from '../../src/main/sessions/launch-mapping';
 import type { ReplaySeam } from '../../src/main/sessions/replay-seam';
-import { FakeEngineHost } from './session-host';
+import { FakeEngineHost, type RestartOptions } from './session-host';
 import { TrustStoreFixture } from './trust-store';
 
 const noopWriter = { observeRecord: () => {}, observeRemoved: () => {}, observeProject: () => {}, observeProjectRemoved: () => {}, setDigest: () => {} };
@@ -90,7 +90,7 @@ export class SessionHarness {
     const worktrees = (this.worktrees = new WorktreeService({ git, holders: { dispatch: this.host.dispatch, sessions: this.index.sessions } }));
     this.service = new SessionService({
       index: this.index,
-      host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent },
+      host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent, onReady: this.host.onReady }, // E10: onReady
       git,
       worktrees,
       intents: gatedIntents(new FileIntentStore(join(this.userData, 'sessions', 'intents')), this.gate),
@@ -124,12 +124,13 @@ export class SessionHarness {
     return this;
   }
 
-  // The app quits and starts again: nothing it ran survives but the disk.
-  async restart(): Promise<void> {
+  // The app quits and starts again: nothing it ran survives but the disk. E10: with `keep` the detached supervisor kept
+  // its rows; with `unavailable` main cannot reach it until `host.becomeReady()` (FakeEngineHost.afterRestart).
+  async restart(opts: RestartOptions = {}): Promise<void> {
     this.gate = new CrashGate(); // the old store keeps its own, still closed
     this.service.dispose();
     this.stopSource();
-    this.host = this.host.afterRestart();
+    this.host = this.host.afterRestart(opts);
     this.boot();
     await this.service.start();
   }

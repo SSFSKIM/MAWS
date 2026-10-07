@@ -1,0 +1,207 @@
+{
+ "question": "Q4",
+ "runs": [
+  {
+   "runtime": "node v22.23.2",
+   "execPath": "/Users/new/.nvm/versions/node/v22.23.2/bin/node",
+   "dirBytes": 71,
+   "results": [
+    {
+     "bytes": 100,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 100,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 103,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 103,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 104,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 104,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 105,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": false,
+      "entries": [
+       {
+        "nameBytes": 104,
+        "equalsRequested": false
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 110,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": false,
+      "entries": [
+       {
+        "nameBytes": 104,
+        "equalsRequested": false
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    }
+   ],
+   "dirRemoved": true
+  },
+  {
+   "runtime": "electron 44.4.5 as node v24.21.0",
+   "execPath": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+   "dirBytes": 71,
+   "results": [
+    {
+     "bytes": 100,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 100,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 103,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 103,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 104,
+     "bind": {
+      "ok": true
+     },
+     "created": {
+      "fullPathExists": true,
+      "entries": [
+       {
+        "nameBytes": 104,
+        "equalsRequested": true
+       }
+      ]
+     },
+     "connect": {
+      "ok": true,
+      "data": "pong"
+     }
+    },
+    {
+     "bytes": 105,
+     "bind": {
+      "ok": false,
+      "code": "EINVAL",
+      "message": "listen EINVAL: invalid argument /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-q4-Tf1TWX/sxxxxxxxxxxxxxxxxxxxxxxxxxxx.sock"
+     },
+     "created": {
+      "fullPathExists": false,
+      "entries": []
+     },
+     "connect": {
+      "ok": false,
+      "code": "EINVAL",
+      "message": "connect EINVAL /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-q4-Tf1TWX/sxxxxxxxxxxxxxxxxxxxxxxxxxxx.sock - Local (undefined:undefined)"
+     }
+    },
+    {
+     "bytes": 110,
+     "bind": {
+      "ok": false,
+      "code": "EINVAL",
+      "message": "listen EINVAL: invalid argument /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-q4-Tf1TWX/sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.sock"
+     },
+     "created": {
+      "fullPathExists": false,
+      "entries": []
+     },
+     "connect": {
+      "ok": false,
+      "code": "EINVAL",
+      "message": "connect EINVAL /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-q4-Tf1TWX/sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.sock - Local (undefined:undefined)"
+     }
+    }
+   ],
+   "dirRemoved": true
+  }
+ ]
+}

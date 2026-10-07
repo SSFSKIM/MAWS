@@ -172,7 +172,7 @@ describe('a released session’s card', () => {
   it('stays on the board, idle, with the muted word released', () => {
     const id = idOf('Settings idle probe');
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: new Date(2026, 8, 29, 14, 2).toISOString(), limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: new Date(2026, 8, 29, 14, 2).toISOString(), reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
     expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');

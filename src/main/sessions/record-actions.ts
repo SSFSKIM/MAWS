@@ -43,10 +43,11 @@ export async function archiveRecord(s: Setup, appSessionId: AppSessionId, opts: 
   return { archived: true };
 }
 
-// C12: whether the host's row for the session is the exit of a release (its last exit, since a launch replaces the row)
+// C12: whether the host's row for the session is the exit of a release (its last exit, since a launch replaces the row);
+// E10: the budget's or the supervisor's idle release
 async function releasedByHost(s: Setup, appSessionId: AppSessionId): Promise<boolean> {
   const table = await hostCall(s.dispatch, 'engine.sessions', undefined);
-  return table.some((row) => row.appSessionId === appSessionId && row.process === 'exited' && row.exit?.reason === 'budget');
+  return table.some((row) => row.appSessionId === appSessionId && row.process === 'exited' && (row.exit?.reason === 'budget' || row.exit?.reason === 'idle'));
 }
 
 // `session.delete`: whole or not at all. Refused for a foreign holder, and for a MAWS-live session unless the caller

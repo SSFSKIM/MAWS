@@ -1,25 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { createHostRuntime, HostCommandError, type HostEmit, type HostPort } from '@shared/host/runtime';
 
 // Electron is faked. A fork returns a child that spawns when the test says so; a MessageChannelMain is a pair of
 // ports delivering to each other on a microtask, like the real ones. The real host runtime serves the port a child
 // receives with its hello, so both ends of the host protocol are exercised together.
 const electron = vi.hoisted(() => {
   type Listener = (event: { data: unknown }) => void;
+  // Like a real MessagePort, a message posted before anyone listens on the other end waits for its first listener.
   class FakePort {
     peer: FakePort | null = null;
     listeners: Listener[] = [];
+    backlog: unknown[] = [];
     closed = false;
     on(_event: 'message', listener: Listener) {
       this.listeners.push(listener);
+      const waiting = this.backlog.splice(0);
+      if (waiting.length > 0) queueMicrotask(() => waiting.forEach((data) => this.deliver(data)));
       return this;
+    }
+    deliver(data: unknown) {
+      if (this.closed) return;
+      if (this.listeners.length === 0) this.backlog.push(data);
+      else this.listeners.forEach((l) => l({ data }));
     }
     postMessage(data: unknown) {
       const peer = this.peer;
       if (this.closed || !peer) return;
-      queueMicrotask(() => {
-        if (!peer.closed) peer.listeners.forEach((l) => l({ data: structuredClone(data) }));
-      });
+      const copy = structuredClone(data);
+      queueMicrotask(() => peer.deliver(copy));
     }
     start() {}
     close() {
@@ -88,7 +96,9 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { createHostSupervisor, type HostSupervisor } from './supervisor';
+import type { HostDispatch } from '../ipc/router';
+import { engineHostSettled } from '../sessions/service-register';
+import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
 
 const HOSTS = {
   'engine-host': { modulePath: '/out/main/engine-host.js', serviceName: 'maws-engine-host' },
@@ -246,6 +256,249 @@ describe('host supervisor', () => {
     expect(log).toHaveBeenCalledOnce();
   });
 
+  // E10: a host emits nothing before main's ready line (X13); main says it on the port right after its hello
+  it('says ready on each host’s port after hello, so the host runtime’s events reach main', async () => {
+    void supervisor.start();
+    const pty = latest('maws-pty-host');
+    let hostEmit!: HostEmit;
+    serve(pty, (on, e) => {
+      on('pty.ping', async () => PING(202));
+      hostEmit = e;
+    });
+    pty.spawn(202);
+    await flush();
+    const exit = { ptyId: 'p1', exitCode: 0, signal: null };
+    expect(hostEmit('pty.exit', exit as never)).toBe(true);
+    await flush();
+    expect(emit).toHaveBeenCalledWith('pty.exit', exit);
+  });
+
+  // E10: a host with a resync (the engine host) is told ready once main has pulled what it needs (X13)
+  describe('the resync and the ready line', () => {
+    const BROKER = { appSessionId: 'app-1', items: [] } as never;
+
+    function serveEngine(pid: number) {
+      const engine = latest('maws-engine-host');
+      let hostEmit!: HostEmit;
+      serve(engine, (on, e) => {
+        on('engine.ping', async () => PING(pid));
+        hostEmit = e;
+      });
+      engine.spawn(pid);
+      return { engine, emit: (...args: Parameters<HostEmit>) => hostEmit(...args) };
+    }
+
+    it('says ready only after the resync, which dispatches to the ready host; the pty host is told at hello', async () => {
+      let release!: () => void;
+      const seen: unknown[] = [];
+      supervisor.setResync('engine-host', async (dispatch) => {
+        seen.push(await dispatch('engine-host', 'engine.ping', undefined));
+        await new Promise<void>((resolve) => (release = resolve));
+      });
+      void supervisor.start();
+      let ptyEmit!: HostEmit;
+      serve(latest('maws-pty-host'), (on, e) => {
+        on('pty.ping', async () => PING(202));
+        ptyEmit = e;
+      });
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(seen).toEqual([{ ok: true, value: PING(101) }]);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false); // no event before the ready line
+      expect(ptyEmit('pty.exit', { ptyId: 'p1', exitCode: 0, signal: null } as never)).toBe(true);
+      release();
+      await flush();
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      await flush();
+      expect(emit).toHaveBeenCalledWith('session.brokerItems', BROKER);
+    });
+
+    it('runs the resync again at every relaunch', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const resync = vi.fn(async () => {});
+      supervisor.setResync('engine-host', resync);
+      await startReady(101);
+      expect(resync).toHaveBeenCalledOnce();
+      latest('maws-engine-host').exit(137);
+      await vi.advanceTimersByTimeAsync(500);
+      const next = serveEngine(303);
+      await flush();
+      expect(resync).toHaveBeenCalledTimes(2);
+      expect(next.emit('session.brokerItems', BROKER)).toBe(true);
+    });
+
+    it('says ready without the resync past RESYNC_BOUND_MS, and after a resync that failed', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      supervisor.setResync('engine-host', () => new Promise<void>(() => {}));
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await vi.advanceTimersByTimeAsync(RESYNC_BOUND_MS - 1);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      expect(log.mock.calls.flat().join(' ')).toContain('resync took longer');
+
+      supervisor.setResync('engine-host', async () => {
+        throw new Error('the resync broke');
+      });
+      engine.engine.exit(1);
+      await vi.advanceTimersByTimeAsync(500);
+      const next = serveEngine(303);
+      await flush();
+      expect(next.emit('session.brokerItems', BROKER)).toBe(true);
+      expect(log.mock.calls.flat().join(' ')).toContain('resync failed');
+    });
+
+    // E10 (Decision Log, onStreaming): what a listener dispatches whose effect arrives only as events runs here
+    it('fires onStreaming once per connection, after the ready line: the engine host after its resync, the pty host at its spawn', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let release!: () => void;
+      supervisor.setResync('engine-host', () => new Promise<void>((resolve) => (release = resolve)));
+      const streaming: string[] = [];
+      supervisor.onStreaming('engine-host', () => void streaming.push('engine'));
+      const offPty = supervisor.onStreaming('pty-host', () => void streaming.push('pty'));
+      void supervisor.start();
+      serve(latest('maws-pty-host'), (on) => on('pty.ping', async () => PING(202)));
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(streaming).toEqual(['pty']);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false);
+      release();
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine']);
+      // a listener sees the host streaming: what it dispatches now is answered by events that reach main
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine']); // once per connection
+
+      engine.engine.exit(137);
+      await vi.advanceTimersByTimeAsync(500);
+      serveEngine(303);
+      await flush();
+      release();
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine', 'engine']);
+      offPty();
+    });
+
+    it('cancels a resync the host leaves ready during: its signal aborts, its later requests are never held for the next host, and that connection is never told ready', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let signal!: AbortSignal;
+      let resyncDispatch!: HostDispatch;
+      const releases: (() => void)[] = [];
+      supervisor.setResync('engine-host', (dispatch, s) => {
+        signal = s;
+        resyncDispatch = dispatch;
+        return new Promise<void>((resolve) => void releases.push(resolve));
+      });
+      const streaming = vi.fn();
+      supervisor.onStreaming('engine-host', streaming);
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const first = serveEngine(101);
+      await flush();
+      const firstSignal = signal;
+      expect(firstSignal.aborted).toBe(false);
+      first.engine.exit(137); // crashed, then restarting: the resync's connection is gone
+      expect(firstSignal.aborted).toBe(true);
+      expect(firstSignal.reason).toBe('transition');
+      // a request the cancelled resync makes now fails at once rather than waiting for the next host
+      await expect(resyncDispatch('engine-host', 'engine.ping', undefined)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      await vi.advanceTimersByTimeAsync(500);
+      const pings: number[] = [];
+      const next = latest('maws-engine-host');
+      let nextEmit!: HostEmit;
+      serve(next, (on, e) => {
+        on('engine.ping', async () => (pings.push(303), PING(303)));
+        nextEmit = e;
+      });
+      next.spawn(303);
+      await flush();
+      expect(pings).toEqual([]); // nothing of the cancelled resync reached the new host
+      expect(signal).not.toBe(firstSignal); // the new connection runs a resync of its own
+      releases[0]!(); // the first resync settles late: nothing is said for a connection it no longer has
+      await flush();
+      expect(streaming).not.toHaveBeenCalled();
+      expect(nextEmit('session.brokerItems', BROKER)).toBe(false); // the new host is still pulled from, not told ready
+      releases[1]!();
+      await flush();
+      expect(nextEmit('session.brokerItems', BROKER)).toBe(true);
+      expect(streaming).toHaveBeenCalledOnce();
+    });
+
+    // E10: the session service's boot forgets stale bootstrap ids, whose `session.forgotten` retires their attention: it
+    // waits for the host to stream, so that event reaches main
+    it('streaming() holds from the ready line until the host leaves ready; engineHostSettled waits for it, or for crashed', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let release!: () => void;
+      supervisor.setResync('engine-host', () => new Promise<void>((resolve) => (release = resolve)));
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(supervisor.snapshot('engine-host').state).toBe('ready');
+      expect(supervisor.streaming('engine-host')).toBe(false);
+      let settled = false;
+      void engineHostSettled(supervisor).then(() => (settled = true));
+      await flush();
+      expect(settled).toBe(false); // ready, but still pulled from
+      release();
+      await flush();
+      expect(supervisor.streaming('engine-host')).toBe(true);
+      expect(settled).toBe(true);
+      await expect(engineHostSettled(supervisor)).resolves.toBeUndefined(); // already streaming: at once
+
+      engine.engine.exit(137);
+      expect(supervisor.streaming('engine-host')).toBe(false);
+      let again = false;
+      void engineHostSettled(supervisor).then(() => (again = true));
+      await flush();
+      expect(again).toBe(true); // crashed settles it (the session service answers host_unavailable rather than hang)
+    });
+
+    it('at RESYNC_BOUND_MS aborts the resync (reason bound) before the ready line, then fires onStreaming', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let signal!: AbortSignal;
+      supervisor.setResync('engine-host', (_dispatch, s) => ((signal = s), new Promise<void>(() => {})));
+      const streaming = vi.fn();
+      supervisor.onStreaming('engine-host', streaming);
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      serveEngine(101);
+      await vi.advanceTimersByTimeAsync(RESYNC_BOUND_MS);
+      expect(signal.aborted).toBe(true);
+      expect(signal.reason).toBe('bound');
+      expect(streaming).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('sends a request held while a utility host is restarting once its new port exists', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { engine } = await startReady(101);
+    let reply: Promise<unknown> | null = null;
+    supervisor.onState('engine-host', (s) => {
+      if (s.state === 'restarting' && !reply) reply = supervisor.dispatch('engine-host', 'engine.ping', undefined);
+    });
+    engine.exit(137);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(reply).not.toBeNull();
+    const next = latest('maws-engine-host');
+    serve(next, (on) => on('engine.ping', async () => PING(303)));
+    next.spawn(303);
+    await flush();
+    await expect(reply).resolves.toEqual({ ok: true, value: PING(303) });
+  });
+
+  it('fails a request made before start() at once, as before (requests are held only once the hosts are starting)', async () => {
+    await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'host_unavailable' },
+    });
+  });
+
   // C3 start: main-side subscription to validated host events (wave-2 ledger (b); C3's attention service, C4's index)
   it('onEvent hands each validated host event to its listeners by name, after relaying it, until unsubscribed', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -393,6 +646,137 @@ describe('host supervisor', () => {
     expect(electron.forks).toHaveLength(2);
     await expect(supervisor.dispatch('pty-host', 'pty.ping', undefined)).resolves.toMatchObject({
       error: { code: 'host_unavailable' },
+    });
+  });
+
+  // E10 Task 2.3b: host.restart and the quit's stop-all for a utility engine host
+  describe('a utility engine host restarted or stopped for the quit', () => {
+    // A host whose admission closes for good at its stop-all, as the real one's does (ProcessTable.shuttingDown): a ping
+    // stands for a launch.
+    function serveLatching(child: InstanceType<typeof electron.FakeChild>, pid: number, stops: unknown[] = []) {
+      let latched = false;
+      serve(child, (on) => {
+        on('engine.ping', async () => {
+          if (latched) throw new HostCommandError({ code: 'internal', message: 'engine host is shutting down' });
+          return PING(pid);
+        });
+        on('host.stopAll', async (input) => {
+          stops.push(input);
+          latched = true;
+          return { stopped: 1, forced: 0 };
+        });
+        on('engine.shutdown', async (input) => {
+          stops.push(input);
+          latched = true;
+          return { stopped: 1, forced: 0 };
+        });
+      });
+    }
+
+    it('host.restart stops the sessions, kills the host and forks one that can launch, with no crash count', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(first, 101, stops);
+      first.spawn(101);
+      serve(latest('maws-pty-host'), () => {});
+      latest('maws-pty-host').spawn(202);
+      await flush();
+      const states: string[] = [];
+      supervisor.onState('engine-host', (s) => void states.push(s.state));
+
+      await expect(supervisor.restartSupervisor({ stopSessions: false })).resolves.toEqual({ ok: true, value: undefined });
+      expect(stops).toEqual([{ graceMs: 5_000 }]); // a utility host's sessions end with it either way
+      await flush();
+      expect(first.killed).toBe(true);
+      const next = latest('maws-engine-host');
+      expect(next).not.toBe(first);
+      serveLatching(next, 303);
+      next.spawn(303);
+      await flush();
+      await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toEqual({ ok: true, value: PING(303) });
+      expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: 303, restarts: 0 });
+      expect(states).toEqual(['restarting', 'ready']);
+      expect(supervisor.facts('engine-host')).toEqual({ transport: 'utility', reason: null, refused: null, waitingLiveSessions: null, lastExit: null });
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('unexpectedly'));
+    });
+
+    it('a request made while it restarts is held for the new host; a stop-all the old host refuses does not stop the restart', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await startReady(101); // a host that knows no host.stopAll
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('restarting it anyway'), expect.objectContaining({ message: expect.stringContaining('host.stopAll') }));
+      const reply = supervisor.dispatch('engine-host', 'engine.ping', undefined);
+      await flush();
+      const next = latest('maws-engine-host');
+      serve(next, (on) => on('engine.ping', async () => PING(303)));
+      next.spawn(303);
+      await expect(reply).resolves.toEqual({ ok: true, value: PING(303) });
+    });
+
+    it('two restarts back to back fork one successor: the second answers with the restart under way', async () => {
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(first, 101, stops);
+      first.spawn(101);
+      serve(latest('maws-pty-host'), () => {});
+      latest('maws-pty-host').spawn(202);
+      await flush();
+      const both = Promise.all([supervisor.restartSupervisor({ stopSessions: true }), supervisor.restartSupervisor({ stopSessions: false })]);
+      await expect(both).resolves.toEqual([{ ok: true, value: undefined }, { ok: true, value: undefined }]);
+      await flush();
+      expect(stops).toHaveLength(1);
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // the first and its one successor
+      expect(latest('maws-engine-host').killed).toBe(false);
+      const next = latest('maws-engine-host');
+      serveLatching(next, 303);
+      next.spawn(303);
+      await flush();
+      await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toEqual({ ok: true, value: PING(303) });
+    });
+
+    it('a restart asked while the old host is still exiting is the restart under way', async () => {
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      serveLatching(first, 101);
+      first.spawn(101);
+      await flush();
+      first.kill = () => ((first.killed = true), true); // it takes its time to exit
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(supervisor.snapshot('engine-host').state).toBe('restarting');
+      await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+      expect(forksOf('maws-engine-host')).toHaveLength(1); // nothing forked beside the host still exiting
+      first.exit(0);
+      await flush();
+      expect(forksOf('maws-engine-host')).toHaveLength(2);
+    });
+
+    it('a crashed host is forked afresh at once, its crash window cleared', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { engine } = await startReady(101);
+      engine.exit(137);
+      expect(supervisor.snapshot('engine-host').state).toBe('crashed');
+      expect(supervisor.facts('engine-host').lastExit).toMatchObject({ code: 137, signal: null });
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // at once, not after the backoff
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // the backoff's own restart was cancelled
+      await supervisor.restartSupervisor({ stopSessions: true }); // a later restart is its own
+      await flush();
+      expect(forksOf('maws-engine-host')).toHaveLength(3);
+    });
+
+    it('stopAllForQuit sends engine.shutdown with the grace, as the quit did before', async () => {
+      void supervisor.start();
+      const engine = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(engine, 101, stops);
+      engine.spawn(101);
+      await flush();
+      await supervisor.stopAllForQuit(5_000);
+      expect(stops).toEqual([{ graceMs: 5_000 }]);
     });
   });
 

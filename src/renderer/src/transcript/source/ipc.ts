@@ -105,6 +105,38 @@ function withAppEvents(app: SessionEvent[], events: SessionEvent[]): SessionEven
   return out;
 }
 
+// E10: an engine host that dies (a supervisor's kill -9, a utility host's crash) takes its engine processes along and
+// sends no `process.exited` for them, and a successor that never ran the session never will, so a turn the live stream
+// left running would read Working for good. When the host regains ready after a departure while this subscription's
+// stream says the process runs, its table is read: a host that lists the session (a same-pid reconnect, or one that
+// exited it and is replaying that) speaks for it through its stream; one that does not has no process for it, and the
+// source closes it as the reducer closes any crashed process, with an app-synthesised exit (its id under the app id, so
+// the disk-form filter lets it pass; its time the departure's). The exit lives in this transcript's state only: a later
+// hydration reads the session from disk through the successor. A read asked before a later departure says nothing; the
+// next ready asks again.
+function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () => SessionEvent | null, lost: (exit: SessionEvent) => void): () => void {
+  let departedAt: string | null = null; // when the host was first heard leaving ready with the process running
+  let heard = 0;
+  return client.on('engine.hostState', ({ state }) => {
+    const asked = ++heard;
+    if (state !== 'ready') {
+      if (running() !== null) departedAt ??= new Date().toISOString();
+      return;
+    }
+    const at = departedAt;
+    departedAt = null;
+    if (at === null || running() === null) return;
+    void client.invoke('engine.sessions', undefined).then((result) => {
+      const last = running();
+      if (asked !== heard || !result.ok || last === null || result.value.some((status) => status.appSessionId === appSessionId)) return;
+      lost({
+        id: `${appSessionId}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
+        kind: 'process.exited', code: null, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null,
+      });
+    });
+  });
+}
+
 // A session's events can reach `session.eventBatch` in both forms at once: a disk follower started by an earlier read
 // (C4's backfill: `seq: null`, ids from the transcript's uuids) keeps delivering what a resumed launch's live journal
 // also delivers (its row's `seq`, ids under the app session id), under different ids, so id deduplication cannot merge
@@ -128,8 +160,15 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     held: SessionEvent[][] | null;
     pass(batch: SessionEvent[]): void;
     foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
+    running: SessionEvent | null; // E10: the latest live-form event since the last exit the subscription delivered
   }
   let latest: Subscription | null = null;
+  const track = (subscription: Subscription, events: SessionEvent[]) => {
+    for (const event of events) {
+      if (event.kind === 'process.exited') subscription.running = null;
+      else if (liveForm(event)) subscription.running = event;
+    }
+  };
   const resets = new Set<() => void>();
   // W7: a subscription that has the live form while its record is foreign-live starts over from disk, once.
   const resetIfOverturned = (subscription: Subscription) => {
@@ -145,6 +184,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       const subscription: Subscription = {
         live: false,
         foreign: false, // W7
+        running: null, // E10
         held: [],
         batch: null,
         ended: new AbortController(),
@@ -153,6 +193,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
             if (liveForm(event)) subscription.live = true;
             return ofParent(event) && !(subscription.live && diskForm(event));
           });
+          track(subscription, events);
           if (events.length > 0) listener(events);
         },
       };
@@ -170,9 +211,14 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         subscription.foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
         resetIfOverturned(subscription);
       });
+      const offLoss = onHostLoss(client, appSessionId, () => subscription.running, (exit) => { // E10
+        if (subscription.held) subscription.held.push([exit]);
+        else subscription.pass([exit]);
+      });
       return () => {
         off();
         offChanged();
+        offLoss();
         subscription.held = null;
         subscription.pass = () => {};
         subscription.ended.abort();
@@ -187,6 +233,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       const events = withAppEvents(valueOf(await client.invoke('session.appEvents', { appSessionId })).events, journal);
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
+        track(subscription, events); // E10
         const waiting = subscription.held ?? [];
         subscription.held = null;
         for (const batch of waiting) subscription.pass(batch);

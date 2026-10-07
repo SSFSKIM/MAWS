@@ -23,6 +23,7 @@ function harness(read?: (path: string) => Promise<Buffer>) {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
     emitted.push({ name, payload });
+    return true;
   };
   const bound = new Map<AppSessionId, SessionId>();
   const bindings: ReplayBindings = {

@@ -57,6 +57,7 @@ function harness(environment: Record<string, string> = terminalEnvironment(BASE_
       const exit = payload as EventPayload<'pty.exit'>;
       exits.set(exit.ptyId, exit);
     }
+    return true;
   };
   const table: PtyTable = createPtyTable({ emit, environment: Promise.resolve(environment) });
   tables.push(table);
@@ -359,7 +360,10 @@ describe('pty host coalesces reads into fewer events', () => {
   it('flushes before the exit event, so a program’s last bytes precede its exit', async () => {
     const events: string[] = [];
     const table = createPtyTable({
-      emit: (name, payload) => void events.push(name === 'pty.data' ? `data:${decoder.decode((payload as EventPayload<'pty.data'>).data)}` : name),
+      emit: (name, payload) => {
+        events.push(name === 'pty.data' ? `data:${decoder.decode((payload as EventPayload<'pty.data'>).data)}` : name);
+        return true;
+      },
       environment: Promise.resolve(terminalEnvironment(BASE_ENV, { appVersion: '0' })),
     });
     tables.push(table);

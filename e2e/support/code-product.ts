@@ -20,8 +20,10 @@ export const COLOUR_TOKENS = [
 ];
 
 // Elements (portals included) whose background, text or border colour is one only the other theme's tokens produce.
-export async function otherThemeColours(page: Page): Promise<string[]> {
-  return page.evaluate((names) => {
+// `paintedOnly` skips elements with no layout box (display: none paints nothing in either theme, e.g. xterm's IME
+// composition view with its own fixed colours until a composition starts); every element is scanned by default.
+export async function otherThemeColours(page: Page, { paintedOnly = false }: { paintedOnly?: boolean } = {}): Promise<string[]> {
+  return page.evaluate(({ names, paintedOnly }) => {
     const resolve = (theme: string) => {
       const host = document.createElement('div');
       host.setAttribute('data-theme', theme);
@@ -41,13 +43,14 @@ export async function otherThemeColours(page: Page): Promise<string[]> {
     const props = ['background-color', 'color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'];
     const offenders: string[] = [];
     for (const el of Array.from(document.querySelectorAll('body *'))) {
+      if (paintedOnly && el.getClientRects().length === 0) continue;
       const style = getComputedStyle(el);
       const prop = props.find((p) => forbidden.includes(style.getPropertyValue(p)));
       if (prop) offenders.push(`${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').slice(0, 60)} ${prop} ${style.getPropertyValue(prop)}`);
       if (offenders.length >= 8) break;
     }
     return offenders;
-  }, COLOUR_TOKENS);
+  }, { names: COLOUR_TOKENS, paintedOnly });
 }
 
 // An application-menu item clicked by its id, as the owner's click would (`theme.light`, `file.save`).

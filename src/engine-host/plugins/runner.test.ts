@@ -334,6 +334,46 @@ describe('PluginsRunner mutations', () => {
     expect(events.find((e) => e.opId === opId && e.phase === 'output')?.line).toBe('Cloning \u2026');
     expect(finished.outcome).toMatchObject({ ok: true, result: { message: 'done \u2026' } });
   });
+
+  // E10: the connect burst re-emits each running operation's latest event (E10 execution document, \u00a7Design 3)
+  it('lists each running operation by its latest event; a queued one, having none yet, and an ended one are not listed', async () => {
+    behave(`echo "step one" >&2\necho "step two" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${INSTALLED}\n`);
+    const { runner, events, done } = make();
+    expect(runner.running()).toEqual([]);
+    const first = await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    const queued = await runner.start('enable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    await until(() => events.some((e) => e.line === 'step two'), 'the second line');
+    expect(runner.running()).toEqual([{ opId: first.opId, action: 'install', target: 'e8-probe@e8-scratch', phase: 'output', line: 'step two' }]);
+    expect(runner.running().some((e) => e.opId === queued.opId)).toBe(false);
+    writeFileSync(join(fake, 'go'), '');
+    await done(first.opId);
+    await done(queued.opId);
+    expect(runner.running()).toEqual([]);
+  });
+
+  // E10: the supervisor's idle exit and exit-when-idle wait for the runner: a queued or running operation, or a process
+  // group a read still owns, keeps it busy; its listeners hear when it holds nothing again
+  it('is busy while an operation is queued or running or a read owns a group, and tells its listeners once it is idle', async () => {
+    behave(`if [ "$2" = "list" ]; then while [ ! -f "${fake}/read" ]; do sleep 0.02; done; echo '[]'; exit 0; fi\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${INSTALLED}\n`);
+    const { runner } = make();
+    let idles = 0;
+    runner.onIdle(() => (idles += 1));
+    expect(runner.busy()).toBe(false);
+    const first = await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    await runner.start('enable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    expect(runner.busy()).toBe(true);
+    writeFileSync(join(fake, 'go'), '');
+    await until(() => idles === 1, 'idle after both operations');
+    expect(runner.busy()).toBe(false);
+    expect(runner.running().some((e) => e.opId === first.opId)).toBe(false);
+    const read = runner.read(READ_LINES.installed, cwd);
+    await until(() => calls().some((line) => line.startsWith('plugin list')), 'the read spawned');
+    expect(runner.busy()).toBe(true);
+    writeFileSync(join(fake, 'read'), '');
+    await read;
+    expect(runner.busy()).toBe(false);
+    expect(idles).toBe(2);
+  });
 });
 
 describe('PluginsRunner reads', () => {

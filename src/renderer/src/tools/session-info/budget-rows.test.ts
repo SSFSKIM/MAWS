@@ -28,9 +28,15 @@ describe("Session info's memory budget lines", () => {
 
   it('says when and why a released session was released', () => {
     const at = new Date(2026, 8, 29, 14, 2).toISOString();
-    expect(budgetRows(state(), digest(A, { released: { at, limitKiB: 8 * GiB } }))).toEqual([
+    expect(budgetRows(state(), digest(A, { released: { at, reason: 'budget', limitKiB: 8 * GiB } }))).toEqual([
       { label: 'Memory budget', value: '3.1 GB of 8 GB · 9 sessions' },
       { label: 'Process', value: 'Released at 14:02 to stay under 8 GB' },
     ]);
+  });
+
+  // E10: the supervisor's idle release, while no app was connected, has no limit and its own words
+  it('says when a session was stopped while idle', () => {
+    const at = new Date(2026, 9, 6, 14, 2).toISOString();
+    expect(budgetRows(state(), digest(A, { released: { at, reason: 'idle', limitKiB: null } }))[1]).toEqual({ label: 'Process', value: 'Stopped at 14:02 while idle' });
   });
 });

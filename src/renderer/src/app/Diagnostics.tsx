@@ -10,6 +10,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { StoreDiagnostics } from './StoreDiagnostics';
+import { SupervisorRow } from './SupervisorRow'; // E10
 // C7 start
 import { ResumeLauncher } from '../composer/dev/ResumeLauncher';
 // C7 end
@@ -61,6 +62,8 @@ export function Diagnostics() {
       </div>
       <HostRow label="engine host" state={engine} />
       <HostRow label="pty host" state={pty} />
+      {/* E10: the supervisor (main's host.status), on a row of its own */}
+      <SupervisorRow />
       <ShellDataRow />
       <div className="flex items-center gap-3">
         <button

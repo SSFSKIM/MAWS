@@ -64,6 +64,12 @@ const LIVE: ReadonlySet<EngineSessionStatus['process']> = new Set(['starting', '
 // after its background tasks end moves `lastEventSeq` first and then opens a turn.
 const ENGINE_ACTIVE: ReadonlySet<EngineSessionStatus['engineState']> = new Set(['running', 'requires_action']);
 
+// E10: a row the supervisor's idle clock may release (E10 execution document, §Design 1 "Idle exit, and idle rows"):
+// ready, holding no hard reason, and not working or waiting by the engine's own word (as the budget rules a row out).
+export function isIdleRow(s: EngineSessionStatus, stateful: ReadonlySet<string>): boolean {
+  return s.process === 'ready' && !ENGINE_ACTIVE.has(s.engineState) && hardReasons(s, stateful).length === 0;
+}
+
 export function evaluate(input: BudgetInput): BudgetVerdict {
   const stateful = new Set(input.policy.statefulMcpServers);
   const live = input.rows.filter((s) => LIVE.has(s.process));

@@ -420,7 +420,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
   async function attended() {
     const run = await mawsSession();
     const published: AttentionItem[][] = [];
-    const stream = new SessionStream({ appSessionId: run.session.status().appSessionId, launchId: 'L', sessionId: null, journalPath: join(userData, 'L.jsonl'), emit: () => {} });
+    const stream = new SessionStream({ appSessionId: run.session.status().appSessionId, launchId: 'L', sessionId: null, journalPath: join(userData, 'L.jsonl'), emit: () => true });
     run.session.on('events', (events) => stream.events(events));
     run.session.on('brokerItems', (items) => {
       published.push(items);

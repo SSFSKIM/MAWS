@@ -61,6 +61,7 @@ function engineHost(deps: Partial<EngineIpcDeps> = {}) {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues).slice(0, 400)}`);
     emitted.push({ name, payload });
+    return true;
   };
   const ipc = registerEngineIpc(on, emit, {
     userData: root, replayEnabled: true, cwd: REPO_ROOT,

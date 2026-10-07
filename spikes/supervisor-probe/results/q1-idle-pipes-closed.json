@@ -1,0 +1,213 @@
+{
+ "question": "Q1",
+ "variant": "idle-pipes-closed",
+ "engine": {
+  "bin": "/Users/new/.local/share/claude/versions/2.1.291",
+  "version": "2.1.291"
+ },
+ "model": "haiku",
+ "watchMs": 30000,
+ "events": [
+  {
+   "ms": 35,
+   "ev": "spawned",
+   "engine": 91694,
+   "wrapper": 91691
+  },
+  {
+   "ms": 330,
+   "ev": "initialized",
+   "subtype": "success"
+  },
+  {
+   "ms": 1963,
+   "ev": "pipes_closed"
+  },
+  {
+   "ms": 2193,
+   "ev": "engine_exit",
+   "code": 0,
+   "signal": null
+  }
+ ],
+ "samples": [
+  {
+   "ms": 103,
+   "engineAlive": true,
+   "ppid": 91691,
+   "registry": false,
+   "sleeper": false
+  },
+  {
+   "ms": 255,
+   "engineAlive": false,
+   "ppid": null,
+   "registry": false,
+   "sleeper": false
+  }
+ ],
+ "beforeKill": {
+  "engine": {
+   "pid": 91694,
+   "ppid": 91691,
+   "pgid": 91694,
+   "stat": "Ss"
+  },
+  "wrapperPid": 91691,
+  "descendants": [],
+  "registry": {
+   "pid": 91694,
+   "sessionId": "12ab7fc8-57db-41f5-8556-bf3e814441a5",
+   "entrypoint": "sdk-ts",
+   "kind": "interactive",
+   "cwdIsScratch": true,
+   "keys": [
+    "cwd",
+    "entrypoint",
+    "kind",
+    "messagingSocketPath",
+    "name",
+    "nameSince",
+    "nameSource",
+    "peerFeatures",
+    "peerProtocol",
+    "pid",
+    "pidDomain",
+    "procStart",
+    "sessionId",
+    "startedAt",
+    "status",
+    "statusUpdatedAt",
+    "updatedAt",
+    "version"
+   ]
+  }
+ },
+ "killAtMs": 1963,
+ "afterKill": {
+  "engineGoneMs": 255,
+  "registryGoneMs": 103,
+  "sleeperGoneMs": 103,
+  "firstOrphanSample": null,
+  "wrapperExit": {
+   "code": 0,
+   "signal": null,
+   "ms": 2195
+  },
+  "engineExitSeenByWrapper": {
+   "at": 1791309379617,
+   "ev": "engine_exit",
+   "code": 0,
+   "signal": null
+  }
+ },
+ "lingeringAfterWindow": [],
+ "transcript": null,
+ "framesSeen": {
+  "count": 1,
+  "lastAtMsFromKill": -1634,
+  "results": []
+ },
+ "debugTail": [
+  "2026-10-06T17:56:17.775Z [DEBUG] hooks module cc-plugin-telemetry@builtin telemetry.log settled in 0.9ms (native link, next() included)",
+  "2026-10-06T17:56:17.775Z [DEBUG] hooks module cc-plugin-telemetry@builtin telemetry.log settled in 0.1ms (native link, next() included)",
+  "2026-10-06T17:56:17.775Z [DEBUG] hooks module cc-plugin-telemetry@builtin telemetry.log settled in 0.0ms (native link, next() included)",
+  "2026-10-06T17:56:17.775Z [DEBUG] Ripgrep first use test: PASSED (mode=embedded, path=/Users/new/.local/share/claude/versions/2.1.291)",
+  "2026-10-06T17:56:17.775Z [DEBUG] \"rg error (signal=undefined, code=2, stderr: rg: <scratch>/config/plugins/cache: IO error for operation on <scratch>/config/plugins/cache: No such file or directory (os error 2)\\n), 0 res",
+  "2026-10-06T17:56:17.783Z [DEBUG] $.process.run (cc-plugin-telemetry): sh exited 0 in 29ms, 50 + 0 chars",
+  "2026-10-06T17:56:17.784Z [DEBUG] Preserving file permissions: 100644",
+  "2026-10-06T17:56:17.784Z [DEBUG] Writing to temp file: <scratch>/config/.claude.json.tmp.91694.1573c297cf33",
+  "2026-10-06T17:56:17.785Z [DEBUG] Applied original permissions to temp file",
+  "2026-10-06T17:56:17.785Z [DEBUG] Temp file written successfully, size: 1007 bytes",
+  "2026-10-06T17:56:17.785Z [DEBUG] Renaming <scratch>/config/.claude.json.tmp.91694.1573c297cf33 to <scratch>/config/.claude.json",
+  "2026-10-06T17:56:17.786Z [DEBUG] File <scratch>/config/.claude.json written atomically",
+  "2026-10-06T17:56:18.060Z [DEBUG] [fs.watch probe] verdict: delivers",
+  "2026-10-06T17:56:18.424Z [DEBUG] [mcp-registry] Loaded 294 official MCP URLs (legacy)",
+  "2026-10-06T17:56:19.394Z [DEBUG] [uds-messaging] Shutting down",
+  "2026-10-06T17:56:19.396Z [DEBUG] LSP server manager shut down successfully",
+  "2026-10-06T17:56:19.397Z [ERROR] [Anthropic telemetry] Failed to check metrics opt-out status: Auth error: no credential usable for the metrics opt-out check",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics export failed (metrics opt-out check failed; skipping export). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics export: 1 failure(s) this session (last: metrics opt-out check failed; skipping export)",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter flush complete",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter flush complete",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter shutdown complete",
+  "2026-10-06T17:56:19.399Z [DEBUG] $.session.authorize (cc-plugin-telemetry): no first-party credential (No API key available)",
+  "2026-10-06T17:56:19.399Z [DEBUG] [cc-plugin-telemetry] $.ui.log (to debug): telemetry: 3 row(s) not sent: this session has no first-party credential to authorize",
+  "2026-10-06T17:56:19.399Z [DEBUG] hooks module cc-plugin-telemetry@builtin session.end settled in 0.7ms (native link, next() included)"
+ ],
+ "debugShutdownLines": [
+  "2026-10-06T17:56:17.676Z [INFO] [uds-messaging] Connect when the data is ready (e.g. out=$(cmd); printf '%s\\n' \"$out\" | nc -U \"$CLAUDE_CODE_MESSAGING_SOCKET\" — or the socat form above): a connection that sends no complet",
+  "2026-10-06T17:56:17.783Z [DEBUG] $.process.run (cc-plugin-telemetry): sh exited 0 in 29ms, 50 + 0 chars",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics export failed (metrics opt-out check failed; skipping export). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures",
+  "2026-10-06T17:56:19.398Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter shutdown complete"
+ ],
+ "stderr": "",
+ "ownerFileDelta": {
+  "before": [
+   "/private/tmp",
+   "/private/tmp/b2-ws",
+   "/private/tmp/bench-browser",
+   "/private/tmp/bgt2",
+   "/private/tmp/bgtest",
+   "/private/tmp/cc-capture",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+   "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+   "/private/tmp/claude-plugin-smoke-15",
+   "/private/tmp/cua-accept",
+   "/private/tmp/fold-live",
+   "/private/tmp/fold-smoke",
+   "/private/tmp/hooktest",
+   "/private/tmp/maws-accept",
+   "/private/tmp/maws-harness/a",
+   "/private/tmp/md-test",
+   "/private/tmp/oc-ws-b",
+   "/private/tmp/sminos-probe",
+   "/private/tmp/th-pad.Nnz1",
+   "/private/tmp/th-pad.WI9D",
+   "/private/tmp/th-test",
+   "/private/tmp/th-tools.Ozkz",
+   "/private/tmp/th-tools.VY2Y",
+   "/private/tmp/wr-test"
+  ],
+  "after": [
+   "/private/tmp",
+   "/private/tmp/b2-ws",
+   "/private/tmp/bench-browser",
+   "/private/tmp/bgt2",
+   "/private/tmp/bgtest",
+   "/private/tmp/cc-capture",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+   "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+   "/private/tmp/claude-plugin-smoke-15",
+   "/private/tmp/cua-accept",
+   "/private/tmp/fold-live",
+   "/private/tmp/fold-smoke",
+   "/private/tmp/hooktest",
+   "/private/tmp/maws-accept",
+   "/private/tmp/maws-harness/a",
+   "/private/tmp/md-test",
+   "/private/tmp/oc-ws-b",
+   "/private/tmp/sminos-probe",
+   "/private/tmp/th-pad.Nnz1",
+   "/private/tmp/th-pad.WI9D",
+   "/private/tmp/th-test",
+   "/private/tmp/th-tools.Ozkz",
+   "/private/tmp/th-tools.VY2Y",
+   "/private/tmp/wr-test"
+  ],
+  "same": true,
+  "pythonBefore": "[\"/private/tmp\", \"/private/tmp/b2-ws\", \"/private/tmp/bench-browser\", \"/private/tmp/bgt2\", \"/private/tmp/bgtest\", \"/private/tmp/cc-capture\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe\", \"/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest\", \"/private/tmp/claude-plugin-smoke-15\", \"/private/tmp/cua-accept\", \"/private/tmp/fold-live\", \"/private/tmp/fold-smoke\", \"/private/tmp/hooktest\", \"/private/tmp/maws-accept\", \"/private/tmp/maws-harness/a\", \"/private/tmp/md-test\", \"/private/tmp/oc-ws-b\", \"/private/tmp/sminos-probe\", \"/private/tmp/th-pad.Nnz1\", \"/private/tmp/th-pad.WI9D\", \"/private/tmp/th-test\", \"/private/tmp/th-tools.Ozkz\", \"/private/tmp/th-tools.VY2Y\", \"/private/tmp/wr-test\"]",
+  "pythonAfter": "[\"/private/tmp\", \"/private/tmp/b2-ws\", \"/private/tmp/bench-browser\", \"/private/tmp/bgt2\", \"/private/tmp/bgtest\", \"/private/tmp/cc-capture\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe\", \"/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest\", \"/private/tmp/claude-plugin-smoke-15\", \"/private/tmp/cua-accept\", \"/private/tmp/fold-live\", \"/private/tmp/fold-smoke\", \"/private/tmp/hooktest\", \"/private/tmp/maws-accept\", \"/private/tmp/maws-harness/a\", \"/private/tmp/md-test\", \"/private/tmp/oc-ws-b\", \"/private/tmp/sminos-probe\", \"/private/tmp/th-pad.Nnz1\", \"/private/tmp/th-pad.WI9D\", \"/private/tmp/th-test\", \"/private/tmp/th-tools.Ozkz\", \"/private/tmp/th-tools.VY2Y\", \"/private/tmp/wr-test\"]"
+ },
+ "cleanup": {
+  "started": [
+   91691,
+   91694
+  ],
+  "stillAlive": [],
+  "psMatchesScratch": [],
+  "scratchRemoved": true
+ }
+}

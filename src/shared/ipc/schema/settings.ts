@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -71,9 +71,16 @@ const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSch
 // locale as a BCP-47 identifier (`en-US`); null = the system's current locale, which the helper resolves at each capture.
 export const VoiceSettingsSchema = z.strictObject({ locale: z.string().min(2).max(32).nullable() });
 // E9 end
+// E10 start: version 10, the background supervisor (E10 execution document, Interfaces "Settings version 10"; A-29 (4)).
+// idleExitMinutes: how long the supervisor waits, with no app connected and no live session, before it exits (and how
+// long a kept session with no hard reason runs while no app is connected); null = never. keepRunningDefault: whether
+// "Quit and keep sessions running" is the quit question's default button when work is in flight.
+export const MAX_IDLE_MINUTES = 1440; // a day; host.configure's millisecond cap is derived from it (schema/host.ts)
+export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(MAX_IDLE_MINUTES).nullable(), keepRunningDefault: z.boolean() });
+// E10 end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(9), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice)
+  version: z.literal(10), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -87,6 +94,7 @@ export const SettingsSchema = z.strictObject({
   // C11 end
   permissions: PermissionsSettingsSchema, // W3
   voice: VoiceSettingsSchema, // E9
+  supervisor: SupervisorSettingsSchema, // E10
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -103,6 +111,7 @@ export const SettingsPatchSchema = z.strictObject({
   appearance: AppearanceSettingsSchema.partial().optional(),
   permissions: PermissionsSettingsSchema.partial().optional(), // W3
   voice: VoiceSettingsSchema.partial().optional(), // E9
+  supervisor: SupervisorSettingsSchema.partial().optional(), // E10
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 

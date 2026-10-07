@@ -111,6 +111,7 @@ const BOUNDED_BUDGET_S = 8;
 export interface EngineIpcDeps {
   userData: string;
   replayEnabled: boolean; // MAWS_ENGINE_REPLAY === '1'
+  replayRowMs?: number; // E10: MAWS_E2E_REPLAY_ROW_MS under MAWS_E2E=1, the pace of a replay's `in` rows (default 0, at once)
   cwd?: string; // resolves relative replay paths and the prelude; default process.cwd()
   store?: SessionStateStore; // default FileSessionStateStore(userData), the P0 store
   table?: ProcessTable;
@@ -130,11 +131,16 @@ export interface EngineIpcDeps {
   // registry); absent, never
   heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
+  onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
+  hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
 }
 
 export interface EngineIpc {
   table: ProcessTable;
   plugins: PluginsRunner; // E8
+  // E10: engine.shutdown's body (every live row's ladder, and the plugin runner stopped), shared with the detached
+  // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
+  shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>;
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
@@ -205,6 +211,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const launch = createLauncher({
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
+    replayRowMs: deps.replayRowMs, // E10
     cwd: deps.cwd ?? process.cwd(),
     table,
     store,
@@ -214,12 +221,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
     log,
+    hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
-        emit, ringSize: deps.ringSize, batchMs: deps.batchMs,
+        emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));
@@ -253,12 +261,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
-  handle('engine.shutdown', async ({ graceMs }) => {
-    // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
-    // SIGKILL sooner than a cancel's so the stop fits main's quit bound
+  // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
+  // SIGKILL sooner than a cancel's so the stop fits main's quit bound
+  const shutdown = async (graceMs: number) => {
     const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
     return result;
-  });
+  };
+  handle('engine.shutdown', async ({ graceMs }) => shutdown(graceMs));
   // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
   // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),
   // and the state is the table's own; the event goes out whenever the state changes and at every release.
@@ -729,7 +738,32 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   // E3 end
 
-  return { table, plugins };
+  // E10 start: the connect burst (E10 execution document, §Design 3 "Connect"), run synchronously at the client's ready
+  // before any later event: every row in the table's order (its stream republishes the row's state, read from the
+  // session since the stream keeps none, then the events no client received), then the budget, the plugin lists'
+  // change and the latest event of every running plugin operation. A row with no stream here has none to send; a row
+  // whose republish throws is logged and skipped, so it costs the rows after it and the host's state nothing.
+  deps.onConnect?.(() => {
+    for (const session of table.list()) {
+      let id = 'a row whose status could not be read';
+      try {
+        const status = session.status();
+        id = status.appSessionId;
+        const catalog = session.catalog();
+        streams.get(status.appSessionId)?.republish({
+          status, queue: session.queue.recovered ? session.queue.state : null, brokerItems: session.brokerItems(), catalog: catalog.revision > 0 ? catalog : null,
+        });
+      } catch (error) {
+        log(`the connect burst skipped ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    emit('engine.budget', table.budgetState());
+    emit('plugins.changed', {});
+    for (const event of plugins.running()) emit('plugins.operation', event);
+  });
+  // E10 end
+
+  return { table, plugins, shutdown };
 }
 
 function throwing(error: Error): never {

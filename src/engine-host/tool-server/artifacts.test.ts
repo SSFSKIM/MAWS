@@ -247,6 +247,18 @@ describe('artifact_screenshot (G4, host half)', () => {
   });
 });
 
+describe('artifact_screenshot with no app connected (E10)', () => {
+  it('fails at once with appNotOpen and asks main nothing', async () => {
+    await created();
+    const sent: ArtifactCaptureRequest[] = [];
+    const capture = new HostBridge<ArtifactCaptureRequest, MawsArtifactCapturedResult>({ send: (r) => sent.push(r), answerMs: CAPTURE_ANSWER_MS, hasClient: () => false });
+    const result = await artifactScreenshotTool({ deliverables: store, capture }).call({ id: 'dash' }, ctx());
+    expect(result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('artifact_screenshot') }], isError: true });
+    expect(TOOL_ERRORS.appNotOpen('artifact_screenshot')).toBe('artifact_screenshot: MAWS is not open; the artifact cannot be captured');
+    expect(sent).toEqual([]);
+  });
+});
+
 describe('externalReferenceCount', () => {
   it('counts the http(s) URLs a page names in src, href, srcset, url( and @import positions, and no data: URL', () => {
     expect(externalReferenceCount('<img src="https://a/1.png"><img src=\'https://a/2.png\'><img src="data:image/png;base64,AA==">')).toBe(2);

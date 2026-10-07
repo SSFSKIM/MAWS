@@ -3,9 +3,11 @@
 // through its writer, tells the renderer (`session.changed`, `session.removed`, `session.projects.changed`, coalesced per
 // tick with the index's revision), and keeps the host's `appSessionId ↔ sessionId` bindings in step with the index
 // (`fs.bind` for every id it allocates or binds, `fs.unbind` for every id it clears, `fs.unfollow` for an id that goes
-// live). Whenever the engine host becomes ready (at start, and after a restart that lost its bindings) it re-sends every
-// binding, scans with what the index already holds, and folds the registry's holders once, since the host's start-up
-// holder events predate the subscription. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
+// live). Whenever the engine host starts streaming (at start, and after a restart that lost its bindings) it re-sends
+// every binding, scans with what the index already holds, and folds the registry's holders once, since the host's
+// start-up holder events predate the subscription. E10: streaming, not the `ready` state: the host emits nothing before
+// main's `ready` line (X13), which follows the `ready` transition and main's resync, and a scan's discoveries come back
+// only as `fs.sessionChanged` events. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
@@ -22,7 +24,7 @@ import { contested, type BindingChange, type ChangeCause } from './sessions';
 // and attention, which main feeds it from the host directly (src/main/sessions/index.ts).
 export type ReadModelWriter = Pick<ShellReadModelWriter, 'observeRecord' | 'observeRemoved' | 'observeProject' | 'observeProjectRemoved' | 'setDigest'>;
 
-export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'snapshot'>;
+export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'snapshot'>; // E10: onStreaming
 
 export interface SourceOptions {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // main → renderer (src/main/ipc/events)
@@ -105,13 +107,16 @@ export class IndexSessionSource implements SessionSource {
         this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch));
         this.liveStatus(appSessionId, status.process === 'exited', record.engineSessionId !== null);
       }),
-      this.host.onState('engine-host', (state) => {
+      // E10: the reset at every transition, `ready` included; a kept session's burst status re-marks it self after it
+      this.host.onState('engine-host', () => {
         this.live.clear(); // a host that went away took its processes with it
         this.holders.clear();
         this.write('engine-host generation', () => this.index.sessions.resetSelfHolders());
-        if (state.state === 'ready') void this.sync();
       }),
+      this.host.onStreaming('engine-host', () => void this.sync()), // E10
     ];
+    // A source started after the host became ready: it may be streaming already (no streaming call is coming) or still
+    // in its resync (one is, and a second sync then is harmless).
     if (this.host.snapshot('engine-host').state === 'ready') void this.sync();
 
     // Sessions an earlier membership rule left in a linked worktree's own project move under its main checkout. Telling

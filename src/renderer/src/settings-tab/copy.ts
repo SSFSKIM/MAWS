@@ -1,5 +1,6 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
+import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 
 export const SECTIONS = {
   engine: 'Engine',
@@ -66,6 +67,50 @@ export const BUDGET_SETTINGS = {
 };
 
 // C12 end
+
+// E10 start: Settings › Engine › Background supervisor (E10 execution document, §Design 11; settings version 10)
+const sessions = (n: number) => (n === 0 ? 'no sessions' : `${n} ${n === 1 ? 'session' : 'sessions'}`);
+// The idle time as the supervisor holds it: whole minutes from the setting, seconds under the e2e seam
+const idleSpan = (ms: number) => (ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`);
+export const SUPERVISOR = {
+  title: 'Background supervisor',
+  status: 'Status',
+  reading: 'Reading…',
+  running: (since: string, pid: number, live: number, exit: string) => `Running since ${since} · pid ${pid} · ${sessions(live)} · ${exit}`,
+  exitsAfter: (idleExitMs: number) => `exits ${idleSpan(idleExitMs)} after the last session ends`,
+  exitsNever: 'never exits on its own',
+  exitsWithLast: 'exits when its last session ends', // exit-when-idle armed (an update, or the incompatible wait)
+  inApp: (pid: number, live: number) => `Runs inside MAWS · pid ${pid} · ${sessions(live)} · stops when MAWS quits`, // MAWS_HOST_MODE=utility
+  starting: 'Starting',
+  restarting: 'Restarting',
+  notRunning: 'Not running',
+  heldLock: 'Not running · another supervisor holds its lock and does not answer',
+  waiting: (live: number) => `Waiting · the previous version's supervisor still runs ${sessions(live)}; MAWS moves to a new one when they become idle`,
+  waitingNote: "This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.",
+  restartNow: 'Restart now',
+  statusNote: 'Sessions run in this background process, so they can keep running after MAWS quits.',
+  restartFailed: (why: string) => `The supervisor was not restarted · ${why}`,
+  idle: 'Exit when idle',
+  idleField: 'Minutes before the supervisor exits when idle',
+  idleNever: 'never', // the empty field's placeholder
+  idleUnit: 'min',
+  idleNote: (minutes: number) => `With MAWS closed, the supervisor exits ${minutes} min after its last session ends, and a kept session idle that long is stopped (Send resumes it). Empty means never.`,
+  idleNeverNote: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.',
+  idleInvalid: `Enter whole minutes from 1 to ${MAX_IDLE_MINUTES}, or leave the field empty for never`,
+  quitDefault: 'When quitting with work in flight',
+  quitKeep: 'Keep sessions running',
+  quitStop: 'Stop them',
+  quitNote: "The quit question's default answer. It asks only while a session is mid-turn or has work in flight; otherwise quitting stops every session.",
+  stopAll: 'Stop all',
+  stopAllAction: 'Stop all sessions and the supervisor…',
+  stopAllNote: 'Every session stops; Send resumes it from its transcript. A fresh supervisor starts in its place.',
+  confirm: (live: number) => (live === 0 ? 'No session is running. Stop the supervisor and start a fresh one?' : `Stop ${sessions(live)} and the supervisor?`),
+  confirmAction: 'Stop all',
+  cancel: 'Cancel',
+  stopping: 'Stopping…',
+  stopFailed: (why: string) => `The supervisor was not stopped · ${why}`,
+};
+// E10 end
 
 export const GATEWAY = {
   defaultRoute: 'Default route',
