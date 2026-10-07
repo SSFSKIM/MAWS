@@ -60,7 +60,7 @@ export function fit(text: string, max: number): string {
 }
 
 // The same from the other end: the last `max - 1` units after an ellipsis (the innermost segments of a path).
-function fitEnd(text: string, max: number): string {
+export function fitEnd(text: string, max: number): string {
   if (text.length <= max) return text;
   let kept = text.slice(text.length - Math.max(0, max - 1));
   if (/^[\uDC00-\uDFFF]/.test(kept)) kept = kept.slice(1);
