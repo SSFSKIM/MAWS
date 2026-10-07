@@ -1,0 +1,38 @@
+E4c M0 Task 0.3: the unplaced-view probe (e4c/unplaced.mjs; results/e4c/unplaced.json), run 2026-10-06 23:09 PDT on the owner's
+unlocked screen (CGSSessionScreenIsLocked absent, display on since 21:46, UserIsActive 1) with the repository's Electron 44.4.5
+(Chrome 152.0.7977.130) and playwright-core 1.63.0 through E0b's bridge, the window pinned floating and shown inactive.
+
+Parking: the first variant in (a), (b), (c), (e) order that passes snapshot, click and screenshot is (b), a view never attached
+to any window, sized with setBounds(0, 0, 1280, 800) and setVisible(true): 1280 x 800 viewport, visibilityState visible, 121 rAF
+frames in 1 s, ariaSnapshot 116 chars with the button's ref, the locator click advanced the counter in 24 ms, a viewport
+screenshot of 2560 x 1600 at device scale (1280 x 800 with scale 'css'); (e), the view in a hidden host window of its own
+(show: false, 1280 x 800), passes identically. (a) E4a's view as created (no bounds set: 0 x 0, not 1 px; setVisible(false)), (c)
+the view attached to the shown window at x = the content width, and (d) the same then hidden all give the page a 0 x 0 viewport:
+the snapshot works, the click times out at 5 s, and Page.captureScreenshot refuses ("Cannot take screenshot with 0 width"); so a
+WebContentsView placed wholly outside its window's content area is clipped to nothing and stock Electron has no analogue of
+Codex's painted off-screen webview. In every variant, (a) and (d) included, the page read visible with rAF at 121 Hz once
+Playwright's attach had sent Emulation.setFocusEmulationEnabled: the probe's blocker is the viewport's size, not visibility
+(visibility4's paused rAF under setVisible(false) was a placed view that had painted; it is not contradicted for covers). A view
+never attached has no owner window (getOwnerBrowserWindow() null in (a) and (b)); one attached once keeps its owner after removal
+(shell/browser/api/electron_api_web_contents_view.cc:141), and (e)'s owner is its hidden window.
+
+Dialogs (variant f): in Electron 44.4.5 a page's alert/confirm reaches main's JavaScript as the internal `-run-dialog` event, whose
+one listener (lib/browser/api/web-contents.ts:784-830) shows dialog.showMessageBox(owner, …) as a sheet on the owner window, or,
+with no owner, dialog.showMessageBox(options), which on macOS is NSAlert runModal (shell/browser/ui/message_box_mac.mm,
+ShowMessageBox). prompt() never shows anything: Electron's renderer replaces window.prompt with a function that throws "prompt()
+is not supported." (lib/renderer/window-setup.ts:17-21; measured: the page's call throws, no CDP event, no -run-dialog), and main's
+listener answers any prompt that does reach it (false, '') at once. With Page enabled, Chromium emits Page.javascriptDialogOpening
+(hasBrowserHandler true) and still runs Electron's dialog (content/browser/web_contents/web_contents_impl.cc RunJavaScriptDialog);
+Page.handleJavaScriptDialog returns the page's call (confirm false in 389 ms, alert in 307 ms) but does not close Electron's box,
+because Electron's dialog manager does not implement HandleJavaScriptDialog (content/browser/devtools/protocol/page_handler.cc
+HandleJavaScriptDialog; measured: sheet-begin and no sheet-end until a reload's -cancel-dialogs closed it). Playwright behaves the
+same: with no `dialog` listener it dismisses through that command (confirm returned false in 298 ms, the sheet stayed up); with a
+no-op listener it sends nothing. On a never-attached view the parentless runModal froze main outright: from the confirm() on no
+timer of main ran (no 250 ms tick, no CDP answer, not the step's own 12 s timeout) until the 15 s watchdog killed the process, so no
+CDP route can answer it in time. Wrapping Electron's `-run-dialog` listener (kept and restored; the wrapper answers by Decision Log
+33's rule) showed no sheet and no box on the placed and the never-attached view, returned alert and confirm (false) at once, still
+reported Page.javascriptDialogOpening and javascriptDialogClosed to a CDP client, and gave the dialog's type, message and frame URL;
+with Playwright connected and no `dialog` listener, its auto-dismiss then failed as an unhandled rejection ("Page.handleJavaScriptDialog:
+No dialog is showing"), which the no-op listener Decision Log 33 already requires prevents. Verdict for Decision Log 33: the
+`-run-dialog` wrap (an Electron-internal event, so a test pins its single listener at view creation); CDP or Playwright handling
+alone leaves Electron's sheet up on a placed tab and cannot answer before a parentless box freezes main.
