@@ -13,7 +13,7 @@ To see it: open a session, add Browser from the panel's "+", type `wikipedia.org
 - [x] M0 — The on-screen visibility check (A-33's first act; with the owner, else the open condition and the flag) (2026-10-06 16:30 PDT: run on screen, verdict visible, `FOCUS_EMULATION` `off`)
 - [x] M1 — Shared contracts: `BrowserTab`, `browser.*` IPC, the `browser` TabRef, settings 11, index migration 5, the pure URL and error modules (2026-10-06 17:35 PDT, reviewed clean, minors fixed at 538772dc; settings 11 deferred to Task 3.5 as E10 has not landed)
 - [x] (2026-10-06 21:40 PDT, every task reviewed clean after one fix round each; head 833b9001) M2 — Main: the partition, the tab store and its persistence, the view manager (placement, cover, placeholder), navigation and errors, history, favicons, permissions, downloads, `window.open`, the context menu, the keyboard hook, `TabDebugger` and the attribution seams, the memory sample and the cap, the handlers
-- [ ] M3 — Renderer: the Browser tool and the `browser` main tab, the chrome and its states, the pane's placement and cover watch, the empty and error pages, Settings › Browser, `show_pane 'browser'`
+- [x] (2026-10-07, every task reviewed clean after one fix round each; settings 11 landed in Task 3.5 on E10's 10; head d38580f9) M3 — Renderer: the Browser tool and the `browser` main tab, the chrome and its states, the pane's placement and cover watch, the empty and error pages, Settings › Browser, `show_pane 'browser'`
 - [ ] M4 — `e2e:browser` against a local server, evidence in both themes, gates, tracker rows, the whole-branch review, hand-back
 
 ## Terms
