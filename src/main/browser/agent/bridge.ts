@@ -1,24 +1,20 @@
-// The CDP bridge (E4c execution document, Design §4; A-19; G3): a browser-level CDP endpoint for one tab, served over a
-// loopback WebSocket for playwright-core's `connectOverCDP` and backed by the tab's TabDebugger. Lifted from E0b's
-// `spikes/browser-probe/cdp/bridge.mjs` with the document's changes and no others: every command goes out through
-// `TabDebugger.send` (never the raw debugger, so the in-flight Input table fills itself, E4a Decision 19), events come
-// from `TabDebugger.on('*')` (Decision Log 34 (b)), the page's target id is the attachment's main-frame id (no second
-// `Page.getFrameTree`), an upgrade carrying an Origin header is refused (a Node client sends none; a page's would), one
-// socket at a time, and a child that waits for a debugger while no socket is open is resumed.
+// The CDP bridge (E4c execution document, Design §4; A-19, A-43; G3; Decision Log 57): a browser-level CDP endpoint for
+// one tab, handed to playwright-core in process as a `ConnectOverCDPTransport` and backed by the tab's TabDebugger. No
+// socket, port or listener exists: Playwright's messages arrive as objects through `send` and the bridge's go back
+// through `onmessage`. Lifted from E0b's `spikes/browser-probe/cdp/bridge.mjs` with the document's changes: every command
+// goes out through `TabDebugger.send` (never the raw debugger, so the in-flight Input table fills itself, E4a Decision
+// 19), events come from `TabDebugger.on('*')` (Decision Log 34 (b)), the page's target id is the attachment's main-frame
+// id (no second `Page.getFrameTree`), and a child that waits for a debugger while no transport is open is resumed.
 //
 // Playwright expects a *browser* target; the debugger is a *page* session. The bridge answers the browser-level methods
 // itself, announces the one page as an attached target under a synthetic session id, and forwards everything carrying
 // that id (or a child session Chromium announced through auto-attach) to the page. The boundary is enforced, not
 // assumed: Electron's debugger client is trusted, so the page session's own Target domain could enumerate and attach to
 // every target in the process (MAWS's renderer among them). The bridge therefore (1) forwards only sessions it or the
-// debugger announced, (2) allows on them only the Target methods auto-attach needs and no Browser.*, Storage.*,
-// SystemInfo.* or Tethering.* method, and (3) accepts upgrades only on a per-bridge random token path, never with an
-// Origin, one at a time.
-import { randomBytes } from 'node:crypto';
-import { createServer, type IncomingMessage } from 'node:http';
-import type { Duplex } from 'node:stream';
+// debugger announced, and (2) allows on them only the Target methods auto-attach needs and no Browser.*, Storage.*,
+// SystemInfo.* or Tethering.* method.
 import type { WebContents } from 'electron';
-import { WebSocketServer, type WebSocket } from 'ws';
+import type { ConnectOverCDPTransport } from 'playwright-core';
 import type { CommandParams, TabDebugger } from '../debugger';
 
 const PAGE_SESSION = 'maws-bridge-page-1';
@@ -54,16 +50,16 @@ export interface BridgeStats {
   events: number;
   errors: number;
   blocked: string[];
-  rejectedUpgrades: number;
   unknownBrowserMethods: Set<string>;
 }
 
 export interface CdpBridge {
-  wsUrl: string; // the token path: handed to the driver alone
   pageSessionId: string;
   stats: BridgeStats;
-  readonly connected: boolean; // a socket is open
-  // Ends the socket and the server; detaches the debugger only when told to (Decision Log 1 and 34 (a)).
+  readonly connected: boolean; // a transport is open
+  // A transport for `chromium.connectOverCDP(transport)`. One is open at a time: a new one ends the one before.
+  connect(): ConnectOverCDPTransport;
+  // Ends the open transport (Playwright hears `onclose`); detaches the debugger only when told to (Decision Log 1, 34 (a)).
   close(options: { detach: boolean }): Promise<void>;
 }
 
@@ -84,14 +80,32 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
   // In CDP a page target's id is its main frame's id, and Playwright relies on the equality (a synthetic id orphans the
   // main frame: page.url() stays '' and evaluate waits for a context forever). Chromium keeps it across process swaps.
   const targetId = dbg.mainFrameId!;
-  const token = randomBytes(16).toString('hex');
-  const wsPath = `/devtools/browser/${token}`;
   const knownSessions = new Set([PAGE_SESSION]);
-  const stats: BridgeStats = { forwarded: 0, browserLevel: 0, events: 0, errors: 0, blocked: [], rejectedUpgrades: 0, unknownBrowserMethods: new Set() };
-  let client: WebSocket | null = null;
+  const stats: BridgeStats = { forwarded: 0, browserLevel: 0, events: 0, errors: 0, blocked: [], unknownBrowserMethods: new Set() };
+  let client: ConnectOverCDPTransport | null = null;
 
+  // Every message reaches Playwright on a later turn, in order, as a socket's would: Playwright registers a command's
+  // callback only after `send` returns, so an answer delivered inside `send` would be lost.
+  const outbox: { to: ConnectOverCDPTransport; message: object }[] = [];
+  let flushing = false;
+  const flush = () => {
+    flushing = false;
+    for (const { to, message } of outbox.splice(0)) if (client === to) to.onmessage?.(message);
+  };
+  const deliverTo = (to: ConnectOverCDPTransport, message: object) => {
+    outbox.push({ to, message });
+    if (!flushing) {
+      flushing = true;
+      setImmediate(flush);
+    }
+  };
   const deliver = (message: object) => {
-    if (client && client.readyState === client.OPEN) client.send(JSON.stringify(message));
+    if (client) deliverTo(client, message);
+  };
+  const end = (transport: ConnectOverCDPTransport, reason: string) => {
+    if (client !== transport) return;
+    client = null;
+    setImmediate(() => transport.onclose?.(reason));
   };
 
   const unsubscribe = [
@@ -129,10 +143,8 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
     return !(method === 'Target.getTargetInfo' && params.targetId && params.targetId !== targetId);
   };
 
-  async function handle(ws: WebSocket, { id, method, params = {}, sessionId }: Message): Promise<void> {
-    const answer = (body: object) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ id, ...body, ...(sessionId ? { sessionId } : {}) }));
-    };
+  async function handle(transport: ConnectOverCDPTransport, { id, method, params = {}, sessionId }: Message): Promise<void> {
+    const answer = (body: object) => deliverTo(transport, { id, ...body, ...(sessionId ? { sessionId } : {}) });
     const reply = (result: unknown) => answer({ result: result ?? {} });
     const fail = (code: number, message: string) => {
       stats.errors++;
@@ -190,7 +202,7 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
         return reply({});
       case 'Browser.close':
         reply({});
-        ws.close();
+        setImmediate(() => end(transport, 'Browser.close'));
         return;
       default:
         stats.unknownBrowserMethods.add(method);
@@ -199,52 +211,29 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
     }
   }
 
-  // No /json/version: it would publish the token. The driver gets the URL from the bridge's owner.
-  const http = createServer((_request, response) => {
-    response.statusCode = 404;
-    response.end();
-  });
-  const wss = new WebSocketServer({ noServer: true });
-  const refuseUpgrade = (socket: Duplex, status: string) => {
-    stats.rejectedUpgrades++;
-    socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-  };
-  http.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (request.url !== wsPath) return refuseUpgrade(socket, '404 Not Found');
-    if (request.headers.origin !== undefined) return refuseUpgrade(socket, '403 Forbidden');
-    if (client !== null) return refuseUpgrade(socket, '409 Conflict');
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      client = ws;
-      ws.on('message', (data: Buffer) => {
-        let message: Message;
-        try {
-          message = JSON.parse(data.toString()) as Message;
-        } catch {
-          return;
-        }
-        void handle(ws, message);
-      });
-      ws.on('close', () => {
-        if (client === ws) client = null;
-      });
-    });
-  });
-  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
-  const { port } = http.address() as { port: number };
-
+  let closed = false;
   return {
-    wsUrl: `ws://127.0.0.1:${port}${wsPath}`,
     pageSessionId: PAGE_SESSION,
     stats,
     get connected() {
       return client !== null;
     },
+    connect: () => {
+      if (closed) throw new Error('the CDP bridge is closed');
+      if (client) end(client, 'replaced by a new connection');
+      const transport: ConnectOverCDPTransport = {
+        send: (message) => {
+          if (client === transport) void handle(transport, message as Message);
+        },
+        close: () => end(transport, 'closed by the client'),
+      };
+      client = transport;
+      return transport;
+    },
     close: async ({ detach }) => {
+      closed = true;
       for (const stop of unsubscribe) stop();
-      client?.terminate();
-      client = null;
-      wss.close();
-      await new Promise<void>((resolve) => http.close(() => resolve()));
+      if (client) end(client, 'the CDP bridge closed');
       if (detach) dbg.detach();
     },
   };

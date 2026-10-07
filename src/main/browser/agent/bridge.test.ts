@@ -1,11 +1,13 @@
 import { EventEmitter } from 'node:events';
+import { Server } from 'node:net';
+import type { ConnectOverCDPTransport } from 'playwright-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocket } from 'ws';
 import { TabDebugger, type CommandPhase } from '../debugger';
 import { startCdpBridge, type CdpBridge } from './bridge';
 
-// G3 (E4c Acceptance): the bridge over E4a's real TabDebugger, itself over a fake `webContents.debugger`, driven by a raw
-// `ws` client as Playwright would drive it. The bridge never holds the raw debugger: every command it forwards must go
+// G3 (E4c Acceptance; Decision Log 57): the bridge over E4a's real TabDebugger, itself over a fake `webContents.debugger`,
+// driven through its in-process transport as Playwright's CRConnection drives it (objects in through `send`, out through
+// `onmessage` on a later turn). The bridge never holds the raw debugger: every command it forwards must go
 // through `TabDebugger.send` (spied), which is what fills the in-flight table the input attribution reads.
 
 class FakeElectronDebugger extends EventEmitter {
@@ -48,91 +50,52 @@ interface Reply {
   sessionId?: string;
 }
 
-// A raw CDP client: numbered commands answered by id, events collected.
+// A raw CDP client on the transport: numbered commands answered by id, events collected. It sets `onmessage` after
+// `send` as CRConnection does, so an answer delivered inside `send` would be lost here as there.
 class Client {
   private nextId = 1;
   private readonly waiting = new Map<number, (reply: Reply) => void>();
   readonly events: Reply[] = [];
+  closedWith: string | null = null;
 
-  private constructor(private readonly ws: WebSocket) {
-    ws.on('message', (data: Buffer) => {
-      const message = JSON.parse(data.toString()) as Reply;
-      if (message.id !== undefined) this.waiting.get(message.id)?.(message);
-      else this.events.push(message);
-    });
-  }
-
-  static open(url: string): Promise<Client> {
-    const ws = new WebSocket(url);
-    return new Promise((resolve, reject) => {
-      ws.once('open', () => resolve(new Client(ws)));
-      ws.once('error', reject);
-    });
+  constructor(private readonly transport: ConnectOverCDPTransport) {
+    transport.onmessage = (message) => {
+      const reply = message as Reply;
+      if (reply.id !== undefined) this.waiting.get(reply.id)?.(reply);
+      else this.events.push(reply);
+    };
+    transport.onclose = (reason) => void (this.closedWith = reason ?? '');
   }
 
   call(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Reply> {
     const id = this.nextId++;
-    this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    this.transport.send({ id, method, params, ...(sessionId ? { sessionId } : {}) });
     return new Promise((resolve) => this.waiting.set(id, resolve));
   }
 
-  close(): Promise<void> {
-    if (this.ws.readyState === WebSocket.CLOSED) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.ws.once('close', () => resolve());
-      this.ws.close();
-    });
+  close(): void {
+    this.transport.close();
   }
-
-  get closed(): Promise<void> {
-    if (this.ws.readyState === WebSocket.CLOSED) return Promise.resolve();
-    return new Promise((resolve) => this.ws.once('close', () => resolve()));
-  }
-}
-
-// What an upgrade the bridge refuses answers: the status code `ws` reports from the server's response.
-function refusedStatus(url: string, options: { origin?: string } = {}): Promise<number> {
-  const ws = new WebSocket(url, options);
-  return new Promise((resolve, reject) => {
-    ws.once('unexpected-response', (_request, response) => {
-      resolve(response.statusCode ?? 0);
-      ws.terminate();
-    });
-    ws.once('error', (error) => {
-      const match = /Unexpected server response: (\d+)/.exec(error.message);
-      if (match) resolve(Number(match[1]));
-      else reject(error);
-    });
-    ws.once('open', () => reject(new Error('the upgrade was accepted')));
-  });
 }
 
 const page = { getTitle: () => 'Example', getURL: () => 'https://example.com/', getUserAgent: () => 'MAWS-UA', focus: vi.fn() };
 
-const opened: { bridge: CdpBridge; clients: Client[] }[] = [];
+const opened: { bridge: CdpBridge }[] = [];
 
 async function harness() {
   const raw = new FakeElectronDebugger();
   const tabDebugger = new TabDebugger({ debugger: raw, isDestroyed: () => false } as never);
   const send = vi.spyOn(tabDebugger, 'send');
   const bridge = await startCdpBridge(tabDebugger, page);
-  const record = { bridge, clients: [] as Client[] };
-  opened.push(record);
-  const connect = async () => {
-    const client = await Client.open(bridge.wsUrl);
-    record.clients.push(client);
-    return client;
-  };
+  opened.push({ bridge });
+  const connect = async () => new Client(bridge.connect());
   return { raw, tabDebugger, send, bridge, connect, PAGE: bridge.pageSessionId };
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 afterEach(async () => {
-  for (const { bridge, clients } of opened.splice(0)) {
-    await Promise.all(clients.map((client) => client.close()));
-    await bridge.close({ detach: false });
-  }
+  for (const { bridge } of opened.splice(0)) await bridge.close({ detach: false });
 });
 
 describe('startCdpBridge: the boundary (G3)', () => {
@@ -297,38 +260,59 @@ describe('startCdpBridge: the browser-level answers', () => {
   });
 });
 
-describe('startCdpBridge: the socket (G3)', () => {
-  it('refuses an upgrade on any path but the token path (404)', async () => {
-    const { bridge } = await harness();
-    const wrong = bridge.wsUrl.replace(/\/devtools\/browser\/[0-9a-f]+$/, '/devtools/browser/guess');
-    expect(await refusedStatus(wrong)).toBe(404);
-    expect(bridge.wsUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[0-9a-f]{32}$/);
-    expect(bridge.stats.rejectedUpgrades).toBe(1);
+describe('startCdpBridge: no socket (G3, Decision Log 57)', () => {
+  it('opens no listening socket at all during an action', async () => {
+    const listen = vi.spyOn(Server.prototype, 'listen');
+    const servers = () => process.getActiveResourcesInfo().filter((kind) => kind === 'TCPServerWrap' || kind === 'PipeServerWrap').length;
+    const before = servers();
+    const { connect, PAGE, bridge } = await harness();
+    const client = await connect();
+    await client.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    expect((await client.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 1, y: 1, button: 'left', clickCount: 1 }, PAGE)).result).toBeDefined();
+    expect(servers()).toBe(before);
+    await bridge.close({ detach: false });
+    expect(listen).not.toHaveBeenCalled();
+    listen.mockRestore();
   });
 
-  it('refuses an upgrade that carries an Origin header (403)', async () => {
+  it('never answers inside send: the answer comes on a later turn', async () => {
     const { bridge } = await harness();
-    expect(await refusedStatus(bridge.wsUrl, { origin: 'https://evil.example' })).toBe(403);
+    const transport = bridge.connect();
+    const heard: unknown[] = [];
+    transport.onmessage = (message) => void heard.push(message);
+    transport.send({ id: 1, method: 'Browser.getVersion', params: {} });
+    expect(heard).toEqual([]);
+    await vi.waitFor(() => expect(heard).toHaveLength(1));
   });
 
-  it('refuses a second socket while one is open (409), and takes a new one once it closed', async () => {
+  it('keeps one transport open: a new one ends the one before, which hears its close', async () => {
     const { bridge, connect } = await harness();
     const first = await connect();
-    expect(await refusedStatus(bridge.wsUrl)).toBe(409);
-    await first.close();
-    await vi.waitFor(() => expect(bridge.connected).toBe(false));
     const second = await connect();
+    await vi.waitFor(() => expect(first.closedWith).toBe('replaced by a new connection'));
+    expect(bridge.connected).toBe(true);
     expect((await second.call('Browser.getVersion')).result).toBeDefined();
+    let late = false;
+    void first.call('Browser.getVersion').then(() => (late = true));
+    await settle();
+    await settle();
+    expect(late).toBe(false); // an ended transport is answered nothing
   });
 
-  it('serves no /json/version (the token is never published)', async () => {
-    const { bridge } = await harness();
-    const http = bridge.wsUrl.replace(/^ws:/, 'http:').replace(/\/devtools\/.*$/, '/json/version');
-    expect((await fetch(http)).status).toBe(404);
+  it("ends the transport on the client's close and on Browser.close", async () => {
+    const { bridge, connect } = await harness();
+    const one = await connect();
+    one.close();
+    expect(bridge.connected).toBe(false);
+    await vi.waitFor(() => expect(one.closedWith).toBe('closed by the client'));
+    const two = await connect();
+    expect((await two.call('Browser.close')).result).toEqual({});
+    await vi.waitFor(() => expect(two.closedWith).toBe('Browser.close'));
+    expect(bridge.connected).toBe(false);
   });
 });
 
-describe('startCdpBridge: waiting children while no socket is open', () => {
+describe('startCdpBridge: waiting children while no transport is open', () => {
   it('resumes a child that waits for a debugger when no client is connected', async () => {
     const { raw, send } = await harness();
     raw.event('Target.attachedToTarget', { sessionId: 'CHILD-2', targetInfo: { targetId: 'IFRAME-2', type: 'iframe' }, waitingForDebugger: true });
@@ -348,8 +332,8 @@ describe('startCdpBridge: waiting children while no socket is open', () => {
   it('resumes again once the client has gone', async () => {
     const { raw, connect, send, bridge } = await harness();
     const client = await connect();
-    await client.close();
-    await vi.waitFor(() => expect(bridge.connected).toBe(false));
+    client.close();
+    expect(bridge.connected).toBe(false);
     raw.event('Target.attachedToTarget', { sessionId: 'CHILD-4', targetInfo: { targetId: 'WORKER-4', type: 'worker' }, waitingForDebugger: true });
     await settle();
     expect(send).toHaveBeenCalledWith('Runtime.runIfWaitingForDebugger', undefined, 'CHILD-4');
@@ -357,14 +341,14 @@ describe('startCdpBridge: waiting children while no socket is open', () => {
 });
 
 describe('startCdpBridge: close', () => {
-  it('closes the socket and the server and leaves the attachment unless told to detach', async () => {
+  it('ends the transport and leaves the attachment unless told to detach', async () => {
     const { bridge, connect, tabDebugger, raw } = await harness();
     const client = await connect();
     await bridge.close({ detach: false });
-    await client.closed;
+    await vi.waitFor(() => expect(client.closedWith).toBe('the CDP bridge closed'));
     expect(tabDebugger.attached).toBe(true);
     expect(raw.isAttached()).toBe(true);
-    await expect(Client.open(bridge.wsUrl)).rejects.toThrow();
+    expect(() => bridge.connect()).toThrow('the CDP bridge is closed');
     // closed: an event no longer reaches anyone and no waiting child is resumed by a dead bridge
     raw.event('Target.attachedToTarget', { sessionId: 'CHILD-5', waitingForDebugger: true });
     await settle();

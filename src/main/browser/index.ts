@@ -148,7 +148,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
-      void agent?.stop(); // E4c: nothing more is answered; every driver's socket closed
+      void agent?.stop(); // E4c: nothing more is answered; every driver's connection closed
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
       memory.stop();

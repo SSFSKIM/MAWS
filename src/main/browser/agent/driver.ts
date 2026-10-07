@@ -1,14 +1,14 @@
 // The per-tab Playwright driver (E4c execution document, Design §4; A-19, A-33 item 6; Decision Log 1, 2, 33, 34 (a), 35):
-// for one tab, the CDP bridge over its TabDebugger, Playwright connected through it, and the one page the bridge
-// announces. Made on the first tool call that needs the page (playwright-core is required then, never at startup) and
+// for one tab, the CDP bridge over its TabDebugger, Playwright connected through the bridge's in-process transport
+// (Decision Log 57: no socket), and the one page the bridge announces. Made on the first tool call that needs the page (playwright-core is required then, never at startup) and
 // kept across navigations and process swaps; dropped when the debugger detaches (a renderer crash) or Playwright's page
 // closes, so the next call builds a fresh one; closed at once when the tab's page goes.
 //
 // The idle close: a driver whose tab's debugger saw no command for BROWSER_BRIDGE_IDLE_MS (anyone's command counts:
 // E4b's import and E4d's crop hold it as Playwright's do) while the tab is not busy (the agent holds it or a request is
 // pending) first turns auto-attach off on the page session, since Playwright's `waitForDebuggerOnStart: true` would
-// otherwise pause every new cross-site frame and worker once nobody resumes them, then closes the socket (Playwright's
-// connection ends with it) and detaches the debugger only when focus emulation is off; under 'on' the attachment is
+// otherwise pause every new cross-site frame and worker once nobody resumes them, then closes the bridge (Playwright hears its
+// transport close) and detaches the debugger only when focus emulation is off; under 'on' the attachment is
 // E4a's to keep. The mode is the one `startBrowser` computed from its env (`focusEmulationMode`), never the default.
 //
 // A person's JavaScript dialog is never Playwright's to answer: a no-op `dialog` listener stops its auto-dismiss, and
@@ -127,7 +127,7 @@ export class Drivers {
     let browser: PlaywrightCore.Browser;
     try {
       if (slot.closed) throw tabClosed();
-      browser = await this.playwright.chromium.connectOverCDP(bridge.wsUrl, { timeout: CONNECT_TIMEOUT_MS });
+      browser = await this.playwright.chromium.connectOverCDP(bridge.connect(), { timeout: CONNECT_TIMEOUT_MS });
       if (slot.closed) throw tabClosed();
     } catch (error) {
       await bridge.close({ detach: false });

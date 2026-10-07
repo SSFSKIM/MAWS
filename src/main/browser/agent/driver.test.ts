@@ -62,8 +62,8 @@ function fakePlaywright(order: string[]) {
       listeners,
     };
   }
-  const connectOverCDP = vi.fn(async (url: string) => {
-    order.push(`connect ${url}`);
+  const connectOverCDP = vi.fn(async (transport: { name: string }) => {
+    order.push(`connect ${transport.name}`);
     const page = fakePage();
     pages.push(page);
     const browser = { on: vi.fn(), contexts: () => [{ pages: () => [page] }] };
@@ -82,7 +82,7 @@ function harness(focusEmulation: 'on' | 'off' = 'off') {
   const startBridge = vi.fn(async () => {
     const n = ++bridgeCount;
     const bridge = {
-      wsUrl: `ws://127.0.0.1:1/devtools/browser/token-${n}`,
+      connect: vi.fn(() => ({ name: `transport-${n}`, send: vi.fn(), close: vi.fn() })),
       pageSessionId: 'maws-bridge-page-1',
       stats: {} as never,
       connected: true,
@@ -126,7 +126,7 @@ describe('Drivers: connecting (Design §4)', () => {
     expect(h.drivers.state('b_000000000001')).toBe('none');
     const driver = await h.drivers.for(h.entry());
     expect(h.startBridge).toHaveBeenCalledWith(h.dbg(), h.entry().view!.webContents, expect.anything());
-    expect(h.playwright.connectOverCDP).toHaveBeenCalledWith('ws://127.0.0.1:1/devtools/browser/token-1', { timeout: 10_000 });
+    expect(h.playwright.connectOverCDP).toHaveBeenCalledWith(expect.objectContaining({ name: 'transport-1' }), { timeout: 10_000 }); // in process (Decision Log 57)
     const page = h.playwright.pages[0];
     expect(driver.page).toBe(page);
     expect(page.setDefaultTimeout).toHaveBeenCalledWith(BROWSER_ACTION_TIMEOUT_MS);
@@ -150,8 +150,8 @@ describe('Drivers: connecting (Design §4)', () => {
 
   it('closes the bridge when the connection fails, and tries afresh on the next call', async () => {
     const h = harness();
-    h.playwright.connectOverCDP.mockRejectedValueOnce(new Error('WebSocket error: connect ECONNREFUSED'));
-    await expect(h.drivers.for(h.entry())).rejects.toThrow('ECONNREFUSED');
+    h.playwright.connectOverCDP.mockRejectedValueOnce(new Error('Browser.getVersion: the page is no longer attached'));
+    await expect(h.drivers.for(h.entry())).rejects.toThrow('no longer attached');
     expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: false });
     expect(h.drivers.state('b_000000000001')).toBe('none');
     await h.drivers.for(h.entry());
@@ -252,9 +252,9 @@ describe('Drivers: crash and close (Design §4, §11)', () => {
     const h = harness();
     let release!: () => void;
     h.playwright.connectOverCDP.mockImplementationOnce(
-      (url: string) =>
+      () =>
         new Promise((resolve) => {
-          release = () => resolve({ on: vi.fn(), contexts: () => [{ pages: () => [{ setDefaultTimeout: vi.fn(), setDefaultNavigationTimeout: vi.fn(), on: vi.fn() }] }], url } as never);
+          release = () => resolve({ on: vi.fn(), contexts: () => [{ pages: () => [{ setDefaultTimeout: vi.fn(), setDefaultNavigationTimeout: vi.fn(), on: vi.fn() }] }] } as never);
         }),
     );
     const pending = h.drivers.for(h.entry());
