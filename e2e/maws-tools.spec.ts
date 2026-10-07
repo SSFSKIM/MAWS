@@ -299,8 +299,7 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     await expect(sectionOf(sheet, 'q3').getByRole('textbox')).toBeVisible();
     await expect(sectionOf(sheet, 'q4').getByRole('button', { name: 'Choose folder…' })).toBeVisible();
     await expect(sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' })).toBeVisible(); // the scratch project
-    await capsule.scrollIntoViewIfNeeded();
-    await expect(capsule).toBeVisible();
+    await expect(capsule).toBeInViewport(); // follow mode keeps it in view as the notice grows the composer (E11)
     await shoot(s, 'capsule-pending');
 
     // the attention item: in Needs you and on the session's Overview card, compact, with its one button

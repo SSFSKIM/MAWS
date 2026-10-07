@@ -287,3 +287,60 @@ describe('Transcript', () => {
     expect(labelled).toEqual(['user', 'divider']);
   });
 });
+
+// E11 (W-C; E1's blocking-ask screenshots): the viewport changing height with no scroll and no row change (the composer
+// below growing with an attention notice) moves the end out of view; a following reader is kept at the end.
+describe('follow mode across a change of the viewport’s height', () => {
+  const resized: (() => void)[] = [];
+  const Native = globalThis.ResizeObserver;
+  beforeAll(() => {
+    globalThis.ResizeObserver = class {
+      private readonly targets: Element[] = [];
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.targets.push(target);
+        if (target.hasAttribute('data-transcript-scroller')) resized.push(() => this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this));
+      }
+      unobserve() {}
+      disconnect() {
+        resized.length = 0;
+      }
+    };
+  });
+  afterAll(() => {
+    globalThis.ResizeObserver = Native;
+  });
+
+  const rows = () => {
+    const b = builder();
+    for (let i = 0; i < 80; i++) {
+      b.turn(`u${i}`);
+      b.text(`m${i}`, 0, `Answer ${i}`);
+      b.end([`u${i}`]);
+    }
+    return b.events;
+  };
+
+  it('a following reader is scrolled back to the end; one who scrolled up is left where they are', async () => {
+    await mounted(rows());
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const scrolls: unknown[] = [];
+    scroller.scrollTo = ((options: ScrollToOptions) => void scrolls.push(options)) as typeof scroller.scrollTo;
+    act(() => resized.forEach((fire) => fire()));
+    expect(scrolls).not.toEqual([]); // following: pinned to the end again
+
+    let top = 18_000; // happy-dom has no scroll metrics: the scroller's, by hand, the reader at the end
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => void (top = value) });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 20_000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 2_000 });
+    act(() => void fireEvent.scroll(scroller)); // at the end
+    act(() => {
+      top = 0; // the reader scrolls up: follow mode ends
+      fireEvent.scroll(scroller);
+    });
+    await screen.findByRole('button', { name: 'Jump to latest' });
+    scrolls.length = 0;
+    act(() => resized.forEach((fire) => fire()));
+    expect(scrolls).toEqual([]);
+  });
+});

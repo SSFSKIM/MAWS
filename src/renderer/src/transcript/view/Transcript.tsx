@@ -105,6 +105,18 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per row list, reading the follow mode of the moment
   }, [rows]);
 
+  // E11 (W-C): the viewport changing height with no scroll and no row change (the composer below growing with an
+  // attention notice) moves the end out of view; a following reader is kept at the end.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      if (followingRef.current) virtualizer.scrollToEnd({ behavior: 'instant' });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [virtualizer]);
+
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => virtualizer.scrollToIndex(index, { align, behavior: 'instant' }),
     scrollToEnd: () => virtualizer.scrollToEnd({ behavior: 'instant' }),
