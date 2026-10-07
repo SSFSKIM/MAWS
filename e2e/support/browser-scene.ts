@@ -8,7 +8,7 @@
 // - `tabState` reads a tab as main records it (`browser.tabs.list`) and its view as Electron holds it (the seam's
 //   `__maws_browser.tab`, which reports the view's own state alone: visible, bounds, attached, window, owner);
 // - `pageAt` is the Playwright page of a view (a WebContentsView's page is one of `electronApp.windows()`), matched by URL,
-//   so a case reads the page's own DOM;
+//   so a case reads the page's own DOM; `preloadRuns` counts the browser preload's runs in each of its frames (over CDP);
 // - `shootBrowser` writes `e4a-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e4a/ when MAWS_E4A_SHOTS=1. A
 //   view is not in the renderer's screenshot, so the shown page's own screenshot is laid into the pane first, where the
 //   view draws, and taken out after.
@@ -164,6 +164,47 @@ export async function pageAt(s: Scene, url: string): Promise<Page> {
   let found: Page | undefined;
   await expect.poll(() => (found = s.maws.app.windows().find((p) => p !== s.page && !p.isClosed() && p.url() === url)) !== undefined, { message: `a page at ${url}` }).toBe(true);
   return found!;
+}
+
+// How many times the browser preload ran in a page's current document, in its main frame and in each subframe (by URL),
+// read over a CDP session: the preload counts its runs on its isolated world's global (src/preload/browser.ts), which
+// the page's own world cannot see. A frame without such a world counts 0. Same-process frames only.
+export interface PreloadRuns {
+  main: number;
+  subframes: { url: string; runs: number }[];
+}
+export async function preloadRuns(page: Page): Promise<PreloadRuns> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const isolated: { id: number; frameId: string }[] = [];
+    cdp.on('Runtime.executionContextCreated', ({ context }) => {
+      const aux = context.auxData as { type?: string; frameId?: string } | undefined;
+      if (aux?.type === 'isolated' && aux.frameId) isolated.push({ id: context.id, frameId: aux.frameId });
+    });
+    await cdp.send('Runtime.enable'); // reports every existing context first
+    const runsIn = async (frameId: string) => {
+      let runs = 0;
+      for (const { id } of isolated.filter((context) => context.frameId === frameId)) {
+        const { result } = await cdp.send('Runtime.evaluate', { expression: 'globalThis.__mawsBrowserPreloadRuns ?? 0', contextId: id, returnByValue: true });
+        runs += result.value as number;
+      }
+      return runs;
+    };
+    const { frameTree } = await cdp.send('Page.getFrameTree');
+    type Tree = typeof frameTree;
+    const children = (tree: Tree): Tree[] => (tree.childFrames ?? []).flatMap((child) => [child, ...children(child)]);
+    const subframes = [];
+    for (const { frame } of children(frameTree)) subframes.push({ url: frame.url, runs: await runsIn(frame.id) });
+    return { main: await runsIn(frameTree.frame.id), subframes };
+  } finally {
+    await cdp.detach();
+  }
+}
+
+// The preload's runs in every page at `url` (two tabs may show one URL).
+export async function preloadRunsAt(s: Scene, url: string): Promise<PreloadRuns[]> {
+  const pages = s.maws.app.windows().filter((p) => p !== s.page && !p.isClosed() && p.url() === url);
+  return Promise.all(pages.map(preloadRuns));
 }
 
 // The pane's rect as the renderer lays it out, rounded per edge as the pane reports it (Decision Log 48).

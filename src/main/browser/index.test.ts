@@ -71,6 +71,8 @@ vi.mock('electron', () => ({
       getUserAgent: () => 'UA Electron/1',
       setUserAgent: () => {},
       webRequest: { onBeforeRequest: () => {} },
+      getPreloadScripts: () => [],
+      registerPreloadScript: ({ id, type, filePath }: { id: string; type: string; filePath: string }) => void prepared.push(`preload ${id} ${type} ${filePath.split('/').slice(-2).join('/')}`),
       setPermissionRequestHandler: () => void prepared.push('permission requests'),
       setPermissionCheckHandler: () => void prepared.push('permission checks'),
       setDevicePermissionHandler: () => void prepared.push('devices'),
@@ -220,14 +222,14 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(globalThis.__maws_browser).toBeUndefined();
   });
 
-  it('prepares a partition, when a tab first needs it, with the permission handlers and the download listener', () => {
+  it('prepares a partition, when a tab first needs it, with the browser preload, the permission handlers and the download listener', () => {
     prepared.length = 0;
     const browser = start(fakeIndex([A]).index);
     expect(prepared).toEqual([]);
     browser.store.open({ appSessionId: A, url: null, select: true });
-    expect(prepared).toEqual(['permission requests', 'permission checks', 'devices', 'display media', 'will-download']);
+    expect(prepared).toEqual(['preload maws-browser frame preload/browser.js', 'permission requests', 'permission checks', 'devices', 'display media', 'will-download']);
     browser.store.open({ appSessionId: A, url: null, select: true });
-    expect(prepared).toHaveLength(5); // once per partition
+    expect(prepared).toHaveLength(6); // once per partition
     browser.stop();
   });
 

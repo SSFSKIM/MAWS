@@ -64,7 +64,7 @@ describe('attachWindowOpen: the handler on the page', () => {
     const seam = { line: vi.fn(), openExternal: vi.fn() };
     let clock = NOW;
     const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true, partition }).tab.tabId) as TabEntry;
-    const preferences = { preload: '/out/preload/browser.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
+    const preferences = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
     attachWindowOpen(entry, { store, linkTarget: () => linkTarget, seam, childPreferences: preferences, now: () => clock });
     const handler = (entry.view!.webContents as unknown as { setWindowOpenHandler: { mock: { calls: [(details: unknown) => Record<string, unknown>][] } } }).setWindowOpenHandler.mock.calls[0]![0];
     const open = (url: string, disposition = 'foreground-tab') => handler({ url, disposition, frameName: '', features: '', referrer: { url: '', policy: 'default' } });
