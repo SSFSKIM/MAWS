@@ -498,6 +498,26 @@ describe('recovery with kept sessions (E10)', () => {
       handedOff(pin);
     });
 
+    it('a streaming while the deferral reads the bootstrap notes runs the recovery, never losing the wakeup', async () => {
+      const list = BootstrapNotes.prototype.list;
+      let reads = 0;
+      const spy = vi.spyOn(BootstrapNotes.prototype, 'list').mockImplementation(async function (this: BootstrapNotes) {
+        reads += 1;
+        if (reads === 1) h.host.becomeReady(); // the host streams while the deferring boot reads its notes
+        return list.call(this);
+      });
+      try {
+        await h.restart({ keep: true, unavailable: true });
+        await h.service.listIntents(); // waits for the recovery the streaming owed
+        handedOff(pin);
+        expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+        expect(await notes().list()).toEqual([]);
+        expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('a re-run whose step fails logs it and goes on with the rest', async () => {
       await h.restart({ keep: true, unavailable: true });
       const list = vi.spyOn(BootstrapNotes.prototype, 'list').mockRejectedValueOnce(new Error('EACCES: the notes are unreadable'));

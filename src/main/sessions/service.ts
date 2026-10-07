@@ -148,12 +148,17 @@ export class SessionService {
     }
     this.offReady = this.deps.host.onReady?.(() => {
       this.streamed = true;
-      if (this.unrecovered === null || this.recovering !== null) return;
-      this.recovering = this.recover()
-        .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
-        .finally(() => (this.recovering = null));
+      this.rerunDeferred();
     }) ?? null;
     await this.recover();
+  }
+
+  // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
+  private rerunDeferred(): void {
+    if (this.unrecovered === null || this.recovering !== null) return;
+    this.recovering = this.recover()
+      .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => (this.recovering = null));
   }
 
   // The start-time recovery (recovery.ts). E10: it reads the host's live rows first; when `engine.sessions` cannot be
@@ -181,6 +186,8 @@ export class SessionService {
           this.unrecovered = { intents: new Map(intents.map((i) => [i.appSessionId, startState(i)])), notes: new Set((await this.bootstrapNotes()).map((n) => n.bootstrapId)) };
         }
         this.log(`recovery waits for the engine host (engine.sessions: ${error instanceof Error ? error.message : String(error)}); nothing is failed, removed or forgotten until it answers`);
+        // a streaming during the notes read found nothing owed yet and left the re-run to this run: start it now
+        if (this.streamed) this.rerunDeferred();
         return;
       }
     }
