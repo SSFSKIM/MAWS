@@ -4,7 +4,8 @@
 // `fs.tasksChanged`). A live session's list is C3's `taskListId`, a disk-only one's the record's engine session id,
 // labelled `session list`; with neither, the section says the list is not known yet rather than guessing one.
 // E7 (P-20): the read and the list body are shared with the Tasks panel (`useChecklist`, `ChecklistBody`), so the glance
-// and the panel are two surfaces over one list; this section's heading gains `Open`, which opens the panel.
+// and the panel are two surfaces over one list; this section's heading gains `Open`, which opens the panel. Its own
+// module, neither tool's (E11 W-D).
 import { useQuery } from '@tanstack/react-query';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
@@ -14,7 +15,7 @@ import { actionClass } from '../../../panel/summary/Section';
 import { agentWorkClient } from '../client';
 import { BACKGROUND_COPY, TASKS_COPY } from '../copy';
 import { checklistOf, listIdFor, type ListIdAnswer } from '../model/task-list';
-import { Group } from './Group';
+import { Group } from '../background/Group';
 
 export interface Checklist {
   answer: ListIdAnswer;

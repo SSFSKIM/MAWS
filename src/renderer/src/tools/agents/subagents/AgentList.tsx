@@ -2,9 +2,10 @@
 // Design §3 and §5; G2): **Agents**, the running roots in first-seen order with their subtrees (a running parent's
 // finished children folded under one `Done · N`, the running teammates grouped first under the team header, in one
 // labelled group), **Done**, the finished roots newest end first with their children, collapsed by default, and
-// **On disk** as before (status unknown, `agentRows`). A child whose parent the tree does not hold reads `· nested` at depth 0 with a tooltip naming the
-// parent. A workflow's agents are in no list. A row reads by its own status wherever it sits: a running one ticks its
-// elapsed once a second while shown and the tool visible, a finished one its `<ago>` on the slow tick.
+// **On disk** as before (status unknown, `agentRows`). A child whose parent the tree does not hold reads `· nested` at
+// depth 0 with a tooltip naming the parent. A workflow's agents are in no list. A row reads by its own status wherever
+// it sits: a running one ticks its elapsed once a second while shown and the tool visible, a finished one its `<ago>`
+// on the slow tick.
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';

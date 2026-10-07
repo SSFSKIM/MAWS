@@ -17,6 +17,7 @@ import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import type { FilesChanged } from '@shared/ipc/schema/files'; // E7
 import type { PersistedTask } from '@shared/wire/store';
 import type { AgentWorkClient } from '../../tools/agents/client';
+import { fakeFileHash } from '../../tools/agents/fake-work-client'; // E7
 import { FAKE_STOP_REFUSAL, type AgentsHarnessCalls } from './api';
 
 export { FAKE_STOP_REFUSAL } from './api';
@@ -47,13 +48,6 @@ export interface FakeAgentWorkClient {
 }
 
 const SPILL_NOT_FOUND = 'spill not found';
-
-// E7: a stand-in for main's SHA-256 (64 lowercase hex), a function of the text alone.
-function fakeFileHash(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
-  return h.toString(16).padStart(8, '0').repeat(8);
-}
 
 // `session.events { afterSeq, limit: null }` over a replayed fixture: the fixture's own events the transcript has applied
 // (`released` holds their ids), in fixture order, above `afterSeq`; `lastSeq` the highest kept (whole rows: the player

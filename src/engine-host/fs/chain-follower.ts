@@ -14,8 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
-import { opensTurn } from './backfill'; // E7
+import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, opensTurn, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;

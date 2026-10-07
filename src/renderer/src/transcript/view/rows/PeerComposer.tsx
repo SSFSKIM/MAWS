@@ -8,6 +8,7 @@
 import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
+import { RELAY_LONG_WAIT_MS } from '../../../tools/agents/model/relay'; // after this long asked, the long-wait clause (the drill-in relay's)
 import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
@@ -15,9 +16,6 @@ import { duration } from '../../model/time';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
 import { useTicker } from './parts';
 
-// After this long asked with the turn clause shown, the clause becomes the long-wait one: the session reaches no tool
-// boundary while one call runs (the drill-in relay's RELAY_LONG_WAIT_MS).
-const LONG_WAIT_MS = 30_000;
 
 // The line over the box, or null when nothing was asked of this address yet.
 export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): string | null {
@@ -28,7 +26,7 @@ export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['m
       const waited = now - Date.parse(state.sentAt);
       const elapsed = duration(waited);
       if (!state.parentTurnOpenAtSend) return peerMessageCopy.asked(mode, session, elapsed);
-      return waited >= LONG_WAIT_MS ? peerMessageCopy.askedLongWait(mode, session, elapsed) : peerMessageCopy.askedTurnOpen(mode, session, elapsed);
+      return waited >= RELAY_LONG_WAIT_MS ? peerMessageCopy.askedLongWait(mode, session, elapsed) : peerMessageCopy.askedTurnOpen(mode, session, elapsed);
     }
     case 'forwarded':
       return peerMessageCopy.forwarded(mode, session);

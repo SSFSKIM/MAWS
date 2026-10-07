@@ -601,15 +601,16 @@ export function agentTree(graph: TaskGraph): AgentTree {
       if (parent !== null && parent !== n.taskId && inTree.has(parent)) children.set(parent, [...(children.get(parent) ?? []), n]);
       else roots.push(n);
     }
-    const active = new Map<TaskId, boolean>();
-    const isActive = (n: TaskNode): boolean => {
-      const known = active.get(n.taskId);
-      if (known !== undefined) return known;
-      active.set(n.taskId, n.status === 'running'); // provisional: a parent cycle reads its own start
-      const result = n.status === 'running' || (children.get(n.taskId) ?? []).some(isActive);
-      active.set(n.taskId, result);
-      return result;
-    };
+    // Active: running, or with a running descendant. Walked up from each running agent through its parents, so a parent
+    // cycle is walked once and none of its members is judged before the walk is done (E11 W-D).
+    const parentOf = new Map<TaskId, TaskId>();
+    for (const [parent, kids] of children) for (const kid of kids) parentOf.set(kid.taskId, parent);
+    const active = new Set<TaskId>();
+    for (const n of members) {
+      if (n.status !== 'running') continue;
+      for (let id: TaskId | undefined = n.taskId; id !== undefined && !active.has(id); id = parentOf.get(id)) active.add(id);
+    }
+    const isActive = (n: TaskNode): boolean => active.has(n.taskId);
     const seen = new Set<TaskId>();
     const visit = (out: TreeRow[], n: TaskNode, depth: number, foldedUnder: TaskId | null) => {
       if (seen.has(n.taskId)) return;

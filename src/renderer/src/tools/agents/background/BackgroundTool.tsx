@@ -23,7 +23,7 @@ import { BackgroundSummary } from './BackgroundSummary';
 import { Group, type BackgroundSection } from './Group';
 import { RunWidget } from './RunWidget'; // E7
 import { ScheduledSection } from './ScheduledRows'; // E7
-import { TaskChecklist } from './TaskChecklist';
+import { TaskChecklist } from '../checklist/TaskChecklist';
 import { MonitorRow, ShellRow } from './TaskRows';
 import { WorkflowCard } from './WorkflowCard';
 

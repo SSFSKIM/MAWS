@@ -19,7 +19,7 @@ import { useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import type { BackgroundHandle } from './BackgroundTool';
 import { StopButton, StopError } from './TaskRows';
-import { RunBadge, runLine } from './WorkflowCard';
+import { RunBadge, runLine } from './run-parts';
 
 const EMPTY_GRAPH = emptyGraph();
 

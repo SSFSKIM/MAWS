@@ -491,6 +491,20 @@ describe('task graph', () => {
       expect(agentTree(graph).agents).toEqual([agent('R', 0), agent('P', 0, { parentTaskId: 'C', orphan: true }), agent('C', 1, { parentTaskId: 'P' })]);
     });
 
+    // E11 W-D (E7 housekeeping): activity is reachability of a running agent, so a cycle's member whose activity was
+    // asked while the cycle was being walked is not kept inactive
+    it('a parent cycle’s member with a running descendant through the cycle reads active', () => {
+      const graph = graphOf([
+        issue('C', 'tu_P', 1), start('P', 2), issue('P', 'tu_C', 3), start('C', 4), ...child('P', 'G', 5),
+        finish('P', 8, '2026-09-29T10:00:08.000Z'), finish('C', 9, '2026-09-29T10:00:09.000Z'),
+      ]);
+      expect(agentTree(graph)).toEqual({
+        agents: [agent('P', 0, { parentTaskId: 'C', orphan: true }), agent('C', 1, { parentTaskId: 'P' }), agent('G', 1, { parentTaskId: 'P' })],
+        done: [],
+        running: 1,
+      });
+    });
+
     it('is memoised on the graph object', () => {
       const graph = graphOf([start('P', 1)]);
       expect(agentTree(graph)).toBe(agentTree(graph));

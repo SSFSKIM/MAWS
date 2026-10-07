@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
-import { ChecklistBody, useChecklist } from '../background/TaskChecklist';
+import { ChecklistBody, useChecklist } from '../checklist/TaskChecklist';
 import { TASKS_COPY } from '../copy';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 

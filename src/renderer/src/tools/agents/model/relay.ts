@@ -96,7 +96,7 @@ export type PeerRelayState =
   | { kind: 'asked'; messageUuid: MessageUuid; sentAt: string; parentTurnOpenAtSend: boolean; reworded?: { toolUseId: ToolUseId; outcome: { ok: true; at: string } | { ok: false; message: string } | null } }
   | { kind: 'forwarded'; messageUuid: MessageUuid; sentAt: string; toolUseId: ToolUseId; forwardedAt: string }
   | { kind: 'sent'; sentAt: string; reworded?: true } // the SendMessage's result said it went (reworded: in the session's own words)
-  | { kind: 'failed'; message: string }; // the steer refused or dropped, or the send answered `success: false` (or an error)
+  | { kind: 'failed'; message: string }; // the steer refused or dropped, the send answered `success: false` (or an error), or the steer's own turn ended without sending it
 
 export interface PeerRelay {
   appSessionId: AppSessionId;
