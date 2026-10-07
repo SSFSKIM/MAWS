@@ -13,7 +13,7 @@
     "dev": "electron-vite dev",
     "dev:stub": "node scripts/dev-stub.js",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false",
     "lint": "eslint .",
     "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
     "test:live": "MAWS_LIVE=1 vitest run --project live --silent=false",
