@@ -336,8 +336,8 @@ const IGNORED: ReadonlySet<string> = new Set(['script', 'style', 'noscript', 'te
 const LABELABLE: ReadonlySet<string> = new Set(['button', 'input', 'meter', 'output', 'progress', 'select', 'textarea']);
 const PLACEHOLDER_TYPES: ReadonlySet<string> = new Set(['text', 'password', 'number', 'search', 'tel', 'email', 'url']);
 
-// A text that cannot be computed here the way Playwright would (a select's chosen option, CSS-generated content, an
-// `aria-owns`): the name it would be part of answers `''`.
+// A text that cannot be computed here the way Playwright would (CSS-generated content, an `aria-owns`), or must not be
+// carried (an embedded control's value): the name it would be part of answers `''`.
 const DOUBT = null;
 type Text = string | typeof DOUBT;
 // `inReferenced`: inside a referenced subtree (a labelledby target, a label, a legend, a caption), where every
@@ -410,9 +410,12 @@ function nativeName(el: DomElement, role: string, labelledBy: boolean, walk: Wal
   if (PRESENTATIONAL.has(role)) return undefined;
   const tag = el.localName;
   const title = () => flat(el.getAttribute('title') ?? '');
+  // The control is marked visited before its labels are walked (Playwright 1.63 does), so a label that wraps it never
+  // reads the control itself; only when labels exist, since `contentText` answers '' for a visited element.
   const fromLabels = (): Text | undefined => {
     const labels = labelsOf(el);
     if (labels.length === 0) return undefined;
+    walk.visited.add(el);
     const text = joined(labels.map((label) => embeddedText(label, walk, true)));
     return text === DOUBT ? DOUBT : flat(text);
   };
@@ -462,11 +465,10 @@ function embeddedText(el: DomElement, outer: Walk, referenced: boolean): Text {
     }
   }
   const role = ariaRole(el) ?? '';
-  if (role === 'textbox' || role === 'searchbox') {
-    const value = (el as unknown as { value?: unknown }).value;
-    return typeof value === 'string' ? value : (el.textContent ?? '');
-  }
-  if (['combobox', 'listbox', 'progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'].includes(role)) return DOUBT;
+  // An embedded control contributes its value (Playwright reads a textbox's value, a select's chosen option, a range's
+  // number): what a person typed, a password included. The channel carries geometry and names only (Design §9, A-33),
+  // so every such value is doubt and the name around it is omitted (Decision Log 35).
+  if (['textbox', 'searchbox', 'combobox', 'listbox', 'progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'].includes(role)) return DOUBT;
   if (role === 'menu') return '';
   const label = el.getAttribute('aria-label') ?? '';
   if (flat(label) !== '') return label;

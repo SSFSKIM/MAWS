@@ -342,6 +342,42 @@ describe('accessibleNameOf', () => {
   });
 });
 
+// The whole-branch review (Decision Log 35): what a person typed into a page never reaches a name, a label or a path.
+describe('a control’s value is never part of a name', () => {
+  const typed = (el: HappyElement, selector: string, value: string) => {
+    (el.querySelector(selector) as unknown as { value: string }).value = value;
+    return el;
+  };
+
+  it('a control inside its own label is named by the label alone, as Playwright marks it visited first', () => {
+    expect(accessibleNameOf(fragment('<label>Email <input data-t value="a@b.c"></label>'))).toBe('Email');
+    const password = fragment('<label>Password <input data-t type="password"></label>');
+    (password as unknown as { value: string }).value = 'hunter2';
+    expect(accessibleNameOf(password)).toBe('Password');
+    expect(accessibleNameOf(fragment('<label>Notes <textarea data-t>draft</textarea></label>'))).toBe('Notes');
+  });
+
+  it('an embedded control’s value makes the content name around it doubt, so it is omitted', () => {
+    const row = fragment('<table><tr data-t><td>PIN</td><td><input type="password" value="hunter2"></td></tr></table>');
+    expect(accessibleNameOf(row)).toBe('');
+    expect(accessibleNameOf(typed(fragment('<table><tr data-t><td>PIN</td><td><input type="password"></td></tr></table>'), 'input', 'hunter2'))).toBe('');
+    expect(accessibleNameOf(fragment('<button data-t>Search <input value="cats"></button>'))).toBe('');
+    expect(accessibleNameOf(typed(fragment('<a data-t href="#">Go <textarea></textarea></a>'), 'textarea', 'typed'))).toBe('');
+    expect(accessibleNameOf(fragment('<a data-t href="#">Go <input type="search" value="q"></a>'))).toBe('');
+    expect(accessibleNameOf(fragment('<button data-t>Go <span role="textbox" contenteditable>typed</span></button>'))).toBe('');
+    expect(accessibleNameOf(fragment('<label for="v1">Name <input value="other"></label><input data-t id="v1">'))).toBe('');
+  });
+
+  it('no description of a pick in or beside such a row carries the value', () => {
+    fragment('<table><tr data-row><td>PIN</td><td data-cell><input data-input type="password" value="hunter2"></td><td><button data-t>Show</button></td></tr></table>');
+    const at = (selector: string) => describeElement(doc().querySelector(selector)!)!;
+    for (const description of [at('[data-row]'), at('[data-cell]'), at('[data-input]'), at('[data-t]')]) expect(JSON.stringify(description)).not.toContain('hunter2');
+    expect(at('[data-t]').a11y).toMatch(/(^| > )row > cell “Show” > button “Show”$/u);
+    expect(at('[data-row]')).toMatchObject({ role: 'row', name: '' });
+    expect(at('[data-cell]')).toMatchObject({ role: 'cell', name: '' });
+  });
+});
+
 describe('describeElement and a11yPath', () => {
   it('names the discriminating cases as Playwright would, or not at all', () => {
     const pick = (name: string) => describeElement(target(name));
