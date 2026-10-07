@@ -62,3 +62,18 @@ describe('X12 as E2 extends it', () => {
   });
 });
 // E2 end
+// E4c start (E4c execution document, Design §7; X12's additive `sourceUrl`)
+describe('X12 as E4c extends it', () => {
+  it("a screenshot's record carries the page's URL, optional and never rewritten", () => {
+    const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
+    const shot = {
+      id: ID, appSessionId: 'app-1', kind: 'screenshot', title: 'E4c order form', path: `/u/deliverables/app-1/screenshots/${ID}.png`, sourceUrl: 'http://127.0.0.1:17391/form.html',
+      versions: [{ path: `/u/deliverables/app-1/screenshots/${ID}.png`, at: '2026-10-07T00:00:00.000Z', toolUseId: 'toolu_1' }], toolUseId: 'toolu_1', createdAt: '2026-10-07T00:00:00.000Z',
+    };
+    expect(DeliverableRecordSchema.parse(shot)).toEqual(shot);
+    expect(DeliverableRecordSchema.safeParse({ ...shot, sourceUrl: undefined }).success).toBe(true);
+    for (const sourceUrl of ['about:blank', 'https://example.com/a?b#c']) expect(DeliverableRecordSchema.safeParse({ ...shot, sourceUrl }).success, sourceUrl).toBe(true);
+    for (const sourceUrl of ['', 'not a url', ' http://example.com/']) expect(DeliverableRecordSchema.safeParse({ ...shot, sourceUrl }).success, sourceUrl).toBe(false);
+  });
+});
+// E4c end

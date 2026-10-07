@@ -33,7 +33,12 @@ import {
 describe('X9: the maws server and its seven tools', () => {
   it('names the server and the tools as the contract says (E2 appends the four artifact tools)', () => {
     expect(MAWS_SERVER_NAME).toBe('maws');
-    expect(MAWS_TOOL_NAMES).toEqual(['send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot']);
+    expect(MAWS_TOOL_NAMES).toEqual([
+      'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
+      // E4c start: the six browser tools (E4c execution document, Design §2)
+      'browser_tabs', 'browser_navigate', 'browser_snapshot', 'browser_act', 'browser_eval', 'browser_screenshot',
+      // E4c end
+    ]);
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
     expect(mawsServerInfo('0.9.0')).toEqual({ name: 'maws', version: '0.9.0' });
     expect(MAWS_TOOL_ANNOTATIONS).toEqual({ readOnlyHint: true, openWorldHint: false });
@@ -70,6 +75,14 @@ describe('X9: the maws server and its seven tools', () => {
       ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
       ['artifact_list', { readOnlyHint: true, openWorldHint: false, title: 'List artifacts' }],
       ['artifact_screenshot', { readOnlyHint: true, openWorldHint: false, title: 'Screenshot artifact' }],
+      // E4c start: navigate, act and eval change the page (A-31), so the permission modes gate them
+      ['browser_tabs', { readOnlyHint: true, openWorldHint: false, title: 'Browser tabs' }],
+      ['browser_navigate', { readOnlyHint: false, openWorldHint: false, title: 'Browser navigate' }],
+      ['browser_snapshot', { readOnlyHint: true, openWorldHint: false, title: 'Browser snapshot' }],
+      ['browser_act', { readOnlyHint: false, openWorldHint: false, title: 'Browser act' }],
+      ['browser_eval', { readOnlyHint: false, openWorldHint: false, title: 'Browser eval' }],
+      ['browser_screenshot', { readOnlyHint: true, openWorldHint: false, title: 'Browser screenshot' }],
+      // E4c end
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });
@@ -260,7 +273,7 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.notRecorded('artifact_update', '/r/x.html', 'ENOSPC')).toBe('artifact_update: /r/x.html was not recorded: ENOSPC');
     expect(TOOL_ERRORS.deliverableNotFound('d1')).toBe('show_pane: no deliverable "d1" in this session');
     expect(TOOL_ERRORS.deliverableUnreadable('d1', 'EIO')).toBe('show_pane: could not read deliverable "d1": EIO');
-    expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot');
+    expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot, browser_tabs, browser_navigate, browser_snapshot, browser_act, browser_eval, browser_screenshot'); // E4c: thirteen
   });
 });
 // E2 end

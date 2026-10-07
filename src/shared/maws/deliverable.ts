@@ -5,6 +5,8 @@
 // unchanged: an artifact's `artifactId` (the agent's short name) and `updatedAt` (its last version's time), and per
 // version the call that added it and the path the agent named (the version's `path` is MAWS's copy). `path` is the
 // latest version's path. The store stays these files (Decision Log 1); `deliverable-files.ts` holds their layout.
+// E4c (E4c execution document, Design §7) writes `kind: 'screenshot'` for `browser_screenshot`, with the page's URL in
+// the additive `sourceUrl` and the picture under `screenshots/`.
 import * as z from 'zod';
 import { AppSessionIdSchema, ToolUseIdSchema, type AppSessionId } from '../graph/ids';
 import { ARTIFACT_ID } from './tools';
@@ -28,6 +30,10 @@ export const DeliverableRecordSchema = z.strictObject({
   toolUseId: ToolUseIdSchema.optional(), // the call that delivered it (`_meta["claudecode/toolUseId"]`)
   createdAt: z.string(),
   updatedAt: z.string().optional(), // E2: the last version's time
+  // E4c start: the page a screenshot was taken of: any URL the tab had, as Chromium serialises it (no whitespace), checked
+  // without zod's url(), which trims
+  sourceUrl: z.string().refine((url) => !/\s/.test(url) && URL.canParse(url), { message: 'not a URL' }).optional(),
+  // E4c end
 });
 export type DeliverableRecord = z.infer<typeof DeliverableRecordSchema>;
 

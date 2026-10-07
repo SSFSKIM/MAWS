@@ -94,6 +94,11 @@ describe('the maws server on an EngineSession (scripted)', () => {
       // E2 (Decision Log 4): the two writers are not read-only
       ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }], ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
       ['artifact_list', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifacts' }], ['artifact_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Screenshot artifact' }],
+      // E4c start: the six browser tools; navigate, act and eval are not read-only (A-31)
+      ['browser_tabs', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser tabs' }], ['browser_navigate', { readOnlyHint: false, openWorldHint: false, title: 'Browser navigate' }],
+      ['browser_snapshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser snapshot' }], ['browser_act', { readOnlyHint: false, openWorldHint: false, title: 'Browser act' }],
+      ['browser_eval', { readOnlyHint: false, openWorldHint: false, title: 'Browser eval' }], ['browser_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser screenshot' }],
+      // E4c end
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '../graph/ids';
 import type { DeliverableRecord } from './deliverable';
-import { deliverablesDir, readRecords, recordPath, versionPath, writeAtomic, writeRecord } from './deliverable-files';
+import { deliverablesDir, readRecords, recordPath, screenshotPath, screenshotsDir, versionPath, writeAtomic, writeRecord } from './deliverable-files';
 
 let userData: string;
 beforeEach(async () => {
@@ -83,3 +83,21 @@ describe('the store layout both processes share (E2 Design §2)', () => {
     await expect(readRecords(dir, denied)).rejects.toMatchObject({ code: 'EACCES' });
   });
 });
+// E4c start (E4c execution document, Design §7): a browser screenshot's file, named by the host, written by main
+describe('the screenshots directory', () => {
+  it('places a screenshot under deliverables/<appSessionId>/screenshots/<id>.<png|jpg>, beside the records a reader lists', async () => {
+    expect(screenshotsDir(userData, A)).toBe(join(userData, 'deliverables', A, 'screenshots'));
+    expect(screenshotPath(userData, A, ID1, 'png')).toBe(join(userData, 'deliverables', A, 'screenshots', `${ID1}.png`));
+    expect(screenshotPath(userData, A, ID1, 'jpg')).toBe(join(userData, 'deliverables', A, 'screenshots', `${ID1}.jpg`));
+    await writeAtomic(screenshotPath(userData, A, ID1, 'png'), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+    await writeRecord(recordPath(userData, A, ID2), record(ID2, '2026-10-07T00:00:00.000Z'));
+    expect((await readRecords(deliverablesDir(userData, A))).map((r) => r.id)).toEqual([ID2]); // the directory is passed over
+  });
+
+  it('refuses an id that is not a uuid and an app session id that is not one path component', () => {
+    for (const bad of ['../../x', 'a/b', '']) expect(() => screenshotPath(userData, A, bad, 'png')).toThrow('invalid deliverable id');
+    expect(() => screenshotsDir(userData, '../x' as AppSessionId)).toThrow();
+    expect(() => screenshotPath(userData, 'a/b' as AppSessionId, ID1, 'jpg')).toThrow();
+  });
+});
+// E4c end

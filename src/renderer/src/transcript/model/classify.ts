@@ -14,6 +14,11 @@ export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
   artifact_create: `mcp__${MAWS_SERVER_NAME}__artifact_create`, artifact_update: `mcp__${MAWS_SERVER_NAME}__artifact_update`,
   artifact_list: `mcp__${MAWS_SERVER_NAME}__artifact_list`, artifact_screenshot: `mcp__${MAWS_SERVER_NAME}__artifact_screenshot`,
   // E2 end
+  // E4c start: the browser tools (their row, `browser_action`, is E4c's M3; until then they are cells)
+  browser_tabs: `mcp__${MAWS_SERVER_NAME}__browser_tabs`, browser_navigate: `mcp__${MAWS_SERVER_NAME}__browser_navigate`,
+  browser_snapshot: `mcp__${MAWS_SERVER_NAME}__browser_snapshot`, browser_act: `mcp__${MAWS_SERVER_NAME}__browser_act`,
+  browser_eval: `mcp__${MAWS_SERVER_NAME}__browser_eval`, browser_screenshot: `mcp__${MAWS_SERVER_NAME}__browser_screenshot`,
+  // E4c end
 };
 // E1 end
 
