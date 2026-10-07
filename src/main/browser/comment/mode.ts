@@ -105,8 +105,9 @@ export class CommentMode {
     state.phase = 'arming';
     state.taken = false;
     state.view = view;
+    const epoch = state.epoch; // a timer outliving its arming (ended, then the tab armed again) is harmless
     state.ackTimer = setTimeout(() => {
-      if (state.phase === 'arming') this.disarm(tabId, 'unavailable');
+      if (state.phase === 'arming' && state.epoch === epoch) this.disarm(tabId, 'unavailable');
     }, ARM_ACK_MS);
     this.armedTab = tabId;
     this.toPreload(view, { type: 'arm', epoch: state.epoch });

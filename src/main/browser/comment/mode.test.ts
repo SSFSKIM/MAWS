@@ -202,7 +202,7 @@ describe('arming (Design §2): browser.comment.set', () => {
 
   it('whatever ends an arm ends an arming, its timer with it', () => {
     vi.useFakeTimers();
-    const tabs = ['b_000000000001', 'b_000000000002', 'b_000000000003', 'b_000000000004', 'b_000000000005', 'b_000000000006'];
+    const tabs = ['b_000000000001', 'b_000000000002', 'b_000000000003', 'b_000000000004', 'b_000000000005', 'b_000000000006', 'b_000000000007', 'b_000000000008'];
     const pages = tabs.map((tabId) => store.add(tabId).wc);
     store.add(B);
     const end = [
@@ -211,18 +211,40 @@ describe('arming (Design §2): browser.comment.set', () => {
       () => pages[2].emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://x.test/' }),
       () => store.setControl(tabs[3], 'agent'),
       () => store.destroyView(tabs[4]),
+      () => pages[5].emit('render-process-gone', {}, { reason: 'crashed' }),
+      () => pages[6].emit('did-navigate', {}, 'http://x.test/', 200, 'OK'), // the commit of a navigation
       () => mode.set(B, true), // another tab's arming
     ];
-    const reasons = ['toggle', 'escape', 'navigated', 'agent', 'closed', 'other'];
+    const reasons = ['toggle', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'navigated', 'other'];
     tabs.forEach((tabId, i) => {
       mode.set(tabId, true);
       end[i]();
       expect(mode.state(tabId), reasons[i]).toMatchObject({ arming: false });
       expect(changes().filter((c) => (c as { tabId: string }).tabId === tabId)).toEqual([{ tabId, on: false, reason: reasons[i] }]);
     });
+    expect(vi.getTimerCount(), 'only B\'s arming still waits').toBe(1);
     const told = emitted.length;
     vi.advanceTimersByTime(ARM_ACK_MS * 2);
     expect(emitted.slice(told).map(([, p]) => (p as { tabId: string; reason: string }).reason)).toEqual(['unavailable']); // B's own arming, unconfirmed
+  });
+
+  it('an arming ended and the same tab armed again within ARM_ACK_MS waits its own full ARM_ACK_MS', async () => {
+    vi.useFakeTimers();
+    const { wc } = store.add(A);
+    mode.set(A, true);
+    vi.advanceTimersByTime(ARM_ACK_MS - 500);
+    mode.set(A, false); // the toggle again, before any acknowledgement
+    expect(vi.getTimerCount(), 'the ended arming\'s timer is gone').toBe(0);
+    expect(mode.set(A, true)).toEqual({ on: false, reason: 'arming' });
+    vi.advanceTimersByTime(ARM_ACK_MS - 1); // past the first arming's deadline, within the second's
+    expect(mode.state(A)).toMatchObject({ arming: true, epoch: 2 });
+    expect(changes().map((c) => (c as { reason: string }).reason)).toEqual(['toggle']);
+    await ack(A);
+    expect(mode.state(A)).toMatchObject({ armed: true });
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(ARM_ACK_MS * 2);
+    expect(changes().map((c) => (c as { reason: string }).reason)).toEqual(['toggle', 'armed']);
+    expect(wc.sent()).toEqual([{ type: 'arm', epoch: 1 }, { type: 'disarm' }, { type: 'arm', epoch: 2 }]);
   });
 
   it('refuses with the reason, and changes nothing, for a tab that cannot be picked on', () => {
@@ -347,6 +369,7 @@ describe('what disarms (Design §2, §8)', () => {
     wc.emit('render-process-gone', {}, { reason: 'crashed' });
     wc.destroyed = true;
     wc.emit('destroyed');
+    expect(vi.getTimerCount(), 'dispose clears every timer').toBe(0);
     vi.advanceTimersByTime(PICK_AT_MS + ARM_ACK_MS);
     expect(emitted).toHaveLength(told);
   });
