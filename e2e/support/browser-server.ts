@@ -6,7 +6,8 @@
 //   `file:///etc/hosts`, `mailto:` and `zoommtg:`, a Notification button, a Copy button and `copyLater()` (the same
 //   clipboard write from a timer), each writing its outcome into `#clipboard`, a download link to `/file.bin`, the word
 //   `needle` three times, a `keydown` recorder into `#keys`, and a two-second `requestAnimationFrame` count in `#frames`;
-// - `/b.html` and `/c.html` (each writes whether `window.opener` is set into `#opener`), `/plain.html` (no title), and
+// - `/b.html` and `/c.html` (each writes whether `window.opener` is set into `#opener`; `/c.html` also has a button
+//   opening `/c.html?popup=1` with `window.open` and one calling `window.close()`), `/plain.html` (no title), and
 //   `/favicon.ico` (a PNG);
 // - `/file.bin` (4 KiB), `/drop` (the socket destroyed: Chromium's ERR_EMPTY_RESPONSE, a generic error), `/slow` (never
 //   answers, for Stop).
@@ -78,7 +79,12 @@ const HTML: Record<string, string> = {
   '/a.html': page('Page A', A_BODY, A_SCRIPT),
   '/plain.html': '<!doctype html><html><head><meta charset="utf-8"></head><body><p id="plain">A page with no title</p></body></html>',
   '/b.html': page('Page B', '<h1 id="heading">Page B</h1><p>Opener: <span id="opener"></span></p>', OPENER_SCRIPT),
-  '/c.html': page('Page C', '<h1 id="heading">Page C</h1><p>Opener: <span id="opener"></span></p>', OPENER_SCRIPT),
+  '/c.html': page(
+    'Page C',
+    '<h1 id="heading">Page C</h1><p>Opener: <span id="opener"></span></p>' +
+      `<p><button id="open-popup" onclick="window.open('/c.html?popup=1')">Open a popup</button> <button id="close" onclick="window.close()">Close this page</button></p>`,
+    OPENER_SCRIPT,
+  ),
 };
 
 // A loopback port nothing listens on (bound, read, closed), for a refused connection. Not a fixed low port: Chromium

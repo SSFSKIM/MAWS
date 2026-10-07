@@ -3,9 +3,9 @@
 // replay (no engine). The first live run of main's browser code: views laid over panes, the cover, adoption of a page's
 // window.open, the attribution seams behind the pop-up gate and the clipboard carve-out, errors, persistence.
 //
-// (1) show_pane, links and window.open, a main tab and the one owner; (2) error pages; (3) refused addresses;
-// (4) the cover; (5) placement under resizes; (6) a relaunch restores tabs suspended; (7) permissions, the clipboard,
-// a download, find, Esc; (8) the chrome in both themes (shots under MAWS_E4A_SHOTS=1).
+// (1) show_pane, links and window.open, a main tab and the one owner, a popup closing itself; (2) error pages;
+// (3) refused addresses; (4) the cover; (5) placement under resizes; (6) a relaunch restores tabs suspended;
+// (7) permissions, the clipboard, a download, find, Esc; (8) the chrome in both themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -81,6 +81,12 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
           return { sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, nodeIntegration: prefs.nodeIntegration, webSecurity: prefs.webSecurity, storage: wc.session.storagePath?.split('/').pop() };
         }), [A, C]),
     ).toEqual(Array(2).fill({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, storage: 'maws-browser' }));
+    // safeDialogs: a tab's own page reports it; Electron 44.4.5 reports an adopted child's as false although the same
+    // override reaches the child's other preferences (a probe's defaultFontSize did), so the child's is recorded only
+    const [ownDialogs, childDialogs] = await s.maws.app.evaluate(({ webContents }, urls) =>
+      urls.map((url) => (webContents.getAllWebContents().find((w) => w.getURL() === url) as unknown as { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences().safeDialogs), [A, C]);
+    expect(ownDialogs).toBe(true);
+    test.info().annotations.push({ type: 'adopted child safeDialogs as reported', description: String(childDialogs) });
 
     // a ⌘-click on the link: a fourth tab in the background, the selection unmoved
     await chipOf(panel, a).getByRole('tab').click();
@@ -103,6 +109,15 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     await paneIn(panel).getByRole('button', { name: 'Show here' }).click();
     await expectOnPane(s, a, paneIn(panel), 'panel');
     await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
+    // the menu's round trip moves the page though both panes stay mounted on the tab: Open in tab, Show in panel, again
+    for (let round = 0; round < 2; round++) {
+      await overflow(s, panel, 'Open in tab');
+      await expectOnPane(s, a, paneIn(main), 'main');
+      await expect(paneIn(panel).locator('[data-browser-page="elsewhere"]')).toBeVisible();
+      await overflow(s, main, 'Show in panel');
+      await expectOnPane(s, a, paneIn(panel), 'panel');
+      await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
+    }
     // another panel tab selected: the Browser tool's pane unmounts and the main tab takes the view back
     await s.panel.getByRole('button', { name: 'Add a tool' }).click();
     await s.page.getByRole('menuitem', { name: 'Deliverables' }).click();
@@ -118,6 +133,27 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     expect(pageC.isClosed()).toBe(false);
     await expect(pageC.locator('#heading')).toHaveText('Page C');
     expect((await tabState(s, c)).tab).toMatchObject({ crashed: null, suspended: false, url: C });
+
+    // a popup that closes itself (an OAuth sign-in once it has posted back): its tab goes, its opener is selected again,
+    // and the window's cover still hides and restores the page
+    await chipOf(panel, c).getByRole('tab').click();
+    await expectOnPane(s, c, paneIn(panel), 'panel');
+    await pageC.locator('#open-popup').click();
+    const P = s.server.url('/c.html?popup=1');
+    const popup = await tabAt(s, id, P);
+    expect((await tabsOf(s, id)).selected).toBe(popup);
+    const pagePopup = await pageAt(s, P);
+    await expectOnPane(s, popup, paneIn(panel), 'panel');
+    await pagePopup.locator('#close').click({ noWaitAfter: true });
+    await expect.poll(async () => (await tabsOf(s, id)).tabs.map((tab) => tab.tabId)).toEqual([b, c, expect.any(String)]);
+    expect((await tabsOf(s, id)).selected).toBe(c);
+    await expect(chipsIn(panel)).toHaveCount(3);
+    await expectOnPane(s, c, paneIn(panel), 'panel');
+    expect(await hiddenAfter(s, c, 'palette')).not.toBeNull();
+    await expect(s.page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
+    await s.page.keyboard.press('Escape');
+    await expect(s.page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
+    await expectOnPane(s, c, paneIn(panel), 'panel');
   });
 });
 
