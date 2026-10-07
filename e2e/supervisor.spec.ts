@@ -467,6 +467,12 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
     const row = await showSession(second.page, id);
     await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
+    // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
+    // resync: a turn open (working, or waiting on its request) with the one request pending
+    const digestOf = async () => value(await invoke(second.page, 'session.digests', undefined)).digests.find((d) => d.appSessionId === id);
+    await expect.poll(async () => (await digestOf())?.pendingRequests, { message: 'the digest counts the request raised while away' }).toBe(1);
+    const digest = (await digestOf())!;
+    expect(['working', 'waiting'], `the digest reads the turn open after the resync (phase ${digest.phase})`).toContain(digest.phase);
     await expect(submitOf(second.page), 'the renderer reads the turn open').toHaveAttribute('data-submit-state', 'stop');
     await new Promise((r) => setTimeout(r, 1_000));
     const items = await pendingPermissions(second.page, id);
@@ -475,7 +481,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items[0]!.request.requestId).toBe(requested.requestId);
     expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"`,
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"; main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 
