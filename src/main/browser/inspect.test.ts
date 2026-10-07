@@ -42,12 +42,15 @@ describe('the e2e seam (E4a Interfaces "Main": globalThis.__maws_browser)', () =
     });
   });
 
-  it('a tab with no view, an unplaced view, and an unknown tab', () => {
+  it('a released view, a tab with no view, and an unknown tab', () => {
     const win = fakeWindow(3);
-    const unplaced = loadedEntry('b_000000000002', { host: win as never }); // left in its window, not a child of it any more
+    // its owner let go: the view stays a child of its last window, hidden, with no owner (view.ts `release`)
+    const released = loadedEntry('b_000000000002', { host: win as never });
+    Object.assign(released.view!, { getVisible: () => false });
+    win.contentView.children.push(released.view);
     const suspended = { tab: { tabId: 'b_000000000003', memoryKiB: null }, view: null, host: null, placement: null } as unknown as TabEntry;
-    const { inspector } = setup([unplaced, suspended]);
-    expect(inspector.tab('b_000000000002')).toMatchObject({ attached: false, windowId: 3, owner: null });
+    const { inspector } = setup([released, suspended]);
+    expect(inspector.tab('b_000000000002')).toEqual({ visible: false, bounds: { x: 1, y: 2, width: 300, height: 200 }, attached: true, windowId: 3, owner: null });
     expect(inspector.tab('b_000000000003')).toEqual({ visible: false, bounds: null, attached: false, windowId: null, owner: null });
     expect(inspector.tab('b_ffffffffffff')).toBeNull();
   });
@@ -63,7 +66,9 @@ describe('the e2e seam (E4a Interfaces "Main": globalThis.__maws_browser)', () =
   it('showPane hands the windows a maws.pane.show as the engine host would', () => {
     const { inspector, emit } = setup([]);
     const request: MawsPaneShow = { appSessionId: A, requestId: 'r-1' as never, pane: 'browser', target: 'http://127.0.0.1:1/a.html', line: null };
-    inspector.showPane(request);
+    emit.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect(inspector.showPane(request)).toBe(true);
     expect(emit).toHaveBeenCalledWith('maws.pane.show', request);
+    expect(inspector.showPane({ ...request, pane: 'nope' as never })).toBe(false); // refused by emit's validation
   });
 });

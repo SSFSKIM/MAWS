@@ -1,8 +1,10 @@
 // The e2e's window into main's browser (E4a execution document, Interfaces "Main"; E2's pattern, `deliverables/index.ts`):
 // installed as `globalThis.__maws_browser` under MAWS_E2E=1 only, read through `app.evaluate`, since a view's placement,
-// visibility and window are main's alone and no IPC command reports them. `tab` reads the view as Electron holds it
-// (not main's bookkeeping), so the e2e checks what the screen shows; `showPane` hands the windows a `maws.pane.show` as
-// the engine host would for `show_pane` (the e2e runs no engine); `metrics` says how many tabs are loaded and measured.
+// visibility and window are main's alone and no IPC command reports them. `tab` reads `visible`, `bounds` and `attached`
+// from the view as Electron holds it (so the e2e checks what the screen shows), and `windowId` and `owner` from main's
+// records of the window holding the view and the pane placing it; `showPane` hands the windows a `maws.pane.show` as
+// the engine host would for `show_pane` (the e2e runs no engine; it answers whether the event was sent); `metrics` says
+// how many tabs are loaded and measured.
 import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 
@@ -16,7 +18,7 @@ export interface InspectedTab {
 
 export interface BrowserInspector {
   tab(tabId: string): InspectedTab | null;
-  showPane(request: MawsPaneShow): void;
+  showPane(request: MawsPaneShow): boolean; // `emit`'s answer: false when the request was invalid and nothing was sent
   metrics(): { loaded: number; sampled: number };
 }
 
@@ -35,7 +37,7 @@ export function browserInspector({ store, emit }: BrowserInspectorDeps): Browser
       const entry = store.entry(tabId);
       return entry ? inspect(entry) : null;
     },
-    showPane: (request) => void emit('maws.pane.show', request),
+    showPane: (request) => emit('maws.pane.show', request) === true,
     metrics: () => ({
       loaded: store.loadedCount(),
       sampled: store.all().filter((entry) => entry.view !== null && entry.tab.memoryKiB !== null).length,

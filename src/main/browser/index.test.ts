@@ -7,9 +7,62 @@ import { BROWSER_SETTINGS_DEFAULTS, DEFAULT_PARTITION } from '@shared/browser/ta
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
 
+// A page's view as startBrowser's listeners use it, with a webContents.debugger that records attach and every command;
+// and the window the e2e-free wiring test places it in.
+const fakes = await vi.hoisted(async () => {
+  const { EventEmitter } = await import('node:events');
+  const cdp: unknown[] = [];
+  const webContents = () => {
+    const dbg = Object.assign(new EventEmitter(), {
+      attachedTo: false,
+      attach: () => {
+        dbg.attachedTo = true;
+        cdp.push('attach');
+      },
+      detach: () => void (dbg.attachedTo = false),
+      isAttached: () => dbg.attachedTo,
+      sendCommand: (method: string, params?: unknown) => {
+        if (method === 'Page.getFrameTree') return Promise.resolve({ frameTree: { frame: { id: 'F' } } });
+        cdp.push([method, params]);
+        return Promise.resolve({});
+      },
+    });
+    const history = { canGoBack: () => false, canGoForward: () => false, getActiveIndex: () => 0, getEntryAtIndex: () => ({ title: '' }) };
+    return Object.assign(new EventEmitter(), {
+      debugger: dbg,
+      navigationHistory: history,
+      loadURL: () => Promise.resolve(),
+      close: () => {},
+      isDestroyed: () => false,
+      isFocused: () => false,
+      isLoading: () => false,
+      getURL: () => 'https://a.test/',
+      getZoomFactor: () => 1,
+      setWindowOpenHandler: () => {},
+    });
+  };
+  class View {
+    readonly webContents = webContents();
+    visible = true;
+    setVisible(visible: boolean) {
+      this.visible = visible;
+    }
+    setBounds() {}
+  }
+  const win = Object.assign(new EventEmitter(), {
+    id: 1,
+    webContents: Object.assign(new EventEmitter(), { getURL: () => 'app://index.html', focus: () => {} }),
+    contentView: { addChildView: () => {}, removeChildView: () => {} },
+    isDestroyed: () => false,
+    isVisible: () => true,
+    isMinimized: () => false,
+  });
+  return { cdp, View, win };
+});
+
 vi.mock('electron', () => ({
   ipcMain: { handle: () => {} },
-  BrowserWindow: { fromWebContents: () => null },
+  BrowserWindow: { fromWebContents: () => fakes.win },
   session: {
     fromPartition: () => ({
       getUserAgent: () => 'UA Electron/1',
@@ -22,10 +75,12 @@ vi.mock('electron', () => ({
       on: (event: string) => void prepared.push(event),
     }),
   },
-  WebContentsView: class {},
+  WebContentsView: fakes.View,
 }));
 
 const { startBrowser } = await import('./index');
+const { registerAppWindow } = await import('../windows');
+registerAppWindow(fakes.win as never);
 
 const A = 'App-A' as AppSessionId;
 const GONE = 'App-Gone' as AppSessionId;
@@ -124,5 +179,36 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     browser.store.open({ appSessionId: A, url: null, select: true });
     expect(prepared).toHaveLength(5); // once per partition
     browser.stop();
+  });
+
+  it('wires each new page\'s input seams and, under focus emulation, its debugger and the view manager\'s hook', async () => {
+    const handlers = new Map<string, (input: unknown, context: unknown) => unknown>();
+    const register = ((name: string, handler: (input: unknown, context: unknown) => unknown) => void handlers.set(name, handler)) as never;
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    const page = (browser: ReturnType<typeof start>) => {
+      const { tab } = browser.store.open({ appSessionId: A, url: 'https://a.test/', select: true });
+      const entry = browser.store.entry(tab.tabId)!;
+      return { tab, entry, wc: entry.view!.webContents as unknown as import('node:events').EventEmitter };
+    };
+
+    fakes.cdp.length = 0;
+    const off = start(fakeIndex([A]).index, { register });
+    const plain = page(off);
+    plain.wc.emit('before-input-event', { preventDefault: () => {} }, { type: 'keyDown', key: 'a', code: 'KeyA' });
+    expect(plain.entry.input.lastHumanActivationAt).not.toBeNull(); // the gates are live
+    await settle();
+    expect(fakes.cdp).toEqual([]); // off: nothing attaches
+    off.stop();
+
+    const on = start(fakeIndex([A]).index, { register, env: { MAWS_BROWSER_FOCUS_EMULATION: '1' } });
+    const emulated = page(on);
+    await settle();
+    expect(fakes.cdp).toEqual(['attach']); // at view creation
+    emulated.wc.emit('did-navigate', {}, 'https://a.test/', 200, 'OK');
+    const rect = { x: 0, y: 0, width: 300, height: 200 };
+    handlers.get('browser.view.place')!({ tabId: emulated.tab.tabId, paneId: 'p', surface: 'panel', rect, claim: true }, { sender: fakes.win.webContents });
+    await settle();
+    expect(fakes.cdp).toContainEqual(['Emulation.setFocusEmulationEnabled', { enabled: true }]); // the hook sends through the debugger
+    on.stop();
   });
 });
