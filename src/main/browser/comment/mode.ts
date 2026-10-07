@@ -20,7 +20,7 @@ import { COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload } from '@sha
 import type { BrowserCommentSetResult } from '@shared/ipc/schema/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { Crop } from './crop';
-import { ownerAlive, sendPicked } from './send';
+import { ownerAlive, pickedPayload, sendPicked } from './send';
 
 const CURSOR_CSS = '* { cursor: crosshair !important }';
 
@@ -160,6 +160,13 @@ export class CommentMode {
         outcome = 'failed';
       }
     }
+    // checked against the X2 registry before the mode ends, so a payload it refuses ends as a refusal the renderer
+    // toasts rather than as a silent pick
+    const payload = pickedPayload({ tabId, appSessionId: entry.tab.appSessionId, anchor, crop: outcome });
+    if (payload === null) {
+      if (screenshot && outcome === 'attached') this.deps.discard(screenshot.path);
+      return this.refuse(tabId, state, via);
+    }
     const owner = entry.placement?.window ?? null;
     if (!ownerAlive(owner)) {
       // no window to open the sheet in; never broadcast, which would make a thread per window (Decision Log 14)
@@ -168,8 +175,7 @@ export class CommentMode {
       return;
     }
     if (via === 'arm') this.disarm(tabId, 'picked');
-    const sent = sendPicked(owner, { tabId, appSessionId: entry.tab.appSessionId, anchor, crop: outcome });
-    if (!sent && screenshot && outcome === 'attached') this.deps.discard(screenshot.path);
+    sendPicked(owner, payload);
   }
 
   // ---- reads (the e2e seam) ----------------------------------------------------------------------------------------------
@@ -226,6 +232,14 @@ export class CommentMode {
   private refuse(tabId: string, state: TabState, via: Via): void {
     if (via === 'arm' || state.armed) this.disarm(tabId, 'refused');
     else this.deps.emit('browser.comment.changed', { tabId, on: false, reason: 'refused' });
+  }
+
+  // A report from the document leaving is stale from here.
+  private navigated(tabId: string): void {
+    const state = this.states.get(tabId);
+    if (!state) return;
+    state.epoch += 1;
+    this.end(tabId, 'navigated');
   }
 
   // The tab's page went (`closed`, `crashed`) or the agent took it (`agent`): the pending pick dropped, the arm ended.
@@ -287,10 +301,12 @@ export class CommentMode {
     });
     wc.on('did-start-navigation', (details) => {
       if (!live() || !details.isMainFrame || details.isSameDocument) return;
-      const state = this.states.get(tabId);
-      if (!state) return;
-      state.epoch += 1; // a report from the document leaving is stale from here
-      this.end(tabId, 'navigated');
+      this.navigated(tabId);
+    });
+    // The commit too (main frame, another document): an arm or a pickAt made while that navigation was in flight went
+    // to the document leaving, and the one arriving starts with a disarmed preload.
+    wc.on('did-navigate', () => {
+      if (live()) this.navigated(tabId);
     });
     wc.on('render-process-gone', () => {
       if (live()) this.end(tabId, 'crashed');

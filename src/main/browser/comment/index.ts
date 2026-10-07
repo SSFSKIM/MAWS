@@ -57,7 +57,11 @@ export function startCommentMode({ store, emit, register, userData, env }: Comme
   register('browser.comment.set', ({ tabId, on }) => mode.set(tabId, on));
   const onPreload = (event: IpcMainEvent, message: unknown) => void mode.receive(event.sender, message);
   ipcMain.on(COMMENT_CHANNEL.fromPreload, onPreload);
-  const offMenu = registerContextMenuExtras(commentMenuExtra((tabId, x, y) => void mode.pickAt(tabId, x, y)));
+  const zoomOf = (tabId: string) => {
+    const contents = store.entry(tabId)?.view?.webContents;
+    return contents && !contents.isDestroyed() ? contents.getZoomFactor() : undefined;
+  };
+  const offMenu = registerContextMenuExtras(commentMenuExtra((tabId, x, y) => void mode.pickAt(tabId, x, y), zoomOf));
   void sweepCrops(dir, Date.now());
 
   const seam = env.MAWS_E2E === '1' ? commentSeam(store, mode) : null;

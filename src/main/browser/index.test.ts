@@ -275,6 +275,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
 const { contextMenuTemplate } = await import('./context-menu');
 const { COMMENT_CHANNEL } = await import('@shared/browser/comment-protocol');
 describe('startBrowser wires comment mode (E4d)', () => {
+  beforeEach(() => void commentIpc.channel.removeAllListeners()); // independent of whether earlier suites stopped
   const menuLabels = () =>
     contextMenuTemplate({ x: 1, y: 1, linkURL: '', srcURL: '', mediaType: 'none', isEditable: false, selectionText: '', editFlags: {} } as never, { canGoBack: false, canGoForward: false }, {} as never).map(
       (item) => item.label,
@@ -289,9 +290,9 @@ describe('startBrowser wires comment mode (E4d)', () => {
     expect(menuLabels()).toContain('Comment');
 
     const { tab } = browser.store.open({ appSessionId: A, url: 'https://a.test/', select: true });
-    const page = browser.store.entry(tab.tabId)!.view!.webContents;
+    const page = Object.assign(browser.store.entry(tab.tabId)!.view!.webContents, { id: 42 }); // the fake has no id of its own
     commentIpc.channel.emit(COMMENT_CHANNEL.fromPreload, { sender: page }, { type: 'picked', epoch: 0, requestId: null });
-    expect(globalThis.__maws_browser_comment!.state(tab.tabId)).toMatchObject({ armed: false, epoch: 0, dropped: 1 }); // nothing armed: dropped
+    expect(globalThis.__maws_browser_comment!.state(tab.tabId)).toEqual({ armed: false, epoch: 0, dropped: 1, webContentsId: 42 }); // nothing armed: dropped
     await expect(globalThis.__maws_browser_comment!.replayReport(tab.tabId, 'junk')).resolves.toBe(true);
     expect(globalThis.__maws_browser_comment!.state(tab.tabId)!.dropped).toBe(2);
     globalThis.__maws_browser_comment!.setControl(tab.tabId, 'agent');

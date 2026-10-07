@@ -231,10 +231,31 @@ describe('what disarms (Design §2, §8)', () => {
     expect(changes().at(-1)).toEqual({ tabId: A, on: false, reason: 'agent' });
   });
 
-  it('stops listening at dispose', () => {
-    store.add(A);
+  it('an arm made while a navigation is in flight ends when the new document commits (its preload starts disarmed)', () => {
+    const { wc } = store.add(A);
+    wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://127.0.0.1:4000/b.html' });
+    mode.set(A, true);
+    const { epoch } = mode.state(A)!;
+    wc.emit('did-navigate', {}, 'http://127.0.0.1:4000/b.html', 200, 'OK');
+    expect(mode.state(A)).toMatchObject({ armed: false, epoch: epoch + 1 });
+    expect(changes().at(-1)).toEqual({ tabId: A, on: false, reason: 'navigated' });
+    wc.emit('did-navigate', {}, 'http://127.0.0.1:4000/c.html', 200, 'OK'); // an arm already ended: nothing more told
+    expect(changes()).toHaveLength(2);
+  });
+
+  it('stops listening at dispose, and tells nothing afterwards', () => {
+    const { wc } = store.add(A);
+    mode.set(A, true);
+    const told = emitted.length;
     mode.dispose();
     expect(store.listeners()).toBe(0);
+    key(wc, {});
+    wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://x.test/' });
+    wc.emit('did-navigate', {}, 'http://x.test/', 200, 'OK');
+    wc.emit('render-process-gone', {}, { reason: 'crashed' });
+    wc.destroyed = true;
+    wc.emit('destroyed');
+    expect(emitted).toHaveLength(told);
   });
 });
 
@@ -357,6 +378,19 @@ describe('the report gate (Design §8, §9)', () => {
     expect(discard).toHaveBeenCalledExactlyOnceWith(long);
   });
 
+  it('refuses, before disarming, a pick whose payload the X2 registry refuses, and lets its crop go', async () => {
+    const { wc, send } = store.add(A, { appSessionId: '' as never }); // AppSessionIdSchema refuses an empty id
+    capture.mockResolvedValueOnce({ crop: 'attached', screenshot: { path: '/u/x.png', width: 2, height: 2 } });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mode.set(A, true);
+    await mode.receive(wc as never, report());
+    expect(picked(send)).toEqual([]);
+    expect(changes().map((c) => (c as { reason: string }).reason)).toEqual(['armed', 'refused']);
+    expect(discard).toHaveBeenCalledExactlyOnceWith('/u/x.png');
+    expect(error).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
+
   it('passes the crop outcome through when there is no picture', async () => {
     const { wc, send } = store.add(A);
     capture.mockResolvedValueOnce({ crop: 'tooLarge' });
@@ -409,5 +443,6 @@ describe('pickAt (Design §7): the context menu\'s one-shot pick', () => {
     store.setControl(A, 'agent');
     await mode.receive(wc as never, report({ epoch: 0, requestId: 'r1' }));
     expect(picked(send)).toEqual([]);
+    expect(mode.state(A)!.dropped).toBe(1);
   });
 });

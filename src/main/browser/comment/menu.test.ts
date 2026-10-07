@@ -32,6 +32,20 @@ describe('the context menu\'s Comment (Design §7)', () => {
     expect(pickAt).toHaveBeenLastCalledWith('b_aaaaaaaaaaaa', 250, 125);
   });
 
+  it('reads the page\'s zoom at click time through the resolver, the tab\'s mirror when the page has none', () => {
+    const pickAt = vi.fn();
+    let live: number | undefined = 1.5;
+    const zoomOf = vi.fn(() => live);
+    const [item] = commentMenuExtra(pickAt, zoomOf)(params, tab({ zoom: 1.25 }));
+    expect(zoomOf).not.toHaveBeenCalled(); // not at popup time
+    (item.click as () => void)();
+    expect(zoomOf).toHaveBeenCalledExactlyOnceWith('b_aaaaaaaaaaaa');
+    expect(pickAt).toHaveBeenLastCalledWith('b_aaaaaaaaaaaa', 250 / 1.5, 125 / 1.5);
+    live = undefined;
+    (item.click as () => void)();
+    expect(pickAt).toHaveBeenLastCalledWith('b_aaaaaaaaaaaa', 200, 100);
+  });
+
   it('sits in its own section after Reload and before Inspect in E4a\'s menu', () => {
     const template = contextMenuTemplate(params, tab(), {} as ContextMenuActions, [commentMenuExtra(() => {})]);
     expect(template.map((item) => item.label ?? item.type)).toEqual(['Back', 'Forward', 'Reload', 'separator', 'Comment', 'separator', 'Inspect']);

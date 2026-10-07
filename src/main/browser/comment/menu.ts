@@ -4,13 +4,18 @@
 import { COMMENT_WORDS } from '@shared/browser/comment-protocol';
 import type { ContextMenuExtra } from '../context-menu';
 
-// `pickAt` takes CSS px of the viewport; Electron's `params.x/y` are the view's DIP, which the page's zoom scales.
-export function commentMenuExtra(pickAt: (tabId: string, x: number, y: number) => void): ContextMenuExtra {
+// `pickAt` takes CSS px of the viewport; Electron's `params.x/y` are the view's DIP, which the page's zoom scales. The
+// factor is read at click time from the page itself (`zoomOf`, as the crop reads it), the tab's rounded mirror only when
+// the page has none.
+export function commentMenuExtra(pickAt: (tabId: string, x: number, y: number) => void, zoomOf: (tabId: string) => number | undefined = () => undefined): ContextMenuExtra {
   return (params, tab) => [
     {
       label: COMMENT_WORDS.menu,
       enabled: tab.control !== 'agent' && !tab.suspended && tab.loadError === null && tab.crashed === null,
-      click: () => pickAt(tab.tabId, params.x / tab.zoom, params.y / tab.zoom),
+      click: () => {
+        const zoom = zoomOf(tab.tabId) ?? tab.zoom;
+        pickAt(tab.tabId, params.x / zoom, params.y / zoom);
+      },
     },
   ];
 }
