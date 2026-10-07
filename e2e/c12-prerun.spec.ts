@@ -229,7 +229,8 @@ test('§10.1 real store, read only', async () => {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   expect(executable, 'the real-store case runs over the owner build (pnpm e2e:packaged)').not.toBeNull();
   // Explicit MAWS_C12_REALSTORE exception: index/discovery reads only, no engine launch or live helper.
-  // launchMaws's environment (e2e/support/launch.ts), with only CLAUDE_CONFIG_DIR deleted.
+  // launchMaws's settings (e2e/support/launch.ts) over the runner's whole environment, CLAUDE_CONFIG_DIR deleted so the
+  // app reads the owner's store; launchMaws drops every CLAUDE* variable, this case keeps the rest (no engine launches).
   const env: Record<string, string> = {};
   for (const [key, v] of Object.entries(process.env)) if (v !== undefined) env[key] = v;
   delete env.ELECTRON_RENDERER_URL;
