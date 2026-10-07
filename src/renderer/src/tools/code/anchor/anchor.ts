@@ -3,7 +3,7 @@
 // E3's (the shared component and its destination control); E3 registers it here and E5 never re-implements it. Until
 // then the editor's placeholder sheet shows the anchor. No CodeMirror here: the seam is in the main chunk.
 import { sha256Hex } from '@shared/composer/sha256';
-import type { Anchor, FileLineAnchor } from '@shared/anchor/anchor';
+import { anchorField, type Anchor, type FileLineAnchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { showAnchor } from '../editor/EditorDialogs';
 
@@ -30,18 +30,12 @@ export interface PrLineAnchor {
 }
 
 // X10's label rule (E3's AnchorSchema): at most 200 characters, no control characters. Git allows both in a path, so
-// the label shows a control character as U+FFFD and elides a long path from its start, keeping the basename, the line
-// and the PR number; `path` and `locator` stay exact.
+// the label shows a control character as U+FFFD and elides a long path from its start, keeping the path's end, the
+// line and the PR number (X10's `anchorField`); `path` and `locator` stay exact.
 const LABEL_MAX = 200;
-// eslint-disable-next-line no-control-regex -- the control characters are what is matched
-const CONTROL = /[\x00-\x1f\x7f]/g;
 const prLineLabel = (path: string, line: number, prNumber: number): string => {
-  const shown = path.replace(CONTROL, '�');
   const suffix = `:${line} · PR #${prNumber}`;
-  if (shown.length + suffix.length <= LABEL_MAX) return `${shown}${suffix}`;
-  let tail = shown.slice(shown.length - (LABEL_MAX - 1 - suffix.length));
-  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1); // never half a surrogate pair
-  return `…${tail}${suffix}`;
+  return `${anchorField(path, LABEL_MAX - suffix.length, { control: 'mark', keep: 'tail' })}${suffix}`;
 };
 
 // GitHub addresses a diff line by the SHA-256 of the file's repository-relative path and the side's letter (L the old
