@@ -16,7 +16,7 @@
 // lifecycle (Design §5, Decision Log 23) is held here as transitions the navigation listeners call, so every source of a
 // navigation (the chrome, E4c's tools) shares one rule.
 import { randomBytes } from 'node:crypto';
-import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
+import type { BrowserWindow, LoadURLOptions, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
 import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
@@ -121,6 +121,7 @@ export interface OpenRequest {
   requestId?: string;
   partition?: string; // a tab opened from a page (its context menu) opens in that page's partition, not the setting's
   opener?: TabEntry; // a tab a page opened itself (a modifier-clicked link): that page's, never suspended for it
+  load?: LoadURLOptions; // E11: such a tab's first load, with the link's referrer and post body (window-open.ts)
 }
 
 const normalised = (url: string) => {
@@ -259,7 +260,7 @@ export class TabStore {
     const same = url !== null && reuse === 'url' ? this.all().find(({ tab }) => tab.appSessionId === appSessionId && tab.url !== '' && normalised(tab.url) === url) : undefined;
     if (same) {
       if (select) this.setSelected(appSessionId, same.tab.tabId);
-      if (!same.view) this.loadInto(same, url!, request.opener);
+      if (!same.view) this.loadInto(same, url!, request.opener, request.load);
       this.remember(requestId, same.tab.tabId, at);
       return { tab: same.tab, reused: true };
     }
@@ -270,7 +271,7 @@ export class TabStore {
     this.entries.set(tabId, entry);
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
-    if (url !== null) this.loadInto(entry, url, request.opener);
+    if (url !== null) this.loadInto(entry, url, request.opener, request.load);
     this.remember(requestId, tabId, at);
     return { tab: entry.tab, reused: false };
   }
@@ -449,16 +450,17 @@ export class TabStore {
     this.markSession(appSessionId);
   }
 
-  private loadInto(entry: TabEntry, url: string, opener?: TabEntry): boolean {
-    if (!this.ensureView(entry, url, opener)) return false;
-    return this.navigateView(entry, url);
+  private loadInto(entry: TabEntry, url: string, opener?: TabEntry, load?: LoadURLOptions): boolean {
+    if (!this.ensureView(entry, url, opener)) return false; // E11: a tab suspended for room loads later without `load`
+    return this.navigateView(entry, url, load);
   }
 
-  private navigateView(entry: TabEntry, url: string): boolean {
+  private navigateView(entry: TabEntry, url: string, load?: LoadURLOptions): boolean {
     const view = entry.view!;
     this.beginNavigation(entry.tab.tabId, { url });
     try {
-      view.webContents.loadURL(url).catch(() => {}); // a failure arrives as did-fail-load; the promise says nothing more
+      // a failure arrives as did-fail-load; the promise says nothing more
+      (load === undefined ? view.webContents.loadURL(url) : view.webContents.loadURL(url, load)).catch(() => {});
     } catch (error) {
       this.failView(entry, error);
       return false;

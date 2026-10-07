@@ -43,6 +43,8 @@ describe('decideWindowOpen: the gate (E4a Design §14, Decision Log 11 and 24)',
 
 describe('attachWindowOpen: the handler on the page', () => {
   function harness(linkTarget: 'in-app' | 'external' = 'in-app', refuseChild = false, partition = DEFAULT_PARTITION) {
+    const loaded: unknown[][] = [];
+    const loads = () => vi.fn((...args: unknown[]) => (loaded.push(args), Promise.resolve()));
     const store = new TabStore({
       emit: () => {},
       createView: (_tab, adopted?) => {
@@ -51,7 +53,7 @@ describe('attachWindowOpen: the handler on the page', () => {
           webContents:
             adopted ??
             Object.assign(new EventEmitter(), {
-              loadURL: () => Promise.resolve(),
+              loadURL: loads(), // E11: each made view's loads, as the test reads them
               close: () => {},
               isDestroyed: () => false,
               setWindowOpenHandler: vi.fn(),
@@ -67,8 +69,8 @@ describe('attachWindowOpen: the handler on the page', () => {
     const preferences = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
     attachWindowOpen(entry, { store, linkTarget: () => linkTarget, seam, childPreferences: preferences, now: () => clock });
     const handler = (entry.view!.webContents as unknown as { setWindowOpenHandler: { mock: { calls: [(details: unknown) => Record<string, unknown>][] } } }).setWindowOpenHandler.mock.calls[0]![0];
-    const open = (url: string, disposition = 'foreground-tab') => handler({ url, disposition, frameName: '', features: '', referrer: { url: '', policy: 'default' } });
-    return { store, entry, seam, open, preferences, tick: (ms: number) => void (clock += ms) };
+    const open = (url: string, disposition = 'foreground-tab', details: Record<string, unknown> = {}) => handler({ url, disposition, frameName: '', features: '', referrer: { url: '', policy: 'default' }, ...details });
+    return { store, entry, seam, open, preferences, loaded, tick: (ms: number) => void (clock += ms) };
   }
 
   it('denies and counts an open with no input, with the seam line', () => {
@@ -121,6 +123,27 @@ describe('attachWindowOpen: the handler on the page', () => {
     const selected = h.store.list(A).tabs.find((tab) => tab.url === 'https://a.test/e.html')!;
     expect(h.store.list(A).selected[A]).toBe(selected.tabId);
     expect(h.entry.tab.blockedPopups).toBe(0);
+  });
+
+  // E11 (tracker row E4a "modifier-click drops referrer and postBody"): the tab the page opens itself loads as the
+  // link would have, with its Referer and, for a form, its POST body and content type
+  it('with no child from Chromium, the new tab loads with the request\'s referrer and post body', () => {
+    const h = harness();
+    h.entry.input.lastActivationAt = NOW;
+    const referrer = { url: 'https://a.test/form.html', policy: 'strict-origin-when-cross-origin' };
+    const postBody = { data: [{ type: 'rawData', bytes: Buffer.from('q=maws') }], contentType: 'application/x-www-form-urlencoded' };
+    h.loaded.length = 0;
+    (h.open('https://a.test/search', 'background-tab', { referrer, postBody }).createWindow as (options: unknown) => unknown)({});
+    expect(h.loaded).toEqual([['https://a.test/search', { httpReferrer: referrer, postData: postBody.data, extraHeaders: 'content-type: application/x-www-form-urlencoded' }]]);
+
+    const multipart = { data: [{ type: 'rawData', bytes: Buffer.from('--b\r\n') }], contentType: 'multipart/form-data', boundary: '----b' };
+    h.loaded.length = 0;
+    (h.open('https://a.test/upload', 'background-tab', { referrer, postBody: multipart }).createWindow as (options: unknown) => unknown)({});
+    expect(h.loaded[0]![1]).toMatchObject({ extraHeaders: 'content-type: multipart/form-data; boundary=----b' });
+
+    h.loaded.length = 0;
+    (h.open('https://a.test/plain', 'background-tab').createWindow as (options: unknown) => unknown)({}); // no referrer, no body
+    expect(h.loaded).toEqual([['https://a.test/plain', {}]]);
   });
 
   it('the room check and the tab the page opens itself spare the opener (a page never suspends its own opener)', () => {
