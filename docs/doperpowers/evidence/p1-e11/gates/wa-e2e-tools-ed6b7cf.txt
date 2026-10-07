@@ -1,0 +1,8 @@
+E11 W-A gate: e2e-tools
+command: pnpm e2e:tools
+head: ed6b7cfbfe150f2cffa178d64ae8807894826036
+started (UTC): 2026-10-07T16:24:23Z
+load at start: { 8.89 9.49 7.89 }
+summary:
+    8 passed (14.1s)
+exit: 0
