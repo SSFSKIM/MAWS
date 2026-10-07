@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
-import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the quit e2e runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -155,7 +155,9 @@ test('quit names a replayed session’s background work and a busy terminal; can
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
 test('a quit with nothing busy asks nothing and exits within the probe bound', async ({}, testInfo) => {
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0' } });
+  // E11 (tracker row E10 "14 will-quit listeners"): main's stderr from launch to exit, for the warning check below
+  let log = '';
+  const maws = await onLaunched((app) => void app.process().stderr?.on('data', (chunk) => (log += String(chunk))), () => launchMaws({ env: { MAWS_HARNESS: '0' } }));
   const lines = stderrOf(maws.app);
   try {
     const { app, page } = maws;
@@ -172,6 +174,7 @@ test('a quit with nothing busy asks nothing and exits within the probe bound', a
     testInfo.annotations.push({ type: 'quit latency', description: `report ${reportMs} ms; quit to exit ${exitAt - started} ms` });
     console.log(`[c12-quit] report ${reportMs} ms; quit to exit ${exitAt - started} ms`);
     expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)
+    expect(log, 'one will-quit listener: the launch log carries no listener warning').not.toContain('MaxListenersExceededWarning'); // E11
   } finally {
     await maws.cleanup();
   }
