@@ -1046,7 +1046,7 @@ describe('normaliser: the browser tools recorded live (E4c M4, pass3/p1-maws-bro
       const use = ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId);
       expect(use?.toolName).toBe(`mcp__maws__${e.tool}`);
       expect(seq(e)).toBeGreaterThan(seq(use));
-      expect(answerOf(rows, e.requestId)?.result.isError).toBeUndefined();
+      expect(answerOf(rows, e.requestId)!.result.isError).toBeUndefined();
     }
   });
 

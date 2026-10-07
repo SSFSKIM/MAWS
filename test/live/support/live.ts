@@ -24,7 +24,8 @@ import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/
 export const LIVE_MAX_BUDGET_USD = 0.5;
 export const LIVE_APP_VERSION = '0.0.0-live';
 
-// The probe's `redact`, applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
+// The redactor (the probe's `redact` widened for RFC 2606 names; spikes/protocol-probe/harness.mjs keeps the probe's
+// narrower pattern), applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
 // production writer (the journal is a faithful record; Interfaces, Journal): values of environment keys that look
 // secret (8+ characters, longest first so a value containing another is replaced whole), then `sk-ant-…` keys, then
 // e-mail addresses other than placeholders (`localhost`, and the reserved test TLDs `.test`, `.example`, `.invalid` of

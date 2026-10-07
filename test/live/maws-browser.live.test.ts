@@ -33,7 +33,7 @@ const TURN_MS = 300_000; // the machine is heavily loaded: generous waits
 const CASE_MS = 600_000;
 const PIN = 'b96c1a923e9d828745620746a3e5e8e7b9e67a52'; // the P1 spec's blob at master 32c2b016 (Decision Log 28, 34 (d))
 const SCENARIO = 'p1-maws-browser';
-const MAX_BUDGET_USD = 0.25; // one recording costs about US$0.10; the child's budget is US$0.60 for three at most
+const MAX_BUDGET_USD = 0.2; // one recording costs about US$0.10; three runs at this cap fit the child's US$0.60
 
 // Design §13's prompt, with one sentence added before the first run (the form snapshot shows Submit `[disabled]`: the
 // page enables it 1.2 s after the Email field's last input, and the real click's readiness wait covers that).

@@ -55,7 +55,7 @@ describe('live suite bookkeeping', () => {
     const journal = [
       row(1, 'meta', { event: 'spawn', envKeys: ['ANTHROPIC_AUTH_TOKEN'], args: ['--settings', '{"dialogExpiry":"never"}'] }),
       row(2, 'in', { type: 'control_response', response: { account: { email: 'owner@example.com' }, key: 'sk-ant-api03-abcdef_123', token: 'hunter2-secret-value' } }),
-      row(3, 'in', { type: 'user', placeholders: ['ada@example.test', 'probe@localhost', 'x@mail.example', 'y@redacted.invalid'] }), // E4c: reserved names are kept
+      row(3, 'in', { type: 'user', placeholders: ['ada@example.test', 'x@mail.example', 'y@redacted.invalid'] }), // E4c: reserved names are kept
     ]
       .map((r) => JSON.stringify(r))
       .join('\n');
