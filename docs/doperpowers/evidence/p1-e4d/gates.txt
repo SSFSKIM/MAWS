@@ -6,6 +6,9 @@ Head:   cbd5892be80b1a712a17e1272dcb3cf0cb0bae36 (branch worktree-agent-ac181b47
         session, registerPreloadScript type 'frame'; and its record) into E4d dc0a02d3, no conflicts; the same commit
         flips e2e/browser-comment.spec.ts: case "7b (adopted)" deleted (it asserted the refusal on an adopted tab, now
         false by design), case 7c's test.fail mark and its comment removed (an adopted window.open tab arms and shields).
+        The record commits 2f48d2ac, 0e8823a9 and 7c3b3d2a landed on the branch while the gates ran; they touch only
+        the E4d execution document and docs/tech-debt-tracker.md, so the gated code is the head's (7c3b3d2a's tree
+        differs from cbd5892b's in those two files alone).
 Date:   2026-10-07 (Asia/Seoul), 02:21 to 02:37
 Machine gate: each command through /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh, one at a time.
 Command form: env pnpm_config_verify_deps_before_run=false pnpm <cmd>   (cwd the worktree)
