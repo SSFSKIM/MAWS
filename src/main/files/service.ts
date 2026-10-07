@@ -21,6 +21,7 @@
 // its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
 // before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file of a document
 // or media kind (`opensExternally`, an allowlist). E1: `reveal` takes the same pre-check and any regular file, since
+// showing a file in Finder runs nothing.
 //
 // `write` (E5) is `read`'s boundary with a read-write open: it compares the file's hash and writes in place through the
 // confirmed descriptor, never by path, so it shares `read`'s guarantee and never creates, renames or replaces a file.
@@ -29,7 +30,6 @@
 // writer between the compare and the write is not caught (containment is guaranteed, not an atomic compare-and-swap).
 import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
-// showing a file in Finder runs nothing.
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
