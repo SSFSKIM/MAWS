@@ -58,6 +58,13 @@ describe('connectBrowserComment', () => {
     expect(toasts()).toEqual([]);
   });
 
+  it('a tab whose page never confirmed the arm, or never answered a menu pick, says Comment is unavailable there (Decision Log 34)', () => {
+    fake.event('browser.comment.changed', { tabId: T1, on: false, reason: 'unavailable' });
+    expect(armed()).toEqual([]);
+    expect(toasts()).toEqual([['warning', COMMENT_COPY.unavailable]]);
+    expect(COMMENT_COPY.unavailable).toBe('Comment isn’t available on this page');
+  });
+
   it('a refused pick says the element could not be named, armed or not (the context menu’s one-shot)', () => {
     fake.event('browser.comment.changed', { tabId: T1, on: true, reason: 'armed' });
     fake.event('browser.comment.changed', { tabId: T1, on: false, reason: 'refused' });

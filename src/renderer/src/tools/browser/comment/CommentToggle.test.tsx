@@ -91,6 +91,27 @@ describe('the Comment toggle', () => {
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('while main waits for the page to confirm the arm, the toggle stays unpressed; the confirmation presses it (Decision Log 34)', async () => {
+    main = installFakeMain(() => ok({ on: false, reason: 'arming' }));
+    show(browserTab(T1, A));
+    await userEvent.click(toggle());
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    act(() => setCommentArmed(T1, true)); // `browser.comment.changed {on: true, reason: 'armed'}`, through connect.ts
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('an arming answer that arrives after the confirmation does not unpress it', async () => {
+    const { setCommentMode } = await import('./store');
+    let answer!: (value: unknown) => void;
+    main = installFakeMain(() => new Promise((resolve) => (answer = resolve)) as never);
+    show(browserTab(T1, A));
+    const asked = setCommentMode(T1, true);
+    act(() => setCommentArmed(T1, true));
+    answer(ok({ on: false, reason: 'arming' }));
+    await act(() => asked);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('a refusal from main leaves it unpressed', async () => {
     main = installFakeMain(() => ok({ on: false, reason: 'notPlaced' }));
     show(browserTab(T1, A));

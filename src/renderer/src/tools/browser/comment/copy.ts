@@ -11,6 +11,7 @@ export const COMMENT_COPY = {
   cropFailed: 'Screenshot unavailable; the comment is sent without one',
   cropTooLarge: 'The screenshot was too large; the comment is sent without one',
   cannotName: 'This element can’t be named; try a smaller area',
+  unavailable: 'Comment isn’t available on this page', // the page never confirmed the arm or answered a menu pick
   openInBrowser: 'Open in the browser',
   cannotOpen: (url: string) => `MAWS can’t open ${url}`,
   openedElsewhere: (title: string) => `Opened in the browser of ${title}`,

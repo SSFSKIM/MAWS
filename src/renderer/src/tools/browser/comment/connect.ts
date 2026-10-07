@@ -17,6 +17,7 @@ export function connectBrowserComment(client: MawsBridge = ipc): () => void {
   const offChanged = client.on('browser.comment.changed', ({ tabId, on, reason }) => {
     setCommentArmed(tabId, on);
     if (reason === 'refused') warn(COMMENT_COPY.cannotName);
+    else if (reason === 'unavailable') warn(COMMENT_COPY.unavailable); // no preload answered (Decision Log 34)
   });
   const offPicked = client.on('browser.comment.picked', ({ appSessionId, anchor, crop }) => {
     openCommentComposer(anchor, { appSessionId });
