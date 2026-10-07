@@ -2,9 +2,9 @@
 // `src/main/index.ts` once the index is open: the tab store over `<userData>/browser/tabs.json`, the partitions, the
 // views, each view's navigation (history and favicons included), the page's guards (permissions, downloads,
 // `window.open`, the context menu, the keyboard), the input attribution over each tab's TabDebugger (with focus
-// emulation when it is on), the memory sample and its soft cap, and `browser.*`. Tabs belong to sessions (P-21): a session whose record
-// is deleted closes its tabs, and at boot a tab whose session the index does not know is dropped from the file. Main
-// never waits on the renderer.
+// emulation when it is on), the memory sample and its soft cap, `browser.*`, and under MAWS_E2E=1 the e2e's seam
+// (inspect.ts). Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a tab
+// whose session the index does not know is dropped from the file. Main never waits on the renderer.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
@@ -16,6 +16,7 @@ import { isAppWindow } from '../windows';
 import { attachContextMenu } from './context-menu';
 import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
+import { browserInspector } from './inspect';
 import { attachInputSeams } from './input';
 import { attachKeys } from './keys';
 import { MemorySampler } from './memory';
@@ -112,11 +113,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });
+  const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
+  if (inspector) globalThis.__maws_browser = inspector;
 
   return {
     store,
     views,
+    // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
+      if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       stopSessions();
       memory.stop();
       views.dispose();

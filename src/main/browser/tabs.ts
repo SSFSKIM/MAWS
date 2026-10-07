@@ -19,7 +19,7 @@ import { randomBytes } from 'node:crypto';
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
-import { BROWSER_LOADED_TABS_MAX, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabDebugger } from './debugger';
@@ -339,6 +339,15 @@ export class TabStore {
       denied: [],
       memoryKiB: null,
     });
+  }
+
+  // Who drives the page (Design §11): stamped and told at once through `browser.control.changed` (E4c's waits read it),
+  // and in the next tab list. E4a moves it only to `idle` (`browser.control.handBack`, from any state); E4c supplies
+  // every other transition through here.
+  setControl(tabId: string, control: BrowserControl): void {
+    const controlSince = new Date(this.now()).toISOString();
+    this.update(tabId, { control, controlSince });
+    this.deps.emit('browser.control.changed', { tabId, control, controlSince });
   }
 
   // The one way a tab changes (Design §2).

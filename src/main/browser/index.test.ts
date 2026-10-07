@@ -103,6 +103,18 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     browser.stop();
   });
 
+  it('installs the e2e seam under MAWS_E2E=1 only, and removes it at stop', () => {
+    const plain = start(fakeIndex([A]).index);
+    expect(globalThis.__maws_browser).toBeUndefined();
+    plain.stop();
+    const e2e = start(fakeIndex([A]).index, { env: { MAWS_E2E: '1' } });
+    const { tab } = e2e.store.open({ appSessionId: A, url: null, select: true });
+    expect(globalThis.__maws_browser!.tab(tab.tabId)).toEqual({ visible: false, bounds: null, attached: false, windowId: null, owner: null });
+    expect(globalThis.__maws_browser!.metrics()).toEqual({ loaded: 0, sampled: 0 });
+    e2e.stop();
+    expect(globalThis.__maws_browser).toBeUndefined();
+  });
+
   it('prepares a partition, when a tab first needs it, with the permission handlers and the download listener', () => {
     prepared.length = 0;
     const browser = start(fakeIndex([A]).index);

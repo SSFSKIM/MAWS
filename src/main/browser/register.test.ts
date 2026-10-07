@@ -47,7 +47,23 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload',
       'browser.history.suggest',
       'browser.profiles.list', 'browser.view.place', 'browser.view.cover',
+      'browser.control.handBack',
     ]);
+  });
+
+  it('browser.control.handBack returns any tab to idle; an unknown tab answers invalid_input', () => {
+    const { call, store } = setup();
+    const { tab } = call('browser.tabs.open', { appSessionId: A, url: null, select: true }) as { tab: { tabId: string } };
+    store.setControl(tab.tabId, 'human');
+    expect(call('browser.control.handBack', { tabId: tab.tabId })).toBeUndefined();
+    expect(store.require(tab.tabId).tab.control).toBe('idle');
+    let thrown: unknown;
+    try {
+      call('browser.control.handBack', { tabId: 'b_ffffffffffff' });
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
   it('hands navigate, zoom, find, dismiss and devtools to the navigator for a known tab', () => {

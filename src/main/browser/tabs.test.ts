@@ -459,6 +459,26 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
   });
 });
 
+describe('TabStore: the control field (Design §11)', () => {
+  it('setControl moves control, stamps controlSince, and tells browser.control.changed at once and the tab list after', () => {
+    const h = harness();
+    const { tab } = open(h, null);
+    h.flush();
+    h.tick(5000);
+    h.store.setControl(tab.tabId, 'human');
+    const since = '2026-10-06T12:00:05.000Z';
+    expect(h.entry(tab.tabId).tab).toMatchObject({ control: 'human', controlSince: since });
+    expect(h.emitted.filter((e) => e.name === 'browser.control.changed').map((e) => e.payload)).toEqual([{ tabId: tab.tabId, control: 'human', controlSince: since }]);
+    h.flush();
+    expect(h.changed().at(-1)!.tabs[0]).toMatchObject({ control: 'human', controlSince: since });
+    h.tick(1000);
+    h.store.setControl(tab.tabId, 'idle');
+    h.store.setControl(tab.tabId, 'idle'); // from any state, idle included: stamped and told again
+    expect(h.emitted.filter((e) => e.name === 'browser.control.changed')).toHaveLength(3);
+    expect(() => h.store.setControl('b_ffffffffffff', 'idle')).toThrow(UnknownTabError);
+  });
+});
+
 describe('TabStore: the TabDebugger (Design §10, §15)', () => {
   it('one per loaded view, made with it, detached when its renderer is gone, and dropped with the view', () => {
     const h = harness();

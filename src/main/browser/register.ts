@@ -63,4 +63,6 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   register('browser.view.cover', ({ covered }, { sender }) => {
     views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error));
   });
+  // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
+  register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
 }
