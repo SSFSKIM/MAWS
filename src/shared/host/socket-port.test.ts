@@ -111,6 +111,27 @@ describe('SocketPort', () => {
     await peerClosed;
   });
 
+  // E11 (tracker row E10 "keep-quit close counts in-flight lines delivered"): main's deliberate close at a keep-quit
+  // writes nothing more but still delivers what the host wrote before it saw the client's end; the host's writes after
+  // that end are refused, so the host counts nothing delivered that the client did not read
+  it('a draining close delivers the lines the peer wrote before it saw the end; the peer’s writes after its end are refused', async () => {
+    const { server, client } = await pair();
+    const hostPort = new SocketPort(server, Buffer.alloc(0), { log: () => {} });
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atClient = receiving(clientPort);
+    clientPort.start();
+    hostPort.start();
+    const hostSawEnd = new Promise((resolve) => server.once('end', resolve));
+    const clientClosed = new Promise((resolve) => clientPort.onClose(resolve));
+    clientPort.close({ drain: true });
+    expect(clientPort.postMessage({ t: 'ready' })).toBe(false); // nothing more is written
+    for (let n = 1; n <= 3; n++) expect(hostPort.postMessage({ t: 'evt', name: 'x', payload: n })).toBe(true); // in flight: the end has not reached the host
+    await hostSawEnd;
+    expect(hostPort.postMessage({ t: 'evt', name: 'x', payload: 4 })).toBe(false); // after the client's end: never counted written
+    await clientClosed;
+    expect(atClient).toEqual([1, 2, 3].map((n) => ({ t: 'evt', name: 'x', payload: n })));
+  });
+
   it('serves the host protocol through createHostRuntime: req and res, and evt once the client is ready', async () => {
     const { server, client } = await pair();
     let emit!: HostEmit;

@@ -421,6 +421,21 @@ describe('the detached transport: a served connection ends', () => {
     await expect(next.next()).resolves.toMatchObject({ t: 'welcome', pid: fake.pid });
     next.socket.destroy();
   });
+
+  // E11 (tracker row E10 "keep-quit close counts in-flight lines delivered"): the deliberate close drains, so an event
+  // the supervisor wrote (and counted delivered) before it saw main's end still reaches main's listeners
+  it('stop() still reads the events the supervisor wrote before it saw the end', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const before = { appSessionId: 'app-before', items: [] } as never;
+    await until(() => fake.emit('session.brokerItems', before)); // main's ready reached the supervisor
+    supervisor.stop();
+    const inFlight = { appSessionId: 'app-in-flight', items: [] } as never;
+    expect(fake.emit('session.brokerItems', inFlight)).toBe(true); // written: main's end has not reached the supervisor
+    await until(() => emit.mock.calls.some(([name, payload]) => name === 'session.brokerItems' && (payload as { appSessionId: string }).appSessionId === 'app-in-flight'));
+    await until(() => !fake.connected());
+    expect(fake.exits).toEqual([]);
+  });
 });
 
 describe('the detached transport: a request held and never sent', () => {

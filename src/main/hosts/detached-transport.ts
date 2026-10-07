@@ -617,7 +617,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       cancelAttempt();
       const connection = served;
       served = null;
-      connection?.port.close(); // no `exit`: the supervisor keeps serving its sessions
+      connection?.port.close({ drain: true }); // no `exit`: the supervisor keeps serving its sessions; what it wrote before it saw the end is still read (E11)
     },
   };
 }
