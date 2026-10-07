@@ -19,6 +19,7 @@ interface Behaviour {
   // `evaluationErrorKept`: the worker threw while it evaluated, then was kept running (Electron 44.4.5 under an attached
   // debugger, as Playwright's is); `laterError`: a worker that started, then logged an uncaught error while running
   background?: 'running' | 'error' | 'stopped' | 'silent' | 'evaluationErrorKept' | 'laterError';
+  message?: string; // the level-3 console message the worker logs (an uncaught TypeError on `chrome.*` by default)
   throws?: string;
   id?: string; // Electron's id when it differs from the directory's
   path?: string; // where Electron says it loaded from
@@ -53,7 +54,7 @@ function fakeSession(behaviours: Record<string, Behaviour> = {}) {
       if (behaviour.background === 'running') running[versionId] = { scope: url, scriptUrl: `${url}sw.js`, renderProcessId: 1, versionId };
       if (behaviour.background === 'error') workers.emit('console-message', {}, { message: WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
       const keep = () => (running[versionId] = { scope: url, scriptUrl: `${url}sw.js`, renderProcessId: 1, versionId });
-      const error = () => workers.emit('console-message', {}, { message: WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
+      const error = () => workers.emit('console-message', {}, { message: behaviour.message ?? WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
       if (behaviour.background === 'evaluationErrorKept') {
         workers.emit('running-status-changed', { versionId, runningStatus: 'starting' });
         error();
@@ -167,6 +168,19 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       const byId = Object.fromEntries(records.map((record) => [record.id, record]));
       expect(byId[fails.id]).toMatchObject({ background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' });
       expect(byId[probe.id]).toMatchObject({ background: 'running', backgroundError: null });
+    });
+
+    it('reads a worker that logged an error while starting but threw nothing (console.error, a rejected promise) by whether it runs', async () => {
+      const { probe, fails } = fixture.extensions;
+      const ses = fakeSession({
+        [probe.id]: { background: 'evaluationErrorKept', message: 'config missing, using defaults' }, // console.error at top level
+        [fails.id]: { background: 'evaluationErrorKept', message: 'Uncaught (in promise) TypeError: Failed to fetch' },
+      });
+      const records = await run(loader(), ses, chosen('probe', 'fails'));
+      expect(records.map(({ background, backgroundError }) => ({ background, backgroundError }))).toEqual([
+        { background: 'running', backgroundError: null },
+        { background: 'running', backgroundError: null },
+      ]);
     });
 
     it('reads a worker that stopped within the settle as failed, with no error text', async () => {

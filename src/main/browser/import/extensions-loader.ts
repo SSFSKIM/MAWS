@@ -296,7 +296,7 @@ export class ExtensionsLoader {
 interface BackgroundWatch {
   running(url: string): boolean;
   error(url: string): string | null;
-  evaluationError(url: string): string | null; // an uncaught error while the version was starting, before it ran
+  evaluationError(url: string): string | null; // an exception thrown while the version was starting, before it ran
   stopped(url: string): boolean;
   stop(): void;
 }
@@ -304,16 +304,22 @@ interface BackgroundWatch {
 // What the session's workers report while extensions load and settle: errors (`console-message` at level 3, the
 // worker's uncaught error naming the absent `chrome.*` member) and versions that stopped (`running-status-changed`, an
 // experimental signal; a version's scope is learnt while it is still known, since a stopped one may no longer be). An
-// error logged while its version was reported `starting` and not yet `running` was thrown as the worker evaluated: its
-// listeners never registered, whether or not Chromium then keeps the worker alive (Electron 44.4.5 does when a debugger
-// is attached to the session's targets, as Playwright's is; without one it stops the worker).
+// exception thrown synchronously while its version was reported `starting` and not yet `running` was thrown as the
+// worker evaluated: the script stopped there, whether or not Chromium then keeps the worker alive (Electron 44.4.5 does
+// when a debugger is attached to the session's targets, as Playwright's is; without one it stops the worker). Anything
+// else at level 3 while starting (the worker's own `console.error`, an `Uncaught (in promise)` rejection) did not stop
+// the script, so the worker is read by whether it runs.
+const THROWN_WHILE_EVALUATING = /^Uncaught (?!\(in promise\))/;
+
 function watchBackgrounds(workers: Workers): BackgroundWatch {
   const errors: { url: string; message: string; evaluating: boolean }[] = [];
   const scopes = new Map<number, string>();
   const stopped = new Set<number>();
   const status = new Map<number, string>();
   const onConsole = (_event: unknown, details: Electron.MessageDetails) => {
-    if (details.level === 3) errors.push({ url: details.sourceUrl, message: details.message, evaluating: status.get(details.versionId) === 'starting' });
+    if (details.level !== 3) return;
+    const evaluating = status.get(details.versionId) === 'starting' && THROWN_WHILE_EVALUATING.test(details.message);
+    errors.push({ url: details.sourceUrl, message: details.message, evaluating });
   };
   const onStatus = ({ versionId, runningStatus }: ServiceWorkersRunningStatusChangedEventParams) => {
     if (!scopes.has(versionId)) {
