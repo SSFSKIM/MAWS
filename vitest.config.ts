@@ -28,6 +28,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/fs/follow.test.ts',
   'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',
+  'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
   'src/main/git/watcher.test.ts',
   'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service
   'src/main/usage/claude-usage-reader.test.ts',
