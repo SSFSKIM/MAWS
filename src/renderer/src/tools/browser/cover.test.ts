@@ -22,6 +22,14 @@ function rectFor(element: Element): DOMRect {
   return { ...r, x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top, toJSON: () => r } as DOMRect;
 }
 
+// The app's root, where the shell (and its toast viewport) lives: never a layer itself.
+function appRoot(): HTMLElement {
+  const root = Object.assign(document.createElement('div'), { id: 'root' });
+  root.setAttribute('data-test-layer', '');
+  document.body.append(root);
+  return root;
+}
+
 // Two animation frames (happy-dom runs a frame as an immediate) and the observers' microtasks.
 const frames = async (n = 3) => {
   for (let i = 0; i < n; i++) await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
@@ -135,8 +143,7 @@ describe('watchCoverLayers', () => {
   it('a toast over the pane covers while it is shown; one elsewhere does not', async () => {
     const viewport = document.createElement('ol');
     viewport.setAttribute('data-toast-viewport', '');
-    viewport.setAttribute('data-test-layer', '');
-    document.body.append(viewport); // in the app it sits inside the shell; where it sits does not matter to the watch
+    appRoot().append(viewport); // inside the shell, as in the app
     watch.refresh(); // found on the next refresh when it mounted after the watch began
     const elsewhere = document.createElement('li');
     elsewhere.setAttribute('data-rect', 'away');
@@ -151,6 +158,30 @@ describe('watchCoverLayers', () => {
     toast.remove();
     await frames();
     expect(changes).toEqual([true, false]);
+  });
+
+  it('the toast viewport unmounting while toasts are held and remounting as a new element is followed on refresh', async () => {
+    const root = appRoot();
+    const mount = (rect: string) => {
+      const viewport = document.createElement('ol');
+      viewport.setAttribute('data-toast-viewport', '');
+      const toast = document.createElement('li');
+      toast.setAttribute('data-rect', rect);
+      viewport.append(toast);
+      root.append(viewport);
+      return viewport;
+    };
+    const first = mount('over');
+    watch.refresh();
+    await frames();
+    expect(changes).toEqual([true]);
+    first.remove(); // the host holds its toasts: the viewport and its toast leave together
+    watch.refresh();
+    expect(changes).toEqual([true, false]);
+    mount('over'); // released: a new viewport element
+    watch.refresh();
+    await frames();
+    expect(changes).toEqual([true, false, true]);
   });
 
   it('a pane moving under a layer already measured is re-checked on refresh', async () => {

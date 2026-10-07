@@ -10,7 +10,7 @@ export const PAGE_PRIMARY_BUTTON = 'max-w-full truncate rounded-sm bg-accent px-
 export function PageFrame({ page, heading, summary, children }: { page: string; heading: ReactNode; summary?: ReactNode; children?: ReactNode }) {
   return (
     <div data-browser-page={page} className="absolute inset-0 overflow-auto bg-bg">
-      <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3 px-6 pt-[18vh] pb-8 text-ui text-fg-muted">
+      <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3 px-6 pt-[20vh] pb-8 text-ui text-fg-muted">
         <h2 className="m-0 text-prose font-medium text-fg">{heading}</h2>
         {summary !== undefined && <p className="m-0 break-words">{summary}</p>}
         {children}

@@ -13,7 +13,8 @@
 //   3. anything else but the app root, Radix's focus guards and inert elements: the intersection rule (the composer's
 //      `@` and `/` popups, which tiptap mounts into body with no Radix marker; a Dialog's overlay).
 // A second observer watches the toast viewport's toasts (inside the shell, at the window's bottom right, where a panel
-// pane sits) under the intersection rule.
+// pane sits) under the intersection rule. The viewport unmounts while toasts are held and remounts as a new element,
+// which no observer here sees: `refresh` finds it again, and a layer whose element left the document is forgotten.
 export interface PaneRect {
   x: number;
   y: number;
@@ -62,6 +63,7 @@ export function watchCoverLayers(rectsOf: () => readonly PaneRect[], onChange: (
 
   const evaluate = () => {
     if (stopped) return;
+    for (const element of [...modal, ...measured.keys()]) if (!element.isConnected) forget(element);
     const panes = rectsOf();
     const next = modal.size > 0 || [...measured.values()].some(({ rect }) => rect !== null && panes.some((pane) => meets(rect, pane)));
     if (next === covered) return;
@@ -69,7 +71,7 @@ export function watchCoverLayers(rectsOf: () => readonly PaneRect[], onChange: (
     onChange(next);
   };
 
-  const forget = (element: Element) => {
+  function forget(element: Element): void {
     modal.delete(element);
     const entry = measured.get(element);
     if (entry) {
@@ -77,7 +79,7 @@ export function watchCoverLayers(rectsOf: () => readonly PaneRect[], onChange: (
       entry.resize?.disconnect();
       measured.delete(element);
     }
-  };
+  }
 
   const track = (element: Element, kind: LayerKind = classifyLayer(element)) => {
     if (modal.has(element) || measured.has(element) || kind === 'never') return;
@@ -137,10 +139,7 @@ export function watchCoverLayers(rectsOf: () => readonly PaneRect[], onChange: (
     refresh() {
       if (stopped) return;
       findViewport();
-      for (const [element, entry] of measured) {
-        if (!element.isConnected) forget(element);
-        else if (entry.rect !== null) entry.rect = element.getBoundingClientRect();
-      }
+      for (const [element, entry] of measured) if (entry.rect !== null && element.isConnected) entry.rect = element.getBoundingClientRect();
       evaluate();
     },
     unwatch() {

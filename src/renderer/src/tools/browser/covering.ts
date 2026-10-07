@@ -5,9 +5,12 @@
 //
 // The layers: the DOM's (`watchCoverLayers` against the panes that own their view), the floating Overview while it is
 // open, and the chrome's own holds (the address suggestions, which draw over the frozen page as an omnibox popup does).
-// The watch runs only while a pane is mounted; the last pane leaving lifts any cover it had asked for.
+// The watch runs only while a pane is mounted; the last pane leaving lifts any cover it had asked for. Any change of the
+// notices store refreshes the watch on the next frame (after the toast host rendered it): the toast viewport unmounts
+// while toasts are held and remounts as a new element the DOM watch cannot see by itself.
 import { ipc } from '../../ipc/client';
 import { useLayout } from '../../stores/layout';
+import { useNotices } from '../../stores/notices';
 import { watchCoverLayers, type CoverWatch, type PaneRect } from './cover';
 
 type RectOf = () => PaneRect | null; // a mounted pane's rect while it owns its view, else null
@@ -16,6 +19,8 @@ const panes = new Set<RectOf>();
 const holds = new Set<symbol>();
 let watch: CoverWatch | null = null;
 let offLayout: (() => void) | null = null;
+let offNotices: (() => void) | null = null;
+let noticesFrame = 0;
 let domCovered = false;
 let overviewOpen = false;
 let told = false; // what main was last told
@@ -38,17 +43,32 @@ function start(): void {
     overviewOpen = state.overviewOpen;
     sync();
   });
+  offNotices = useNotices.subscribe(() => {
+    if (noticesFrame !== 0) return;
+    noticesFrame = requestAnimationFrame(() => {
+      noticesFrame = 0;
+      watch?.refresh();
+    });
+  });
   watch = watchCoverLayers(rects, (covered) => {
     domCovered = covered;
     sync();
   });
 }
 
+function unsubscribe(): void {
+  offLayout?.();
+  offLayout = null;
+  offNotices?.();
+  offNotices = null;
+  cancelAnimationFrame(noticesFrame);
+  noticesFrame = 0;
+}
+
 function stop(): void {
   watch?.unwatch();
   watch = null;
-  offLayout?.();
-  offLayout = null;
+  unsubscribe();
   domCovered = false;
   overviewOpen = false;
   sync();
@@ -84,8 +104,7 @@ export function holdCover(): () => void {
 export function resetCovering(): void {
   watch?.unwatch();
   watch = null;
-  offLayout?.();
-  offLayout = null;
+  unsubscribe();
   panes.clear();
   holds.clear();
   domCovered = false;
