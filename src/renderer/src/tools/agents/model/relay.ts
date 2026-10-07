@@ -60,10 +60,6 @@ export function restoreDraft(draft: string, relay: Relay | PeerRelay | undefined
   return relay?.state.kind === 'failed' && draft.trim() === '' ? relay.text : draft;
 }
 
-// After this long in `asked` with the turn clause shown, the clause becomes the long-wait string: the parent reaches no
-// tool boundary while one call runs.
-export const RELAY_LONG_WAIT_MS = 30_000;
-
 // A parent round is one parent assistant message carrying at least one tool_use block: distinct messageUuid among the
 // parent's (agentId null) tool_use block completions with fromSeq < seq < toSeq.
 export function parentRoundsBetween(events: SessionEvent[], fromSeq: number, toSeq: number): number {

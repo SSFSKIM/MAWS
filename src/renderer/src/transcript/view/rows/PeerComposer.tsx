@@ -8,7 +8,7 @@
 import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
-import { RELAY_LONG_WAIT_MS } from '../../../tools/agents/model/relay'; // after this long asked, the long-wait clause (the drill-in relay's)
+import { RELAY_LONG_WAIT_MS } from '../../../relay-wait'; // after this long asked, the long-wait clause (the drill-in relay's too)
 import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';

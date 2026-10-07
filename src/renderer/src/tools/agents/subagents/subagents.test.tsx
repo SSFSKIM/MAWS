@@ -14,6 +14,7 @@ import { event, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../t
 import { connectKeys } from '../../../keymap/dispatcher';
 import { instanceOf, panelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
+import { RELAY_LONG_WAIT_MS } from '../../../relay-wait';
 import { itemFor, permission } from '../../../request-card/test-requests';
 import { useAttention } from '../../../stores/attention';
 import { useSessions } from '../../../stores/sessions';
@@ -23,7 +24,7 @@ import { builder, request, tool } from '../../../transcript/model/test-events';
 import { setAgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
 import { agentTranscriptActions, registerAgentTools } from '../index';
-import { RELAY_LONG_WAIT_MS, relayText } from '../model/relay';
+import { relayText } from '../model/relay';
 import { useRelays } from '../relay-store';
 import { useTaskGraph } from '../store';
 import { SubagentsSummary } from './SubagentsSummary';
