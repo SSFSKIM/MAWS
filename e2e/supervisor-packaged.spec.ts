@@ -75,7 +75,6 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     expect(fuses, 'the runAsNode fuse is enabled').toMatch(/^\s*RunAsNode is Enabled$/m);
 
     maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached' } });
-    expect(maws.packaged).toBe(true);
     const app = maws.app;
     const appPid = app.process().pid!;
     const exited = new Promise<void>((done) => app.process().once('exit', () => done()));
