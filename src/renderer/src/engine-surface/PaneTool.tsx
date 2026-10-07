@@ -141,9 +141,10 @@ export const pluginPaneTool: PanelTool<PluginPaneState, PluginPaneParams | undef
   pinnable: false,
   multiInstance: true,
   menu: false, // offered under "Plugin panes" in the "+" menu, one per open pane, never as a tool to add
-  createState: ({ appSessionId, params }) => {
+  // a tab restored from the layout (the host's flag, E11 W-D) names no pane and closes without asking the engine
+  createState: ({ appSessionId, params, restored }) => {
     const state: PluginPaneState = { appSessionId, paneId: params?.paneId ?? null };
-    if (params === undefined) markGone(state);
+    if (restored) markGone(state);
     return state;
   },
   // the person's close: the engine runs the plugins' `ui.close` hooks, which may keep the pane; a session no longer

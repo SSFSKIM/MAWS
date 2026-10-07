@@ -20,6 +20,7 @@ import { BannerHost } from '../app/BannerHost';
 import { ToastHost } from '../app/ToastHost';
 import { A, panelOf, resetPanelStores, TestHost } from '../test-support/panel';
 import { connectPluginPanes, resetPaneRosters } from './panes';
+import { pluginPaneTool } from './PaneTool';
 import { resetSurfaceRegistry } from './registry';
 import { usePaneRosters } from './pane-roster';
 
@@ -333,4 +334,19 @@ describe('plugin panes as panel tabs (R2)', () => {
     expect(screen.getByText('A held toast')).toBeTruthy();
   });
 
+});
+
+// E11 W-D (tracker row E10 "PaneTool and LogTool infer restored"): the host's restored flag, not missing params, marks a
+// tab restored from the layout; such a tab closes without asking the engine.
+describe('the plugin pane tool reads the host’s restored flag', () => {
+  it('a restored tab closes without asking the engine; an open naming a pane asks', async () => {
+    connect({});
+    const init = { appSessionId: A, session: null, instanceId: 'plugin-pane:1' };
+    await expect(pluginPaneTool.beforeClose(pluginPaneTool.createState({ ...init, params: undefined, restored: true }))).resolves.toBe(true);
+    expect(fake.invoked('session.ui.close')).toEqual([]);
+    const asked = pluginPaneTool.beforeClose(pluginPaneTool.createState({ ...init, params: { paneId: 'dialog' } }));
+    await waitFor(() => expect(fake.invoked('session.ui.close')).toEqual([{ appSessionId: A, id: 'dialog' }]));
+    await act(() => fake.reply('session.ui.close', { closed: true }));
+    await expect(asked).resolves.toBe(true);
+  });
 });

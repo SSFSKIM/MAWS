@@ -56,8 +56,8 @@ function installSpill(text: string): void {
 }
 
 const handles: LogHandle[] = [];
-function create(params: LogParams | undefined, appSessionId: AppSessionId = A, instanceId = 'log:test'): LogHandle {
-  const handle = logTool.createState({ appSessionId, session: null, instanceId, params: params as LogParams });
+function create(params: LogParams | undefined, appSessionId: AppSessionId = A, instanceId = 'log:test', restored = false): LogHandle {
+  const handle = logTool.createState({ appSessionId, session: null, instanceId, params: params as LogParams, ...(restored ? { restored: true as const } : {}) });
   handles.push(handle);
   return handle;
 }
@@ -72,8 +72,8 @@ function Mounted({ state }: { state: LogHandle }) {
   return <Body state={state} ctx={ctx} />;
 }
 
-async function mount(params: LogParams | undefined) {
-  const handle = create(params);
+async function mount(params: LogParams | undefined, restored = false) {
+  const handle = create(params, A, 'log:test', restored);
   const view = render(<Mounted state={handle} />);
   await act(async () => {}); // the first page's read settles
   return { handle, ...view };
@@ -179,9 +179,17 @@ describe('log tool', () => {
     expect(screen.getByText('End of file')).toBeTruthy();
   });
 
-  it('a restored tab (params undefined) says so and reads nothing', async () => {
-    await mount(undefined);
+  it('a restored tab (the host’s restored flag) says so and reads nothing', async () => {
+    await mount(undefined, true);
     expect(screen.getByText('This log was not restored. Reopen it from its row')).toBeTruthy();
+    expect(spill.readSpill).not.toHaveBeenCalled();
+  });
+
+  // E11 W-D (tracker row E10 "PaneTool and LogTool infer restored"): params undefined alone is an open that gave none
+  it('a param-less open is not read as restored: it says no file was reported and reads nothing', async () => {
+    await mount(undefined);
+    expect(screen.queryByText('This log was not restored. Reopen it from its row')).toBeNull();
+    expect(screen.getByText('No file to open: the engine reported no output file for this cell; the transcript shows what was kept')).toBeTruthy();
     expect(spill.readSpill).not.toHaveBeenCalled();
   });
 
