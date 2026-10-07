@@ -28,6 +28,81 @@ export interface SettleDeps {
   onDownloadRefused(listener: (refusal: DownloadRefusal) => void): () => void;
 }
 
+// After an act's dispatch or an eval (Design §6 "Downloads"; A-31): a page call can start a main-frame navigation that
+// commits a new document or turns into a download, and either arrives after the call returned (a `location = …` eval
+// returns in about 3 ms, its download ~160 ms later). Watched from just before the call: when a cross-document
+// navigation started (or starts within `startWindowMs` after the call), `settle` waits for its load to end, or for a
+// stop without a commit plus the grace in which a download refusal still wins, or for the refusal itself, all within
+// `graceMs`; with none started it resolves at once. It never fails but on an abort: the caller reads the refusal.
+export const CALL_NAVIGATION_GRACE_MS = 2_000;
+export const EVAL_NAVIGATION_START_MS = 250;
+
+export interface CallNavigation {
+  settle(refused: Promise<void>, options?: { startWindowMs?: number; graceMs?: number }): Promise<void>;
+  stop(): void;
+}
+
+export function watchCallNavigation(entry: TabEntry, signal: AbortSignal): CallNavigation {
+  const wc = entry.view?.webContents as (NodeJS.EventEmitter & { isLoading(): boolean }) | undefined;
+  let started = false;
+  let committed = false;
+  let stopped = false;
+  let changed = () => {};
+  const listeners: [string, (...args: unknown[]) => void][] = [
+    ['did-start-navigation', (event) => {
+      const details = event as { isMainFrame?: boolean; isSameDocument?: boolean } | undefined;
+      if (!details?.isMainFrame || details.isSameDocument) return;
+      started = true;
+      committed = stopped = false;
+      changed();
+    }],
+    ['did-navigate', () => {
+      committed = true;
+      changed();
+    }],
+    ['did-stop-loading', () => {
+      if (!started || wc!.isLoading()) return;
+      stopped = true;
+      changed();
+    }],
+  ];
+  for (const [event, listener] of listeners) wc?.on(event, listener);
+  const stop = () => {
+    for (const [event, listener] of listeners) wc?.removeListener(event, listener);
+  };
+  return {
+    stop,
+    settle: (refused, { startWindowMs = 0, graceMs = CALL_NAVIGATION_GRACE_MS } = {}) =>
+      new Promise<void>((resolve, reject) => {
+        if (signal.aborted) return reject(signal.reason);
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        let stopGrace = false;
+        const finish = (settle: () => void) => {
+          for (const timer of timers.splice(0)) clearTimeout(timer);
+          changed = () => {};
+          signal.removeEventListener('abort', onAbort);
+          settle();
+        };
+        const done = () => finish(resolve);
+        const onAbort = () => finish(() => reject(signal.reason));
+        signal.addEventListener('abort', onAbort, { once: true });
+        void refused.then(done);
+        changed = () => {
+          if (!started || !stopped) return;
+          if (committed) return done();
+          if (!stopGrace) {
+            stopGrace = true;
+            timers.push(setTimeout(done, STOPPED_WITHOUT_COMMIT_GRACE_MS));
+          }
+        };
+        if (!started && startWindowMs <= 0) return done(); // nothing started during the call
+        timers.push(setTimeout(done, graceMs));
+        if (!started) timers.push(setTimeout(() => !started && done(), startWindowMs));
+        changed();
+      }),
+  };
+}
+
 export function waitForSettled(entry: TabEntry, tool: BrowserToolName, signal: AbortSignal, deps: SettleDeps, deadlineMs = SETTLE_DEADLINE_MS): Promise<void> {
   const { tabId } = entry.tab;
   const wc = entry.view?.webContents;

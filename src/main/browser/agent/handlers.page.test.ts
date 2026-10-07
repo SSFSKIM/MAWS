@@ -120,8 +120,15 @@ function harness() {
     return tabId;
   };
   const cover = (tabId: string, covered: boolean) => store.update(tabId, { covered });
+  // Chromium's main-frame events for a navigation a page call started: its start, its commit, its load's end
+  const contentsOf = (tabId: string) => store.entry(tabId)!.view!.webContents as unknown as FakeWebContents;
+  const navigation = {
+    start: (tabId: string, url = 'https://a.test/next') => void contentsOf(tabId).emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }),
+    commit: (tabId: string, url = 'https://a.test/next') => void contentsOf(tabId).emit('did-navigate', {}, url, 200, 'OK'),
+    stop: (tabId: string) => void contentsOf(tabId).emit('did-stop-loading'),
+  };
   return {
-    store, page, log, drivers, control, dialogs, controller, waits, emitted, run, open, cover,
+    store, page, log, drivers, control, dialogs, controller, waits, emitted, run, open, cover, navigation,
     hold: () => {
       const gate = deferred<Waited>();
       pausing = gate.promise;
@@ -220,7 +227,7 @@ describe('browser_snapshot (a read: Design §5, Decision Log 5)', () => {
 });
 
 describe('browser_act (Design §6: show, resolve, wait without input, the pause point, dispatch)', () => {
-  it('clicks a ref in order: acting, locate, the input-free readiness wait, the pause point, the mark, the click with its own timeout, the navigation grace', async () => {
+  it('clicks a ref in order: acting, locate, the input-free readiness wait, the pause point, the mark, the click with its own timeout', async () => {
     const h = harness();
     const other = h.open('https://b.test/', 'Page B');
     const tabId = h.open();
@@ -234,12 +241,11 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
       ok: true,
       result: { status: 'ok', tabId, url: 'https://a.test/', title: 'Page A', ms: 0, action: 'click', target: { ref: 'e5', role: 'button', name: 'Submit' }, navigated: false, waitedFor: null, waitedMs: null },
     });
-    expect(h.page.lines()).toEqual(['count aria-ref=e5', 'waitFor visible aria-ref=e5', 'isEnabled aria-ref=e5', 'click aria-ref=e5', 'waitForLoadState load']);
+    expect(h.page.lines()).toEqual(['count aria-ref=e5', 'waitFor visible aria-ref=e5', 'isEnabled aria-ref=e5', 'click aria-ref=e5']);
     expect(h.log).toEqual(['pause', 'acting', 'click', 'ended']);
     const click = h.page.calls.find((call) => call.method === 'click')!;
     expect(click.args).toEqual([{ timeout: 5_000, signal: h.controller.signal }]);
     expect(h.page.calls.find((call) => call.method === 'waitFor visible')!.args).toEqual([{ state: 'visible', timeout: BROWSER_ACTION_TIMEOUT_MS, signal: expect.any(AbortSignal) }]);
-    expect(h.page.calls.find((call) => call.method === 'waitForLoadState')!.args).toEqual([{ timeout: 2_000, signal: h.controller.signal }]);
     expect(h.page.calls.some((call) => JSON.stringify(call.args).includes('trial'))).toBe(false);
     expect(h.store.list(A).selected[A]).toBe(tabId); // the acting tab comes forward
     expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
@@ -269,7 +275,7 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     const tabId = h.open();
     h.page.counts.set('aria-ref=e3', 1);
     await h.run('browser_act', { tabId, action: 'scroll', target: 'e3', value: '-240' });
-    expect(h.page.lines()).toEqual(['count aria-ref=e3', 'waitFor attached aria-ref=e3', 'scrollIntoViewIfNeeded aria-ref=e3', 'hover aria-ref=e3', 'mouse.wheel', 'waitForLoadState load']);
+    expect(h.page.lines()).toEqual(['count aria-ref=e3', 'waitFor attached aria-ref=e3', 'scrollIntoViewIfNeeded aria-ref=e3', 'hover aria-ref=e3', 'mouse.wheel']);
     expect(h.page.calls.find((call) => call.method === 'mouse.wheel')!.args).toEqual([0, -240]);
   });
 
@@ -395,20 +401,40 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     expect(h.log).toEqual([]);
   });
 
-  it('says it navigated when the page URL changed, after waiting for the load', async () => {
+  it('waits for the load of a navigation the act started and says it navigated', async () => {
     const h = harness();
     const tabId = h.open();
     h.page.counts.set('aria-ref=e5', 1);
-    h.page.onAction.set('click', () => void (h.page.currentUrl = 'https://a.test/done.html'));
-    const answer = await h.run('browser_act', { tabId, action: 'click', target: 'e5' });
-    expect(resultOf(answer).navigated).toBe(true);
+    h.page.onAction.set('click', () => {
+      h.navigation.start(tabId, 'https://a.test/done.html');
+      h.page.currentUrl = 'https://a.test/done.html';
+    });
+    let settled = false;
+    const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' }).then((result) => ((settled = true), result));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(settled).toBe(false); // started, not loaded
+    h.navigation.commit(tabId, 'https://a.test/done.html');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(false); // committed, still loading
+    h.navigation.stop(tabId);
+    expect(resultOf(await answer).navigated).toBe(true);
+  });
+
+  it('answers at once when the act started no navigation, and caps a slow load at the 2 s grace', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    expect(resultOf(await h.run('browser_act', { tabId, action: 'click', target: 'e5' })).navigated).toBe(false);
+    h.page.onAction.set('click', () => h.navigation.start(tabId));
+    const slow = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await slow).toMatchObject({ ok: true });
   });
 
   it('answers downloadRefused for a download the act started, at once rather than after the whole grace (A-31)', async () => {
     const h = harness();
     const tabId = h.open();
     h.page.counts.set('aria-ref=e5', 1);
-    h.page.onLoadState = () => new Promise(() => {}); // no load follows a download
     h.page.onAction.set('click', () => {
       h.refuse({ tabId: 'b_999999999999', url: 'https://x.test/other.zip', filename: 'other.zip' }); // another tab's
       h.refuse({ tabId, url: 'https://a.test/report.pdf', filename: 'report.pdf' });
@@ -418,6 +444,68 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_act', 'https://a.test/report.pdf', 'report.pdf') });
     expect(h.log).toEqual(['pause', 'acting', 'ended']);
     expect(h.refusals.size).toBe(0);
+  });
+
+  it('answers downloadRefused for a download that arrives after the click returned: the navigation started, no document commits', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.onAction.set('click', () => h.navigation.start(tabId, 'https://a.test/report.pdf'));
+    const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(160);
+    h.refuse({ tabId, url: 'https://a.test/report.pdf', filename: 'report.pdf' });
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_act', 'https://a.test/report.pdf', 'report.pdf') });
+  });
+
+  it('settles a navigation that stops without a commit after a short grace, in which a refusal still wins', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.onAction.set('click', () => h.navigation.start(tabId, 'https://a.test/204'));
+    const stopped = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(50);
+    h.navigation.stop(tabId); // a 204: no commit, no failure
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await stopped).toMatchObject({ ok: true, result: { navigated: false } });
+    h.page.onAction.set('click', () => h.navigation.start(tabId, 'https://a.test/x.zip'));
+    const download = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(50);
+    h.navigation.stop(tabId); // the download's abort stops the load before the refusal is told
+    await vi.advanceTimersByTimeAsync(100);
+    h.refuse({ tabId, url: 'https://a.test/x.zip', filename: 'x.zip' });
+    expect(await download).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_act', 'https://a.test/x.zip', 'x.zip') });
+  });
+
+  it('answers tabCrashed when the renderer dies during the readiness wait', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.hidden.add('aria-ref=e5');
+    const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    h.contents(tabId).emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    h.page.closedWith = new Error('locator.waitFor: Target page, context or browser has been closed');
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabCrashed('browser_act', tabId) });
+    expect(h.log).toEqual([]);
+  });
+
+  it('waits out a cover raised while the person held the page, then passes the pause point again (Decision Log 64)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    const gate = h.hold();
+    const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    h.cover(tabId, true); // the person opens the palette while they hold the page
+    gate.resolve({ waitedFor: 'human', waitedMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(h.log).toEqual(['pause']); // released, but the sheet holds the action
+    expect(h.waits.at(-1)).toEqual([tabId, 'cover']);
+    h.cover(tabId, false);
+    expect(await answer).toMatchObject({ ok: true, result: { waitedFor: 'human', waitedMs: 2_000 } });
+    expect(h.log).toEqual(['pause', 'pause', 'acting', 'click', 'ended']);
+    expect(h.page.lines().filter((line) => line.startsWith('waitFor visible'))).toHaveLength(2);
   });
 
   it("answers a failed dispatch as actionFailed with Playwright's message, and targetNotFound before any dispatch", async () => {
@@ -451,8 +539,10 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     const h = harness();
     const tabId = h.open();
     h.page.onEvaluate = async () => ({ heading: 'Example', count: 2, at: undefined });
-    const answer = await h.run('browser_eval', { tabId, expression: 'document.title' });
-    expect(answer).toEqual({ ok: true, result: { status: 'ok', tabId, url: 'https://a.test/', title: 'Page A', ms: 0, value: { heading: 'Example', count: 2 }, truncated: false } });
+    const pending = h.run('browser_eval', { tabId, expression: 'document.title' });
+    await vi.advanceTimersByTimeAsync(250); // the window in which a navigation the expression started would begin
+    const answer = await pending;
+    expect(answer).toEqual({ ok: true, result: { status: 'ok', tabId, url: 'https://a.test/', title: 'Page A', ms: 250, value: { heading: 'Example', count: 2 }, truncated: false } });
     expect(h.page.calls).toEqual([{ method: 'evaluate', selector: null, args: ['document.title'] }]);
     expect(h.log).toEqual(['pause', 'acting', 'ended']);
     expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
@@ -462,7 +552,9 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     const h = harness();
     const tabId = h.open();
     h.page.onEvaluate = async () => 'x'.repeat(BROWSER_EVAL_MAX_CHARS + 50);
-    expect(resultOf(await h.run('browser_eval', { tabId, expression: 'document.body.innerText' }))).toMatchObject({ value: 'x'.repeat(BROWSER_EVAL_MAX_CHARS), truncated: true });
+    const pending = h.run('browser_eval', { tabId, expression: 'document.body.innerText' });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(resultOf(await pending)).toMatchObject({ value: 'x'.repeat(BROWSER_EVAL_MAX_CHARS), truncated: true });
   });
 
   it("answers the page's exception as evalFailed", async () => {
@@ -500,14 +592,29 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     expect(await cancelled).toBeNull();
   });
 
-  it('answers downloadRefused for a download the evaluation started', async () => {
+  it('answers downloadRefused for a download the evaluation started, which arrives after evaluate returned', async () => {
     const h = harness();
     const tabId = h.open();
-    h.page.onEvaluate = async () => {
-      h.refuse({ tabId, url: 'https://a.test/x.zip', filename: 'x.zip' });
-      return null;
-    };
-    expect(await h.run('browser_eval', { tabId, expression: "location = '/x.zip'" })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_eval', 'https://a.test/x.zip', 'x.zip') });
+    h.page.onEvaluate = async () => undefined; // `location = …` returns at once
+    const answer = h.run('browser_eval', { tabId, expression: "location = '/x.zip'" });
+    await vi.advanceTimersByTimeAsync(5);
+    h.navigation.start(tabId, 'https://a.test/x.zip'); // the navigation begins just after
+    await vi.advanceTimersByTimeAsync(155);
+    h.refuse({ tabId, url: 'https://a.test/x.zip', filename: 'x.zip' }); // ~160 ms later, the download
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_eval', 'https://a.test/x.zip', 'x.zip') });
+    expect(h.log).toEqual(['pause', 'acting', 'ended']);
+  });
+
+  it('answers tabCrashed when the renderer dies during the evaluation', async () => {
+    const h = harness();
+    const tabId = h.open();
+    let fail!: (error: Error) => void;
+    h.page.onEvaluate = () => new Promise((_, reject) => (fail = reject));
+    const answer = h.run('browser_eval', { tabId, expression: 'while (true) {}' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    h.contents(tabId).emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    fail(new Error('page.evaluate: Target crashed'));
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabCrashed('browser_eval', tabId) });
   });
 });
 

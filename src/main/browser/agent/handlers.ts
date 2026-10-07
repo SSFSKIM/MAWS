@@ -48,7 +48,7 @@ import type { Driver, Drivers } from './driver';
 import { answerOfError, BrowserToolError, firstLine } from './errors';
 import { evalValueOf } from './evaluate';
 import { isTimeout, locate, RefBook } from './locate';
-import { SETTLE_DEADLINE_MS, waitForSettled, type DownloadRefusal } from './navigate';
+import { EVAL_NAVIGATION_START_MS, SETTLE_DEADLINE_MS, waitForSettled, watchCallNavigation, type DownloadRefusal } from './navigate';
 import { takeSnapshot } from './snapshot';
 
 export type { DownloadRefusal } from './navigate';
@@ -114,8 +114,6 @@ export interface BrowserHandlerDeps {
   now?(): number;
 }
 
-const NAVIGATION_GRACE_MS = 2_000; // after an act: how long a navigation it started is waited for
-
 const ok = (result: object): MawsBrowserAnswerResult => ({ ok: true, result: result as Record<string, unknown> });
 
 export class BrowserHandlers {
@@ -133,9 +131,19 @@ export class BrowserHandlers {
       return this.withDialogs(await this.answer(call, ctx));
     } catch (error) {
       if (ctx.signal.aborted) return null;
+      // the page's renderer died during the call: whatever Playwright threw (a closed page, a timeout), that is the answer
+      const crashed = this.crashedDuring(call);
+      if (crashed) return { ok: false, error: BROWSER_TOOL_ERRORS.tabCrashed(call.tool, crashed) };
       const [action, target] = describeCall(call);
       return answerOfError(error, call.tool, action, target);
     }
+  }
+
+  // The tab of a snapshot, act or eval whose page crashed (E4a's `crashed`; requirePage refused one crashed before).
+  private crashedDuring(call: BrowserCall): string | null {
+    if (call.tool !== 'browser_snapshot' && call.tool !== 'browser_act' && call.tool !== 'browser_eval') return null;
+    const entry = reachedEntry(this.deps.store, this.deps.reachable, call.appSessionId, call.args.tabId);
+    return entry?.tab.crashed ? entry.tab.tabId : null;
   }
 
   private answer(call: BrowserCall, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
@@ -302,13 +310,15 @@ export class BrowserHandlers {
 
       control.markActing(entry);
       let navigated: boolean;
+      const navigation = watchCallNavigation(entry, ctx.signal);
       try {
         const before = page.url();
         await dispatch(page, locator, args.action, args.value, ctx.signal);
         // a navigation the action started: its load, briefly; a download it started answers at once
-        await Promise.race([page.waitForLoadState('load', { timeout: NAVIGATION_GRACE_MS, signal: ctx.signal }).catch(() => ctx.signal.throwIfAborted()), downloads.refused]);
+        await navigation.settle(downloads.refused);
         navigated = page.url() !== before;
       } finally {
+        navigation.stop();
         control.actionEnded(entry);
       }
       downloads.throwIfRefused();
@@ -335,16 +345,22 @@ export class BrowserHandlers {
       await this.pause(entry, ctx);
       control.markActing(entry);
       let value: unknown;
+      const navigation = watchCallNavigation(entry, ctx.signal);
       try {
         // a string is evaluated as an expression and a promise awaited; once sent it runs to its end (Decision Log 3), so
         // an abort or a promise that never settles only stops the waiting for it
         const evaluation = page.evaluate(args.expression);
         evaluation.catch(() => {});
-        value = await abortable(evaluation, ctx.signal, { ms: SETTLE_DEADLINE_MS, text: BROWSER_TOOL_ERRORS.evalFailed(`the expression did not settle within ${SETTLE_DEADLINE_MS / 1000} s`) });
-      } catch (error) {
-        if (ctx.signal.aborted || error instanceof BrowserToolError) throw error;
-        throw new BrowserToolError(BROWSER_TOOL_ERRORS.evalFailed(firstLine(error)));
+        try {
+          value = await abortable(evaluation, ctx.signal, { ms: SETTLE_DEADLINE_MS, text: BROWSER_TOOL_ERRORS.evalFailed(`the expression did not settle within ${SETTLE_DEADLINE_MS / 1000} s`) });
+        } catch (error) {
+          if (ctx.signal.aborted || error instanceof BrowserToolError) throw error;
+          throw new BrowserToolError(BROWSER_TOOL_ERRORS.evalFailed(firstLine(error)));
+        }
+        // `location = …` returns at once and its navigation (or download) follows: the start gets a short window
+        await navigation.settle(downloads.refused, { startWindowMs: EVAL_NAVIGATION_START_MS });
       } finally {
+        navigation.stop();
         control.actionEnded(entry);
       }
       downloads.throwIfRefused();

@@ -42,7 +42,8 @@ export class FakePage {
   // what an action does (by method), after it is recorded: navigate, throw, wait
   readonly onAction = new Map<string, (call: FakeCall) => void | Promise<void>>();
   onEvaluate: (expression: string) => Promise<unknown> = async () => undefined;
-  onLoadState: (state: string, options: Options) => Promise<void> = async () => {};
+  // the page went (a crash: the bridge's detach closes Playwright's page): pending and later waits reject with this
+  closedWith: Error | null = null;
   readonly mouse = { wheel: async (deltaX: number, deltaY: number) => void this.record('mouse.wheel', null, [deltaX, deltaY]) };
 
   record(method: string, selector: string | null, args: unknown[]): FakeCall {
@@ -68,8 +69,9 @@ export class FakePage {
     return new FakeLocator(this, selector);
   }
 
-  getByRole(role: string, options: { name?: string; exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this, `role=${role}${options.name === undefined ? '' : ` name=${JSON.stringify(options.name)}`}${options.exact ? ' exact' : ''}`);
+  getByRole(role: string, options: { name?: string; exact?: boolean; includeHidden?: boolean } = {}): FakeLocator {
+    const name = options.name === undefined ? '' : ` name=${JSON.stringify(options.name)}`;
+    return new FakeLocator(this, `role=${role}${name}${options.exact ? ' exact' : ''}${options.includeHidden ? ' hidden' : ''}`);
   }
 
   async ariaSnapshot(options?: Options): Promise<string> {
@@ -84,11 +86,6 @@ export class FakePage {
   evaluate(expression: string): Promise<unknown> {
     this.record('evaluate', null, [expression]);
     return this.onEvaluate(expression);
-  }
-
-  waitForLoadState(state: string, options: Options): Promise<void> {
-    this.record('waitForLoadState', state, [options]);
-    return this.onLoadState(state, options);
   }
 
   asPage(): Page {
@@ -125,7 +122,12 @@ export class FakeLocator {
       const timeout = options.timeout ?? 30_000;
       const started = Date.now();
       const poll = () =>
-        after(10, options.signal, () => (ready() ? resolve() : Date.now() - started >= timeout ? reject(timeoutError('waitFor', timeout)) : poll()), reject);
+        after(
+          10,
+          options.signal,
+          () => (this.page.closedWith ? reject(this.page.closedWith) : ready() ? resolve() : Date.now() - started >= timeout ? reject(timeoutError('waitFor', timeout)) : poll()),
+          reject,
+        );
       poll();
     });
   }

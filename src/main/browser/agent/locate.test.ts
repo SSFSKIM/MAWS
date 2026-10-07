@@ -84,14 +84,14 @@ describe('a locator {css, role?, name?} (css-first, Decision Log 30)', () => {
     expect(h.page.lines()).toEqual(['waitFor attached css=a >> text=b >> first', 'count css=a >> text=b']);
   });
 
-  it('checks one match against a given role and name without an aria snapshot', async () => {
+  it('checks one match against a given role and name without an aria snapshot, hidden elements included', async () => {
     const h = harness();
     h.page.counts.set('css=#save', 1);
-    h.page.counts.set('css=#save & role=button name="Save" exact', 1);
+    h.page.counts.set('css=#save & role=button name="Save" exact hidden', 1); // an anchor hidden at locate time still agrees
     const located = await h.run({ css: '#save', role: 'button', name: 'Save' });
     expect(located.resolved).toEqual({ css: '#save', role: 'button', name: 'Save', matches: 1 });
     expect((located.locator as unknown as { selector: string }).selector).toBe('css=#save');
-    expect(h.page.lines()).not.toContain('ariaSnapshotJSON css=#save');
+    expect(h.page.lines()).toEqual(['waitFor attached css=#save >> first', 'count css=#save', 'count css=#save & role=button name="Save" exact hidden']);
   });
 
   it('answers targetNotFound naming what css matched when its role or name disagrees, and takes no fallback', async () => {
@@ -103,6 +103,23 @@ describe('a locator {css, role?, name?} (css-first, Decision Log 30)', () => {
     expect(answer).toBe('browser_act: {css: "#save"} matches one element, button "Cancel", not button "Save"');
     expect(answer).toBe(BROWSER_TOOL_ERRORS.targetNotFound('browser_act', { css: '#save', role: 'button', name: 'Save' }, { role: 'button', name: 'Cancel' }));
     expect(h.page.lines()).not.toContain('count role=button name="Save" exact');
+  });
+
+  it("restores the model's refs with a whole-page ai snapshot right after reading an element's aria node", async () => {
+    const h = harness();
+    h.page.counts.set('css=#save', 1);
+    h.page.json.set('css=#save', [{ role: 'button', name: 'Cancel' }]);
+    h.page.snapshots.set('page', SNAPSHOT); // the same document: the same refs come back
+    await h.refusal(h.run({ css: '#save', role: 'button', name: 'Save' }));
+    const lines = h.page.lines();
+    expect(lines.slice(lines.indexOf('ariaSnapshotJSON css=#save'))).toEqual(['ariaSnapshotJSON css=#save', 'ariaSnapshot page']);
+    expect(h.page.calls.at(-1)!.args).toEqual([{ mode: 'ai', signal: h.controller.signal }]);
+    expect(h.refs.elementOf('e5')).toEqual({ role: 'button', name: 'Submit' }); // recorded as any snapshot is
+    h.page.calls.length = 0;
+    h.page.json.set('css=#n', [{ role: 'textbox', name: 'Name' }]);
+    h.page.counts.set('css=#n', 1);
+    await h.run({ css: '#n', name: 'Name' }); // the name-only check reads the node too
+    expect(h.page.lines().slice(-2)).toEqual(['ariaSnapshotJSON css=#n', 'ariaSnapshot page']);
   });
 
   it('names a generic element, which Playwright leaves out of its aria tree, as generic', async () => {
@@ -136,12 +153,14 @@ describe('a locator {css, role?, name?} (css-first, Decision Log 30)', () => {
     expect((await h.run({ css: '.x', role: 'link' })).resolved).toEqual({ css: '.x', role: 'link', matches: 1 });
   });
 
-  it('uses the first of several when nothing narrows them', async () => {
+  it('uses the first of several when nothing narrows them; a name without a role narrows nothing and is not echoed', async () => {
     const h = harness();
     h.page.counts.set('css=li', 5);
     const located = await h.run({ css: 'li' });
     expect(located.resolved).toEqual({ css: 'li', matches: 5 });
     expect((located.locator as unknown as { selector: string }).selector).toBe('css=li >> first');
+    expect((await h.run({ css: 'li', name: 'Third' })).resolved).toEqual({ css: 'li', matches: 5 });
+    expect(h.page.lines()).not.toContain('ariaSnapshotJSON css=li >> first');
   });
 
   it('falls back to role and name when css matches none and they name exactly one element (the element moved)', async () => {
