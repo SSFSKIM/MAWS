@@ -1,0 +1,9 @@
+head b7ff64e 2026-10-07T20:03:06Z load { 15.88 14.91 10.54 }
+typecheck exit 0 43s
+lint exit 0 27s
+units-renderer-shared exit 0 64s
+  units-renderer-shared:  Test Files  393 passed | 1 skipped (394)
+  units-renderer-shared:       Tests  5633 passed | 1 skipped (5634)
+units-touched-host-main exit 0 19s
+  units-touched-host-main:  Test Files  40 passed (40)
+  units-touched-host-main:       Tests  867 passed (867)
