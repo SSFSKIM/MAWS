@@ -633,6 +633,16 @@ export const useViewer = createViewerStore(ipc);
 export const unsavedPaths = (entries: ReadonlyMap<string, ViewerEntry>): string[] =>
   [...new Set([...entries.values()].filter((entry) => entry.dirty).map((entry) => entry.path))].sort();
 
+// E5 (M5): every dirty tab as a Save all that could not run answers it (E11 W-D: its fallback), each path once with its
+// bar's reason: a tab in the merge view its conflict, any other the unsaved mark.
+export const unsavedFailures = (entries: ReadonlyMap<string, ViewerEntry>): UnsavedFailure[] => {
+  const byPath = new Map<string, string>();
+  for (const entry of entries.values()) {
+    if (entry.dirty && byPath.get(entry.path) !== EDITOR_COPY.conflictOnSave) byPath.set(entry.path, entry.theirs?.view === 'merge' ? EDITOR_COPY.conflictOnSave : EDITOR_COPY.unsaved);
+  }
+  return [...byPath].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([path, message]) => ({ path, message }));
+};
+
 // E5 (M5): the window's whole dirty set to main for the quit guard (`layout.unsavedFiles`), sent whenever it changes
 // (a tab turning dirty or clean, a dirty tab's entry gone) and never otherwise; synchronously from the store's write, so
 // a save's push leaves before anything the caller sends after it. Main starts each page from an empty set, and a
