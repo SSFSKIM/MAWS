@@ -44,4 +44,18 @@ describe('SessionStatusTracker.applyReload', () => {
     expect(status.pluginErrors).toEqual([{ plugin: 'broken', type: 'manifest', message: 'bad json', path: '/p/broken' }]);
     expect(status.pluginWarnings).toEqual([{ plugin: 'old', type: 'shadowed', message: 'shadowed by user' }]);
   });
+
+  // W-D review m1: the answer carries no skills, and init's skills are among the commands (seq 9 against seq 4), so a
+  // skill the reload removed (seq 54 drops e8-probe's two commands) leaves the catalogue's skills too.
+  it('keeps only the init’s skills still among the reload answer’s commands', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe(fixtureRow(9), '2026-10-06T02:52:00.000Z');
+    const initSkills = fixtureRow(9).skills as string[];
+    expect(tracker.catalog().skills).toEqual(initSkills);
+    const reload = (seq: number) => tracker.applyReload(ReloadPluginsResponseSchema.parse((fixtureRow(seq).response as { response: unknown }).response));
+    reload(31); // the plugin still enabled: every skill stays
+    expect(tracker.catalog().skills).toEqual(initSkills);
+    reload(54);
+    expect(tracker.catalog().skills).toEqual(initSkills.filter((skill) => skill !== 'e8-probe:e8-hello'));
+  });
 });
