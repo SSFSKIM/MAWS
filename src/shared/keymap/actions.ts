@@ -66,6 +66,12 @@ export const ACTIONS = {
   // because macOS registers ⌘S in the menu and the page never sees it (as ⌘W); it saves the focused pane's file tab.
   'file.save':               { title: 'Save file',                chord: 'Cmd+S',        sink: 'menu', menu: 'file', scope: 'app' },
   // E5 end
+  // E11 start (W-C; the comment gutter's keyboard and screen-reader path): opens the comment composer for the cursor's
+  // line of the focused pane's file tab, as the gutter's mark does for its line. A menu action, so it reaches the
+  // editor's cursor from the palette, File ▸ Comment on this line and a chord bound in Settings ▸ Keyboard alike;
+  // unbound by default
+  'file.commentLine':        { title: 'Comment on this line',     chord: null,           sink: 'menu', menu: 'file', scope: 'app' },
+  // E11 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

@@ -55,6 +55,20 @@ export const prLineAnchor = (input: { prUrl: string; prNumber: number; path: str
   };
 };
 
+// E11 (W-C): each mounted code view's comment on its cursor's line, by tab, for the "Comment on this line" action
+// (`file.commentLine`): the gutter's keyboard and screen-reader twin. The latest view of a tab wins; a disposer
+// removes only its own.
+const cursorComments = new Map<string, () => void>();
+
+export function registerCursorComment(tabId: string, open: () => void): () => void {
+  cursorComments.set(tabId, open);
+  return () => {
+    if (cursorComments.get(tabId) === open) cursorComments.delete(tabId);
+  };
+}
+
+export const commentOnCursorLine = (tabId: string): void => cursorComments.get(tabId)?.();
+
 // Registrations, the latest last; each its own record, so a disposer removes its own even when one opener is
 // registered twice.
 const registrations: { open: CommentComposerOpener }[] = [];
