@@ -214,7 +214,7 @@ describe('the view manager: lastShownAt and the cap (Design §2)', () => {
     const { sender } = h.win();
     const x = h.loaded('https://x.test/');
     const y = h.loaded('https://y.test/');
-    for (let i = 2; i < BROWSER_LOADED_TABS_MAX; i++) h.store.update(h.loaded(`https://${i}.test/`).tabId, { control: 'agent' }); // ineligible
+    for (let i = 2; i < BROWSER_LOADED_TABS_MAX; i++) h.store.setControl(h.loaded(`https://${i}.test/`).tabId, 'agent'); // ineligible
     for (const { tab } of h.store.all()) h.store.update(tab.tabId, { loading: false });
     h.tick(1000);
     h.place(sender, x.tabId, 'px', R, true); // x claimed first

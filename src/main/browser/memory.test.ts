@@ -113,7 +113,7 @@ describe('MemorySampler: the soft cap (Design §2, Decision Log 6)', () => {
     const second = h.loaded(6);
     h.store.update(placed.tab.tabId, { placedIn: { paneId: 'p', surface: 'panel' } });
     h.store.update(busy.tab.tabId, { loading: true });
-    h.store.update(driven.tab.tabId, { control: 'agent' });
+    h.store.setControl(driven.tab.tabId, 'agent');
     h.store.update(downloading.tab.tabId, { download: { name: 'f', state: 'progressing', received: 1, total: 2, path: null } });
     for (const entry of [placed, busy, driven, downloading, first, second]) h.workingSets.set(h.pidOf(entry), 0.5 * GIB);
     h.sampler.sample(); // 3 GiB: two must go, and only two may

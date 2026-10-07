@@ -221,7 +221,7 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     for (const t of tabs) h.store.update(t.tabId, { loading: false });
     h.store.update(tabs[0]!.tabId, { lastShownAt: '2026-10-06T13:00:00.000Z' }); // shown recently: not the victim
     h.store.update(tabs[2]!.tabId, { placedIn: { paneId: 'p', surface: 'panel' } }); // placed: protected
-    h.store.update(tabs[3]!.tabId, { control: 'agent' }); // the agent's: protected
+    h.store.setControl(tabs[3]!.tabId, 'agent'); // the agent's: protected
     h.store.update(tabs[4]!.tabId, { download: { name: 'f', state: 'progressing', received: 1, total: 2, path: null } }); // downloading
     const added = open(h, 'https://new.test/', { appSessionId: B }).tab;
     expect(added.suspended).toBe(false);

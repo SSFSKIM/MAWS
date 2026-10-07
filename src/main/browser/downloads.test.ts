@@ -91,13 +91,13 @@ describe('Downloads (E4a Design §8; A-31: the human\'s, through a save dialog)'
 
   it('refuses a download while the agent holds the page: cancelled, the refusal and the chrome notice sent', () => {
     const h = harness();
-    h.store.update(h.entry.tab.tabId, { control: 'agent' });
+    h.store.setControl(h.entry.tab.tabId, 'agent');
     const item = new FakeItem();
     h.start(item);
     expect(item.cancel).toHaveBeenCalled();
     expect(item.setSaveDialogOptions).not.toHaveBeenCalled();
     expect(h.entry.tab.download).toBeNull();
-    expect(h.emitted.filter((e) => e.name !== 'browser.tabs.changed')).toEqual([
+    expect(h.emitted.filter((e) => e.name !== 'browser.tabs.changed' && e.name !== 'browser.control.changed')).toEqual([
       { name: 'browser.download.refused', payload: { tabId: h.entry.tab.tabId, url: 'https://a.test/file.bin', filename: 'file.bin' } },
       { name: 'browser.notice', payload: { appSessionId: A, tabId: h.entry.tab.tabId, kind: 'downloadRefusedAgent' } },
     ]);

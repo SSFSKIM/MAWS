@@ -41,6 +41,17 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   return { store, views, navigator, downloads, history, handlers, call };
 }
 
+// What a handler threw, as the router's CommandFailure (undefined when it did not throw one).
+function failure(fn: () => unknown): InstanceType<typeof CommandFailure> | undefined {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof CommandFailure) return error;
+    throw error;
+  }
+  return undefined;
+}
+
 describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
   it('registers the tab store\'s commands and the profile list', () => {
     expect([...setup().handlers.keys()]).toEqual([
@@ -58,13 +69,8 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     store.setControl(tab.tabId, 'human');
     expect(call('browser.control.handBack', { tabId: tab.tabId })).toBeUndefined();
     expect(store.require(tab.tabId).tab.control).toBe('idle');
-    let thrown: unknown;
-    try {
-      call('browser.control.handBack', { tabId: 'b_ffffffffffff' });
-    } catch (error) {
-      thrown = error;
-    }
-    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    const thrown = failure(() => call('browser.control.handBack', { tabId: 'b_ffffffffffff' }));
+    expect(thrown?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
   it('hands navigate, zoom, find, dismiss and devtools to the navigator for a known tab', () => {
@@ -111,14 +117,9 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       ['browser.tabs.devtools', { tabId }],
     ];
     for (const [name, input] of inputs) {
-      let thrown: unknown;
-      try {
-        handlers.get(name)!(input, { sender: {} });
-      } catch (error) {
-        thrown = error;
-      }
+      const thrown = failure(() => handlers.get(name)!(input, { sender: {} }));
       expect(thrown, name).toBeInstanceOf(CommandFailure);
-      expect((thrown as InstanceType<typeof CommandFailure>).error, name).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+      expect(thrown?.error, name).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
     }
   });
 
@@ -149,13 +150,8 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
 
   it('browser.view.place for an unknown tab answers invalid_input', () => {
     const { call } = setup((store) => new ViewManager({ store, emit: () => {}, windowOf: () => ({}) as never, focusEmulation: 'off' }));
-    let thrown: unknown;
-    try {
-      call('browser.view.place', { tabId: 'b_ffffffffffff', paneId: 'p', surface: 'panel', rect: null, claim: false });
-    } catch (error) {
-      thrown = error;
-    }
-    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    const thrown = failure(() => call('browser.view.place', { tabId: 'b_ffffffffffff', paneId: 'p', surface: 'panel', rect: null, claim: false }));
+    expect(thrown?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
   it('a cover that fails is logged, never an unhandled rejection', async () => {
@@ -182,14 +178,9 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
 
   it('answers an unknown tab as invalid_input ("unknown browser tab")', () => {
     const { call } = setup();
-    let thrown: unknown;
-    try {
-      call('browser.tabs.close', { tabId: 'b_ffffffffffff' });
-    } catch (error) {
-      thrown = error;
-    }
+    const thrown = failure(() => call('browser.tabs.close', { tabId: 'b_ffffffffffff' }));
     expect(thrown).toBeInstanceOf(CommandFailure);
-    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    expect(thrown?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
   it('lists the imported profiles by directory and name', () => {

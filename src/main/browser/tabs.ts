@@ -78,7 +78,8 @@ export interface PendingNavigation {
   crashed: BrowserTab['crashed'];
 }
 
-export type TabPatch = Partial<Omit<BrowserTab, 'tabId' | 'appSessionId'>>;
+// Who drives the page is not patchable: `setControl` is its one transition, so `browser.control.changed` always follows.
+export type TabPatch = Partial<Omit<BrowserTab, 'tabId' | 'appSessionId' | 'control' | 'controlSince'>>;
 export type BrowserEmit = <N extends EventName>(name: N, payload: EventPayload<N>) => unknown;
 
 export class UnknownTabError extends Error {
@@ -355,16 +356,13 @@ export class TabStore {
   // every other transition through here.
   setControl(tabId: string, control: BrowserControl): void {
     const controlSince = new Date(this.now()).toISOString();
-    this.update(tabId, { control, controlSince });
+    this.patch(this.require(tabId), { control, controlSince });
     this.deps.emit('browser.control.changed', { tabId, control, controlSince });
   }
 
   // The one way a tab changes (Design §2).
   update(tabId: string, patch: TabPatch): BrowserTab {
-    const entry = this.require(tabId);
-    entry.tab = { ...entry.tab, ...patch };
-    this.changed(entry);
-    return entry.tab;
+    return this.patch(this.require(tabId), patch);
   }
 
   // ---- the load-error lifecycle (Design §5, Decision Log 23) -----------------------------------------------------------
@@ -524,6 +522,12 @@ export class TabStore {
     if (!this.fileBroken) return;
     this.fileBroken = false;
     this.deps.emit('browser.notice', { appSessionId, tabId: null, kind: 'tabsFileBroken' });
+  }
+
+  private patch(entry: TabEntry, patch: Partial<BrowserTab>): BrowserTab {
+    entry.tab = { ...entry.tab, ...patch };
+    this.changed(entry);
+    return entry.tab;
   }
 
   private changed(entry: TabEntry): void {
