@@ -214,3 +214,194 @@ Wave sizes: W-A 13, W-B 16, W-C 15 and W-D 15 (+A-28) sit in the 10-16 band. W-E
   ruled 178, but several are one change each (58/74/98/123 one warning fix; 83/118 one shared scene; 72/97/139 one load approach),
   about 15 units plus four non-row items. No other E4 row was added to W-E; E4 test-only rows (145, 147, 149, 162, 176, 177, 181) and
   bounded but rare main-process browser defects (166, 169, 170, 175) are deferred to P2 to keep W-B and W-E carryable.
+
+== Dispositions after M1 (Task 1.6, 2026-10-07; tracker at e8434055) ==
+One line per row of "== Rows ==" above (the tracker at 1582e97c): its disposition, the commit, and for a kept row its line now and its owner.
+Format: line at 1582e97c | owner (tracker column) | handle | disposition | detail
+
+24 | C6 | closed local-command turn cannot take a delayed turn.ended | re-deferred | now line 25; Owner: P2 (the transcript); owner line at 97f6be15
+25 | C9 | OSC 8 links plain after an exact reattach | re-deferred | now line 26; Owner: P2 (the terminal; revisit when the addon carries links); owner line at 97f6be15
+26 | C4 | intermediate rebased C4 commits do not typecheck | dropped | the header's "Deferred with a reason" line keeps it (Design §2); removed at 2e8a1906
+27 | C6 | dev-only hot update re-instantiates the transcript store | re-deferred | now line 27; Owner: P2; owner line at 97f6be15
+28 | C6 | pending prompt hidden by a rewind opens in place | re-deferred | now line 28; Owner: P2; owner line at 97f6be15
+29 | C8c (filed under C12 until C12's landing) | highlight.js 11.11.2 override (C8c block) | re-deferred | now line 29; Owner: P2 (the next bump of `@git-diff-view` or `lowlight`; rerun the fresh resolve); c296bd11: with the block removed, a lockfile-only install over the committed lockfile keeps one highlight.js (11.11.2, carried), with no lockfile two (11.12.0 for @git-diff-view 0.1.7, 11.11.2 for lowlight 3.3.0)
+30 | C4 · C7 | two cost cases (SIGKILL cost-state, fork start) | re-deferred | now line 30; Owner: P2; owner line at 97f6be15
+31 | C3 | resume stall cause unexplained | open until 7.3 | now line 31; owner E11; removed at 7.3 on its evidence or kept with the log
+32 | C12 | busy-quit hang in e2e/c12-quit.spec.ts | open until 5.2 | now line 32; owner E11; removed at 5.2 on its evidence or kept with the log
+33 | C10 · C3 | catalogue key's model environment approximation | re-deferred | now line 33; Owner: the owner (Q1, at E11's sitting, step I); owner line at 97f6be15
+34 | C4 | git watcher blind spots (nested clone, submodule HEAD, reftable) | re-deferred | now line 34; Owner: P2; owner line at 97f6be15
+35 | C7 | c7 keyboard failures' cause inferred | open until 5.2 | now line 35; owner E11; removed at 5.2 on its evidence or kept with the log
+36 | C3 | SessionStart hook bound reads four sources only | re-deferred | now line 36; Owner: P2; owner line at 97f6be15
+37 | C10 | separate-git-dir linked worktree outside its checkout | re-deferred | now line 37; Owner: the owner (Q3, at E11's sitting, step I); owner line at 97f6be15
+38 | C4 | sibling-worktree fold confirms the main checkout by content | re-deferred | now line 38; Owner: the owner (Q3, at E11's sitting, step I); owner line at 97f6be15
+39 | C6 | hook item kept though a retraction names its hookId | fixed | W-C 256ce327
+40 | C4 | three heuristics in the disk hook mapping | re-deferred | now line 39; Owner: P2; owner line at 97f6be15
+41 | C6 · C3 · C4 | Edit prompt on a steer a UserPromptSubmit hook rejected | re-deferred | now line 40; Owner: P2; owner line at 97f6be15
+42 | C5 | project reveal waits in module state | removed | annotated closed at f0c59469; removed at 00da9fe3
+43 | C12 | renderer-only libraries as production dependencies | removed | annotated closed at 0ad7d184; removed at 00da9fe3
+44 | R2 · C3 | plugin prompt fill inside the 500 ms before the 4 s refusal | re-deferred | now line 41; Owner: P2; owner line at 97f6be15
+45 | R3 · C7 · C3 | composer session.ui.promptEdit unwired | re-deferred | now line 42; Owner: P2; owner line at 97f6be15
+46 | Test harness | FORCE_COLOR colours the relay-health test port | removed | annotated closed at f5c3cf90; removed at 00da9fe3
+47 | M1 · C11 | near-limit banner inert settings data | re-deferred | now line 43; Owner: P2; owner line at 97f6be15
+48 | M1 · C6 | native Markdown strips SGR styling | re-deferred | now line 44; Owner: P2; owner line at 97f6be15
+49 | Test harness · live | live.ts config home falls back to ~/.claude | removed | annotated closed at f4fd9157; removed at 00da9fe3
+50 | C4 · index | index keeps session rows whose transcript is gone | removed | annotated closed at c768507b; removed at 00da9fe3
+52 | C3 · FX3 | non-surface replay controls match by subtype | removed | annotated closed at 8661b857; removed at 00da9fe3
+53 | W14 | shell fg rollback clears input emacs-style | re-deferred | now line 45; Owner: P2; owner line at 97f6be15
+54 | C3 · C4 | system/api_error unmapped on both paths | fixed | W-A be7423b3
+55 | E9 | Swift voice helper has no regression tests | re-deferred | now line 46; Owner: P2 (voice); owner line at 97f6be15
+56 | E9 | Settings > Voice cannot mark every on-device locale | re-deferred | now line 47; Owner: P2 (voice); owner line at 97f6be15
+57 | E9 | failed voice.openPrivacySettings only logged | fixed | W-D 4e59e22c; residue: new row 'the composer's dictation notice only logs the failure' at 81159033 (owner P2, E9 voice)
+58 | test support (found by E9) | engine-pin MODULE_TYPELESS_PACKAGE_JSON warning (E9's) | fixed | W-E 249f2799; residue (with 74, 98, 123): new row 'test:probes prints MODULE_TYPELESS_PACKAGE_JSON for initialize.ts' at 81159033 (owner P2)
+59 | E8 · widgets | /plugins Available's dead `installed` note | fixed | W-D c3c04c98
+60 | E8 · reload | update expectation never reads `reflected` | fixed | W-A 4a0f0405
+61 | E8 · runner | runner.test.ts real /bin/sh children under load | fixed | W-E 8372ccff
+62 | E8 · runner | kill path under Electron's utility process untested | re-deferred | now line 48; Owner: P2; owner line at 97f6be15
+63 | E8 · catalogue | applyReload ignores the answer's commands and agents | fixed | W-D fccbdab0
+64 | E5 | dirty file tab pruned silently | fixed | W-D a64a080b
+65 | E5 | change load does not say why disk cannot become `theirs` | fixed | W-D e60365df
+66 | E5 | stale `theirs` when disk returns to the baseline | re-deferred | now line 49; Owner: P2; owner line at 97f6be15
+67 | E5 | comment gutter has no keyboard or screen-reader path | fixed | W-C c0dbbf10
+68 | E5 | merge bar's path shrinks to nothing at ~600 px | fixed | W-D 2ce075b6
+69 | E5 | quit guard keeps a crashed window's unsaved set | fixed | W-B 12d7f4a4
+70 | E5 | "Quit when idle" lags up to 2 s | fixed | W-B fe066513
+71 | E5 | saveAll fallback answers merge tabs "Unsaved changes" | fixed | W-D 1d6498e4
+72 | C8c · E5 | viewer.test.tsx Load more cases ~4.5 s of 5 s | fixed | W-E 48256cf3
+73 | E1 | probes opt out of sdkMcpServers by hand | fixed | W-E cf4c7587
+74 | E1 | FileHandle-GC and module-type warnings (E1's) | fixed | W-E f8af4190
+75 | E1 | layout.pickFiles reads bytes the Question sheet drops | fixed | W-B f6d60ec9
+76 | E1 · C8a | addTool switches session before writing the tab | fixed | W-C 7d929c33
+77 | E1 | ask row carries no cancel reason | removed | annotated closed at 9d1c6ad3; removed at 00da9fe3
+78 | E1 | session.ts ~1,200 lines with the maws wiring | fixed | W-A ed6b7cfb
+79 | E1 · C6 | blocking ask's capsule not followed into view | fixed | W-C bfa1ba39
+80 | E1 · C5 | "needs you" toast covers the Question sheet's Submit | fixed | W-C aa65f774
+81 | E1 | stream keeps request events of never-listed items | fixed | W-A 353d785a
+82 | E1 | live evidence lines state unasserted facts | fixed | W-E 01ff8551
+83 | E1 | replay and live maws-tools helpers duplicated | fixed | W-E f3f8c15f
+84 | E2 · E1 | artifacts live test copies E1's harness | fixed | W-E 5f57e2c2
+85 | C4 · index | released index migrations unpinned | fixed | W-E 60bb5417
+86 | E6 · C4 | diff prefix config reshapes git.diff headers | fixed | W-B 5e32df17
+87 | E6 | scm mutation chain keyed by realpath | re-deferred | now line 50; Owner: P2; owner line at 97f6be15
+88 | E6 | small per-call costs in scm.* | fixed | W-B f51db88b
+89 | E6 · C8c | scm store repeats review-store's held-diff machinery | re-deferred | now line 51; Owner: P2; owner line at 97f6be15
+90 | E6 | PushState derives its session from the active tab | fixed | W-D 2d7863bf
+91 | E6 | E6 cosmetic leftovers | fixed | W-D 5f86bd17
+92 | E6 | two short windows (untracked flash, 250 ms bound, unborn push) | fixed | W-B af3c8a19
+93 | E6 | PR-state answer naming another branch not re-asked | fixed | W-B 87c5330c
+94 | E3 · C4 | first launch after migration 4 re-summarises for ~10 s | fixed | W-B d2ac6741; residue: new row 'interleaved host events flush the warm-up queue synchronously' at 81159033 (owner P2)
+95 | E3 | quit before finishBinding leaves a side thread unrenamed | fixed | W-B b67ada8b
+96 | E3 · C6 | snapshot suite writes a missing baseline silently | fixed | W-E efd2ead3
+97 | E3 (seen) · E5 · C11 | viewer Load more and pause-take-over.pty fail under load | re-deferred, narrowed | now line 52; (owner P2, the load debt wave); narrowed at 81774338
+98 | E3 (seen) | engine-pin and FileHandle-GC warnings (E3's) | fixed | W-E f8af4190
+99 | E3 · E1 · C8 | shownSession() copies | fixed | W-C d8954841
+100 | E3 · C1 | typecheck runs --composite false | fixed | W-E ee8bdf23
+101 | E3 | side-question `retried` set renderer-only | fixed | W-A 4840b74b
+102 | E3 | ThreadView with openedBy btw untested | fixed | W-C 3bfed8e0
+103 | E3 · E2 | comment composer's screenshot is a chip, not a thumbnail | re-deferred | now line 53; Owner: the owner (Q4, at E11's sitting, step I); owner line at 97f6be15
+104 | E3 (seen) · E5 | e2e:code rewrites E5's shots | fixed | W-E 2d418795
+105 | E7 | isPeerPrompt requires text-only blocks | fixed | W-A 5e407270
+106 | E7 | non-isMeta peer record unrecorded | open until 7.3 | now line 54; owner E11; removed at 7.3 on its evidence or kept with the log
+107 | E7 | per-turn memo key misses cross-turn knowledge | re-deferred | now line 55; Owner: P2; owner line at 97f6be15
+108 | E7 | paraphrased peer reply reads notSent | fixed | W-D d9dabc2d
+109 | E7 | teammate `joined` extra frozen | fixed | W-D ffb93373
+110 | E7 | scheduled rows mix English and the app locale | re-deferred | now line 56; Owner: the owner (Q2, at E11's sitting, step I); owner line at 97f6be15
+111 | E7 | mid-session EnterWorktree root untracked | re-deferred | now line 57; Owner: P2; owner line at 97f6be15
+112 | E7 | E7 housekeeping | fixed | W-D a8d784e6
+113 | E2 · E1 | maws rows read "Registering"/"Delivering" for good | fixed | W-C 32ae5a35
+114 | E2 | deliverable frame can reach a TURN relay over TCP | re-deferred | now line 58; Owner: P2 (re-checked on each Electron bump); owner line at 97f6be15
+115 | E2 · E3 · E6 | control-character strip for anchors three times | fixed | W-C 2e709823; residue: new row 'describe.ts keeps its own strip-and-fit helper' at 81159033 (owner P2)
+116 | E2 | web link in delivered HTML shows Chromium's blocked page | re-deferred | now line 59; Owner: P2; owner line at 97f6be15
+117 | E2 · C3 | quit after a replay writes replay_mismatch | fixed | W-A 2942d828
+118 | E2 · E1 | third copy of the replay scene | fixed | W-E 2cceab80
+119 | E2 | ARTIFACT_SCREENSHOT_MAX_BYTES is 4 MiB | fixed | W-B 37a098c4
+120 | E10 | lock stale-break race | fixed | W-A bb50d1bf; residue: W-A's review fix fbf659e1 added the lock break's three-candidate window row (owner P2)
+121 | E10 | refused connection stays open with no deadline | fixed | W-A 3edaf660
+122 | E10 | json-wire guard misses command inputs and outputs | fixed | W-E f01697fc
+123 | E10 | engine-pin warning nine times (E10's) | fixed | W-E 249f2799
+124 | E10 | 14 will-quit listeners | fixed | W-B 7a2dd309
+125 | E10 | host.* commands lack deadline shapes | fixed | W-A 6ddcb4aa
+126 | E10 | setup intent's first message lost on a quit | fixed | W-B 3505735f; residue: new row 'first message still lost while initializing, and for a fork with a rewind point' at 81159033 (owner P2)
+127 | E10 | arming without a holder pid logs every retry | fixed | W-B 41ae1aa0
+128 | E10 | keep-quit close counts in-flight lines delivered | fixed | W-A c67eab3c; re-tracked narrowed (Decision Log 28; W-B's quit hold 2a53449a): new row 'the keep-quit drain delivers after the consuming services stopped' at 81159033 (owner P2)
+129 | E10 | Restart now `acted` flag strands focus | fixed | W-D ddeb9d6c
+130 | E10 | Restart now written twice | fixed | W-D 938b689d
+131 | E10 | PaneTool and LogTool infer `restored` | fixed | W-D 2f34e179
+132 | E10 | Diagnostics dot centred on a wrapped status | fixed | W-C a24e99c9
+133 | E10 | drill-in tab keeps Working after a host death | fixed | W-C 79ea825e
+134 | E10 | host.log expected traffic as errors | fixed | W-A 3c855807
+135 | E10 | attention toast outlives its item [A-47 widening] | fixed | W-C e7c8cbbb
+136 | E10 | crash divider reads "You stopped after" | fixed | W-C e5c1512f; residue: new row 'a session transcript after a host loss rehydrates from disk as completed' at 81159033 (owner P2, C4 disk path)
+137 | E10 | e2e:supervisor case (b) glyph after the relaunch | fixed | W-E 834d8ee8
+138 | E10 | supervisor-packaged repeats the process helpers | fixed | W-E d8bbb0db
+139 | E10 (seen) | review.test.tsx "same hunks" under load | fixed | W-E b8cf4d58
+140 | E4a | memory soft cap counts unsuspendable tabs | re-deferred | now line 60; Owner: the owner (step A of E11's sitting, E4a's caps); owner line at 97f6be15
+141 | E4a | activation gates count taken chords and Esc | fixed | W-B 7d566f1e
+142 | E4a | history LIKE folds ASCII case only | re-deferred | now line 61; Owner: P2; owner line at 97f6be15
+143 | E4a | modifier-click drops referrer and postBody | fixed | W-B 20529458
+144 | E4a | untitled-page check misses punycode, elision, ftp. | re-deferred | now line 62; Owner: P2; owner line at 97f6be15
+145 | E4a | "Open in external browser" has no e2e seam | re-deferred | now line 63; Owner: P2; owner line at 97f6be15
+146 | E4a | denied-permissions banner has one Dismiss | re-deferred | now line 64; Owner: the owner (Q6, step B of E11's sitting, the browser chrome); owner line at 97f6be15
+147 | E4a (seen) | load-70 timing: sidecars, viewer, pause-take-over | re-deferred, narrowed | now line 65; (owner P2, the load debt wave); narrowed at 81774338
+148 | E4a | safeDialogs not set on adopted pop-ups | re-deferred | now line 66; Owner: P2 (re-checked on each Electron bump); owner line at 97f6be15
+149 | E2 (seen by E4a) | deliverables case 3 pick hover flake | re-deferred | now line 67; Owner: P2; owner line at 97f6be15
+150 | E4d | three accessible-name divergences from Playwright | re-deferred | now line 68; Owner: P2; owner line at 97f6be15
+151 | E4d | tag-step path crosses an open shadow host | re-deferred | now line 69; Owner: P2; owner line at 97f6be15
+152 | E4d | custom element names can reach the 2,000 cap | re-deferred | now line 70; Owner: P2; owner line at 97f6be15
+153 | E4d | comment shield cannot cover top-layer content | re-deferred | now line 71; Owner: P2; owner line at 97f6be15
+154 | E4d | side thread's tab comment opens in the parent's browser | re-deferred | now line 72; Owner: P2; owner line at 97f6be15
+155 | E4d | web-component button labels as `button` | re-deferred | now line 73; Owner: P2; owner line at 97f6be15
+156 | E4d | cannotOpen/openedElsewhere toasts freeze the pane | re-deferred | now line 74; Owner: P2; owner line at 97f6be15
+157 | E4d (seen) | context-menu DIP and capturePage at zoom undriven | open until 7.3 | now line 75; owner E11; removed at 7.3 on its evidence or kept with the log
+158 | E4d → E3 | stale User.tsx:142-143 comment | fixed | W-C 3f9e5ec7
+159 | E4b | newer profiles.json treated as broken; sweep deletes imports | fixed | W-B a121285d
+160 | E4b | Remove imported profile answers success on failed steps | re-deferred | now line 76; Owner: P2; owner line at 97f6be15
+161 | E4b | import done with no window writes no browser.profile | re-deferred | now line 77; Owner: P2; owner line at 97f6be15
+162 | C10 (seen by E4b) | expandRow races the sidebar's restored state | re-deferred | now line 78; Owner: P2; owner line at 97f6be15
+163 | E4c | re-verify the -run-dialog wrap on Electron upgrades | re-deferred | now line 79; Owner: P2 (each Electron bump); owner line at 97f6be15
+164 | E4c | late download refusal answered as success | re-deferred | now line 80; Owner: P2; owner line at 97f6be15
+165 | E4c | browser_eval fixed 250 ms start window | re-deferred | now line 81; Owner: P2; owner line at 97f6be15
+166 | E4c | act dispatches without re-checking the cover | re-deferred | now line 82; Owner: P2; owner line at 97f6be15
+167 | E4c | spike watchdog kills by stored PID | re-deferred | now line 83; Owner: P2; owner line at 97f6be15
+168 | E4c | host reads the screenshot before the cap; orphan file | fixed | W-A 2d59209f
+169 | E4c | covered capture in DIPs at zoom | re-deferred | now line 84; Owner: P2; owner line at 97f6be15
+170 | E4c | JPEG retake may take a second step budget | re-deferred | now line 85; Owner: P2; owner line at 97f6be15
+171 | E4c | unlessCovered/withoutCover duplicate scaffolding | re-deferred | now line 86; Owner: P2; owner line at 97f6be15
+172 | E4c | covered screenshot route connects an unused driver | re-deferred | now line 87; Owner: P2; owner line at 97f6be15
+173 | E4c | textAfterJson repeats firstJsonBlock's test | fixed | W-C a230df7c
+174 | E4c | browser row ring repeats the cells' CSS rule | re-deferred | now line 88; Owner: P2; owner line at 97f6be15
+175 | E4c → E4d | comment crop can include the agent cursor | re-deferred | now line 89; Owner: P2; owner line at 97f6be15
+176 | E4c (seen) | chrome.test, viewer, TranscriptSlot load flakes | re-deferred, narrowed | now line 90; (owner P2, the load debt wave); narrowed at 81774338
+177 | E4c | browser-tools-scene copies browserScene | re-deferred | now line 91; Owner: P2; owner line at 97f6be15
+178 | E4c → E11 (W-E) | CLAUDE_* environment leaks into live runs | fixed | W-E a350a8c9; residue: new row 'pass-2 probes' SCRUB list and harness.mjs leak CLAUDE* variables' at 81159033 (owner P2)
+179 | E4c → E4a | toolbar overflows at 379 px with Hand back | re-deferred | now line 92; Owner: the owner (Q6, step B of E11's sitting, the browser chrome; a one-file fix in M7's wave if the owner asks); owner line at 97f6be15
+180 | E4c (seen) → C3 | docking card leaves a finished row unmounted | re-deferred | now line 93; Owner: P2; owner line at 97f6be15
+181 | E4c | shots-mode held click inside the 10 s budget | re-deferred | now line 94; Owner: P2; owner line at 97f6be15
+182 | E4c · E4d | css-only act heading "Clicked #increment" | re-deferred | now line 95; Owner: the owner (Q8, at E11's sitting, step I); owner line at 97f6be15
+183 | E3 | side thread launches without --max-budget-usd | re-deferred | now line 96; Owner: the owner (Q12, at E11's sitting, step I); owner line at 97f6be15
+
+Counts: dropped 1, fixed 79, open until 5.2 2, open until 7.3 3, re-deferred 64, re-deferred, narrowed 3, removed 7; total 159.
+Fixed per wave: W-A 13, W-B 16, W-C 15, W-D 15, W-E 20 (79; W-E kept row 97, re-deferred narrowed above).
+Close bin (6): row 29 re-deferred (the fresh resolve splits); rows 32 and 35 open until 5.2; rows 31, 106 and 157 open until 7.3.
+
+== Rows added after M0 ==
+fbf659e1 (W-A review fix) | E10 | the lock's stale-break fix leaves a three-candidate window | owner P2
+81159033 (1.6) | E10 | the keep-quit drain delivers after attention, layout and sessions, index, yield and the side-threads tap stopped (row 128 narrowed, Decision Log 28) | owner P2
+81159033 (1.6) | E10 | the setup intent's first message still lost while the row is initializing, and for a fork with a rewind point (recovery.ts:86) | owner P2
+81159033 (1.6) | E4d · E3 | the anchor-text strip-and-fit helper duplicated in src/shared/browser/describe.ts (the preload is zod-free) | owner P2
+81159033 (1.6) | E10 · C4 | after a host loss the session transcript reads stopped live but rehydrates through C4's unknown exit as completed | owner P2 (C4 disk path)
+81159033 (1.6) | E3 · C4 | interleaved host events flush the index sync's warm-up queue synchronously; 757 ms measured without them | owner P2
+81159033 (1.6) | E9 | MicControl.tsx:79-82 DictationNotice only logs a failed Open System Settings | owner P2 (E9 voice)
+81159033 (1.6) | Protocol probes | pass2/common.mjs SCRUB omits CLAUDE_CODE_PLUGIN_DIRS, CLAUDE_MODEL, CLAUDE_CODE_SUBAGENT_MODEL; harness.mjs copies process.env | owner P2
+81159033 (1.6) | Protocol probes (seen by E11 W-E) | test:probes prints MODULE_TYPELESS_PACKAGE_JSON for src/shared/engine/initialize.ts | owner P2
+
+== Note: the E7 teammate `joined` drop (row 109, W-D ffb93373) ==
+W-D dropped the listing's frozen joined age rather than recomputing it: a roster row is dated by `listed <ago>` instead. The
+drop is recognised by the regex /^joined .* ago$/ (src/renderer/src/tools/agents/copy.ts:53), which matches only the shape
+of the hand-built listing the e2e uses. The engine's real teammate listing format is unverified live: teams never form under
+MAWS's sdk-ts launch (Decision Log 6 and 19; SPEC 39 §39.6), so no recording shows it. If the engine writes the extra in
+another shape, the regex misses it and that variant would stay frozen on the row. S2's interactive-terminal attempt (Decision
+Log 6) is the first chance to see the real form; no tracker row is filed for a format no one has observed.
+
+Tracker counts: 159 rows at 1582e97c; 79 removed by the waves and 1 added (W-A); 1.6 removed 8 (7 annotated closed, the C4
+intermediate-commits row) and added 8; 81 at e8434055. Acceptance 4's check: tracker-check-1.6.txt.
+The empty line inside the table noted at the top (line 51 at 1582e97c) was dropped at a3a781f0.
