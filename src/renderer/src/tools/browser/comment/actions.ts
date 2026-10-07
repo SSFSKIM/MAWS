@@ -16,8 +16,6 @@ import { useSessions } from '../../../stores/sessions';
 import { browserTool, type BrowserParams } from '../BrowserTool';
 import { COMMENT_COPY } from './copy';
 
-// The session the main view shows (E3's rule, side/actions.ts).
-
 // The session whose browser holds a session's pages: a side thread's parent, else the session itself.
 export function browserSessionOf(appSessionId: AppSessionId): AppSessionId {
   const lineage = useSessions.getState().records.get(appSessionId)?.lineage;
