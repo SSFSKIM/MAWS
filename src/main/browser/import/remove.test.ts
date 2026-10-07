@@ -115,10 +115,14 @@ describe('Remove imported profile (E4b Design §12)', () => {
     vi.mocked(deps.partitions.session).mockImplementation(() => {
       throw new Error('cannot open');
     });
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await expect(removeImportedProfile(deps, 'Default')).resolves.toMatchObject({ historyRows: 4 });
-    expect(deps.records.map((candidate) => candidate.profileDir)).toEqual(['Profile 1']);
-    expect(existsSync(join(userData, 'browser', partitionDirName(PARTITION)))).toBe(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeImportedProfile(deps, 'Default')).resolves.toMatchObject({ historyRows: 4 });
+      expect(deps.records.map((candidate) => candidate.profileDir)).toEqual(['Profile 1']);
+      expect(existsSync(join(userData, 'browser', partitionDirName(PARTITION)))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('fails when the record cannot be dropped, and ends the removal either way', async () => {

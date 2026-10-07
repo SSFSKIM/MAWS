@@ -93,9 +93,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
   // those loads are done waits for them, so its content scripts are registered before it loads (the boot race).
   const onPartitionPrepared = (ses: Electron.Session, partition: string) => extensions.onPartitionPrepared(ses, partition);
   const unregister = browser.partitions.registerPreparer(onPartitionPrepared);
-  const stopHold = browser.store.onViewCreated((entry) => {
-    if (entry.view) extensions.holdIfLoading(entry.view.webContents, entry.tab.partition);
-  });
+  const stopHold = browser.store.onViewCreated((entry) => extensions.holdNewView(entry));
   // The active profile's partition is prepared now, so its extensions are loaded and their content scripts settled well
   // before the first tab opens; any other imported profile loads when a tab first needs its partition.
   try {

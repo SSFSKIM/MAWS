@@ -1,16 +1,18 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { Session } from 'electron';
+import type { Session, WebContentsView } from 'electron';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension } from '@shared/browser/import';
 import { partitionDirName, type ImportedProfile } from '@shared/browser/profiles';
+import type { AppSessionId } from '@shared/graph/ids';
 import { profilePartition } from '@shared/browser/tab';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
 import { inspectExtensions, type InspectedExtension } from './chrome/extensions';
-import { describeBackgroundError, ExtensionsLoader, holdFirstLoad, SETTLE_MS } from './extensions-loader';
-import type { ChosenExtension } from './service';
+import { TabStore } from '../tabs';
+import { describeBackgroundError, ExtensionsLoader, FIRST_LOAD_HOLD_MS, holdFirstLoad, SETTLE_MS } from './extensions-loader';
+import { ImportRefused, type ChosenExtension } from './service';
 
 // How the fake session's loaded extension behaves, by Chrome's directory id.
 interface Behaviour {
@@ -164,6 +166,18 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       expect(ses.fake.extensions.removeExtension).toHaveBeenCalledWith(probe.id);
     });
 
+    it('admits an extension Electron reports under the partition folder\'s real path', async () => {
+      const { probe } = fixture.extensions;
+      const real = mkdtempSync(join(root, 'real-'));
+      const linked = join(root, `linked-${basename(real)}`);
+      symlinkSync(real, linked); // userData reached through a symlink: Electron answers the resolved path
+      const folder = join(linked, 'browser', partitionDirName(PARTITION));
+      const ses = fakeSession({ [probe.id]: { path: join(realpathSync(real), 'browser', partitionDirName(PARTITION), 'extensions', probe.id), background: 'running' } });
+      const records = await loader().importExtensions({ ses, partition: PARTITION, partitionFolder: folder, stagingDir, extensions: chosen('probe'), signal: new AbortController().signal, progress: () => {} });
+      expect(records[0]).toMatchObject({ status: 'loaded', background: 'running' });
+      expect(ses.fake.extensions.removeExtension).not.toHaveBeenCalled();
+    });
+
     it('keeps Electron\'s id and Chrome\'s directory id beside it when they differ', async () => {
       const { probe } = fixture.extensions;
       const electronId = 'a'.repeat(32);
@@ -313,6 +327,83 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       await expect(webContents.loadURL('http://127.0.0.1/a')).rejects.toThrow();
       expect(original).not.toHaveBeenCalled();
     });
+
+    it('turns a synchronous throw of the original load into the held load\'s rejection', async () => {
+      const webContents = {
+        loadURL: vi.fn<(url: string) => Promise<void>>(() => {
+          throw new Error('refused synchronously');
+        }),
+        isDestroyed: () => false,
+      };
+      holdFirstLoad(webContents, Promise.resolve());
+      await expect(webContents.loadURL('http://127.0.0.1/a')).rejects.toThrow('refused synchronously');
+    });
+
+    // A boot load whose single `loadExtension` the test settles itself.
+    function pendingBootLoad() {
+      const { probe } = fixture.extensions;
+      cpSync(probe.dir, join(partitionFolder, 'extensions', probe.id), { recursive: true }); // as an earlier import left it
+      let settle!: () => void;
+      const ses = fakeSession({ [probe.id]: { background: 'running' } });
+      const load = ses.fake.extensions.loadExtension.getMockImplementation()!;
+      ses.fake.extensions.loadExtension.mockImplementationOnce((dir, options) => new Promise((resolve) => (settle = () => resolve(load(dir, options)))));
+      const extension = { id: probe.id, chromeId: null, name: 'Probe', version: '1.0', enabled: true, wallet: false, unsupportedPermissions: [], status: 'loaded', error: null, background: 'running', backgroundError: null, checkedAt: '2026-10-06T00:00:00.000Z' } as const;
+      const profiles = memoryProfiles([
+        {
+          profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: [{ ...extension, unsupportedPermissions: [] }],
+          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+        },
+      ]);
+      return { ses, profiles, settle: () => settle() };
+    }
+
+    it('holds a page no longer than the bound when its partition\'s loads never settle', async () => {
+      const { ses, profiles } = pendingBootLoad();
+      let bound!: () => void;
+      wait.mockImplementation((ms) => (ms === FIRST_LOAD_HOLD_MS ? new Promise<void>((resolve) => (bound = resolve)) : Promise.resolve()));
+      const target = loader(profiles);
+      target.onPartitionPrepared(ses, PARTITION);
+      const webContents = { loadURL: vi.fn<(url: string) => Promise<void>>(async () => {}), isDestroyed: () => false };
+      const original = webContents.loadURL;
+      target.holdIfLoading(webContents, PARTITION);
+      const held = webContents.loadURL('http://127.0.0.1/a');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(wait).toHaveBeenCalledWith(FIRST_LOAD_HOLD_MS, expect.any(AbortSignal));
+      expect(original).not.toHaveBeenCalled();
+      bound();
+      await held;
+      expect(original).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1/a', undefined);
+    });
+
+    it('through E4a\'s tab store: a new tab\'s first load in an imported partition waits for its extensions', async () => {
+      const { ses, profiles, settle } = pendingBootLoad();
+      // the hold's bound runs out only when the loads settle first and abort it
+      wait.mockImplementation((ms, signal) => (ms === FIRST_LOAD_HOLD_MS ? new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve())) : Promise.resolve()));
+      const target = loader(profiles);
+      const prepared = new Set<string>();
+      const loads: string[] = [];
+      const store = new TabStore({
+        emit: () => {},
+        // E4a's createTabView prepares the partition before it makes the view: the preparer starts the loads
+        createView: (tab) => {
+          if (!prepared.has(tab.partition)) {
+            prepared.add(tab.partition);
+            target.onPartitionPrepared(ses, tab.partition);
+          }
+          return { webContents: { loadURL: vi.fn(async (url: string) => void loads.push(url)), close: vi.fn(), isDestroyed: () => false } } as unknown as WebContentsView;
+        },
+        resolvePartition: () => PARTITION,
+        schedule: () => {},
+      });
+      store.onViewCreated((entry) => target.holdNewView(entry));
+      store.open({ appSessionId: 'App-A' as AppSessionId, url: 'http://127.0.0.1/a', select: true });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(loads).toEqual([]);
+      settle();
+      await target.idle(PARTITION);
+      expect(loads).toEqual(['http://127.0.0.1/a']);
+      expect(ses.fake.loaded.has(fixture.extensions.probe.id)).toBe(true);
+    });
   });
 
   describe('the toggle (P-21)', () => {
@@ -385,6 +476,40 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       release();
       expect(await toggled).toMatchObject({ enabled: false, status: 'off' });
       expect(profiles.get('Default')!.extensions.find((candidate) => candidate.id === probe.id)).toMatchObject({ enabled: false, status: 'off' });
+    });
+
+    it('a toggle racing a removal never brings the record back, and unloads what it loaded', async () => {
+      const { fails, probe } = fixture.extensions;
+      const { ses, profiles, target } = await liveImport({ [fails.id]: { background: 'error' } });
+      await target.setExtension('Default', fails.id, false);
+      const record = profiles.records[0]!;
+      let release!: () => void;
+      wait.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)));
+      const inFlight = target.setExtension('Default', fails.id, true); // loads, then waits in the settle
+      await new Promise((resolve) => setImmediate(resolve));
+      const queued = target.setExtension('Default', probe.id, false); // behind it in the partition's queue
+      const unloading = target.unloadForRemoval(record); // the removal begins
+      await expect(target.setExtension('Default', probe.id, false)).rejects.toThrow(new ImportRefused('notImported'));
+      profiles.records = []; // the removal drops the record while the toggle settles
+      release();
+      await expect(inFlight).rejects.toThrow(new ImportRefused('notImported'));
+      await expect(queued).rejects.toThrow(new ImportRefused('notImported'));
+      await unloading;
+      expect(profiles.records).toEqual([]);
+      expect(profiles.put).toHaveBeenCalledTimes(1); // the first toggle's, before the removal
+      expect(ses.fake.loaded.has(fails.id)).toBe(false);
+      target.removalDone(PARTITION);
+    });
+
+    it('a toggle whose record is gone by the time it writes writes nothing and unloads what it loaded', async () => {
+      const { fails } = fixture.extensions;
+      const { ses, profiles, target } = await liveImport({ [fails.id]: { background: 'error' } });
+      await target.setExtension('Default', fails.id, false);
+      profiles.put.mockClear();
+      wait.mockImplementationOnce(async () => void (profiles.records = []));
+      await expect(target.setExtension('Default', fails.id, true)).rejects.toThrow(new ImportRefused('notImported'));
+      expect(profiles.put).not.toHaveBeenCalled();
+      expect(ses.fake.loaded.has(fails.id)).toBe(false);
     });
 
     it('refuses a profile that is not imported, or an extension its record does not hold', async () => {

@@ -10,9 +10,11 @@
 // Per boot, `onPartitionPrepared` (registered through `Partitions.registerPreparer`) starts loading the enabled
 // extensions of the record whose partition was just prepared, and writes the statuses it observes back to the record.
 // Preparation is synchronous and loading is not, so a view created in that partition while its loads are pending has
-// its first `loadURL` held until they are done (`holdFirstLoad`): the first page never loads before the content scripts
-// are registered. Everything one profile's extensions go through (a boot load, a toggle, a removal's unloading) runs in
-// one queue per partition, so a boot load's statuses never overwrite a toggle made meanwhile.
+// its first `loadURL` held until its `loadExtension` calls have settled (`holdFirstLoad`), at most FIRST_LOAD_HOLD_MS;
+// whether Chromium has handed the content scripts to the page's renderer by then is not observable from Electron, which
+// is why the active profile's partition is also prepared at boot (Decision Log 39). Everything one profile's extensions
+// go through (a boot load, a toggle, a removal's unloading) runs in one queue per partition, so a boot load's statuses
+// never overwrite a toggle made meanwhile, and a toggle never writes a record a removal has begun to drop.
 import { realpathSync } from 'node:fs';
 import { cp, lstat, mkdir, rename, rm } from 'node:fs/promises';
 import { join, sep } from 'node:path';
@@ -98,7 +100,9 @@ export class ExtensionsLoader {
         if (this.loads.get(partition) === loads) this.loads.delete(partition);
         loadsDone();
       };
-      void this.enqueue(partition, () => this.bootLoad(ses, record.profileDir, partition, finishLoads)).finally(finishLoads);
+      this.enqueue(partition, () => this.bootLoad(ses, record.profileDir, partition, finishLoads))
+        .catch((error: unknown) => this.log({ kind: 'error', where: 'extensions_boot', code: errorCode(error) }))
+        .finally(finishLoads);
     } catch (error) {
       this.log({ kind: 'error', where: 'extensions_boot', code: errorCode(error) });
     }
@@ -110,27 +114,37 @@ export class ExtensionsLoader {
   }
 
   // Holds the first page of a view created while its partition's loads are pending (the boot race), at most
-  // FIRST_LOAD_HOLD_MS.
+  // FIRST_LOAD_HOLD_MS on the settle's clock.
   holdIfLoading(webContents: Pick<WebContents, 'loadURL' | 'isDestroyed'>, partition: string): void {
     const loads = this.loading(partition);
-    if (loads) holdFirstLoad(webContents, bounded(loads, FIRST_LOAD_HOLD_MS));
+    if (!loads) return;
+    const bound = new AbortController();
+    const ready = Promise.race([loads, this.wait(FIRST_LOAD_HOLD_MS, bound.signal)]).finally(() => bound.abort());
+    holdFirstLoad(webContents, ready);
   }
 
-  // Settles once everything queued for the partition has run (tests, and the e2e seam).
+  // E4a's `onViewCreated` hook: a tab's new view, held when its partition's loads are pending.
+  holdNewView(entry: { tab: { partition: string }; view: { webContents: Pick<WebContents, 'loadURL' | 'isDestroyed'> } | null }): void {
+    if (entry.view) this.holdIfLoading(entry.view.webContents, entry.tab.partition);
+  }
+
+  // Settles once everything queued for the partition has run (for tests).
   async idle(partition: string): Promise<void> {
     await this.queues.get(partition);
   }
 
   // The owner's toggle (P-21; Design §9 "Toggles"): written to the record, and applied at once when the partition was
-  // prepared this boot (loaded, settled and read, or unloaded); otherwise applied at its next preparation.
+  // prepared this boot (loaded, settled and read, or unloaded); otherwise applied at its next preparation. A profile
+  // being removed is no longer imported: a toggle queued or settling when its removal begins writes nothing and unloads
+  // what it loaded, so it can never put back the record the removal drops.
   async setExtension(profileDir: string, extensionId: string, enabled: boolean): Promise<ImportedExtension> {
     const record = this.deps.profiles.get(profileDir);
-    if (!record) throw new ImportRefused('notImported');
+    if (!record || this.removing.has(record.partition)) throw new ImportRefused('notImported');
     if (!record.extensions.some((extension) => extension.id === extensionId)) throw new ImportRefused('notInRecord');
     return this.enqueue(record.partition, async () => {
       const current = this.deps.profiles.get(profileDir);
       const extension = current?.extensions.find((candidate) => candidate.id === extensionId);
-      if (!current) throw new ImportRefused('notImported');
+      if (!current || this.removing.has(current.partition)) throw new ImportRefused('notImported');
       if (!extension) throw new ImportRefused('notInRecord');
       const ses = this.live.get(current.partition) ?? null;
       let next: ImportedExtension;
@@ -146,7 +160,13 @@ export class ExtensionsLoader {
       } else {
         next = { ...extension, enabled: true };
       }
-      await this.deps.profiles.put({ ...current, extensions: current.extensions.map((candidate) => (candidate === extension ? next : candidate)) });
+      // Read again after the settle: a removal may have begun, or dropped the record, meanwhile.
+      const latest = this.deps.profiles.get(profileDir);
+      if (!latest || this.removing.has(latest.partition)) {
+        if (ses && next.status === 'loaded' && ses.extensions.getExtension(next.id)) ses.extensions.removeExtension(next.id);
+        throw new ImportRefused('notImported');
+      }
+      await this.deps.profiles.put({ ...latest, extensions: latest.extensions.map((candidate) => (candidate.id === extension.id ? next : candidate)) });
       return next;
     });
   }
@@ -340,7 +360,10 @@ export function describeBackgroundError(message: string, unsupportedPermissions:
 
 // Defers `loadURL` on this page until `ready`, then puts the original back; a load asked meanwhile runs in order once
 // ready, unless the page was closed first. E4a's tab store voids the promise and reads the navigation from the view's
-// events, so a deferred load reads as a slow start.
+// events, so a deferred load reads as a slow start. A synchronous throw of the original load becomes the held load's
+// rejection, which E4a's `.catch` swallows where it would have failed the view: harmless, because the throws Electron's
+// `loadURL` makes synchronously are for a destroyed page (checked here first) and a malformed argument (E4a passes only
+// URLs `validateBrowserUrl` admitted).
 export function holdFirstLoad(webContents: Pick<WebContents, 'loadURL' | 'isDestroyed'>, ready: Promise<void>): void {
   const original = webContents.loadURL;
   const held: WebContents['loadURL'] = (url, options) =>
@@ -418,16 +441,6 @@ function rootsOf(folder: string): string[] {
   return roots.map((root) => root + sep);
 }
 const under = (path: string, roots: readonly string[]) => roots.some((root) => path.startsWith(root));
-
-function bounded(promise: Promise<void>, ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    void promise.finally(() => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
