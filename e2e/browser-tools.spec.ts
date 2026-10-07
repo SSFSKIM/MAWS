@@ -473,7 +473,7 @@ test('(7) the cover: an act under the palette waits, uncounted, and resumes when
     await menu(s.maws.app, 'palette.open');
     await expect.poll(() => coveredOf(s, tab)).toBe(true);
     const overlay = await cursorLayerOpacity(page);
-    expect(overlay, 'the cursor overlay is shown when the cover comes').not.toBe('0');
+    expect(overlay, 'the cursor overlay is shown when the cover comes').toBe('1');
     const shot = await agentOk(s, id, 'browser_screenshot', { tabId: tab });
     const picture = await bluePixels(s, { path: shot.image!.path });
     expect([picture.width, picture.height]).toEqual([bounds.width, bounds.height]);

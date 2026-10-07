@@ -45,7 +45,7 @@ function readAsar(archive: string): { files: Map<string, { unpacked: boolean }>;
 
 test('packaged: playwright-core is packed in app.asar with nothing of it unpacked, and ws is no production dependency', () => {
   const { files, text } = readAsar(join(resources(), 'app.asar'));
-  expect(files.get('node_modules/playwright-core/package.json'), 'app.asar lists playwright-core').toEqual({ unpacked: false });
+  expect(files.get('node_modules/playwright-core/package.json'), 'app.asar lists playwright-core, packed (not unpacked)').toEqual({ unpacked: false });
   const playwright = [...files].filter(([path]) => path.startsWith('node_modules/playwright-core/'));
   expect(playwright.filter(([, file]) => file.unpacked).map(([path]) => path), 'nothing of playwright-core is marked unpacked').toEqual([]);
   expect(existsSync(join(resources(), 'app.asar.unpacked/node_modules/playwright-core')), 'nothing of playwright-core beside the asar').toBe(false);
