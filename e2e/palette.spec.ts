@@ -7,6 +7,7 @@
 // at once, ahead of any timer). Both pin the row's focus, so a Trigger or a focus restore added later fails here.
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { menu } from './support/menu';
 
 const SHELL_ENV = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' };
 const PROJECTS = ['codex_somersault', 'claude-usage-menubar', 'MAWS'];
@@ -17,16 +18,6 @@ test.beforeAll(async () => {
   await expect(maws.page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 }); // Other sessions is a row
 });
 test.afterAll(async () => maws.cleanup());
-
-async function menu(app: ElectronApplication, id: string): Promise<void> {
-  const clicked = await app.evaluate(({ Menu }, id) => {
-    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
-    if (!item?.enabled) return false;
-    item.click();
-    return true;
-  }, id);
-  expect(clicked, `menu item ${id} exists and is enabled`).toBe(true);
-}
 
 const focused = (page: Page) =>
   page.evaluate(() => ({ kind: document.activeElement?.getAttribute('data-kind') ?? null, row: document.activeElement?.getAttribute('aria-label') ?? null }));
