@@ -55,6 +55,26 @@ export class BrowserHistoryStore {
   }
 
   // E4b start
+  // An import's rows (E4b Design §6), in one transaction per call: Chrome's counts carried, so `suggest` ranks them as
+  // Chrome's omnibox would. A conflict replaces the counts rather than adding (Decision Log 16), so importing the same
+  // rows twice never doubles them; the later visit and a title the import lacks are kept. Answers the rows written. An
+  // unavailable index fails the history category (Design §13) rather than dropping the rows silently.
+  importRows(partition: string, rows: readonly BrowserHistoryImportRow[]): number {
+    if (this.db.readOnly) throw Object.assign(new Error('the index is unavailable'), { code: 'indexUnavailable' });
+    return this.db.transaction(() => {
+      let written = 0;
+      for (const row of rows) {
+        written += this.db.run(
+          `INSERT INTO browser_history (partition, url, title, visit_count, typed_count, last_visit_ms, source) VALUES (?, ?, ?, ?, ?, ?, 'imported')
+           ON CONFLICT (partition, url) DO UPDATE SET visit_count = excluded.visit_count, typed_count = excluded.typed_count,
+             last_visit_ms = max(last_visit_ms, excluded.last_visit_ms), title = coalesce(excluded.title, title), source = 'imported'`,
+          partition, row.url, row.title, row.visitCount, row.typedCount, row.lastVisitMs,
+        );
+      }
+      return written;
+    });
+  }
+
   // The boot sweep (E4b Design §14; Decision Log 26): every row of a partition named with `prefix` that `keep` does not
   // list, whatever its source (an import's rows, or visits a restored tab made in it); answers the rows removed.
   removeImportedExcept(prefix: string, keep: readonly string[]): number {
@@ -66,3 +86,14 @@ export class BrowserHistoryStore {
   }
   // E4b end
 }
+
+// E4b start
+// One row of a Chrome import (E4b's history decoder yields this shape): the URL as the browser serialises it.
+export interface BrowserHistoryImportRow {
+  url: string;
+  title: string | null;
+  visitCount: number;
+  typedCount: number;
+  lastVisitMs: number;
+}
+// E4b end
