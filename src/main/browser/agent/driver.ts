@@ -12,7 +12,7 @@
 // E4a's to keep. The mode is the one `startBrowser` computed from its env (`focusEmulationMode`), never the default.
 //
 // A person's JavaScript dialog is never Playwright's to answer: a no-op `dialog` listener stops its auto-dismiss, and
-// the dialog itself is the `-run-dialog` wrap's (Task 2.4).
+// the dialog itself is the `-run-dialog` wrap's (dialogs.ts).
 import { createRequire } from 'node:module';
 import type * as PlaywrightCore from 'playwright-core';
 import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_ANSWER_MS, BROWSER_BRIDGE_IDLE_MS } from '@shared/maws/browser';

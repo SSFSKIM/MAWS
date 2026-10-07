@@ -39,7 +39,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function harness() {
+function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
   vi.useFakeTimers({ now: 1_000_000 });
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
@@ -84,6 +84,7 @@ function harness() {
     requestPending: vi.fn(),
   };
   const dialogs = { take: vi.fn<(tabId: string) => BrowserDialog[]>(() => []) };
+  const cursor = { aim: vi.fn((_entry: TabEntry, box: object) => void log.push(`aim ${JSON.stringify(box)}`)) };
   const refusals = new Set<(refusal: DownloadRefusal) => void>();
   const handlers = new BrowserHandlers({
     store,
@@ -91,6 +92,7 @@ function harness() {
     control,
     drivers,
     dialogs,
+    cursor: withCursor ? cursor : undefined,
     reachable: (appSessionId) => [appSessionId],
     onDownloadRefused: (listener) => {
       refusals.add(listener);
@@ -128,7 +130,7 @@ function harness() {
     stop: (tabId: string) => void contentsOf(tabId).emit('did-stop-loading'),
   };
   return {
-    store, page, log, drivers, control, dialogs, controller, waits, emitted, run, open, cover, navigation,
+    store, page, log, drivers, control, dialogs, cursor, controller, waits, emitted, run, open, cover, navigation,
     hold: () => {
       const gate = deferred<Waited>();
       pausing = gate.promise;
@@ -531,6 +533,34 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     const h = harness();
     const tabId = h.open();
     expect(await h.run('browser_act', { tabId, action: 'click', target: 'e5' })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.staleRef('browser_act', 'e5', 'missing') });
+  });
+});
+
+describe("browser_act: the agent's cursor (Design §9; Decision Log 68)", () => {
+  it("aims at the element's box between the mark and the dispatch, after the pause point", async () => {
+    const h = harness({ withCursor: true });
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.boxes.set('aria-ref=e5', { x: 10, y: 20, width: 30, height: 40 });
+    await h.run('browser_act', { tabId, action: 'fill', target: 'e5', value: 'Ada' });
+    expect(h.log).toEqual(['pause', 'acting', 'aim {"x":10,"y":20,"width":30,"height":40}', 'fill', 'ended']);
+    expect(h.cursor.aim).toHaveBeenCalledWith(h.store.entry(tabId), { x: 10, y: 20, width: 30, height: 40 });
+  });
+
+  it('acts without the cursor when the box cannot be read, and never after an abort that came while it was read', async () => {
+    const h = harness({ withCursor: true });
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    expect(await h.run('browser_act', { tabId, action: 'click', target: 'e5' })).toMatchObject({ ok: true });
+    expect(h.cursor.aim).not.toHaveBeenCalled();
+    expect(h.log).toEqual(['pause', 'acting', 'click', 'ended']);
+    h.log.length = 0;
+    h.page.boxes.set('aria-ref=e5', () => {
+      h.controller.abort(new Error('cancelled'));
+      return { x: 0, y: 0, width: 1, height: 1 };
+    });
+    expect(await h.run('browser_act', { tabId, action: 'click', target: 'e5' })).toBeNull();
+    expect(h.log).toEqual(['pause', 'acting', 'aim {"x":0,"y":0,"width":1,"height":1}', 'ended']);
   });
 });
 

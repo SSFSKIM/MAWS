@@ -2,14 +2,14 @@ import { EventEmitter } from 'node:events';
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
+import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload, HostState } from '@shared/ipc/schema';
 import type { MawsBrowserAnswerResult, MawsBrowserRequest } from '@shared/ipc/schema/maws';
-import { BROWSER_AGENT_IDLE_MS, BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
+import { BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { TabStore } from '../tabs';
 import type { BrowserCall, CallContext } from './handlers';
-import { BrowserRequests, e2eTabIds, provisionalControl, reachableSessions, startBrowserAgent } from './index';
+import { BrowserRequests, e2eTabIds, reachableSessions, startBrowserAgent } from './index';
 
 // The request lifecycle in main (E4c Design §4 "Every request has an AbortController", Interfaces "Main"): one request
 // at a time per tab, the host's cancel, the tab's close, the engine host's connection going (Decision Log 46: the host
@@ -245,26 +245,6 @@ describe('e2eTabIds (Design §13 (b); Decision Log 36)', () => {
   });
 });
 
-describe('provisionalControl (until Task 2.4)', () => {
-  it("marks the agent's tab and lets it lapse to idle 10 s after the action ends", () => {
-    vi.useFakeTimers();
-    const tab = { tabId: TAB, control: 'idle' } as BrowserTab;
-    const entry = { tab } as never;
-    const setControl = vi.fn((_tabId: string, control: BrowserTab['control']) => void (tab.control = control));
-    const control = provisionalControl({ setControl, entry: () => entry });
-    control.markActing(entry);
-    expect(setControl).toHaveBeenLastCalledWith(TAB, 'agent');
-    control.actionEnded(entry);
-    vi.advanceTimersByTime(BROWSER_AGENT_IDLE_MS - 1);
-    control.markActing(entry); // a next action in time keeps it
-    control.actionEnded(entry);
-    vi.advanceTimersByTime(BROWSER_AGENT_IDLE_MS - 1);
-    expect(tab.control).toBe('agent');
-    vi.advanceTimersByTime(1);
-    expect(setControl).toHaveBeenLastCalledWith(TAB, 'idle');
-  });
-});
-
 // The wiring: the host's events in, the commands out, the tab's close and the host's state, over E4a's real store.
 describe('startBrowserAgent', () => {
   class FakeWebContents extends EventEmitter {
@@ -272,6 +252,15 @@ describe('startBrowserAgent', () => {
     readonly close = vi.fn();
     readonly isDestroyed = () => false;
     readonly isLoading = () => false;
+    readonly setBackgroundThrottling = vi.fn();
+    readonly send = vi.fn();
+    readonly sendInputEvent = vi.fn();
+    readonly getLastWebPreferences = () => ({ safeDialogs: true });
+    readonly native = vi.fn((_info: unknown, callback: (accept: boolean, text: string) => void) => callback(false, ''));
+    constructor() {
+      super();
+      this.on('-run-dialog', this.native); // Electron's own dialog listener
+    }
   }
 
   function wired() {
@@ -280,11 +269,12 @@ describe('startBrowserAgent', () => {
     let ids = 0;
     const store = new TabStore({
       emit,
-      createView: () => ({ webContents: new FakeWebContents() }) as unknown as WebContentsView,
+      createView: () => ({ webContents: new FakeWebContents(), getBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) }) as unknown as WebContentsView,
       resolvePartition: () => DEFAULT_PARTITION,
       newTabId: () => `b_${String(++ids).padStart(12, '0')}`,
       schedule: () => {},
     });
+    const views = { park: vi.fn() };
     const listeners = new Map<string, (payload: never) => void>();
     const stateListeners = new Set<(state: HostState) => void>();
     const dispatched: [string, unknown][] = [];
@@ -311,13 +301,14 @@ describe('startBrowserAgent', () => {
       hosts: hosts as never,
       emit,
       env: {},
+      views,
       drivers,
     });
     const send = (name: string, payload: unknown) => listeners.get(name)!(payload as never);
     const hostState = (state: HostState['state']) => {
       for (const listener of stateListeners) listener({ state, pid: null, restarts: 0, revision: 1 });
     };
-    return { store, agent, send, hostState, dispatched, listeners, emitted, drivers };
+    return { store, agent, send, hostState, dispatched, listeners, emitted, drivers, views };
   }
 
   const THREAD = 'App-Thread' as AppSessionId;
@@ -399,6 +390,60 @@ describe('startBrowserAgent', () => {
     expect(w.agent.seam.driverState(tabId)).toBe('none');
     w.store.entry(tabId)!.input.emit({ kind: 'mouse', source: 'human', at: 7 });
     expect(w.agent.seam.lastInputs(tabId)).toEqual([{ kind: 'mouse', source: 'human', at: 7 }]);
+    await w.agent.stop();
+  });
+
+  it('a request held at the pause point by the person reports the wait, and answers tabClosed when the tab closes (Design §8)', async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    w.store.entry(tabId)!.input.emit({ kind: 'mouse', source: 'human', at: Date.now() }); // the person clicked just now
+    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId, url: 'https://b.test/' }));
+    await vi.waitFor(() => expect(w.dispatched).toEqual([['maws.browser.waiting', { appSessionId: A, requestId: rid(1), waiting: 'human' }]]));
+    expect(w.agent.seam.control(tabId)?.control).toBe('human');
+    w.store.close(tabId);
+    await vi.waitFor(() => expect(w.dispatched.at(-1)).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', tabId) } }]));
+    await w.agent.stop();
+  });
+
+  it('wraps every new view\'s dialogs: an alert under agent control is answered and reaches the tab\'s next result', async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: false }).tab.tabId;
+    const contents = w.store.entry(tabId)!.view!.webContents as unknown as FakeWebContents;
+    w.store.setControl(tabId, 'agent');
+    const callback = vi.fn();
+    contents.emit('-run-dialog', { dialogType: 'alert', messageText: 'Saved.', defaultPromptText: '' }, callback);
+    expect(callback).toHaveBeenCalledWith(false, '');
+    expect(contents.native).not.toHaveBeenCalled();
+    const answer = await w.agent.seam.run(A, 'browser_tabs', { action: 'select', tabId });
+    expect(answer).toMatchObject({ ok: true, result: { tabId, dialogs: [{ type: 'alert', message: 'Saved.' }] } });
+    await w.agent.stop();
+  });
+
+  it('parks an unplaced tab the agent has a request on, through the view manager', async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    w.drivers.for.mockReturnValue(new Promise(() => {})); // the request stays pending
+    void w.agent.seam.run(A, 'browser_snapshot', { tabId });
+    await flush();
+    expect(w.views.park).toHaveBeenCalledWith(w.store.entry(tabId), { x: 0, y: 0, width: 1280, height: 800 });
+    await w.agent.stop();
+  });
+
+  it('the seam sends the person\'s input with its screen point, and counts the cursor\'s messages', async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    const entry = w.store.entry(tabId)!;
+    entry.host = { isDestroyed: () => false, getContentBounds: () => ({ x: 100, y: 30, width: 800, height: 600 }) } as never;
+    (entry.view as unknown as { getBounds: () => object }).getBounds = () => ({ x: 400, y: 50, width: 300, height: 200 });
+    const contents = entry.view!.webContents as unknown as FakeWebContents;
+    expect(w.agent.seam.sendInput(tabId, { type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1 })).toBe(true);
+    expect(w.agent.seam.sendInput(tabId, { type: 'keyDown', keyCode: 'a' })).toBe(true);
+    expect(contents.sendInputEvent.mock.calls).toEqual([[{ type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1, globalX: 510, globalY: 100 }], [{ type: 'keyDown', keyCode: 'a' }]]);
+    expect(w.agent.seam.sendInput('b_00000000dead', { type: 'keyDown', keyCode: 'a' })).toBe(false);
+    w.store.setControl(tabId, 'agent');
+    w.store.setControl(tabId, 'idle'); // the agent lets go: the cursor hides
+    expect(w.agent.seam.cursorMessages(tabId)).toBe(1);
+    expect(contents.send).toHaveBeenCalledWith('browser:cursor', { kind: 'hide' });
     await w.agent.stop();
   });
 

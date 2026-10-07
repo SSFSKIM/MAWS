@@ -10,10 +10,15 @@
 // request it holds rather than click for a call the engine was already told failed. An aborted request answers nothing;
 // one still queued never runs.
 //
-// Under MAWS_E2E=1 the e2e's seam gains `agent` (`run`, `cancel`, `driverState`, `control`, `lastInputs`) on
-// `globalThis.__maws_browser`, so the e2e drives the handlers without an engine.
+// Who drives each tab (control.ts), the parking of unplaced tabs the agent works on (visible.ts), the agent's cursor in the
+// page (cursor.ts) and the `-run-dialog` wrap on every tab view (dialogs.ts) start here too, over the store's view hooks,
+// so they cover every view, adopted pop-ups included, from the first.
+//
+// Under MAWS_E2E=1 the e2e's seam gains `agent` (`run`, `cancel`, `driverState`, `control`, `lastInputs`, `sendInput`,
+// `cursorMessages`) on `globalThis.__maws_browser`, so the e2e drives the handlers without an engine.
+import type { KeyboardInputEvent, MouseInputEvent, MouseWheelInputEvent } from 'electron';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import { BROWSER_AGENT_IDLE_MS, BROWSER_TOOL_ERRORS, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_TOOL_ERRORS, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 import type { MawsBrowserAnswerResult, MawsBrowserRequest } from '@shared/ipc/schema/maws';
 import { parseToolArguments } from '@shared/maws/tools';
 import type { HostSupervisor } from '../../hosts/supervisor';
@@ -21,11 +26,16 @@ import type { SessionStore } from '../../index/sessions';
 import type { InputEmission } from '../input';
 import type { Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
+import type { ViewManager } from '../view';
 import { focusEmulationMode } from '../visibility';
+import { TabControls } from './control';
+import { AgentCursor } from './cursor';
+import { PageDialogs } from './dialogs';
 import { Drivers, type DriverState } from './driver';
 import { answerOfError, refusal } from './errors';
-import { BrowserHandlers, describeCall, reachedEntry, type AgentControl, type AgentDialogs, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
+import { BrowserHandlers, describeCall, reachedEntry, type AgentControl, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
 import { waitingReporter, type Via } from './progress';
+import { Parking } from './visible';
 
 const LAST_INPUTS_KEPT = 32;
 
@@ -177,38 +187,6 @@ export function e2eTabIds(env: NodeJS.ProcessEnv, restored: readonly { tabId: st
   return () => `b_${String(next++).padStart(12, '0')}`;
 }
 
-// Until Task 2.4's control.ts: no pause point (nothing in this build sets `control: 'human'`), the agent's mark, and its
-// lapse to idle BROWSER_AGENT_IDLE_MS after the last action. control.ts replaces it whole.
-export function provisionalControl(store: Pick<TabStore, 'setControl' | 'entry'>): AgentControl {
-  const lapses = new Map<string, ReturnType<typeof setTimeout>>();
-  const clear = (tabId: string) => {
-    clearTimeout(lapses.get(tabId));
-    lapses.delete(tabId);
-  };
-  return {
-    pause: async (_entry, signal) => {
-      signal.throwIfAborted();
-      return { waitedFor: null, waitedMs: null };
-    },
-    markActing: (entry) => {
-      clear(entry.tab.tabId);
-      if (entry.tab.control !== 'agent') store.setControl(entry.tab.tabId, 'agent');
-    },
-    actionEnded: (entry) => {
-      const { tabId } = entry.tab;
-      clear(tabId);
-      lapses.set(
-        tabId,
-        setTimeout(() => {
-          lapses.delete(tabId);
-          if (store.entry(tabId) === entry && entry.tab.control === 'agent') store.setControl(tabId, 'idle');
-        }, BROWSER_AGENT_IDLE_MS),
-      );
-    },
-    requestPending: () => {},
-  };
-}
-
 // ---- the wiring -----------------------------------------------------------------------------------------------------
 
 export interface BrowserAgentSeam {
@@ -217,7 +195,13 @@ export interface BrowserAgentSeam {
   driverState(tabId: string): DriverState;
   control(tabId: string): { control: TabEntry['tab']['control']; controlSince: string } | null;
   lastInputs(tabId: string): InputEmission[]; // E4a's classifier's last emissions for the tab
+  // The person's stand-in (E4-0): an input event sent to the tab's page as the OS would, a mouse event's screen point
+  // filled from the view's place on screen; false when the tab has no page
+  sendInput(tabId: string, event: SeamInputEvent): boolean;
+  cursorMessages(tabId: string): number; // how many `browser:cursor` messages the tab's pages were sent
 }
+
+export type SeamInputEvent = MouseInputEvent | MouseWheelInputEvent | KeyboardInputEvent;
 
 declare module '../inspect' {
   interface BrowserInspector {
@@ -233,8 +217,7 @@ export interface BrowserAgentDeps {
   hosts: Pick<HostSupervisor, 'onEvent' | 'dispatch' | 'onState'>;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // the mode of focus emulation, as startBrowser read it
-  control?: AgentControl; // Task 2.4's control.ts; the provisional one until then
-  dialogs?: AgentDialogs; // Task 2.4's `-run-dialog` wrap: the dialogs it answered per tab; none until then
+  views: Pick<ViewManager, 'park'>; // E4a's view manager, for parking (visible.ts)
   drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise
 }
 
@@ -245,8 +228,11 @@ export interface BrowserAgent {
 
 export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
   const { store, hosts, emit } = deps;
-  const control = deps.control ?? provisionalControl(store);
   const log = (line: string) => console.warn(`[browser] ${line}`);
+  const control = new TabControls({ store });
+  const parking = new Parking({ store, views: deps.views, controls: control });
+  const cursor = new AgentCursor({ store, controls: control });
+  const dialogs = new PageDialogs({ store, emit, log });
   const drivers =
     deps.drivers ??
     new Drivers({
@@ -260,7 +246,8 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     navigator: deps.navigator,
     control,
     drivers,
-    dialogs: deps.dialogs,
+    dialogs,
+    cursor,
     reachable,
     onDownloadRefused: deps.onDownloadRefused,
     emit,
@@ -327,6 +314,17 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
       const entry = store.entry(tabId);
       return entry ? [...(inputs.get(entry) ?? [])] : [];
     },
+    sendInput: (tabId, event) => {
+      const entry = store.entry(tabId);
+      const contents = entry?.view?.webContents;
+      if (!entry || !contents || contents.isDestroyed()) return false;
+      contents.sendInputEvent('x' in event ? { ...screenPointOf(entry, event), ...event } : event);
+      return true;
+    },
+    cursorMessages: (tabId) => {
+      const entry = store.entry(tabId);
+      return entry ? cursor.messages(entry) : 0;
+    },
   };
 
   return {
@@ -334,7 +332,16 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     stop: async () => {
       for (const stop of stops.splice(0)) stop();
       requests.abortAll();
+      for (const part of [dialogs, cursor, parking, control]) part.dispose();
       await drivers.stop();
     },
   };
+}
+
+// Where a point of the tab's page is on screen (E4-0's stand-in for the person, `pass2/main.mjs` `screenPoint`): the
+// window's content origin plus the view's offset; an unplaced view counts from the origin.
+function screenPointOf(entry: TabEntry, { x, y }: { x: number; y: number }): { globalX: number; globalY: number } {
+  const host = entry.host && !entry.host.isDestroyed() ? entry.host.getContentBounds() : { x: 0, y: 0 };
+  const view = entry.view!.getBounds();
+  return { globalX: host.x + view.x + x, globalY: host.y + view.y + y };
 }

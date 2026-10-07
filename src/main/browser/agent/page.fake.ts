@@ -10,6 +10,7 @@ export interface FakeCall {
   args: unknown[];
 }
 
+type Box = { x: number; y: number; width: number; height: number };
 type Options = { timeout?: number; signal?: AbortSignal; state?: string; mode?: string; trial?: boolean } | undefined;
 
 const abortError = (signal: AbortSignal) => Object.assign(new Error(`The operation was aborted: ${String(signal.reason)}`), { name: 'AbortError' });
@@ -42,6 +43,8 @@ export class FakePage {
   // what an action does (by method), after it is recorded: navigate, throw, wait
   readonly onAction = new Map<string, (call: FakeCall) => void | Promise<void>>();
   onEvaluate: (expression: string) => Promise<unknown> = async () => undefined;
+  // per selector: the element's bounding box (or what reads it); none set: null, as for an element not rendered
+  readonly boxes = new Map<string, Box | (() => Box | null)>();
   // the page went (a crash: the bridge's detach closes Playwright's page): pending and later waits reject with this
   closedWith: Error | null = null;
   readonly mouse = { wheel: async (deltaX: number, deltaY: number) => void this.record('mouse.wheel', null, [deltaX, deltaY]) };
@@ -152,6 +155,12 @@ export class FakeLocator {
   async ariaSnapshotJSON(options?: Options): Promise<unknown> {
     this.page.record('ariaSnapshotJSON', this.selector, [options]);
     return this.page.json.get(this.selector) ?? [];
+  }
+
+  async boundingBox(options?: Options): Promise<Box | null> {
+    this.page.record('boundingBox', this.selector, [options]);
+    const box = this.page.boxes.get(this.selector) ?? null;
+    return typeof box === 'function' ? box() : box;
   }
 
   click = (options?: Options) => this.act('click', [options]);

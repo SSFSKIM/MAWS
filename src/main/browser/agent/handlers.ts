@@ -6,13 +6,14 @@
 //
 // The rules every handler keeps: a tab is reachable when it is the calling session's or, for a side thread, its parent's
 // (P-21, P-24); an action shows its tab (selects it unless the person is using the session's selected tab, and says
-// `browser.agent.acting`), passes the pause point (`AgentControl.pause`, Task 2.4's control.ts) and marks the tab the
+// `browser.agent.acting`), passes the pause point (`AgentControl.pause`, control.ts) and marks the tab the
 // agent's before its first page-changing command; a load (a tab that has no page yet) is marked the agent's in the tick
 // it starts, before any network event, so E4a's download handler refuses for the agent (A-31), and has no pause point;
 // reads touch neither control nor the selection (Decision Log 5, 6, 15). An aborted request answers nothing (null).
-// A page dialog MAWS answered for the agent (Task 2.4's `-run-dialog` wrap) reaches the next successful result naming its
+// A page dialog MAWS answered for the agent (dialogs.ts, the `-run-dialog` wrap) reaches the next successful result naming its
 // tab (Decision Log 33, 35, 37): `run` drains the tab's dialogs into it.
 import type { WebContents } from 'electron';
+import type { Locator } from 'playwright-core';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_HANDBACK_IDLE_MS, type BrowserTab } from '@shared/browser/tab';
 import { cutSnapshot } from '@shared/browser/snapshot';
@@ -44,6 +45,7 @@ import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { NavigateTo, Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import { dispatch, waitUntilReady } from './act';
+import type { AgentCursor } from './cursor';
 import type { Driver, Drivers } from './driver';
 import { answerOfError, BrowserToolError, firstLine } from './errors';
 import { evalValueOf } from './evaluate';
@@ -59,8 +61,7 @@ export interface Waited {
   waitedMs: number | null;
 }
 
-// Who drives the page (Design §8), as the handlers and the request queue use it. Task 2.4's control.ts implements it;
-// until then index.ts supplies a provisional one.
+// Who drives the page (Design §8), as the handlers and the request queue use it; control.ts's TabControls implements it.
 export interface AgentControl {
   // The pause point: resolves when the action may dispatch, after any wait on the person (reported through `report`
   // while it lasts); rejects with the signal's reason when the request is aborted meanwhile.
@@ -70,7 +71,7 @@ export interface AgentControl {
   requestPending(entry: TabEntry, delta: 1 | -1): void; // a request for the tab was queued (1) or finished (-1)
 }
 
-// The page dialogs Task 2.4's `-run-dialog` wrap answered for the agent, per tab, until a result reports them: `take`
+// The page dialogs the `-run-dialog` wrap (dialogs.ts) answered for the agent, per tab, until a result reports them: `take`
 // returns them (at most BROWSER_DIALOGS_MAX, each message already cut) and forgets them.
 export interface AgentDialogs {
   take(tabId: string): BrowserDialog[];
@@ -108,11 +109,14 @@ export interface BrowserHandlerDeps {
   control: AgentControl;
   drivers: Pick<Drivers, 'for'>;
   dialogs?: AgentDialogs;
+  cursor?: Pick<AgentCursor, 'aim'>; // the agent's pointer shown in the page before each act (Design §9)
   reachable(appSessionId: AppSessionId): AppSessionId[]; // the session itself first, then its parent for a side thread
   onDownloadRefused(listener: (refusal: DownloadRefusal) => void): () => void;
   emit: BrowserEmit;
   now?(): number;
 }
+
+const AIM_TIMEOUT_MS = 1_000; // the element is ready by then: its box answers at once
 
 const ok = (result: object): MawsBrowserAnswerResult => ({ ok: true, result: result as Record<string, unknown> });
 
@@ -312,6 +316,7 @@ export class BrowserHandlers {
       let navigated: boolean;
       const navigation = watchCallNavigation(entry, ctx.signal);
       try {
+        await this.aim(entry, locator, ctx.signal);
         const before = page.url();
         await dispatch(page, locator, args.action, args.value, ctx.signal);
         // a navigation the action started: its load, briefly; a download it started answers at once
@@ -449,6 +454,17 @@ export class BrowserHandlers {
       ctx.signal.throwIfAborted(); // checked again right before dispatch (Decision Log 3)
       return waited;
     });
+  }
+
+  // Design §9: the agent's pointer moves to the element and outlines it before the action (fill and press move no mouse),
+  // between the mark and the dispatch (Decision Log 68). Cosmetic: a box that cannot be read shows nothing. The abort is
+  // checked again after it, right before dispatch (Decision Log 3).
+  private async aim(entry: TabEntry, locator: Locator, signal: AbortSignal): Promise<void> {
+    if (this.deps.cursor) {
+      const box = await locator.boundingBox({ timeout: AIM_TIMEOUT_MS }).catch(() => null);
+      if (box) this.deps.cursor.aim(entry, box);
+    }
+    signal.throwIfAborted();
   }
 
   // A load E4a has just started (Design §6 "Loads"): the agent's in this same tick, then waited for. A tab E4a could not
