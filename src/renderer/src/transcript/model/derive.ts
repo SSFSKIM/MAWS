@@ -1243,6 +1243,7 @@ interface BrowserResultFields {
   waitedMs?: number | null;
   target?: { role?: string; name?: string } | null;
   chars?: number;
+  truncated?: boolean;
   tabs?: unknown[];
   value?: unknown;
 }
@@ -1290,7 +1291,7 @@ function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: Tur
     url: event ? event.url : (parsed?.url ?? null), title: event ? event.title : (parsed?.title ?? null), ms: event ? event.ms : (parsed?.ms ?? null),
     deliverableId: event ? event.deliverableId : (parsed?.deliverableId ?? null), error: stopped ? null : error,
     waitedFor: event ? event.waitedFor : (parsed?.waitedFor ?? null), waitedMs: event ? event.waitedMs : (parsed?.waitedMs ?? null),
-    chars: parsed?.chars ?? null, tabCount: parsed?.tabs?.length ?? null,
+    chars: parsed?.chars ?? null, truncated: parsed?.truncated ?? false, tabCount: parsed?.tabs?.length ?? null,
     state, detail: tool === 'browser_snapshot' && parsed && result ? textAfterJson(result.content) : value, answered: result !== null,
   };
 }

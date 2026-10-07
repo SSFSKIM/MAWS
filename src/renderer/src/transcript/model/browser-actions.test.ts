@@ -32,7 +32,7 @@ describe('the browser action row', () => {
     expect(running).toEqual({
       id: rowId.browserAction(tool('toolu_a')), turnId: 'turn:u1', at: running.at, kind: 'browser_action', toolUseId: 'toolu_a', tool: 'browser_act', action: 'click', tabId: TAB,
       target: 'e12', targetRole: null, targetName: null, value: null, url: null, title: null, ms: null, deliverableId: null, error: null, waitedFor: null, waitedMs: null,
-      chars: null, tabCount: null, state: 'running', detail: null, answered: false,
+      chars: null, truncated: false, tabCount: null, state: 'running', detail: null, answered: false,
     });
     b.result('toolu_a', clicked());
     expect(browserRows(b.events)[0]).toMatchObject({
@@ -97,11 +97,11 @@ describe('the browser action row', () => {
     b.result('toolu_e', [json({ ...page, ms: 5, value: { heading: 'E4c order form', fields: 2 }, truncated: false })]);
     b.toolUse('toolu_t', 'mcp__maws__browser_eval', { tabId: TAB, expression: 'document.title' });
     b.result('toolu_t', [json({ ...page, ms: 5, value: 'E4c order form', truncated: false })]);
-    expect(browserRows(b.events).map((row) => [row.action, row.target, row.chars, row.detail])).toEqual([
-      ['snapshot', null, 47_125, text],
-      ['snapshot', 'main', null, null],
-      ['eval', null, null, '{\n  "heading": "E4c order form",\n  "fields": 2\n}'],
-      ['eval', null, null, 'E4c order form'],
+    expect(browserRows(b.events).map((row) => [row.action, row.target, row.chars, row.truncated, row.detail])).toEqual([
+      ['snapshot', null, 47_125, true, text],
+      ['snapshot', 'main', null, false, null],
+      ['eval', null, null, false, '{\n  "heading": "E4c order form",\n  "fields": 2\n}'],
+      ['eval', null, null, false, 'E4c order form'],
     ]);
   });
 

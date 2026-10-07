@@ -536,6 +536,7 @@ interface BrowserActionFacts {
   value: string | null;
   url: string | null;
   chars: number | null;
+  truncated: boolean;
   tabCount: number | null;
   detail: string | null;
 }
@@ -548,24 +549,36 @@ function elementOf(row: BrowserActionFacts): string {
   return row.target === null ? 'the element' : cut(row.target);
 }
 
+// A page by its host; null for one with none (about:blank, data:, file:), so a heading reads without it. A string that
+// is not a URL is shown as given, cut as an element is.
+function pageHost(page: string): string | null {
+  try {
+    return new URL(page).host || null;
+  } catch {
+    return page === '' ? null : cut(page);
+  }
+}
+
 function browserPhrase(row: BrowserActionFacts): BrowserPhrase {
   const page = row.url ?? (row.action === 'open' || row.action === 'url' ? row.target : null);
-  const host = page === null ? null : hostOf(page);
+  const host = page === null ? null : pageHost(page);
   const on = host === null ? '' : ` ${host}`;
+  const somePage = ` ${host ?? 'a page'}`;
   const el = elementOf(row);
   switch (`${row.tool}:${row.action}`) {
-    case 'browser_tabs:open': return phrase(`Opened${on}`, `Opening${on}`, `open${on}`);
+    case 'browser_tabs:open': return phrase(`Opened${somePage}`, `Opening${somePage}`, `open${somePage}`);
     case 'browser_tabs:close': return phrase('Closed tab', 'Closing tab', 'close the tab');
     case 'browser_tabs:select': return phrase(`Selected tab${on}`, 'Selecting tab', 'select the tab');
     case 'browser_tabs:list': return phrase(row.tabCount === null ? 'Listed tabs' : `Listed ${plural(row.tabCount, 'tab')}`, 'Listing tabs', 'list tabs');
-    case 'browser_navigate:url': return phrase(`Navigated to${on}`, `Navigating to${on}`, `navigate to${on}`);
+    case 'browser_navigate:url': return phrase(`Navigated to${somePage}`, `Navigating to${somePage}`, `navigate to${somePage}`);
     case 'browser_navigate:back': return phrase('Went back', 'Going back', 'go back');
     case 'browser_navigate:forward': return phrase('Went forward', 'Going forward', 'go forward');
-    case 'browser_navigate:reload': return phrase(`Reloaded${on}`, 'Reloading', 'reload');
+    case 'browser_navigate:reload': return phrase(`Reloaded ${host ?? 'the page'}`, 'Reloading', 'reload');
     case 'browser_snapshot:snapshot': {
-      const of = `${row.target === null ? '' : ` ${cut(row.target)} on`}${on}`;
-      const size = row.chars === null ? '' : ` (${row.detail !== null && row.detail.length < row.chars ? `${row.detail.length.toLocaleString('en-US')} of ` : ''}${row.chars.toLocaleString('en-US')} chars)`;
-      return phrase(`Snapshot${of === '' ? '' : ` of${of}`}${size}`, 'Taking a snapshot', 'take a snapshot');
+      const of = [row.target === null ? null : cut(row.target), host].filter((part) => part !== null).join(' on ');
+      const kept = row.truncated && row.detail !== null ? `${row.detail.length.toLocaleString('en-US')} of ` : '';
+      const size = row.chars === null ? '' : ` (${kept}${row.chars.toLocaleString('en-US')} chars)`;
+      return phrase(`Snapshot${of === '' ? '' : ` of ${of}`}${size}`, 'Taking a snapshot', 'take a snapshot');
     }
     case 'browser_act:click': return phrase(`Clicked ${el}`, `Clicking ${el}`, `click ${el}`);
     case 'browser_act:fill': return phrase(`Filled ${el}`, `Filling ${el}`, `fill ${el}`);

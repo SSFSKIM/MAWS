@@ -135,7 +135,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     ...base, kind: z.literal('browser_action'), toolUseId: z.string(), tool: z.enum(BROWSER_TOOL_NAMES), action: z.string(), tabId: nullable(z.string()), target: nullable(z.string()),
     targetRole: nullable(z.string()), targetName: nullable(z.string()), value: nullable(z.string()), url: nullable(z.string()), title: nullable(z.string()), ms: nullable(z.number()),
     deliverableId: nullable(z.string()), error: nullable(z.string()), waitedFor: nullable(BrowserWaitReasonSchema), waitedMs: nullable(z.number()), chars: nullable(z.number()),
-    tabCount: nullable(z.number()), state: z.enum(['running', 'done', 'error', 'cancelled']), detail: nullable(z.string()), answered: z.boolean(),
+    truncated: z.boolean(), tabCount: nullable(z.number()), state: z.enum(['running', 'done', 'error', 'cancelled']), detail: nullable(z.string()), answered: z.boolean(),
   }),
   // E4c end
 ]);

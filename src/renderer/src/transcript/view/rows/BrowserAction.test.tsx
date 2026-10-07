@@ -18,7 +18,7 @@ const DELIVERABLE = '6f1c2a4e-3b5d-4c7e-8f90-a1b2c3d4e5f6';
 const BASE: BrowserRow = {
   id: 'browser:t1' as never, turnId: null, at: '2026-10-07T10:00:00.000Z', kind: 'browser_action', toolUseId: 't1' as never, tool: 'browser_act', action: 'click', tabId: TAB,
   target: 'e12', targetRole: 'button', targetName: 'Submit', value: null, url: 'https://example.com/form', title: 'Order form', ms: 40, deliverableId: null, error: null,
-  waitedFor: null, waitedMs: null, chars: null, tabCount: null, state: 'done', detail: null, answered: true,
+  waitedFor: null, waitedMs: null, chars: null, truncated: false, tabCount: null, state: 'done', detail: null, answered: true,
 };
 const row = (over: Partial<BrowserRow>): BrowserRow => ({ ...BASE, ...over });
 const heading = (container: HTMLElement) => container.querySelector('[data-browser-heading]')!.textContent;
@@ -42,7 +42,9 @@ describe('the browser action row', () => {
     ['navigate', { tool: 'browser_navigate', action: 'url', target: 'https://example.com/form' }, 'Navigated to example.com'],
     ['back', { tool: 'browser_navigate', action: 'back', target: null }, 'Went back'],
     ['reload', { tool: 'browser_navigate', action: 'reload', target: null }, 'Reloaded example.com'],
-    ['snapshot, cut', { tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 47_125, detail: 'x'.repeat(24_000) }, 'Snapshot of example.com (24,000 of 47,125 chars)'],
+    ['snapshot, cut', { tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 47_125, truncated: true, detail: 'x'.repeat(24_000) }, 'Snapshot of example.com (24,000 of 47,125 chars)'],
+    // the cut is the result's own flag, never inferred from the text's length (the engine may append to it, or drop it)
+    ['snapshot, whole, shorter text', { tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 47_125, truncated: false, detail: 'x'.repeat(24_000) }, 'Snapshot of example.com (47,125 chars)'],
     ['snapshot, whole', { tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 448, detail: 'x'.repeat(448) }, 'Snapshot of example.com (448 chars)'],
     ['snapshot, rooted', { tool: 'browser_snapshot', action: 'snapshot', target: 'main', chars: 448, detail: 'x'.repeat(448) }, 'Snapshot of main on example.com (448 chars)'],
     ['click', {}, 'Clicked button "Submit"'],
@@ -57,6 +59,15 @@ describe('the browser action row', () => {
     ['screenshot', { tool: 'browser_screenshot', action: 'screenshot', target: 'page', targetRole: null, targetName: null, deliverableId: DELIVERABLE }, 'Screenshot of example.com'],
     ['full page', { tool: 'browser_screenshot', action: 'screenshot', target: 'fullPage', targetRole: null, targetName: null, deliverableId: DELIVERABLE }, 'Full-page screenshot of example.com'],
     ['element shot', { tool: 'browser_screenshot', action: 'screenshot', deliverableId: DELIVERABLE }, 'Screenshot of button "Submit"'],
+    // a page with no host (about:blank, data:, file:) is worded without one; an unparseable URL is cut as an element is
+    ['open, no host', { tool: 'browser_tabs', action: 'open', target: 'https://example.com/form', url: 'data:text/html,<p>hi</p>' }, 'Opened a page'],
+    ['navigate, no host', { tool: 'browser_navigate', action: 'url', target: 'https://example.com/form', url: 'file:///tmp/form.html' }, 'Navigated to a page'],
+    ['reload, no host', { tool: 'browser_navigate', action: 'reload', target: null, url: 'about:blank' }, 'Reloaded the page'],
+    ['select, no host', { tool: 'browser_tabs', action: 'select', target: null, url: 'about:blank' }, 'Selected tab'],
+    ['snapshot, no host', { tool: 'browser_snapshot', action: 'snapshot', target: null, url: 'about:blank', chars: 30, detail: 'x'.repeat(30) }, 'Snapshot (30 chars)'],
+    ['snapshot, rooted, no host', { tool: 'browser_snapshot', action: 'snapshot', target: 'main', url: 'about:blank', chars: 30, detail: 'x'.repeat(30) }, 'Snapshot of main (30 chars)'],
+    ['screenshot, no host', { tool: 'browser_screenshot', action: 'screenshot', target: 'page', targetRole: null, targetName: null, url: 'about:blank', deliverableId: DELIVERABLE }, 'Screenshot'],
+    ['open, unparseable', { tool: 'browser_tabs', action: 'open', target: `not a url ${'x'.repeat(80)}`, url: null }, `Opened not a url ${'x'.repeat(49)}…`],
     ['refused arguments', { action: 'drag', state: 'error', error: 'browser_act: invalid arguments: action: Invalid option' }, 'Could not run browser act'],
   ])('reads its line: %s', (_name, over, expected) => {
     expect(heading(renderRow(row(over), { storeKey: APP }).container)).toBe(expected);
