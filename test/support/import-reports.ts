@@ -1,7 +1,7 @@
 // Test data only (never imported by app code): the reports E4b's Acceptance quotes, over the synthetic Chrome profile of
 // `test/support/chrome-profile.ts` (E4b Design §17), shared by the shared, main and renderer suites so the three agree on
 // one shape. Hosts only, never a cookie name, value, path or title (Decision Log 22).
-import type { ImportedExtension, ImportReport } from './import';
+import type { ImportedExtension, ImportReport } from '@shared/browser/import';
 
 const AT = '2026-10-06T10:00:05.000Z';
 

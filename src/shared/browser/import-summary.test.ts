@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ImportReport } from './import';
-import { CANCELLED_REPORT, DONE_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from './import-fixtures';
+import { CANCELLED_REPORT, DONE_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../test/support/import-reports';
 import { summaryWords } from './import-summary';
 
 describe('summaryWords (E4b Design §10: "N cookies, M history entries, K extensions · J skipped: reasons")', () => {

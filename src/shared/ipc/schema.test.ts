@@ -50,7 +50,7 @@ import * as host from './schema/host';
 import * as browser from './schema/browser';
 // E4a end
 // E4b start
-import { DONE_REPORT, PROBE_EXTENSION } from '../browser/import-fixtures';
+import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 // E4b end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.

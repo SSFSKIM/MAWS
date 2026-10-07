@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BrowserProfileSchema } from '../../main/browser/partition'; // E4a's loose reader: every E4b record must parse with it too
-import { DONE_REPORT, FAILS_EXTENSION, PROBE_EXTENSION, WALLET_EXTENSION } from './import-fixtures';
+import { DONE_REPORT, FAILS_EXTENSION, PROBE_EXTENSION, WALLET_EXTENSION } from '../../../test/support/import-reports';
 import { ImportedProfileSchema, ImportedProfilesFileSchema, partitionDirName } from './profiles';
 import { DEFAULT_PARTITION, profilePartition } from './tab';
 
@@ -18,7 +18,7 @@ const RECORD = {
 describe('the imported profile record (profiles.json, E4b Interfaces)', () => {
   it('accepts a record with E4a’s four fields first and E4b’s after, and refuses an extra key', () => {
     expect(ImportedProfileSchema.parse(RECORD)).toEqual(RECORD);
-    expect(Object.keys(RECORD).slice(0, 4)).toEqual(['profileDir', 'name', 'partition', 'importedAt']);
+    expect(Object.keys(ImportedProfileSchema.shape).slice(0, 4)).toEqual(['profileDir', 'name', 'partition', 'importedAt']);
     expect(ImportedProfileSchema.safeParse({ ...RECORD, cookies: [] }).success).toBe(false);
   });
 
@@ -31,6 +31,12 @@ describe('the imported profile record (profiles.json, E4b Interfaces)', () => {
     for (const partition of [DEFAULT_PARTITION, 'persist:maws-chrome-Profile 1', 'persist:maws-chrome-', 'maws-chrome-Default'])
       expect(ImportedProfileSchema.safeParse({ ...RECORD, partition }).success, partition).toBe(false);
     expect(ImportedProfileSchema.safeParse({ ...RECORD, profileDir: 'Profile 1', partition: profilePartition('Profile 1'), report: { ...DONE_REPORT, profileDir: 'Profile 1', partition: profilePartition('Profile 1') } }).success).toBe(true);
+  });
+
+  it('refuses a record carrying another profile’s report', () => {
+    const work = { profileDir: 'Profile 1', partition: profilePartition('Profile 1') };
+    expect(ImportedProfileSchema.safeParse({ ...RECORD, report: { ...DONE_REPORT, ...work } }).success).toBe(false);
+    expect(ImportedProfileSchema.safeParse({ ...RECORD, ...work }).success).toBe(false);
   });
 
   it('takes the storage directory as one Chromium partition directory name, never a path', () => {

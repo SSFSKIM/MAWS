@@ -4,7 +4,7 @@
 // `done` import, so it always describes a whole import (Decision Log 2).
 import * as z from 'zod';
 import { AbsolutePathSchema } from '../ipc/schema/settings';
-import { CHROME_PROFILE_DIR, ChromeProfileDirSchema, IMPORT_NAME_MAX, IMPORT_TEXT_MAX, ImportedExtensionSchema, ImportReportSchema } from './import';
+import { CHROME_PROFILE_DIR, ChromeProfileDirSchema, IMPORT_TEXT_MAX, ImportedExtensionSchema, ImportNameSchema, ImportReportSchema, isOwnPartition } from './import';
 import { BrowserPartitionSchema, profilePartition } from './tab';
 
 const PERSIST = 'persist:';
@@ -26,7 +26,7 @@ const StorageDirNameSchema = z.string().regex(/^maws-chrome-[^/\\]+$/).max(255);
 export const ImportedProfileSchema = z
   .strictObject({
     profileDir: ChromeProfileDirSchema,
-    name: z.string().max(IMPORT_NAME_MAX),
+    name: ImportNameSchema,
     partition: BrowserPartitionSchema,
     importedAt: z.iso.datetime(),
     storageDirName: StorageDirNameSchema,
@@ -34,8 +34,13 @@ export const ImportedProfileSchema = z
     extensions: z.array(ImportedExtensionSchema), // the toggles' state, updated after import (P-21)
     report: ImportReportSchema,
   })
-  // Removal clears `partition`: a record naming the default or another profile's partition must never parse.
-  .refine((record) => record.partition === profilePartition(record.profileDir), { message: 'not the profile’s own partition', path: ['partition'] });
+  // Removal clears `partition`: a record naming the default or another profile's partition must never parse, nor one
+  // whose report is another profile's.
+  .refine(isOwnPartition, { message: 'not the profile’s own partition', path: ['partition'] })
+  .refine((record) => record.report.profileDir === record.profileDir && record.report.partition === record.partition, {
+    message: 'the report is another profile’s',
+    path: ['report'],
+  });
 export type ImportedProfile = z.infer<typeof ImportedProfileSchema>;
 
 export const ImportedProfilesFileSchema = z

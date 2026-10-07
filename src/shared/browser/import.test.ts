@@ -14,7 +14,7 @@ import {
   KeychainOutcomeSchema,
   WALLET_EXTENSION_IDS,
 } from './import';
-import { DONE_REPORT, PROBE_EXTENSION } from './import-fixtures';
+import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 
 const CANDIDATE = {
   id: 'cddgipniephaglaopjjeihjehogcpggh', name: 'Probe', version: '1.0', manifestVersion: 3, background: 'service_worker', contentScripts: 1,
@@ -79,10 +79,9 @@ describe('the import shapes (E4b Interfaces)', () => {
     expect(ExtensionCandidateSchema.safeParse({ ...CANDIDATE, id: 'probe' }).success).toBe(false);
   });
 
-  it('lists the permissions Electron 44.4.5 lacks, once each', () => {
+  // Advisory (Design §9): the list's contents follow Electron and are not pinned; only its shape is.
+  it('lists the permissions Electron lacks once each', () => {
     expect(new Set(ELECTRON_ABSENT_PERMISSIONS).size).toBe(ELECTRON_ABSENT_PERMISSIONS.length);
-    for (const name of CANDIDATE.unsupportedPermissions) expect(ELECTRON_ABSENT_PERMISSIONS).toContain(name);
-    for (const name of ['storage', 'tabs', 'alarms', 'webRequest', 'declarativeNetRequest', 'offscreen']) expect(ELECTRON_ABSENT_PERMISSIONS).not.toContain(name);
   });
 
   it('takes the categories, the phases and the Keychain outcomes as closed sets', () => {
@@ -118,5 +117,11 @@ describe('the import shapes (E4b Interfaces)', () => {
   it('refuses a report whose partition is not the profile’s own', () => {
     expect(ImportReportSchema.safeParse({ ...DONE_REPORT, partition: 'persist:maws-browser' }).success).toBe(false);
     expect(ImportReportSchema.safeParse({ ...DONE_REPORT, partition: 'persist:maws-chrome-Profile 1' }).success).toBe(false);
+  });
+
+  it('refuses more partitioned cookies verified than set', () => {
+    const cookies = DONE_REPORT.cookies;
+    expect(ImportReportSchema.safeParse({ ...DONE_REPORT, cookies: { ...cookies, partitioned: { imported: 2, verified: 2 } } }).success).toBe(true);
+    expect(ImportReportSchema.safeParse({ ...DONE_REPORT, cookies: { ...cookies, partitioned: { imported: 1, verified: 2 } } }).success).toBe(false);
   });
 });

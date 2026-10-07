@@ -16,11 +16,15 @@ export const IMPORT_HOSTS_MAX = 20; // the hosts a report lists per skip reason 
 
 export const ChromeProfileDirSchema = z.string().regex(CHROME_PROFILE_DIR);
 export const ExtensionIdSchema = z.string().regex(EXTENSION_ID);
-const TextSchema = z.string().max(IMPORT_TEXT_MAX);
-const NameSchema = z.string().max(IMPORT_NAME_MAX);
+export const ImportTextSchema = z.string().max(IMPORT_TEXT_MAX);
+export const ImportNameSchema = z.string().max(IMPORT_NAME_MAX);
 const HostSchema = z.string().min(1).max(255);
-const CountSchema = z.number().int().min(0);
+export const ImportCountSchema = z.number().int().min(0);
 const InstantSchema = z.iso.datetime();
+
+// A report or a record names its own profile's partition, never the default nor another profile's (removal clears it).
+export const isOwnPartition = (owner: { profileDir: string; partition: string }): boolean => owner.partition === profilePartition(owner.profileDir);
+const OWN_PARTITION = { message: 'not the profile’s own partition', path: ['partition'] };
 
 // Chrome extension permissions Electron 44.4.5 does not implement (E0b's stderr digest and the probe's `present` table).
 // Advisory: an extension asking for one gets a warning in its row, never a refusal; revisit when Electron moves.
@@ -58,9 +62,9 @@ export function isWalletExtension(extension: { id: string; name: string; descrip
 // A profile `Local State` names (E0b S1e: `name` shown, `gaia_name` and `user_name` muted; nothing else is read).
 export const ChromeProfileSchema = z.strictObject({
   profileDir: ChromeProfileDirSchema,
-  name: NameSchema,
-  gaiaName: NameSchema.nullable(),
-  userName: NameSchema.nullable(),
+  name: ImportNameSchema,
+  gaiaName: ImportNameSchema.nullable(),
+  userName: ImportNameSchema.nullable(),
   lastUsed: z.boolean(), // `profile.last_used`: the picker preselects it
   imported: z.boolean(), // a record exists: not importable again until removed (Decision Log 2)
 });
@@ -69,15 +73,15 @@ export type ChromeProfile = z.infer<typeof ChromeProfileSchema>;
 // An extension the inspection found in the profile's `Extensions/` (Design §9), before consent.
 export const ExtensionCandidateSchema = z.strictObject({
   id: ExtensionIdSchema,
-  name: NameSchema, // resolved through `_locales` as Electron would
-  version: NameSchema,
+  name: ImportNameSchema, // resolved through `_locales` as Electron would
+  version: ImportNameSchema,
   manifestVersion: z.union([z.literal(2), z.literal(3)]),
   background: z.enum(['service_worker', 'page', 'none']),
-  contentScripts: CountSchema,
+  contentScripts: ImportCountSchema,
   unsupportedPermissions: z.array(z.enum(ELECTRON_ABSENT_PERMISSIONS)),
   wallet: z.boolean(),
   chromeState: z.enum(['enabled', 'disabled', 'unknown']), // `disabled` arrives unchecked (Decision Log 9)
-  sizeBytes: CountSchema,
+  sizeBytes: ImportCountSchema,
   error: z.enum(['symlink', 'manifest', 'missing']).nullable(), // set: the row is disabled
 });
 export type ExtensionCandidate = z.infer<typeof ExtensionCandidateSchema>;
@@ -89,7 +93,7 @@ export const ImportPhaseSchema = z.enum(['copying', 'history', 'keychain', 'cook
 export type ImportPhase = z.infer<typeof ImportPhaseSchema>;
 
 // `wrongKey`: the Keychain answered, and every attempted decrypt failed (Design §7); `skipped`: cookies were chosen but
-// the store could not be copied, so the Keychain was never asked.
+// the store could not be copied or opened, so the Keychain was never asked.
 export const KeychainOutcomeSchema = z.enum(['allowed', 'denied', 'missing', 'timeout', 'wrongKey', 'skipped']);
 export type KeychainOutcome = z.infer<typeof KeychainOutcomeSchema>;
 
@@ -106,21 +110,21 @@ export type HistorySkipReason = z.infer<typeof HistorySkipReasonSchema>;
 export const ImportedExtensionSchema = z.strictObject({
   id: ExtensionIdSchema, // Electron's loaded id (Chrome's, from the manifest's `key`), or Chrome's directory id when never loaded
   chromeId: ExtensionIdSchema.nullable(), // Chrome's directory id when Electron derived another (Decision Log 20)
-  name: NameSchema,
-  version: NameSchema,
+  name: ImportNameSchema,
+  version: ImportNameSchema,
   enabled: z.boolean(), // the owner's toggle; `!wallet` at import (P-21)
   wallet: z.boolean(),
-  unsupportedPermissions: z.array(NameSchema),
+  unsupportedPermissions: z.array(ImportNameSchema),
   status: z.enum(['loaded', 'off', 'loadFailed', 'copyFailed']),
-  error: TextSchema.nullable(), // the failure's first line or code
+  error: ImportTextSchema.nullable(), // the failure's first line or code
   background: z.enum(['running', 'failed', 'stopped', 'none']),
-  backgroundError: TextSchema.nullable(), // the worker's uncaught error, naming the absent `chrome.*` member
+  backgroundError: ImportTextSchema.nullable(), // the worker's uncaught error, naming the absent `chrome.*` member
   checkedAt: InstantSchema,
 });
 export type ImportedExtension = z.infer<typeof ImportedExtensionSchema>;
 
 const hostsBy = <const R extends readonly [string, ...string[]]>(reasons: R) => z.partialRecord(z.enum(reasons), z.array(HostSchema).max(IMPORT_HOSTS_MAX));
-const countsBy = <const R extends readonly [string, ...string[]]>(reasons: R) => z.record(z.enum(reasons), CountSchema); // every reason present
+const countsBy = <const R extends readonly [string, ...string[]]>(reasons: R) => z.record(z.enum(reasons), ImportCountSchema); // every reason present
 
 // The report an import ends with (Design §10), kept whole on the record. Per category a block, or null when the owner
 // did not choose it. Cookies count each row once: `imported` is the plain rows set, `partitioned.imported` the
@@ -129,26 +133,28 @@ const countsBy = <const R extends readonly [string, ...string[]]>(reasons: R) =>
 export const ImportReportSchema = z
   .strictObject({
     profileDir: ChromeProfileDirSchema,
-    name: NameSchema,
+    name: ImportNameSchema,
     partition: BrowserPartitionSchema,
     startedAt: InstantSchema,
     finishedAt: InstantSchema,
     outcome: z.enum(['done', 'cancelled', 'failed']),
-    failure: TextSchema.nullable(), // why a `failed` run could not continue
+    failure: ImportTextSchema.nullable(), // why a `failed` run could not continue
     history: z
-      .strictObject({ imported: CountSchema, skipped: countsBy(HISTORY_SKIP_REASONS), hosts: hostsBy(HISTORY_SKIP_REASONS), error: TextSchema.nullable() })
+      .strictObject({ imported: ImportCountSchema, skipped: countsBy(HISTORY_SKIP_REASONS), hosts: hostsBy(HISTORY_SKIP_REASONS), error: ImportTextSchema.nullable() })
       .nullable(),
     cookies: z
       .strictObject({
-        imported: CountSchema,
-        partitioned: z.strictObject({ imported: CountSchema, verified: CountSchema }),
+        imported: ImportCountSchema,
+        partitioned: z
+          .strictObject({ imported: ImportCountSchema, verified: ImportCountSchema })
+          .refine((rows) => rows.verified <= rows.imported, { message: 'more partitioned cookies verified than set', path: ['verified'] }),
         skipped: countsBy(COOKIE_SKIP_REASONS),
         hosts: hostsBy(COOKIE_SKIP_REASONS),
         keychain: KeychainOutcomeSchema,
-        error: TextSchema.nullable(),
+        error: ImportTextSchema.nullable(),
       })
       .nullable(),
     extensions: z.array(ImportedExtensionSchema).nullable(),
   })
-  .refine((report) => report.partition === profilePartition(report.profileDir), { message: 'not the profile’s own partition', path: ['partition'] });
+  .refine(isOwnPartition, OWN_PARTITION);
 export type ImportReport = z.infer<typeof ImportReportSchema>;

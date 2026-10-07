@@ -23,9 +23,11 @@ import {
   ExtensionIdSchema,
   IMPORT_TEXT_MAX,
   ImportCategoriesSchema,
+  ImportCountSchema,
   ImportedExtensionSchema,
   ImportPhaseSchema,
   ImportReportSchema,
+  ImportTextSchema,
 } from '../../browser/import';
 import { ImportedProfileSchema } from '../../browser/profiles';
 import { AbsolutePathSchema } from './settings';
@@ -65,14 +67,13 @@ export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
 // the Chrome folder and the profile directory against the disk and `Local State`; these schemas only keep a path out.
 const ChromeFolderSchema = AbsolutePathSchema.max(IMPORT_TEXT_MAX);
 const ImportIdSchema = z.uuid(); // main's randomUUID() for an inspection or a run
-const ImportCount = z.number().int().min(0);
-const StoreErrorSchema = z.strictObject({ error: z.string().max(IMPORT_TEXT_MAX) }); // the category cannot be imported
+const StoreErrorSchema = z.strictObject({ error: ImportTextSchema }); // the category cannot be imported
 export const BrowserImportInspectionSchema = z.strictObject({
   inspectionId: ImportIdSchema,
   profile: ChromeProfileSchema,
   chromeRunning: z.boolean(), // `SingletonLock` exists: a hint, never a block
-  history: z.union([z.strictObject({ rows: ImportCount }), StoreErrorSchema]),
-  cookies: z.union([z.strictObject({ rows: ImportCount, partitioned: ImportCount, storeVersion: z.number().int() }), StoreErrorSchema]),
+  history: z.union([z.strictObject({ rows: ImportCountSchema }), StoreErrorSchema]),
+  cookies: z.union([z.strictObject({ rows: ImportCountSchema, partitioned: ImportCountSchema, storeVersion: z.number().int() }), StoreErrorSchema]),
   extensions: z.array(ExtensionCandidateSchema),
 });
 export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
@@ -156,7 +157,7 @@ export const commands = {
   // `userDataDir: null` lists Chrome's default folder (under e2e, MAWS_E2E_CHROME_USER_DATA).
   'browser.import.profiles': {
     input: z.strictObject({ userDataDir: ChromeFolderSchema.nullable() }),
-    output: z.strictObject({ userDataDir: ChromeFolderSchema, found: z.boolean(), chromeRunning: z.boolean(), profiles: z.array(ChromeProfileSchema), error: z.string().max(IMPORT_TEXT_MAX).nullable() }),
+    output: z.strictObject({ userDataDir: ChromeFolderSchema, found: z.boolean(), chromeRunning: z.boolean(), profiles: z.array(ChromeProfileSchema), error: ImportTextSchema.nullable() }),
     owner: 'main',
   },
   'browser.import.chooseUserData': { input: z.void(), output: z.strictObject({ userDataDir: ChromeFolderSchema.nullable() }), owner: 'main' }, // null: the dialog was cancelled
@@ -178,7 +179,7 @@ export const commands = {
   'browser.import.list': { input: z.void(), output: z.strictObject({ profiles: z.array(ImportedProfileSchema), fileBroken: z.boolean() }), owner: 'main' },
   'browser.import.remove': {
     input: z.strictObject({ profileDir: ChromeProfileDirSchema }),
-    output: z.strictObject({ removed: z.strictObject({ tabs: ImportCount, historyRows: ImportCount, extensions: ImportCount }) }),
+    output: z.strictObject({ removed: z.strictObject({ tabs: ImportCountSchema, historyRows: ImportCountSchema, extensions: ImportCountSchema }) }),
     owner: 'main',
   },
   'browser.import.setExtension': {
@@ -201,7 +202,7 @@ export const events = {
   'browser.download.refused': z.strictObject({ tabId: BrowserTabIdSchema, url: z.string(), filename: z.string() }), // an agent-started download, cancelled
   'browser.notice': BrowserNoticeSchema,
   // E4b start: a run's progress (at most every 100 ms per phase, plus each phase's first and last), its end, the records
-  'browser.import.progress': z.strictObject({ importId: ImportIdSchema, phase: ImportPhaseSchema, done: ImportCount, total: ImportCount }),
+  'browser.import.progress': z.strictObject({ importId: ImportIdSchema, phase: ImportPhaseSchema, done: ImportCountSchema, total: ImportCountSchema }),
   'browser.import.finished': z.strictObject({ importId: ImportIdSchema, report: ImportReportSchema }),
   'browser.import.changed': z.strictObject({ profiles: z.array(ImportedProfileSchema) }),
   // E4b end
