@@ -2,10 +2,11 @@
 // of the three passes (through C3's normaliser since the rebase), per synthetic journal, per event fixture and for synthetic/500, holding the `Row[]` of `rowsOf`
 // with every turn, group and cell expanded, keys sorted, timestamps as they are, `structured` and `input` verbatim.
 // Time labels are pinned (now, locale, zone) so a snapshot never depends on the machine. A mismatch names the first
-// differing row and field; `pnpm test -- -u src/renderer/src/transcript/model` accepts an intended change.
+// differing row and field; `pnpm test -- -u src/renderer/src/transcript/model` accepts an intended change, and is the
+// only run that writes a new fixture's snapshot (E11 W-E: any other run fails on a missing one).
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { synthesise } from '../../../../../test/support/synth-transcript';
@@ -48,12 +49,20 @@ function firstDifference(a: unknown, b: unknown, path = ''): string | null {
   return a === b ? null : `${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`;
 }
 
+// Why a snapshot cannot be compared: its baseline is not committed and this run does not update snapshots (vitest's
+// update state: `all` under `-u`, `new` by default outside CI, `none` in CI); null when the comparison may go ahead.
+function missingBaseline(path: string, update: 'all' | 'new' | 'none'): string | null {
+  return existsSync(path) || update === 'all' ? null : `${relative(SNAPSHOT_DIR, path)}: no committed snapshot; write it with \`-u\` and commit it`;
+}
+
 async function snapshot(file: string, events: SessionEvent[]): Promise<Row[]> {
   const rows = rowsOf(withAllExpanded(applyEvents(createState(null, null), events)));
   const invalid = rows.map((row, i) => [i, RowSchema.safeParse(row)] as const).filter(([, parsed]) => !parsed.success);
   expect(invalid.map(([i, parsed]) => `row ${i} (${rows[i].id}): ${parsed.error?.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)).toEqual([]);
   const json = `${JSON.stringify(rows.map(sortKeys), null, 2)}\n`;
   const path = join(SNAPSHOT_DIR, `${file}.rows.json`);
+  const missing = missingBaseline(path, expect.getState().snapshotState.snapshotUpdateState);
+  if (missing !== null) throw new Error(missing);
   try {
     await expect(json).toMatchFileSnapshot(path);
   } catch (error) {
@@ -115,5 +124,19 @@ describe('presentation model snapshots', () => {
   it('synthetic/500', async () => {
     const rows = await snapshot('synthetic/500', synthesise({ turns: 500, seed: 1 }));
     expect(rows.length).toBeGreaterThan(1000);
+  });
+});
+
+// E11 W-E: a fixture lands with its committed snapshot. Vitest writes a missing file snapshot by itself outside CI, so a
+// missing baseline fails here instead, unless the run updates snapshots (`-u`), the one way to write it.
+describe('a missing baseline', () => {
+  const missing = join(SNAPSHOT_DIR, 'pass1', 'no-such-fixture.rows.json');
+  const committed = join(SNAPSHOT_DIR, 'synthetic', '500.rows.json');
+  it('fails a run that does not update snapshots, CI or not', () => {
+    for (const update of ['new', 'none'] as const) expect(missingBaseline(missing, update)).toBe('pass1/no-such-fixture.rows.json: no committed snapshot; write it with `-u` and commit it');
+  });
+  it('is written only by an update (-u), and a committed baseline is compared as before', () => {
+    expect(missingBaseline(missing, 'all')).toBeNull();
+    for (const update of ['new', 'none', 'all'] as const) expect(missingBaseline(committed, update)).toBeNull();
   });
 });
