@@ -1,0 +1,7 @@
+E11 W-E review fix: pnpm test:probes at 51ec6e6 (2026-10-07 15:13)
+# tests 172
+# pass 172
+# fail 0
+# cancelled 0
+# skipped 0
+test:probes exit 0
