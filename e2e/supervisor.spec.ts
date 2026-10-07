@@ -17,7 +17,7 @@
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
 // observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
 // scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
-import { execFileSync, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +30,7 @@ import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
@@ -66,34 +67,6 @@ function tailFixture(dir: string): string {
   const path = join(dir, 'permission-task-failure.jsonl');
   writeFileSync(path, `${rows.map((row, k) => JSON.stringify({ ...row, seq: k + 1 })).join('\n')}\n`);
   return path;
-}
-
-// ---- processes ---------------------------------------------------------------------------------------------------------
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-function ps(pid: number, field: 'pgid' | 'command'): string {
-  try {
-    return execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
-  } catch {
-    return ''; // no such process
-  }
-}
-// Every process whose command line names `text` (a scratch root: the supervisors' `--detached <dir>`), but this one.
-function processesNaming(text: string): { pid: number; command: string }[] {
-  const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
-  return out
-    .split('\n')
-    .map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null && m[2]!.includes(text))
-    .map((m) => ({ pid: Number(m[1]), command: m[2]! }))
-    .filter((p) => p.pid !== process.pid);
 }
 
 interface Lock { pid: number; procStart: string; socketPath: string; buildId: string }
@@ -219,18 +192,8 @@ class Scratch {
       await run.maws.cleanup().catch(() => {}); // the app is gone; a given profile is left to this cleanup
     }
     this.lock();
-    const named = processesNaming(this.root);
-    for (const pid of new Set([...this.supervisors, ...named.map((p) => p.pid)])) {
-      // a recorded pid is killed only while it is still a supervisor of this profile (never a reused pid)
-      if (!isAlive(pid) || !ps(pid, 'command').includes(this.root)) continue;
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error); // gone meanwhile is fine
-      }
-    }
     let leftover: unknown = null; // a survivor is reported, after the files are removed all the same
-    await expect.poll(() => processesNaming(this.root).map((p) => p.pid), { timeout: 10_000, message: `no process of ${this.root} outlives the case` }).toEqual([]).catch((error: unknown) => (leftover = error));
+    await killScratchProcesses(this.root, this.supervisors).catch((error: unknown) => (leftover = error));
     for (const socket of this.sockets) {
       const dir = tmpSocketDirOf(this.userData, socket); // a socket under root goes with it
       if (dir !== null) rmSync(dir, { recursive: true, force: true });

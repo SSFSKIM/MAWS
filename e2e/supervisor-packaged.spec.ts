@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
@@ -29,21 +30,6 @@ function realpathOr(path: string): string {
     return path; // the launcher reports a missing executable
   }
 }
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-function ps(pid: number, field: string): string {
-  try {
-    return execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
-  } catch {
-    return ''; // no such process
-  }
-}
 // The process's executable: `lsof`'s first text (mapped program) file, which needs no privilege for one's own process.
 // `ps -o comm=` follows argv0, so it reads `maws-supervisor`, not the binary.
 function executableOf(pid: number): string {
@@ -51,14 +37,6 @@ function executableOf(pid: number): string {
   const first = out.split('\n').find((line) => line.startsWith('n'));
   if (!first) throw new Error(`lsof lists no text file for pid ${pid}`);
   return first.slice(1);
-}
-function processesNaming(text: string): number[] {
-  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
-    .split('\n')
-    .map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null && m[2]!.includes(text))
-    .map((m) => Number(m[1]))
-    .filter((pid) => pid !== process.pid);
 }
 
 test('packaged: the supervisor is the app binary run as Node, named maws-supervisor, its chunk inside app.asar', async () => {
@@ -72,6 +50,7 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
   let maws: MawsLaunch | null = null;
   let socketPath: string | null = null;
   let supervisorPid: number | null = null;
+  let leftover: unknown = null; // a survivor, reported after the files are removed all the same (the body's error first)
   try {
     const fuses = execFileSync(join(REPO_ROOT, 'node_modules/.bin/electron-fuses'), ['read', '--app', bundle], { encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' } }).trimEnd();
     expect(fuses, 'the runAsNode fuse is enabled').toMatch(/^\s*RunAsNode is Enabled$/m);
@@ -153,16 +132,11 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     }
   } finally {
     if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
-    for (const pid of new Set([...(supervisorPid !== null ? [supervisorPid] : []), ...processesNaming(root)])) {
-      if (!isAlive(pid) || !ps(pid, 'command').includes(root)) continue; // never a reused pid
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error);
-      }
-    }
+    // E11 W-E: the survivor check of supervisor.spec.ts's cleanup, so a run that leaves a supervisor behind fails
+    await killScratchProcesses(root, supervisorPid !== null ? [supervisorPid] : []).catch((error: unknown) => (leftover = error));
     const tmpSocketDir = socketPath !== null ? tmpSocketDirOf(userData, socketPath) : null; // a socket under root goes with it
     if (tmpSocketDir !== null) rmSync(tmpSocketDir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
+  if (leftover !== null) throw leftover;
 });

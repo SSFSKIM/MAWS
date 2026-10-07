@@ -27,7 +27,10 @@
     // E3 start: the transcript model's export words the side-thread row through E3's copy, which takes the composer's
     // own "next step" wording; listed for the same reason as C8a's
     "src/renderer/src/side/copy.ts",
-    "src/renderer/src/composer/submit/submit-state.ts"
+    "src/renderer/src/composer/submit/submit-state.ts",
     // E3 end
+    // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest
+    "e2e/support/processes.ts"
+    // E11 end
   ]
 }
