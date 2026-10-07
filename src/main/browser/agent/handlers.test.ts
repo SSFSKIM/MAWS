@@ -379,6 +379,46 @@ describe('browser_navigate (Design §6)', () => {
     expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.browserTimeout('browser_navigate') });
   });
 
+  it('settles a load that stops with neither a commit nor a failure only after the grace, in which a download refusal wins', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const [quiet, download] = ['https://a.test/1', 'https://a.test/2'].map((url) => {
+      const tabId = h.open(A, url);
+      h.commit(tabId, url);
+      return tabId;
+    });
+    const answers = [quiet, download].map((tabId) => h.run(A, 'browser_navigate', { tabId, url: 'https://files.test/report.pdf' }));
+    const settled: unknown[] = [];
+    answers.forEach((answer, index) => void answer.then((result) => (settled[index] = result)));
+    await vi.advanceTimersByTimeAsync(0);
+    for (const tabId of [quiet, download]) {
+      h.wc(tabId).loading = false;
+      h.wc(tabId).emit('did-stop-loading'); // a 204, or a download's -3: no commit, no failure
+    }
+    await vi.advanceTimersByTimeAsync(249);
+    expect(settled).toEqual([]);
+    h.refuseDownload({ tabId: download, url: 'https://files.test/report.pdf', filename: 'report.pdf' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await answers[0]).toMatchObject({ ok: true, result: { tabId: quiet, url: 'https://a.test/1' } });
+    expect(await answers[1]).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.downloadRefused('browser_navigate', 'https://files.test/report.pdf', 'report.pdf') });
+  });
+
+  it("does not answer an earlier failure E4a restores when a load stops without committing", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const tabId = h.open(A, 'https://down.test/');
+    h.wc(tabId).emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://down.test/', true, 1, 1);
+    expect(h.entry(tabId).tab.loadError).not.toBeNull();
+    const answer = h.run(A, 'browser_navigate', { tabId, url: 'https://next.test/' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.entry(tabId).tab.loadError).toBeNull(); // cleared by the navigation command
+    h.wc(tabId).loading = false;
+    h.wc(tabId).emit('did-stop-loading'); // stopped: E4a's loadStopped restores the earlier error page
+    expect(h.entry(tabId).tab.loadError?.url).toBe('https://down.test/');
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await answer).toMatchObject({ ok: true, result: { tabId, url: 'https://down.test/' } }); // the stop, as it is
+  });
+
   it('goes back and forward through the history, and says when there is none', async () => {
     const h = harness();
     const tabId = h.open(A, 'https://a.test/');

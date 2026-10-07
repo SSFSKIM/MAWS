@@ -21,6 +21,7 @@ const request = (n: number, tool: MawsBrowserRequest['tool'], args: unknown, app
 
 const TAB = 'b_000000000001';
 const OTHER = 'b_000000000002';
+const FOREIGN = 'b_000000000003'; // another session's tab
 
 // A run the test settles by hand, with the context it was given.
 function deferredRuns() {
@@ -39,13 +40,14 @@ function harness() {
   const answers: { call: BrowserCall; result: MawsBrowserAnswerResult }[] = [];
   const reports: [string, string, unknown][] = [];
   const pending = vi.fn();
-  const entries = new Map([TAB, OTHER].map((tabId) => [tabId, { tab: { tabId } }]));
+  const entries = new Map([TAB, OTHER, FOREIGN].map((tabId) => [tabId, { tab: { tabId } }]));
   const requests = new BrowserRequests({
     run,
     answer: (call, result) => void answers.push({ call, result }),
     report: (call, tabId, reason) => void reports.push([call.requestId, tabId, reason]),
     control: { requestPending: pending },
     store: { entry: (tabId: string) => entries.get(tabId) as never },
+    reaches: (appSessionId, tabId) => entries.has(tabId) && (tabId === FOREIGN ? appSessionId === 'App-B' : appSessionId === A),
     now: () => 5_000,
   });
   return { requests, runs, run, answers, reports, pending, entries };
@@ -82,6 +84,22 @@ describe('BrowserRequests: running and answering', () => {
     await h.requests.accept(request(1, 'browser_tabs', { action: 'open' }), 'host');
     expect(h.run).not.toHaveBeenCalled();
     expect(h.answers[0].result).toEqual({ ok: false, error: TOOL_ERRORS.invalidArguments('browser_tabs', 'url: open needs a url') });
+  });
+
+  it("answers tabNotFound at once for a tab the session does not reach, never queuing on it nor counting it pending (P-21)", async () => {
+    const h = harness();
+    void h.requests.accept(request(1, 'browser_navigate', { tabId: FOREIGN, url: 'reload' }, 'App-B' as AppSessionId), 'host'); // its owner's request
+    await flush();
+    const refused = await h.requests.accept(request(2, 'browser_navigate', { tabId: FOREIGN, url: 'reload' }), 'host');
+    expect(refused).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', FOREIGN) });
+    expect(h.answers.map(({ call, result }) => [call.requestId, result])).toEqual([[rid(2), refused]]);
+    // answered while the owner's request still runs on that tab: never queued behind it, never counted on it
+    expect(h.runs.map(({ call }) => call.requestId)).toEqual([rid(1)]);
+    expect(h.pending.mock.calls.map(([entry, delta]) => [entry.tab.tabId, delta])).toEqual([[FOREIGN, 1]]);
+    expect(await h.requests.accept(request(3, 'browser_navigate', { tabId: 'b_00000000dead', url: 'reload' }), 'seam')).toEqual({
+      ok: false,
+      error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', 'b_00000000dead'),
+    });
   });
 
   it('runs one request at a time per tab, and different tabs side by side', async () => {
@@ -300,21 +318,51 @@ describe('startBrowserAgent', () => {
         return () => void stateListeners.delete(listener);
       }),
     };
+    const drivers = { for: vi.fn(), state: vi.fn(() => 'none' as const), close: vi.fn(async () => {}), retire: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
     const agent = startBrowserAgent({
       store,
       navigator: { navigate: vi.fn(() => true) },
       onDownloadRefused: () => () => {},
-      sessions: { get: () => null },
+      sessions: { get: (id: AppSessionId) => (id === THREAD ? ({ lineage: { kind: 'side-thread', parentAppSessionId: A } } as never) : null) },
       hosts: hosts as never,
       emit,
       env: {},
+      drivers,
     });
     const send = (name: string, payload: unknown) => listeners.get(name)!(payload as never);
     const hostState = (state: HostState['state']) => {
       for (const listener of stateListeners) listener({ state, pid: null, restarts: 0, revision: 1 });
     };
-    return { store, agent, send, hostState, dispatched, listeners, emitted };
+    return { store, agent, send, hostState, dispatched, listeners, emitted, drivers };
   }
+
+  const THREAD = 'App-Thread' as AppSessionId;
+  const status = (appSessionId: AppSessionId, process: string) => ({ appSessionId, status: { appSessionId, process } });
+
+  it("retires the drivers of an exited session's tabs at once, but not one another session still has a request on (Design §4)", async () => {
+    const w = wired();
+    const mine = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    const busy = w.store.open({ appSessionId: A, url: 'https://b.test/', select: false }).tab.tabId;
+    const theirs = w.store.open({ appSessionId: 'App-B' as AppSessionId, url: 'https://c.test/', select: true }).tab.tabId;
+    // a side thread of A is navigating in A's second tab
+    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId: busy, url: 'https://d.test/' }, THREAD));
+    await flush();
+    w.send('session.status', status(A, 'ready'));
+    expect(w.drivers.retire).not.toHaveBeenCalled();
+    w.send('session.status', status(A, 'exited'));
+    expect(w.drivers.retire.mock.calls).toEqual([[mine]]);
+    expect(w.drivers.retire).not.toHaveBeenCalledWith(theirs);
+    await w.agent.stop();
+  });
+
+  it("answers tabNotFound for another session's tab without queuing on it", async () => {
+    const w = wired();
+    const theirs = w.store.open({ appSessionId: 'App-B' as AppSessionId, url: 'https://c.test/', select: true }).tab.tabId;
+    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId: theirs, url: 'reload' }));
+    await vi.waitFor(() => expect(w.dispatched).toHaveLength(1));
+    expect(w.dispatched[0]).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', theirs) } }]);
+    await w.agent.stop();
+  });
 
   it("answers maws.browser.request through maws.browser.answer, and stops listening at stop", async () => {
     const w = wired();
@@ -351,7 +399,7 @@ describe('startBrowserAgent', () => {
     w.store.close(tabId);
     await vi.waitFor(() => expect(w.dispatched).toHaveLength(1));
     expect(w.dispatched[0]).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', tabId) } }]);
-    expect(w.agent.seam.driverState(tabId)).toBe('none');
+    expect(w.drivers.close).toHaveBeenCalledWith(tabId);
     await w.agent.stop();
   });
 

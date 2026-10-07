@@ -79,7 +79,7 @@ function harness(focusEmulation: 'on' | 'off' = 'off') {
   const loadPlaywright = vi.fn(() => playwright.module as never);
   const bridges: (CdpBridge & { close: ReturnType<typeof vi.fn> })[] = [];
   let bridgeCount = 0;
-  const startBridge = vi.fn(async () => {
+  const startBridge = vi.fn(async (dbg: FakeDebugger) => {
     const n = ++bridgeCount;
     const bridge = {
       connect: vi.fn(() => ({ name: `transport-${n}`, send: vi.fn(), close: vi.fn() })),
@@ -88,7 +88,7 @@ function harness(focusEmulation: 'on' | 'off' = 'off') {
       connected: true,
       close: vi.fn(async ({ detach }: { detach: boolean }) => {
         order.push(`bridge ${n} close detach=${detach}`);
-        if (detach) entries.get('b_000000000001')?.debugger?.detach();
+        if (detach) dbg.detach(); // its own debugger, as the real bridge's close does
       }),
     };
     bridges.push(bridge);
@@ -106,7 +106,7 @@ function harness(focusEmulation: 'on' | 'off' = 'off') {
     return found;
   };
   const dbg = (tabId = 'b_000000000001') => entry(tabId).debugger as unknown as FakeDebugger;
-  const deps: DriversDeps = { focusEmulation, busy: (e) => busy.has(e.tab.tabId), loadPlaywright, startBridge };
+  const deps: DriversDeps = { focusEmulation, busy: (e) => busy.has(e.tab.tabId), loadPlaywright, startBridge: startBridge as never };
   const drivers = new Drivers(deps);
   return { drivers, order, playwright, loadPlaywright, startBridge, bridges, busy, entry, dbg };
 }
@@ -148,14 +148,57 @@ describe('Drivers: connecting (Design §4)', () => {
     expect(h.startBridge).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the bridge when the connection fails, and tries afresh on the next call', async () => {
-    const h = harness();
+  it.each([
+    ['off', true],
+    ['on', false],
+  ] as const)('a failed connection (focus emulation %s) resets auto-attach, closes the bridge per the mode, and the next call tries afresh', async (mode, detached) => {
+    const h = harness(mode);
     h.playwright.connectOverCDP.mockRejectedValueOnce(new Error('Browser.getVersion: the page is no longer attached'));
     await expect(h.drivers.for(h.entry())).rejects.toThrow('no longer attached');
-    expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: false });
+    // Playwright may have set waitForDebuggerOnStart before it failed: the reset goes first, as at an idle close
+    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', `bridge 1 close detach=${detached}`]);
+    expect(h.dbg().sent).toEqual([{ method: 'Target.setAutoAttach', params: { autoAttach: false, waitForDebuggerOnStart: false, flatten: true } }]);
+    expect(h.dbg().attached).toBe(!detached);
     expect(h.drivers.state('b_000000000001')).toBe('none');
     await h.drivers.for(h.entry());
     expect(h.drivers.state('b_000000000001')).toBe('connected');
+  });
+
+  it('a bridge that fails to start gives the attachment back under focus emulation off', async () => {
+    const h = harness('off');
+    h.startBridge.mockRejectedValueOnce(new Error('no frame tree'));
+    await expect(h.drivers.for(h.entry())).rejects.toThrow('no frame tree');
+    expect(h.dbg().sent.map(({ method }) => method)).toEqual(['Target.setAutoAttach']);
+    expect(h.dbg().attached).toBe(false);
+  });
+
+  it('drops a connection still under way when the tab gets a new page, leaking nothing', async () => {
+    const h = harness();
+    let release!: () => void;
+    h.playwright.connectOverCDP.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ on: vi.fn(), contexts: () => [{ pages: () => [{ setDefaultTimeout: vi.fn(), setDefaultNavigationTimeout: vi.fn(), on: vi.fn() }] }] } as never);
+        }),
+    );
+    const entry = h.entry();
+    const stale = h.dbg();
+    const first = h.drivers.for(entry);
+    await vi.advanceTimersByTimeAsync(0);
+    // the tab was suspended and resumed: a new view, a new TabDebugger
+    entry.debugger = new (stale.constructor as new (order: string[]) => typeof stale)(h.order) as never;
+    const second = h.drivers.for(entry);
+    release();
+    await expect(first).rejects.toThrow('the tab closed');
+    const driver = await second;
+    expect(h.bridges[0].close).toHaveBeenCalled(); // the stale connection's bridge
+    expect(h.drivers.state('b_000000000001')).toBe('connected');
+    expect(await h.drivers.for(entry)).toBe(driver);
+    // the stale debugger's commands arm nothing: only the live driver's idle clock runs
+    stale.command();
+    await vi.advanceTimersByTimeAsync(BROWSER_BRIDGE_IDLE_MS);
+    expect(h.drivers.state('b_000000000001')).toBe('idle-closed');
+    expect(h.bridges[1].close).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a tab with no page', async () => {
@@ -263,8 +306,22 @@ describe('Drivers: crash and close (Design §4, §11)', () => {
     release();
     await expect(pending).rejects.toThrow('the tab closed');
     await closed;
-    expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: false });
+    expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: true }); // the failed attempt's teardown, per the mode
     expect(h.drivers.state('b_000000000001')).toBe('none');
+  });
+
+  it.each([
+    ['off', true],
+    ['on', false],
+  ] as const)("retires a session's driver at once at its exit (focus emulation %s)", async (mode, detached) => {
+    const h = harness(mode);
+    await h.drivers.for(h.entry());
+    await h.drivers.retire('b_000000000001');
+    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', `bridge 1 close detach=${detached}`]);
+    expect(h.drivers.state('b_000000000001')).toBe('none');
+    await vi.advanceTimersByTimeAsync(BROWSER_BRIDGE_IDLE_MS);
+    expect(h.bridges[0].close).toHaveBeenCalledTimes(1); // no idle close later
+    await h.drivers.retire('b_000000000002'); // no driver: nothing to do
   });
 
   it('stop closes every driver', async () => {

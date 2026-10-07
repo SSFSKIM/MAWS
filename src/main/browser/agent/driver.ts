@@ -116,32 +116,46 @@ export class Drivers {
     await Promise.all([...this.slots.keys()].map((tabId) => this.close(tabId)));
   }
 
+  // The tab's session exited (Design §4): its driver ends at once, as the idle close ends one (the auto-attach reset,
+  // then the detach when focus emulation is off), rather than after BROWSER_BRIDGE_IDLE_MS.
+  async retire(tabId: string): Promise<void> {
+    const slot = this.slots.get(tabId);
+    if (!slot) return;
+    slot.closed = true; // a connection under way tears itself down at its next step
+    if (slot.connecting) return void (await slot.connecting.catch(() => {}));
+    const driver = slot.driver;
+    this.release(slot);
+    if (driver) await this.teardown(slot.debugger, driver.bridge);
+  }
+
   // ---- internals ------------------------------------------------------------------------------------------------------
 
   private async connect(slot: Slot): Promise<Driver> {
     const { entry } = slot;
     const tabClosed = () => new Error('the tab closed while MAWS attached to it');
     this.playwright ??= (this.deps.loadPlaywright ?? loadPlaywrightCore)();
-    await slot.debugger.attach(); // idempotent: E4a's attachment, shared
-    const bridge = await (this.deps.startBridge ?? startCdpBridge)(slot.debugger, entry.view!.webContents, { log: this.deps.log });
+    let bridge: CdpBridge | null = null;
     let browser: PlaywrightCore.Browser;
+    let page: PlaywrightCore.Page | undefined;
     try {
+      await slot.debugger.attach(); // idempotent: E4a's attachment, shared
+      if (slot.closed) throw tabClosed();
+      bridge = await (this.deps.startBridge ?? startCdpBridge)(slot.debugger, entry.view!.webContents, { log: this.deps.log });
       if (slot.closed) throw tabClosed();
       browser = await this.playwright.chromium.connectOverCDP(bridge.connect(), { timeout: CONNECT_TIMEOUT_MS });
       if (slot.closed) throw tabClosed();
+      page = browser.contexts()[0]?.pages()[0];
+      if (!page) throw new Error('the bridge announced no page');
     } catch (error) {
-      await bridge.close({ detach: false });
+      // Playwright may have set `waitForDebuggerOnStart` before it failed, and the attachment is this attempt's to give
+      // back: the idle close's teardown (Decision Log 1, 34 (a))
+      await this.teardown(slot.debugger, bridge);
       throw error;
-    }
-    const page = browser.contexts()[0]?.pages()[0];
-    if (!page) {
-      await bridge.close({ detach: false });
-      throw new Error('the bridge announced no page');
     }
     page.setDefaultTimeout(BROWSER_ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(BROWSER_ANSWER_MS);
     page.on('dialog', () => {}); // Decision Log 33, 35: never Playwright's auto-dismiss
-    const driver: Driver = { entry, browser, page, bridge };
+    const driver: Driver = { entry, browser, page: page!, bridge: bridge! };
     slot.driver = driver;
     this.idleClosed.delete(entry.tab.tabId);
     page.on('close', () => {
@@ -170,13 +184,23 @@ export class Drivers {
     this.release(slot);
     this.idleClosed.add(slot.entry.tab.tabId);
     // the reset is not a use of the page, and the detach that may follow is this close's own: both unobserved (released)
-    if (slot.debugger.attached) await slot.debugger.send('Target.setAutoAttach', AUTO_ATTACH_OFF).catch(() => {});
-    await driver.bridge.close({ detach: this.deps.focusEmulation === 'off' });
+    await this.teardown(slot.debugger, driver.bridge);
+  }
+
+  // Ends a connection that leaves the page alive: auto-attach off while attached (no new frame or worker waits for a
+  // debugger nobody runs), then the bridge closed, detaching only when focus emulation is off (under 'on' the attachment
+  // is E4a's). With no bridge (it never started) the detach is the debugger's own.
+  private async teardown(dbg: TabDebugger, bridge: CdpBridge | null): Promise<void> {
+    const detach = this.deps.focusEmulation === 'off';
+    if (dbg.attached) await dbg.send('Target.setAutoAttach', AUTO_ATTACH_OFF).catch(() => {});
+    if (bridge) await bridge.close({ detach }).catch((error: unknown) => this.deps.log?.(`the CDP bridge did not close cleanly: ${String(error)}`));
+    else if (detach) dbg.detach();
   }
 
   // A crash, Playwright's page closing, the tab going: the connection ends and nothing of it is kept.
   private async drop(slot: Slot): Promise<void> {
     if (this.slots.get(slot.entry.tab.tabId) !== slot) return;
+    slot.closed = true; // a connection still under way ends at its next step rather than outside the map
     const driver = slot.driver;
     this.release(slot);
     if (driver) await driver.bridge.close({ detach: false }).catch((error: unknown) => this.deps.log?.(`the CDP bridge did not close cleanly: ${String(error)}`));

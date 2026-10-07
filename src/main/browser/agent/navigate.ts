@@ -5,8 +5,9 @@
 // Resolves at once on a main-frame `did-navigate-in-page` (a fragment or pushState moves no loading state), and after a
 // main-frame `did-navigate` as soon as the view stops loading (checked at the commit and on each `did-stop-loading`). A
 // load that stops with neither a commit nor a failure (a 204, Stop) settles too, after a short grace in which a download
-// refusal for it still wins. Rejects with the refusal the host writes: `navigationFailed` on E4a's `loadError`,
-// `tabCrashed` on its `crashed`, `downloadRefused` on the tab's `browser.download.refused` (a download aborts the
+// refusal for it still wins; an earlier load error E4a restores then is not reported as this navigation's. Rejects
+// with the refusal the host writes: `navigationFailed` on E4a's `loadError`, `tabCrashed` on its `crashed`,
+// `downloadRefused` on the tab's `browser.download.refused` (a download aborts the
 // navigation with -3, which E4a ignores), `tabClosed` when the view goes, and main's own timeout just before the host's.
 // The signal's abort rejects with its reason (nothing is written).
 import { BROWSER_TOOL_ERRORS, type BrowserToolName } from '@shared/maws/browser';
@@ -66,12 +67,15 @@ export function waitForSettled(entry: TabEntry, tool: BrowserToolName, signal: A
       if (committed) return done();
       timers.push(setTimeout(done, STOPPED_WITHOUT_COMMIT_GRACE_MS));
     });
+    // What the navigation command cleared (E4a's `pending`): a load that stops with neither a commit nor a failure gets
+    // it back (`loadStopped`), and an earlier failure restored so is not this navigation's (it settles as a stop does).
+    const restorable = entry.pending?.loadError ?? null;
     cleanups.push(
       deps.store.onUpdated((updated) => {
         if (updated !== entry) return;
         const { loadError, crashed } = entry.tab;
-        if (loadError) fail(BROWSER_TOOL_ERRORS.navigationFailed(tool, loadError.url, loadError.kind, loadError.description || loadError.code));
-        else if (crashed) fail(BROWSER_TOOL_ERRORS.tabCrashed(tool, tabId));
+        if (crashed) fail(BROWSER_TOOL_ERRORS.tabCrashed(tool, tabId));
+        else if (loadError && loadError !== restorable) fail(BROWSER_TOOL_ERRORS.navigationFailed(tool, loadError.url, loadError.kind, loadError.description || loadError.code));
       }),
       deps.store.onViewDestroying((destroyed) => {
         if (destroyed === entry) fail(BROWSER_TOOL_ERRORS.tabClosed(tool, tabId));

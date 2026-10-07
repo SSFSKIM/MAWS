@@ -45,6 +45,9 @@ export interface BrowserRequestsDeps {
   report(call: BrowserCall, tabId: string, reason: BrowserWaitReason | null, via: Via): void;
   control: Pick<AgentControl, 'requestPending'>;
   store: Pick<TabStore, 'entry'>;
+  // Whether the session reaches the tab (P-21, P-24): checked before a request joins the tab's queue, so another
+  // session's tab is never queued on nor counted as pending
+  reaches(appSessionId: AppSessionId, tabId: string): boolean;
   now(): number;
 }
 
@@ -74,6 +77,11 @@ export class BrowserRequests {
     const call = { ...base, tool, args: parsed.data } as BrowserCall;
     const args = parsed.data as { tabId?: unknown };
     const tabId = typeof args.tabId === 'string' ? args.tabId : null;
+    if (tabId !== null && !this.deps.reaches(appSessionId, tabId)) {
+      const result = refusal(BROWSER_TOOL_ERRORS.tabNotFound(tool, tabId));
+      if (via === 'host') this.deps.answer(call, result);
+      return result;
+    }
     const key = keyOf(appSessionId, requestId);
     const controller = new AbortController();
     this.pending.set(key, { appSessionId, tabId, controller });
@@ -127,8 +135,8 @@ export class BrowserRequests {
     for (const pending of this.pending.values()) pending.controller.abort(new RequestEnded('host'));
   }
 
-  pendingFor(tabId: string): boolean {
-    for (const pending of this.pending.values()) if (pending.tabId === tabId) return true;
+  pendingFor(tabId: string, exceptSession?: AppSessionId): boolean {
+    for (const pending of this.pending.values()) if (pending.tabId === tabId && pending.appSessionId !== exceptSession) return true;
     return false;
   }
 
@@ -241,6 +249,7 @@ export interface BrowserAgentDeps {
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // the mode of focus emulation, as startBrowser read it
   control?: AgentControl; // Task 2.4's control.ts; the provisional one until then
+  drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise
 }
 
 export interface BrowserAgent {
@@ -252,11 +261,13 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
   const { store, hosts, emit } = deps;
   const control = deps.control ?? provisionalControl(store);
   const log = (line: string) => console.warn(`[browser] ${line}`);
-  const drivers = new Drivers({
-    focusEmulation: focusEmulationMode(deps.env), // Decision Log 1, 34 (a): the effective mode, not the default
-    busy: (entry) => entry.tab.control === 'agent' || requests.pendingFor(entry.tab.tabId),
-    log,
-  });
+  const drivers =
+    deps.drivers ??
+    new Drivers({
+      focusEmulation: focusEmulationMode(deps.env), // Decision Log 1, 34 (a): the effective mode, not the default
+      busy: (entry) => entry.tab.control === 'agent' || requests.pendingFor(entry.tab.tabId),
+      log,
+    });
   const handlers = new BrowserHandlers({
     store,
     navigator: deps.navigator,
@@ -275,6 +286,10 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     report: waitingReporter({ hosts, emit }),
     control,
     store,
+    reaches: (appSessionId, tabId) => {
+      const entry = store.entry(tabId);
+      return entry !== undefined && reachableSessions(deps.sessions, appSessionId).includes(entry.tab.appSessionId);
+    },
     now: Date.now,
   });
 
@@ -284,6 +299,14 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     hosts.onEvent('maws.browser.cancel', ({ appSessionId, requestId }) => void requests.cancel(appSessionId, requestId)),
     hosts.onState('engine-host', (state) => {
       if (state.state !== 'ready') requests.abortAll();
+    }),
+    // Design §4: a session's exit ends its tabs' drivers at once (the host has cancelled its requests, Decision Log 46);
+    // a tab another session still has a request on (a side thread acting in its parent's tab) keeps its driver
+    hosts.onEvent('session.status', ({ appSessionId, status }) => {
+      if (status.process !== 'exited') return;
+      for (const { tab } of store.all()) {
+        if (tab.appSessionId === appSessionId && !requests.pendingFor(tab.tabId, appSessionId)) void drivers.retire(tab.tabId);
+      }
     }),
     store.onViewCreated((entry) => {
       if (inputs.has(entry)) return; // the seam outlives a view: one subscription per tab

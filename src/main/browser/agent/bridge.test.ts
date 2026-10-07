@@ -329,6 +329,16 @@ describe('startCdpBridge: waiting children while no transport is open', () => {
     expect(send).not.toHaveBeenCalledWith('Runtime.runIfWaitingForDebugger', undefined, 'CHILD-3');
   });
 
+  it("resumes again once Playwright closed its own transport (`transport.close()`)", async () => {
+    const { raw, bridge, send } = await harness();
+    const transport = bridge.connect(); // as connectOverCDP holds it
+    transport.close(); // Playwright's disconnect: CRConnection's closeAndWait calls the transport's close
+    expect(bridge.connected).toBe(false);
+    raw.event('Target.attachedToTarget', { sessionId: 'CHILD-6', targetInfo: { targetId: 'IFRAME-6', type: 'iframe' }, waitingForDebugger: true });
+    await settle();
+    expect(send).toHaveBeenCalledWith('Runtime.runIfWaitingForDebugger', undefined, 'CHILD-6');
+  });
+
   it('resumes again once the client has gone', async () => {
     const { raw, connect, send, bridge } = await harness();
     const client = await connect();

@@ -284,7 +284,7 @@ describe('startBrowser: the browser tools (E4c)', () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
-    expect([...events.keys()]).toEqual(['maws.browser.request', 'maws.browser.cancel']);
+    expect([...events.keys()]).toEqual(['maws.browser.request', 'maws.browser.cancel', 'session.status']);
     expect(hosts.onState).toHaveBeenCalledWith('engine-host', expect.any(Function));
     browser.stop();
     expect(events.size).toBe(0);
