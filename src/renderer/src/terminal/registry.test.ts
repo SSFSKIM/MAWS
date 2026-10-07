@@ -10,7 +10,7 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 const A = 'session-a' as AppSessionId;
 const KiB = 1024;
@@ -857,7 +857,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });
@@ -893,7 +893,7 @@ describe('terminal font from the root --font-mono', () => {
     registry.unmount(hidden.id);
     const fit = vi.spyOn(shown.renderer, 'fit');
     currentFont = { ...MONO, family: '"MesloLGM Nerd Font Mono", "SF Mono", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, appearance: { ...SETTINGS_DEFAULTS_V10.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V11, appearance: { ...SETTINGS_DEFAULTS_V11.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
     expect(shown.renderer.font.family).toBe(currentFont.family);
     expect(hidden.renderer.font.family).toBe(currentFont.family);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -927,7 +927,7 @@ describe('terminal font from the root --font-mono', () => {
     const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
     registry.mount(id, parent()); // its renderer is being created with the font of this moment
     currentFont = { ...MONO, family: '"Changed", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V10, appearance: { ...SETTINGS_DEFAULTS_V10.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V11, appearance: { ...SETTINGS_DEFAULTS_V11.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
     await settle();
     const renderer = registry.get(id)!.renderer as FakeRenderer;
     expect(renderer.options.font.family).toBe('mono');

@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V10: Settings = {
+export const SETTINGS_DEFAULTS_V11: Settings = {
   version: 10, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
@@ -69,7 +69,7 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V10);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V11);
 
 // E10: v9 → v10, the supervisor section with its defaults
 const fromV9 = (v9: SettingsV9): Settings => ({ ...v9, version: 10, supervisor: defaults().supervisor });

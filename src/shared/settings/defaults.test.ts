@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsPatchSchema, SettingsSchema, type Settings } from '../ipc/schema/settings';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V10 } from './defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V11 } from './defaults';
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/settings', name), 'utf8'));
 // W13: the pin every version from 3 to 7 wrote (version 8 drops it)
 const PIN = { pinnedVersion: '2.1.283' };
 // W7: the engine section every version from 4 to 6 wrote (version 7 adds the budget's switch), with the pin
-const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V10.engine;
+const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V11.engine;
 void _switch;
 const ENGINE_BEFORE_V7 = { ...ENGINE_V8_LESS_SWITCH, ...PIN };
 // W13: an engine section as version 8 holds it: the pin gone
@@ -19,7 +19,7 @@ const unpinned = <E extends { pinnedVersion?: string }>(engine: E): Omit<E, 'pin
 };
 // E10: the sections version 9 wrote (version 10 adds the supervisor section); `version` still says 10, so an object
 // built from them names its own
-const { supervisor: _supervisor, ...SECTIONS_V9 } = SETTINGS_DEFAULTS_V10;
+const { supervisor: _supervisor, ...SECTIONS_V9 } = SETTINGS_DEFAULTS_V11;
 void _supervisor;
 // E9: the sections version 8 wrote (version 9 adds the voice section)
 const { voice: _voice, ...SECTIONS_V8 } = SECTIONS_V9;
@@ -34,7 +34,7 @@ const SUPERVISOR = { supervisor: { idleExitMinutes: 10, keepRunningDefault: true
 
 describe('settings migrate v1 and v2 to v3', () => {
   it('holds the defaults the document states, and they validate', () => {
-    expect(SETTINGS_DEFAULTS_V10).toEqual({
+    expect(SETTINGS_DEFAULTS_V11).toEqual({
       version: 10, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10
       theme: 'light',
       keymap: {},
@@ -47,31 +47,31 @@ describe('settings migrate v1 and v2 to v3', () => {
       voice: { locale: null }, // E9: the system locale
       supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: exits 10 minutes after its last session; keep is the quit's default
     });
-    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V10)).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V11)).toEqual(SETTINGS_DEFAULTS_V11);
   });
 
   it('migrates the v1 fixture to the defaults with its theme', () => {
-    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V10, theme: 'dark' });
+    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V11, theme: 'dark' });
   });
 
   it('migrates the v2 fixture keeping its theme, its keymap override and its notification policy', () => {
     const migrated = migrateSettings(fixture('v2.json'));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     expect(migrated).toEqual({
-      ...SETTINGS_DEFAULTS_V10,
+      ...SETTINGS_DEFAULTS_V11,
       theme: 'system',
       keymap: { 'attention.next': 'Cmd+Alt+J' },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V10.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V11.notifications.kinds },
     });
   });
 
   // W10: ⌥Enter's hold (`composer.steer`) is gone; a file that overrode it keeps everything else
   it('drops an override of a retired action instead of refusing the file, at the current version and an earlier one', () => {
-    const current = { ...SETTINGS_DEFAULTS_V10, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
-    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V10, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
+    const current = { ...SETTINGS_DEFAULTS_V11, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
+    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V11, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
     const v2 = { version: 2, theme: 'system', keymap: { 'composer.steer': null }, notifications: { enabled: true, sound: false } };
     expect(migrateSettings(v2).keymap).toEqual({});
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V10, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
+    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V11, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
   });
 
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
@@ -81,11 +81,11 @@ describe('settings migrate v1 and v2 to v3', () => {
   // earlier object gains the supervisor section.
   it('is the identity over a v10 object', () => {
     const v10: Settings = {
-      ...SETTINGS_DEFAULTS_V10,
+      ...SETTINGS_DEFAULTS_V11,
       theme: 'dark',
       gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
       appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
-      engine: { ...SETTINGS_DEFAULTS_V10.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
+      engine: { ...SETTINGS_DEFAULTS_V11.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
       permissions: { autoFallback: 'default' },
       voice: { locale: 'en-US' },
       supervisor: { idleExitMinutes: null, keepRunningDefault: false }, // E10
@@ -124,7 +124,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('takes any engine mode but auto as the fallback', () => {
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'plan' } }).success).toBe(true);
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'auto' } }).success).toBe(false);
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
   });
   // W3 end
 
@@ -137,8 +137,8 @@ describe('settings migrate v1 and v2 to v3', () => {
   });
 
   it('takes the switch as one object a patch replaces whole, and nothing but a boolean in it', () => {
-    const off = applySettingsPatch(SETTINGS_DEFAULTS_V10, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
-    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V10.engine, memoryBudget: { enabled: false } });
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V11, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
+    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V11.engine, memoryBudget: { enabled: false } });
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: {} } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: 'off' } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: true, limitMiB: 1 } } }).success).toBe(false);
@@ -159,7 +159,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('never shares the defaults object with a migrated result', () => {
     const migrated = migrateSettings(fixture('v1.json'));
     migrated.notifications.kinds.errors = false;
-    expect(SETTINGS_DEFAULTS_V10.notifications.kinds.errors).toBe(true);
+    expect(SETTINGS_DEFAULTS_V11.notifications.kinds.errors).toBe(true);
   });
 });
 
@@ -191,8 +191,8 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
   });
 
   it('validates a v9 object as it is and refuses a locale outside its bounds', () => {
-    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
-    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, voice }).success;
+    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
+    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, voice }).success;
     expect(valid({ locale: null })).toBe(true);
     expect(valid({ locale: 'en' })).toBe(true);
     expect(valid({ locale: 'e' })).toBe(false);
@@ -203,9 +203,9 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 
   it('patches the locale alone and leaves every other section as it was', () => {
     const patch = SettingsPatchSchema.parse({ voice: { locale: 'en-US' } });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, patch)).toEqual({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'en-US' } });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, patch)).toEqual({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'en-US' } });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V11);
     expect(SettingsPatchSchema.safeParse({ voice: { locale: 'e' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ voice: { language: 'en-US' } }).success).toBe(false);
   });
@@ -223,7 +223,7 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('holds the idle time to whole minutes from 1 to 1440, or null for never, and the quit default to a boolean', () => {
-    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, supervisor }).success;
+    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, supervisor }).success;
     expect(valid({ idleExitMinutes: 1, keepRunningDefault: true })).toBe(true);
     expect(valid({ idleExitMinutes: 1440, keepRunningDefault: false })).toBe(true);
     expect(valid({ idleExitMinutes: null, keepRunningDefault: true })).toBe(true);
@@ -236,10 +236,10 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const never = applySettingsPatch(SETTINGS_DEFAULTS_V10, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
-    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    const never = applySettingsPatch(SETTINGS_DEFAULTS_V11, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
+    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V11, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
     expect(applySettingsPatch(never, { supervisor: { keepRunningDefault: false } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: false });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V11);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMinutes: 0 } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMs: 60_000 } }).success).toBe(false);
   });
@@ -248,9 +248,9 @@ describe('settings v9 → v10 adds the supervisor section', () => {
 
 describe('settings v3 validates and refuses unknown versions', () => {
   it.each([
-    ['a v11 object', { ...SETTINGS_DEFAULTS_V10, version: 11 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10
+    ['a v11 object', { ...SETTINGS_DEFAULTS_V11, version: 11 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10
     ['a v10 file without its supervisor section', { ...SECTIONS_V9, version: 10 }], // E10: every v10 file writes one
-    ['a v9 file with a supervisor section', { ...SETTINGS_DEFAULTS_V10, version: 9 }], // E10: v9 never had it
+    ['a v9 file with a supervisor section', { ...SETTINGS_DEFAULTS_V11, version: 9 }], // E10: v9 never had it
     ['a v9 file without its voice section', { ...SECTIONS_V8, version: 9 }], // E9: every v9 file writes one
     ['a v8 file with a voice section', { ...SECTIONS_V9, version: 8 }], // E9: v8 never had it
     ['a v7 file without its pin', { ...SECTIONS_V8, version: 7 }], // W13: every v7 file wrote one
@@ -263,14 +263,14 @@ describe('settings v3 validates and refuses unknown versions', () => {
     ['not an object', 'settings'],
     ['an invalid v1 file', { version: 1, theme: 'sepia' }],
     ['a v2 file with a key v2 never had', { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false }, engine: {} }],
-    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V10, appearance: undefined }],
+    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V11, appearance: undefined }],
   ])('refuses %s', (_, raw) => {
     expect(() => migrateSettings(raw)).toThrow();
   });
 
   // C12 start: the budget's fields
   it('holds each v4 field to its range', () => {
-    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, engine: { ...SETTINGS_DEFAULTS_V10.engine, ...engine } }).success;
+    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, engine: { ...SETTINGS_DEFAULTS_V11.engine, ...engine } }).success;
     expect(bad({ memoryBudgetMiB: 511 })).toBe(false);
     expect(bad({ memoryBudgetMiB: 512 })).toBe(true);
     expect(bad({ memoryBudgetMiB: 1024.5 })).toBe(false);
@@ -283,11 +283,11 @@ describe('settings v3 validates and refuses unknown versions', () => {
   // C12 end
 
   it('holds each v3 field to its range', () => {
-    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, ...patch }).success;
+    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, ...patch }).success;
     expect(bad({ usage: { nearLimitPercent: 49 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 101 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 90.5 } })).toBe(false);
-    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V10.gateway, relayUnreachable: 'retry' } })).toBe(false);
+    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V11.gateway, relayUnreachable: 'retry' } })).toBe(false);
     expect(bad({ appearance: { monoFont: '' } })).toBe(false);
     expect(bad({ appearance: { monoFont: 'x'.repeat(201) } })).toBe(false);
     expect(bad({ appearance: { monoFont: null, transcriptWidth: 800 } })).toBe(false); // W2: Claude Desktop's three widths only
@@ -298,7 +298,7 @@ describe('settings v3 validates and refuses unknown versions', () => {
 
 describe('settings patch merges one kind and keeps its siblings', () => {
   const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true };
-  const state: Settings = { ...SETTINGS_DEFAULTS_V10, notifications: { enabled: true, sound: false, kinds: siblings } };
+  const state: Settings = { ...SETTINGS_DEFAULTS_V11, notifications: { enabled: true, sound: false, kinds: siblings } };
 
   it('validates a patch of one kind and changes that kind alone', () => {
     const patch = SettingsPatchSchema.parse({ notifications: { kinds: { errors: false } } });

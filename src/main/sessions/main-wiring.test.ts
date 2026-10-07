@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionServiceDeps } from './context';
 import { intentFor } from '../../../test/support/session-host';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 const state = vi.hoisted(() => ({
   root: '', shellConfig: '', ready: null as null | (() => unknown),
@@ -22,7 +22,7 @@ vi.mock('electron', () => ({
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), interceptCommand: vi.fn(), CommandFailure: class extends Error {} }));
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn() }) }));
-vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V10, resolvedTheme: 'light' }) }) }));
+vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V11, resolvedTheme: 'light' }) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; } }));
 vi.mock('../index/source', () => ({ IndexSessionSource: class {} }));

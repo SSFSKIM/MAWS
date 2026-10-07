@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { createClient, onCommandRefused } from './client';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 // A bridge that answers every invoke with `answer` and lets the test deliver raw event payloads.
 function fakeBridge(answer: unknown) {
@@ -16,7 +16,7 @@ function fakeBridge(answer: unknown) {
   return { bridge: bridge as unknown as MawsBridge, deliver: (name: string, payload: unknown) => listeners.get(name)?.(payload) };
 }
 
-const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V10, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('renderer ipc client', () => {
   beforeEach(() => vi.restoreAllMocks());
