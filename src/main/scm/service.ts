@@ -392,14 +392,15 @@ export class ScmService {
   }
 
   // Every remote with its configured fetch URL (without user-info), null when it has none, from one `git remote -v`
-  // (E11): a `<name>\t<url> (fetch)` line per remote with a URL (the first of several), `<name>\t` for one without.
+  // (E11): a `<name>\t<url> (fetch)` line per remote with a URL (the first of several; a partial clone's carries a
+  // ` [<filter>]` suffix), `<name>\t` for one without.
   private async remotes(directory: string, read: GitRun): Promise<ScmStatus['remotes']> {
     const urls = new Map<string, string | null>();
     for (const line of (await read(directory, ['remote', '-v'])).split('\n')) {
       const tab = line.indexOf('\t');
       if (tab <= 0) continue;
       const name = line.slice(0, tab);
-      const fetch = /^(.*) \(fetch\)$/.exec(line.slice(tab + 1));
+      const fetch = /^(.*) \(fetch\)(?: \[[^\]]*\])?$/.exec(line.slice(tab + 1));
       if (!urls.has(name) || (urls.get(name) === null && fetch)) urls.set(name, fetch ? withoutUserInfo(fetch[1]!.trim()) : null);
     }
     return [...urls].map(([name, url]) => ({ name, url }));

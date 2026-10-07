@@ -358,6 +358,19 @@ describe('scm service', () => {
       expect(read.mock.calls.filter(([, args]) => args[0] === 'remote').map(([, args]) => args.join(' '))).toEqual(['remote -v']);
     });
 
+    it("reads a partial clone's fetch URL past git's filter suffix", async () => {
+      read.mockImplementation(async (directory, args) => {
+        const command = args.join(' ');
+        if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
+        // a promisor remote with a filter prints `<url> (fetch) [<filter>]` (git's builtin/remote.c)
+        if (command === 'remote -v') return 'origin\thttps://github.com/o/r.git (fetch) [blob:none]\norigin\thttps://github.com/o/r.git (push)\n';
+        if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return '*\0origin\n';
+        if (command === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n';
+        throw new Error(`unexpected read: git ${command}`);
+      });
+      expect((await service().status(ID)).remotes).toEqual([{ name: 'origin', url: 'https://github.com/o/r.git' }]);
+    });
+
     it('falls back to origin, then the sole remote, and answers no base when the remote has no HEAD', async () => {
       let remotes = 'fork\norigin\n';
       read.mockImplementation(async (directory, args) => {
