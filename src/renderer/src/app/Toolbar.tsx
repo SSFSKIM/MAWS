@@ -20,11 +20,21 @@ import { useSlot } from './slots';
 import { displayTitle } from '../sessions/title';
 import { DELIVERABLES_COPY } from '../tools/deliverables/copy'; // E2
 import { useDeliverableTitle } from '../tools/deliverables/store'; // E2
+// E4a start
+import { BROWSER_COPY } from '../tools/browser/copy';
+import { useBrowserTitle } from '../tools/browser/store';
+// E4a end
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-// E2: `deliverableTitle` is a `deliverable` tab's record title, when the deliverables store holds it.
-export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSessionId, SessionRecord>, deliverableTitle: string | null = null): { title: string; branch: string | null } {
+// E2: `deliverableTitle` is a `deliverable` tab's record title, when the deliverables store holds it. E4a:
+// `browserTitle` is a `browser` tab's page title (else host), when the browser store lists the tab.
+export function toolbarTitle(
+  tab: TabRef | null,
+  records: ReadonlyMap<AppSessionId, SessionRecord>,
+  deliverableTitle: string | null = null,
+  browserTitle: string | null = null, // E4a
+): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
       return { title: '', branch: null }; // an empty main area (W5: the Overview is no tab)
@@ -44,8 +54,8 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
       return { title: 'Settings', branch: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, branch: null };
-    case 'browser': // E4a: the tool's name until Task 3.1 reads the tab's title from the browser store
-      return { title: 'Browser', branch: null };
+    case 'browser': // E4a
+      return { title: browserTitle ?? BROWSER_COPY.title, branch: null };
   }
 }
 
@@ -63,7 +73,8 @@ export function Toolbar() {
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
   const unstarted = useUnstartedTitle(appSessionId ?? ('' as AppSessionId));
   const deliverableTitle = useDeliverableTitle(tab?.kind === 'deliverable' ? tab.appSessionId : null, tab?.kind === 'deliverable' ? tab.deliverableId : null); // E2
-  const titled = toolbarTitle(tab, records, deliverableTitle);
+  const browserTitle = useBrowserTitle(tab?.kind === 'browser' ? tab.appSessionId : null, tab?.kind === 'browser' ? tab.browserTabId : null); // E4a
+  const titled = toolbarTitle(tab, records, deliverableTitle, browserTitle);
   // An unstarted session is titled like its tab.
   const { title, branch } = appSessionId && !records.has(appSessionId) ? { title: unstarted.title, branch: null } : titled;
 

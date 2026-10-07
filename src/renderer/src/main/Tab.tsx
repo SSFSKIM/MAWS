@@ -24,6 +24,10 @@ import { useViewer } from '../tools/code/viewer/viewer-store';
 import { DELIVERABLES_COPY } from '../tools/deliverables/copy';
 import { useDeliverableTitle } from '../tools/deliverables/store';
 // E2 end
+// E4a start
+import { BROWSER_COPY } from '../tools/browser/copy';
+import { useBrowserTitle } from '../tools/browser/store';
+// E4a end
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab';
 
@@ -64,6 +68,7 @@ function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId);
   const deliverableTitle = useDeliverableTitle(tab.kind === 'deliverable' ? tab.appSessionId : null, tab.kind === 'deliverable' ? tab.deliverableId : null); // E2
+  const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
   switch (tab.kind) {
     case 'session':
       return session;
@@ -79,8 +84,8 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
-    case 'browser': // E4a: the tool's name until the renderer milestone reads the tab's title from the browser store
-      return { title: 'Browser', secondary: null, glyph: null, fileType: null };
+    case 'browser': // E4a
+      return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
   }
 }
 

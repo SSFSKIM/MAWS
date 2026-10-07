@@ -86,6 +86,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       return <SettingsTab section={tab.section} />;
     case 'deliverable': // E2
       return <DeliverableTab tab={tab} />;
+    case 'browser': // E4a
+      return <BrowserTab tab={tab} />;
   }
 }
 
@@ -143,3 +145,11 @@ function DeliverableTab({ tab }: { tab: Extract<TabRef, { kind: 'deliverable' }>
   // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
   return <Slot tab={tab} />;
 }
+
+// E4a start: one of a session's browser tabs (X14), the slot E4a registers.
+function BrowserTab({ tab }: { tab: Extract<TabRef, { kind: 'browser' }> }) {
+  const Slot = useSlot('browserTab');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot tab={tab} />;
+}
+// E4a end

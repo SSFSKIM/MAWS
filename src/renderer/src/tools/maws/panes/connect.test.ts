@@ -159,24 +159,67 @@ describe('the pane bridge, window side (E1)', () => {
     });
   });
 
+  // (E4a: these two name the `tasks` pane, E7's, since the `browser` pane now validates its target and passes more.)
   it('a sibling’s tool, once registered, receives the target', async () => {
-    const { tool, probe } = probeTool('browser', { title: 'Browser' });
+    const { tool, probe } = probeTool('tasks', { title: 'Tasks' });
     registerPanelTool(tool);
-    show(fake, { pane: 'browser', target: 'https://example.com' });
+    show(fake, { pane: 'tasks', target: 'release' });
     await settle();
-    expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://example.com' }]);
+    expect(probe.created.map((init) => init.params)).toEqual([{ target: 'release' }]);
   });
 
   it('a multi-instance sibling tool shown twice with distinct targets receives both (only the Terminal reuses its tab)', async () => {
-    const { tool, probe } = probeTool('browser', { title: 'Browser', multiInstance: true });
+    const { tool, probe } = probeTool('tasks', { title: 'Tasks', multiInstance: true });
     registerPanelTool(tool);
-    show(fake, { pane: 'browser', target: 'https://a.example' });
-    show(fake, { pane: 'browser', target: 'https://b.example', requestId: 'r2' });
+    show(fake, { pane: 'tasks', target: 'release' });
+    show(fake, { pane: 'tasks', target: 'review', requestId: 'r2' });
     await settle();
-    expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://a.example' }, { target: 'https://b.example' }]);
+    expect(probe.created.map((init) => init.params)).toEqual([{ target: 'release' }, { target: 'review' }]);
     const tabs = panelOf(A)!.tabs.map((tab) => tab.id);
     expect(fake.invoked('maws.pane.answer').map((answer) => (answer as { result: { opened: { tabId: string } } }).result.opened.tabId)).toEqual(tabs);
   });
+
+  // E4a start (Design §14, Decision Log 7): the `browser` pane validates its target as main will, so a refused address
+  // is the model's error to read before anything opens; a valid one (as parsed) or none opens the Browser tool with the
+  // session and the request's own id, so a pinned tool showing another session opens the tab in this one (P-21) and two
+  // windows handling one request reach one tab in main.
+  describe('browser (E4a)', () => {
+    const browserTool = () => {
+      const { tool, probe } = probeTool('browser', { title: 'Browser', multiInstance: false });
+      registerPanelTool(tool);
+      return probe;
+    };
+
+    it('a valid target opens the Browser tool on it, parsed, with the session and the request id', async () => {
+      const probe = browserTool();
+      show(fake, { pane: 'browser', target: 'https://Example.com' });
+      await settle();
+      expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://example.com/', appSessionId: A, requestId: 'r1' }]);
+      const [opened] = panelOf(A)!.tabs;
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: opened!.id, title: 'Browser' } } }]);
+    });
+
+    it('a refused target answers navigationRefused, nothing opened', async () => {
+      const probe = browserTool();
+      show(fake, { pane: 'browser', target: 'file:///etc/hosts' });
+      show(fake, { pane: 'browser', target: 'wikipedia.org', requestId: 'r2' });
+      await settle();
+      expect(probe.created).toEqual([]);
+      expect(fake.invoked('maws.pane.answer')).toEqual([
+        { appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.navigationRefused('file:///etc/hosts') } },
+        { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.navigationRefused('wikipedia.org') } },
+      ]);
+    });
+
+    it('no target opens the tool on the session’s own state, with the session and the request id', async () => {
+      const probe = browserTool();
+      show(fake, { pane: 'browser', target: null });
+      await settle();
+      expect(probe.created.map((init) => init.params)).toEqual([{ appSessionId: A, requestId: 'r1' }]);
+      expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser' } } });
+    });
+  });
+  // E4a end
 
   it('a session this window does not know: nothing opened, no answer', async () => {
     const { tool } = probeTool('terminal', { title: 'Terminal' });

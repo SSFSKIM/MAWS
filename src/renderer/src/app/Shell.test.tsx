@@ -230,6 +230,10 @@ describe('toolbar', () => {
     const deliverable = { id: 'deliverable:app-a:d1', kind: 'deliverable', appSessionId: A, deliverableId: 'd1', pinned: false } as const;
     expect(toolbarTitle(deliverable, records, 'Dashboard')).toEqual({ title: 'Dashboard', branch: null });
     expect(toolbarTitle(deliverable, records)).toEqual({ title: 'Deliverable', branch: null });
+    // E4a: a browser tab by its page's title (else host), else "Browser" until the browser store lists the tab
+    const browser = { id: 'browser:app-a:b_000000000001', kind: 'browser', appSessionId: A, browserTabId: 'b_000000000001', pinned: false } as const;
+    expect(toolbarTitle(browser, records, null, 'Page A')).toEqual({ title: 'Page A', branch: null });
+    expect(toolbarTitle(browser, records)).toEqual({ title: 'Browser', branch: null });
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
     expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
   });

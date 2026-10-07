@@ -87,6 +87,11 @@ import { connectDeliverables } from './tools/deliverables/store';
 import { openDeliverable } from './tools/maws/actions';
 import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
 // E2 end
+// E4a start
+import { browserTool } from './tools/browser/BrowserTool';
+import { BrowserTab } from './tools/browser/BrowserTab';
+import { connectBrowser } from './tools/browser/store';
+// E4a end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -219,6 +224,14 @@ export function App() {
   useEffect(() => connectDeliverables(), []);
   useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
   // E2 end
+  // E4a start: the Browser tool and its main tab, registered once and never unregistered (C8a's rule above), and the
+  // window's mirror of main's browser tabs (the list, then its events)
+  useEffect(() => {
+    registerPanelTool(browserTool);
+    registerSlot('browserTab', BrowserTab);
+  }, []);
+  useEffect(() => connectBrowser(), []);
+  // E4a end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
