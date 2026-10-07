@@ -15,7 +15,8 @@ export default defineConfig({
   // E4d (inside C6's block, as E4a's): so does the comment mode spec, under `pnpm e2e:browser-comment`.
   // E4b (inside C6's block, as E4a's): so does the profile import spec, under `pnpm e2e:browser-import`.
   // E4c (inside C6's block, as E4a's): so does the browser tools spec, under `pnpm e2e:browser-tools`.
-  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4d start */ 'browser-comment.spec.ts' /* E4d end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */, /* E4c start */ 'browser-tools.spec.ts' /* E4c end */],
+  // E4d (M5): the live proof runs only under MAWS_E4D_LIVE=1 (`pnpm e2e:browser-comment-live`, spending money).
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4d start */ 'browser-comment.spec.ts' /* E4d end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */, /* E4c start */ 'browser-tools.spec.ts' /* E4c end */, /* E4d start: the live proof, only under its flag (it also skips itself) */ ...(process.env.MAWS_E4D_LIVE === '1' ? [] : ['browser-comment-live.spec.ts']) /* E4d end */],
   // end C6
   // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch),
   // and the live check against this checkout runs only when named under MAWS_PANEL_LIVE=1 (it skips itself otherwise).
