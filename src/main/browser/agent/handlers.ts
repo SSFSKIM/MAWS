@@ -2,16 +2,17 @@
 // tool's input schema, run against the calling session's tab and answered as the host writes it. `browser_tabs` and
 // `browser_navigate` work through E4a's TabStore and Navigator alone (no Playwright: a navigation goes where the chrome's
 // own would, through `will-navigate`, the history and the load-error lifecycle); `browser_snapshot`, `browser_act` and
-// `browser_eval` work through the tab's Playwright driver (driver.ts); Task 2.5 adds the screenshot as a case of `run`.
+// `browser_eval` work through the tab's Playwright driver (driver.ts), and `browser_screenshot` too (screenshot.ts).
 //
 // The rules every handler keeps: a tab is reachable when it is the calling session's or, for a side thread, its parent's
 // (P-21, P-24); an action shows its tab (selects it unless the person is using the session's selected tab, and says
 // `browser.agent.acting`), passes the pause point (`AgentControl.pause`, control.ts) and marks the tab the
 // agent's before its first page-changing command; a load (a tab that has no page yet) is marked the agent's in the tick
 // it starts, before any network event, so E4a's download handler refuses for the agent (A-31), and has no pause point;
-// reads touch neither control nor the selection (Decision Log 5, 6, 15). An aborted request answers nothing (null).
+// reads (snapshot, screenshot) touch neither control nor the selection and pass no pause point (Decision Log 5, 6, 15). An aborted request answers nothing (null).
 // A page dialog MAWS answered for the agent (dialogs.ts, the `-run-dialog` wrap) reaches the next successful result naming its
 // tab (Decision Log 33, 35, 37): `run` drains the tab's dialogs into it.
+import { randomUUID } from 'node:crypto';
 import type { WebContents } from 'electron';
 import type { Locator } from 'playwright-core';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,6 +29,7 @@ import {
   type BrowserActResult,
   type BrowserDialog,
   type BrowserEvalResult,
+  type BrowserScreenshotResult,
   type BrowserSnapshotResult,
   type BrowserEvalInput,
   type BrowserActInput,
@@ -51,6 +53,7 @@ import { answerOfError, BrowserToolError, firstLine } from './errors';
 import { evalValueOf } from './evaluate';
 import { isTimeout, locate, RefBook } from './locate';
 import { EVAL_NAVIGATION_START_MS, SETTLE_DEADLINE_MS, waitForSettled, watchCallNavigation, type DownloadRefusal } from './navigate';
+import { captureScreenshot, saveScreenshot } from './screenshot';
 import { takeSnapshot } from './snapshot';
 
 export type { DownloadRefusal } from './navigate';
@@ -91,8 +94,8 @@ interface CallBase {
   appSessionId: AppSessionId;
   requestId: string;
   toolUseId: string | null;
-  deliverableId?: string; // browser_screenshot: the record's id the host minted
-  path?: string;
+  deliverableId?: string; // browser_screenshot: the record's id the host minted (main mints one for the e2e seam's call)
+  path?: string; // the host's own derivation, unused: main derives the path from the id (Design §7)
 }
 
 export type BrowserCall = { [N in BrowserToolName]: CallBase & { tool: N; args: ToolArgs[N] } }[BrowserToolName];
@@ -110,7 +113,8 @@ export interface BrowserHandlerDeps {
   control: AgentControl;
   drivers: Pick<Drivers, 'for'>;
   dialogs?: AgentDialogs;
-  cursor?: Pick<AgentCursor, 'aim'>; // the agent's pointer shown in the page before each act (Design §9)
+  cursor?: Pick<AgentCursor, 'aim' | 'hide'>; // the agent's pointer in the page: aimed before each act, hidden for a covered capture (Design §7, §9)
+  userData: string; // main's own: a screenshot's file is under its deliverables (Design §7)
   reachable(appSessionId: AppSessionId): AppSessionId[]; // the session itself first, then its parent for a side thread
   onDownloadRefused(listener: (refusal: DownloadRefusal) => void): () => void;
   emit: BrowserEmit;
@@ -146,7 +150,7 @@ export class BrowserHandlers {
 
   // The tab of a snapshot, act or eval whose page crashed (E4a's `crashed`; requirePage refused one crashed before).
   private crashedDuring(call: BrowserCall): string | null {
-    if (call.tool !== 'browser_snapshot' && call.tool !== 'browser_act' && call.tool !== 'browser_eval') return null;
+    if (call.tool === 'browser_tabs' || call.tool === 'browser_navigate') return null;
     const entry = reachedEntry(this.deps.store, this.deps.reachable, call.appSessionId, call.args.tabId);
     return entry?.tab.crashed ? entry.tab.tabId : null;
   }
@@ -164,7 +168,7 @@ export class BrowserHandlers {
       case 'browser_eval':
         return this.evaluate(call, ctx);
       case 'browser_screenshot':
-        return Promise.resolve({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed(call.tool, 'screenshot', '', 'not available in this build of MAWS') });
+        return this.screenshot(call, ctx);
     }
   }
 
@@ -381,6 +385,44 @@ export class BrowserHandlers {
     } finally {
       downloads.stop();
     }
+  }
+
+  // ---- browser_screenshot (a read) --------------------------------------------------------------------------------------
+
+  // The viewport, a target or the full page (screenshot.ts), written as the record's file at the path main derives from
+  // the record's id; the host checks that path against its own derivation and writes the record (Decision Log 17, 47).
+  // A read: no pause point, no control change, no selection change (Decision Log 5); an unplaced tab is parked for it
+  // while its request is pending (visible.ts).
+  private async screenshot(call: CallOf<'browser_screenshot'>, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
+    const { appSessionId, args } = call;
+    const tool = 'browser_screenshot';
+    const target = args.target === undefined ? '' : browserTargetText(args.target);
+    const fullPage = args.fullPage === true;
+    const entry = this.reach(tool, appSessionId, args.tabId);
+    this.requirePage(entry, tool);
+    const refs = this.refsOf(entry);
+    const { page } = await this.driverOf(entry, tool, 'screenshot', target, ctx.signal);
+    const located = args.target === undefined ? null : await locate(page, args.target, { tool, signal: ctx.signal, refs });
+    const picture = await captureScreenshot(entry, page, { locator: located?.locator ?? null, fullPage }, {
+      store: this.deps.store,
+      signal: ctx.signal,
+      report: (reason) => ctx.waiting(entry.tab.tabId, reason),
+      now: this.now,
+      hideCursor: () => this.deps.cursor?.hide(entry),
+    });
+    ctx.signal.throwIfAborted(); // a withdrawn call leaves no file
+    const deliverableId = call.deliverableId ?? randomUUID();
+    let path: string;
+    try {
+      path = await saveScreenshot(this.deps.userData, appSessionId, deliverableId, picture);
+    } catch (error) {
+      throw new BrowserToolError(BROWSER_TOOL_ERRORS.screenshotFailed(`the picture could not be saved (${firstLine(error)})`));
+    }
+    const { tabId, url, title } = entry.tab;
+    const { mimeType, width, height } = picture;
+    const bytes = picture.data.length;
+    const result: BrowserScreenshotResult = { status: 'ok', tabId, url, title, ms: this.ms(ctx), deliverableId, path, width, height, bytes, mimeType, target: located?.resolved ?? null, fullPage };
+    return { ok: true, result, image: { path, mimeType, width, height, bytes } };
   }
 
   // ---- shared steps -----------------------------------------------------------------------------------------------------

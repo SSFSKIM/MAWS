@@ -90,6 +90,7 @@ function harness() {
       return () => void refusals.delete(listener);
     },
     emit,
+    userData: '/nonexistent/maws-user-data', // no screenshot is taken in these tests
     now: () => clock,
   });
   const controller = new AbortController();
@@ -469,13 +470,5 @@ describe('browser_navigate (Design §6)', () => {
     await answer;
     expect(h.store.list(A).selected[A]).toBe(held);
     expect(h.acting()).toEqual([{ appSessionId: A, tabId: acted }]);
-  });
-});
-
-describe('the tool a later task builds', () => {
-  it('browser_screenshot answers a plain actionFailed until Task 2.5 builds it', async () => {
-    const h = harness();
-    const tabId = h.open(A);
-    expect(await h.run(A, 'browser_screenshot', { tabId })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed('browser_screenshot', 'screenshot', '', 'not available in this build of MAWS') });
   });
 });

@@ -302,6 +302,7 @@ describe('startBrowserAgent', () => {
       emit,
       env: {},
       views,
+      userData: '/nonexistent/maws-user-data',
       drivers,
     });
     const send = (name: string, payload: unknown) => listeners.get(name)!(payload as never);

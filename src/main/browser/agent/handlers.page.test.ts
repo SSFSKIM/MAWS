@@ -1,17 +1,22 @@
 import { EventEmitter } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_EVAL_MAX_CHARS, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, BrowserScreenshotResultSchema, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 import { cutSnapshot } from '@shared/browser/snapshot';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { MawsBrowserAnswerResultSchema } from '@shared/ipc/schema/maws';
+import { screenshotPath, screenshotsDir } from '@shared/maws/deliverable-files';
 import { Navigator } from '../navigation';
 import { TabStore, type TabEntry } from '../tabs';
 import type { Driver } from './driver';
 import { personHolds } from './control';
 import { BrowserHandlers, type AgentControl, type BrowserCall, type DownloadRefusal, type Waited } from './handlers';
-import { FakePage } from './page.fake';
+import { FakePage, jpegBytes, pngBytes } from './page.fake';
 
 // browser_snapshot, browser_act and browser_eval (E4c Design §5, §6, §11; Decision Log 3, 5, 22, 27, 30, 33, 37, 44 (b))
 // over E4a's real TabStore and Navigator, a fake driver whose page is a recording fake Page, and a fake control whose
@@ -30,6 +35,9 @@ class FakeWebContents extends EventEmitter {
   readonly isDestroyed = () => false;
   readonly isLoading = () => this.loading;
   readonly getZoomFactor = () => 1;
+  // Electron's capture of a covered page (browser_screenshot's viewport under a cover)
+  readonly picture = { isEmpty: () => false, resize: () => this.picture, toPNG: () => pngBytes(800, 600, 2_000), toJPEG: () => jpegBytes(800, 600) };
+  readonly capturePage = vi.fn(async () => this.picture);
 }
 
 const SNAPSHOT = ['- generic [ref=e1]:', '  - heading "E4c order form" [level=1] [ref=e2]', '  - textbox "Name" [ref=e3]', '  - button "Submit" [ref=e5]'].join('\n');
@@ -47,7 +55,7 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
   let ids = 0;
   const store = new TabStore({
     emit,
-    createView: () => ({ webContents: new FakeWebContents() }) as unknown as WebContentsView,
+    createView: () => ({ webContents: new FakeWebContents(), getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }) }) as unknown as WebContentsView,
     resolvePartition: () => DEFAULT_PARTITION,
     newTabId: () => `b_${(++ids).toString().padStart(12, '0')}`,
     schedule: () => {},
@@ -86,7 +94,9 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
     personHolds: (entry: TabEntry) => personHolds(entry, Date.now()),
   };
   const dialogs = { take: vi.fn<(tabId: string) => BrowserDialog[]>(() => []) };
-  const cursor = { aim: vi.fn((_entry: TabEntry, box: object) => void log.push(`aim ${JSON.stringify(box)}`)) };
+  const cursor = { aim: vi.fn((_entry: TabEntry, box: object) => void log.push(`aim ${JSON.stringify(box)}`)), hide: vi.fn<(entry: TabEntry) => void>(() => void log.push('hide')) };
+  const userData = mkdtempSync(join(tmpdir(), 'maws-e4c-handlers-'));
+  userDataDirs.push(userData);
   const refusals = new Set<(refusal: DownloadRefusal) => void>();
   const handlers = new BrowserHandlers({
     store,
@@ -95,6 +105,7 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
     drivers,
     dialogs,
     cursor: withCursor ? cursor : undefined,
+    userData,
     reachable: (appSessionId) => [appSessionId],
     onDownloadRefused: (listener) => {
       refusals.add(listener);
@@ -107,8 +118,8 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
   const controller = new AbortController();
   const waits: [string, BrowserWaitReason | null][] = [];
   let requests = 0;
-  const run = (tool: BrowserToolName, args: Record<string, unknown>, { signal = controller.signal, appSessionId = A } = {}) =>
-    handlers.run({ appSessionId, requestId: `r${++requests}`, toolUseId: null, tool, args } as BrowserCall, {
+  const run = (tool: BrowserToolName, args: Record<string, unknown>, { signal = controller.signal, appSessionId = A, deliverableId = undefined as string | undefined } = {}) =>
+    handlers.run({ appSessionId, requestId: `r${++requests}`, toolUseId: null, tool, args, deliverableId } as BrowserCall, {
       signal,
       startedAt: Date.now(),
       waiting: (tabId, reason) => void waits.push([tabId, reason]),
@@ -132,7 +143,7 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
     stop: (tabId: string) => void contentsOf(tabId).emit('did-stop-loading'),
   };
   return {
-    store, page, log, drivers, control, dialogs, cursor, controller, waits, emitted, run, open, cover, navigation,
+    store, page, log, drivers, control, dialogs, cursor, controller, waits, emitted, run, open, cover, navigation, userData,
     hold: () => {
       const gate = deferred<Waited>();
       pausing = gate.promise;
@@ -145,8 +156,11 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
   };
 }
 
+const userDataDirs: string[] = [];
+
 afterEach(() => {
   vi.useRealTimers();
+  for (const dir of userDataDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const resultOf = (answer: unknown) => (answer as { ok: true; result: Record<string, unknown> }).result;
@@ -681,5 +695,134 @@ describe('dialogs (Decision Log 33, 35, 37; the seam Task 2.4 fills)', () => {
     h.dialogs.take.mockClear();
     expect((await h.run('browser_act', { tabId, action: 'click', target: 'e99' }))?.ok).toBe(false);
     expect(h.dialogs.take).not.toHaveBeenCalled();
+  });
+});
+
+describe('browser_screenshot (a read: Design §7, Decision Log 5, 23, 43, 44 (b), 47)', () => {
+  const ID = '6f1c2a4e-3b5d-4c7e-8f90-a1b2c3d4e5f6';
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const shotsOf = (h: ReturnType<typeof harness>) => screenshotsDir(h.userData, A);
+
+  it('captures the viewport, writes it at the path main derives, and answers the result and the image, touching nothing', async () => {
+    const h = harness({ withCursor: true });
+    const tabId = h.open();
+    const other = h.open('https://b.test/', 'Page B'); // selected
+    h.store.setControl(tabId, 'human'); // the person holds it: a read proceeds anyway
+    const picture = pngBytes(1280, 800, 5_000);
+    h.page.onScreenshot = () => picture;
+    const answer = await h.run('browser_screenshot', { tabId }, { deliverableId: ID });
+    const path = screenshotPath(h.userData, A, ID, 'png');
+    expect(answer).toEqual({
+      ok: true,
+      result: { status: 'ok', tabId, url: 'https://a.test/', title: 'Page A', ms: 0, deliverableId: ID, path, width: 1280, height: 800, bytes: 5_000, mimeType: 'image/png', target: null, fullPage: false },
+      image: { path, mimeType: 'image/png', width: 1280, height: 800, bytes: 5_000 },
+    });
+    expect(BrowserScreenshotResultSchema.safeParse(resultOf(answer)).success).toBe(true); // what the host checks
+    expect(MawsBrowserAnswerResultSchema.safeParse(answer).success).toBe(true);
+    expect(readFileSync(path).equals(picture)).toBe(true);
+    expect(h.page.calls).toMatchObject([{ method: 'screenshot', selector: 'page' }]);
+    // a read: no pause point, no control change, no selection change, no acting tab, no cursor message
+    expect(h.control.pause).not.toHaveBeenCalled();
+    expect(h.control.markActing).not.toHaveBeenCalled();
+    expect(h.store.entry(tabId)!.tab.control).toBe('human');
+    expect(h.store.list(A).selected[A]).toBe(other);
+    expect(h.acting()).toEqual([]);
+    expect(h.cursor.aim).not.toHaveBeenCalled();
+    expect(h.cursor.hide).not.toHaveBeenCalled();
+  });
+
+  it('captures a ref target with its snapshot role and name, and a locator target with its matches', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.snapshots.set('page', SNAPSHOT);
+    await h.run('browser_snapshot', { tabId });
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.counts.set('css=.card', 3);
+    h.page.onScreenshot = (selector) => (selector === 'page' ? pngBytes(1, 1) : pngBytes(120, 40));
+    expect(resultOf(await h.run('browser_screenshot', { tabId, target: 'e5' }, { deliverableId: ID }))).toMatchObject({ target: { ref: 'e5', role: 'button', name: 'Submit' }, width: 120, height: 40, fullPage: false });
+    expect(resultOf(await h.run('browser_screenshot', { tabId, target: { css: '.card' } }))).toMatchObject({ target: { css: '.card', matches: 3 } });
+    expect(h.page.calls.filter((call) => call.method === 'screenshot').map((call) => call.selector)).toEqual(['aria-ref=e5', 'css=.card >> first']);
+  });
+
+  it('mints the record id when the request carries none (the e2e seam has no host)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.onScreenshot = () => pngBytes(10, 10);
+    const result = resultOf(await h.run('browser_screenshot', { tabId }));
+    expect(result.deliverableId).toMatch(UUID);
+    expect(result.path).toBe(screenshotPath(h.userData, A, result.deliverableId as string, 'png'));
+    expect(existsSync(result.path as string)).toBe(true);
+  });
+
+  it('writes the JPEG retake of an oversize full page as .jpg', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.onScreenshot = (_selector, options) => (options.type === 'png' ? pngBytes(1280, 9_000, BROWSER_SCREENSHOT_MAX_BYTES + 1) : jpegBytes(1280, 9_000, { size: 700_000 }));
+    const answer = await h.run('browser_screenshot', { tabId, fullPage: true }, { deliverableId: ID });
+    const path = screenshotPath(h.userData, A, ID, 'jpg');
+    expect(resultOf(answer)).toMatchObject({ path, mimeType: 'image/jpeg', bytes: 700_000, width: 1280, height: 9_000, fullPage: true });
+    expect(answer).toMatchObject({ image: { path, mimeType: 'image/jpeg', bytes: 700_000 } });
+    expect(existsSync(screenshotPath(h.userData, A, ID, 'png'))).toBe(false);
+  });
+
+  it('writes nothing for a refusal: too large, a stale ref, another session, a suspended tab', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.onScreenshot = () => pngBytes(1280, 99_000, BROWSER_SCREENSHOT_MAX_BYTES + 1);
+    expect(await h.run('browser_screenshot', { tabId, fullPage: true }, { deliverableId: ID })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.screenshotTooLarge(BROWSER_SCREENSHOT_MAX_BYTES + 1) });
+    expect(await h.run('browser_screenshot', { tabId, target: 'e9' }, { deliverableId: ID })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.staleRef('browser_screenshot', 'e9', 'missing') });
+    expect(await h.run('browser_screenshot', { tabId }, { appSessionId: B, deliverableId: ID })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabNotFound('browser_screenshot', tabId) });
+    h.store.suspend(tabId);
+    expect(await h.run('browser_screenshot', { tabId }, { deliverableId: ID })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabNotLoaded('browser_screenshot', tabId, 'https://a.test/') });
+    expect(existsSync(shotsOf(h))).toBe(false);
+  });
+
+  it("captures a covered viewport through Electron's capturePage after hiding the cursor", async () => {
+    const h = harness({ withCursor: true });
+    const tabId = h.open();
+    h.cover(tabId, true);
+    const answer = h.run('browser_screenshot', { tabId }, { deliverableId: ID });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(resultOf(await answer)).toMatchObject({ width: 800, height: 600, mimeType: 'image/png', bytes: 2_000 });
+    expect(h.cursor.hide).toHaveBeenCalledWith(h.store.entry(tabId));
+    expect(h.contents(tabId).capturePage).toHaveBeenCalledTimes(1);
+    expect(h.page.calls).toEqual([]);
+  });
+
+  it('waits out a cover for a target, reporting it to the host and the row', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('css=#chart', 1);
+    h.page.onScreenshot = () => pngBytes(300, 200);
+    h.cover(tabId, true);
+    const answer = h.run('browser_screenshot', { tabId, target: { css: '#chart' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(h.waits).toEqual([[tabId, 'cover']]);
+    h.cover(tabId, false);
+    expect(resultOf(await answer)).toMatchObject({ width: 300, height: 200 });
+    expect(h.waits).toEqual([[tabId, 'cover'], [tabId, null]]);
+  });
+
+  it('answers nothing and writes nothing when cancelled during the capture', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.onScreenshot = (_selector, options) => new Promise((_, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    const answer = h.run('browser_screenshot', { tabId }, { deliverableId: ID });
+    await vi.advanceTimersByTimeAsync(100);
+    h.controller.abort('withdrawn');
+    expect(await answer).toBeNull();
+    expect(existsSync(shotsOf(h))).toBe(false);
+  });
+
+  it('answers tabCrashed when the renderer dies during the capture', async () => {
+    const h = harness();
+    const tabId = h.open();
+    let fail!: (error: Error) => void;
+    h.page.onScreenshot = () => new Promise((_, reject) => (fail = reject));
+    const answer = h.run('browser_screenshot', { tabId }, { deliverableId: ID });
+    await vi.advanceTimersByTimeAsync(100);
+    h.contents(tabId).emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    fail(new Error('page.screenshot: Target crashed'));
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabCrashed('browser_screenshot', tabId) });
   });
 });

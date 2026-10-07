@@ -10,7 +10,8 @@
 // focus emulation, so nothing could make the action proceed under it: while the tab is covered the wait is suspended
 // (a cover that comes stops the step, which restarts with what is left of its budget once the cover lifts), the time
 // under it is not counted, and the wait is reported (`cover`, then null) so the host's deadline pauses and the row says
-// a sheet covers the page. A screenshot of a target waits the same way (`withoutCover`, Task 2.5).
+// a sheet covers the page. A screenshot of a target or of the full page waits the same way (`withoutCover`); a viewport
+// screenshot takes another route under a cover instead (`unlessCovered`, screenshot.ts).
 //
 // The dispatch is the real Playwright action with a short timeout of its own (its actionability checks pass at once
 // now); every call takes the request's signal, and once a command has left nothing cancels it (Decision Log 3).
@@ -64,6 +65,29 @@ export async function withoutCover<T>(entry: TabEntry, deps: CoverDeps, budgetMs
       stopWatch();
       stopRelay();
     }
+  }
+}
+
+// Runs `step` while the tab stays uncovered: null, and the step stopped through the signal it was given, when the tab is
+// covered already or a cover comes during it, so the caller takes a route that works under a cover.
+export async function unlessCovered<T>(entry: TabEntry, deps: Pick<CoverDeps, 'store' | 'signal'>, step: (signal: AbortSignal) => Promise<T>): Promise<T | null> {
+  const { signal } = deps;
+  signal.throwIfAborted();
+  if (entry.tab.covered) return null;
+  const attempt = new AbortController();
+  const stopRelay = relay(signal, attempt);
+  const stopWatch = deps.store.onUpdated((updated) => {
+    if (updated === entry && entry.tab.covered) attempt.abort(COVERED);
+  });
+  try {
+    return await step(attempt.signal);
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    if (attempt.signal.reason === COVERED) return null;
+    throw error;
+  } finally {
+    stopWatch();
+    stopRelay();
   }
 }
 
@@ -137,7 +161,7 @@ function relay(from: AbortSignal, to: AbortController): () => void {
   return () => from.removeEventListener('abort', onAbort);
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);

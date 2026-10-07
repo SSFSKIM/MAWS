@@ -12,6 +12,7 @@ export interface FakeCall {
 
 type Box = { x: number; y: number; width: number; height: number };
 type Options = { timeout?: number; signal?: AbortSignal; state?: string; mode?: string; trial?: boolean } | undefined;
+export type ScreenshotOptions = { type?: 'png' | 'jpeg'; quality?: number; scale?: string; style?: string; fullPage?: boolean; timeout?: number; signal?: AbortSignal };
 
 const abortError = (signal: AbortSignal) => Object.assign(new Error(`The operation was aborted: ${String(signal.reason)}`), { name: 'AbortError' });
 const timeoutError = (method: string, ms: number) => Object.assign(new Error(`locator.${method}: Timeout ${ms}ms exceeded.\nCall log:\n  - waiting`), { name: 'TimeoutError' });
@@ -47,6 +48,8 @@ export class FakePage {
   readonly boxes = new Map<string, Box | (() => Box | null)>();
   // the page went (a crash: the bridge's detach closes Playwright's page): pending and later waits reject with this
   closedWith: Error | null = null;
+  // what a screenshot answers: `selector` is 'page' for the page's own (viewport or fullPage), else the locator's
+  onScreenshot: (selector: string, options: ScreenshotOptions) => Buffer | Promise<Buffer> = () => Buffer.alloc(0);
   readonly mouse = { wheel: async (deltaX: number, deltaY: number) => void this.record('mouse.wheel', null, [deltaX, deltaY]) };
 
   record(method: string, selector: string | null, args: unknown[]): FakeCall {
@@ -84,6 +87,11 @@ export class FakePage {
 
   url(): string {
     return this.currentUrl;
+  }
+
+  async screenshot(options: ScreenshotOptions = {}): Promise<Buffer> {
+    this.record('screenshot', 'page', [options]);
+    return this.onScreenshot('page', options);
   }
 
   evaluate(expression: string): Promise<unknown> {
@@ -163,6 +171,11 @@ export class FakeLocator {
     return typeof box === 'function' ? box() : box;
   }
 
+  async screenshot(options: ScreenshotOptions = {}): Promise<Buffer> {
+    this.page.record('screenshot', this.selector, [options]);
+    return this.page.onScreenshot(this.selector, options);
+  }
+
   click = (options?: Options) => this.act('click', [options]);
   fill = (value: string, options?: Options) => this.act('fill', [value, options]);
   selectOption = (value: string, options?: Options) => this.act('selectOption', [value, options]);
@@ -185,4 +198,31 @@ function next(answers: Map<string, boolean[]>, selector: string): boolean {
   const queue = answers.get(selector);
   if (!queue || queue.length === 0) return true;
   return queue.length === 1 ? queue[0]! : queue.shift()!;
+}
+
+// Encoded pictures for the screenshot tests: headers only, padded with zeros to `size` bytes (what a capture answers).
+// A PNG: its signature and IHDR (the dimension reader reads no further).
+export function pngBytes(width: number, height: number, size = 0): Buffer {
+  const head = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(head, 0);
+  head.writeUInt32BE(13, 8);
+  head.write('IHDR', 12, 'latin1');
+  head.writeUInt32BE(width, 16);
+  head.writeUInt32BE(height, 20);
+  head[24] = 8; // bit depth
+  head[25] = 6; // RGBA
+  return size > head.length ? Buffer.concat([head, Buffer.alloc(size - head.length)]) : head;
+}
+
+// A JPEG: SOI, an APP0 and a DHT segment (neither a frame header), the SOF of `sof` with the size, then EOI.
+export function jpegBytes(width: number, height: number, { sof = 0xc0, size = 0 } = {}): Buffer {
+  const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+  const bytes = Buffer.from([
+    0xff, 0xd8,
+    ...segment(0xe0, [0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    ...segment(0xc4, [0x00, ...new Array<number>(16).fill(0)]),
+    ...segment(sof, [8, height >> 8, height & 0xff, width >> 8, width & 0xff, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]),
+    0xff, 0xd9,
+  ]);
+  return size > bytes.length ? Buffer.concat([bytes, Buffer.alloc(size - bytes.length)]) : bytes;
 }
