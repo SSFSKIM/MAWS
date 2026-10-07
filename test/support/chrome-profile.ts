@@ -150,7 +150,7 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
     { url: `${http}/${sentinel('path')}`, title: sentinel('title'), visitCount: 12, typedCount: 3, lastVisitMs: now - hour, hidden: false, expected: 'imported' },
     { url: `https://example.test/${sentinel('path')}`, title: sentinel('title'), visitCount: 7, typedCount: 1, lastVisitMs: now - day, hidden: false, expected: 'imported' },
     { url: `https://www.example.test/${sentinel('path')}`, title: sentinel('title'), visitCount: 3, typedCount: 0, lastVisitMs: now - 2 * day, hidden: false, expected: 'imported' },
-    { url: `${http}/${sentinel('path')}`, title: sentinel('title'), visitCount: 1, typedCount: 2, lastVisitMs: now - 3 * day, hidden: false, expected: 'imported' },
+    { url: `${http}/${sentinel('path')}`, title: sentinel('title'), visitCount: 5, typedCount: 2, lastVisitMs: now - 3 * day, hidden: false, expected: 'imported' },
     { url: `https://example.test/${sentinel('path')}`, title: sentinel('title'), visitCount: 1, typedCount: 0, lastVisitMs: now - 4 * day, hidden: true, expected: 'hidden' },
     { url: `chrome://settings/${sentinel('path')}`, title: sentinel('title'), visitCount: 2, typedCount: 0, lastVisitMs: now - 5 * day, hidden: false, expected: 'unsupportedScheme' },
   ];
