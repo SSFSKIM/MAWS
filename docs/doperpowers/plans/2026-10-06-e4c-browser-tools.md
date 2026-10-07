@@ -11,7 +11,7 @@ To see it: open a session with the Browser tool, send "Open https://example.com 
 ## Progress
 
 - [x] (2026-10-07, reviewed clean after the controller's fix 20fb5a49) M0 — Re-pin against E4a as landed; read M0's verdict; the dependencies (`playwright-core`, `ws`) after the APFS clone
-- [ ] M1 — Shared and host: the six schemas, descriptions and error texts; the `BrowserBridge`; the six tool definitions; the `maws.browser.*` IPC; the normaliser's `maws.browser.action`
+- [x] (2026-10-07, Tasks 1.1-1.3 and 1.4 reviewed clean; review findings folded in Decision Log 44) M1 — Shared and host: the six schemas, descriptions and error texts; the `BrowserBridge`; the six tool definitions; the `maws.browser.*` IPC; the normaliser's `maws.browser.action`
 - [ ] M2 — Main: the CDP bridge over `TabDebugger.send`, the per-tab Playwright driver, the six handlers, snapshots and refs, actions and the pause point, screenshots and the record, the control state machine, the cursor channel, the visibility hold, the e2e seam
 - [ ] M3 — Renderer and preload: the `browser_action` row and its waiting line, the acting-tab chip, the Browser tool following the agent, the cursor overlay
 - [ ] M4 — The snapshot fixtures from the real app; the live Haiku recording; `e2e:browser-tools` (G1, G2, the OOPIF click, the cover); the packaged proof; gates; the whole-branch review; hand-back
