@@ -11,7 +11,9 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { replayedSession } from './conformance/session-harness';
 import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
-import { SessionStream } from './session-stream';
+import { BATCH_BYTES, SessionStream } from './session-stream';
+import { BROWSER_SCREENSHOT_MAX_BYTES } from '@shared/maws/browser'; // E11
+import { LINE_CAP } from '@shared/host/socket-protocol'; // E11
 // E10 start
 import { status as engineStatus } from '../../test/support/builders';
 import { ev } from '../../test/support/events';
@@ -454,6 +456,28 @@ describe('the delivered cursor and the connect burst (E10)', () => {
     expect(s.delivered).toEqual({ index: 1_199, id: `${APP}:L:1200:0` });
     s.republish(STATE);
     expect(fake.batches()).toHaveLength(2); // nothing resent
+  });
+
+  // E11 scale review A sweep#1: inline screenshots ride the events as base64, so 500 of them can pass the socket's line
+  // cap; main then drops the connection while the cursor has already moved past the batch
+  it('cuts the burst by bytes as well as by count, so no batch line nears the socket line cap', () => {
+    const fake = client();
+    const s = stream(fake.emit);
+    fake.state.connected = false;
+    const data = 'A'.repeat(Math.ceil((BROWSER_SCREENSHOT_MAX_BYTES * 4) / 3)); // one screenshot at the cap, as base64
+    const shot = (seq: number): SessionEvent =>
+      ev('tool.result', { id: `${APP}:L:${seq}:0`, sessionId: 'sess-burst', seq, toolUseId: `toolu_${seq}`, content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }] });
+    const tail = [...rows(1, 3), ...Array.from({ length: 20 }, (_, k) => shot(4 + k)), ...rows(24, 3)];
+    s.events(tail);
+    s.flush();
+    fake.state.connected = true;
+    s.republish(STATE);
+    const lines = fake.emitted.filter((e) => e.name === 'session.eventBatch').map((e) => Buffer.byteLength(JSON.stringify({ t: 'evt', name: e.name, payload: e.payload })));
+    expect(lines.length).toBeGreaterThan(1);
+    for (const bytes of lines) expect(bytes).toBeLessThanOrEqual(BATCH_BYTES + 1024); // the batch's events plus the envelope
+    expect(BATCH_BYTES).toBeLessThanOrEqual(LINE_CAP / 4);
+    expect(fake.delivered()).toEqual(tail.map((e) => e.id)); // once each, in order
+    expect(s.delivered).toEqual({ index: tail.length - 1, id: tail.at(-1)!.id });
   });
 
   it('a live batch refused while the client stays connected moves the cursor past it, so no burst resends it', () => {
