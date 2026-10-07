@@ -2,7 +2,7 @@
 // Browser tool (the session's selected tab) and by a `browser` main tab (its own tab) alike. The session is listed afresh
 // on mount (Decision Log 44 (a)). A main tab whose tab main no longer knows shows the session's browser with no tab,
 // headed "That tab was closed" (Decision Log 21; X14's restore rule).
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Chrome } from './chrome/Chrome';
 import { BrowserPane } from './Pane';
@@ -21,11 +21,12 @@ export function BrowserView({ appSessionId, surface, browserTabId }: BrowserView
   const shownId = browserTabId ?? selected;
   const tab = tabs.find((candidate) => candidate.tabId === shownId) ?? null;
   const gone = browserTabId !== undefined && known && tab === null;
+  const [owns, setOwns] = useState(false); // the pane holds the page's view
   return (
     <div data-browser-view={surface} className="flex h-full min-h-0 flex-col bg-bg">
-      <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} />
+      <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} />
       <div className="min-h-0 flex-1">
-        <BrowserPane tab={tab} surface={surface} gone={gone} />
+        <BrowserPane tab={tab} surface={surface} gone={gone} onOwns={setOwns} />
       </div>
     </div>
   );

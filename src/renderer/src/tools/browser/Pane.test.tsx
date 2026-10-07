@@ -144,6 +144,19 @@ describe('placement', () => {
     expect(screen.queryByText(BROWSER_COPY.shownElsewhere)).toBeNull();
   });
 
+  it('tells its surface whether it holds the view (the chrome’s commands follow it, Task 3.3)', async () => {
+    const owns = vi.fn();
+    const { rerender, unmount } = render(<BrowserPane tab={tab()} surface="panel" onOwns={owns} />);
+    await frames();
+    expect(owns).toHaveBeenLastCalledWith(true);
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" onOwns={owns} />);
+    expect(owns).toHaveBeenLastCalledWith(false);
+    rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" onOwns={owns} />); // the other let go: this one claims
+    expect(owns).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(owns).toHaveBeenLastCalledWith(false);
+  });
+
   it('a pane for another tab of the session is a new mount with its own token', async () => {
     const { rerender } = render(<BrowserPane tab={tab()} surface="panel" />);
     await frames();

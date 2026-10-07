@@ -31,9 +31,10 @@ export interface BrowserPaneProps {
   tab: BrowserTab | null; // null: the session has no tab to show
   surface: 'panel' | 'main';
   gone?: boolean; // a main tab whose tab main no longer knows (Decision Log 21)
+  onOwns?(owns: boolean): void; // whether this pane holds the page's view (the chrome's commands follow it)
 }
 
-export function BrowserPane({ tab, surface, gone = false }: BrowserPaneProps) {
+export function BrowserPane({ tab, surface, gone = false, onOwns }: BrowserPaneProps) {
   if (tab === null) {
     return (
       <div data-browser-pane="" className={PANE}>
@@ -41,10 +42,10 @@ export function BrowserPane({ tab, surface, gone = false }: BrowserPaneProps) {
       </div>
     );
   }
-  return <PlacedPane key={tab.tabId} tab={tab} surface={surface} />;
+  return <PlacedPane key={tab.tabId} tab={tab} surface={surface} onOwns={onOwns} />;
 }
 
-function PlacedPane({ tab, surface }: { tab: BrowserTab; surface: 'panel' | 'main' }) {
+function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel' | 'main'; onOwns?(owns: boolean): void }) {
   const element = useRef<HTMLDivElement>(null);
   const placement = useRef<Placement | null>(null);
   const [mode, setMode] = useState<PlacementMode>('claiming');
@@ -96,6 +97,8 @@ function PlacedPane({ tab, surface }: { tab: BrowserTab; surface: 'panel' | 'mai
   }, [tabId, surface, ownerAtMount]);
 
   useEffect(() => placement.current?.observe(owner), [owner]);
+  useEffect(() => onOwns?.(mode === 'owner'), [mode, onOwns]);
+  useEffect(() => () => onOwns?.(false), [onOwns]);
 
   return (
     <div ref={element} data-browser-pane="" className={PANE}>
