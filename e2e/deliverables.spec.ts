@@ -8,7 +8,7 @@
 // error main attributes to the deliverable. M6 added the bridge script's pick on the real Chromium.
 //
 // M7's seven cases drive the product as the owner does, over a scratch project the sidebar shows (support/
-// deliverables-scene.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
+// maws-tools.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
 // the console chip; (2) the Deliverables tool's list, viewer, versions and main tab; (3) a delivered file of every kind
 // and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into E3's
 // composer; (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay. Records
@@ -30,7 +30,7 @@ import { invoke, value } from './support/c7-replay';
 import {
   allowNext, closeScene, frameAt, idle, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, PASS3, recordedCwd, recordPath, replay, rowOf,
   scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
-} from './support/deliverables-scene';
+} from './support/maws-tools';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { solidPng } from './support/side-replay';
 

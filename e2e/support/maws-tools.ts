@@ -1,8 +1,10 @@
-// E2's scenes for `e2e/deliverables.spec.ts` (E2 execution document, M7): a scratch project whose sessions the sidebar
-// shows, the product app over C3's replay transport (MAWS_ENGINE_REPLAY=1) with the e2e seam log, the journal readers
-// for the `maws` server's calls and answers, records written straight into the store's layout (the reader's format),
-// the Deliverables tool's locators, and the evidence shots in both themes. E1's tools spec keeps its own copies of the
-// journal readers; these follow them.
+// The `maws` groups' one replay scene (E11 W-E: E2's `deliverables-scene.ts`, which E1's tools group and live sitting
+// had copied, the copies now gone; E2 execution document, M7): a scratch project whose sessions the sidebar shows (one
+// seeded transcript per session), the product app over C3's replay transport (MAWS_ENGINE_REPLAY=1) with the e2e seam
+// log and a console check that leaves a deliverable frame's errors to its chip, the journal readers for the `maws`
+// server's calls and answers, the window's event log, records written straight into the store's layout (the reader's
+// format), the Deliverables tool's locators, the toast clearing and the evidence shots in both themes. Imported by E1's
+// `tools` group and live sitting, E2's `deliverables` group and E4's browser groups.
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +28,7 @@ const rowsOf = (path: string): JournalRow[] =>
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as JournalRow);
-const fixtureRows = (fixture: string) => rowsOf(join(REPO_ROOT, fixture));
+export const fixtureRows = (fixture: string) => rowsOf(join(REPO_ROOT, fixture));
 
 // The fixture's recorded human prompt (the replay holds at it), and its `spawn` row's working directory.
 const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user')!.frame as Frame).message as { content: string }).content;
@@ -44,6 +46,12 @@ function journalOf(userData: string, id: string): JournalRow[] {
 
 export type McpBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export type McpResult = { content: McpBlock[]; isError?: boolean };
+// The text of a tool result's block `index` (the JSON a `maws` tool answers in).
+export function resultText(result: McpResult, index = 0): string {
+  const block = result.content[index];
+  if (block?.type !== 'text') throw new Error(`block ${index} of the result is not text: ${JSON.stringify(block)}`);
+  return block.text;
+}
 // The tool result the host wrote for the engine's `mcp_message` request `requestId`, or null while none is written.
 export function mcpResultOf(rows: JournalRow[], requestId: string): McpResult | null {
   for (const row of rows) {
@@ -60,7 +68,7 @@ export function mcpCalls(rows: JournalRow[]): { requestId: string; name: string;
     return [{ requestId: frame.request_id!, name: frame.request.message.params!.name, args: frame.request.message.params!.arguments }];
   });
 }
-const metaEvents = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'meta').map((r) => (r.frame as { event: string }).event);
+export const metaEvents = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'meta').map((r) => (r.frame as { event: string }).event);
 
 export const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
 
@@ -91,34 +99,47 @@ export interface Scene {
   appErrors(): string[]; // the window's own console errors (a deliverable frame's are the page's, read through the chip)
 }
 
-// `repo` defaults to a fresh directory under the scratch root; a replay that stats files names the recording's own.
-export function scratchProject(opts: { titles: string[]; repo?: string }): Scratch {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2-deliverables-')));
-  const repo = opts.repo ?? join(root, 'repo');
-  mkdirSync(repo, { recursive: true });
-  const config = join(root, 'claude-config');
+// One transcript per title in the config home's project directory for `repo`, its first user record only, so C4
+// indexes the directory as a project (the sheet's repository list) and the sidebar shows a session row for each; the
+// engine session ids, in the order of the titles.
+export function seedTranscripts(config: string, repo: string, titles: string[]): string[] {
   const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
   mkdirSync(project, { recursive: true });
-  const engineIds = opts.titles.map((title, k) => {
+  return titles.map((title, k) => {
     const sessionId = randomUUID();
     const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: `2026-10-06T0${k}:00:00.000Z`, cwd: repo, sessionId, version: '2.1.291' };
     writeFileSync(join(project, `${sessionId}.jsonl`), `${JSON.stringify(first)}\n`);
     return sessionId;
   });
+}
+
+// `repo` defaults to a fresh directory under the scratch root; a replay that stats files names the recording's own.
+// `folders` are made inside it (E1's `assets`, which the ask's folder question picks); `label` names the root.
+export function scratchProject(opts: { titles: string[]; repo?: string; folders?: string[]; label?: string }): Scratch {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `maws-${opts.label ?? 'e2-deliverables'}-`)));
+  const repo = opts.repo ?? join(root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  for (const folder of opts.folders ?? []) mkdirSync(join(repo, folder), { recursive: true });
+  const config = join(root, 'claude-config');
+  const engineIds = seedTranscripts(config, repo, opts.titles);
   const userData = join(root, 'user-data');
   mkdirSync(userData);
   return { root, repo, config, userData, openLog: join(root, 'open.txt'), engineIds };
 }
 
-async function recordEvents(page: Page): Promise<void> {
+// Every event batch the window receives from now on, kept in the window for `eventsOf`; idempotent.
+export async function recordEvents(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = window as unknown as { __e2?: { appSessionId: string; events: unknown[] }[] };
-    if (w.__e2) return;
+    const w = window as unknown as { __mawsEvents?: { appSessionId: string; events: unknown[] }[] };
+    if (w.__mawsEvents) return;
     const log: { appSessionId: string; events: unknown[] }[] = [];
-    w.__e2 = log;
+    w.__mawsEvents = log;
     window.maws.on('session.eventBatch', (payload) => log.push(payload as { appSessionId: string; events: unknown[] }));
   });
 }
+// The session's events the window received since `recordEvents` (since the window was last loaded).
+export const eventsOf = (page: Page, id: string): Promise<SessionEvent[]> =>
+  page.evaluate((appSessionId) => ((window as unknown as { __mawsEvents: { appSessionId: string; events: SessionEvent[] }[] }).__mawsEvents ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id);
 
 // The app window's console errors and uncaught errors, less those of a deliverable frame (or of Chromium's PDF viewer
 // beneath one), told by the message's location or the error's stack: a frame's page is the agent's, and what it logs is
@@ -169,8 +190,7 @@ export async function launchScene(scratch: Scratch, known?: AppSessionId[]): Pro
       pane: page.locator('[data-region="main"] [data-pane="0"]'),
       panel: page.locator('[data-region="panel"]'),
       journal: (id) => journalOf(maws.userData, id),
-      events: (id) =>
-        page.evaluate((appSessionId) => ((window as unknown as { __e2: { appSessionId: string; events: SessionEvent[] }[] }).__e2 ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id),
+      events: (id) => eventsOf(page, id),
     };
   } catch (error) {
     await maws.cleanup();
@@ -190,7 +210,7 @@ export async function closeScene(s: Scene): Promise<void> {
   }
 }
 
-export async function scene(opts: { titles: string[]; repo?: string }, body: (s: Scene) => Promise<void>): Promise<void> {
+export async function scene(opts: { titles: string[]; repo?: string; folders?: string[]; label?: string }, body: (s: Scene) => Promise<void>): Promise<void> {
   const scratch = scratchProject(opts);
   try {
     const s = await launchScene(scratch);
@@ -310,18 +330,23 @@ export async function clearToasts(page: Page): Promise<void> {
   }).toPass({ timeout: 20_000 });
 }
 
-// `e2-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e2/ when MAWS_E2_SHOTS=1, the window as it stands in each
-// theme, then back to light (the default). `before` runs after each switch, to restore what the shot is of (an open popover, a hover).
+// The window as it stands in each theme, toasts cleared first, saved where `path` names for the theme; then back to light
+// (the default). `before` runs after each switch, to restore what the shot is of (an open popover, a hover).
+export async function shootThemes(page: Page, path: (theme: (typeof THEMES)[number]) => string, before?: () => Promise<void>): Promise<void> {
+  await clearToasts(page);
+  for (const theme of THEMES) {
+    value(await invoke(page, 'settings.set', { theme }));
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await before?.();
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path(theme) });
+  }
+  value(await invoke(page, 'settings.set', { theme: 'light' }));
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+}
+
+// `e2-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e2/ when MAWS_E2_SHOTS=1.
 export async function shoot(s: Scene, surface: string, before?: () => Promise<void>): Promise<void> {
   if (SHOTS === null) return;
-  await clearToasts(s.page);
-  for (const theme of THEMES) {
-    value(await invoke(s.page, 'settings.set', { theme }));
-    await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
-    await before?.();
-    await s.page.waitForTimeout(250);
-    await s.page.screenshot({ path: join(SHOTS, `e2-${surface}-${theme}.png`) });
-  }
-  value(await invoke(s.page, 'settings.set', { theme: 'light' }));
-  await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await shootThemes(s.page, (theme) => join(SHOTS, `e2-${surface}-${theme}.png`), before);
 }

@@ -11,20 +11,19 @@
 // ask from a session not shown never switches the main view; its sheet opens when that session is selected.
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { SessionEvent } from '@shared/graph/events';
+import { expect, test, type Locator } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
-import type { JournalRow } from '@shared/wire/journal';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
-import { invoke, launchReady, value } from './support/c7-replay';
-import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { sidebarOf, sidebarRow } from './support/sidebar';
+import { invoke, value } from './support/c7-replay';
+import { REPO_ROOT } from './support/launch';
+import {
+  allowNext, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
+  unfoldWork, type Frame, type McpResult, type Scene,
+} from './support/maws-tools';
+import { sidebarOf } from './support/sidebar';
 
-const PASS3 = 'spikes/protocol-probe/fixtures/pass3';
 const SEND_FILE = `${PASS3}/p1-maws-send-file.jsonl`;
 const ASK_BLOCKING = `${PASS3}/p1-maws-ask-blocking.jsonl`;
 const ASK_ASYNC = `${PASS3}/p1-maws-ask-async.jsonl`;
@@ -32,183 +31,17 @@ const SHOW_PANE = `${PASS3}/p1-maws-show-pane.jsonl`;
 const ROUNDTRIP = `${PASS3}/p1-sdk-mcp-roundtrip.jsonl`;
 
 const SHOTS = process.env.MAWS_E1_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e1') : null;
-const THEMES = ['light', 'dark'] as const;
 
 test.describe.configure({ timeout: 120_000 });
 
-// ---- fixtures and journals ------------------------------------------------------------------------------------------
+// ---- the scene (support/maws-tools.ts): a scratch project with an `assets` folder, the product app over the replay ----
 
-type Frame = Record<string, unknown>;
-const rowsOf = (path: string): JournalRow[] =>
-  readFileSync(path, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as JournalRow);
-const fixtureRows = (fixture: string) => rowsOf(join(REPO_ROOT, fixture));
+const scene = (opts: { titles: string[]; repo?: string }, body: (s: Scene) => Promise<void>) => sharedScene({ ...opts, folders: ['assets'], label: 'e1-tools' }, body);
 
-// The fixture's recorded human prompt (the replay holds at it), and its `spawn` row's working directory.
-const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user')!.frame as Frame).message as { content: string }).content;
-const recordedCwd = (fixture: string) => (fixtureRows(fixture).find((r) => r.direction === 'meta' && (r.frame as Frame).event === 'spawn')!.frame as { cwd: string }).cwd;
-
-// Every row the session's launches journaled (one file per launch, in the session's journal directory).
-function journalOf(userData: string, id: string): JournalRow[] {
-  const dir = join(userData, 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith('.jsonl'))
-    .sort()
-    .flatMap((name) => rowsOf(join(dir, name)));
-}
-
-type McpResult = { content: { type: string; text: string }[]; isError?: boolean };
-// The tool result the host wrote for the engine's `mcp_message` request `requestId`, or null while none is written.
-function mcpResultOf(rows: JournalRow[], requestId: string): McpResult | null {
-  for (const row of rows) {
-    const frame = row.frame as { type?: string; response?: { request_id?: string; response?: { mcp_response?: { result?: McpResult } } } };
-    if (row.direction === 'out' && frame.type === 'control_response' && frame.response?.request_id === requestId) return frame.response.response?.mcp_response?.result ?? null;
-  }
-  return null;
-}
-// The engine's `tools/call` requests of the `maws` server, in order: their request ids and arguments.
-function mcpCalls(rows: JournalRow[]): { requestId: string; name: string; args: Record<string, unknown> }[] {
-  return rows.flatMap((row) => {
-    const frame = row.frame as { type?: string; request_id?: string; request?: { subtype?: string; message?: { method?: string; params?: { name: string; arguments: Record<string, unknown> } } } };
-    if (row.direction !== 'in' || frame.type !== 'control_request' || frame.request?.subtype !== 'mcp_message' || frame.request.message?.method !== 'tools/call') return [];
-    return [{ requestId: frame.request_id!, name: frame.request.message.params!.name, args: frame.request.message.params!.arguments }];
-  });
-}
-const metaEvents = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'meta').map((r) => (r.frame as { event: string }).event);
-
-// ---- the scene: a scratch project, the product app over the replay ---------------------------------------------------
-
-interface Scene {
-  maws: MawsLaunch;
-  page: Page;
-  root: string;
-  repo: string;
-  openLog: string;
-  ids: string[]; // the seeded sessions' app ids, in the order of `titles`
-  pane: Locator; // the main region's first pane
-  panel: Locator;
-  journal(id: string): JournalRow[];
-  events(id: string): Promise<SessionEvent[]>; // every event batch the window received for the session since it was last loaded
-}
-
-async function recordEvents(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __e1?: { appSessionId: string; events: unknown[] }[] };
-    if (w.__e1) return;
-    const log: { appSessionId: string; events: unknown[] }[] = [];
-    w.__e1 = log;
-    window.maws.on('session.eventBatch', (payload) => log.push(payload as { appSessionId: string; events: unknown[] }));
-  });
-}
-
-// `repo` defaults to a fresh scratch directory; the delivery case names the recording's own (finding 3 of the review).
-async function scene(opts: { titles: string[]; repo?: string }, body: (s: Scene) => Promise<void>): Promise<void> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e1-tools-')));
-  const repo = opts.repo ?? join(root, 'repo');
-  mkdirSync(join(repo, 'assets'), { recursive: true });
-  const config = join(root, 'claude-config');
-  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
-  mkdirSync(project, { recursive: true });
-  const engineIds = opts.titles.map((title, k) => {
-    const sessionId = randomUUID();
-    const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: `2026-10-06T0${k}:00:00.000Z`, cwd: repo, sessionId, version: '2.1.291' };
-    writeFileSync(join(project, `${sessionId}.jsonl`), `${JSON.stringify(first)}\n`);
-    return sessionId;
-  });
-  const openLog = join(root, 'open.txt');
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_OPEN_LOG: openLog } });
-  try {
-    const { page } = maws;
-    await recordEvents(page);
-    let ids: string[] = [];
-    await expect
-      .poll(async () => {
-        const { sessions } = value(await invoke(page, 'session.list', {}));
-        ids = engineIds.map((engineId) => sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '');
-        return ids.every((id) => id !== '');
-      })
-      .toBe(true);
-    const s: Scene = {
-      maws, page, root, repo, openLog, ids,
-      pane: page.locator('[data-region="main"] [data-pane="0"]'),
-      panel: page.locator('[data-region="panel"]'),
-      journal: (id) => journalOf(maws.userData, id),
-      events: (id) =>
-        page.evaluate((appSessionId) => ((window as unknown as { __e1: { appSessionId: string; events: SessionEvent[] }[] }).__e1 ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id),
-    };
-    await body(s);
-    expect(maws.consoleErrors()).toEqual([]);
-    // every replay followed its recording: a mismatch ends a replay early, which a case's own waits can miss (`idle`
-    // also holds after an exit)
-    for (const id of ids) expect(metaEvents(journalOf(maws.userData, id)), `the journal of ${id}`).not.toContain('replay_mismatch');
-  } finally {
-    await maws.cleanup();
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-// The session's row clicked (the main view shows it), the pointer moved off the sidebar so no hover card covers rows.
-async function show(s: Scene, id: string): Promise<void> {
-  await (await sidebarRow(s.page, { appSessionId: id })).click();
-  await s.page.mouse.move(700, 20);
-  await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
-}
-
-// The fixture launched under the session's id (with the scratch directory as its cwd) and its prompt sent as recorded.
-async function replay(s: Scene, id: string, fixture: string): Promise<void> {
-  await launchReady(s.page, id, fixture, { cwd: s.repo });
-  value(await invoke(s.page, 'session.send', { appSessionId: id as never, content: firstPrompt(fixture) }));
-}
-
-const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
-
-// The next permission the session asks, allowed once through the real request card docked in the composer (the
-// replay compares the response's behaviour: every fixture recorded `allow`).
-async function allowNext(s: Scene, id: string): Promise<void> {
-  const answered = ofKind(await s.events(id), 'permission.resolved').length;
-  await expect.poll(async () => ofKind(await s.events(id), 'permission.requested').length, { timeout: 30_000 }).toBeGreaterThan(answered);
-  const frame = s.pane.getByRole('group', { name: 'Approval needed' });
-  await frame.getByRole('radio', { name: 'Allow once' }).click();
-  await frame.getByRole('button', { name: 'Allow', exact: true }).click();
-  await expect.poll(async () => ofKind(await s.events(id), 'permission.resolved').length, { timeout: 30_000 }).toBe(answered + 1);
-}
-
-const turnOf = async (s: Scene, id: string) => value(await invoke(s.page, 'session.status', { appSessionId: id as never })).turn;
-const idle = (s: Scene, id: string) => expect.poll(() => turnOf(s, id), { timeout: 60_000 }).toBeNull();
-
-// The work of a completed turn folds behind its divider; the cells are read with it open.
-async function unfoldWork(pane: Locator): Promise<void> {
-  const divider = pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
-  await expect(divider).toBeVisible();
-  if ((await divider.getAttribute('aria-expanded')) === 'false') await divider.click();
-}
-
-// A toast ("<session> needs you") lands over the panel's bottom edge, where the sheet's Submit bar sits: cleared first.
-// Every open toast dismissed, then none left open (a closing one still animates out over the bar), so the next click
-// lands on the sheet.
-async function clearToasts(page: Page): Promise<void> {
-  const region = page.getByRole('region', { name: /^Notifications/ });
-  const open = region.locator('li[data-state="open"]');
-  await expect(async () => {
-    for (const dismiss of await open.getByRole('button', { name: 'Dismiss' }).all()) await dismiss.click({ timeout: 2_000 }).catch(() => undefined);
-    await expect(region.locator('li')).toHaveCount(0, { timeout: 1_000 });
-  }).toPass({ timeout: 20_000 });
-}
-
+// `e1-replay-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e1/ when MAWS_E1_SHOTS=1.
 async function shoot(s: Scene, surface: string): Promise<void> {
   if (SHOTS === null) return;
-  await clearToasts(s.page);
-  for (const theme of THEMES) {
-    value(await invoke(s.page, 'settings.set', { theme }));
-    await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
-    await s.page.waitForTimeout(150);
-    await s.page.screenshot({ path: join(SHOTS, `e1-replay-${surface}-${theme}.png`) });
-  }
-  value(await invoke(s.page, 'settings.set', { theme: 'light' }));
-  await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await shootThemes(s.page, (theme) => join(SHOTS, `e1-replay-${surface}-${theme}.png`));
 }
 
 // ---- the Question sheet ---------------------------------------------------------------------------------------------
@@ -224,7 +57,7 @@ const setPick = (s: Scene, path: string) => s.maws.app.evaluate((_electron, dir)
 async function answersWritten(s: Scene, id: string, requestId: string): Promise<AskAnswer[]> {
   let result: McpResult | null = null;
   await expect.poll(() => (result = mcpResultOf(s.journal(id), requestId)) !== null, { timeout: 20_000 }).toBe(true);
-  const parsed = JSON.parse(result!.content[0]!.text) as { status: string; askId: string; answers: AskAnswer[] };
+  const parsed = JSON.parse(resultText(result!)) as { status: string; askId: string; answers: AskAnswer[] };
   expect(parsed.status).toBe('answered');
   return parsed.answers;
 }
@@ -260,7 +93,7 @@ test('send_file: the delivery row names hello.txt and the caption, its two butto
       expect(call).toMatchObject({ name: 'send_file', args: { files: ['hello.txt'], caption: 'the greeting' } });
       const result = mcpResultOf(s.journal(id), call!.requestId)!;
       expect(result.isError).toBeUndefined();
-      const delivered = JSON.parse(result.content[0]!.text) as { status: string; deliverables: { id: string; path: string; name: string }[] };
+      const delivered = JSON.parse(resultText(result)) as { status: string; deliverables: { id: string; path: string; name: string }[] };
       expect(delivered).toMatchObject({ status: 'delivered', deliverables: [{ path, name: 'hello.txt' }] });
       const record = JSON.parse(readFileSync(join(s.maws.userData, 'deliverables', id, `${delivered.deliverables[0]!.id}.json`), 'utf8')) as Record<string, unknown>;
       expect(record).toMatchObject({ id: delivered.deliverables[0]!.id, appSessionId: id, kind: 'file', path, title: 'hello.txt', caption: 'the greeting', versions: [{ path }] });
@@ -489,7 +322,7 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
     expect(opened).toMatchObject({ blocking: false });
     // the acknowledgement was the host's answer at once
-    expect(JSON.parse(mcpResultOf(s.journal(id), opened!.requestId)!.content[0]!.text)).toEqual({ status: 'asked', askId: opened!.askId });
+    expect(JSON.parse(resultText(mcpResultOf(s.journal(id), opened!.requestId)!))).toEqual({ status: 'asked', askId: opened!.askId });
     // no attention item for an async ask
     expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id)).toEqual([]);
 
@@ -540,7 +373,7 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
     const calls = mcpCalls(s.journal(id));
     expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'deliverable', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
-    expect(JSON.parse(results[0]!.content[0]!.text)).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
+    expect(JSON.parse(resultText(results[0]!))).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
     expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliverableNotFound('none') }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([

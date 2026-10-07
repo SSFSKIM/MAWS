@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { agentOk, browserToolsScene, driverState, type BrowserToolsScene } from './support/browser-tools-scene';
-import { show } from './support/deliverables-scene';
+import { show } from './support/maws-tools';
 import { REPO_ROOT } from './support/launch';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { closedPort, startBrowserServer } from './support/browser-server';
-import { closeScene, scratchProject, seamLines, show, type Scene } from './support/deliverables-scene';
+import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import {

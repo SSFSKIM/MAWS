@@ -25,7 +25,7 @@ import { startBrowserServer, type BrowserServer } from './support/browser-server
 import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, pageAt, paneIn, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
-import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/deliverables-scene';
+import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
 import { REPO_ROOT } from './support/launch';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
 

@@ -1,5 +1,5 @@
 // E4a's scene for `e2e/browser.spec.ts` (E4a execution document, Task 4.1): E2's scene (a scratch project the sidebar
-// shows, the product app over the replay with the e2e seam log; imported from support/deliverables-scene.ts, not
+// shows, the product app over the replay with the e2e seam log; imported from support/maws-tools.ts, not
 // copied) plus a local web server, the folder main saves downloads into under the e2e (MAWS_E2E_SAVE_PATH), and the
 // Browser tool's locators and readers:
 //
@@ -18,7 +18,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './c7-replay';
-import { clearToasts, closeScene, launchScene, scratchProject, type Scene, type Scratch } from './deliverables-scene';
+import { clearToasts, closeScene, launchScene, scratchProject, type Scene, type Scratch } from './maws-tools';
 import { REPO_ROOT } from './launch';
 import { startBrowserServer, type BrowserServer } from './browser-server';
 

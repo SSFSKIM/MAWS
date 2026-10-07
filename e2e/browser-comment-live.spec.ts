@@ -28,7 +28,7 @@ import { address, openBrowser, pageAt, tabAt, tabsOf, type BrowserScene } from '
 import { startBrowserServer } from './support/browser-server';
 import { journal, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
-import { mcpCalls, mcpResultOf, ofKind, show } from './support/deliverables-scene';
+import { mcpCalls, mcpResultOf, ofKind, show } from './support/maws-tools';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 test.skip(process.env.MAWS_E4D_LIVE !== '1', 'the E4d live proof runs only under MAWS_E4D_LIVE=1');

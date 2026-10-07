@@ -52,7 +52,7 @@ import {
   SNAPSHOT_FIXTURES,
   waitsOf,
 } from './support/browser-tools-scene';
-import { allowNext, idle, mcpCalls, mcpResultOf, ofKind, PASS3, replay, show } from './support/deliverables-scene';
+import { allowNext, idle, mcpCalls, mcpResultOf, ofKind, PASS3, replay, show } from './support/maws-tools';
 import { menu } from './support/menu';
 
 test.describe.configure({ timeout: 180_000 });

@@ -19,7 +19,7 @@ import type { MawsBrowserAnswerResult, MawsBrowserProgress } from '@shared/ipc/s
 import type { BrowserToolName } from '@shared/maws/browser';
 import { launchBrowserScene, type BrowserScene } from './browser-scene';
 import { invoke, value } from './c7-replay';
-import { clearToasts, closeScene, ofKind, scratchProject, type Scene } from './deliverables-scene';
+import { clearToasts, closeScene, ofKind, scratchProject, type Scene } from './maws-tools';
 import { REPO_ROOT } from './launch';
 import { ORDER_REFERENCE, startBrowserToolsServer, type BrowserToolsServer } from './browser-tools-server';
 
