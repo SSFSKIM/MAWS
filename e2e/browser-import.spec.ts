@@ -389,6 +389,7 @@ test('the consent with twenty extensions keeps Import on screen and scrolls its 
       expect(box.y + box.height, 'the sheet ends inside the window').toBeLessThanOrEqual(viewport);
       const scroller = sheet.locator('form > div').first();
       expect(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight), 'the consent scrolls its own list').toBe(true);
+      await scroller.evaluate((el) => (el.scrollTop = 0)); // the shot shows the categories; the list scrolls under them
       await shootImport(s, 'consent');
       await importButton.click();
       const done = await report(s);
