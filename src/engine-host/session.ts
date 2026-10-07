@@ -7,7 +7,8 @@
 // initialize, status check, init_failed, reconnect, queue, notices, the normaliser's own warnings, exit) pass through
 // `record`, which journals the row and then normalises it; nothing here builds an event. What the frames say about the
 // process lives in SessionStatusTracker (session-status.ts); the queue in MessageQueue (queue.ts); the plan outcome
-// "clear context and implement" in ClearAndImplementSequence (session-clear.ts).
+// "clear context and implement" in ClearAndImplementSequence (session-clear.ts); the `maws` tool server, its bridges and
+// the asks in SessionMaws (session-maws.ts).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid, RequestId } from '@shared/graph/ids';
@@ -42,32 +43,18 @@ import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
-// E1 start
-import type { MawsArtifactCapturedResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
-import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
-import type { AskAnswer, AskResult } from '@shared/maws/tools';
-import { MemoryDeliverableStore, type DeliverableChange, type DeliverableWriter, type OnDeliverableWritten } from './deliverables/store';
-import { AskAnswerMismatch } from './tool-server/ask';
-import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
-import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
-import { MawsToolServer, toolText } from './tool-server/server';
-import { mawsTools } from './tool-server/tools';
+// E1 start (E11: the wiring in session-maws.ts)
+import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { PendingAsk } from '@shared/maws/ask';
+import type { BrowserWaitReason } from '@shared/maws/browser';
+import type { AskAnswer } from '@shared/maws/tools';
+import type { DeliverableWriter, OnDeliverableWritten } from './deliverables/store';
+import { SessionMaws, type MawsListeners } from './session-maws';
 // E1 end
 // E3 start
 import type { SideQuestionRequest } from '@shared/wire/control';
 import { SideQuestionLog } from './side-questions';
 // E3 end
-// E2 start
-import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
-import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
-import { HostBridge } from './tool-server/bridge';
-// E2 end
-// E4c start
-import { tmpdir } from 'node:os';
-import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
-import type { BrowserWaitReason } from '@shared/maws/browser';
-import { BrowserBridge, type BrowserRequest } from './tool-server/browser-bridge';
-// E4c end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -132,7 +119,7 @@ export interface BudgetRelease { limitKiB: number; totalKiB: number }
 
 export interface SendResult { messageUuid: MessageUuid | null; disposition: 'sent' | 'queued'; queueId: string; entry: QueueEntry }
 
-interface Listeners {
+interface SessionListeners {
   events: (events: SessionEvent[]) => void;
   status: (status: EngineSessionStatus) => void;
   brokerItems: (items: AttentionItem[]) => void;
@@ -140,16 +127,9 @@ interface Listeners {
   exited: (summary: ExitSummary) => void;
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
-  paneShow: (request: PaneShowRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void; // E1: `show_pane` asks the windows (maws.pane.show)
-  // E2 start: the store wrote a record (deliverables.changed); `artifact_screenshot` asks main to capture (maws.artifact.capture)
-  deliverableChanged: (change: { appSessionId: LaunchSpec['appSessionId']; id: string; change: DeliverableChange }) => void;
-  artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void;
-  // E2 end
-  // E4c start: a browser tool asks main (maws.browser.request); the host tells main to stop one (maws.browser.cancel)
-  browserRequest: (request: BrowserRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void;
-  browserCancel: (cancel: { appSessionId: LaunchSpec['appSessionId']; requestId: RequestId }) => void;
-  // E4c end
 }
+// E1, E2, E4c: paneShow, deliverableChanged, artifactCapture, browserRequest, browserCancel (session-maws.ts)
+type Listeners = SessionListeners & MawsListeners;
 
 type ProcessState = EngineSessionStatus['process'];
 type Frame = Record<string, unknown> & { type?: unknown; subtype?: unknown };
@@ -171,13 +151,7 @@ export class EngineSession {
   private readonly clearAndImplement: ClearAndImplementSequence;
   private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
   readonly surface: SessionSurface; // R2: the remote surface MAWS attaches as
-  // E1: the `maws` MCP server the engine handshakes over `mcp_message`, and the bridge `show_pane` opens panes through
-  readonly toolServer: MawsToolServer;
-  private readonly panes: PaneBridge;
-  private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
-  private readonly browser: BrowserBridge; // E4c: the bridge the browser tools ask main through
-  private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
-  private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
+  private readonly maws: SessionMaws; // E1: the `maws` tool server, its bridges and the asks (session-maws.ts)
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
@@ -234,45 +208,28 @@ export class EngineSession {
     this.lastUsedAt = this.launchedAt; // C12
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
-    // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
-    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }), hasClient: opts.hasClient /* E10 */ });
-    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: opts.hasClient /* E10 */ }); // E2
-    const announce: OnDeliverableWritten = (record, change) => this.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
-    // E4c start: a deadline paused while main waits on the person or a cover; main told to stop what no one awaits
-    this.browser = new BrowserBridge({
-      send: (request) => this.emit('browserRequest', { appSessionId: opts.spec.appSessionId, ...request }),
-      cancel: (requestId) => this.emit('browserCancel', { appSessionId: opts.spec.appSessionId, requestId }),
-      connected: opts.hasClient,
-      onClientGone: opts.onClientGone,
-    });
-    // E4c end
-    this.askTable = new AskTable({
-      onChange: () => {
-        this.publishAsks(); // E1 M4b
-        this.touch();
-      },
-    });
-    this.toolServer = new MawsToolServer({
-      tools: mawsTools({
-        deliverables: opts.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce }), bridge: this.panes, capture: this.captures /* E2 */,
-        asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
-        browser: this.browser, userData: opts.userData ?? tmpdir() /* E4c */,
-      }),
+    // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
+    this.maws = new SessionMaws({
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, userData: opts.userData, onClientGone: opts.onClientGone,
+      emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
-      appSessionId: opts.spec.appSessionId,
-      version: opts.appVersion ?? 'unknown',
+      sessionId: () => this.normalizer.state.sessionId,
+      publishAttention: () => this.emit('brokerItems', this.brokerItems()),
+      steer: (content, steerOpts) => this.queue.steer(content, steerOpts),
+      meta: (frame) => void this.record('meta', frame),
+      journalFailed: (error) => error instanceof JournalWriteFailed,
+      markUsed: () => this.markUsed(),
+      touch: () => this.touch(),
       log: this.log,
-      onChange: () => this.touch(),
     });
-    // E1 end
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
       client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
       meta: (frame) => this.record('meta', frame),
       onAttention: (items) => {
-        this.emit('brokerItems', [...items, ...this.askItems.values()]); // E1 M4b: with the blocking asks'
+        this.emit('brokerItems', [...items, ...this.maws.attention()]); // E1 M4b: with the blocking asks'
         this.touch();
       },
       onGrant: (updates) => {
@@ -414,31 +371,29 @@ export class EngineSession {
 
   private readonly respond = (requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void> => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process')));
 
-  // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
+  // E1, E2, E4c: the `maws` commands' answers and reads (session-maws.ts says what each does)
   answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
-    return this.panes.answer(requestId, result);
+    return this.maws.answerPane(requestId, result);
   }
 
-  // E2: main's answer to an `artifact_screenshot` capture (`maws.artifact.captured`); the first one wins.
   answerCapture(requestId: RequestId, result: MawsArtifactCapturedResult): 'delivered' | 'not_pending' {
-    return this.captures.answer(requestId, result);
+    return this.maws.answerCapture(requestId, result);
   }
 
-  // E4c start: main's answer to a browser tool's request (`maws.browser.answer`), the first one wins; and its report
-  // that the request waits on the person or a cover, or no longer does (`maws.browser.waiting`), which pauses or
-  // re-arms the request's deadline.
   answerBrowser(requestId: RequestId, result: MawsBrowserAnswerResult): 'delivered' | 'not_pending' {
-    return this.browser.answer(requestId, result);
+    return this.maws.answerBrowser(requestId, result);
   }
 
   browserWaiting(requestId: RequestId, waiting: BrowserWaitReason | null): 'delivered' | 'not_pending' {
-    return this.browser.waiting(requestId, waiting);
+    return this.maws.browserWaiting(requestId, waiting);
   }
-  // E4c end
 
-  // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
   asks(): PendingAsk[] {
-    return this.askTable.list();
+    return this.maws.asks();
+  }
+
+  answerAsk(askId: string, answers: AskAnswer[]): Promise<'delivered' | 'not_pending' | 'write_failed'> {
+    return this.maws.answerAsk(askId, answers);
   }
 
   // E3 start: a side question (`session.sideQuestion`), sent through the caller's operation table with the log's
@@ -451,62 +406,6 @@ export class EngineSession {
     return receipt;
   }
   // E3 end
-
-  // E1 M2 (residue 12): the human's answers to one ask (`maws.ask.answer`), checked against its questions first (a
-  // mismatch throws AskAnswerMismatch and writes nothing), then claimed, written, and committed only once the write
-  // settled: a blocking ask's call is answered with the AskResult (committed at the flushed row), an async ask's answers
-  // go as a `next` steer whose write carries `maws_ask_answered` as its preface. A refused write releases the ask
-  // (`write_failed`, still pending, so the human can retry); a live journal failure does not (answerNotWritten); an exit
-  // meanwhile cancels it with the rest.
-  async answerAsk(askId: string, answers: AskAnswer[]): Promise<'delivered' | 'not_pending' | 'write_failed'> {
-    const held = this.askTable.get(askId);
-    if (held === null) return 'not_pending';
-    const problem = askAnswersProblem(held.questions, answers);
-    if (problem !== null) throw new AskAnswerMismatch(`ask ${askId}: ${problem}`);
-    const ask = this.askTable.claim(askId);
-    if (ask === null) return 'not_pending';
-    this.markUsed();
-    if (ask.blocking) {
-      const result: AskResult = { status: 'answered', askId, answers };
-      const written = toolText(result);
-      try {
-        await this.toolServer.reply(ask.requestId, written, { flushed: () => this.askTable.commit(askId, written) });
-      } catch (error) {
-        return this.answerNotWritten(askId, error);
-      }
-      this.askTable.commit(askId, written); // a client that does not call `flushed` still ends committed
-      return 'delivered';
-    }
-    // the meta row rides the steer's own write as its preface: journaled just before the steer's row, and only if the
-    // write succeeded, under the writer's journal-failure handling
-    try {
-      await this.queue.steer(askSteerText(askId, ask.questions, answers), { priority: 'next', preface: [{ event: 'maws_ask_answered', askId, toolUseId: ask.toolUseId, answers }] });
-    } catch (error) {
-      return this.answerNotWritten(askId, error);
-    } finally {
-      this.touch();
-    }
-    this.askTable.commit(askId);
-    return 'delivered';
-  }
-
-  // E1 M2: an answer whose write failed. A refused write releases the ask for a retry. A journal failure while live
-  // (the frame may have reached the engine, only its row is missing) leaves it claimed: the writer has already ended
-  // the process through the journal-failure path, a retry could deliver the answers twice, and the exit cancels it.
-  private answerNotWritten(askId: string, error: unknown): 'write_failed' {
-    if (!(error instanceof JournalWriteFailed)) this.askTable.release(askId);
-    return 'write_failed';
-  }
-
-  // E1 M2: an ask nobody will answer any more (the engine withdrew its call, or the process ended): journaled, since no
-  // frame carries the fact.
-  private askCancelled(ask: PendingAsk, reason: AskCancelReason): void {
-    try {
-      this.record('meta', { event: 'maws_ask_cancelled', askId: ask.askId, toolUseId: ask.toolUseId, reason });
-    } catch (error) {
-      this.log(`maws_ask_cancelled for ${ask.askId} not journaled: ${messageOf(error)}`);
-    }
-  }
 
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
@@ -611,17 +510,7 @@ export class EngineSession {
 
   // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
   brokerItems(): AttentionItem[] {
-    return [...this.broker.snapshot(), ...this.askItems.values()];
-  }
-
-  // E1 M4b (the architect's ruling 1): the attention list again whenever the blocking asks held changed (one opened,
-  // was answered or was cancelled); an async ask, or a claim or release that leaves the set alone, publishes nothing.
-  // An item is built once per ask, so its fields never move between publications.
-  private publishAsks(): void {
-    const blocking = this.askTable.list().filter((ask) => ask.blocking);
-    if (blocking.length === this.askItems.size && blocking.every((ask) => this.askItems.has(ask.askId))) return;
-    this.askItems = new Map(blocking.map((ask) => [ask.askId, this.askItems.get(ask.askId) ?? askAttentionItem(ask, this.spec.appSessionId, this.normalizer.state.sessionId)]));
-    this.emit('brokerItems', this.brokerItems());
+    return [...this.broker.snapshot(), ...this.maws.attention()];
   }
 
   // The command catalogue C7's `session.catalog` answers from (coordinator, C7's asks).
@@ -651,7 +540,7 @@ export class EngineSession {
       bin: this.plan.bin, // W13: the spawn row's
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
-      pendingRequests: this.broker.live + (this.client?.pending ?? 0) + this.toolServer.inFlight + this.askTable.asyncCount /* E1 */, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
+      pendingRequests: this.broker.live + (this.client?.pending ?? 0) + this.maws.pending /* E1 */, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
@@ -735,7 +624,7 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
-    client.onInboundCancel((requestId) => this.toolServer.cancel(requestId)); // E1: the engine withdrew a tool call
+    client.onInboundCancel((requestId) => this.maws.cancel(requestId)); // E1: the engine withdrew a tool call
     // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
     // late mutation gets the notice (debt wave 3 review).
     client.onLateResponse((late) => {
@@ -997,7 +886,7 @@ export class EngineSession {
         return;
       // E1 start: the `maws` server's JSON-RPC traffic (the server answers another server's name itself)
       case 'mcp_message':
-        this.toolServer.accept(req);
+        this.maws.accept(req);
         return;
       // E1 end
       default:
@@ -1175,15 +1064,10 @@ export class EngineSession {
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
     const { lost: lostApprovals } = this.broker.processExited();
     // E1 M5 fix: a blocking ask still published is attention lost like a pending AskUserQuestion (the architect's ruling
-    // 1), counted before the tool server aborts it; `lostAskCount` names the asks among them (absent when none)
-    const lostAsks = this.askItems.size;
+    // 1), counted before the tool server aborts it; `lostAskCount` names the asks among them (absent when none). E1: every
+    // tool call, pane, capture and browser request settles, and the async asks are cancelled before the exit row.
+    const lostAsks = this.maws.processExited();
     const lost = lostApprovals + lostAsks;
-    // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
-    this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
-    this.panes.processExited();
-    this.captures.processExited(); // E2
-    this.browser.processExited(); // E4c: main told to stop each; the bridge stops following the app
-    for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
     this.sideQuestions.processExited(new Date().toISOString()); // E3: no answer comes once the process is gone
     this.client?.close('the process exited');
     this.clearAndImplement.processExited();
