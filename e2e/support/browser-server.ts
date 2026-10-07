@@ -13,6 +13,11 @@
 //   answers, for Stop).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+// E4d start
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT } from './launch';
+// E4d end
 
 export interface BrowserServer {
   origin: string; // http://127.0.0.1:<port>
@@ -87,6 +92,37 @@ const HTML: Record<string, string> = {
   ),
   '/framed.html': page('Framed', '<h1 id="heading">Framed</h1><iframe id="sub" src="/plain.html" title="Plain"></iframe>'),
 };
+
+// E4d start: comment mode's page (E4d execution document, Interfaces "e2e"): `/comment.html` is the naming module's
+// fixture (`test/fixtures/browser/probe-page.html`, E0b's four targets and the discriminating cases, each with a
+// `data-target`) served with what the e2e adds after its last section, so every path the fixture's units pin is
+// unchanged: a same-origin frame of `/b.html` (titled, so it has a name), controls holding values (an input inside its
+// own label, a password in a table row: no value may reach an anchor, Decision Log 35), a modal `<dialog>` (top layer) the case opens
+// itself (its Confirm button closes it, so a click that reached the button would show), a 2,400 px filler so the page
+// scrolls, the fixture's `#shadow-host` given an open shadow root holding a button, and a capture-phase recorder on
+// `window` writing every pointer, mouse and wheel event type the page hears into `#log`, each marked `*` when MAWS's
+// shield was in the page as it was heard (a listener a page registers can only run after the preload's, which is what
+// "no pointer event reaches the page while armed" is about).
+const COMMENT_ADDITIONS = `
+  <section class="card" aria-label="A frame"><iframe src="/b.html" title="Frame B" data-target="frame" style="width:320px;height:140px;border:1px solid #ccc"></iframe></section>
+  <section class="card" aria-label="Values"><div class="row"><label>Email <input type="email" value="a@b.c" data-target="label-wrapped"></label></div><table><tr><td>PIN</td><td><input type="password" value="hunter2"></td><td><button type="button" data-target="pin-show">Show</button></td></tr></table></section>
+  <dialog id="modal" aria-label="A modal"><p>A modal dialog</p><button type="button" id="modal-confirm" data-target="modal-confirm" onclick="this.closest('dialog').close()">Confirm</button></dialog>
+  <div aria-hidden="true" style="height:2400px"></div>`;
+const COMMENT_SCRIPT = `<script>
+  const log = document.getElementById('log');
+  const types = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu',
+    'pointermove', 'pointerover', 'pointerout', 'pointerenter', 'pointerleave', 'mousemove', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave', 'wheel'];
+  for (const type of types)
+    window.addEventListener(type, () => {
+      const entry = (document.querySelector('maws-comment-shield') ? '*' : '') + type;
+      log.textContent = (log.textContent ? log.textContent + ',' : '') + entry;
+    }, { capture: true, passive: true });
+  document.getElementById('shadow-host').attachShadow({ mode: 'open' }).innerHTML = '<button type="button">Inner action</button>';
+</script>`;
+HTML['/comment.html'] = readFileSync(join(REPO_ROOT, 'test/fixtures/browser/probe-page.html'), 'utf8')
+  .replace('</main>', `${COMMENT_ADDITIONS}\n</main>`)
+  .replace('</body>', `${COMMENT_SCRIPT}\n</body>`);
+// E4d end
 
 // A loopback port nothing listens on (bound, read, closed), for a refused connection. Not a fixed low port: Chromium
 // refuses ports such as 1 itself (ERR_UNSAFE_PORT, a generic error) before connecting.

@@ -4,8 +4,14 @@ export const commands = [
   'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
   'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
   'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
+  // E4d start
+  'browser.comment.set',
+  // E4d end
 ] as const;
 
 export const events = [
   'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
+  // E4d start
+  'browser.comment.changed', 'browser.comment.picked',
+  // E4d end
 ] as const;

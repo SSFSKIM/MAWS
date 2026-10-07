@@ -41,13 +41,48 @@ describe('the anchored prompt', () => {
   it('an anchor with no path is a label, not a button', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
-    const anchor: Anchor = { kind: 'browser-element', locator: 'button#save', label: 'Save button', pageUrl: 'https://example.com' };
+    // E4d: a page element's anchor opens its page now (below); an artifact's has no opener yet (E2's later wave)
+    const anchor: Anchor = { kind: 'artifact-element', locator: 'button#save', label: 'Save button', pageUrl: 'https://example.com' };
     b.emit('user.message', { messageUuid: uuid('u1'), content: anchoredMessage({ anchor, text: 'Make it blue', destination: 'thread', screenshot: false }), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     const { container } = renderRow(rowOf(rowsOf(applyEvents(createState(null, null), b.events)), 'user'));
     const chip = container.querySelector('[data-chip="anchor"]')!;
     expect(chip.tagName).toBe('SPAN');
     expect(chip.textContent).toBe('Save button');
   });
+
+  // E4d start: a page element's chip opens the page in the in-app browser (E4d execution document, Design §10)
+  const browserAnchorRow = (anchor: Anchor) => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }, { type: 'text', text: anchoredMessage({ anchor, text: 'Make this primary', destination: 'thread', screenshot: true }) }], isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    return rowOf(rowsOf(applyEvents(createState(null, null), b.events)), 'user');
+  };
+  const PAGE: Anchor = {
+    kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'http://127.0.0.1:4000/comment.html',
+    css: '#increment', role: 'button', name: 'Increment', a11y: 'main > region “A form” > button “Increment”', box: { x: 248, y: 312, width: 96, height: 30 },
+  };
+
+  it('a page element’s chip is a button that opens its page for the row’s session; the picture draws beside it', () => {
+    const { container, actions } = renderRow(browserAnchorRow(PAGE), { storeKey: PARENT });
+    const chip = container.querySelector<HTMLButtonElement>('[data-chip="anchor"]')!;
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('data-anchor-kind')).toBe('browser-element');
+    expect(chip.textContent).toBe('button “Increment”');
+    expect(chip.getAttribute('title')).toBe('#increment');
+    fireEvent.click(chip);
+    expect(actions.openBrowserUrl).toHaveBeenCalledWith(PARENT, 'http://127.0.0.1:4000/comment.html');
+    expect(actions.openFile).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('img.transcript-attachment-image')).toHaveLength(1);
+  });
+
+  it('a page element’s chip without a page URL, or outside a session’s transcript, stays a label', () => {
+    const noPage: Anchor = { ...PAGE };
+    delete noPage.pageUrl;
+    expect(renderRow(browserAnchorRow(noPage), { storeKey: PARENT }).container.querySelector('[data-chip="anchor"]')!.tagName).toBe('SPAN');
+    cleanup();
+    expect(renderRow(browserAnchorRow(PAGE)).container.querySelector('[data-chip="anchor"]')!.tagName).toBe('SPAN');
+  });
+  // E4d end
 });
 
 describe('the side-thread row', () => {

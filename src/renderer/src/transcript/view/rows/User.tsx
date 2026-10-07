@@ -15,6 +15,9 @@ import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { placeholdersOf, untaggedUserText } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
+// E4d start
+import { useRowSession } from '../context';
+// E4d end
 import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
 import { Chevron, clockTime, copyText } from './parts';
@@ -147,6 +150,20 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
     </>
   );
   const { path } = anchor;
+  // E4d start: a page element's chip opens its page in the in-app browser (E4d execution document, Design §10): the
+  // row's session's browser, or a side thread's parent's (`openBrowserUrl` decides); a label outside a session's transcript
+  const session = useRowSession();
+  const pageUrl = anchor.kind === 'browser-element' ? anchor.pageUrl : undefined;
+  if (path === undefined && pageUrl !== undefined && session !== null) {
+    return (
+      <div className="transcript-user-anchor">
+        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openBrowserUrl(session, pageUrl)}>
+          {content}
+        </button>
+      </div>
+    );
+  }
+  // E4d end
   return (
     <div className="transcript-user-anchor">
       {path !== undefined ? (

@@ -1117,10 +1117,12 @@ describe('ipc schema validates both directions', () => {
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
+        'browser.comment.set' /* E4d */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(browser.events)).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
+        'browser.comment.changed', 'browser.comment.picked' /* E4d */,
       ]);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
@@ -1199,4 +1201,43 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4a end
+  // E4d start: comment mode's command and events (E4d execution document, Interfaces "IPC `browser.comment.*`")
+  describe('E4d entries', () => {
+    const TAB_ID = 'b_0123456789ab';
+    const anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'http://127.0.0.1:4321/comment.html', css: '#increment', role: 'button', name: 'Increment', a11y: 'main > button “Increment”', box: { x: 1, y: 2, width: 3, height: 4 } };
+
+    it('appends one command and two events to the browser namespace, main-owned, every name bridged', () => {
+      expect(Object.keys(browser.commands).filter((name) => name.startsWith('browser.comment.'))).toEqual(['browser.comment.set']);
+      expect(browser.commands['browser.comment.set'].owner).toBe('main');
+      expect(Object.keys(browser.events).filter((name) => name.startsWith('browser.comment.'))).toEqual(['browser.comment.changed', 'browser.comment.picked']);
+      expect(NAMES.browser.commands).toContain('browser.comment.set');
+      expect(NAMES.browser.events).toEqual(expect.arrayContaining(['browser.comment.changed', 'browser.comment.picked']));
+    });
+
+    it('validates the toggle and its answer', () => {
+      expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: true }).ok).toBe(true);
+      for (const tabId of ['b_0123', 'tab-1', '', 7]) expect(validateCommandInput('browser.comment.set', { tabId, on: true }).ok, String(tabId)).toBe(false);
+      expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: 'yes' }).ok).toBe(false);
+      expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: true, mode: 'area' }).ok).toBe(false);
+      for (const reason of ['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent', 'arming']) expect(validateCommandOutput('browser.comment.set', { on: reason === 'ok', reason }).ok, reason).toBe(true);
+      expect(validateCommandOutput('browser.comment.set', { on: false, reason: 'busy' }).ok).toBe(false);
+    });
+
+    it('validates the mode’s change and the pick', () => {
+      for (const reason of ['armed', 'toggle', 'picked', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'refused', 'other', 'unavailable'])
+        expect(validateEventPayload('browser.comment.changed', { tabId: TAB_ID, on: reason === 'armed', reason }).ok, reason).toBe(true);
+      expect(validateEventPayload('browser.comment.changed', { tabId: TAB_ID, on: false, reason: 'blurred' }).ok).toBe(false);
+      expect(validateEventPayload('browser.comment.changed', { tabId: 'nope', on: false, reason: 'toggle' }).ok).toBe(false);
+      const picked = { tabId: TAB_ID, appSessionId: 'a', anchor, crop: 'attached' };
+      expect(validateEventPayload('browser.comment.picked', picked).ok).toBe(true);
+      expect(validateEventPayload('browser.comment.picked', { ...picked, anchor: { ...anchor, screenshot: { path: '/u/browser/crops/b.png', width: 2, height: 2 } } }).ok).toBe(true);
+      for (const crop of ['none', 'tooLarge', 'failed']) expect(validateEventPayload('browser.comment.picked', { ...picked, crop }).ok, crop).toBe(true);
+      expect(validateEventPayload('browser.comment.picked', { ...picked, crop: 'partial' }).ok).toBe(false);
+      expect(validateEventPayload('browser.comment.picked', { ...picked, tabId: 'b_xyz' }).ok).toBe(false);
+      for (const field of ['label', 'css', 'name', 'a11y'] as const)
+        expect(validateEventPayload('browser.comment.picked', { ...picked, anchor: { ...anchor, [field]: 'a\u0000b' } }).ok, field).toBe(false);
+      expect(validateEventPayload('browser.comment.picked', { ...picked, anchor: { ...anchor, html: '<b>' } }).ok).toBe(false);
+    });
+  });
+  // E4d end
 });
