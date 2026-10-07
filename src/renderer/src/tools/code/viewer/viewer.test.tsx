@@ -283,8 +283,11 @@ describe('viewer', () => {
     render(<FileViewer tab={fileTab('/r/big.log')} />);
     await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
     expect(screen.getByRole('button', { name: 'Open externally' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    const loadMore = screen.getByRole<HTMLButtonElement>('button', { name: 'Load more' });
+    fireEvent.click(loadMore);
+    expect(loadMore.disabled).toBe(true); // `loadMore` sets `loadingMore` inside the click's act, before its read answers
     await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    expect(loadMore.disabled).toBe(false); // the read that grew the head cleared `loadingMore` in the same patch
     expect(main.callsOf('files.read').map((input) => [input.offset, input.length])).toEqual([
       [0, MiB],
       [MiB, MiB],
@@ -355,8 +358,9 @@ describe('viewer', () => {
   const bigLog = () => useViewer.getState().entries.get(BIG_LOG)!;
   // E11 W-E: the two supersede cases drive the store the viewer mounts, not the rendered tab: CodeMirror laying out
   // megabytes of text under happy-dom took most of their time and all of their sensitivity to load (the button is
-  // `disabled={entry.loadingMore}`, as the first Load more case shows through the tab). Each wait is on the store's own
-  // change, and `drained` lets an answer released by hand run its course before the case checks it landed nowhere.
+  // `disabled={entry.loadingMore}`, which the 20 MB Load more case asserts through the tab). Each wait is on the
+  // store's own change, and `drained` lets an answer released by hand run its course before the case checks it landed
+  // nowhere.
   const mountBigLog = () => offs.push(useViewer.getState().mount(BIG_LOG, { appSessionId: A, path: '/r/big.log', line: null }));
   const until = (holds: (entry: ReturnType<typeof bigLog>) => boolean) =>
     new Promise<void>((resolve) => {
