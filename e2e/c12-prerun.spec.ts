@@ -177,13 +177,13 @@ test('§10.1 terminal-started sessions show under their projects, the live one f
   const north = scratchRepo(scratch.root, 'north');
   const south = scratchRepo(scratch.root, 'south');
   const made: Record<string, { sessionId: string; how: string; cwd: string }> = {};
-  const a = printRun(scratch.config, north, 'Reply with exactly: NORTH ONE READY');
+  const a = printRun(scratch.config, north, 'Reply with exactly: NORTH ONE READY', 'sonnet');
   terminalCost('10.1 north-one (-p)', a.costUsd);
   made.northOne = { sessionId: a.sessionId, how: 'claude -p', cwd: north };
-  const b = printRun(scratch.config, south, 'Reply with exactly: SOUTH ONE READY');
+  const b = printRun(scratch.config, south, 'Reply with exactly: SOUTH ONE READY', 'sonnet');
   terminalCost('10.1 south-one (-p)', b.costUsd);
   made.southOne = { sessionId: b.sessionId, how: 'claude -p', cwd: south };
-  const term = await ptyEngine(scratch.config, north, [], join(scratch.root, 'terminal-10.1.txt'));
+  const term = await ptyEngine(scratch.config, north, [], join(scratch.root, 'terminal-10.1.txt'), { model: 'sonnet' });
   let maws: MawsLaunch | null = null;
   try {
     await term.say('Reply with exactly: NORTH LIVE READY');
@@ -529,7 +529,7 @@ test('§10.2 a new worktree from "+", trust attested, project settings load as i
     const mawsInit = loaded(initOf(status.journalPath));
     const mawsHooks = markers().filter((m) => !markersBefore.has(m)); // before the terminal runs
     // the terminal in the same worktree under the same home, after MAWS's trust step
-    const terminal = printRun(scratch.config, worktree, 'Reply with exactly: TERMINAL OK', ['--setting-sources', 'user,project,local']);
+    const terminal = printRun(scratch.config, worktree, 'Reply with exactly: TERMINAL OK', 'sonnet', ['--setting-sources', 'user,project,local']);
     terminalCost('10.2 terminal compare (-p)', terminal.costUsd);
     const termInit = loaded(terminal.init);
     const setup = await page.evaluate(() => (window as unknown as { __setup: { appSessionId: string; phase: string }[] }).__setup);
@@ -918,7 +918,7 @@ test('§10.5 the archived deep session resumes from a terminal with claude --res
 
     await step(`claude --resume in the worktree (${ENGINE_VERSION} under the scratch home)`, async () => {
       const since = Date.now();
-      const term = await ptyEngine(scratch.config, worktree!, ['--resume', engineId!], join(scratch.root, 'terminal-10.5.txt'));
+      const term = await ptyEngine(scratch.config, worktree!, ['--resume', engineId!], join(scratch.root, 'terminal-10.5.txt'), { model: 'sonnet' });
       try {
         await term.say('In one short sentence: what file did you create in this session, and what line does it hold?');
         const reply = await term.replied(/c12-deep/i, 180_000);

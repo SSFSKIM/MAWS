@@ -171,10 +171,11 @@ export function trustInScratch(config: string, cwd: string): void {
 
 export interface PrintRun { sessionId: string; costUsd: number; result: string; init: Record<string, unknown> | null }
 
-// One `claude -p` exchange in `cwd`, on the stream-json output so the init frame is kept (the terminal's view of what
+// One `claude -p` exchange in `cwd` on `model` (E11 W-E: named by every caller; the C12 pre-run passes its Sonnet, a
+// sitting under E11's rule Haiku), on the stream-json output so the init frame is kept (the terminal's view of what
 // loaded: MCP servers, commands, agents, plugins).
-export function printRun(config: string, cwd: string, prompt: string, args: string[] = []): PrintRun {
-  const out = execFileSync(ENGINE_BIN, ['-p', prompt, '--model', 'sonnet', '--max-budget-usd', '0.5', '--output-format', 'stream-json', '--verbose', ...args], {
+export function printRun(config: string, cwd: string, prompt: string, model: string, args: string[] = []): PrintRun {
+  const out = execFileSync(ENGINE_BIN, ['-p', prompt, '--model', model, '--max-budget-usd', '0.5', '--output-format', 'stream-json', '--verbose', ...args], {
     cwd, env: terminalEnv(config), encoding: 'utf8', timeout: 240_000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
   });
   const frames = out.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -189,7 +190,9 @@ const ANSI = /\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The pinned engine interactively in a PTY (a terminal session), left running until `exit()`: its screen, a prompt
-// sender, the session id it writes to the scratch home. `args` may resume (`--resume <id>`).
+// sender, the session id it writes to the scratch home. `args` may resume (`--resume <id>`). `model` is named by every
+// caller (E11 W-E), and `env` adds variables to the terminal's environment (E11's teammate sitting passes
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1), set after the scratch home's own.
 export interface PtyEngine {
   screen(): string;
   say(text: string): Promise<void>;
@@ -199,11 +202,11 @@ export interface PtyEngine {
   exit(): Promise<void>;
   pid: number;
 }
-export async function ptyEngine(config: string, cwd: string, args: string[], logTo: string): Promise<PtyEngine> {
+export async function ptyEngine(config: string, cwd: string, args: string[], logTo: string, opts: { model: string; env?: Record<string, string> }): Promise<PtyEngine> {
   trustInScratch(config, cwd);
   const pty = createRequire(join(REPO_ROOT, 'package.json'))('node-pty') as typeof import('node-pty');
   const started = Date.now();
-  const term = pty.spawn(ENGINE_BIN, ['--model', 'sonnet', ...args], { name: 'xterm-256color', cols: 120, rows: 40, cwd, env: terminalEnv(config) });
+  const term = pty.spawn(ENGINE_BIN, ['--model', opts.model, ...args], { name: 'xterm-256color', cols: 120, rows: 40, cwd, env: terminalEnv(config, opts.env) });
   let raw = '';
   term.onData((d) => (raw += d));
   let alive = true;
