@@ -6,11 +6,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildChromeUserData, chromeExtensionId, COOKIES_SCHEMA, SENTINEL_PREFIX, SLOW_COPY_BYTES, type ChromeUserData } from './chrome-profile';
+import { buildChromeUserData, chromeExtensionId, SENTINEL_PREFIX, SLOW_COPY_BYTES, type ChromeUserData } from './chrome-profile';
 
 // E0b's recorded `urls` schema (spikes/browser-probe/results/all.json `import.realCopies.history.schema`, version 70).
 const URLS_SCHEMA =
   'CREATE TABLE urls(id INTEGER PRIMARY KEY AUTOINCREMENT,url LONGVARCHAR,title LONGVARCHAR,visit_count INTEGER DEFAULT 0 NOT NULL,typed_count INTEGER DEFAULT 0 NOT NULL,last_visit_time INTEGER NOT NULL,hidden INTEGER DEFAULT 0 NOT NULL)';
+// E0b's recorded `cookies` schema (spikes/browser-probe/import/synthetic.mjs `COOKIES_SCHEMA`, a Chrome 14x store at
+// version 24), restated here so the check does not read the builder's own constant.
+const COOKIES_SCHEMA =
+  'CREATE TABLE cookies(creation_utc INTEGER NOT NULL,host_key TEXT NOT NULL,top_frame_site_key TEXT NOT NULL,name TEXT NOT NULL,value TEXT NOT NULL,encrypted_value BLOB NOT NULL,path TEXT NOT NULL,expires_utc INTEGER NOT NULL,is_secure INTEGER NOT NULL,is_httponly INTEGER NOT NULL,last_access_utc INTEGER NOT NULL,has_expires INTEGER NOT NULL,is_persistent INTEGER NOT NULL,priority INTEGER NOT NULL,samesite INTEGER NOT NULL,source_scheme INTEGER NOT NULL,source_port INTEGER NOT NULL,last_update_utc INTEGER NOT NULL,source_type INTEGER NOT NULL,has_cross_site_ancestor INTEGER NOT NULL)';
 const PROBE_SOURCE = resolve(__dirname, '../../spikes/browser-probe/ext/test-ext');
 const EXTENSION_ID = /^[a-p]{32}$/;
 
@@ -59,9 +63,14 @@ const manifestOf = (dir: string) => json<Manifest>(join(dir, 'manifest.json'));
 
 // Chrome's macOS scheme, restated independently of the builder: PBKDF2-HMAC-SHA1, AES-128-CBC with sixteen spaces.
 const keyOf = (password: string) => pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
+class NotV10Error extends Error {
+  constructor() {
+    super('not a v10 value');
+  }
+}
 function decryptRow(password: string, hostKey: string, blob: Uint8Array): string {
   const bytes = Buffer.from(blob);
-  expect(bytes.subarray(0, 3).toString('latin1')).toBe('v10');
+  if (bytes.subarray(0, 3).toString('latin1') !== 'v10') throw new NotV10Error();
   const decipher = createDecipheriv('aes-128-cbc', keyOf(password), Buffer.alloc(16, 0x20));
   const plain = Buffer.concat([decipher.update(bytes.subarray(3)), decipher.final()]);
   if (!plain.subarray(0, 32).equals(createHash('sha256').update(hostKey, 'utf8').digest())) throw new Error('host hash mismatch');
@@ -174,7 +183,8 @@ describe('buildChromeUserData', () => {
       try {
         decryptRow(fixture.wrongPassword, row.host_key as string, row.encrypted_value as Uint8Array);
         return false;
-      } catch {
+      } catch (error) {
+        if (error instanceof NotV10Error) throw error; // a malformed blob is the fixture's fault, not a wrong key
         return true;
       }
     });
