@@ -1,6 +1,8 @@
 // Test engine selection (charter D-1, W13 and FX4). Fixtures retain their recording version even when the installer
 // removes that binary. Live runs prefer an explicit override, then the retained pin, then the newest installed release.
-// Node imports only: the probe runner's .mjs imports this module directly with Node's type stripping.
+// Node imports only: the probe runner's .mjs imports this module directly with Node's type stripping. It sits in its own
+// directory beside a package.json declaring `"type": "module"`, so Node loads it as ESM without guessing (and without the
+// MODULE_TYPELESS_PACKAGE_JSON warning); importers name the directory, which every resolver maps to this index.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
