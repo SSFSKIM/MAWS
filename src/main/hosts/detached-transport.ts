@@ -343,7 +343,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         socket.end(`${JSON.stringify({ t: 'exit', when: 'idle' } satisfies ClientExit)}\n`);
         socket.setTimeout(timing.helloTimeoutMs, () => socket.destroy());
         if (holder) idleArmed = { pid: holder.pid, procStart: holder.procStart };
-        log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
+        // E11: with no holder to remember it by, the arming is written at every retry (idempotent in the supervisor) and
+        // logged once per wait: only the wait's first refusal finds `waitingFor` unset
+        if (holder || waitingFor === null) log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
       }
       finish();
       if (waitingFor !== refuse.liveSessions) {

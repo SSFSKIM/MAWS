@@ -587,6 +587,22 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null, waitingLiveSessions: null });
   });
 
+  // E11 (tracker row E10 "arming without a holder pid logs every retry"): with no lock to read (missing or unparseable)
+  // the arming cannot be remembered by pid; it is still written at each retry (idempotent in the supervisor, and the
+  // process behind the socket may have changed), but logged once per wait
+  it('an incompatible supervisor with no readable lock: exit when idle written at each retry, logged once per wait', async () => {
+    const old = await startFake({ wire: 'other-wire', ...live(2) });
+    writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), '{ not json');
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
+    await until(() => old.exits.length >= 3); // three retries, each armed again
+    const asked = () => logs.filter((line) => line.includes('to exit when idle')).length;
+    expect(asked()).toBe(1);
+    expect(logs.find((line) => line.includes('to exit when idle'))).toBe('asked the incompatible supervisor to exit when idle');
+    await old.die(); // the wait ends: a fresh supervisor is served
+    await until(() => state().state === 'ready');
+  });
+
   it('a refused protocol with sessions live: the same wait, and another incompatible process is asked again', async () => {
     const first = await startFake({ protocol: SOCKET_PROTOCOL + 1, ...live(1) });
     await supervisor.start();
