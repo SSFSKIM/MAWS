@@ -31,3 +31,34 @@ Development runs of e2e:browser-import before the gate (e4b-dev-browser-import-{
   run 4: 6 passed
   shots run (MAWS_E4B_SHOTS=1, e4b-shots.log): 5 passed, 1 failed, timing only: after case 1's relaunch the sidebar's
          project row stayed collapsed after its click (support/sidebar.ts expandRow); passed in the gate run
+
+Pass 3, the merged head 8d5647d8 (master 5073c21a with E4d merged; script /tmp/maws-review/e4b-final-gates.sh,
+logs /tmp/maws-review/gates/e4b-final-*.log), each first try:
+  pnpm typecheck                          exit 0
+  pnpm lint                               exit 0
+  pnpm test --maxWorkers=4                676 files passed | 1 skipped; 9270 tests passed | 1 skipped
+  pnpm e2e:browser-import                 6 passed (31.1s)
+  pnpm e2e:browser                        8 passed (24.2s)
+  pnpm e2e:settings                       9 passed (22.0s)
+  pnpm e2e:tools                          8 passed (14.8s)
+  pnpm e2e:deliverables                   10 passed (52.0s)
+
+Pass 4, head e1d0a588 (the whole-branch review's fix wave 92f16a10..d1357c8d; logs /tmp/maws-review/gates/e4b-final2-*.log):
+  pnpm typecheck                          exit 0
+  pnpm lint                               exit 0
+  pnpm test --maxWorkers=4                676 files passed | 1 skipped; 9276 tests passed | 1 skipped
+  MAWS_E4B_SHOTS=1 pnpm e2e:browser-import try 1: 5 passed, 1 failed (case 1: an import-log line of the relaunch,
+      "extension <id> loaded background=failed", in the mirror file but not yet received from main's stdout pipe when
+      the cross-check ran; a timing-only failure of the test's own check, never a leak); try 2: 6 passed (32.1s),
+      writing the eight shots in this directory
+  pnpm e2e:browser                        8 passed (20.7s)
+  pnpm e2e:settings                       9 passed (20.9s)
+  pnpm e2e:tools                          8 passed (20.9s)
+  pnpm e2e:deliverables                   10 passed (49.2s)
+
+Pass 5, final code head 64722478 (the only change since pass 4: e2e/support/browser-import-scene.ts and
+e2e/browser-import.spec.ts, the stdout cross-check now waiting up to 5 s for the pipe to catch up with the mirror):
+  pnpm typecheck                          exit 0
+  eslint on the two files                 clean
+  pnpm e2e:browser-import                 6 passed (29.0s)
+No src/ file changed after pass 4, so the unit suite and the other e2e groups stand at pass 4.
