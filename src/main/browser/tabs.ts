@@ -78,7 +78,6 @@ export interface TabStoreDeps {
   // A view for the tab, in the tab's partition, with no listeners yet (view.ts `createTabView`); may throw. With
   // `adopted`, the view takes that webContents (a page's `window.open` child Chromium already created) instead.
   createView(tab: BrowserTab, adopted?: WebContents): WebContentsView;
-  createDebugger?(webContents: WebContents): TabDebugger; // `new TabDebugger(webContents)` by default
   // The partition a new tab of this session opens in (the Browser setting's profile, its fallbacks and their notices).
   resolvePartition(appSessionId: AppSessionId, tabId: string): string;
   restored?: Pick<TabsFile, 'tabs' | 'selected'>;
@@ -429,7 +428,7 @@ export class TabStore {
       this.failView(entry, error);
       return false;
     }
-    entry.debugger = this.deps.createDebugger?.(entry.view.webContents) ?? new TabDebugger(entry.view.webContents);
+    entry.debugger = new TabDebugger(entry.view.webContents); // attaches only when someone first asks
     entry.committed = committed;
     this.update(entry.tab.tabId, { suspended: false, failed: null });
     for (const listener of [...this.created]) listener(entry);
