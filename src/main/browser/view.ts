@@ -145,6 +145,11 @@ export class ViewManager {
     );
   }
 
+  // Under focus emulation, whether the tab's page should have it now (what was last sent through `setFocusEmulation`).
+  focusEmulationWanted(entry: TabEntry): boolean {
+    return this.focusEmulated.get(entry) ?? false;
+  }
+
   dispose(): void {
     for (const unhook of this.unhook) unhook();
   }

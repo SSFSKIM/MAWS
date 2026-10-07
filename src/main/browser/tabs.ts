@@ -22,6 +22,8 @@ import { classifyLoadError } from '@shared/browser/errors';
 import { BROWSER_LOADED_TABS_MAX, type BrowserTab } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { TabDebugger } from './debugger';
+import { TabInputSeam } from './input';
 import type { PersistedTab, TabsFile } from './persist';
 
 const REQUEST_ID_MS = 10_000; // a repeated requestId within this answers the first call's tab (Design §2)
@@ -34,9 +36,9 @@ export interface TabPlacement {
   rect: { x: number; y: number; width: number; height: number };
 }
 
-// The input seam (Design §11): when the page last saw input attributed to the human, and to anyone (the human or the
-// agent), in epoch ms; null until the first. Task 2.5's `attachInputSeams` writes it; the clipboard carve-out
-// (permissions.ts) and the `window.open` gate (window-open.ts) read it.
+// What the input seam (input.ts `TabInputSeam`, Design §11) is read for: when the page last saw input attributed to the
+// human, and to anyone (the human or the agent), in epoch ms; null until the first. `attachInputSeams` writes it; the
+// clipboard carve-out (permissions.ts) and the `window.open` gate (window-open.ts) read it.
 export interface TabInput {
   lastHumanAt: number | null;
   lastInputAt: number | null;
@@ -54,7 +56,9 @@ export interface TabEntry {
   // committed navigation, so neither a blank view nor Chromium's own error page is ever shown in the pane. An adopted
   // `about:blank` child starts true: its opener may write into that document without ever navigating it.
   committed: boolean;
-  input: TabInput;
+  // The tab's one CDP attachment (debugger.ts), made with its view and gone with it; attached only when someone asks.
+  debugger: TabDebugger | null;
+  input: TabInputSeam;
   // The chrome's find bar is open for this tab (main opened it on ⌘F in the page, or a find request arrived), so Esc in
   // the page closes it rather than reaching the page (keys.ts).
   findOpen: boolean;
@@ -74,6 +78,7 @@ export interface TabStoreDeps {
   // A view for the tab, in the tab's partition, with no listeners yet (view.ts `createTabView`); may throw. With
   // `adopted`, the view takes that webContents (a page's `window.open` child Chromium already created) instead.
   createView(tab: BrowserTab, adopted?: WebContents): WebContentsView;
+  createDebugger?(webContents: WebContents): TabDebugger; // `new TabDebugger(webContents)` by default
   // The partition a new tab of this session opens in (the Browser setting's profile, its fallbacks and their notices).
   resolvePartition(appSessionId: AppSessionId, tabId: string): string;
   restored?: Pick<TabsFile, 'tabs' | 'selected'>;
@@ -162,6 +167,22 @@ export class TabStore {
   entryOf(webContents: WebContents): TabEntry | undefined {
     for (const entry of this.entries.values()) if (entry.view?.webContents === webContents) return entry;
     return undefined;
+  }
+
+  // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
+  // not the agent's or the human's (Design §2). The count cap here and the memory cap (memory.ts) share it.
+  capVictim(except: TabEntry | null = null): TabEntry | undefined {
+    const eligible = this.all().filter(
+      (entry) =>
+        entry !== except &&
+        entry.view !== null &&
+        entry.tab.placedIn === null &&
+        !entry.tab.loading &&
+        entry.tab.download?.state !== 'progressing' &&
+        entry.tab.control === 'idle',
+    );
+    eligible.sort((a, b) => a.tab.lastShownAt.localeCompare(b.tab.lastShownAt) || a.tab.createdAt.localeCompare(b.tab.createdAt));
+    return eligible[0];
   }
 
   // Whether one more tab could be loaded now: under the cap, or with an eligible tab to suspend for it.
@@ -353,10 +374,12 @@ export class TabStore {
     this.update(tabId, { url, canGoBack, canGoForward, loading: false, loadError: { url, host: hostOf(url), kind, code, description } });
   }
 
-  // `render-process-gone`: the crash page until the next committed navigation.
+  // `render-process-gone`: the crash page until the next committed navigation. The debugger's attachment ends with the
+  // renderer (Design §15); whoever needs it next attaches again.
   rendererGone(tabId: string, reason: string): void {
     const entry = this.require(tabId);
     entry.committed = false;
+    entry.debugger?.detach();
     this.update(tabId, { crashed: { reason }, loading: false, unresponsive: false });
   }
 
@@ -397,26 +420,11 @@ export class TabStore {
       this.failView(entry, error);
       return false;
     }
+    entry.debugger = this.deps.createDebugger?.(entry.view.webContents) ?? new TabDebugger(entry.view.webContents);
     entry.committed = committed;
     this.update(entry.tab.tabId, { suspended: false, failed: null });
     for (const listener of [...this.created]) listener(entry);
     return true;
-  }
-
-  // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
-  // not the agent's or the human's (Design §2).
-  private capVictim(except: TabEntry | null): TabEntry | undefined {
-    const eligible = this.all().filter(
-      (entry) =>
-        entry !== except &&
-        entry.view !== null &&
-        entry.tab.placedIn === null &&
-        !entry.tab.loading &&
-        entry.tab.download?.state !== 'progressing' &&
-        entry.tab.control === 'idle',
-    );
-    eligible.sort((a, b) => a.tab.lastShownAt.localeCompare(b.tab.lastShownAt) || a.tab.createdAt.localeCompare(b.tab.createdAt));
-    return eligible[0];
   }
 
   // Told in the chrome of the session whose open or resume met the cap, on the tab it opened or resumed (whether another
@@ -435,7 +443,9 @@ export class TabStore {
     const view = entry.view;
     if (!view) return;
     for (const listener of [...this.destroying]) listener(entry);
+    entry.debugger?.detach();
     entry.view = null;
+    entry.debugger = null;
     entry.committed = false;
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
@@ -493,7 +503,7 @@ export class TabStore {
   }
 
   private blankEntry(tab: BrowserTab): TabEntry {
-    return { tab, view: null, placement: null, host: null, visible: false, committed: false, input: { lastHumanAt: null, lastInputAt: null }, findOpen: false };
+    return { tab, view: null, placement: null, host: null, visible: false, committed: false, debugger: null, input: new TabInputSeam(), findOpen: false };
   }
 
   private newTab(tabId: string, appSessionId: AppSessionId, partition: string): BrowserTab {

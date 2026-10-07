@@ -1,7 +1,8 @@
 // The browser's side of main (E4a execution document, Design §1, §2, §9; Interfaces "Main"), started from
 // `src/main/index.ts` once the index is open: the tab store over `<userData>/browser/tabs.json`, the partitions, the
 // views, each view's navigation (history and favicons included), the page's guards (permissions, downloads,
-// `window.open`, the context menu, the keyboard) and `browser.*`. Tabs belong to sessions (P-21): a session whose record
+// `window.open`, the context menu, the keyboard), the input attribution over each tab's TabDebugger (with focus
+// emulation when it is on), the memory sample and its soft cap, and `browser.*`. Tabs belong to sessions (P-21): a session whose record
 // is deleted closes its tabs, and at boot a tab whose session the index does not know is dropped from the file. Main
 // never waits on the renderer.
 import { mkdirSync } from 'node:fs';
@@ -15,7 +16,9 @@ import { isAppWindow } from '../windows';
 import { attachContextMenu } from './context-menu';
 import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
+import { attachInputSeams } from './input';
 import { attachKeys } from './keys';
+import { MemorySampler } from './memory';
 import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
 import { guardPage, preparePermissions } from './permissions';
@@ -24,7 +27,7 @@ import { registerBrowserHandlers } from './register';
 import { browserSeam } from './seam';
 import { TabStore, type BrowserEmit } from './tabs';
 import { createTabView, tabWebPreferences, ViewManager } from './view';
-import { focusEmulationMode } from './visibility';
+import { attachFocusEmulation, focusEmulationMode, setFocusEmulation } from './visibility';
 import { attachWindowOpen } from './window-open';
 
 export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
@@ -77,6 +80,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     onDirty: () => writer.markDirty(),
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
+  const focusEmulation = focusEmulationMode(env);
   const views = new ViewManager({
     store,
     emit,
@@ -84,8 +88,10 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       const win = BrowserWindow.fromWebContents(sender);
       return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
     },
-    focusEmulation: focusEmulationMode(env),
+    focusEmulation,
+    setFocusEmulation,
   });
+  const memory = new MemorySampler({ store, emit, metrics: () => app.getAppMetrics() });
 
   const seam = browserSeam(env);
   const downloads = new Downloads({ store, emit, downloadsDir: () => app.getPath('downloads'), saveDir: e2eSaveDir(env), reveal: seam.reveal });
@@ -98,6 +104,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     attachWindowOpen(entry, { store, linkTarget: () => settings().linkTarget, seam, childPreferences });
     attachContextMenu(entry, { store, navigator, openExternal: seam.openExternal });
     attachKeys(entry, { store, navigator, emit });
+    attachInputSeams(entry);
+    if (focusEmulation === 'on') attachFocusEmulation(entry, (tab) => views.focusEmulationWanted(tab));
   });
 
   registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
@@ -110,6 +118,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     views,
     stop: () => {
       stopSessions();
+      memory.stop();
       views.dispose();
       writer.flushSync();
       for (const { view } of store.all()) if (view && !view.webContents.isDestroyed()) view.webContents.close();

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_LOADED_TABS_MAX, BrowserTabSchema, DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { TabDebugger } from './debugger';
 import { TabStore, UnknownTabError, type TabEntry } from './tabs';
 
 const A = 'App-A' as AppSessionId;
@@ -453,7 +454,29 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     const entry = h.entry(open(h, 'https://a.test/').tab.tabId);
     expect(h.store.entryOf(entry.view!.webContents)).toBe(entry);
     expect(h.store.entryOf(child() as never)).toBeUndefined();
-    expect(entry.input).toEqual({ lastHumanAt: null, lastInputAt: null });
+    expect(entry.input).toMatchObject({ lastHumanAt: null, lastInputAt: null });
     expect(entry.findOpen).toBe(false);
+  });
+});
+
+describe('TabStore: the TabDebugger (Design §10, §15)', () => {
+  it('one per loaded view, made with it, detached when its renderer is gone, and dropped with the view', () => {
+    const h = harness();
+    const { tab } = open(h, 'https://a.test/');
+    const entry = h.entry(tab.tabId);
+    const first = entry.debugger!;
+    expect(first).toBeInstanceOf(TabDebugger);
+    expect(first.attached).toBe(false); // attached only when someone asks
+    const detach = vi.spyOn(first, 'detach');
+    h.store.rendererGone(tab.tabId, 'crashed');
+    expect(detach).toHaveBeenCalledTimes(1);
+    expect(entry.debugger).toBe(first); // the view lives on, and so does its debugger: the next ask attaches again
+    h.store.suspend(tab.tabId);
+    expect(detach).toHaveBeenCalledTimes(2);
+    expect(entry.debugger).toBeNull();
+    h.store.load(tab.tabId, 'https://a.test/');
+    expect(entry.debugger).toBeInstanceOf(TabDebugger);
+    expect(entry.debugger).not.toBe(first);
+    expect(h.entry(open(h, null).tab.tabId).debugger).toBeNull(); // no view, no debugger
   });
 });

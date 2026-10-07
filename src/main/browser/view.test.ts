@@ -489,6 +489,7 @@ describe('focus emulation (Design §3, Decision Log 1; M0: off)', () => {
     const { tabId } = h.loaded();
     h.place(sender, tabId, 'p1', R, true);
     expect(h.focusCalls).toEqual([[tabId, true]]);
+    expect(h.manager.focusEmulationWanted(h.store.entry(tabId)!)).toBe(true); // what a navigation re-sends (visibility.ts)
     await h.manager.cover(true, sender);
     await h.manager.cover(false, sender);
     w.minimized = true;
@@ -504,6 +505,7 @@ describe('focus emulation (Design §3, Decision Log 1; M0: off)', () => {
       [tabId, true],
       [tabId, false],
     ]);
+    expect(h.manager.focusEmulationWanted(h.store.entry(tabId)!)).toBe(false);
   });
 
   it('on: the window\'s hide and show re-evaluate it', () => {
