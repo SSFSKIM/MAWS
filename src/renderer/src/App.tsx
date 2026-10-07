@@ -96,6 +96,7 @@ import { BrowserTab } from './tools/browser/BrowserTab';
 import { connectBrowser } from './tools/browser/store';
 // E4a end
 // E4d start
+import { connectBrowserComment } from './tools/browser/comment/connect';
 import { CommentToggle } from './tools/browser/comment/CommentToggle';
 import { registerChromeExtra } from './tools/browser/extras';
 // E4d end
@@ -243,8 +244,10 @@ export function App() {
   }, []);
   useEffect(() => connectBrowser(), []);
   // E4a end
-  // E4d start: comment mode (E4d execution document, M3): the chrome's Comment toggle in E4a's extras slot
+  // E4d start: comment mode (E4d execution document, M3): the chrome's Comment toggle in E4a's extras slot, and main's
+  // comment-mode events (the toggle's store; a pick opens E3's composer through E5's seam)
   useEffect(() => registerChromeExtra(CommentToggle), []);
+  useEffect(() => connectBrowserComment(), []);
   // E4d end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
