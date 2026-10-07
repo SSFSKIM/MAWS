@@ -213,6 +213,21 @@ describe('PluginsRunner mutations', () => {
     expect(reloads).toEqual(['a', 'a', 'a']);
   });
 
+  // E11 scale review A scalpel-5#1: enable and disable auto-detect the scope when none is named, and their result names
+  // the one changed (pass3/e8-plugins-reload seq 42, 50); a project-scope change holds no session elsewhere to it
+  it('holds the reload to the scope the CLI result names when the input named none', async () => {
+    behave(RESULT({ command: 'disable', outcome: 'ok', plugin: 'e8-probe@e8-scratch', pluginId: 'e8-probe@e8-scratch', scope: 'project', message: 'Successfully disabled plugin: e8-probe (scope: project)' }));
+    const elsewhere = join(root, 'elsewhere');
+    mkdirSync(elsewhere);
+    const still = async () => ({ commands: [], agents: [], plugins: [{ name: 'e8-probe' }], error_count: 0 }); // other directories still load it
+    const here: ReloadTarget = { id: 'here' as AppSessionId, directory: cwd, reload: async () => ({ commands: [], agents: [], plugins: [], error_count: 0 }) };
+    const there: ReloadTarget = { id: 'there' as AppSessionId, directory: elsewhere, reload: still };
+    const { runner, done } = make({ reloadTargets: () => [here, there] });
+    const disabled = await done((await runner.start('disable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin)).opId);
+    expect(calls()).toEqual(['plugin disable e8-probe@e8-scratch --json']);
+    expect(disabled.reload).toEqual({ sessions: [{ appSessionId: 'here', outcome: 'reflected', error: null }, { appSessionId: 'there', outcome: 'no_expectation', error: null }] });
+  });
+
   it('stop resolves once every child is gone, a TERM-ignoring one through SIGKILL, and closes admission', async () => {
     behave(`trap '' TERM\nsleep 30\n`);
     const { runner, done } = make();

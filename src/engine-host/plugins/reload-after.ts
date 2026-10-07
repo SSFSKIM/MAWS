@@ -27,7 +27,7 @@ export interface ReloadTarget {
 
 export interface ReloadChange {
   action: PluginsAction;
-  scope: PluginsScope; // the CLI's default, user, when the input named none
+  scope: PluginsScope; // the input's, else the one the CLI's result names, else user (E11)
   cwd: string; // the operation's directory, where project and local scope write
   plugin: string | null; // the plugin's name (the id before its `@marketplace`); null for the marketplace verbs
   version: string | null; // an update's result `newVersion`, which the reload answer's plugin entry carries (pass3/e8-plugins-reload seq 31); null otherwise
