@@ -174,7 +174,7 @@ test.describe('source control over a scratch repository', () => {
       }, [scratch.appSessionId, scratch.dir] as const);
       expect(timed.ok).toBe(true);
       expect(timed.gap, 'git.changed arrived').not.toBeNull();
-      expect(timed.gap!, `git.changed ${Math.round(timed.gap!)} ms after the stage answered`).toBeLessThan(250);
+      expect(timed.gap!, `git.changed ${Math.round(timed.gap!)} ms after the stage answered`).toBeLessThan(150); // W-B review M4: well clear of a debounce-driven one (250 ms less the IPC)
       await expect(row(p, 'staged', 'src/app.ts')).toBeVisible();
       await expect(row(p, 'unstaged', 'src/app.ts')).toHaveCount(0);
       expect(gitNames(scratch, '--cached'), 'git agrees').toEqual(['src/app.ts', 'src/staged.ts']);
