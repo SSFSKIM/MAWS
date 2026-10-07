@@ -15,6 +15,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import { builder, uuid } from '../transcript/model/test-events';
+import { useTranscriptStore } from '../transcript';
 import { instanceOf, panelHost } from '../panel/host';
 import type { PanelToolContext } from '../panel/tool';
 import { useLayout } from '../stores/layout';
@@ -258,6 +259,30 @@ describe('the Side pane’s question view', () => {
     const rows = rowsOf(applyEvents(createState(null, null), b.events));
     expect(promotionQuestionOf(rows)).toBe('Why is this null-checked twice?');
     expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events.slice(0, 3))))).toBeNull();
+  });
+
+  // E11 (W-C): the header through the transcript-store selector, not only the pure reader
+  it('renders a promoted thread’s header from its own transcript’s rows, and none for a thread a comment opened', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const btw: Anchor = { kind: 'none', locator: 'btw', label: 'Side question' };
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { openedBy: 'btw', anchor: btw }), thread(TWO, '2026-10-06T02:00:00.000Z'));
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    act(() => useTranscriptStore.setState({ entries: { [ONE]: { rows: [] } as never, [TWO]: { rows } as never } }));
+    try {
+      const view = render(<ThreadView parent={A} child={ONE} visible={false} />);
+      expect(document.querySelector('[data-side-question]')).toBeNull(); // no rows read yet
+      act(() => useTranscriptStore.setState((s) => ({ entries: { ...s.entries, [ONE]: { rows } as never } })));
+      const header = document.querySelector<HTMLElement>(`[data-side-thread-view="${ONE}"] [data-side-question]`);
+      expect(header?.textContent).toBe('Why is this null-checked twice?');
+      expect(header?.title).toBe('Why is this null-checked twice?');
+      view.unmount();
+      render(<ThreadView parent={A} child={TWO} visible={false} />); // the same prompt in a thread a comment opened
+      expect(document.querySelector('[data-side-question]')).toBeNull();
+    } finally {
+      useTranscriptStore.setState({ entries: {} });
+    }
   });
 
   it('a thread promoted inside a promoted thread names its own question, the last promotion prompt, after a disk read', () => {
