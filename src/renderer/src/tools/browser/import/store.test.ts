@@ -9,12 +9,13 @@ import { ipc } from '../../../ipc/client';
 import { useNotices } from '../../../stores/notices';
 import { useSettings } from '../../../stores/settings';
 import { CHROME, DONE, IMPORT_ID, importBridge, INSPECTION, OTHER_IMPORT_ID, RECORD, type ImportBridge } from '../../../test-support/browser-import';
-import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, resetBrowserImport, setExtension, showReport, start } from './store';
+import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, reportShown, resetBrowserImport, setExtension, showReport, start } from './store';
 
 let b: ImportBridge;
 let queries: QueryClient;
 let disconnect = () => {};
 const stage = () => browserImport.getState().stage;
+const THIRD_IMPORT_ID = '44444444-4444-4444-8444-444444444444';
 const names = () => b.calls.map((c) => c.name);
 
 function connect(over: ImportBridge['answers'] = {}) {
@@ -56,6 +57,31 @@ describe('the run’s end', () => {
     b.emit('browser.import.finished', { importId: OTHER_IMPORT_ID, report: { ...CANCELLED_REPORT, outcome: 'failed', failure: 'partitionUnavailable' } });
     await Promise.resolve();
     expect(b.sets).toEqual([]);
+  });
+
+  it('a cancelled or failed run no sheet has shown is kept as unseen until a sheet shows it; a done one is not', async () => {
+    connect();
+    b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'extensions', done: 1, total: 3 }); // adopted, no sheet
+    b.emit('browser.import.finished', { importId: IMPORT_ID, report: CANCELLED_REPORT });
+    const unseen = browserImport.getState().unseen;
+    expect(unseen).toEqual(CANCELLED_REPORT);
+    openImport(); // Import a Chrome profile… starts over at the picker, and the report is still there to show
+    expect(stage()).toEqual({ kind: 'pick' });
+    expect(browserImport.getState().unseen).toBe(unseen);
+    showReport(unseen!); // Settings' Show
+    reportShown(unseen!); // the sheet rendered it
+    expect(browserImport.getState().unseen).toBeNull();
+
+    const failed = { ...CANCELLED_REPORT, outcome: 'failed' as const, failure: 'partitionUnavailable' as const };
+    b.emit('browser.import.progress', { importId: OTHER_IMPORT_ID, phase: 'copying', done: 0, total: 1 });
+    b.emit('browser.import.finished', { importId: OTHER_IMPORT_ID, report: failed });
+    expect(browserImport.getState().unseen).toEqual(failed);
+    reportShown(DONE); // another report shown leaves it unseen
+    expect(browserImport.getState().unseen).toEqual(failed);
+
+    b.emit('browser.import.progress', { importId: THIRD_IMPORT_ID, phase: 'copying', done: 0, total: 1 });
+    b.emit('browser.import.finished', { importId: THIRD_IMPORT_ID, report: DONE });
+    expect(browserImport.getState().unseen).toBeNull(); // a done run is its record's "Show report"
   });
 
   it('a run that ends before start’s answer arrives shows its report, not a run that never ends', async () => {
@@ -148,7 +174,7 @@ describe('the toggles', () => {
 });
 
 describe('the sheet’s stages', () => {
-  it('a refused start shows main’s sentence and discards the inspection it may have left standing', async () => {
+  it('a refused start says so in a sentence around main’s reason and discards the inspection it may have left standing', async () => {
     connect({
       'browser.import.start': () => {
         throw new Error('an import is running');
@@ -156,8 +182,18 @@ describe('the sheet’s stages', () => {
     });
     await toConsent();
     await start(CHOICE);
-    expect(stage()).toEqual({ kind: 'failed', message: 'an import is running' });
+    expect(stage()).toEqual({ kind: 'failed', message: "Couldn't start the import: an import is running. Choose the profile again." });
     expect(names()).toContain('browser.import.discard');
+  });
+
+  it('a failed inspection says so in a sentence around main’s reason', async () => {
+    connect({
+      'browser.import.inspect': () => {
+        throw new Error('the profile folder is not under this Chrome folder.');
+      },
+    });
+    await inspect(CHROME, 'Default');
+    expect(stage()).toEqual({ kind: 'failed', message: "Couldn't read what this profile holds: the profile folder is not under this Chrome folder. Choose the profile again." });
   });
 
   it('an inspection that answers after the sheet closed, or after another run was adopted, is discarded on arrival', async () => {

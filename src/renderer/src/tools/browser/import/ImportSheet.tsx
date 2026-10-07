@@ -4,7 +4,7 @@
 // in pick and consent it discards a standing inspection (main deletes the staging); while a run goes on it does nothing
 // (only Cancel ends a run); in report and failed it just closes. While a start is in flight, consent cannot be
 // dismissed either, so its answer never lands on a closed sheet. A sheet unmounted in pick or consent (Settings
-// closed) discards as its close does.
+// closed) discards as its close does. A report it renders is marked shown, so Settings stops offering it.
 import { useEffect } from 'react';
 import { Sheet } from '../../../sessions/Sheet';
 import { SECONDARY } from '../../../sessions/ui';
@@ -13,7 +13,7 @@ import { IMPORT_COPY } from './copy';
 import { ProfilePicker } from './ProfilePicker';
 import { Progress } from './Progress';
 import { Report } from './Report';
-import { browserImport, discard, useBrowserImport, type ImportStage } from './store';
+import { browserImport, discard, reportShown, useBrowserImport, type ImportStage } from './store';
 
 const WIDTH = 'w-[min(560px,90vw)]';
 
@@ -43,6 +43,9 @@ export function ImportSheet({ onClose }: { onClose(): void }) {
     },
     [],
   );
+  useEffect(() => {
+    if (stage.kind === 'report') reportShown(stage.report);
+  }, [stage]);
   const close = () => {
     if (stage.kind === 'running' || (stage.kind === 'consent' && busy)) return;
     if (stage.kind === 'pick' || stage.kind === 'consent') discard();

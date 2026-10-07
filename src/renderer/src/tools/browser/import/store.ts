@@ -9,6 +9,9 @@
 //   progress and the end of any other run are ignored.
 // - `records`: the imported profiles, from `browser.import.list` once and `browser.import.changed` after; each change
 //   invalidates E4a's `browser.profiles.list` so the partition pill and the profile select follow.
+// - `unseen`: the report of a run this window followed that ended cancelled or failed, until a sheet shows it. Such a
+//   run leaves no record (Design §14), so with no sheet mounted at its end (Settings closed, or a run adopted from
+//   another window) Settings › Browser offers it with Show; a done run is its record's "Show report".
 //
 // A run that ends `done` makes its profile the active one (Decision Log 7): the `finished` handler writes
 // `browser.profile` through `writeSettings` in every window that hears it (the write is idempotent). A removal writes
@@ -47,9 +50,10 @@ export interface BrowserImportState {
   busy: boolean; // an inspect or a start is in flight
   listed: boolean; // this connection's records came from main (a list answer or a change)
   records: ImportedProfile[];
+  unseen: ImportReport | null;
 }
 
-const initial = (): BrowserImportState => ({ stage: { kind: 'pick' }, busy: false, listed: false, records: [] });
+const initial = (): BrowserImportState => ({ stage: { kind: 'pick' }, busy: false, listed: false, records: [], unseen: null });
 
 export const browserImport = createStore<BrowserImportState>()(initial);
 export const useBrowserImport = <T>(selector: (state: BrowserImportState) => T): T => useStore(browserImport, selector);
@@ -81,7 +85,7 @@ export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryCli
       ended.set(importId, report);
       const current = stage();
       const ours = current.kind === 'running' ? current.importId === importId : current.kind !== 'consent' || browserImport.getState().busy;
-      if (ours) set({ stage: { kind: 'report', report } });
+      if (ours) set({ stage: { kind: 'report', report }, unseen: report.outcome === 'done' ? null : report });
       if (report.outcome === 'done') void writeSettings({ browser: { profile: report.profileDir } }, client);
     }),
     client.on('browser.import.changed', ({ profiles }) => {
@@ -141,7 +145,7 @@ export async function inspect(userDataDir: string, profileDir: string, client: M
     if (result.ok) void client.invoke('browser.import.discard', { inspectionId: result.value.inspectionId }); // the sheet moved on meanwhile
     return;
   }
-  set({ busy: false, stage: result.ok ? { kind: 'consent', inspection: result.value, userDataDir } : { kind: 'failed', message: result.error.message } });
+  set({ busy: false, stage: result.ok ? { kind: 'consent', inspection: result.value, userDataDir } : { kind: 'failed', message: IMPORT_COPY.inspectFailed(result.error.message) } });
 }
 
 // The sheet's close in pick or consent: a standing inspection's staging is deleted (Design §4), and one still being
@@ -169,7 +173,7 @@ export async function start(choice: ImportChoice, client: MawsBridge = ipc): Pro
   set({ busy: false });
   if (!result.ok) {
     void client.invoke('browser.import.discard', { inspectionId }); // a refused start may leave the inspection standing
-    set({ stage: { kind: 'failed', message: result.error.message } });
+    set({ stage: { kind: 'failed', message: IMPORT_COPY.startFailed(result.error.message) } });
     return;
   }
   const { importId } = result.value;
@@ -178,6 +182,11 @@ export async function start(choice: ImportChoice, client: MawsBridge = ipc): Pro
   const now = stage();
   const progress = now.kind === 'running' && now.importId === importId ? now.progress : null; // adopted from an early event
   set({ stage: { kind: 'running', importId, name: profile.name, progress, cancelling: false } });
+}
+
+// The sheet rendered this report: it is no longer one to offer.
+export function reportShown(report: ImportReport): void {
+  if (browserImport.getState().unseen === report) set({ unseen: null });
 }
 
 export function cancel(client: MawsBridge = ipc): void {

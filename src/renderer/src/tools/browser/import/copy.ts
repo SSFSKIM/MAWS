@@ -61,6 +61,9 @@ const CANDIDATE_ERRORS: Record<NonNullable<ExtensionCandidate['error']>, string>
   manifest: "The extension's manifest couldn't be read",
 };
 
+// Main's refusal or error message as the middle of a sentence: ending in exactly one full stop.
+const reason = (message: string) => `${message.trim().replace(/\.+$/, '')}.`;
+
 export const IMPORT_COPY = {
   title: {
     pick: 'Import a Chrome profile',
@@ -82,6 +85,8 @@ export const IMPORT_COPY = {
   profilesFailed: (message: string) => `Couldn't list Chrome's profiles: ${message}`,
   chooseFailed: (message: string) => `Couldn't use that folder: ${message}`,
   inspecting: 'Reading what this profile holds…',
+  inspectFailed: (message: string) => `Couldn't read what this profile holds: ${reason(message)} Choose the profile again.`,
+  startFailed: (message: string) => `Couldn't start the import: ${reason(message)} Choose the profile again.`,
   continue: 'Continue',
 
   // the consent

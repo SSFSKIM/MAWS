@@ -2,7 +2,8 @@
 // mounted from BrowserSection.tsx's E4b block under E4a's rows:
 //
 // - "Chrome profile": Import a Chrome profile… opens the import sheet; while a run goes on (started here, in another
-//   window, or before a reload) the row says its step and Show reopens the running sheet.
+//   window, or before a reload) the row says its step and Show reopens the running sheet. A run that ended cancelled
+//   or failed with no sheet showing it is offered beside the button, with Show, until a sheet shows its report.
 // - One group per imported record: its date, the report's summary with Show report, an On/Off toggle per extension
 //   (main loads or unloads it at once when the profile's partition is open; wallets start off), and Remove imported
 //   profile behind its confirm sheet.
@@ -31,6 +32,7 @@ export function BrowserImport() {
   const [removing, setRemoving] = useState<ImportedProfile | null>(null);
   const records = useBrowserImport((s) => s.records);
   const running = useBrowserImport((s) => (s.stage.kind === 'running' ? s.stage : null));
+  const unseen = useBrowserImport((s) => s.unseen);
   const open = (prepare: () => void) => {
     prepare();
     setSheet(true);
@@ -46,9 +48,19 @@ export function BrowserImport() {
             </button>
           </>
         ) : (
-          <button type="button" className={TEXT_ACTION} onClick={() => open(openImport)}>
-            {BROWSER.import}
-          </button>
+          <>
+            {unseen && unseen.outcome !== 'done' && (
+              <>
+                <span className="text-fg-muted">{BROWSER.lastImport(unseen.outcome)}</span>
+                <button type="button" className={TEXT_ACTION} onClick={() => open(() => showReport(unseen))}>
+                  {BROWSER.show}
+                </button>
+              </>
+            )}
+            <button type="button" className={TEXT_ACTION} onClick={() => open(openImport)}>
+              {BROWSER.import}
+            </button>
+          </>
         )}
       </Setting>
       {records.map((record) => (

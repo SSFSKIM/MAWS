@@ -11,6 +11,7 @@ import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { browserTab, T1, T2 } from '../test-support/browser';
+import { CANCELLED_REPORT } from '../../../../test/support/import-reports';
 import { FAILS_ID, IMPORT_ID, importBridge, RECORD, WALLET_ID, type ImportBridge } from '../test-support/browser-import';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { browser } from '../tools/browser/store';
@@ -72,6 +73,22 @@ describe('with no imported profile', () => {
     expect(within(importRow).queryByRole('button', { name: 'Import a Chrome profile…' })).toBeNull();
     fireEvent.click(within(importRow).getByRole('button', { name: 'Show' }));
     expect(dialog().dataset.browserImport).toBe('running');
+  });
+
+  it('a run that ended cancelled or failed while no sheet showed it is offered with Show until shown', async () => {
+    renderBlock();
+    b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'extensions', done: 1, total: 3 });
+    b.emit('browser.import.finished', { importId: IMPORT_ID, report: CANCELLED_REPORT });
+    const importRow = screen.getByRole('group', { name: 'Chrome profile' });
+    await within(importRow).findByText('The last import was cancelled');
+    expect(within(importRow).getByRole('button', { name: 'Import a Chrome profile…' })).toBeTruthy();
+    fireEvent.click(within(importRow).getByRole('button', { name: 'Show' }));
+    expect(dialog().dataset.browserImport).toBe('report');
+    expect(within(dialog()).getByText('Cancelled')).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(within(importRow).queryByText('The last import was cancelled')).toBeNull();
+    expect(within(importRow).queryByRole('button', { name: 'Show' })).toBeNull();
   });
 });
 

@@ -241,6 +241,7 @@ export const BROWSER = {
   importNote: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.',
   importing: (step: string) => `Import running · ${step}`,
   show: 'Show',
+  lastImport: (outcome: 'cancelled' | 'failed') => (outcome === 'cancelled' ? 'The last import was cancelled' : 'The last import failed'),
   importedOn: (date: string) => `Imported ${date}`,
   showReport: 'Show report',
   remove: 'Remove imported profile',
