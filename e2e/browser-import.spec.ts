@@ -142,7 +142,7 @@ test('the full import: picker, consent, phases, report, active profile, cookies,
       await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBe('Profile 1');
       value(await invoke(s.page, 'settings.set', { browser: { profile: 'Default' } }));
       expect(profilesFile(s.maws.userData)!.profiles.map((r) => r.profileDir)).toEqual(['Default', 'Profile 1']);
-      expectNothingLogged(s);
+      await expectNothingLogged(s);
     } catch (error) {
       await s.maws.cleanup();
       throw error;
@@ -173,7 +173,7 @@ test('the full import: picker, consent, phases, report, active profile, cookies,
       await expectContentScript(work);
       await expect.poll(async () => (await recordOf(again, 'Profile 1'))?.extensions.map((e) => [e.id, e.status, e.background])).toEqual([[workProbe.id, 'loaded', 'running']]);
       expect((await suggest(again, WORK, 'e4b-sentinel-title')).map((row) => row.title).sort()).toEqual(titlesOf(again, 'Profile 1'));
-      expectNothingLogged(again);
+      await expectNothingLogged(again);
     } catch (error) {
       await again.maws.cleanup();
       throw error;
@@ -205,7 +205,7 @@ test('a wrong Safe Storage password fails every cookie and says so; history and 
       const echo = await newTabAt(s, panel, s.server.url('/echo-cookies'));
       await expect(pill(panel)).toHaveText('Person 1');
       expect(await echoedCookies(echo)).toEqual({});
-      expectNothingLogged(s);
+      await expectNothingLogged(s);
     } catch (error) {
       await s.maws.cleanup();
       throw error;
@@ -242,7 +242,7 @@ test('the Keychain denied skips cookies only; a second profile cancelled during 
       expect(existsSync(join(s.maws.userData, 'browser', 'maws-chrome-Profile 1'))).toBe(false);
       expect(stagingLeft(s.maws.userData)).toEqual([]);
       expect(settingsFile(s.maws.userData).browser.profile).toBe('Default');
-      expectNothingLogged(s);
+      await expectNothingLogged(s);
     } catch (error) {
       await s.maws.cleanup();
       throw error;

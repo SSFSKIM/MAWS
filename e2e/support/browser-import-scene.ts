@@ -90,11 +90,22 @@ async function collectAppConsole(page: Page): Promise<() => string[]> {
 // Nothing logs a value (Design §16): none of the fixture's sentinels in main's streams, the app window's console or the
 // import's log mirror. A leak is reported by the sentinel's kind and position, never by the value itself. Every line
 // the import logged in this launch is also in main's stdout, so the check is known to have read the stream it checks.
-export function expectNothingLogged(s: ImportScene): void {
-  const importLog = existsSync(s.importLog) ? readFileSync(s.importLog, 'utf8') : '';
+// The mirror file is appended synchronously by main while its stdout reaches this process through the pipe, so a line
+// logged just before the check can be in the file and not yet received: the containment check waits (bounded) for the
+// stream to catch up, and the sentinel checks then read the caught-up stream.
+export async function expectNothingLogged(s: ImportScene): Promise<void> {
+  const readImportLog = () => (existsSync(s.importLog) ? readFileSync(s.importLog, 'utf8') : '');
+  await expect
+    .poll(
+      () => {
+        const output = s.mainOutput();
+        return readImportLog().slice(s.importLogFrom).split('\n').filter(Boolean).filter((line) => !output.includes(line));
+      },
+      { timeout: 5_000, message: "the import's lines of this launch, missing from main's stdout" },
+    )
+    .toEqual([]);
+  const importLog = readImportLog();
   const sources = { 'main stdout and stderr': s.mainOutput(), 'the app console': s.appConsole().join('\n'), 'the import log': importLog };
-  const thisLaunch = importLog.slice(s.importLogFrom).split('\n').filter(Boolean);
-  expect(thisLaunch.filter((line) => !sources['main stdout and stderr'].includes(line)), "the import's lines of this launch, missing from main's stdout").toEqual([]);
   for (const [where, text] of Object.entries(sources)) {
     const leaked = s.chrome.sentinels.flatMap((sentinel, k) => (text.includes(sentinel) ? [`#${k} ${sentinel.startsWith(SENTINEL_PREFIX) ? sentinel.split('-')[2] : 'password'}`] : []));
     expect(leaked, `sentinels in ${where}`).toEqual([]);
