@@ -7,8 +7,9 @@
 // to main and a Side thread from a pick on a live parent (E3's replay journals): the written prompts, the transcript's
 // chip and image, the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
-// the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped, an adopted
-// window.open child carries the preload; (8) a frame, a shadow host and a top-layer dialog; (9) disk-form replay
+// the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
+// tab whose preload never acknowledges the arm is refused (7c: an adopted window.open tab, expected to fail until E4a's
+// fix); (8) a frame, a shadow host and a top-layer dialog; (9) disk-form replay
 // parity and the chip opening the page; (10) the agent's control gate; (11) both-theme evidence under MAWS_E4D_SHOTS=1.
 // Runs under `pnpm e2e:browser-comment` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
@@ -19,6 +20,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
+import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
 import { address, browserIn, expectOnPane, launchBrowserScene, openBrowser, pageAt, paneIn, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -78,6 +80,7 @@ async function commentScene(opts: CommentSceneOptions, body: (s: BrowserScene) =
 
 interface CommentState {
   armed: boolean;
+  arming: boolean; // main awaits the preload's acknowledgement (Decision Log 34)
   epoch: number;
   dropped: number;
   webContentsId: number | null;
@@ -88,6 +91,7 @@ interface CommentSeam {
   sendInput(tabId: string, event: { type: 'keyDown' | 'keyUp'; keyCode: string }): boolean;
   replayReport(tabId: string, report: unknown): Promise<boolean>;
   setControl(tabId: string, control: 'idle' | 'agent' | 'human'): void;
+  ignoreAcks(tabId: string, on: boolean): void;
 }
 const stateOf = (s: BrowserScene, tabId: string): Promise<CommentState> =>
   s.maws.app.evaluate((_electron, id) => (globalThis as unknown as { __maws_browser_comment: CommentSeam }).__maws_browser_comment.state(id)!, tabId);
@@ -592,32 +596,87 @@ test('7. a navigation disarms; a report from the earlier arm is dropped and coun
   });
 });
 
-// A page's window.open, adopted as a tab of the session (E4a's `adoptChild`): armed, its page should put the shield up.
-// It does not: Electron 44.4.5 runs no browser preload in an adopted child (`overrideBrowserWindowOptions.webPreferences
-// .preload` never reaches it, with or without an opener, and not after a reload; the same preload registered on the
-// partition's session does run there), so main answers armed while the page has no shield and a click reaches it.
-// E4a's code; recorded for the architect, and kept here as an expected failure that turns red once the child runs the
-// preload.
-test('7b. a tab adopted from window.open carries the browser preload (expected to fail until adopted children load it)', async () => {
-  test.fail(true, 'E4a: an adopted window.open child runs no browser preload (E4d task 5 report)');
-  await commentScene({ titles: ['E4d: adopted'] }, async (s) => {
+// ---- (7b, 7c) armed means acknowledged (Decision Log 34) ----------------------------------------------------------------
+
+// A tab whose preload never acknowledges the arm is refused: the toggle is never pressed, main ends the arming after
+// ARM_ACK_MS with `unavailable` and the toast says so, no shield stays in the page, and main holds the tab neither armed
+// nor arming (so the page hearing a click then is the mode being off, not a hole in it).
+async function expectRefusedArm(s: BrowserScene, view: Locator, tabId: string, page: Page): Promise<void> {
+  const toggle = toggleOf(view);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect.poll(async () => (await stateOf(s, tabId)).arming, { message: 'arming, awaiting the acknowledgement' }).toBe(true);
+  await expect(toggle, 'not pressed while main waits').toHaveAttribute('aria-pressed', 'false');
+  await expect
+    .poll(async () => (await recorded(s)).changed.filter((c) => c.payload.tabId === tabId).at(-1)?.payload, { timeout: 5_000, message: 'the arming ends unavailable' })
+    .toEqual({ tabId, on: false, reason: 'unavailable' });
+  expect((await recorded(s)).changed.filter((c) => c.payload.tabId === tabId && c.payload.on), 'never told on').toEqual([]);
+  await expect(s.page.getByRole('region', { name: /^Notifications/ }).getByText(COMMENT_COPY.unavailable)).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(commentNodes(page), 'no shield left in the page').toHaveCount(0);
+  const state = await stateOf(s, tabId);
+  expect({ armed: state.armed, arming: state.arming }).toEqual({ armed: false, arming: false });
+  await clearToasts(s.page);
+}
+
+test('7b. armed means acknowledged: a tab whose preload never confirms the arm is refused as unavailable (the seam’s ignoreAcks on an ordinary tab)', async () => {
+  await commentScene({ titles: ['E4d: no ack'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
-    await show(s, id);
-    const panel = await openBrowser(s);
-    const A = s.server.url('/a.html');
-    await address(panel, A);
-    await tabAt(s, id, A);
-    const pageA = await pageAt(s, A);
-    await pageA.locator('#open-c').click();
-    const C = s.server.url('/c.html');
-    const c = await tabAt(s, id, C);
-    const pageC = await pageAt(s, C);
-    await expectOnPane(s, c, paneIn(panel), 'panel');
+    const t = await openCommentPage(s, id);
+    await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as { __maws_browser_comment: CommentSeam }).__maws_browser_comment.ignoreAcks(id, true), t.tabId);
+    await expectRefusedArm(s, t.panel, t.tabId, t.page);
+    // the mode is off, so the page is the person's again: a click reaches its recorder
+    await clickAt(t.page, centre(await rectOf(t.page.locator('header h1'))));
+    await expect(pageLog(t.page)).toHaveText('pointerdown,mousedown,pointerup,mouseup,click');
+    await clearLog(t.page);
+    // the same tab, its acknowledgements heard again: it arms and shields, and a pick reaches nothing in the page
+    await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as { __maws_browser_comment: CommentSeam }).__maws_browser_comment.ignoreAcks(id, false), t.tabId);
+    await arm(s, t);
+    await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
+    const sheet = sheetOf(s, INCREMENT_LABEL);
+    await expect(sheet).toBeVisible();
+    await expect(pageLog(t.page)).toHaveText('');
+    await cancel(s, t, sheet);
+  });
+});
+
+// A tab adopted from a page's window.open (E4a's `adoptChild`): Electron 44.4.5 loads no browser preload there under
+// E4a's per-view `webPreferences.preload` (Decision Log 33), so today it is the real page with no preload, refused as
+// above. E4a's fix (the preload registered per session) makes adopted tabs acknowledge: then delete the adopted variant
+// of 7b (7b covers the defence durably) and drop 7c's `test.fail`.
+async function adoptedTab(s: BrowserScene): Promise<{ view: Locator; tabId: string; page: Page }> {
+  const [id] = s.ids as [AppSessionId];
+  await show(s, id);
+  const view = await openBrowser(s);
+  const A = s.server.url('/a.html');
+  await address(view, A);
+  await tabAt(s, id, A);
+  await (await pageAt(s, A)).locator('#open-c').click();
+  const C = s.server.url('/c.html');
+  const tabId = await tabAt(s, id, C);
+  const page = await pageAt(s, C);
+  await expectOnPane(s, tabId, paneIn(view), 'panel');
+  return { view, tabId, page };
+}
+
+test('7b (adopted). today’s preload-less page, an adopted window.open tab, is refused as unavailable (delete when E4a’s per-session preload lands)', async () => {
+  await commentScene({ titles: ['E4d: adopted, refused'] }, async (s) => {
+    const { view, tabId, page } = await adoptedTab(s);
+    await expectRefusedArm(s, view, tabId, page);
+  });
+});
+
+test('7c. a tab adopted from window.open arms and shields (expected to fail until E4a’s per-session preload lands)', async () => {
+  // E4a's fix makes this pass; remove the mark then (Decision Log 33, 34).
+  test.fail(true, 'E4a: an adopted window.open tab runs no browser preload (Decision Log 33)');
+  await commentScene({ titles: ['E4d: adopted'] }, async (s) => {
+    const { view, tabId, page } = await adoptedTab(s);
+    await toggleOf(view).click();
     try {
-      expect(value(await invoke(s.page, 'browser.comment.set', { tabId: c, on: true }))).toEqual({ on: true, reason: 'ok' });
-      await expect(pageC.locator('maws-comment-shield'), 'the adopted child loads the browser preload').toBeAttached({ timeout: 2_000 });
+      await expect(toggleOf(view), 'the adopted tab acknowledges the arm').toHaveAttribute('aria-pressed', 'true', { timeout: 3_000 });
+      await expect(page.locator('maws-comment-shield'), 'the adopted tab loads the browser preload').toBeAttached();
     } finally {
-      value(await invoke(s.page, 'browser.comment.set', { tabId: c, on: false }));
+      value(await invoke(s.page, 'browser.comment.set', { tabId, on: false }));
     }
   });
 });
