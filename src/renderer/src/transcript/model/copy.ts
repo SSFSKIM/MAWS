@@ -31,6 +31,7 @@ const list = (names: string[]) => (names.length <= 1 ? (names[0] ?? '') : `${nam
 
 export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
+  cause?: 'crash' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"
   origin: 'human' | 'engine' | 'peer';
   durationMs: number;
   toolCalls: number;
@@ -38,18 +39,18 @@ export interface DividerCopyInput {
   autoDenied: number;
 }
 
-function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number): string {
+function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number, cause: DividerCopyInput['cause'] = null): string {
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < 1000 ? 'Working' : `Working for ${t}`;
     case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
-    case 'stopped': return `You stopped after ${t}`;
+    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
 }
 
 export function dividerCopy(input: DividerCopyInput): string {
-  const parts = [verb(input.state, input.origin, input.durationMs)];
+  const parts = [verb(input.state, input.origin, input.durationMs, input.cause)];
   if (input.state !== 'working' && input.toolCalls > 0) parts.push(plural(input.toolCalls, 'tool call'));
   if (input.denied > 0) parts.push(`${input.denied} denied`);
   if (input.autoDenied > 0) parts.push(`${input.autoDenied} auto-denied`);
@@ -67,7 +68,7 @@ export interface TurnSummaryCopyInput extends Omit<DividerCopyInput, 'denied' | 
 }
 
 export function turnSummaryCopy(input: TurnSummaryCopyInput): string {
-  const head = verb(input.state, input.origin, input.durationMs) + (input.model ? ` on ${input.model}` : '');
+  const head = verb(input.state, input.origin, input.durationMs, input.cause) + (input.model ? ` on ${input.model}` : '');
   const parts = [head];
   if (input.toolCalls > 0) parts.push(`${plural(input.toolCalls, 'tool call')}${input.phrases ? `: ${input.phrases}` : ''}`);
   if (input.denied.length > 0) parts.push(`${input.denied.length} denied (${[...new Set(input.denied.map((d) => d.kind))].join(', ')})`);

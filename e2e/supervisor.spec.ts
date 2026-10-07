@@ -594,7 +594,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     const composer = `"${await submitOf(run.page).textContent()}" (${await submitOf(run.page).getAttribute('title')})`;
     // the transcript closes the dead turn once the successor's table does not list the session: stopped, not Working
     await expect(run.page.getByText('Session process exited (crash)')).toBeVisible();
-    await expect(run.page.getByRole('button', { name: /stopped after/i })).toBeVisible(); // the human turn's divider: "You stopped after …"
+    await expect(run.page.getByRole('button', { name: /Stopped after .*\(engine process exited\)/ })).toBeVisible(); // the human turn's divider, in the engine's words (E11)
     await expect(run.page.getByText(/^Working/)).toHaveCount(0);
     await expect(toast).toBeVisible();
     await shots(run.maws, 'notice-crashed', () => null);
