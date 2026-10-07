@@ -197,8 +197,8 @@ export class SessionStream {
   }
 
   // The client's `ready`: the row's state as ordinary events, then every event of the ring no client has received yet,
-  // in batches of at most BATCH_MAX events and BATCH_BYTES of JSON. The pending batch is part of that tail (its events are in the ring and undelivered), so it is
-  // dropped rather than flushed after the burst a second time. A batch the client did not take ends the burst: the cursor
+  // in batches of at most BATCH_MAX events and BATCH_BYTES of JSON. The pending batch is part of that tail (its events
+  // are in the ring and undelivered), so it is dropped rather than flushed after the burst a second time. A batch the client did not take ends the burst: the cursor
   // stays at the last one written, and the next ready sends the rest.
   republish(state: RowState): void {
     if (this.timer !== null) clearTimeout(this.timer);
