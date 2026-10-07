@@ -62,9 +62,17 @@ const fakes = await vi.hoisted(async () => {
   return { cdp, View, win, app };
 });
 
+// E4d start: the preload channel's listener comment mode adds to ipcMain (E4d Task 2.2)
+const commentIpc = await vi.hoisted(async () => {
+  const { EventEmitter } = await import('node:events');
+  const channel = new EventEmitter();
+  return { channel, on: channel.on.bind(channel), removeListener: channel.removeListener.bind(channel) };
+});
+// E4d end
+
 vi.mock('electron', () => ({
   app: fakes.app,
-  ipcMain: { handle: () => {} },
+  ipcMain: { handle: () => {}, on: commentIpc.on, removeListener: commentIpc.removeListener }, // E4d: on, removeListener
   BrowserWindow: { fromWebContents: () => fakes.win },
   session: {
     fromPartition: () => ({
@@ -262,3 +270,44 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     on.stop();
   });
 });
+
+// E4d start: comment mode's wiring inside startBrowser (E4d execution document, Interfaces "Main"; Decision Log 26(b))
+const { contextMenuTemplate } = await import('./context-menu');
+const { COMMENT_CHANNEL } = await import('@shared/browser/comment-protocol');
+describe('startBrowser wires comment mode (E4d)', () => {
+  const menuLabels = () =>
+    contextMenuTemplate({ x: 1, y: 1, linkURL: '', srcURL: '', mediaType: 'none', isEditable: false, selectionText: '', editFlags: {} } as never, { canGoBack: false, canGoForward: false }, {} as never).map(
+      (item) => item.label,
+    );
+
+  it('registers browser.comment.set, the preload channel, the menu\'s Comment and the seam, and removes them at stop', async () => {
+    const handlers = new Map<string, (input: unknown, context: unknown) => unknown>();
+    const register = ((name: string, handler: (input: unknown, context: unknown) => unknown) => void handlers.set(name, handler)) as never;
+    const browser = start(fakeIndex([A]).index, { register, env: { MAWS_E2E: '1' } });
+    expect(handlers.get('browser.comment.set')!({ tabId: 'b_00000000000f', on: true }, {})).toEqual({ on: false, reason: 'unknownTab' });
+    expect(commentIpc.channel.listenerCount(COMMENT_CHANNEL.fromPreload)).toBe(1);
+    expect(menuLabels()).toContain('Comment');
+
+    const { tab } = browser.store.open({ appSessionId: A, url: 'https://a.test/', select: true });
+    const page = browser.store.entry(tab.tabId)!.view!.webContents;
+    commentIpc.channel.emit(COMMENT_CHANNEL.fromPreload, { sender: page }, { type: 'picked', epoch: 0, requestId: null });
+    expect(globalThis.__maws_browser_comment!.state(tab.tabId)).toMatchObject({ armed: false, epoch: 0, dropped: 1 }); // nothing armed: dropped
+    await expect(globalThis.__maws_browser_comment!.replayReport(tab.tabId, 'junk')).resolves.toBe(true);
+    expect(globalThis.__maws_browser_comment!.state(tab.tabId)!.dropped).toBe(2);
+    globalThis.__maws_browser_comment!.setControl(tab.tabId, 'agent');
+    expect(browser.store.entry(tab.tabId)!.tab.control).toBe('agent');
+    expect(globalThis.__maws_browser_comment!.state('b_00000000000f')).toBeNull();
+
+    browser.stop();
+    expect(commentIpc.channel.listenerCount(COMMENT_CHANNEL.fromPreload)).toBe(0);
+    expect(menuLabels()).not.toContain('Comment');
+    expect(globalThis.__maws_browser_comment).toBeUndefined();
+  });
+
+  it('installs no seam without MAWS_E2E=1', () => {
+    const browser = start(fakeIndex([A]).index);
+    expect(globalThis.__maws_browser_comment).toBeUndefined();
+    browser.stop();
+  });
+});
+// E4d end
