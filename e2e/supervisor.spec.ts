@@ -542,7 +542,6 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     const toast = run.page.getByText(/^The session supervisor stopped unexpectedly/);
     await expect(toast).toHaveText('The session supervisor stopped unexpectedly (SIGKILL); 1 session was interrupted. Their transcripts are on disk; open one to resume.');
     await toast.hover(); // a hovered toast stays
-    await shots(run.maws, 'notice-crashed', () => null);
     const restarted = await s.ready(run.page, (st) => st.supervisor!.pid !== old);
     const fresh = restarted.supervisor!.pid;
     expect(restarted.lastExit).toMatchObject({ code: null, signal: 'SIGKILL', interrupted: 1 });
@@ -553,6 +552,12 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     await expect(submitOf(run.page)).toHaveAttribute('title', 'Session ended');
     await expect(glyphOf(row)).not.toHaveAttribute('aria-label', /Working|Needs approval/);
     const composer = `"${await submitOf(run.page).textContent()}" (${await submitOf(run.page).getAttribute('title')})`;
+    // the transcript closes the dead turn once the successor's table does not list the session: stopped, not Working
+    await expect(run.page.getByText('Session process exited (crash)')).toBeVisible();
+    await expect(run.page.getByRole('button', { name: /stopped after/i })).toBeVisible(); // the human turn's divider: "You stopped after …"
+    await expect(run.page.getByText(/^Working/)).toHaveCount(0);
+    await expect(toast).toBeVisible();
+    await shots(run.maws, 'notice-crashed', () => null);
     const sessions = value(await invoke(run.page, 'engine.sessions', undefined));
     expect(sessions.filter((st) => st.appSessionId === id && st.process !== 'exited'), 'the new supervisor holds no live row of it').toEqual([]);
 
