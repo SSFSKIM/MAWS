@@ -23,10 +23,11 @@ import { RELAY_URL } from '../src/engine-host/launch';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { assertConfigHomeSafe } from '../test/live/support/live';
+import { ownerPlugins } from '../test/support/claude-env';
 import { journal, mainResults, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { clearToasts, eventsOf, ofKind, recordEvents, seedTranscripts, shootThemes } from './support/maws-tools';
+import { clearToasts, eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, shootThemes, type Frame } from './support/maws-tools';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_E1_LIVE !== '1', 'the E1 live sitting runs only under MAWS_E1_LIVE=1');
@@ -248,7 +249,8 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const [init] = ofKind(events, 'session.init');
       expect(init!.tools).toEqual(expect.arrayContaining(['mcp__maws__send_file', 'mcp__maws__ask', 'mcp__maws__show_pane']));
       expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
-      note(`G1: session.init (the journal's system/init) lists ${init!.tools.length} tools, ${JSON.stringify(init!.tools.filter((t) => t.startsWith('mcp__')))}; mcp_servers ${JSON.stringify(init!.mcpServers)}`);
+      expect(ownerPlugins(init!.plugins), 'none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
+      note(`G1: session.init (the journal's system/init) lists ${init!.tools.length} tools, ${JSON.stringify(init!.tools.filter((t) => t.startsWith('mcp__')))}; mcp_servers ${JSON.stringify(init!.mcpServers)}; plugins ${JSON.stringify(init!.plugins)} (none of the owner's)`);
       const [delivered] = ofKind(events, 'maws.delivery.file');
       const path = join(sc.repo, 'hello.txt');
       expect(delivered).toMatchObject({ caption: 'the greeting', deliverables: [{ path, name: 'hello.txt' }] });
@@ -318,7 +320,16 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await drive(s, session, 'the answer and the reply', async () => ofKind(await s.events(session.id), 'maws.ask.answered').length > 0 && (await idleNow(s, session.id)));
       const [answered] = ofKind(await s.events(session.id), 'maws.ask.answered');
       expect(answered).toMatchObject({ askId: opened!.askId, delivery: 'result' });
+      // what the sheet was given, written as the result's answers, one per question in the ask's order
+      const given = (q: AskQuestion) =>
+        q === single ? { status: 'answered', value: ['Blue'] }
+        : q === multi ? { status: 'answered', value: ['Mon', 'Wed'], otherText: 'Fri' }
+        : q.modality === 'text' ? { status: 'skipped' }
+        : q.modality === 'folder' ? { status: 'answered', value: [assets] }
+        : { status: 'decide_for_me' };
+      expect(answered!.answers).toMatchObject(opened!.questions.map((q) => ({ ...(q.id === undefined ? {} : { id: q.id }), ...given(q) })));
       await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+      await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
       await expect(needsYou).toHaveCount(0);
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
       await shoot(s, 'capsule-answered');
@@ -337,6 +348,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       expect(opened!.blocking).toBe(false);
       const capsule = capsuleOf(s);
       await expect(capsule).toHaveAttribute('data-ask-state', 'asked');
+      await expect(capsule.locator('[data-ask-chip]')).toHaveText('Asked, answer when ready');
       // the model keeps working: its Bash call starts, then the answer goes from the sheet while it runs
       await drive(s, session, 'the Bash call', async () => ofKind(await s.events(session.id), 'tool.use').some((e) => e.toolName === 'Bash'));
       await page.waitForTimeout(2_000);
@@ -354,7 +366,19 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const firstResult = results[0]!;
       const folded = results.length === 1 && steer!.seq < firstResult.seq;
       const replies = mainTurnsEnded(await s.events(session.id)).map((t) => t.resultText ?? '');
-      note(`G4: maws.ask.opened blocking false; the acknowledgement {status: "asked"} at once; the capsule read "Asked, answer when ready"; the answer went from the sheet while Bash ran; the steer (priority next, seq ${steer!.seq}) ${folded ? `folded into the running turn (one main result, seq ${firstResult.seq})` : `did not fold: ${results.length} main results at seqs ${JSON.stringify(results.map((r) => r.seq))}`}; replies ${JSON.stringify(replies)}`);
+      // the tool's acknowledgement, written before the answer's steer
+      const askCall = mcpCalls(rows).find((c) => c.name === 'ask')!;
+      expect(JSON.parse(resultText(mcpResultOf(rows, askCall.requestId)!))).toEqual({ status: 'asked', askId: opened!.askId });
+      const ack = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string; response?: { request_id?: string } }).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === askCall.requestId)!;
+      expect(ack.seq, 'the acknowledgement before the answer').toBeLessThan(steer!.seq);
+      // the answer's steer written inside the Bash call's span: after its tool_use, before its tool_result
+      const blocks = (r: (typeof rows)[number]) => (((r.frame as Frame).message as { content?: unknown } | undefined)?.content ?? []) as { type?: string; id?: string; name?: string; tool_use_id?: string }[];
+      const bashUse = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'assistant' && Array.isArray(blocks(r)) && blocks(r).some((b) => b.type === 'tool_use' && b.name === 'Bash'));
+      const bashId = bashUse && blocks(bashUse).find((b) => b.type === 'tool_use' && b.name === 'Bash')!.id;
+      const bashResult = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'user' && Array.isArray(blocks(r)) && blocks(r).some((b) => b.type === 'tool_result' && b.tool_use_id === bashId));
+      const duringBash = bashUse !== undefined && bashResult !== undefined && bashUse.seq < steer!.seq && steer!.seq < bashResult.seq;
+      note(`G4: maws.ask.opened blocking false; the acknowledgement {status: "asked", askId} written at seq ${ack.seq}, before the answer's steer; the capsule read "Asked, answer when ready"; the steer (priority next, seq ${steer!.seq}) ${duringBash ? `went while Bash ran (its tool_use at seq ${bashUse!.seq}, its result at seq ${bashResult!.seq})` : `did not land inside Bash's span (tool_use seq ${bashUse?.seq ?? 'none'}, result seq ${bashResult?.seq ?? 'none'})`}, and ${folded ? `folded into the running turn (one main result, seq ${firstResult.seq})` : `did not fold: ${results.length} main results at seqs ${JSON.stringify(results.map((r) => r.seq))}`}; replies ${JSON.stringify(replies)}`);
+      expect.soft(duringBash, 'the answer went from the sheet while Bash ran').toBe(true);
       expect(replies.some((r) => /ANSWER:\s*Yes/i.test(r))).toBe(true);
       expect.soft(folded, 'the answer folded into the running turn').toBe(true);
       await end(s, session, before, costs);
