@@ -9,7 +9,8 @@
 // Under 'on', the tab's TabDebugger attaches at view creation and stays attached (never detached on idle); the view
 // manager decides when a page should have the emulation (shown, uncovered, placed, its window visible and not minimized)
 // and calls `setFocusEmulation` on each change, and each committed navigation re-enables it while it should hold. A
-// renderer crash ends the attachment (the store detaches it); the next enable attaches again.
+// renderer crash ends the attachment (the store detaches it); the next committed navigation attaches again, wanted or
+// not (Design §15), so the debugger is attached under 'on' whenever the tab has a live page.
 import type { TabEntry } from './tabs';
 
 export type FocusEmulationMode = 'off' | 'on';
@@ -22,18 +23,24 @@ export function focusEmulationMode(env: NodeJS.ProcessEnv): FocusEmulationMode {
 }
 
 // The view manager's `setFocusEmulation` hook: the command goes through the tab's TabDebugger, the one CDP path.
+// Every change goes through `send`, which keeps the order of the calls: a disable that follows an enable while the attach
+// is still settling goes out after it, so the last wanted value wins. Only a disable with no attachment made or being
+// made is dropped: a gone attachment took its emulation with it.
 export function setFocusEmulation(entry: TabEntry, enabled: boolean): void {
   const tabDebugger = entry.debugger;
-  if (!tabDebugger || (!enabled && !tabDebugger.attached)) return; // a gone attachment took its emulation with it
+  if (!tabDebugger || (!enabled && !tabDebugger.attached && !tabDebugger.attaching)) return;
   tabDebugger.send('Emulation.setFocusEmulationEnabled', { enabled }).catch(failed);
 }
 
-// Under 'on', at view creation (the store's `onViewCreated`): attached at once, re-enabled after each navigation.
+// Under 'on', at view creation (the store's `onViewCreated`): attached at once; after each committed navigation attached
+// again if a crash ended it (a no-op otherwise), and re-enabled while the page should have it.
 export function attachFocusEmulation(entry: TabEntry, wanted: (entry: TabEntry) => boolean): void {
   const view = entry.view!;
   entry.debugger!.attach().catch(failed);
   view.webContents.on('did-navigate', () => {
-    if (entry.view === view && wanted(entry)) setFocusEmulation(entry, true);
+    if (entry.view !== view || !entry.debugger) return;
+    entry.debugger.attach().catch(failed);
+    if (wanted(entry)) setFocusEmulation(entry, true);
   });
 }
 

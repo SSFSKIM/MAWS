@@ -41,7 +41,7 @@ export type DebuggerEventListener = (params: unknown, sessionId: string, method:
 type DebuggerHost = Pick<WebContents, 'debugger' | 'isDestroyed'>;
 
 export class TabDebugger {
-  private attaching: Promise<void> | null = null;
+  private connection: Promise<void> | null = null; // the attachment, made or being made
   private isAttached = false;
   private generation = 0; // bumped by every detach, so an attach the detach overtook does not complete
   private wired = false;
@@ -61,6 +61,11 @@ export class TabDebugger {
     return this.isAttached;
   }
 
+  // An attach is under way (not yet `attached`): a command sent now goes out, in order, once it settles.
+  get attaching(): boolean {
+    return this.connection !== null && !this.isAttached;
+  }
+
   // The page's main frame id (the page target's id in CDP), read once per attachment; null while detached.
   get mainFrameId(): string | null {
     return this.frameId;
@@ -68,9 +73,9 @@ export class TabDebugger {
 
   // Attaches if nothing is attached; every caller in the meantime shares the one attachment.
   attach(): Promise<void> {
-    if (!this.attaching) {
+    if (!this.connection) {
       const generation = this.generation;
-      this.attaching = this.connect(generation).catch((error: unknown) => {
+      this.connection = this.connect(generation).catch((error: unknown) => {
         if (this.generation === generation) {
           this.detachDebugger(); // half attached (attached, but the frame tree never came): undone
           this.release(null);
@@ -78,12 +83,12 @@ export class TabDebugger {
         throw error;
       });
     }
-    return this.attaching;
+    return this.connection;
   }
 
   // Detaches (a no-op while detached); the detach listeners hear it once, as they hear Chromium's.
   detach(): void {
-    if (this.attaching === null) return;
+    if (this.connection === null) return;
     this.detachDebugger();
     this.release('detached');
   }
@@ -171,7 +176,7 @@ export class TabDebugger {
       }
     });
     dbg.on('detach', (_event, reason) => {
-      if (this.attaching !== null) this.release(reason);
+      if (this.connection !== null) this.release(reason);
     });
   }
 
@@ -184,7 +189,7 @@ export class TabDebugger {
   // The attachment is gone: nothing is in flight any more (each pending reply rejects), and the listeners are told.
   private release(reason: string | null): void {
     this.generation++;
-    this.attaching = null;
+    this.connection = null;
     this.isAttached = false;
     this.frameId = null;
     this.flying.clear();

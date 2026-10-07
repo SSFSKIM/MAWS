@@ -74,10 +74,13 @@ describe('TabDebugger: the attachment (E4a Design §10)', () => {
   it('an attach that fails leaves it detached, and the next ask tries again', async () => {
     const h = harness();
     h.dbg.autoFrameTree = false;
+    expect(h.tabDebugger.attaching).toBe(false);
     const attaching = h.tabDebugger.attach();
     await settle();
+    expect([h.tabDebugger.attaching, h.tabDebugger.attached]).toEqual([true, false]);
     h.dbg.last().reject(new Error('target closed'));
     await expect(attaching).rejects.toThrow('target closed');
+    expect(h.tabDebugger.attaching).toBe(false);
     expect(h.tabDebugger.attached).toBe(false);
     expect(h.dbg.isAttached()).toBe(false);
     h.dbg.autoFrameTree = true;
