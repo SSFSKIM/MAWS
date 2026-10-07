@@ -104,6 +104,7 @@ import { registerTranscriptActions as registerBrowserTranscriptActions } from '.
 // E4d end
 // E4c start
 import { openBrowserTab } from './tools/browser/agent/actions';
+import { connectBrowserAgent } from './tools/browser/agent/connect';
 import { connectBrowserProgress } from './tools/browser/agent/progress';
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
@@ -259,9 +260,10 @@ export function App() {
   useEffect(() => registerBrowserTranscriptActions({ openBrowserUrl }), []);
   // E4d end
   // E4c start: the browser tools' rows (E4c execution document, Design §10): main's waiting reports for the row's line,
-  // and the row's Open tab
+  // and the row's Open tab; the Browser tool following the agent into the tab it acts on
   useEffect(() => connectBrowserProgress(), []);
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
+  useEffect(() => connectBrowserAgent(), []);
   // E4c end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

@@ -114,6 +114,8 @@ export const BROWSER_COPY = {
     type === 'confirm'
       ? `While this tab was hidden the page asked ${excerpt === '' ? 'for a confirmation' : `“${excerpt}”`}; MAWS answered Cancel`
       : `While this tab was hidden the page showed an alert, which MAWS closed${excerpt === '' ? '' : `: “${excerpt}”`}`,
+  // the acting dot on the chip of the tab the agent holds (Design §9)
+  acting: 'The agent is using this tab',
   // E4c end
 
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----

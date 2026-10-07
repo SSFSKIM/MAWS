@@ -513,3 +513,28 @@ describe('the extras slot', () => {
     expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
   });
 });
+
+// E4c start: the acting tab (E4c execution document, Design §9, Task 3.2): the chip of a tab the agent holds shows a
+// small accent dot before its title, named for assistive tech and titled; a tab the person holds or nobody holds shows
+// none. The chip's own text stays the title.
+describe('the acting dot', () => {
+  it('marks the chip of the tab under control: agent, and only that one', () => {
+    const { rerender } = render(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab({ title: 'Page A', control: 'agent' }), browserTab(T2, A, { title: 'Page B' })]} />);
+    const dot = () => document.querySelectorAll('[data-browser-acting]');
+    expect(dot()).toHaveLength(1);
+    const chip = document.querySelector(`[data-browser-chip="${T1}"]`)!;
+    expect(chip.contains(dot()[0]!)).toBe(true);
+    expect(dot()[0]!.getAttribute('title')).toBe(BROWSER_COPY.acting);
+    expect(screen.getByRole('img', { name: BROWSER_COPY.acting })).toBe(dot()[0]);
+    expect(dot()[0]!.className).toContain('bg-accent');
+    expect(dot()[0]!.textContent).toBe('');
+    // before the title, after the page's icon
+    const title = within(chip as HTMLElement).getByText('Page A');
+    expect(dot()[0]!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const control of ['human', 'idle'] as const) {
+      rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab({ title: 'Page A', control }), browserTab(T2, A, { title: 'Page B' })]} />);
+      expect(dot()).toHaveLength(0);
+    }
+  });
+});
+// E4c end
