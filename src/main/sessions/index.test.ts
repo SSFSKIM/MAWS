@@ -22,7 +22,7 @@ import { emittedAppEventsSource, startSessions } from '.';
 // The source is real: after the renderer disappears, a disk advance must stay unread.
 describe('visibility belongs to the reporting renderer', () => {
   afterEach(() => { handlers.clear(); interceptors.clear(); });
-  it.each(['destroyed', 'render-process-gone', 'did-start-navigation'])('releases visibility on %s, and a replacement page may report it again', (event) => {
+  it.each(['destroyed', 'render-process-gone', 'did-start-navigation'])('releases visibility on %s, and a replacement page may report it again', async (event) => {
     const dir = tempDir();
     const index = new Index(join(dir.path, 'index.sqlite'));
     const disk = summary();
@@ -40,6 +40,7 @@ describe('visibility belongs to the reporting renderer', () => {
       visible({ appSessionId: appId, visible: true }, { sender });
       sender.emit(event, { url: 'file:///index.html', isMainFrame: true, isSameDocument: false, frame: null });
       listeners.get('fs.sessionChanged')!({ summary: { ...disk, size: disk.size + 100, leafUuid: 'new-leaf', lastRecordAt: '2026-10-02T12:00:00Z' } });
+      await new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
       expect(index.sessions.get(appId)?.unread).toBe(true);
       visible({ appSessionId: appId, visible: true }, { sender });
       expect(index.sessions.get(appId)?.unread).toBe(false);
