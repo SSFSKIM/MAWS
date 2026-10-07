@@ -1,0 +1,7 @@
+head b5b5f9a 2026-10-07T21:58:12Z
+e2e-code exit 0 107s load { 19.76 13.65 9.86 }
+  36 passed (1.3m)
+e2e-widgets exit 0 73s load { 26.83 17.30 11.56 }
+  24 passed (45.9s)
+evidence restored after each group; sibling evidence paths left modified: 0
+survivors: 0 maws-supervisor; 0 electron
