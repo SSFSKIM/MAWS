@@ -29,8 +29,10 @@
     "src/renderer/src/side/copy.ts",
     "src/renderer/src/composer/submit/submit-state.ts",
     // E3 end
-    // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest
-    "e2e/support/processes.ts"
+    // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest, and
+    // test/support/scratch-env.test.ts the e2e launches' environments
+    "e2e/support/processes.ts",
+    "e2e/support/scratch-env.ts"
     // E11 end
   ]
 }
