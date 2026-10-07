@@ -374,6 +374,7 @@ Each task is one commit (or a few), run by the executor through `doperpowers:tas
 Written by the executor as it goes: the M0 pin table (every E4a name, its path and export as landed), the M0 verdict read, every heavy command with its log path and result, the live recording's cost and A-15 lines, the e2e counts, the review rounds.
 
 - 2026-10-07, pre-flight: `git merge --ff-only master` 4281735e → 32c2b016; `git hash-object docs/doperpowers/plans/2026-10-05-p1-extension.md` = `b96c1a923e9d828745620746a3e5e8e7b9e67a52` (expected); Decision Log 28 to 34 written.
+- 2026-10-07, after Task 2.4 (controller): master b9450b84 (E4a's corrective preload fix ffad3a3a and the A-44 records) merged → merge commit dd3b0a9a, no conflicts. The browser preload registers once per partition session through `registerBrowserPreload(ses)` in `view.ts`, `tabWebPreferences` names no preload and `createTabView` lost its preload parameter, so adopted `window.open` tabs run the preload (the agent cursor reaches them; Decision Log 60). At dd3b0a9a: `pnpm typecheck` and `pnpm lint` clean; `vitest run src/main/browser src/preload` 32 files passed (1 skipped), 472 tests passed.
 - 2026-10-07, M0 Task 0.1 (the merge was the pre-flight's). **The pin table** at 56a65a8a (= master 32c2b016 plus the pre-flight); ✓ as the document names it, **moved** (use as landed), **absent** (an E4c block adds it where its task says; listed for the architect):
 
   | Name in this document | As landed (path:line, export, signature) | |
