@@ -83,6 +83,35 @@ describe('the shutdown list', () => {
     expect(app.exit).toHaveBeenCalledOnce();
   });
 
+  // W-B review M7: a step written as an expression body answers whatever its call does (a Map's delete, a count)
+  it('a step answering a truthy value that is not a thenable neither holds the quit nor is logged as failed', () => {
+    const { app, quit } = fakeApp();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const steps = shutdownSteps(app, BOUND_MS);
+      const answers: unknown[] = [true, 1, 'closed', { closed: true }];
+      for (const [i, answer] of answers.entries()) steps.add(`step ${i}`, () => answer as void);
+      expect(quit()).toBe(false);
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('holds the quit for a thenable that is not a native promise', async () => {
+    vi.useFakeTimers();
+    const { app, quit } = fakeApp();
+    let settle!: () => void;
+    const native = new Promise<void>((resolve) => (settle = resolve));
+    const thenable = { then: (resolve: () => void, reject: (e: unknown) => void) => native.then(resolve, reject) };
+    shutdownSteps(app, BOUND_MS).add('hosts', () => thenable as unknown as Promise<void>);
+    expect(quit()).toBe(true);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.exit).toHaveBeenCalledOnce();
+  });
+
   it('a step whose promise rejects is logged by name, and the quit still exits', async () => {
     const { app, quit } = fakeApp();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});

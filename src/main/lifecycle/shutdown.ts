@@ -26,8 +26,9 @@ export function shutdownSteps(app: ShutdownApp, boundMs: number): ShutdownSteps 
     const waits: Promise<void>[] = [];
     for (const { name, step } of steps) {
       try {
-        const answer = step();
-        if (answer) waits.push(answer.catch(failed(name)));
+        // only a thenable holds: a step written as an expression body may answer any value its call returns (M7)
+        const answer: unknown = step();
+        if (typeof (answer as PromiseLike<void> | null)?.then === 'function') waits.push(Promise.resolve(answer as PromiseLike<void>).catch(failed(name)));
       } catch (error) {
         failed(name)(error);
       }
