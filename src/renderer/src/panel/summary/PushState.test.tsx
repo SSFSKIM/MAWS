@@ -214,6 +214,21 @@ describe('push state row shows PR state, install and sign-in states and opens th
       await lineReads('No PR for other');
     });
 
+    // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): a fresh answer for the old branch is
+    // asked again at once rather than waiting out the poll
+    it('remounted after a switch made while nothing showed it, asks again once and shows the new branch’s answer', async () => {
+      let branch = 'feature';
+      bridge({ 'git.watch': () => (branch === 'feature' ? GIT : OTHER), 'scm.pr.state': () => (branch === 'feature' ? PR : { ...PR, checkedAt: '2026-10-06T10:02:00.000Z', branch: 'other', pr: null }) });
+      const view = await mount();
+      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      view.unmount();
+      branch = 'other';
+      setStatus(OTHER); // no surface mounted: the shared query keeps feature's answer, still fresh
+      await mount();
+      await lineReads('No PR for other');
+      expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
+    });
+
     it('hides on a detached head, and back on another branch shows no PR of the branch it left', async () => {
       await mount();
       await lineReads('PR #12 Open · 2 passed, 1 pending');

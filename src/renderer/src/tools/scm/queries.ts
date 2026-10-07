@@ -5,7 +5,7 @@
 // `scm.status`: the checkout's trust, remotes and gh state. `scm.pr.state`: the branch's PR and its checks, polled every
 // 2 minutes only while a surface shows it and the window is shown, asked only for a branch of a trusted checkout with a
 // remote. Both are asked again when the repository's head or refs move (a push from anywhere, a new remote or upstream).
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
@@ -49,11 +49,20 @@ function prStateEnabled(branch: string | null, scm: ScmStatus | undefined): bool
 // is something to ask and only when it names the current branch: after a switch nothing is said until the new branch's
 // answer, and nothing on a detached head or once trust or the last remote is gone. An answer naming no branch (main
 // found the checkout untrusted, not a repository or detached) carries no PR and stands: the row reads trust from it.
+// E11: an answer naming another branch is asked again at once, once per pair of branches (a switch made while nothing
+// showed the query leaves a fresh answer for the old branch, which the poll would otherwise keep for up to 2 minutes).
 export function usePrState(appSessionId: AppSessionId, { root, branch, scm }: { root: string; branch: string | null; scm: ScmStatus | undefined }) {
   useReReadOnHeadOrRefs(root, appSessionId, prStateKey);
   const enabled = prStateEnabled(branch, scm);
   const query = useCommand('scm.pr.state', { appSessionId, refresh: false }, { ...PR_STATE_POLL, enabled });
   const answer = query.data;
+  const reasked = useRef<string | null>(null);
+  const named = answer?.branch ?? null;
+  useEffect(() => {
+    const mismatch = enabled && named !== null && named !== branch ? `${named}\0${branch}` : null;
+    if (mismatch !== null && reasked.current !== mismatch) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
+    reasked.current = mismatch;
+  }, [enabled, named, branch, appSessionId]);
   return {
     data: enabled && answer !== undefined && (answer.branch === null || answer.branch === branch) ? answer : undefined,
     error: enabled ? query.error : null,

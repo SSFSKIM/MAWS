@@ -99,7 +99,7 @@ export class ScmService {
     const checkout = this.checkout(appSessionId);
     const [trust, gh] = await Promise.all([this.trust(checkout), this.gh(refresh)]);
     const repository = trust.keyKind === 'repo';
-    const remotes = repository ? await this.remotes(trust.directory) : [];
+    const remotes = repository ? await this.remotes(trust.directory, await this.pushReader()) : [];
     const defaultRemote = remotes.length > 0 ? await this.defaultRemote(trust.directory, remotes.map((r) => r.name)) : null;
     return {
       directory: trust.directory,
@@ -221,7 +221,7 @@ export class ScmService {
     }
     const branch = status.branch;
     if (branch === null) return answer(null, 'detached');
-    if ((await this.remoteNames(checkout)).length === 0) return answer(branch, 'no_remote');
+    if ((await this.remoteNames(checkout, await this.pushReader())).length === 0) return answer(branch, 'no_remote');
     if (gh.state === 'missing') return answer(branch, 'gh_missing');
     if (gh.state === 'unauthenticated') return answer(branch, 'gh_unauthenticated');
     // git refuses such a name, but a ref written by hand can carry one; gh would read it as an option
@@ -288,6 +288,15 @@ export class ScmService {
       gh: () => this.gh(false),
       runGh: (program, argv) => this.collect(program, argv, checkout, captured),
     };
+  }
+
+  // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): the push's own git under the remote
+  // environment, as a plan reads the destination; the remote picker and the PR state's remote check list remotes
+  // through it, so a remote only that git sees (a non-default XDG_CONFIG_HOME) is listed where a plan would find it
+  private async pushReader(): Promise<GitRun> {
+    const captured = await this.deps.captured();
+    const program = await gitProgram(childEnvironment(captured, 'remote'), this.deps.env);
+    return (this.deps.pushRead ?? pushGitRead)(program, captured);
   }
 
   private collect(program: string, argv: string[], cwd: string, captured: Record<string, string>) {
@@ -378,15 +387,15 @@ export class ScmService {
     return result;
   }
 
-  private async remoteNames(directory: string): Promise<string[]> {
-    return (await this.deps.read(directory, ['remote'])).split('\n').filter((name) => name !== '');
+  private async remoteNames(directory: string, read: GitRun): Promise<string[]> {
+    return (await read(directory, ['remote'])).split('\n').filter((name) => name !== '');
   }
 
   // Every remote with its configured fetch URL (without user-info), null when it has none, from one `git remote -v`
   // (E11): a `<name>\t<url> (fetch)` line per remote with a URL (the first of several), `<name>\t` for one without.
-  private async remotes(directory: string): Promise<ScmStatus['remotes']> {
+  private async remotes(directory: string, read: GitRun): Promise<ScmStatus['remotes']> {
     const urls = new Map<string, string | null>();
-    for (const line of (await this.deps.read(directory, ['remote', '-v'])).split('\n')) {
+    for (const line of (await read(directory, ['remote', '-v'])).split('\n')) {
       const tab = line.indexOf('\t');
       if (tab <= 0) continue;
       const name = line.slice(0, tab);

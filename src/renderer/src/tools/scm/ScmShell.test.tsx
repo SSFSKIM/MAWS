@@ -342,8 +342,9 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     await waitFor(() => expect(document.querySelector('[data-scm-header]')?.textContent).toBe('⎇ feature · origin/feature · 0 ahead'));
     expect(screen.queryByRole('button', { name: 'Open PR #7 on GitHub' })).toBeNull();
     expect(remoteAction('pr')).toMatchObject({ disabled: false, title: 'Open a pull request for feature' });
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2)); // E11: main's answer names main, so it is asked again at once
     act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'head' }));
-    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(3));
     await wait(20);
     expect(remoteAction('pr')?.textContent).toBe('Open PR'); // feature has none
 

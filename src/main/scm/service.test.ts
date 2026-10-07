@@ -60,6 +60,7 @@ describe('scm service', () => {
     return new ScmService({
       records: (id) => records.get(id) ?? null,
       read, status: readStatus, mutate, refresh,
+      pushRead: () => read, // E11: status lists remotes through the push's own reader; the fake answers both
       captured: async () => captured,
       env: {},
       emit: () => {},
@@ -386,6 +387,7 @@ describe('scm service', () => {
           if (args.join(' ') === 'remote -v') return '';
           throw new Error(`unexpected read: git ${args.join(' ')}`);
         },
+        pushRead: () => async () => '', // no remote
         status: readStatus, mutate, refresh,
         captured: async () => {
           calls += 1;

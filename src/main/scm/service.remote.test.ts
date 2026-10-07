@@ -380,6 +380,17 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
     it('reads the default base from the remote HEAD symbolic ref, without --short', async () => {
       expect(await scm.status(ID)).toMatchObject({ defaultRemote: 'origin', defaultBase: 'main' });
     });
+
+    // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): the remote picker lists what a plan
+    // reads, so a remote defined only where the remote environment's git looks (a non-default XDG_CONFIG_HOME) shows
+    it('lists the remotes through the push’s own git under the remote environment, as plans read them', async () => {
+      expect(await scm.status(ID)).toMatchObject({ remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }] });
+      expect(pushReaders).toEqual([{ program: GIT, captured }]);
+      pushReaders = [];
+      remotes = '';
+      expect(await scm.prState({ appSessionId: ID, refresh: false })).toMatchObject({ error: 'no_remote' }); // the PR state's check too
+      expect(pushReaders).toEqual([{ program: GIT, captured }]);
+    });
   });
 
   describe('PR state', () => {
