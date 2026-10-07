@@ -130,7 +130,8 @@ export interface DetachedTransport {
   // its close is then deliberate. False when nothing is served.
   expectExit(): boolean;
   // The quit: from here nothing reconnects or spawns. A served connection stays open for the quit's stop-all and its
-  // close ends the transport; with none served the transport stops at once (false).
+  // close ends the transport; with none served the transport stops at once (false), and a supervisor whose connection
+  // closed quietly, still alive and named by the lock, is sent SIGTERM so its exit order stops every row.
   quit(): boolean;
   // The process the lock names, alive with the lock's start time and not the one served: SIGTERM, SIGKILL past the
   // grace; resolves once it is gone or the start budget is spent (true), false when the lock names no such process.
@@ -170,6 +171,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let served: Served | null = null;
   let awaitDeath: Proc | null = null; // the next attempt waits for this process to be gone (a deliberate close)
   let idleArmed: Proc | null = null; // the supervisor main asked to exit when idle: remembered across reconnects to it
+  let unserved: Proc | null = null; // the welcomed supervisor whose connection closed while it may live on (quiet)
   let waitingFor: number | null = null; // while waiting, the live count last reported (reported again only if it changes)
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
 
@@ -456,6 +458,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false };
     served = connection;
+    unserved = null;
     waitingFor = null;
     if (otherBuild && connection.exitAsked === null) {
       log(`supervisor pid ${welcome.pid} runs build ${welcome.buildId} with ${welcome.liveSessions} sessions live; serving it until they are idle`);
@@ -499,6 +502,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       awaitDeath = connection.proc;
       return events.lost('deliberate');
     }
+    unserved = connection.proc;
     events.disconnected();
     // A supervisor that died closes its socket before its pid is gone (a process still exiting, or a child not yet
     // reaped), so the pid is looked at one poll later.
@@ -531,6 +535,18 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     } catch {
       return false; // already gone
     }
+  }
+
+  // The quit with nothing served: the supervisor whose connection closed quietly still runs the sessions the owner
+  // chose to stop, so it is sent SIGTERM (its exit order stops every row), once the lock still names that process.
+  function stopUnserved(): void {
+    const proc = unserved;
+    unserved = null;
+    if (!proc) return;
+    const lock = readLock(join(options.userData(), 'supervisor'));
+    if (!lock || lock.pid !== proc.pid || !sameProcess(lock) || !sameProcess(proc)) return;
+    log(`stopping supervisor pid ${proc.pid} for the quit: its connection closed and it still runs`);
+    signal(proc.pid, 'SIGTERM');
   }
 
   function stopCandidate(proc: Proc): void {
@@ -580,6 +596,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       cancelAttempt();
       if (served) return true;
       stopped = true;
+      stopUnserved();
       return false;
     },
     async killHeld() {

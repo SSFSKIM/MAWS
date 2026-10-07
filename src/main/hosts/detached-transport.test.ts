@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { statSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import type { SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +9,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostState } from '@shared/ipc/schema';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
-import { buildIdOf } from '../../engine-host/supervisor-files';
+import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { engineHostSettled } from '../sessions/service-register';
 import { supervisorEnv, type DetachedTransportOptions } from './detached-transport';
 import { appIdentity } from './identity';
@@ -759,6 +759,54 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     await expect(held).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
     expect(spawn).not.toHaveBeenCalled();
+    expect(processes.kills).toEqual([]); // the welcomed pid is dead: nothing to signal
+  });
+
+  describe('stopAllForQuit while restarting after a quiet close (the welcomed supervisor lives, unserved)', () => {
+    it('SIGTERMs the supervisor the lock names, so its exit order stops every row; nothing reconnects or spawns', async () => {
+      const fake = await startFake({ counts: { liveSessions: 2, rows: 2 } });
+      await supervisor.start();
+      fake.dropClient(); // a socket error: it lives on, still running its sessions
+      await until(() => state().state === 'restarting');
+      await supervisor.stopAllForQuit(5_000);
+      expect(processes.kills).toEqual([[fake.pid, 'SIGTERM']]);
+      await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state().state).toBe('restarting');
+    });
+
+    it('signals nothing when the lock’s pid is now another process (a reused pid)', async () => {
+      const fake = await startFake();
+      await supervisor.start();
+      fake.dropClient();
+      await until(() => state().state === 'restarting');
+      processes.alive.set(fake.pid, 'another process');
+      await supervisor.stopAllForQuit(5_000);
+      expect(processes.kills).toEqual([]);
+    });
+
+    it('signals nothing when the lock names another process than the one this app was served by', async () => {
+      const fake = await startFake();
+      await supervisor.start();
+      fake.dropClient();
+      await until(() => state().state === 'restarting');
+      const other = processes.newPid();
+      const lock = JSON.parse(readFileSync(join(profile.dir, SUPERVISOR_FILES.lock), 'utf8')) as Record<string, unknown>;
+      writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), JSON.stringify({ ...lock, pid: other, procStart: `start-${other}` }));
+      await supervisor.stopAllForQuit(5_000);
+      expect(processes.kills).toEqual([]);
+    });
+  });
+
+  it('stopAllForQuit after another client took the supervisor signals nothing: it serves that client now', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const other = await connectLines(profile.socketPath);
+    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 1 });
+    await until(() => state().state === 'crashed');
+    await supervisor.stopAllForQuit(5_000);
+    expect(processes.kills).toEqual([]);
+    other.socket.destroy();
   });
 
   it('a held lock: the reason says so; restart kills the holder after its start time is checked, then starts afresh', async () => {
