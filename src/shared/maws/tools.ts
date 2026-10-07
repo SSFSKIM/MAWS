@@ -38,7 +38,7 @@ const ARTIFACT_WRITER_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false 
 export const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 export const ARTIFACT_SCREENSHOT_DEFAULT = { width: 1280, height: 800 } as const;
-export const ARTIFACT_SCREENSHOT_MAX_BYTES = 4 * 1024 * 1024;
+export const ARTIFACT_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: its base64 stays under the API's 5 MB per image
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Inputs (strict; validators never default: `blocking`, `multi`, `allowOther`, `multiple` and a question's `id` take

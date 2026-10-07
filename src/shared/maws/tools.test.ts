@@ -178,7 +178,8 @@ describe('X9 artifact tools (E2)', () => {
   it('carries the constants of the contract', () => {
     expect(ARTIFACT_MAX_BYTES).toBe(16 * 1024 * 1024);
     expect(ARTIFACT_SCREENSHOT_DEFAULT).toEqual({ width: 1280, height: 800 });
-    expect(ARTIFACT_SCREENSHOT_MAX_BYTES).toBe(4 * 1024 * 1024);
+    // A-34: 3.5 MiB, so the base64 the engine sends (about 4.7 MB) stays under the API's 5 MB per-image limit
+    expect(ARTIFACT_SCREENSHOT_MAX_BYTES).toBe(3.5 * 1024 * 1024);
   });
 
   it('ARTIFACT_ID takes a short name and refuses a path, a blank and a 65-character id', () => {
