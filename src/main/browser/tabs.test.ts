@@ -376,3 +376,84 @@ describe('TabStore: restore (G4) and the view hooks', () => {
     });
   });
 });
+
+describe('TabStore: adopting a page\'s window.open child (Design §14, Decision Log 24)', () => {
+  // A createView that adopts the child webContents it is given, as view.ts does.
+  function adopting() {
+    const made: { tab: BrowserTab; adopted: unknown }[] = [];
+    const h = harness({
+      createView: (tab, adopted?: unknown) => {
+        made.push({ tab, adopted });
+        const view = fakeView();
+        return (adopted ? { webContents: adopted } : view) as WebContentsView;
+      },
+    });
+    return { h, made };
+  }
+  const child = () => fakeView().webContents;
+
+  it('adopts Chromium\'s child as a new tab of the opener\'s session and partition, selected, wired before it returns', () => {
+    const { h, made } = adopting();
+    const opener = h.entry(open(h, 'https://a.test/').tab.tabId);
+    h.store.update(opener.tab.tabId, { partition: 'persist:maws-chrome-Profile 1' });
+    const created = vi.fn((entry: TabEntry) => entry.view?.webContents);
+    h.store.onViewCreated(created);
+    const webContents = child();
+    const adopted = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true, webContents: webContents as never });
+    expect(adopted.view!.webContents).toBe(webContents);
+    expect(made.at(-1)).toMatchObject({ adopted: webContents, tab: { partition: 'persist:maws-chrome-Profile 1', appSessionId: A } });
+    expect(created).toHaveReturnedWith(webContents);
+    expect(adopted.tab).toMatchObject({ url: 'https://a.test/c.html', loading: true, suspended: false });
+    expect(adopted.committed).toBe(false); // hidden until the child's own page commits
+    expect(webContents.loadURL).not.toHaveBeenCalled(); // Chromium navigates the child itself
+    expect(h.store.list(A).selected[A]).toBe(adopted.tab.tabId);
+  });
+
+  it('a background child keeps the selection; an about:blank child is shown at once (its opener may write into it)', () => {
+    const { h } = adopting();
+    const opener = h.entry(open(h, 'https://a.test/').tab.tabId);
+    const background = h.store.adoptChild(opener, { url: 'https://a.test/b.html', select: false, webContents: child() as never });
+    expect(h.store.list(A).selected[A]).toBe(opener.tab.tabId);
+    expect(background.tab.tabId).not.toBe(opener.tab.tabId);
+    const blank = h.store.adoptChild(opener, { url: 'about:blank', select: true, webContents: child() as never });
+    expect(blank.committed).toBe(true);
+    expect(blank.tab).toMatchObject({ url: '', loading: false });
+  });
+
+  it('with no child webContents from Chromium, the URL is loaded into a view of the tab\'s own', () => {
+    const { h } = adopting();
+    const opener = h.entry(open(h, 'https://a.test/').tab.tabId);
+    const adopted = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true });
+    expect((adopted.view!.webContents as unknown as ReturnType<typeof child>).loadURL).toHaveBeenCalledWith('https://a.test/c.html');
+  });
+
+  it('adopting at the cap suspends the least recently shown eligible tab; with none, the child is adopted over the cap', () => {
+    const { h } = adopting();
+    const tabs: BrowserTab[] = [];
+    for (let i = 0; i < BROWSER_LOADED_TABS_MAX; i++) {
+      tabs.push(open(h, `https://${i}.test/`).tab);
+      h.tick(1000);
+    }
+    expect(h.store.hasRoomForView()).toBe(false); // all twelve loading: nothing eligible
+    const opener = h.entry(tabs[0]!.tabId);
+    const over = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true, webContents: child() as never });
+    expect(over.view).not.toBeNull();
+    expect(h.store.loadedCount()).toBe(BROWSER_LOADED_TABS_MAX + 1);
+
+    for (const t of tabs) h.store.update(t.tabId, { loading: false });
+    h.store.update(over.tab.tabId, { loading: false, lastShownAt: '2026-10-06T13:00:00.000Z' });
+    expect(h.store.hasRoomForView()).toBe(true);
+    h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: child() as never });
+    expect(h.store.entry(tabs[0]!.tabId)!.view).toBeNull(); // the least recently shown idle, unplaced tab
+    expect(h.notices().at(-1)).toMatchObject({ kind: 'tabsCap', appSessionId: A });
+  });
+
+  it('entryOf finds the tab whose view holds a webContents; a new entry has no input yet', () => {
+    const { h } = adopting();
+    const entry = h.entry(open(h, 'https://a.test/').tab.tabId);
+    expect(h.store.entryOf(entry.view!.webContents)).toBe(entry);
+    expect(h.store.entryOf(child() as never)).toBeUndefined();
+    expect(entry.input).toEqual({ lastHumanAt: null, lastInputAt: null });
+    expect(entry.findOpen).toBe(false);
+  });
+});

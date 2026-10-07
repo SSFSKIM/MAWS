@@ -16,7 +16,7 @@
 // lifecycle (Design §5, Decision Log 23) is held here as transitions the navigation listeners call, so every source of a
 // navigation (the chrome, E4c's tools) shares one rule.
 import { randomBytes } from 'node:crypto';
-import type { BrowserWindow, WebContentsView } from 'electron';
+import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
 import { BROWSER_LOADED_TABS_MAX, type BrowserTab } from '@shared/browser/tab';
@@ -34,6 +34,14 @@ export interface TabPlacement {
   rect: { x: number; y: number; width: number; height: number };
 }
 
+// The input seam (Design §11): when the page last saw input attributed to the human, and to anyone (the human or the
+// agent), in epoch ms; null until the first. Task 2.5's `attachInputSeams` writes it; the clipboard carve-out
+// (permissions.ts) and the `window.open` gate (window-open.ts) read it.
+export interface TabInput {
+  lastHumanAt: number | null;
+  lastInputAt: number | null;
+}
+
 export interface TabEntry {
   tab: BrowserTab;
   view: WebContentsView | null;
@@ -43,8 +51,10 @@ export interface TabEntry {
   host: BrowserWindow | null;
   visible: boolean;
   // The view shows a document of the tab's own: false from creation, after a load error or a crash, until the next
-  // committed navigation, so neither a blank view nor Chromium's own error page is ever shown in the pane.
+  // committed navigation, so neither a blank view nor Chromium's own error page is ever shown in the pane. An adopted
+  // `about:blank` child starts true: its opener may write into that document without ever navigating it.
   committed: boolean;
+  input: TabInput;
   // The chrome's find bar is open for this tab (main opened it on ⌘F in the page, or a find request arrived), so Esc in
   // the page closes it rather than reaching the page (keys.ts).
   findOpen: boolean;
@@ -61,8 +71,9 @@ export class UnknownTabError extends Error {
 
 export interface TabStoreDeps {
   emit: BrowserEmit;
-  // A view for the tab, in the tab's partition, with no listeners yet (view.ts `createTabView`); may throw.
-  createView(tab: BrowserTab): WebContentsView;
+  // A view for the tab, in the tab's partition, with no listeners yet (view.ts `createTabView`); may throw. With
+  // `adopted`, the view takes that webContents (a page's `window.open` child Chromium already created) instead.
+  createView(tab: BrowserTab, adopted?: WebContents): WebContentsView;
   // The partition a new tab of this session opens in (the Browser setting's profile, its fallbacks and their notices).
   resolvePartition(appSessionId: AppSessionId, tabId: string): string;
   restored?: Pick<TabsFile, 'tabs' | 'selected'>;
@@ -71,6 +82,13 @@ export interface TabStoreDeps {
   now?(): number;
   newTabId?(): string;
   schedule?(fn: () => void): void; // the next macrotask
+}
+
+// A page's `window.open` child, adopted as a tab of its opener's session in its opener's partition (window-open.ts).
+export interface AdoptRequest {
+  url: string; // the child's first URL as the page gave it: http(s), or about:blank
+  select: boolean;
+  webContents?: WebContents; // Chromium's child webContents (the `createWindow` options' own)
 }
 
 export interface OpenRequest {
@@ -140,6 +158,17 @@ export class TabStore {
     return [...this.entries.values()];
   }
 
+  // The tab whose view holds this webContents.
+  entryOf(webContents: WebContents): TabEntry | undefined {
+    for (const entry of this.entries.values()) if (entry.view?.webContents === webContents) return entry;
+    return undefined;
+  }
+
+  // Whether one more tab could be loaded now: under the cap, or with an eligible tab to suspend for it.
+  hasRoomForView(): boolean {
+    return this.loadedCount() < BROWSER_LOADED_TABS_MAX || this.capVictim(null) !== undefined;
+  }
+
   loadedCount(): number {
     let count = 0;
     for (const entry of this.entries.values()) if (entry.view) count++;
@@ -204,6 +233,31 @@ export class TabStore {
     return { tab: entry.tab, reused: false };
   }
 
+  // A page's `window.open` child (Design §14; Decision Log 24): a new tab of the opener's session and partition whose
+  // view adopts Chromium's child webContents, so `window.opener` works. The cap applies as for any load (the gate asked
+  // `hasRoomForView` first; should the room have gone meanwhile, the child is adopted over the cap rather than refused,
+  // since Chromium has already created it). Its listeners are wired before this returns, ahead of the child's first
+  // navigation, which Chromium starts itself. An `about:blank` child counts as committed (see `TabEntry.committed`).
+  adoptChild(opener: TabEntry, { url, select, webContents }: AdoptRequest): TabEntry {
+    const { appSessionId, partition } = opener.tab;
+    const blank = url === 'about:blank';
+    const tabId = this.mintTabId();
+    const entry = this.blankEntry({ ...this.newTab(tabId, appSessionId, partition), url: blank ? '' : url, loading: !blank });
+    this.entries.set(tabId, entry);
+    this.changed(entry);
+    if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
+    if (this.loadedCount() >= BROWSER_LOADED_TABS_MAX) {
+      const victim = this.capVictim(entry);
+      if (victim) {
+        this.suspend(victim.tab.tabId);
+        this.capNotice(entry);
+      }
+    }
+    if (!this.createViewFor(entry, webContents, blank)) return entry;
+    if (!webContents && !blank) this.navigateView(entry, url); // no child from Chromium: the URL is loaded here
+    return entry;
+  }
+
   // `browser.tabs.close`: the view destroyed, the entry dropped, and the session's selection moved to the neighbour (the
   // next tab, else the previous) when it was this tab.
   close(tabId: string): void {
@@ -244,15 +298,7 @@ export class TabStore {
   load(tabId: string, url: string): boolean {
     const entry = this.require(tabId);
     if (!this.ensureView(entry, url)) return false;
-    const view = entry.view!;
-    this.beginNavigation(tabId, { url });
-    try {
-      view.webContents.loadURL(url).catch(() => {}); // a failure arrives as did-fail-load; the promise says nothing more
-    } catch (error) {
-      this.failView(entry, error);
-      return false;
-    }
-    return true;
+    return this.navigateView(entry, url);
   }
 
   // Unloads the tab: its view closed, {url, title, favicon, zoom} kept, the page's transient state dropped.
@@ -316,6 +362,18 @@ export class TabStore {
 
   // ---- internals ------------------------------------------------------------------------------------------------------
 
+  private navigateView(entry: TabEntry, url: string): boolean {
+    const view = entry.view!;
+    this.beginNavigation(entry.tab.tabId, { url });
+    try {
+      view.webContents.loadURL(url).catch(() => {}); // a failure arrives as did-fail-load; the promise says nothing more
+    } catch (error) {
+      this.failView(entry, error);
+      return false;
+    }
+    return true;
+  }
+
   private ensureView(entry: TabEntry, url: string): boolean {
     if (entry.view) return true;
     if (this.loadedCount() >= BROWSER_LOADED_TABS_MAX) {
@@ -328,13 +386,18 @@ export class TabStore {
       this.suspend(victim.tab.tabId);
       this.capNotice(entry);
     }
+    return this.createViewFor(entry);
+  }
+
+  // The view made (or Chromium's child adopted) and its listeners wired; false, with the tab failed, when it throws.
+  private createViewFor(entry: TabEntry, adopted?: WebContents, committed = false): boolean {
     try {
-      entry.view = this.deps.createView(entry.tab);
+      entry.view = adopted ? this.deps.createView(entry.tab, adopted) : this.deps.createView(entry.tab);
     } catch (error) {
       this.failView(entry, error);
       return false;
     }
-    entry.committed = false;
+    entry.committed = committed;
     this.update(entry.tab.tabId, { suspended: false, failed: null });
     for (const listener of [...this.created]) listener(entry);
     return true;
@@ -342,7 +405,7 @@ export class TabStore {
 
   // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
   // not the agent's or the human's (Design §2).
-  private capVictim(except: TabEntry): TabEntry | undefined {
+  private capVictim(except: TabEntry | null): TabEntry | undefined {
     const eligible = this.all().filter(
       (entry) =>
         entry !== except &&
@@ -430,7 +493,7 @@ export class TabStore {
   }
 
   private blankEntry(tab: BrowserTab): TabEntry {
-    return { tab, view: null, placement: null, host: null, visible: false, committed: false, findOpen: false };
+    return { tab, view: null, placement: null, host: null, visible: false, committed: false, input: { lastHumanAt: null, lastInputAt: null }, findOpen: false };
   }
 
   private newTab(tabId: string, appSessionId: AppSessionId, partition: string): BrowserTab {

@@ -5,10 +5,14 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_LOADED_TABS_MAX, BROWSER_PLACEHOLDER_MAX_BYTES, DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 
-vi.mock('electron', () => ({ WebContentsView: class {} }));
+vi.mock('electron', () => ({
+  WebContentsView: class {
+    constructor(readonly options?: unknown) {}
+  },
+}));
 
 const { TabStore } = await import('./tabs');
-const { ViewManager, shown } = await import('./view');
+const { ViewManager, createTabView, shown, tabWebPreferences } = await import('./view');
 const { focusEmulationMode } = await import('./visibility');
 
 const A = 'App-A' as AppSessionId;
@@ -516,5 +520,32 @@ describe('focus emulation (Design §3, Decision Log 1; M0: off)', () => {
       [tabId, false],
       [tabId, true],
     ]);
+  });
+});
+
+describe('createTabView: the page\'s webPreferences (Design §3, §14)', () => {
+  it('builds a view in the tab\'s prepared partition with the browser preload, sandboxed, isolated, without Node', () => {
+    const session = vi.fn();
+    const make = createTabView({ session } as never, '/out/preload/browser.js');
+    const view = make({ partition: 'persist:maws-chrome-Profile 1' } as never) as unknown as { options: unknown };
+    expect(session).toHaveBeenCalledWith('persist:maws-chrome-Profile 1');
+    expect(view.options).toEqual({
+      webPreferences: {
+        partition: 'persist:maws-chrome-Profile 1',
+        preload: '/out/preload/browser.js',
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        backgroundThrottling: true,
+      },
+    });
+    expect(tabWebPreferences('/p.js')).toEqual({ preload: '/p.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true });
+  });
+
+  it('adopts a window.open child\'s own webContents (its preferences came through the open handler\'s override)', () => {
+    const child = { id: 7 };
+    const view = createTabView({ session: vi.fn() } as never)({ partition: DEFAULT_PARTITION } as never, child as never) as unknown as { options: unknown };
+    expect(view.options).toEqual({ webContents: child });
   });
 });

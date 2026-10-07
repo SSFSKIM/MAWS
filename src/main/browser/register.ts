@@ -8,6 +8,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { BrowserHistoryStore } from '../index/browser-history';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../ipc/router';
 import type { Navigator } from './navigation';
+import type { Downloads } from './downloads';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import type { ViewManager } from './view';
@@ -16,6 +17,7 @@ export interface BrowserHandlerDeps {
   store: TabStore;
   views: Pick<ViewManager, 'place' | 'cover'>;
   navigator: Pick<Navigator, 'navigate' | 'zoom' | 'find' | 'dismiss' | 'devtools'>;
+  downloads: Pick<Downloads, 'reveal'>;
   history: Pick<BrowserHistoryStore, 'suggest'>;
   profiles(): BrowserProfile[];
   register: typeof registerMainHandler;
@@ -35,7 +37,7 @@ function knownTabs<N extends CommandName>(handler: MainHandler<N>): MainHandler<
 
 const session = (id: string) => id as AppSessionId; // the schema checked it; the wire carries no brand
 
-export function registerBrowserHandlers({ store, views, navigator, history, profiles, register }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, profiles, register }: BrowserHandlerDeps): void {
   register('browser.tabs.list', ({ appSessionId }) => store.list(appSessionId === undefined ? undefined : session(appSessionId)));
   register('browser.tabs.open', (request) => store.open({ ...request, appSessionId: session(request.appSessionId) }));
   register('browser.tabs.close', knownTabs(({ tabId }) => store.close(tabId)));
@@ -45,6 +47,7 @@ export function registerBrowserHandlers({ store, views, navigator, history, prof
   register('browser.tabs.find', knownTabs(({ tabId, ...request }) => navigator.find(tabId, request)));
   register('browser.tabs.dismiss', knownTabs(({ tabId, notice }) => navigator.dismiss(tabId, notice)));
   register('browser.tabs.devtools', knownTabs(({ tabId }) => navigator.devtools(tabId)));
+  register('browser.tabs.revealDownload', knownTabs(({ tabId }) => downloads.reveal(tabId)));
   // The address field's suggestions; a failing index suggests nothing and the field still navigates (Design §15).
   register('browser.history.suggest', ({ partition, query }) => {
     try {

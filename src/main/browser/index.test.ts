@@ -5,10 +5,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_SETTINGS_DEFAULTS, DEFAULT_PARTITION } from '@shared/browser/tab';
 
+const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
+
 vi.mock('electron', () => ({
   ipcMain: { handle: () => {} },
   BrowserWindow: { fromWebContents: () => null },
-  session: { fromPartition: () => ({ getUserAgent: () => 'UA Electron/1', setUserAgent: () => {}, webRequest: { onBeforeRequest: () => {} } }) },
+  session: {
+    fromPartition: () => ({
+      getUserAgent: () => 'UA Electron/1',
+      setUserAgent: () => {},
+      webRequest: { onBeforeRequest: () => {} },
+      setPermissionRequestHandler: () => void prepared.push('permission requests'),
+      setPermissionCheckHandler: () => void prepared.push('permission checks'),
+      setDevicePermissionHandler: () => void prepared.push('devices'),
+      setDisplayMediaRequestHandler: () => void prepared.push('display media'),
+      on: (event: string) => void prepared.push(event),
+    }),
+  },
   WebContentsView: class {},
 }));
 
@@ -87,6 +100,17 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
     expect(browser.store.open({ appSessionId: A, url: null, select: true }).tab.partition).toBe('persist:maws-chrome-Profile 1');
     expect(profiles).toHaveBeenCalledTimes(2);
+    browser.stop();
+  });
+
+  it('prepares a partition, when a tab first needs it, with the permission handlers and the download listener', () => {
+    prepared.length = 0;
+    const browser = start(fakeIndex([A]).index);
+    expect(prepared).toEqual([]);
+    browser.store.open({ appSessionId: A, url: null, select: true });
+    expect(prepared).toEqual(['permission requests', 'permission checks', 'devices', 'display media', 'will-download']);
+    browser.store.open({ appSessionId: A, url: null, select: true });
+    expect(prepared).toHaveLength(5); // once per partition
     browser.stop();
   });
 });

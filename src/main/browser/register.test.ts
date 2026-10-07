@@ -26,23 +26,26 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const views = { place: vi.fn(), cover: vi.fn(async () => {}) };
   const navigator = { navigate: vi.fn(() => true), zoom: vi.fn<(tabId: string) => number>(() => 1.1), find: vi.fn(), dismiss: vi.fn(), devtools: vi.fn() };
   const history = { suggest: vi.fn(() => [{ url: 'https://a.test/', title: 'A' }]) };
+  const downloads = { reveal: vi.fn(() => ({ revealed: true })) };
   registerBrowserHandlers({
     store,
     views: makeViews?.(store) ?? views,
     navigator,
+    downloads,
     history,
     profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
-  return { store, views, navigator, history, handlers, call };
+  return { store, views, navigator, downloads, history, handlers, call };
 }
 
 describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
   it('registers the tab store\'s commands and the profile list', () => {
     expect([...setup().handlers.keys()]).toEqual([
       'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select',
-      'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.history.suggest',
+      'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload',
+      'browser.history.suggest',
       'browser.profiles.list', 'browser.view.place', 'browser.view.cover',
     ]);
   });
@@ -60,6 +63,13 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(navigator.dismiss).toHaveBeenCalledWith(tabId, 'popups');
     call('browser.tabs.devtools', { tabId });
     expect(navigator.devtools).toHaveBeenCalledWith(tabId);
+  });
+
+  it('reveals a tab\'s finished download through the downloads', () => {
+    const { call, downloads } = setup();
+    const { tab } = call('browser.tabs.open', { appSessionId: A, url: null, select: true }) as { tab: { tabId: string } };
+    expect(call('browser.tabs.revealDownload', { tabId: tab.tabId })).toEqual({ revealed: true });
+    expect(downloads.reveal).toHaveBeenCalledWith(tab.tabId);
   });
 
   it('a navigator command for an unknown tab answers invalid_input', () => {

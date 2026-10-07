@@ -21,7 +21,7 @@
 // their views hidden; the fresh renderer's panes claim again on mount. A closing window gives its views up; the tabs
 // live on, unplaced.
 import { join } from 'node:path';
-import { WebContentsView, type BrowserWindow, type NativeImage, type WebContents } from 'electron';
+import { WebContentsView, type BrowserWindow, type NativeImage, type WebContents, type WebPreferences } from 'electron';
 import { BROWSER_PLACEHOLDER_MAX_BYTES, type BrowserTab } from '@shared/browser/tab';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { Partitions } from './partition';
@@ -32,20 +32,19 @@ import type { FocusEmulationMode } from './visibility';
 export const BROWSER_PRELOAD = join(__dirname, '../preload/browser.js');
 const PLACEHOLDER_JPEG_QUALITY = 80;
 
-export function createTabView(partitions: Pick<Partitions, 'session'>, preload = BROWSER_PRELOAD): (tab: BrowserTab) => WebContentsView {
-  return (tab) => {
+// MAWS's own preferences for every page (pass two's construction): the browser preload, sandboxed and isolated, no Node.
+// A page's `window.open` child gets these over whatever the page asked for (window-open.ts); its partition is its
+// opener's, which Chromium's child already shares.
+export function tabWebPreferences(preload = BROWSER_PRELOAD): WebPreferences {
+  return { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true };
+}
+
+// A tab's view in its partition; or, for an adopted `window.open` child, the view over Chromium's child webContents.
+export function createTabView(partitions: Pick<Partitions, 'session'>, preload = BROWSER_PRELOAD): (tab: BrowserTab, adopted?: WebContents) => WebContentsView {
+  return (tab, adopted) => {
     partitions.session(tab.partition); // prepared before its first page loads
-    return new WebContentsView({
-      webPreferences: {
-        partition: tab.partition,
-        preload,
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        webSecurity: true,
-        backgroundThrottling: true,
-      },
-    });
+    if (adopted) return new WebContentsView({ webContents: adopted });
+    return new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences(preload) } });
   };
 }
 

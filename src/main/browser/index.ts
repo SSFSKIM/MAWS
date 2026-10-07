@@ -1,34 +1,42 @@
 // The browser's side of main (E4a execution document, Design §1, §2, §9; Interfaces "Main"), started from
 // `src/main/index.ts` once the index is open: the tab store over `<userData>/browser/tabs.json`, the partitions, the
-// views, each view's navigation (history and favicons included) and `browser.*`. Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a
+// views, each view's navigation (history and favicons included), the page's guards (permissions, downloads,
+// `window.open`, the context menu, the keyboard) and `browser.*`. Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a
 // tab whose session the index does not know is dropped from the file. Main never waits on the renderer.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import type { Index } from '../index/index';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
+import { attachContextMenu } from './context-menu';
+import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
+import { attachKeys } from './keys';
 import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
+import { guardPage, preparePermissions } from './permissions';
 import { readTabsFile, TabsFileWriter, type TabsFile } from './persist';
 import { registerBrowserHandlers } from './register';
 import { browserSeam } from './seam';
 import { TabStore, type BrowserEmit } from './tabs';
-import { createTabView, ViewManager } from './view';
+import { createTabView, tabWebPreferences, ViewManager } from './view';
 import { focusEmulationMode } from './visibility';
+import { attachWindowOpen } from './window-open';
 
 export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
 
 export interface BrowserDeps {
   userData: string;
-  settings(): BrowserSettings; // read when a tab opens; settings 11's `browser` section once it lands (Task 3.5)
+  // Read when a tab opens (the profile) and when a page opens a window (`linkTarget`); settings 11's `browser` section
+  // once it lands (Task 3.5), the defaults until then.
+  settings(): BrowserSettings;
   index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
-  env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E and MAWS_E2E_OPEN_LOG (the seam, seam.ts)
+  env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
   // The imported Chrome profiles, for a new tab's partition and `browser.profiles.list` alike: `profiles.json` read
   // from disk by default; E4b's block hands its in-memory owner here (Decision Log 40).
   profiles?(): BrowserProfile[];
@@ -49,7 +57,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
 
   const { file, broken } = readTabsFile(tabsFile);
   const restored = knownSessionsOnly(file, index);
-  const partitions = new Partitions((partition) => session.fromPartition(partition));
+  // Each partition's permission and download handlers; run when a tab first needs the partition, after the store exists.
+  const partitions = new Partitions(
+    (partition) => session.fromPartition(partition),
+    [(ses, partition) => preparePermissions(store)(ses, partition), (ses, partition) => downloads.prepare()(ses, partition)],
+  );
   const writer = new TabsFileWriter(tabsFile, () => store.snapshot());
   const store: TabStore = new TabStore({
     emit,
@@ -75,13 +87,19 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
 
   const seam = browserSeam(env);
+  const downloads = new Downloads({ store, emit, downloadsDir: () => app.getPath('downloads'), saveDir: e2eSaveDir(env), reveal: seam.reveal });
   const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
   const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });
+  const childPreferences = tabWebPreferences();
   store.onViewCreated((entry) => {
     navigator.attach(entry);
+    guardPage(entry);
+    attachWindowOpen(entry, { store, linkTarget: () => settings().linkTarget, seam, childPreferences });
+    attachContextMenu(entry, { store, navigator, openExternal: seam.openExternal });
+    attachKeys(entry, { store, navigator, emit });
   });
 
-  registerBrowserHandlers({ store, views, navigator, history: index.browserHistory, profiles, register });
+  registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });
