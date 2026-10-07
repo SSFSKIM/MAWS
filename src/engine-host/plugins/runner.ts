@@ -281,8 +281,8 @@ export class PluginsRunner {
     const plugin = id === null ? null : id.lastIndexOf('@') > 0 ? id.slice(0, id.lastIndexOf('@')) : id;
     const version = op.action === 'update' && typeof outcome.result.newVersion === 'string' ? outcome.result.newVersion : null;
     // E11 (scale review A scalpel-5#1): with no scope named, the scope the CLI changed is its result's (enable and disable
-    // auto-detect it; pass3/e8-plugins-reload seq 42, 50); 'user', the CLI's install default, only when it names none
-    // (or a pseudo-scope such as `managed`, which applies everywhere as user does)
+    // auto-detect it; pass3/e8-plugins-reload seq 42, 50); 'user' (install's and uninstall's default) only when it names
+    // none, or a pseudo-scope such as `managed`, which applies everywhere as user does
     const named = PLUGINS_SCOPES.find((scope) => scope === outcome.result.scope);
     const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? named ?? 'user', cwd: op.cwd, plugin, version }, () => this.deps.reloadTargets(), {
       sleep: (ms) => new Promise((resolve) => this.timers.setTimeout(resolve, ms)),
