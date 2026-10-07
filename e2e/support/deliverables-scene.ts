@@ -33,19 +33,14 @@ const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.di
 export const recordedCwd = (fixture: string) => (fixtureRows(fixture).find((r) => r.direction === 'meta' && (r.frame as Frame).event === 'spawn')!.frame as { cwd: string }).cwd;
 
 // Every row the session's launches journaled (one file per launch, in the session's journal directory).
-// `except` passes over files already there (an earlier app launch's).
-function journalOf(userData: string, id: string, except: ReadonlySet<string> = new Set()): JournalRow[] {
+function journalOf(userData: string, id: string): JournalRow[] {
   const dir = join(userData, 'engine-host', 'journal', id);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((name) => name.endsWith('.jsonl') && !except.has(join(dir, name)))
+    .filter((name) => name.endsWith('.jsonl'))
     .sort()
     .flatMap((name) => rowsOf(join(dir, name)));
 }
-const journalFiles = (userData: string): Set<string> => {
-  const root = join(userData, 'engine-host', 'journal');
-  return new Set(existsSync(root) ? readdirSync(root, { recursive: true, encoding: 'utf8' }).map((name) => join(root, name)) : []);
-};
 
 export type McpBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export type McpResult = { content: McpBlock[]; isError?: boolean };
@@ -91,8 +86,7 @@ export interface Scene {
   ids: AppSessionId[]; // the seeded sessions' app ids, in the order of their titles
   pane: Locator; // the main region's first pane
   panel: Locator;
-  journal(id: string): JournalRow[];
-  launchJournal(id: string): JournalRow[]; // this launch's rows alone (a relaunch's earlier ones end with that app's quit)
+  journal(id: string): JournalRow[]; // every launch's rows, an earlier app run's (and its quit) included
   events(id: string): Promise<SessionEvent[]>; // every event batch the window received for the session since it was last loaded
   appErrors(): string[]; // the window's own console errors (a deliverable frame's are the page's, read through the chip)
 }
@@ -150,7 +144,6 @@ async function appConsoleErrors(page: Page): Promise<() => string[]> {
 // the app ids its first launch found (`known`): a session a replay ran in is bound to the recording's engine session
 // from then on, so its seeded transcript no longer finds it.
 export async function launchScene(scratch: Scratch, known?: AppSessionId[]): Promise<Scene> {
-  const earlier = journalFiles(scratch.userData);
   const maws = await launchMaws({
     userData: scratch.userData,
     env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: scratch.config, MAWS_E2E_OPEN_LOG: scratch.openLog },
@@ -176,7 +169,6 @@ export async function launchScene(scratch: Scratch, known?: AppSessionId[]): Pro
       pane: page.locator('[data-region="main"] [data-pane="0"]'),
       panel: page.locator('[data-region="panel"]'),
       journal: (id) => journalOf(maws.userData, id),
-      launchJournal: (id) => journalOf(maws.userData, id, earlier),
       events: (id) =>
         page.evaluate((appSessionId) => ((window as unknown as { __e2: { appSessionId: string; events: SessionEvent[] }[] }).__e2 ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id),
     };
@@ -187,11 +179,12 @@ export async function launchScene(scratch: Scratch, known?: AppSessionId[]): Pro
 }
 
 // The window's own console stayed clean and every replay followed its recording (a mismatch ends a replay early, which a
-// case's own waits can miss), then the app is closed; the profile stays for a relaunch.
+// case's own waits can miss), then the app is closed; the profile stays for a relaunch. The whole journal is read: a
+// relaunch's check covers the earlier app run's quit too (E11), which writes nothing the replay calls a mismatch.
 export async function closeScene(s: Scene): Promise<void> {
   try {
     expect(s.appErrors()).toEqual([]);
-    for (const id of s.ids) expect(metaEvents(s.launchJournal(id)), `the journal of ${id}`).not.toContain('replay_mismatch');
+    for (const id of s.ids) expect(metaEvents(s.journal(id)), `the journal of ${id}`).not.toContain('replay_mismatch');
   } finally {
     await s.maws.cleanup();
   }
