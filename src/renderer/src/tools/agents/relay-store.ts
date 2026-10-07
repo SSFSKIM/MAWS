@@ -13,7 +13,7 @@ import { agentWorkClient } from './client';
 import { RELAY_COPY } from './copy';
 import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './model/relay';
 import { sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
-import { isPeerPending, isPeerTarget, type AgentTarget, type PeerRelay, type PeerTarget } from './model/relay'; // E7
+import { isPeerPending, isPeerTarget, sendsToPeer, type AgentTarget, type PeerRelay, type PeerTarget } from './model/relay'; // E7
 
 export interface RelayStore {
   relays: Map<string, Relay>; // key `appSessionId:agentId`; one relay per agent: a send is refused while it is `asked` (or its steer unanswered) and replaces a `forwarded` one
@@ -173,7 +173,9 @@ export function createRelayStore() {
     // E7 start: a relay to another session (E7 execution document, Design §4; Decision Log 6): asked → forwarded on the
     // parent's SendMessage to the address carrying the owner's text → sent or failed on that call's result; failed when
     // the engine drops the steer before starting it or the steer's own turn ends without that send; gone with the parent's process, as an agent relay is. No child to
-    // follow and no receipt: the other session's inbox is not this one's to watch.
+    // follow and no receipt: the other session's inbox is not this one's to watch. E11 W-D: a send to the address in
+    // the steer's own turn carrying other words (the session paraphrased) decides the turn's end instead: sent,
+    // reworded, when it went (so the text is not handed back for a second send), else failed in the send's words.
     const putPeer = (key: string, relay: PeerRelay | null) => {
       const peers = new Map(get().peers);
       if (relay) peers.set(key, relay);
@@ -190,12 +192,21 @@ export function createRelayStore() {
           if (e.state === 'started') started.add(e.commandUuid);
           else if (DROPPED.has(e.state) && !started.has(e.commandUuid)) putPeer(key, { ...relay, state: { kind: 'failed', message: RELAY_COPY.dropped(e.state as 'cancelled' | 'discarded' | 'refused') } });
           // The steer's own turn ended and no SendMessage carried the text (the engine names that turn by the steer's
-          // uuid, pass3/steer-next seq 238-239; e7-peer-a seq 216 follows the reply's send): nothing will send it now.
-          else if (e.state === 'completed') putPeer(key, { ...relay, state: { kind: 'failed', message: RELAY_COPY.notSent } });
+          // uuid, pass3/steer-next seq 238-239; e7-peer-a seq 216 follows the reply's send): nothing will send it now,
+          // unless the turn sent it to the address in its own words.
+          else if (e.state === 'completed') {
+            const outcome = state.reworded?.outcome ?? null;
+            putPeer(key, { ...relay, state: outcome === null ? { kind: 'failed', message: RELAY_COPY.notSent } : outcome.ok ? { kind: 'sent', sentAt: outcome.at, reworded: true } : { kind: 'failed', message: outcome.message } });
+          }
           return;
         }
         if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay.target, relay.text)) {
           putPeer(key, { ...relay, state: { kind: 'forwarded', messageUuid: state.messageUuid, sentAt: state.sentAt, toolUseId: e.toolUseId, forwardedAt: e.at } });
+        } else if (e.seq !== null && started.has(state.messageUuid) && sendsToPeer(e, relay.target)) {
+          putPeer(key, { ...relay, state: { ...state, reworded: { toolUseId: e.toolUseId, outcome: null } } }); // the steer's turn, other words
+        } else if (e.kind === 'tool.result' && e.agentId === null && state.reworded?.toolUseId === e.toolUseId) {
+          const outcome = sendMessageOutcome(e);
+          putPeer(key, { ...relay, state: { ...state, reworded: { toolUseId: e.toolUseId, outcome: outcome.ok ? { ok: true, at: e.at } : { ok: false, message: outcome.message } } } });
         }
         return;
       }

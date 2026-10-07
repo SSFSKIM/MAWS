@@ -93,12 +93,27 @@ describe('a message from another session', () => {
     expect(screen.getByRole('status').textContent).toBe('Session A is replying with SendMessage');
     put(B, { text: 'on it', state: { kind: 'sent' } });
     expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage');
+    put(B, { text: 'on it', state: { kind: 'sent', reworded: true } }); // E11 W-D
+    expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage, in its own words');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
     put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
     expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'on it again' } });
     expect(source.dismiss).toHaveBeenCalledWith(A, B);
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  // E11 W-D (tracker row E7 "paraphrased peer reply reads notSent"): the relay store keeps a failed reply's text, so a
+  // composer mounted again (its row virtualised away and back) puts it back in the box
+  it('puts a failed reply’s text back in the box when the composer mounts again', () => {
+    live();
+    const { source, put } = replies();
+    put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
+    renderRow(inbound(), { storeKey: A, actions: { ...spyActions(), peerReplies: source } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
   });
 
   it('shows the whole message behind its disclosure when the preview cut it, and offers no Reply when the sender cannot be reached', () => {

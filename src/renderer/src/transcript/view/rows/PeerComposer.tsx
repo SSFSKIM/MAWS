@@ -33,7 +33,7 @@ export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['m
     case 'forwarded':
       return peerMessageCopy.forwarded(mode, session);
     case 'sent':
-      return peerMessageCopy.sent(mode, session);
+      return state.reworded ? peerMessageCopy.sentReworded(mode, session) : peerMessageCopy.sent(mode, session);
     case 'failed':
       return peerMessageCopy.failed(mode, state.message);
   }
@@ -45,7 +45,9 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   const reply = useSyncExternalStore(peerReplies.subscribe, () => (appSessionId === null ? undefined : peerReplies.get(appSessionId, target.address)));
   const live = useSessions((s) => appSessionId !== null && s.engine.has(appSessionId));
   const session = displayTitle(useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null))));
-  const [draft, setDraft] = useState('');
+  // A failed ask's text stays in the relay store until the next edit, so a composer mounted again (its row virtualised
+  // away and back) starts with it in the box (E11 W-D).
+  const [draft, setDraft] = useState(() => (reply?.state.kind === 'failed' ? reply.text : ''));
   const [sending, setSending] = useState(false); // the steer is out and unanswered
   const reason = !live ? peerMessageCopy.disabled.notRunningHere(target.mode) : reply?.state.kind === 'asked' ? peerMessageCopy.disabled.pending(target.mode) : null;
   const canSend = reason === null && !sending && draft.trim() !== '' && appSessionId !== null;

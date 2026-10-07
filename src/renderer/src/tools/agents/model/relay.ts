@@ -92,9 +92,10 @@ export type RelayTarget = AgentTarget | PeerTarget;
 export const isPeerTarget = (target: RelayTarget): target is PeerTarget => target.kind === 'peer';
 
 export type PeerRelayState =
-  | { kind: 'asked'; messageUuid: MessageUuid; sentAt: string; parentTurnOpenAtSend: boolean }
+  // reworded (E11 W-D): the steer's own turn sent to the address in other words, and that send's result once answered
+  | { kind: 'asked'; messageUuid: MessageUuid; sentAt: string; parentTurnOpenAtSend: boolean; reworded?: { toolUseId: ToolUseId; outcome: { ok: true; at: string } | { ok: false; message: string } | null } }
   | { kind: 'forwarded'; messageUuid: MessageUuid; sentAt: string; toolUseId: ToolUseId; forwardedAt: string }
-  | { kind: 'sent'; sentAt: string } // the SendMessage's result said it went
+  | { kind: 'sent'; sentAt: string; reworded?: true } // the SendMessage's result said it went (reworded: in the session's own words)
   | { kind: 'failed'; message: string }; // the steer refused or dropped, or the send answered `success: false` (or an error)
 
 export interface PeerRelay {
@@ -117,9 +118,15 @@ function peerRelayText(target: PeerTarget, text: string): string {
 // envelope's trailer tells the agent to answer the same sender on its own (M0 saw it, seq 130), which must not satisfy
 // the owner's relay.
 function matchesPeerSend(event: Extract<SessionEvent, { kind: 'tool.use' }>, target: PeerTarget, text: string): boolean {
-  const input = (event.input ?? {}) as { to?: unknown; message?: unknown; content?: unknown };
-  const to = input.to;
+  const input = (event.input ?? {}) as { message?: unknown; content?: unknown };
   const message = typeof input.message === 'string' ? input.message : typeof input.content === 'string' ? input.content : '';
-  return (to === target.address || (target.name !== null && to === target.name)) && text !== '' && message.includes(text);
+  return sendsToPeer(event, target) && text !== '' && message.includes(text);
+}
+
+// E11 W-D: the parent's own SendMessage to the address (or the sender's name), whatever it carries.
+export function sendsToPeer(event: SessionEvent, target: PeerTarget): event is Extract<SessionEvent, { kind: 'tool.use' }> {
+  if (event.kind !== 'tool.use' || event.agentId !== null || event.toolName !== 'SendMessage') return false;
+  const to = (event.input as { to?: unknown } | null)?.to;
+  return to === target.address || (target.name !== null && to === target.name);
 }
 // E7 end

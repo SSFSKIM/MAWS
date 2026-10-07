@@ -470,6 +470,8 @@ export const peerMessageCopy = {
     `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} is inside a long tool call; it sends it when that call returns or this turn ends`,
   forwarded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} is replying with SendMessage` : `${session} is sending it with SendMessage`),
   sent: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage` : `${session} sent it with SendMessage`),
+  // E11 W-D: the session's send to the address carried other words than the owner's
+  sentReworded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage, in its own words` : `${session} sent it with SendMessage, in its own words`),
   failed: (mode: PeerMode, message: string) => `${mode === 'reply' ? 'Reply' : 'Message'} failed: ${message}`,
 } as const;
 

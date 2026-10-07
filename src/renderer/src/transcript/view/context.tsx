@@ -49,7 +49,7 @@ export interface PeerAddress {
 }
 export interface PeerReply {
   text: string;
-  state: { kind: 'asked'; sentAt: string; parentTurnOpenAtSend: boolean } | { kind: 'forwarded' } | { kind: 'sent' } | { kind: 'failed'; message: string };
+  state: { kind: 'asked'; sentAt: string; parentTurnOpenAtSend: boolean } | { kind: 'forwarded' } | { kind: 'sent'; reworded?: true } | { kind: 'failed'; message: string };
 }
 export interface PeerReplies {
   subscribe(listener: () => void): () => void;
