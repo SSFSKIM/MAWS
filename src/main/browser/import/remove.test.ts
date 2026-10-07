@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension } from '@shared/browser/import';
 import { partitionDirName, type ImportedProfile } from '@shared/browser/profiles';
 import { DEFAULT_PARTITION, profilePartition } from '@shared/browser/tab';
+import { partitionFor } from '../partition';
 import { removeImportedProfile, type RemoveDeps } from './remove';
 import { ImportRefused } from './service';
 
@@ -28,7 +29,8 @@ const record = (profileDir = 'Default'): ImportedProfile => ({
 describe('Remove imported profile (E4b Design §12)', () => {
   let userData: string;
   let steps: string[];
-  let deps: RemoveDeps & { records: ImportedProfile[] };
+  let deps: RemoveDeps & { records: ImportedProfile[]; browsable(): ImportedProfile[] };
+  let entries: ReturnType<typeof tab>[];
 
   // A tab of `partition`; closing it destroys its page on a later turn, as Electron does.
   const tab = (tabId: string, partition: string) => {
@@ -41,7 +43,8 @@ describe('Remove imported profile (E4b Design §12)', () => {
     mkdirSync(join(userData, 'browser', partitionDirName(PARTITION), 'extensions', 'a'.repeat(32)), { recursive: true });
     writeFileSync(join(userData, 'browser', partitionDirName(PARTITION), 'extensions', 'a'.repeat(32), 'manifest.json'), '{}');
     steps = [];
-    const entries = [tab('b_000000000001', PARTITION), tab('b_000000000002', DEFAULT_PARTITION), tab('b_000000000003', PARTITION)];
+    entries = [tab('b_000000000001', PARTITION), tab('b_000000000002', DEFAULT_PARTITION), tab('b_000000000003', PARTITION)];
+    const withdrawn = new Set<string>(); // ImportedProfiles' withdraw and browsable, over the same records
     const ses = {
       clearStorageData: vi.fn(async () => void steps.push('clearStorageData')),
       clearCache: vi.fn(async () => void steps.push('clearCache')),
@@ -74,8 +77,10 @@ describe('Remove imported profile (E4b Design §12)', () => {
         countPartition: vi.fn(() => (steps.push('count'), 4)),
         removePartition: vi.fn(() => void steps.push('removePartition')),
       },
+      browsable: () => state.records.filter((candidate) => !withdrawn.has(candidate.profileDir)),
       profiles: {
         get: (profileDir: string) => state.records.find((candidate) => candidate.profileDir === profileDir) ?? null,
+        withdraw: (profileDir: string) => (withdrawn.add(profileDir), () => void withdrawn.delete(profileDir)),
         remove: vi.fn(async (profileDir: string) => {
           steps.push('drop record');
           state.records = state.records.filter((candidate) => candidate.profileDir !== profileDir);
@@ -83,7 +88,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
         }),
       },
     };
-    deps = state as unknown as RemoveDeps & { records: ImportedProfile[] };
+    deps = state as unknown as typeof deps;
   });
   afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
@@ -111,6 +116,18 @@ describe('Remove imported profile (E4b Design §12)', () => {
     expect(deps.store.close).not.toHaveBeenCalledWith('b_000000000002'); // another partition's tab is untouched
   });
 
+  it('a tab opened while the removal runs browses with the default profile, so nothing reopens the partition', async () => {
+    // E4a's new tab, opened while the extensions unload (steps 2 to 5 await): its partition from the Browser setting,
+    // which still names the profile, through the profiles main lists for new tabs.
+    vi.mocked(deps.extensions.unloadForRemoval).mockImplementation(async () => {
+      entries.push(tab('b_000000000004', partitionFor('Default', deps.browsable()).partition));
+      return 2;
+    });
+    await removeImportedProfile(deps, 'Default');
+    expect(entries.filter((entry) => !entry.view.webContents.destroyed && entry.tab.partition === PARTITION)).toEqual([]);
+    expect(entries.at(-1)!.tab.partition).toBe(DEFAULT_PARTITION);
+  });
+
   it('carries on past a step that fails, so the record is still dropped (the boot sweep removes what is left)', async () => {
     vi.mocked(deps.partitions.session).mockImplementation(() => {
       throw new Error('cannot open');
@@ -129,6 +146,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
     vi.mocked(deps.profiles.remove).mockRejectedValue(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
     await expect(removeImportedProfile(deps, 'Default')).rejects.toThrow('disk full');
     expect(deps.extensions.removalDone).toHaveBeenCalledWith(PARTITION);
+    expect(deps.browsable().map((candidate) => candidate.profileDir)).toEqual(['Default', 'Profile 1']); // its record stands, so new tabs may use it again
   });
 
   it('refuses a profile that is not imported, and any removal while an import runs, touching nothing', async () => {

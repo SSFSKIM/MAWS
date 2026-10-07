@@ -427,7 +427,7 @@ void startWithProfileLock(app, () => {
     register: registerMainHandler,
     emit,
     env: process.env,
-    profiles: () => browserProfiles.list(), // E4b
+    profiles: () => browserProfiles.browsable(), // E4b
   });
   app.on('will-quit', browser.stop);
   // E4a end

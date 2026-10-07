@@ -307,7 +307,7 @@ interface BackgroundWatch {
 // exception thrown synchronously while its version was reported `starting` and not yet `running` was thrown as the
 // worker evaluated: the script stopped there, whether or not Chromium then keeps the worker alive (Electron 44.4.5 does
 // when a debugger is attached to the session's targets, as Playwright's is; without one it stops the worker). Anything
-// else at level 3 while starting (the worker's own `console.error`, an `Uncaught (in promise)` rejection) did not stop
+// else at level 3 while starting (an error the worker logs itself, an `Uncaught (in promise)` rejection) did not stop
 // the script, so the worker is read by whether it runs.
 const THROWN_WHILE_EVALUATING = /^Uncaught (?!\(in promise\))/;
 

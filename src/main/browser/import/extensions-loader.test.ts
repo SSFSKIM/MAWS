@@ -170,10 +170,10 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       expect(byId[probe.id]).toMatchObject({ background: 'running', backgroundError: null });
     });
 
-    it('reads a worker that logged an error while starting but threw nothing (console.error, a rejected promise) by whether it runs', async () => {
+    it('reads a worker that logged an error while starting but threw nothing (its own error log, a rejected promise) by whether it runs', async () => {
       const { probe, fails } = fixture.extensions;
       const ses = fakeSession({
-        [probe.id]: { background: 'evaluationErrorKept', message: 'config missing, using defaults' }, // console.error at top level
+        [probe.id]: { background: 'evaluationErrorKept', message: 'config missing, using defaults' }, // the worker's own error log at top level
         [fails.id]: { background: 'evaluationErrorKept', message: 'Uncaught (in promise) TypeError: Failed to fetch' },
       });
       const records = await run(loader(), ses, chosen('probe', 'fails'));

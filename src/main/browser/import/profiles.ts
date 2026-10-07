@@ -1,6 +1,7 @@
 // `<userData>/browser/profiles.json`'s one owner in main (E4b Design §11; Decision Log 27, 33): read once at boot, held
-// in memory, written whole through `atomicWriteFile`. E4a's `partitionFor` and `browser.profiles.list` read `list()`
-// through `BrowserDeps.profiles`, so a record written in this boot is seen in this boot. A record is put at the end of
+// in memory, written whole through `atomicWriteFile`. E4a's `partitionFor` and `browser.profiles.list` read `browsable()`
+// through `BrowserDeps.profiles`, so a record written in this boot is seen in this boot, and a profile under removal
+// (`withdraw`) is no longer one a new tab opens in, while its record still stands. A record is put at the end of
 // a `done` import, and again by a toggle or a boot load's statuses; a removal drops it. Writes are serialised, and the
 // memory changes only once the file holds the new list. A file that cannot be read is moved aside as
 // `profiles.json.broken-<epoch>`, the store starts empty, and `fileBroken` says so for this boot (Design §13; Decision
@@ -15,6 +16,7 @@ export const profilesFile = (userData: string) => join(userData, 'browser', 'pro
 
 export class ImportedProfiles {
   private writes: Promise<unknown> = Promise.resolve();
+  private readonly withdrawn = new Set<string>();
 
   private constructor(
     private readonly file: string,
@@ -38,6 +40,18 @@ export class ImportedProfiles {
 
   list(): ImportedProfile[] {
     return [...this.records];
+  }
+
+  // The profiles a new tab may browse as: every record but those whose removal is under way.
+  browsable(): ImportedProfile[] {
+    return this.records.filter((record) => !this.withdrawn.has(record.profileDir));
+  }
+
+  // A removal's first act: the profile leaves `browsable()` so no tab opens in its partition while the removal empties
+  // it; the returned release puts it back (a no-op once the record is dropped).
+  withdraw(profileDir: string): () => void {
+    this.withdrawn.add(profileDir);
+    return () => void this.withdrawn.delete(profileDir);
   }
 
   get(profileDir: string): ImportedProfile | null {

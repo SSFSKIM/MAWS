@@ -1,5 +1,6 @@
 // "Remove imported profile" (E4b Design §12; Decision Log 18): everything an import brought, gone from MAWS, in order.
-// (1) the profile's tabs closed through E4a's store, each page's destruction awaited; (2) its extensions unloaded;
+// First the profile is withdrawn from the profiles new tabs may browse as, so a tab opened while the steps run browses
+// with the default profile instead of landing in the partition being emptied; then (1) the profile's tabs closed through E4a's store, each page's destruction awaited; (2) its extensions unloaded;
 // (3) the partition's storage, cache and auth cache cleared and the cookie store flushed; (4) the partition folder (the
 // extensions' files) deleted; (5) its history rows counted and deleted; (6) the record dropped. A step that fails is
 // logged and the next one runs: the record is dropped whatever else failed, and the boot sweep removes anything an
@@ -27,7 +28,7 @@ export interface RemoveDeps {
   partitions: Pick<Partitions, 'session'>;
   extensions: Pick<ExtensionsLoader, 'unloadForRemoval' | 'removalDone'>;
   history: Pick<BrowserHistoryStore, 'countPartition' | 'removePartition'>;
-  profiles: Pick<ImportedProfiles, 'get' | 'remove'>;
+  profiles: Pick<ImportedProfiles, 'get' | 'withdraw' | 'remove'>;
 }
 
 export interface Removed {
@@ -51,6 +52,7 @@ export async function removeImportedProfile(deps: RemoveDeps, profileDir: string
 
   let tabs = 0;
   let historyRows = 0;
+  const release = deps.profiles.withdraw(profileDir);
   try {
     await step('tabs', async () => {
       const closing = deps.store.all().filter((entry) => entry.tab.partition === partition);
@@ -80,6 +82,7 @@ export async function removeImportedProfile(deps: RemoveDeps, profileDir: string
     });
     await deps.profiles.remove(profileDir);
   } finally {
+    release();
     deps.extensions.removalDone(partition);
   }
   return { tabs, historyRows, extensions: record.extensions.length };

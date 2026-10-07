@@ -92,6 +92,19 @@ describe('ImportedProfiles', () => {
     expect(await store.remove('Default')).toBe(false);
   });
 
+  it('withholds a profile under removal from the profiles new tabs may browse as, until released, keeping its record', async () => {
+    const store = ImportedProfiles.open(dir.path);
+    await store.put(RECORD);
+    await store.put(WORK);
+    expect(store.browsable()).toEqual([RECORD, WORK]);
+    const release = store.withdraw('Default');
+    expect(store.browsable()).toEqual([WORK]);
+    expect(store.list()).toEqual([RECORD, WORK]); // the record itself stands until the removal drops it
+    expect(store.get('Default')).toEqual(RECORD);
+    release();
+    expect(store.browsable()).toEqual([RECORD, WORK]); // a removal that could not drop the record leaves it browsable
+  });
+
   it('keeps every write when two land together', async () => {
     const store = ImportedProfiles.open(dir.path);
     await Promise.all([store.put(RECORD), store.put(WORK)]);
