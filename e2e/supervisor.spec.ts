@@ -465,9 +465,18 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(errorItem!.summary).toBe(`Background task failed: ${TASK_FAILED}`);
     // the request's item comes from the burst's broker items (host-held state re-listed at the connect)
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
-    // read before the session is opened: E11 F2b (plan 2.4) takes an error seen in its opened session out of Needs you
+    // E11 F2b (plan 2.4): the relaunch restores this session's tab, so the error's notice shows in the opened session; seen
+    // there with the window in front it leaves Needs you (confirmed) and the glyph reads the pending request; while unseen
+    // it outranks the request
+    await expect(second.page.locator('[data-region="main"]').getByText(`Background task failed: ${TASK_FAILED}`), 'the tail’s error, shown in its session').toBeVisible();
     const row = await rowOf(second.page, id);
-    await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
+    await expect
+      .poll(async () => {
+        const [item] = await attentionOf(second.page, id, 'error');
+        const label = await glyphOf(row).getAttribute('aria-label');
+        return item?.state === 'pending' ? label === 'Needs you: error' : item?.state === 'confirmed' && label === 'Needs approval';
+      }, { message: 'the sidebar glyph agrees with the error item: Needs you: error while unseen, the request once seen' })
+      .toBe(true);
     await row.click();
     // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
     // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
@@ -485,7 +494,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items[0]!.request.requestId).toBe(requested.requestId);
     expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"; main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: shown in its restored session); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 
