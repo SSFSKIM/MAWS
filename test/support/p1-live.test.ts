@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -57,6 +57,12 @@ describe('the caps', () => {
     expect(kept).toMatchObject({ key: reserved.key, usd: 0.4, against: 'app-5' });
     expect(kept.label).toBe('the launch budget of browser, kept whole: a prompt went unreceipted (its receipts US$0.0600)');
     expect(settledReservation(reserved, []).usd).toBe(0); // launched, nothing asked
+  });
+
+  it('names a side thread’s receipts beyond its allocation as a finding', () => {
+    expect(forkOverspend(0.0912, 0.08)).toBe('fork overspend: 0.0912 > 0.08 (uncapped fork, Q12)');
+    expect(forkOverspend(0.08, 0.08)).toBeNull();
+    expect(forkOverspend(0.031, 0.08)).toBeNull();
   });
 
   it('allocates the smaller of the sitting’s and the run’s remainders', () => {

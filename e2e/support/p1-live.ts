@@ -1,7 +1,7 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1; Design §5
 // S3, S4, S6 and A-47 through e2e/p1-live.spec.ts, S1 through test/live/maws-ask-interrupt.live.test.ts): each sitting's
 // cap and the run's, what each sitting has spent and what the next paid call may spend, a paid call's charge when no
-// receipt shows it, a launch budget's reservation and its settlement, the case's end that runs every step, S6's stall reading, where the logs go, the scratch root every case of one run shares, the A-15
+// receipt shows it, a launch budget's reservation and its settlement, a side thread's overspend, the case's end that runs every step, S6's stall reading, where the logs go, the scratch root every case of one run shares, the A-15
 // reading in the standing rule's exact form and its log line, the screenshot's dominant colour, the site of a URL and
 // the engine's init plugin list. Free of Playwright, so test/support/p1-live.test.ts runs it under vitest.
 import { createHash } from 'node:crypto';
@@ -132,6 +132,11 @@ export function chargeOf(rows: readonly JournalRow[], allocationUsd: number): { 
   const settled = rows.findLastIndex(isPaidRequest) < rows.findLastIndex(isMainResult) || !rows.some(isPaidRequest);
   return { usd: settled ? receipted : Math.max(receipted, allocationUsd), receipted, settled };
 }
+
+// The finding a side thread's receipts beyond its allocation make, or null within it: the product launches the fork
+// with no `--max-budget-usd` (owner question Q12), so its turn can pass the allocation before the test sees a receipt.
+export const forkOverspend = (receiptedUsd: number, allocationUsd: number): string | null =>
+  receiptedUsd > allocationUsd ? `fork overspend: ${receiptedUsd.toFixed(4)} > ${allocationUsd.toFixed(2)} (uncapped fork, Q12)` : null;
 
 // One S1 attempt's `maxBudgetUsd`: what the sitting's cap leaves, shared by the attempts still to run, so the three fit.
 export const attemptBudget = (capUsd: number, spentUsd: number, attemptsLeft: number): number => usd4(Math.max(0, capUsd - spentUsd) / attemptsLeft);

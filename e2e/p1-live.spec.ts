@@ -34,7 +34,9 @@
 // thread stops settles the charge to its receipts (or keeps the whole allocation when a prompt went unreceipted); the
 // parent's own launch budget stays reserved through the four cases, so case 3 needs no allowance of its own. US$0.08
 // is about two and a half times a recorded fork turn (spikes/protocol-probe/fixtures/resume-fork-*.jsonl: US$0.027 to
-// 0.032).
+// 0.032). The residual: the test sees the thread's spend only at a receipt, so its first turn is bounded by its prompt
+// (one word, no tools asked) and the timeout, not by a dollar cap; receipts past the allocation once it settled are
+// logged as the finding `fork overspend: <cost> > 0.08 (uncapped fork, Q12)` and fail case 2's spend assertion.
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
 // response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
@@ -79,7 +81,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -592,6 +594,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     await sheet.getByRole('button', { name: 'Send' }).click();
 
     let child = '' as AppSessionId;
+    let passed = false; // its checks held; PASS is logged only once its spend has settled within the allocation
+    let overspend: string | null = null;
     try {
       await expect(sheet).toHaveCount(0);
       await expect.poll(async () => (child = await sideThreadOf(l)), { timeout: 60_000 }).not.toBe('');
@@ -624,7 +628,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       expect(turnsAfter, 'the parent ran no turn').toBe(turnsBefore);
       expect(usersAfter, 'the main conversation received nothing').toBe(usersBefore);
       await shoot(l, '6', 'side-thread');
-      note('case 2: PASS');
+      passed = true;
     } finally {
       // the thread stopped through the app, then charged what it spent: its receipts, or its whole allocation when a
       // prompt went unreceipted; a thread never listed keeps the whole allocation
@@ -643,8 +647,13 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
               : `the side thread: a prompt went unreceipted, so its whole allocation (its journal shows US$${cost.receipted.toFixed(4)}, counted there; charged up to US$${cost.usd.toFixed(4)} in all)`,
             usd: Number((cost.usd - cost.receipted).toFixed(4)),
           });
+          // the uncapped fork's turn may pass its allocation before a receipt shows it: named, and the case failed
+          overspend = forkOverspend(cost.receipted, FORK_ALLOCATION_USD);
+          if (overspend !== null) note(`case 2: finding: ${overspend}`);
+          expect.soft(overspend, `the side thread's receipts within its US$${FORK_ALLOCATION_USD.toFixed(2)} allocation (spend)`).toBeNull();
         }
       }
+      if (passed && overspend === null) note('case 2: PASS');
     }
   });
 
