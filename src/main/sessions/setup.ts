@@ -222,7 +222,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     run.event('launching', 'Starting');
     const fixture = takeReplay(s, 'launching');
     if (fixture) await run.progress({ engineSessionId: fixture.sessionId });
-    const spec = intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null }, s.settings());
+    const spec = intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings());
     watch = new LaunchWatch(s, appSessionId);
     const answer = await hostCall(s.dispatch, 'session.launch', { spec });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);

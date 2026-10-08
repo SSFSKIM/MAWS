@@ -250,6 +250,8 @@ function targetNotFound(tool: BrowserToolName, locator: BrowserLocator, found?: 
 
 export const BROWSER_TOOL_ERRORS = {
   tabNotFound: (tool: BrowserToolName, tabId: string) => `${tool}: no tab "${tabId}" in this session; call browser_tabs {action: "list"}`,
+  // The in-app browser spec of 2026-10-08 ("Debugger leases"): one automation owner per tab; cua_repl's holds this one
+  tabInUse: (tool: BrowserToolName, tabId: string) => `${tool}: tab "${tabId}" is being driven through cua_repl by an agent session; use another tab`,
   tabNotLoaded: (tool: BrowserToolName, tabId: string, url: string) => `${tool}: tab "${tabId}" is not loaded (${clip(url)}); call browser_navigate {tabId, url: "reload"} first`,
   tabClosed: (tool: BrowserToolName, tabId: string) => `${tool}: tab "${tabId}" was closed during the action`,
   tabCrashed: (tool: BrowserToolName, tabId: string) => `${tool}: the page in tab "${tabId}" crashed; call browser_navigate {tabId, url: "reload"} to revive it`,

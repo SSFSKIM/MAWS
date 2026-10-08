@@ -428,7 +428,7 @@ export class TabStore {
     const entry = this.require(tabId);
     entry.committed = false;
     entry.pending = null; // the crash page stands; a stop that follows restores nothing over it
-    entry.debugger?.detach();
+    entry.debugger?.end();
     this.update(tabId, { crashed: { reason }, loading: false, unresponsive: false });
   }
 
@@ -527,7 +527,7 @@ export class TabStore {
     const view = entry.view;
     if (!view) return;
     for (const listener of [...this.destroying]) listener(entry);
-    entry.debugger?.detach();
+    entry.debugger?.end();
     entry.view = null;
     entry.debugger = null;
     entry.committed = false;

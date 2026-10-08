@@ -80,18 +80,45 @@ function harness({ focus = 'off' }: { focus?: 'on' | 'off' } = {}) {
     setFocusEmulation: (entry, enabled) => void focusCalls.push([entry.tab.tabId, enabled]),
   });
   const controls = new TabControls({ store });
-  const parking = new Parking({ store, views: manager, controls });
+  const leased = new Set<string>();
+  const leaseListeners = new Set<(tabId: string) => void>();
+  const leases = {
+    holds: (tabId: string) => leased.has(tabId),
+    onChange: (listener: (tabId: string) => void) => (leaseListeners.add(listener), () => void leaseListeners.delete(listener)),
+  };
+  const lease = (tabId: string, held: boolean) => {
+    if (held) leased.add(tabId);
+    else leased.delete(tabId);
+    for (const listener of [...leaseListeners]) listener(tabId);
+  };
+  const parking = new Parking({ store, views: manager, controls, leases });
   const loaded = () => {
     const { tabId } = store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab;
     store.navigationCommitted(tabId, { url: 'https://a.test/', canGoBack: false, canGoForward: false });
     return { entry: store.entry(tabId)!, view: views.at(-1)! };
   };
   const place = (tabId: string, rect: Rect | null, claim = true) => manager.place({ tabId, paneId: 'p1', surface: 'panel', rect, claim }, sender);
-  return { store, manager, controls, parking, win, loaded, place, focusCalls };
+  return { store, manager, controls, parking, win, loaded, place, focusCalls, lease };
 }
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('parking by lease (the in-app browser spec, "Parking and placement")', () => {
+  it('an unplaced tab a cua connection holds a lease on is parked, a pane\'s claim supersedes it, and the release unparks it', () => {
+    const h = harness();
+    const { entry, view } = h.loaded();
+    h.lease(entry.tab.tabId, true);
+    expect([h.parking.parked(entry), view.bounds]).toEqual([true, PARKED_BOUNDS]);
+    h.place(entry.tab.tabId, R);
+    expect(h.parking.parked(entry)).toBe(false);
+    expect(view.bounds).toEqual(R);
+    h.place(entry.tab.tabId, null);
+    expect(h.parking.parked(entry)).toBe(true); // released by the pane while still leased: parked again
+    h.lease(entry.tab.tabId, false);
+    expect(h.parking.parked(entry)).toBe(false);
+  });
 });
 
 describe('parking an unplaced tab (Design §9; Decision Log 36, 43)', () => {

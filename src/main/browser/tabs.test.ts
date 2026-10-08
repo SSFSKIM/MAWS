@@ -605,7 +605,7 @@ describe('TabStore: the TabDebugger (Design §10, §15)', () => {
     const first = entry.debugger!;
     expect(first).toBeInstanceOf(TabDebugger);
     expect(first.attached).toBe(false); // attached only when someone asks
-    const detach = vi.spyOn(first, 'detach');
+    const detach = vi.spyOn(first, 'end');
     h.store.rendererGone(tab.tabId, 'crashed');
     expect(detach).toHaveBeenCalledTimes(1);
     expect(entry.debugger).toBe(first); // the view lives on, and so does its debugger: the next ask attaches again

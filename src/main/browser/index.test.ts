@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,7 +58,7 @@ const fakes = await vi.hoisted(async () => {
     isVisible: () => true,
     isMinimized: () => false,
   });
-  const app = new EventEmitter(); // the app's own events (the client certificate a request with no page asks for)
+  const app = Object.assign(new EventEmitter(), { getVersion: () => '9.9.9' }); // the app's own events (the client certificate a request with no page asks for); E13: its version
   return { cdp, View, win, app };
 });
 
@@ -73,7 +73,7 @@ const commentIpc = await vi.hoisted(async () => {
 vi.mock('electron', () => ({
   app: fakes.app,
   ipcMain: { handle: () => {}, on: commentIpc.on, removeListener: commentIpc.removeListener }, // E4d: on, removeListener
-  BrowserWindow: { fromWebContents: () => fakes.win },
+  BrowserWindow: { fromWebContents: () => fakes.win, getAllWindows: () => [] }, // E13: getAllWindows
   session: {
     fromPartition: () => ({
       getUserAgent: () => 'UA Electron/1',
@@ -335,7 +335,7 @@ describe('startBrowser: the browser tools (E4c)', () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
-    expect([...events.keys()]).toEqual(['maws.browser.request', 'maws.browser.cancel', 'session.status']);
+    expect([...events.keys()]).toEqual(['session.status', 'maws.browser.request', 'maws.browser.cancel']); // E13's status hook first
     expect(hosts.onState).toHaveBeenCalledWith('engine-host', expect.any(Function));
     browser.stop();
     expect(events.size).toBe(0);
@@ -354,3 +354,37 @@ describe('startBrowser: the browser tools (E4c)', () => {
   });
 });
 // E4c end
+
+// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2)
+describe("startBrowser: cua's primitive server (E13)", () => {
+  it('serves a socket per session from a status of its live engine (never a trust bootstrap\'s), closed with its record and at stop', async () => {
+    userData = mkdtempSync('/tmp/mbs-'); // a Unix socket path must stay short
+    const listeners = new Set<(payload: { appSessionId: AppSessionId; status: { process: string } }) => void>();
+    const hosts = {
+      onEvent: vi.fn((name: string, listener: never) => {
+        if (name !== 'session.status') return () => {};
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }),
+      dispatch: vi.fn(async () => ({ ok: true })),
+      onState: vi.fn(() => () => {}),
+    };
+    const { index, change } = fakeIndex([A]);
+    const browser = start(index, { hosts: hosts as never });
+    const dir = join(userData, 'browser', 'cua');
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    const status = (appSessionId: string, process: string) => listeners.forEach((l) => l({ appSessionId: appSessionId as AppSessionId, status: { process } }));
+    status('a-bootstrap-id', 'ready');
+    status(A, 'exited');
+    expect(readdirSync(dir)).toEqual([]);
+    status(A, 'ready'); // an engine that outlived the app's relaunch (D-16)
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual([`${A}.sock`]));
+    expect(browser.cua.socketPathFor(A)).toBe(join(dir, `${A}.sock`));
+    change(A, 'removed');
+    expect(readdirSync(dir)).toEqual([]);
+    browser.cua.socketPathFor(A);
+    browser.stop();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});
+// E13 end

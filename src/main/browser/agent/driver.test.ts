@@ -3,13 +3,15 @@ import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_ANSWER_MS, BROWSER_BRIDGE_IDLE_MS } 
 import type { CommandPhase } from '../debugger';
 import type { TabEntry } from '../tabs';
 import type { CdpBridge } from './bridge';
-import { Drivers, type DriversDeps } from './driver';
+import { Drivers, TabInUseError, type DriversDeps } from './driver';
 
 // The per-tab driver (E4c Design §4; Decision Log 1, 34 (a), 35): a fake bridge and a fake playwright-core injected, the
 // tab's TabDebugger a fake that records what goes through it and lets the test observe commands and detach it.
 
 class FakeDebugger {
   attached = false;
+  focusHeld = false; // focus emulation's own implicit lease (mode 'on'): the driver's release leaves the attachment
+
   readonly sent: { method: string; params: unknown }[] = [];
   readonly order: string[];
   private readonly observers = new Set<(phase: CommandPhase) => void>();
@@ -21,7 +23,7 @@ class FakeDebugger {
     this.attached = true;
   });
   detach = vi.fn(() => {
-    if (!this.attached) return;
+    if (!this.attached || this.focusHeld) return;
     this.attached = false;
     for (const listener of [...this.detachListeners]) listener('detached');
   });
@@ -73,7 +75,7 @@ function fakePlaywright(order: string[]) {
   return { module: { chromium: { connectOverCDP } }, connectOverCDP, pages, browsers };
 }
 
-function harness(focusEmulation: 'on' | 'off' = 'off') {
+function harness(focusEmulation: 'on' | 'off' = 'off', heldByCua = new Set<string>()) {
   const order: string[] = [];
   const playwright = fakePlaywright(order);
   const loadPlaywright = vi.fn(() => playwright.module as never);
@@ -100,13 +102,14 @@ function harness(focusEmulation: 'on' | 'off' = 'off') {
     let found = entries.get(tabId);
     if (!found) {
       const dbg = new FakeDebugger(order);
+      dbg.focusHeld = focusEmulation === 'on';
       found = { tab: { tabId, control: 'idle' }, view: { webContents: { id: 1 } }, debugger: dbg } as unknown as TabEntry;
       entries.set(tabId, found);
     }
     return found;
   };
   const dbg = (tabId = 'b_000000000001') => entry(tabId).debugger as unknown as FakeDebugger;
-  const deps: DriversDeps = { focusEmulation, busy: (e) => busy.has(e.tab.tabId), loadPlaywright, startBridge: startBridge as never };
+  const deps: DriversDeps = { busy: (e) => busy.has(e.tab.tabId), heldByCua: (e) => heldByCua.has(e.tab.tabId), loadPlaywright, startBridge: startBridge as never };
   const drivers = new Drivers(deps);
   return { drivers, order, playwright, loadPlaywright, startBridge, bridges, busy, entry, dbg };
 }
@@ -117,6 +120,19 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('Drivers: one automation owner per tab (in-app browser spec, "Debugger leases")', () => {
+  it('refuses a tab a cua connection holds a lease on, attaching nothing, and connects once the lease is gone', async () => {
+    const held = new Set(['b_000000000001']);
+    const h = harness('off', held);
+    await expect(h.drivers.for(h.entry())).rejects.toBeInstanceOf(TabInUseError);
+    expect(h.dbg().attach).not.toHaveBeenCalled();
+    expect(h.startBridge).not.toHaveBeenCalled();
+    held.clear();
+    await h.drivers.for(h.entry());
+    expect(h.drivers.state('b_000000000001')).toBe('connected');
+  });
 });
 
 describe('Drivers: connecting (Design §4)', () => {
@@ -151,12 +167,12 @@ describe('Drivers: connecting (Design §4)', () => {
   it.each([
     ['off', true],
     ['on', false],
-  ] as const)('a failed connection (focus emulation %s) resets auto-attach, closes the bridge per the mode, and the next call tries afresh', async (mode, detached) => {
+  ] as const)('a failed connection (focus emulation %s) resets auto-attach, releases its lease (the attachment follows the count), and the next call tries afresh', async (mode, detached) => {
     const h = harness(mode);
     h.playwright.connectOverCDP.mockRejectedValueOnce(new Error('Browser.getVersion: the page is no longer attached'));
     await expect(h.drivers.for(h.entry())).rejects.toThrow('no longer attached');
     // Playwright may have set waitForDebuggerOnStart before it failed: the reset goes first, as at an idle close
-    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', `bridge 1 close detach=${detached}`]);
+    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', 'bridge 1 close detach=true']);
     expect(h.dbg().sent).toEqual([{ method: 'Target.setAutoAttach', params: { autoAttach: false, waitForDebuggerOnStart: false, flatten: true } }]);
     expect(h.dbg().attached).toBe(!detached);
     expect(h.drivers.state('b_000000000001')).toBe('none');
@@ -228,11 +244,11 @@ describe('Drivers: the idle close (Decision Log 1, 34 (a))', () => {
     expect(h.drivers.state('b_000000000001')).toBe('connected');
   });
 
-  it('with focus emulation on: closes the connection but keeps the attachment', async () => {
+  it("with focus emulation on: releases the driver's lease, and focus emulation's keeps the attachment", async () => {
     const h = harness('on');
     await h.drivers.for(h.entry());
     await vi.advanceTimersByTimeAsync(BROWSER_BRIDGE_IDLE_MS);
-    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', 'bridge 1 close detach=false']);
+    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', 'bridge 1 close detach=true']);
     expect(h.dbg().attached).toBe(true);
     expect(h.drivers.state('b_000000000001')).toBe('idle-closed');
   });
@@ -306,7 +322,7 @@ describe('Drivers: crash and close (Design §4, §11)', () => {
     release();
     await expect(pending).rejects.toThrow('the tab closed');
     await closed;
-    expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: true }); // the failed attempt's teardown, per the mode
+    expect(h.bridges[0].close).toHaveBeenCalledWith({ detach: true }); // the failed attempt's teardown releases its lease
     expect(h.drivers.state('b_000000000001')).toBe('none');
   });
 
@@ -317,7 +333,8 @@ describe('Drivers: crash and close (Design §4, §11)', () => {
     const h = harness(mode);
     await h.drivers.for(h.entry());
     await h.drivers.retire('b_000000000001');
-    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', `bridge 1 close detach=${detached}`]);
+    expect(h.order.slice(-2)).toEqual(['send Target.setAutoAttach', 'bridge 1 close detach=true']);
+    expect(h.dbg().attached).toBe(!detached); // focus emulation's lease keeps the attachment under 'on'
     expect(h.drivers.state('b_000000000001')).toBe('none');
     await vi.advanceTimersByTimeAsync(BROWSER_BRIDGE_IDLE_MS);
     expect(h.bridges[0].close).toHaveBeenCalledTimes(1); // no idle close later

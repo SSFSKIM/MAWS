@@ -236,3 +236,71 @@ describe('TabDebugger: observers and events', () => {
     error.mockRestore();
   });
 });
+
+describe('TabDebugger: leases (MAWS in-app browser spec, "Debugger leases"; A-51)', () => {
+  it('the first lease attaches, the attachment lasts while any lease is held, and the last release detaches', async () => {
+    const h = harness();
+    const detached: string[] = [];
+    h.tabDebugger.onDetach((reason) => detached.push(reason));
+    const a = await h.tabDebugger.lease();
+    const b = await h.tabDebugger.lease();
+    expect([h.dbg.attachCalls, h.tabDebugger.leases, h.tabDebugger.attached]).toEqual([1, 2, true]);
+    a.release();
+    a.release(); // twice is once
+    expect([h.tabDebugger.leases, h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([1, 0, true]);
+    b.release();
+    expect([h.tabDebugger.leases, h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([0, 1, false]);
+    expect(detached).toEqual(['detached']);
+  });
+
+  it('an owner\'s attach and detach are one implicit lease: no owner\'s detach ends an attachment another still uses', async () => {
+    const h = harness();
+    await h.tabDebugger.attach('driver');
+    await h.tabDebugger.attach('driver'); // idempotent per owner
+    await h.tabDebugger.attach('focus');
+    const cua = await h.tabDebugger.lease();
+    expect([h.tabDebugger.leases, h.tabDebugger.heldBy('driver'), h.tabDebugger.heldBy('focus')]).toEqual([3, true, true]);
+    h.tabDebugger.detach('driver');
+    h.tabDebugger.detach('driver');
+    expect([h.tabDebugger.heldBy('driver'), h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([false, 0, true]);
+    cua.release();
+    expect([h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([0, true]); // focus emulation keeps it
+    h.tabDebugger.detach('focus');
+    expect([h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([1, false]);
+  });
+
+  it('end() detaches whatever is held and drops every lease; a stale lease\'s release is a no-op and the next lease attaches again', async () => {
+    const h = harness();
+    const detached: string[] = [];
+    h.tabDebugger.onDetach((reason) => detached.push(reason));
+    const lease = await h.tabDebugger.lease();
+    await h.tabDebugger.attach('focus');
+    h.tabDebugger.end();
+    expect([h.dbg.detachCalls, h.tabDebugger.leases, lease.live, h.tabDebugger.heldBy('focus')]).toEqual([1, 0, false, false]);
+    expect(detached).toEqual(['detached']);
+    lease.release();
+    expect(h.dbg.detachCalls).toBe(1);
+    const again = await h.tabDebugger.lease();
+    expect([h.dbg.attachCalls, h.tabDebugger.leases, again.live]).toEqual([2, 1, true]);
+  });
+
+  it('Chromium\'s own detach (a crash, the target closing) ends every lease with its reason', async () => {
+    const h = harness();
+    const lease = await h.tabDebugger.lease();
+    const detached: string[] = [];
+    h.tabDebugger.onDetach((reason) => detached.push(reason));
+    h.dbg.attachedTo = null;
+    h.dbg.emit('detach', {}, 'target closed');
+    expect([lease.live, h.tabDebugger.leases, detached]).toEqual([false, 0, ['target closed']]);
+  });
+
+  it('a lease whose attach fails is not held; one released while attaching leaves nothing attached', async () => {
+    const h = harness();
+    h.dbg.autoFrameTree = false;
+    const failing = h.tabDebugger.lease();
+    await settle();
+    h.dbg.last().reject(new Error('no page'));
+    await expect(failing).rejects.toThrow('no page');
+    expect([h.tabDebugger.leases, h.tabDebugger.attached]).toEqual([0, false]);
+  });
+});

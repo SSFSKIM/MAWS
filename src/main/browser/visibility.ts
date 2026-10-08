@@ -36,10 +36,10 @@ export function setFocusEmulation(entry: TabEntry, enabled: boolean): void {
 // again if a crash ended it (a no-op otherwise), and re-enabled while the page should have it.
 export function attachFocusEmulation(entry: TabEntry, wanted: (entry: TabEntry) => boolean): void {
   const view = entry.view!;
-  entry.debugger!.attach().catch(failed);
+  entry.debugger!.attach('focus').catch(failed);
   view.webContents.on('did-navigate', () => {
     if (entry.view !== view || !entry.debugger) return;
-    entry.debugger.attach().catch(failed);
+    entry.debugger.attach('focus').catch(failed);
     if (wanted(entry)) setFocusEmulation(entry, true);
   });
 }

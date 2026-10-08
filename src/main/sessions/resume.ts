@@ -61,7 +61,7 @@ export async function runResume(
       });
     }
     const fixture = takeReplay(s, 'launching');
-    let spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null }, s.settings());
+    let spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings());
     let end: LaunchEnd;
     let previousLaunchId: string | null = null;
     for (;;) {

@@ -101,6 +101,17 @@ describe('launch mapping', () => {
     expect(LaunchSpecSchema.parse(spec)).toEqual(spec);
     expect(spec).toMatchObject({ appSessionId: BOOT, cwd: REPO, additionalDirectories: ['/extra'], gateway: 'gateway', trust: { accepted: true, directory: REPO }, model: null, effort: null, permissionMode: null, resume: null, sessionId: null, inheritGrantsFrom: null });
     expect(spec.appSessionId).not.toBe(APP);
+    expect(spec.extraSettings).toBeNull(); // E13: an initialize-only launch never reaches the browser
+  });
+
+  it('E13: hands the session\'s cua socket to the engine through extraSettings.env, and nothing when there is none', () => {
+    const socket = '/u/browser/cua/app.sock';
+    const created = intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: socket });
+    expect(LaunchSpecSchema.parse(created)).toEqual(created);
+    expect(created.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
+    expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null, browserBackend: socket }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
+    expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: null }).extraSettings).toBeNull();
+    expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null }).extraSettings).toBeNull();
   });
 });
 

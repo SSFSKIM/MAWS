@@ -46,6 +46,9 @@ export interface SessionServiceDeps {
   settings?: () => C10Settings;
   userDefaults?: () => Promise<UserEngineDefaults>; // W3: the user's own settings.json (read only); absent, none
   launchGate?: LaunchGate; // C12: consulted when a setup or a resume begins; absent, every launch may go
+  // E13 (the in-app browser spec of 2026-10-08): the session's cua socket, listening from this call on, for its launch's
+  // CUA_BROWSER_BACKENDS; absent or null, the launch carries none
+  browserBackend?: (appSessionId: AppSessionId) => string | null;
   takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs'>; // W7: the tests' seams
   timing?: { watchdogMs?: number; stopWaitMs?: number };
   now?: () => string;

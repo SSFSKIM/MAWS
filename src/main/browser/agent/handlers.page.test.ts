@@ -13,7 +13,7 @@ import { MawsBrowserAnswerResultSchema } from '@shared/ipc/schema/maws';
 import { screenshotPath, screenshotsDir } from '@shared/maws/deliverable-files';
 import { Navigator } from '../navigation';
 import { TabStore, type TabEntry } from '../tabs';
-import type { Driver } from './driver';
+import { TabInUseError, type Driver } from './driver';
 import { personHolds } from './control';
 import { BrowserHandlers, type AgentControl, type BrowserCall, type DownloadRefusal, type Waited } from './handlers';
 import { FakePage, jpegBytes, pngBytes } from './page.fake';
@@ -241,6 +241,13 @@ describe('browser_snapshot (a read: Design §5, Decision Log 5)', () => {
       ok: false,
       error: BROWSER_TOOL_ERRORS.actionFailed('browser_snapshot', 'snapshot', 'main', 'MAWS could not attach to the tab: the bridge announced no page'),
     });
+  });
+
+  it('answers tabInUse for a tab cua_repl drives (one automation owner per tab)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.drivers.for.mockRejectedValueOnce(new TabInUseError(tabId));
+    expect(await h.run('browser_snapshot', { tabId })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabInUse('browser_snapshot', tabId) });
   });
 });
 

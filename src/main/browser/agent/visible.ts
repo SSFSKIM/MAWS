@@ -11,16 +11,26 @@
 // applies as to any unplaced view), and the tab is unparked when the agent lets go with nothing pending. Unparking
 // leaves the view where it is, hidden and out of any window, as E4a keeps a never-placed view; the next pane's placement
 // sizes it. A covered tab is still placed and is never parked: an action waits for the cover (Design §6).
+//
+// The in-app browser spec of 2026-10-08 ("Parking and placement"): a tab a cua connection holds a debugger lease on is
+// the agent's as well (`leases`), so locators, hit-testing and screenshots work on a tab the person is not looking at.
 import type { TabEntry, TabStore } from '../tabs';
 import type { ViewManager } from '../view';
 import type { TabControls } from './control';
 
 export const PARKED_BOUNDS = { x: 0, y: 0, width: 1280, height: 800 };
 
+// Which tabs a cua connection holds a debugger lease on, and when that changes (src/main/browser/cua).
+export interface LeaseHolds {
+  holds(tabId: string): boolean;
+  onChange(listener: (tabId: string) => void): () => void;
+}
+
 export interface ParkingDeps {
-  store: Pick<TabStore, 'all' | 'onUpdated' | 'onViewCreated' | 'onViewDestroying'>;
+  store: Pick<TabStore, 'all' | 'entry' | 'onUpdated' | 'onViewCreated' | 'onViewDestroying'>;
   views: Pick<ViewManager, 'park'>;
   controls: Pick<TabControls, 'onChange' | 'pending'>;
+  leases?: LeaseHolds;
 }
 
 export class Parking {
@@ -34,6 +44,14 @@ export class Parking {
       store.onViewCreated((entry) => this.update(entry)),
       store.onViewDestroying((entry) => void this.parkedTabs.delete(entry)), // a new view is parked afresh
       controls.onChange((entry) => this.update(entry)), // the pending count
+      ...(deps.leases
+        ? [
+            deps.leases.onChange((tabId) => {
+              const entry = store.entry(tabId);
+              if (entry) this.update(entry);
+            }),
+          ]
+        : []),
     ];
     for (const entry of store.all()) this.update(entry);
   }
@@ -47,7 +65,8 @@ export class Parking {
   }
 
   private update(entry: TabEntry): void {
-    const wanted = entry.view !== null && entry.placement === null && (entry.tab.control === 'agent' || this.deps.controls.pending(entry) > 0);
+    const agents = entry.tab.control === 'agent' || this.deps.controls.pending(entry) > 0 || this.deps.leases?.holds(entry.tab.tabId) === true;
+    const wanted = entry.view !== null && entry.placement === null && agents;
     if (!wanted) {
       this.parkedTabs.delete(entry);
       return;

@@ -8,8 +8,12 @@
 // E4b's import and E4d's crop hold it as Playwright's do) while the tab is not busy (the agent holds it or a request is
 // pending) first turns auto-attach off on the page session, since Playwright's `waitForDebuggerOnStart: true` would
 // otherwise pause every new cross-site frame and worker once nobody resumes them, then closes the bridge (Playwright hears its
-// transport close) and detaches the debugger only when focus emulation is off; under 'on' the attachment is
-// E4a's to keep. The mode is the one `startBrowser` computed from its env (`focusEmulationMode`), never the default.
+// transport close) and releases the driver's implicit lease on the debugger: the attachment ends only when no other
+// lease remains (focus emulation's under 'on', the in-app browser spec's "Debugger leases"), so the reset always goes
+// first, whatever leases remain.
+//
+// One automation owner per tab: a tab a cua connection holds a lease on (`heldByCua`) is refused with `TabInUseError`
+// before anything attaches, as the cua server refuses a tab this driver holds.
 //
 // A person's JavaScript dialog is never Playwright's to answer: a no-op `dialog` listener stops its auto-dismiss, and
 // the dialog itself is the `-run-dialog` wrap's (dialogs.ts).
@@ -18,7 +22,6 @@ import type * as PlaywrightCore from 'playwright-core';
 import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_ANSWER_MS, BROWSER_BRIDGE_IDLE_MS } from '@shared/maws/browser';
 import type { TabDebugger } from '../debugger';
 import type { TabEntry } from '../tabs';
-import type { FocusEmulationMode } from '../visibility';
 import { startCdpBridge, type CdpBridge } from './bridge';
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -37,8 +40,8 @@ export interface Driver {
 export type DriverState = 'none' | 'connected' | 'idle-closed';
 
 export interface DriversDeps {
-  focusEmulation: FocusEmulationMode;
   busy(entry: TabEntry): boolean; // the agent holds the tab or a request is pending for it: never idle-closed
+  heldByCua?(entry: TabEntry): boolean; // a cua connection drives the tab (src/main/browser/cua): refused
   loadPlaywright?(): Playwright;
   startBridge?: typeof startCdpBridge;
   idleMs?: number;
@@ -58,6 +61,14 @@ interface Slot {
 // Lazily, from the asar's node_modules (114 ms, E4-0 (6)); playwright-core is a production dependency, never bundled.
 function loadPlaywrightCore(): Playwright {
   return createRequire(__filename)('playwright-core') as Playwright;
+}
+
+// The tab is driven through cua_repl (a cua connection holds a lease on it): the tools leave it alone.
+export class TabInUseError extends Error {
+  constructor(readonly tabId: string) {
+    super(`tab ${tabId} is driven by another agent session through cua_repl`);
+    this.name = 'TabInUseError';
+  }
 }
 
 export class Drivers {
@@ -81,6 +92,7 @@ export class Drivers {
     if (slot?.driver) return Promise.resolve(slot.driver);
     if (slot?.connecting) return slot.connecting;
     if (!entry.debugger || !entry.view) return Promise.reject(new Error('the tab has no page'));
+    if (this.deps.heldByCua?.(entry)) return Promise.reject(new TabInUseError(tabId));
     const fresh: Slot = { entry, debugger: entry.debugger, connecting: null, driver: null, closed: false, idle: null, stops: [] };
     this.slots.set(tabId, fresh);
     fresh.connecting = this.connect(fresh).then(
@@ -138,7 +150,7 @@ export class Drivers {
     let browser: PlaywrightCore.Browser;
     let page: PlaywrightCore.Page | undefined;
     try {
-      await slot.debugger.attach(); // idempotent: E4a's attachment, shared
+      await slot.debugger.attach('driver'); // the driver's implicit lease on E4a's attachment, shared
       if (slot.closed) throw tabClosed();
       bridge = await (this.deps.startBridge ?? startCdpBridge)(slot.debugger, entry.view!.webContents, { log: this.deps.log });
       if (slot.closed) throw tabClosed();
@@ -188,13 +200,12 @@ export class Drivers {
   }
 
   // Ends a connection that leaves the page alive: auto-attach off while attached (no new frame or worker waits for a
-  // debugger nobody runs), then the bridge closed, detaching only when focus emulation is off (under 'on' the attachment
-  // is E4a's). With no bridge (it never started) the detach is the debugger's own.
+  // debugger nobody runs), then the bridge closed and the driver's lease released (the attachment ends only when no other
+  // lease remains). With no bridge (it never started) the release is the debugger's own.
   private async teardown(dbg: TabDebugger, bridge: CdpBridge | null): Promise<void> {
-    const detach = this.deps.focusEmulation === 'off';
     if (dbg.attached) await dbg.send('Target.setAutoAttach', AUTO_ATTACH_OFF).catch(() => {});
-    if (bridge) await bridge.close({ detach }).catch((error: unknown) => this.deps.log?.(`the CDP bridge did not close cleanly: ${String(error)}`));
-    else if (detach) dbg.detach();
+    if (bridge) await bridge.close({ detach: true }).catch((error: unknown) => this.deps.log?.(`the CDP bridge did not close cleanly: ${String(error)}`));
+    else dbg.detach('driver');
   }
 
   // A crash, Playwright's page closing, the tab going: the connection ends and nothing of it is kept.

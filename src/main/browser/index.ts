@@ -35,8 +35,11 @@ import { startCommentMode } from './comment';
 // E4d end
 // E4c start
 import type { HostSupervisor } from '../hosts/supervisor';
-import { e2eTabIds, startBrowserAgent } from './agent';
+import { e2eTabIds, reachableSessions, startBrowserAgent } from './agent';
 // E4c end
+// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52)
+import { startCuaBackend, type CuaBackend } from './cua';
+// E13 end
 
 export interface BrowserDeps {
   userData: string;
@@ -59,6 +62,7 @@ export interface BrowserDeps {
 export interface Browser {
   store: TabStore;
   views: ViewManager;
+  cua: CuaBackend; // E13: the socket each session's engine is told (`socketPathFor`), for cua's host
   stop(): void; // at will-quit: tabs.json written, every view closed
   // E4b start: the partitions, for the Chrome import (E4b Decision Log 31): its partition opened and prepared once, as a
   // tab's is, and its per-boot extension loading registered as a preparer
@@ -129,6 +133,23 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
 
   registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
+  // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
+  // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
+  // first status, and closes with the session's record
+  const cua = startCuaBackend({
+    store,
+    windows: () =>
+      BrowserWindow.getAllWindows()
+        .filter((win) => !win.isDestroyed() && isAppWindow(win))
+        .map((win) => ({ id: win.id, focused: win.isFocused() })),
+    reaches: (appSessionId, tabSessionId) => reachableSessions(index.sessions, appSessionId).includes(tabSessionId),
+    userData,
+    version: app.getVersion(),
+  });
+  const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
+    if (status.process !== 'exited' && knownSession(index, appSessionId)) cua.socketPathFor(appSessionId); // never a trust bootstrap's id
+  });
+  // E13 end
   // A request with no page behind it, a favicon fetched on a tab's partition (`ses.fetch`) among them, asks the app for a
   // client certificate, and Electron's default hands over the keychain's first identity: no certificate is chosen, as
   // for a page (navigation.ts). A request a page made is left to that page's handler.
@@ -139,17 +160,20 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   };
   app.on('select-client-certificate', refuseUnownedCertificate);
   const stopSessions = index.sessions.onChange((record, cause) => {
-    if (cause === 'removed') store.removeSession(record.appId);
+    if (cause !== 'removed') return;
+    store.removeSession(record.appId);
+    cua.closeSession(record.appId); // E13
   });
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
+  if (inspector) inspector.cua = cua; // E13: the e2e's fake host reads the socket and the leases
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
   const commentMode = startCommentMode({ store, emit, register, userData, env });
   // E4d end
   // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
   const agent = hosts
-    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, env, views, userData })
+    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, env, views, userData, cua /* E13 */ })
     : null;
   if (inspector && agent) inspector.agent = agent.seam;
   // E4c end
@@ -157,12 +181,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   return {
     store,
     views,
+    cua, // E13
     partitions, // E4b
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       commentMode.stop(); // E4d
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       void agent?.stop(); // E4c: nothing more is answered; every driver's connection closed
+      stopCuaStatus?.(); // E13
+      cua.dispose(); // E13: every socket closed and unlinked; each connection's leases let go
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
       memory.stop();
@@ -171,6 +198,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       for (const { view } of store.all()) if (view && !view.webContents.isDestroyed()) view.webContents.close();
     },
   };
+}
+
+// E13: whether the index has a record under the id (a trust bootstrap's id never has one); false when it cannot be read.
+function knownSession(index: BrowserDeps['index'], appSessionId: AppSessionId): boolean {
+  try {
+    return index.sessions.get(appSessionId) !== null;
+  } catch {
+    return false;
+  }
 }
 
 // The restored tabs whose session the index knows; all of them when the index cannot be read (nothing is known then).

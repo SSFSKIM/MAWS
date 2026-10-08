@@ -48,7 +48,7 @@ import type { NavigateTo, Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import { coverTally, dispatch, waitUntilReady } from './act';
 import type { AgentCursor } from './cursor';
-import type { Driver, Drivers } from './driver';
+import { TabInUseError, type Driver, type Drivers } from './driver';
 import { answerOfError, BrowserToolError, firstLine } from './errors';
 import { evalValueOf } from './evaluate';
 import { isTimeout, locate, RefBook } from './locate';
@@ -451,6 +451,7 @@ export class BrowserHandlers {
       return await abortable(this.deps.drivers.for(entry), signal);
     } catch (error) {
       if (signal.aborted) throw signal.reason;
+      if (error instanceof TabInUseError) throw new BrowserToolError(BROWSER_TOOL_ERRORS.tabInUse(tool, entry.tab.tabId));
       throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionFailed(tool, action, target, `MAWS could not attach to the tab: ${firstLine(error)}`));
     }
   }

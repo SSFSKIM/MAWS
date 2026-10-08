@@ -76,7 +76,7 @@ interface Message {
 
 export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { log = () => {} }: BridgeOptions = {}): Promise<CdpBridge> {
   // Events reach `on` listeners only once an attach has wired the debugger, so the bridge attaches before it subscribes.
-  await dbg.attach();
+  await dbg.attach('driver');
   // In CDP a page target's id is its main frame's id, and Playwright relies on the equality (a synthetic id orphans the
   // main frame: page.url() stays '' and evaluate waits for a context forever). Chromium keeps it across process swaps.
   const targetId = dbg.mainFrameId!;
@@ -249,7 +249,7 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
       closed = true;
       for (const stop of unsubscribe) stop();
       if (client) end(client, 'the CDP bridge closed');
-      if (detach) dbg.detach();
+      if (detach) dbg.detach('driver');
     },
   };
 }

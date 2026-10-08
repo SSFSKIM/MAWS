@@ -34,6 +34,7 @@ export interface HarnessOptions {
   launchGate?: SessionServiceDeps['launchGate']; // C12: main's launch gate
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
   seedIndex?: (path: string) => void; // writes the index file before the app opens it (an older build's history)
+  browserBackend?: SessionServiceDeps['browserBackend']; // E13: the session's cua socket
 }
 
 export class SessionHarness {
@@ -110,6 +111,7 @@ export class SessionHarness {
       replay: this.opts.replay ?? null,
       settings: this.opts.settings,
       launchGate: this.opts.launchGate, // C12
+      browserBackend: this.opts.browserBackend, // E13
       userDefaults: this.opts.userDefaults, // W3
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200 },
       log: () => {},

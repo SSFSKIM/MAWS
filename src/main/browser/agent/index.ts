@@ -29,7 +29,6 @@ import type { InputEmission } from '../input';
 import type { Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { ViewManager } from '../view';
-import { focusEmulationMode } from '../visibility';
 import { TabControls } from './control';
 import { AgentCursor } from './cursor';
 import { PageDialogs } from './dialogs';
@@ -37,7 +36,7 @@ import { Drivers, type DriverState } from './driver';
 import { answerOfError, refusal } from './errors';
 import { BrowserHandlers, describeCall, reachedEntry, type AgentControl, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
 import { waitingReporter, type Via } from './progress';
-import { Parking } from './visible';
+import { Parking, type LeaseHolds } from './visible';
 
 const LAST_INPUTS_KEPT = 32;
 
@@ -254,6 +253,9 @@ export interface BrowserAgentDeps {
   views: Pick<ViewManager, 'park'>; // E4a's view manager, for parking (visible.ts)
   userData: string; // main's own: browser_screenshot writes its file under the session's deliverables
   drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise
+  // The in-app browser spec of 2026-10-08: the tabs cua's primitive server holds a lease on are parked like the tools'
+  // and refused to the tools (one automation owner per tab)
+  cua?: LeaseHolds;
 }
 
 export interface BrowserAgent {
@@ -265,14 +267,14 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
   const { store, hosts, emit } = deps;
   const log = (line: string) => console.warn(`[browser] ${line}`);
   const control = new TabControls({ store });
-  const parking = new Parking({ store, views: deps.views, controls: control });
+  const parking = new Parking({ store, views: deps.views, controls: control, leases: deps.cua });
   const cursor = new AgentCursor({ store, controls: control });
   const dialogs = new PageDialogs({ store, emit, log });
   const drivers =
     deps.drivers ??
     new Drivers({
-      focusEmulation: focusEmulationMode(deps.env), // Decision Log 1, 34 (a): the effective mode, not the default
       busy: (entry) => entry.tab.control === 'agent' || requests.pendingFor(entry.tab.tabId),
+      heldByCua: (entry) => deps.cua?.holds(entry.tab.tabId) === true, // one automation owner per tab
       log,
     });
   const reachable = (appSessionId: AppSessionId) => reachableSessions(deps.sessions, appSessionId);
