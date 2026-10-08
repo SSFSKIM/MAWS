@@ -12,7 +12,7 @@ import { duration } from '../../model/time';
 import { Output } from '../cells/Truncated';
 import { useActions, useDisclosure, useRowSession, useTranscriptContext } from '../context';
 import { BrowserIcon } from './icons';
-import { useTicker, useWorkingMs } from './parts';
+import { TickingStatus, useTicker, useWorkingMs } from './parts';
 
 type BrowserActionRowData = Extract<Row, { kind: 'browser_action' }>;
 
@@ -89,9 +89,5 @@ function RunningTime({ startedAt }: { startedAt: string }) {
 function WaitingLine({ progress }: { progress: BrowserProgress }) {
   const now = useTicker(true);
   const elapsed = duration(now - Date.parse(progress.since));
-  return (
-    <p role="status" className="transcript-browser-action-note text-fg-muted">
-      {progress.waiting === 'human' ? BROWSER_ACTION.waitingHuman(elapsed) : BROWSER_ACTION.waitingCover(elapsed)}
-    </p>
-  );
+  return <TickingStatus className="transcript-browser-action-note text-fg-muted" line={progress.waiting === 'human' ? BROWSER_ACTION.waitingHuman : BROWSER_ACTION.waitingCover} elapsed={elapsed} />;
 }

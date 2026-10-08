@@ -1,6 +1,6 @@
 // E7 (M2): the rows of messages between sessions and agents and of a listing, and the Reply composer under them (E7
 // execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source.
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../../../test/support/builders';
@@ -87,10 +87,12 @@ describe('a message from another session', () => {
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Waiting for the last reply');
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date().toISOString(), parentTurnOpenAtSend: true } });
     expect(screen.getByRole('status').textContent).toBe('Asked Session A to reply · 0s · Session A sends it at its next tool boundary or when this turn ends');
+    expect(within(screen.getByRole('status')).getByRole('timer').textContent).toBe('0s'); // scale-review C scalpel-5#2: the tick is not re-announced
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date(Date.now() - 40_000).toISOString(), parentTurnOpenAtSend: true } });
     expect(screen.getByRole('status').textContent).toMatch(/^Asked Session A to reply · \d+s · Session A is inside a long tool call; it sends it when that call returns or this turn ends$/);
     put(B, { text: 'on it', state: { kind: 'forwarded' } });
     expect(screen.getByRole('status').textContent).toBe('Session A is replying with SendMessage');
+    expect(screen.queryByRole('timer')).toBeNull();
     put(B, { text: 'on it', state: { kind: 'sent' } });
     expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage');
     put(B, { text: 'on it', state: { kind: 'sent', reworded: true } }); // E11 W-D

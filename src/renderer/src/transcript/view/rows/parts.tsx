@@ -1,5 +1,5 @@
 // Small pieces the row components share.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type HTMLAttributes } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 
 // The disclosure chevron; rotates when its button's aria-expanded is true (transcript.css).
@@ -51,6 +51,28 @@ export function useTicker(active: boolean): number {
     return () => clearInterval(timer);
   }, [active]);
   return now;
+}
+
+// A polite status line whose elapsed time ticks (scale-review C scalpel-5#2): the time is a `role="timer"` span, whose
+// own live setting is off, so the status announces the line when it changes and never each second's tick. `line` is
+// the copy with the time as its argument; without a time (`elapsed` null) the line is plain.
+const TIME_MARK = '\u0000';
+export function TickingStatus({ line, elapsed, ...rest }: { line: (elapsed: string) => string; elapsed: string | null } & HTMLAttributes<HTMLParagraphElement>) {
+  if (elapsed === null) {
+    return (
+      <p role="status" {...rest}>
+        {line('')}
+      </p>
+    );
+  }
+  const [before, ...after] = line(TIME_MARK).split(TIME_MARK);
+  return (
+    <p role="status" {...rest}>
+      {before}
+      <span role="timer">{elapsed}</span>
+      {after.join(elapsed)}
+    </p>
+  );
 }
 
 // How long something that started at `startedAt` has been working (W8: a streaming thinking block), re-read once a
