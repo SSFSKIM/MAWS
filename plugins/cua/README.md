@@ -101,6 +101,9 @@ TextEdit document).
 
 ## For MAWS
 
-MAWS does not load this as a plugin. It bundles `cua-shim.mjs` as an app resource and writes the same server entry
-into the `--mcp-config` it passes to Claude Code, so the agent's computer use does not depend on what is installed in
-the user's `~/.claude`.
+MAWS bundles nothing (charter §16 and §19, 2026-10-08): a session MAWS launches loads the cua plugin the user installed
+(from `github.com/SSFSKIM/cua`, 0.5.0 or newer), as Claude Code does in a terminal, and MAWS gives each session's engine
+the address of its in-app browser in `CUA_BROWSER_BACKENDS`, so `cua.getBrowser()` with no argument in `cua_repl` drives
+that session's MAWS tabs (profile `maws`). MAWS's own browser tools (`mcp__maws__browser_*`) were removed that day; an
+agent in MAWS uses `cua_repl` for the in-app browser as for any other. Bundling the shim as an app resource can return
+when MAWS ships to others.
