@@ -2,8 +2,8 @@
 // turn in flight, on the packaged build. The packaged app (MAWS_E2E_EXECUTABLE) launched as e2e/supervisor-packaged.spec.ts
 // launches it, with the engine host detached (MAWS_HOST_MODE=detached), the installed Claude Code (unmodified, D-1) through
 // ClaudeUsage's relay (GET /api/hello, one retry two minutes later, else `blocked: relay`), on Haiku in default permission
-// mode, under a scratch config home. One session runs `sleep 45; echo DONE_<nonce>` through Bash (its permission allowed
-// once); while the sleep runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
+// mode, under a scratch config home. One session runs `sleep 45; echo DONE_<nonce>` through Bash (a permission request
+// allowed once if the engine asks); while the sleep runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
 // is relaunched within 10 s over the same profile. Asserted: the quit kept one mid-turn session and the supervisor and
 // the engine outlived the app; the relaunch connects to the same supervisor, which lists the session live with its turn
 // open and no DONE yet; DONE_<nonce> then arrives (the host's stream, the relaunched window's live batches and the
@@ -197,33 +197,43 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     value(await invoke(first.page, 'session.send', { appSessionId: id, content: PROMPT }));
     note(`prompt sent at ${new Date().toISOString()}: ${PROMPT}`);
 
-    let requested: Extract<SessionEvent, { kind: 'permission.requested' }> | undefined;
+    // the Bash call: 2.1.293 runs `sleep` and `echo` in default mode without asking (S5's first run, 2026-10-08), so a
+    // permission request is allowed once through the app's answer if one comes, and not waited for
+    type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
+    let call: ToolUse | undefined;
+    const allowed: string[] = [];
     await expect
-      .poll(async () => (requested = (await hostEvents(first.page, id)).find((e): e is Extract<SessionEvent, { kind: 'permission.requested' }> => e.kind === 'permission.requested')) !== undefined, { timeout: 120_000, message: 'the Bash call asks its permission' })
+      .poll(async () => {
+        const events = await hostEvents(first.page, id);
+        const resolved = new Set(events.filter((e) => e.kind === 'permission.resolved').map((e) => (e as { requestId: string }).requestId));
+        for (const r of events.filter((e): e is Extract<SessionEvent, { kind: 'permission.requested' }> => e.kind === 'permission.requested' && !resolved.has(e.requestId) && !allowed.includes(e.requestId))) {
+          value(await invoke(first.page, 'session.answer', { appSessionId: id, requestId: r.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+          allowed.push(r.requestId);
+          note(`permission requested for ${r.toolName} ${JSON.stringify(r.input).slice(0, 160)}: allowed once`);
+        }
+        call = events.find((e): e is ToolUse => e.kind === 'tool.use' && e.toolName === 'Bash' && holds(e.input, DONE));
+        return call !== undefined && events.some((e) => e.kind === 'permission.requested' && (e as { toolUseId: string }).toolUseId === call!.toolUseId && !resolved.has((e as { requestId: string }).requestId)) === false;
+      }, { timeout: 120_000, message: 'the Bash call runs' })
       .toBe(true);
-    note(`permission requested: ${requested!.toolName} ${JSON.stringify(requested!.input).slice(0, 200)}`);
-    expect(requested!.toolName).toBe('Bash');
-    expect(holds(requested!.input, DONE), 'the request is the prompt’s command').toBe(true);
-    value(await invoke(first.page, 'session.answer', { appSessionId: id, requestId: requested!.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
-    const allowedAt = Date.now();
-    await expect.poll(async () => (await hostEvents(first.page, id)).some((e) => e.kind === 'permission.resolved' && e.requestId === requested!.requestId), { timeout: 30_000 }).toBe(true);
-    // a few seconds into the sleep: the command runs, its result is 40 s away
+    const ranAt = Date.now();
+    note(`the Bash call ${call!.toolUseId}: ${JSON.stringify(call!.input).slice(0, 200)}; permission requests ${allowed.length === 0 ? 'none (run without asking)' : `${allowed.length}, allowed once`}`);
+    // a few seconds into the sleep: the command runs, its result 40 s away
     await first.page.waitForTimeout(4_000);
-    const toolUseId = requested!.toolUseId;
+    const toolUseId = call!.toolUseId;
     const resultOf = (events: SessionEvent[]) => events.find((e): e is Extract<SessionEvent, { kind: 'tool.result' }> => e.kind === 'tool.result' && e.toolUseId === toolUseId);
     const beforeQuit = await statusOf(first.page, id);
     expect(beforeQuit.turn, 'the turn is open before the quit').not.toBeNull();
     const eventsBeforeQuit = await hostEvents(first.page, id);
     expect(resultOf(eventsBeforeQuit), 'the command has not answered before the quit').toBeUndefined();
     const turnsBeforeQuit = mainTurnsEnded(eventsBeforeQuit).length;
-    note(`allowed once at ${new Date(allowedAt).toISOString()}; ${eventsBeforeQuit.length} events before the quit, no result for the Bash call ${toolUseId}; the turn open`);
+    note(`running since ${new Date(ranAt).toISOString()}; ${eventsBeforeQuit.length} events before the quit, no result for the Bash call ${toolUseId}; the turn open`);
 
     // ---- keep-quit --------------------------------------------------------------------------------------------------------
     await first.maws.app.evaluate(({ app }) => app.quit());
     await bounded(first.exited, 20_000, () => `MAWS did not quit; the guard said ${JSON.stringify(first.quitLines())}`);
     const exitedAt = Date.now();
     const keepLine = first.quitLines().find((l) => l.includes('auto-answered keep'));
-    note(`quit at ${new Date(exitedAt).toISOString()} (${exitedAt - allowedAt} ms after the allow): ${keepLine ?? JSON.stringify(first.quitLines())}`);
+    note(`quit at ${new Date(exitedAt).toISOString()} (${exitedAt - ranAt} ms after the call ran): ${keepLine ?? JSON.stringify(first.quitLines())}`);
     expect(keepLine).toBe('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
     expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
     expect(isAlive(enginePid), 'the engine outlives the app').toBe(true);
@@ -271,7 +281,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     expect(new Set(liveIds).size, 'no event reached the window twice in its live batches').toBe(liveIds.length);
     const pane = second.page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.getByText(DONE).first(), `${DONE} in the transcript`).toBeVisible({ timeout: 30_000 });
-    note(`the Bash call's result ${JSON.stringify(result.content).slice(0, 120)} in the host's stream at ${new Date(doneAt).toISOString()} (${doneAt - exitedAt} ms after the exit, ${doneAt - allowedAt} ms after the allow), and in the window's live batches; the turn ended (${ended!.result}, US$${ended!.costUsd.toFixed(4)}, reply ${JSON.stringify(ended!.resultText)}); ${liveIds.length} events reached the window live, none twice; ${DONE} shown in the transcript`);
+    note(`the Bash call's result ${JSON.stringify(result.content).slice(0, 120)} in the host's stream at ${new Date(doneAt).toISOString()} (${doneAt - exitedAt} ms after the exit, ${doneAt - ranAt} ms after the call ran), and in the window's live batches; the turn ended (${ended!.result}, US$${ended!.costUsd.toFixed(4)}, reply ${JSON.stringify(ended!.resultText)}); ${liveIds.length} events reached the window live, none twice; ${DONE} shown in the transcript`);
 
     // ---- no duplicate -----------------------------------------------------------------------------------------------------
     const all = await hostEvents(second.page, id);
