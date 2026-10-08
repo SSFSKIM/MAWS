@@ -13,7 +13,8 @@
 // others as `p1-maws-ask-interrupt-attempt<n>` for the record; if none does, the negative stands in the log with the
 // journals and the engine version (the unit proof in session-maws.test.ts stands; a tracker row follows). Each attempt's
 // `--max-budget-usd` is what the sitting's US$0.15 cap leaves (LiveLedger.assertUnderCap() before each). The owner's
-// ~/.claude.json is only read (the A-15 reading before the first launch and after every attempt). The log is
+// ~/.claude.json is only read (the A-15 reading before the first launch and after every attempt: a key under the run's
+// own scratch, `gate.scratch`, appearing or vanishing fails in closeSession; another owner session's is recorded). The log is
 // `live-s1.txt` under MAWS_P1_LIVE_OUT (default /tmp/maws-e11-p1-live); the exports land under the run's
 // `<userData>/exports/` (printed), copied into spikes/protocol-probe/fixtures/pass3/ and test/fixtures/transcripts/ by
 // hand after a look.
@@ -90,13 +91,13 @@ beforeAll(async () => {
   a15First = a15Reading();
   note(`==== S1, ${new Date().toISOString()}: an interrupt during a blocking maws ask (Design §5 S1)`);
   note(`engine ${gate.bin} (${gate.version}), unmodified, through the relay, Haiku, default permission mode; scratch home ${gate.home}; userData ${gate.userData}; cap US$${CAP_USD.toFixed(2)}`);
-  note(a15Line('before the first launch', a15First, a15First, [gate.home, gate.userData]));
+  note(a15Line('before the first launch', a15First, a15First, gate.scratch));
 }, 300_000);
 
 afterAll(() => {
   if ('skip' in gate) return;
   note(ledger.summary());
-  if (a15First !== null) note(a15Line('after the sitting', a15First, a15Reading(), [gate.home, gate.userData]));
+  if (a15First !== null) note(a15Line('after the sitting', a15First, a15Reading(), gate.scratch));
 });
 
 // One attempt: a fresh session, the prompt, the interrupt at its moment, the checks; exported, costed and its A-15
@@ -147,7 +148,7 @@ async function attempt(g: LiveGate, n: number, moment: (typeof MOMENTS)[number],
     await closeSession(host, g, { appSessionId: id, journalPath, scenario, provenance, transcript: { name: `${scenario}-transcript`, engineSessionId: spec.sessionId! } }, (line) => note(`  ${line}`));
     if (journalPath) ledger.add(`attempt ${n}`, journalPath, readJournal(journalPath));
     if (met) exported.done = true;
-    note(`  attempt ${n}: ${met ? 'every expectation met' : 'not met'}; ${ledger.summary()}; ${a15Line(`after attempt ${n}`, a15First!, a15Reading(), [g.home, g.userData])}`);
+    note(`  attempt ${n}: ${met ? 'every expectation met' : 'not met'}; ${ledger.summary()}; ${a15Line(`after attempt ${n}`, a15First!, a15Reading(), g.scratch)}`);
   }
   return met;
 }

@@ -17,6 +17,7 @@ import { createBinaryProbe } from '../../../src/engine-host/binary-info';
 import { RELAY_URL } from '../../../src/engine-host/launch';
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { ownerPlugins, withoutClaudeVariables } from '../../support/claude-env';
+import { a15DeltaText, compareA15 } from '../../support/owner-file';
 import { exportFixture, journalCost, redactJournal, type Provenance } from './live';
 import type { LiveHost } from './live-host';
 
@@ -29,6 +30,7 @@ export interface LiveGate {
   bin: string; // the installed engine the product resolves with no binary configured
   version: string;
   a15Before: string[]; // the owner file's /tmp project keys before the first launch
+  scratch: string[]; // the run's own directories (home, userData, each scratchRepo): a key under one is an A-15 breach
 }
 export type GateResult = { skip: string } | LiveGate;
 
@@ -55,7 +57,8 @@ export async function openGate(label: string, log: (line: string) => void = (lin
   if (!check.ok || check.version === null) return { skip: `live tests skipped: the installed engine did not answer its version (${check.error ?? check.path})` };
   const home = realpathSync(mkdtempSync(`/tmp/maws-${label}-config-`));
   writeFileSync(join(home, 'settings.json'), '{}\n');
-  return { userData: realpathSync(mkdtempSync(`/tmp/maws-${label}-live-`)), home, bin: check.path, version: check.version, a15Before: a15() };
+  const userData = realpathSync(mkdtempSync(`/tmp/maws-${label}-live-`));
+  return { userData, home, bin: check.path, version: check.version, a15Before: a15(), scratch: [home, userData] };
 }
 
 // The gate for one case: skips it, saying why, when the run's gate did.
@@ -68,7 +71,8 @@ export function liveCase(gate: GateResult, ctx: TestContext): LiveGate {
 }
 
 // A scratch git repository under /tmp (so a leak would show in the A-15 delta) holding one.txt and whatever `seed`
-// writes, committed, and trusted in the scratch home's `.claude.json` (merged, so the run's earlier repositories stay).
+// writes, committed, trusted in the scratch home's `.claude.json` (merged, so the run's earlier repositories stay), and
+// added to the run's own scratch.
 export function scratchRepo(g: LiveGate, label: string, seed: (dir: string) => void = () => {}): string {
   const dir = realpathSync(mkdtempSync(`/tmp/maws-${label}-repo-`));
   writeFileSync(join(dir, 'one.txt'), 'ONE\n');
@@ -80,6 +84,7 @@ export function scratchRepo(g: LiveGate, label: string, seed: (dir: string) => v
   const state: { projects?: Record<string, unknown> } & Record<string, unknown> = existsSync(claudeJson) ? JSON.parse(readFileSync(claudeJson, 'utf8')) : { hasCompletedOnboarding: true, theme: 'light' };
   state.projects = { ...state.projects, [dir]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } };
   writeFileSync(claudeJson, `${JSON.stringify(state, null, 2)}\n`);
+  g.scratch.push(dir);
   return dir;
 }
 
@@ -140,7 +145,7 @@ export function exportTranscript(g: LiveGate, name: string, engineSessionId: str
 // The export `finally` of a case's session: the host shut down, the journal costed and exported with the child's
 // provenance (engineVersion, model, scenario and costUsd added), the engine's transcript exported when `transcript`
 // names it, the engine's init plugin list recorded and checked to hold no plugin of the owner's, and the A-15 reading
-// checked against the run's first. Each step's line goes to `report` as it happens, so a failing check still leaves the
+// checked against the run's first (checkA15). Each step's line goes to `report` as it happens, so a failing check still leaves the
 // exports and the record. Called whatever the case's outcome; answers the journal's cost (null with no journal) and the
 // export's path.
 export async function closeSession(
@@ -170,9 +175,16 @@ export async function closeSession(
   // the journal's list carries each plugin's path, so one the sitting installed under its own scratch is told apart
   const plugins = (rows && journalInitPlugins(rows)) ?? initPlugins(host.events(session.appSessionId));
   report(`init plugins: ${JSON.stringify(plugins)}`);
-  const after = a15();
-  report(`A-15 after: ${after.length} keys, ${JSON.stringify(after) === JSON.stringify(g.a15Before) ? 'identical' : `CHANGED: ${JSON.stringify(after)}`}`);
-  expect(ownerPlugins(plugins ?? [], [g.home, g.userData]), 'the engine loaded none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
-  expect(after, 'the A-15 delta: no scratch project in the owner file').toEqual(g.a15Before);
+  const owners = ownerPlugins(plugins ?? [], [g.home, g.userData]);
+  checkA15(g, a15(), report); // its line logged before either check can fail
+  expect(owners, 'the engine loaded none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
   return { costUsd, exported };
+}
+
+// The A-15 reading `after` against the run's first, reported; fails only on a key under the run's own scratch that
+// appeared or vanished (another owner session's key, added or removed meanwhile, is recorded: the standing rule).
+export function checkA15(g: LiveGate, after: string[], report: (line: string) => void): void {
+  const delta = compareA15(g.a15Before, after, g.scratch);
+  report(`A-15 after: ${after.length} keys (${a15DeltaText(delta)})`);
+  expect(delta.breach, 'the A-15 delta: no project of the run’s scratch in the owner file').toEqual([]);
 }

@@ -16,12 +16,17 @@ export function withoutClaudeVariables(env: Record<string, string | undefined>):
 // (pass3/e8-plugins-reload-settle: plugins under /tmp, the session's cwd under /private/tmp).
 const tmpSpelling = (path: string) => path.replace(/^\/private\/tmp(?=\/|$)/, '/tmp');
 
+// Whether `path` is one of `roots` or inside one, /tmp and /private/tmp taken as one directory.
+export function underAny(path: string, roots: readonly string[]): boolean {
+  const at = tmpSpelling(path);
+  return roots.some((root) => at === tmpSpelling(root) || at.startsWith(`${tmpSpelling(root)}/`));
+}
+
 // The `system/init` plugins that are neither the engine's own builtins (`<name>@builtin`) nor installed by the sitting
 // itself (a `path` under one of `scratch`, the directories the sitting made: its config home, a scratch market), by
 // source: what an owner's plugin reaching a scratch-home engine shows as. A recording's list should hold none. A plugin
 // without a `path` (the normalized `session.init` event keeps only name and source) counts as the owner's.
 export function ownerPlugins(plugins: readonly { source: string; path?: string }[], scratch: readonly string[]): string[] {
-  const roots = scratch.map(tmpSpelling);
-  const installedBySitting = (path: string | undefined) => path !== undefined && roots.some((root) => tmpSpelling(path) === root || tmpSpelling(path).startsWith(`${root}/`));
+  const installedBySitting = (path: string | undefined) => path !== undefined && underAny(path, scratch);
   return plugins.filter((plugin) => !plugin.source.endsWith('@builtin') && !installedBySitting(plugin.path)).map((plugin) => plugin.source);
 }

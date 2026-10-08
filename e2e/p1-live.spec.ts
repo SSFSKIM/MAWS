@@ -24,8 +24,8 @@
 // directory per case under it holding `claude-config/` (`settings.json` `{}`, a `.claude.json` trusting the case's
 // repository), `repo/` (a git repository) and `user-data/` (the app's profile; journals under engine-host/journal/),
 // kept for the review and removed by the sitting. The owner's ~/.claude.json is only read: the A-15 reading before a
-// case, after each session and after the app closed; a key under the run's root is a breach, a key another owner
-// session added meanwhile is recorded. Every engine's `system/init` plugin list is recorded and must hold none of the
+// case, after each session and after the app closed; a key under the run's root appearing or vanishing is a breach,
+// a key another owner session added or removed meanwhile is recorded (test/support/owner-file.ts). Every engine's `system/init` plugin list is recorded and must hold none of the
 // owner's (Decision Log 22 and 30). After the app closed, no process it or its engines ran survives (pids recorded).
 // Logs: `live-s3.txt`, `live-s4.txt`, `live-s6.txt`, `live-a47.txt` under MAWS_P1_LIVE_OUT (default
 // /tmp/maws-e11-p1-live), appended line by line. Shots `prerun-<item>-<surface>-<theme>.png` into
@@ -46,6 +46,7 @@ import { deliverableUrl } from '../src/shared/maws/deliverable';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
 import { ownerPlugins } from '../test/support/claude-env';
+import { compareA15 } from '../test/support/owner-file';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { browserIn, openBrowser, pageAt, type BrowserScene } from './support/browser-scene';
@@ -57,7 +58,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetRefusal, capUsd, colourDistance, compareA15, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, remainingUsd, runRoot, siteOf, sittingLog, type A15Reading } from './support/p1-live';
+import { a15Line, a15Reading, budgetRefusal, capUsd, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, remainingUsd, runRoot, siteOf, sittingLog, type A15Reading } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 

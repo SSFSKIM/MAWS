@@ -1,11 +1,10 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1;
-// e2e/support/p1-live.ts and e2e/support/oopif-page.ts): the cap, the A-15 comparison that records another owner
-// session's key and refuses the sitting's own, the screenshot's dominant colour, the site of a URL, the init plugin
-// list, and the OOPIF page. Spawns no engine and reads no owner file.
+// e2e/support/p1-live.ts and e2e/support/oopif-page.ts): the cap, the A-15 log line, the screenshot's dominant colour,
+// the site of a URL, the init plugin list, and the OOPIF page. Spawns no engine and reads no owner file.
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { budgetRefusal, capUsd, compareA15, dominantColour, initPluginsOf, liveOutDir, remainingUsd, siteOf } from '../../e2e/support/p1-live';
+import { a15Line, budgetRefusal, capUsd, dominantColour, initPluginsOf, liveOutDir, remainingUsd, siteOf } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 describe('the cap', () => {
@@ -29,22 +28,15 @@ describe('the cap', () => {
   });
 });
 
-describe('the A-15 comparison', () => {
-  const before = ['/private/tmp/cua-accept', '/tmp/maws-e2-x'];
+describe('the A-15 log line', () => {
+  // the comparison itself is the shared one's (test/support/owner-file.test.ts)
+  const first = { keys: ['/private/tmp/cua-accept'], digest: 'a'.repeat(40) };
   const ours = ['/private/tmp/maws-e11-p1live-r1'];
 
-  it('passes on identical readings', () => {
-    expect(compareA15(before, [...before], ours)).toEqual({ identical: true, added: [], removed: [], breach: [] });
-  });
-
-  it('records a key another owner session added meanwhile, and a key the owner removed, without a breach', () => {
-    expect(compareA15(before, ['/private/tmp/cua-accept', '/tmp/other-session'], ours)).toEqual({ identical: false, added: ['/tmp/other-session'], removed: ['/tmp/maws-e2-x'], breach: [] });
-  });
-
-  it('refuses a key under the sitting’s own scratch, in either spelling of /tmp', () => {
-    expect(compareA15(before, [...before, '/tmp/maws-e11-p1live-r1/s3/repo'], ours).breach).toEqual(['/tmp/maws-e11-p1live-r1/s3/repo']);
-    expect(compareA15(before, [...before, '/private/tmp/maws-e11-p1live-r1'], ours).breach).toEqual(['/private/tmp/maws-e11-p1live-r1']);
-    expect(compareA15(before, [...before, '/private/tmp/maws-e11-p1live-r10'], ours).breach, 'a sibling root is not ours').toEqual([]);
+  it('names the reading’s count, its digest and the delta against the first', () => {
+    expect(a15Line('before the case', first, first, ours)).toBe(`A-15 before the case: 1 keys, sha1 ${'a'.repeat(40)} (identical)`);
+    const other = { keys: ['/private/tmp/cua-accept', '/tmp/other-session'], digest: 'b'.repeat(40) };
+    expect(a15Line('after s3', first, other, ours)).toBe(`A-15 after s3: 2 keys, sha1 ${'b'.repeat(40)} (added ["/tmp/other-session"], removed []; none the sitting’s own (recorded, not a breach))`);
   });
 });
 

@@ -1,7 +1,7 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1; Design §5
 // S3, S4, S6 and A-47 through e2e/p1-live.spec.ts, S1 through test/live/maws-ask-interrupt.live.test.ts): the run's cap and
 // what each session may still spend, where the logs go, the scratch root every case of one run shares, the A-15
-// reading in the standing rule's exact form and its comparison, the screenshot's dominant colour, the site of a URL and
+// reading in the standing rule's exact form and its log line, the screenshot's dominant colour, the site of a URL and
 // the engine's init plugin list. Free of Playwright, so test/support/p1-live.test.ts runs it under vitest.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import type { JournalRow } from '@shared/wire/journal';
+import { a15DeltaText, compareA15 } from '../../test/support/owner-file';
 
 type Env = Record<string, string | undefined>;
 
@@ -74,22 +75,10 @@ export function a15Reading(home: string = homedir()): A15Reading {
   return { keys: JSON.parse(json!) as string[], digest: createHash('sha1').update(`${printed}\n`).digest('hex') };
 }
 
-const tmpSpelling = (path: string) => path.replace(/^\/private\/tmp(?=\/|$)/, '/tmp');
-const under = (path: string, root: string) => tmpSpelling(path) === tmpSpelling(root) || tmpSpelling(path).startsWith(`${tmpSpelling(root)}/`);
-
-// Two readings compared. A key under one of the sitting's own scratch roots (`ours`) is a breach; any other key added
-// (another owner session's, meanwhile) or removed is recorded and passes (the standing rule).
-export function compareA15(before: readonly string[], after: readonly string[], ours: readonly string[]): { identical: boolean; added: string[]; removed: string[]; breach: string[] } {
-  const added = after.filter((key) => !before.includes(key));
-  const removed = before.filter((key) => !after.includes(key));
-  return { identical: added.length === 0 && removed.length === 0, added, removed, breach: added.filter((key) => ours.some((root) => under(key, root))) };
-}
-
-// One reading's log line against the run's first.
+// One reading's log line against the run's first, through the shared comparison (test/support/owner-file.ts: a key
+// under `ours`, the sitting's own scratch, appearing or vanishing is a breach; any other is recorded).
 export function a15Line(label: string, first: A15Reading, now: A15Reading, ours: readonly string[]): string {
-  const cmp = compareA15(first.keys, now.keys, ours);
-  const delta = cmp.identical ? 'identical' : `added ${JSON.stringify(cmp.added)}, removed ${JSON.stringify(cmp.removed)}${cmp.breach.length > 0 ? `; BREACH (the sitting's own): ${JSON.stringify(cmp.breach)}` : '; none the sitting\'s own (recorded, not a breach)'}`;
-  return `A-15 ${label}: ${now.keys.length} keys, sha1 ${now.digest} (${delta})`;
+  return `A-15 ${label}: ${now.keys.length} keys, sha1 ${now.digest} (${a15DeltaText(compareA15(first.keys, now.keys, ours))})`;
 }
 
 // ---- the screenshot -------------------------------------------------------------------------------------------------------

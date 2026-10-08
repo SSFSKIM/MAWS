@@ -1,12 +1,13 @@
 // The shared live harness's offline parts (E11 W-E): the gate's skip path, the scratch repositories' trust merged into
-// the scratch home, the init's plugin list. Spawns no engine and reads no owner file.
+// the scratch home, the init's plugin list, the A-15 check over synthetic readings. Spawns no engine and reads no owner
+// file.
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
-import { initPlugins, journalInitPlugins, openGate, scratchRepo, type LiveGate } from './harness';
+import { checkA15, initPlugins, journalInitPlugins, openGate, scratchRepo, type LiveGate } from './harness';
 
 vi.mock('../../support/engine-pin', () => ({ ENGINE_BIN: '/unused/offline-engine', ENGINE_VERSION: '2.1.283' }));
 
@@ -27,7 +28,7 @@ describe('the shared live harness', () => {
   it('trusts each scratch repository in the scratch home, keeping the ones trusted before (E2’s copy overwrote them)', () => {
     const home = mkdtempSync(join(tmpdir(), 'maws-harness-home-'));
     made.push(home);
-    const g = { userData: home, home, bin: '/unused', version: '2.1.283', a15Before: [] } satisfies LiveGate;
+    const g = { userData: home, home, bin: '/unused', version: '2.1.283', a15Before: [], scratch: [home] } satisfies LiveGate;
     const first = scratchRepo(g, 'unit');
     const second = scratchRepo(g, 'unit', (dir) => writeFileSync(join(dir, 'two.txt'), 'TWO\n'));
     made.push(first, second);
@@ -38,6 +39,22 @@ describe('the shared live harness', () => {
     expect(state.hasCompletedOnboarding).toBe(true);
     expect(Object.keys(state.projects).sort()).toEqual([first, second].sort());
     expect(state.projects[second]).toEqual({ hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true });
+    expect(g.scratch, 'each repository joins the run’s own scratch (the A-15 check’s roots)').toEqual([home, first, second]);
+  });
+
+  it('checks A-15 against the run’s own scratch: another owner session’s key is recorded, a key of the run’s fails', () => {
+    const g = { userData: '/private/tmp/maws-u-live-a', home: '/private/tmp/maws-u-config-a', bin: '/unused', version: '2.1.283', a15Before: ['/private/tmp/cua-accept'], scratch: ['/private/tmp/maws-u-config-a', '/private/tmp/maws-u-live-a', '/private/tmp/maws-u-repo-a'] } satisfies LiveGate;
+    const lines: string[] = [];
+    checkA15(g, ['/private/tmp/cua-accept'], (line) => lines.push(line));
+    checkA15(g, ['/private/tmp/cua-accept', '/tmp/another-session'], (line) => lines.push(line));
+    checkA15(g, [], (line) => lines.push(line));
+    expect(lines).toEqual([
+      'A-15 after: 1 keys (identical)',
+      'A-15 after: 2 keys (added ["/tmp/another-session"], removed []; none the sitting’s own (recorded, not a breach))',
+      'A-15 after: 0 keys (added [], removed ["/private/tmp/cua-accept"]; none the sitting’s own (recorded, not a breach))',
+    ]);
+    expect(() => checkA15(g, ['/private/tmp/cua-accept', '/tmp/maws-u-repo-a'], () => {})).toThrow(/A-15/);
+    expect(() => checkA15({ ...g, a15Before: ['/private/tmp/cua-accept', '/private/tmp/maws-u-live-a/sub'] }, ['/private/tmp/cua-accept'], () => {})).toThrow(/A-15/);
   });
 
   it("reads the plugin list of the session's first init, null before one", () => {
