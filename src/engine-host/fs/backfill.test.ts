@@ -668,5 +668,20 @@ describe('peer messages from disk (E7)', () => {
     expect(kinds(events)).not.toContain('peer.message');
     expect(only(events, 'user.message').every((e) => e.origin !== 'peer')).toBe(true);
   });
+
+  // E11 S2(c) (docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S2(c); the tracker's E7 row on a peer record
+  // that is not `isMeta`): an interactive terminal session (entrypoint cli, 2.1.293, Haiku) messaged by a MAWS session
+  // while idle writes the peer record in the form M0's `-p` sessions wrote, so the backfill takes the same path.
+  it('reads the peer record an interactive terminal session wrote, which has the -p form: its own peer turn, the synthetic message and its companion', () => {
+    const records = loadTranscript('pass3/e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl');
+    const peer = records.find((r) => r.type === 'user' && (r.origin as { kind?: string } | undefined)?.kind === 'peer')!;
+    expect(peer).toMatchObject({ entrypoint: 'cli', isMeta: true, promptSource: 'system', turnOrigin: 'peer', origin: { kind: 'peer', name: 'repo-33', fromMode: 'prompting', body: 'E11 S2c: hello from a MAWS session. No reply needed.' } });
+    const events = mapAll(records);
+    const at = events.findIndex((e) => e.kind === 'user.message' && e.messageUuid === peer.uuid);
+    expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+    expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
+    expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: peer.uuid, seq: null, midTurn: false, fromName: 'repo-33', text: 'E11 S2c: hello from a MAWS session. No reply needed.' });
+    expect(only(events, 'turn.started').map((e) => e.origin), 'the READY turn, then the peer turn: no prompt turn opened by the message').toEqual([null, 'peer']);
+  });
 });
 // E7 end

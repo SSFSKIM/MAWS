@@ -271,7 +271,8 @@ test('pass3 e7-peer: mid-turn, the wire frame is the bare envelope right after t
  assert.deepEqual(fail.structured,{success:false,message:'No agent named \'nobody-e7\' is reachable.\nUse ListAgents to see everyone you can message.',display:'Not sent — no agent named \'nobody-e7\' is reachable.'});
 });
 test('pass3 e7-peer-transcripts: an idle peer message is a meta user record with a peer origin; a mid-turn one a queued_command attachment rendered as a system reminder',()=>{
- const dir=new URL('e7-peer-transcripts/',dir3);const files=readdirSync(dir);assert.equal(files.length,2);
+ // M0's two -p sessions, and (E11 S2(c), docs/doperpowers/plans/2026-10-06-e11-finish.md) an interactive terminal's below
+ const dir=new URL('e7-peer-transcripts/',dir3);const files=readdirSync(dir);assert.equal(files.length,3);
  for(const f of files){const text=readFileSync(new URL(f,dir),'utf8');assert.ok(!text.includes('sk-ant-'),f);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),f);}
  const aId=notes(load3('e7-peer-a'),'provenance')[0].pinnedSessionId;
  const a=readFileSync(new URL(aId+'.jsonl',dir),'utf8').trim().split('\n').map(JSON.parse);
@@ -284,6 +285,44 @@ test('pass3 e7-peer-transcripts: an idle peer message is a meta user record with
  assert.match(mid.rendered[0].content,/^<system-reminder>\nAnother Claude session sent a message while you were working:\n<cross-session-message /);
  assert.match(mid.rendered[0].content,/ After completing your current task, decide whether\/how to respond \(reply via SendMessage to the `from=` address\)\.\n<\/system-reminder>$/);
  assert.ok(a.some(r=>r.type==='queue-operation'&&r.operation==='remove'&&r.reason==='absorbed_mid_turn'&&r.commandUuid===mid.attachment.source_uuid));
+});
+// E11 S2(c) (docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5): an interactive terminal session (entrypoint cli,
+// 2.1.293, Haiku, under a scratch home) messaged by a MAWS session while idle; recorded by e2e/p1-live.spec.ts's S2(c) case,
+// redacted by the live harness. Its peer record has the -p form above (isMeta, promptSource system, turnOrigin peer), its
+// enqueue and dequeue beside it, and its own cost record at the end.
+test('pass3 e7-peer-transcripts: an interactive terminal session writes the idle peer record in the -p form',()=>{
+ const t=readFileSync(new URL('e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl',dir3),'utf8').trim().split('\n').map(JSON.parse);
+ const peer=t.filter(r=>r.type==='user'&&r.origin?.kind==='peer');assert.equal(peer.length,1);
+ assert.equal(peer[0].entrypoint,'cli');assert.equal(peer[0].version,'2.1.293');
+ assert.equal(peer[0].isMeta,true);assert.equal(peer[0].promptSource,'system');assert.equal(peer[0].turnOrigin,'peer');
+ assert.equal(peer[0].origin.body,'E11 S2c: hello from a MAWS session. No reply needed.');assert.equal(peer[0].origin.fromMode,'prompting');
+ assert.ok(peer[0].message.content.startsWith('Another Claude session sent a message:\n<cross-session-message from="uds:'));
+ assert.deepEqual(t.filter(r=>r.type==='queue-operation').map(r=>r.operation),['enqueue','dequeue']);
+ assert.equal(t.at(-1).type,'cost-state');assert.ok(t.at(-1).totalCostUSD>0&&t.at(-1).totalCostUSD<0.05);
+});
+// E11 S2(d) (Design §5; Decision Log 6): the one teammate attempt, an interactive terminal under
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (2.1.293, Haiku, a scratch home), spawning "scout" and calling ListAgents. A team
+// formed: the listing names it under Teammates, its sidecar meta names the team, and the teammate's report reaches the
+// lead as a plain user record (no origin, not isMeta) carrying a <teammate-message> envelope. The lead's transcript and
+// the teammate's sidecar as the projects folder held them (transcripts, not journals: kept in a folder of their own).
+test('pass3 e7-team-terminal: a team forms in an interactive terminal; ListAgents names the teammate under Teammates',()=>{
+ const root=new URL('e7-team-terminal/',dir3);const id='b4b10738-4b3f-4539-906b-fcb5da9669a5';
+ const files=[id+'.jsonl',id+'/subagents/agent-ascout-bcbb17e39be8c1bd.jsonl',id+'/subagents/agent-ascout-bcbb17e39be8c1bd.meta.json'];
+ for(const f of files){const text=readFileSync(new URL(f,root),'utf8');assert.ok(!text.includes('sk-ant-'),f);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),f);}
+ const lead=readFileSync(new URL(files[0],root),'utf8').trim().split('\n').map(JSON.parse);
+ const blocks=r=>Array.isArray(r.message?.content)?r.message.content:[];
+ const spawn=lead.flatMap(blocks).find(b=>b.type==='tool_use'&&b.name==='Agent');
+ assert.deepEqual([spawn.input.name,spawn.input.subagent_type,spawn.input.run_in_background],['scout','general-purpose',true]);
+ const list=lead.flatMap(blocks).find(b=>b.type==='tool_use'&&b.name==='ListAgents');
+ const listing=lead.flatMap(blocks).find(b=>b.type==='tool_result'&&b.tool_use_id===list.id).content;
+ assert.match(listing,/^This session is \S+ \[[0-9a-f]+\] — the name other sessions use to message it/);
+ assert.match(listing,/\n\nTeammates \(1\):\n {2}scout \[[0-9a-f]+\] {2}· {2}general-purpose {2}· {2}running {2}· {2}started \d+s ago$/);
+ const meta=JSON.parse(readFileSync(new URL(files[2],root),'utf8'));
+ assert.deepEqual([meta.name,meta.taskKind,meta.teamName,meta.spawnedAgentType],['scout','in_process_teammate','session-'+id.slice(0,8),'general-purpose']);
+ const report=lead.find(r=>r.type==='user'&&typeof r.message?.content==='string'&&r.message.content.includes('<teammate-message '));
+ assert.equal(report.isMeta,undefined);assert.equal(report.origin,undefined);
+ assert.match(report.message.content,/^Another Claude session sent a message:\n<teammate-message teammate_id="scout" color="blue" summary="[^"]+">\n/);
+ assert.equal(lead.at(-1).type,'cost-state');
 });
 test('pass3 e7-cron: CronCreate answers its id structured; a fire opens a turn with no user frame, its prompt only on disk (turnOrigin scheduled)',()=>{
  const c=load3('e7-cron');const at=e=>notes(c,e)[0];

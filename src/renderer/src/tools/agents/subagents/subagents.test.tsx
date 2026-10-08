@@ -10,7 +10,7 @@ import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@share
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { digest, item, record, status } from '../../../../../../test/support/builders';
-import { event, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
+import { event, recordedTeamListing, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { connectKeys } from '../../../keymap/dispatcher';
 import { instanceOf, panelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -243,7 +243,8 @@ describe('subagents lists', () => {
     expect(rowsOf('agents')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of an agent this session does not list' })]);
   });
 
-  // E7 (Design §5; Decision Log 7, 24): no recorded listing names a teammate, so the roster is a hand-built one.
+  // E7 (Design §5; Decision Log 7, 24): a hand-built roster, for what the one recorded team (below) does not hold: a
+  // teammate no agent matches, drawn as a roster row.
   it('groups the running teammates the newest listing names under Team · led by this session, a teammate no agent matches as a roster row, in one labelled group', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const b = builder();
@@ -267,6 +268,20 @@ describe('subagents lists', () => {
     const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
     expect(roster.tagName).not.toBe('BUTTON'); // no transcript to open
     expect(roster.querySelector('[data-part="title"]')?.textContent).toBe('tester');
+  });
+
+  // E11 S2(d): the listing of the team an interactive terminal formed under the teams gate on 2.1.293 (pass3/e7-team-terminal),
+  // its teammate scout matched by the sidecar's name, as the recording's sidecar meta names it.
+  it('groups the recorded team’s running teammate under Team · led by this session', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    b.result('l1', recordedTeamListing());
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
+    const [one] = sidecarsOf('subagent-sidecars');
+    await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'scout' } }] });
+    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, 'solo']);
+    expect(heading('agents')).toBe('Agents · 2 running');
   });
 
   it('titles a row by the sidecar’s name, else the dispatch description, and the second line by summary, activity, else Working', async () => {
