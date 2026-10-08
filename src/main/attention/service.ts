@@ -16,6 +16,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import { previewLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
 import type { HostSupervisor } from '../hosts/supervisor';
 
@@ -57,6 +58,8 @@ const inWords = (item: AttentionItem): AttentionItem => {
 // carries no origin (engine-host/fs/backfill.ts: meta records, interrupt markers and command output open no turn; peer
 // and task-notification turns say so).
 const humanTurn = (origin: string | null) => origin === 'human' || origin === null;
+
+const SUMMARY_MAX = 200; // E11 F2b (plan 2.6): engine text in a summary is its owner-aware preview line
 
 const count = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`;
 // The contract (§4.6); E1: the blocking `maws` asks among the lost are named questions, the rest stay approvals.
@@ -185,7 +188,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           derive(id, state, event.id, { ...base, kind: 'error', summary: failedTurnSummary(event.result, event.terminalReason, event.errors[0]) });
           break;
         case 'task.notification':
-          if (event.status === 'failed') derive(id, state, event.id, { ...base, kind: 'error', summary: `Background task failed: ${event.summary}`, request: { ...noRequest, taskId: event.taskId as TaskId } });
+          if (event.status === 'failed') derive(id, state, event.id, { ...base, kind: 'error', summary: `Background task failed: ${previewLine(event.summary, SUMMARY_MAX) ?? ''}`.trimEnd(), request: { ...noRequest, taskId: event.taskId as TaskId } });
           break;
         case 'tool.result':
           if (event.denial === 'automode-unavailable') {

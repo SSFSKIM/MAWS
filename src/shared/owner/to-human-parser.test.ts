@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parse } from './parser';
+import { parse } from './to-human-parser';
 
 // Re-expressed from the owner's mod's marked-text cases, with S0's stored-text rule for unbalanced marks.
 describe('stored owner marks', () => {

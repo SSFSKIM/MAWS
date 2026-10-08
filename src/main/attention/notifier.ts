@@ -16,6 +16,7 @@ import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { NotificationKinds, Settings } from '@shared/ipc/schema'; // C11: NotificationKinds
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
+import { previewLine } from '@shared/owner/preview';
 import type { emit as emitEvent } from '../ipc/events';
 import type { SessionReadModel } from '../sessions/read-model';
 
@@ -68,7 +69,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
     const project = record.projectId === null ? null : model.project(record.projectId);
     const notification = new Notification({
       title: project ? `${project.name} · ${record.title.text}` : record.title.text,
-      body: item.summary,
+      body: previewLine(item.summary, 200) ?? item.summary, // E11 F2b (plan 2.6)
       silent: !deps.settings().notifications.sound,
     });
     live.add(notification);

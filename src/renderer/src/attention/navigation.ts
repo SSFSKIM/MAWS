@@ -4,6 +4,7 @@
 // and opens the same way (W9: the item it names is no longer kept for a transcript jump nothing built); when main could
 // not post an OS notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
 import { isOpen } from '@shared/attention/kinds';
+import { previewLine } from '@shared/owner/preview';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
@@ -89,7 +90,7 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
   useNotices.getState().toast({
     id: toastId(attentionId as AttentionId),
     level: 'warning',
-    text: item?.summary ? `${title} needs you · ${item.summary}` : `${title} needs you`,
+    text: item?.summary ? `${title} needs you · ${previewLine(item.summary, 200) ?? item.summary}` : `${title} needs you`, // E11 F2b (plan 2.6)
     actions: [{ label: 'Open session', run: () => openInFocusedPane(id) }],
     dismissible: true,
   });

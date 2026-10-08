@@ -188,6 +188,12 @@ describe('digest fold', () => {
     expect(shown.lastAssistantLine).toBe('to human');
   });
 
+  // E11 F2b (plan 2.6): a report whose first line is only its tag previews its body
+  it('takes the owner-aware preview of a tagged answer, not its "<to-human>" line', () => {
+    const shown = run([ev('turn.started', {}), ev('assistant.block.complete', { block: { type: 'text', text: '<to-human>\nThe migration ran.\n<essential>Three tables changed.</essential>\n</to-human>' } })]);
+    expect(shown.lastAssistantLine).toBe('Three tables changed.');
+  });
+
   it('counts a child’s request as blocking the session', () => {
     expect(run([ev('permission.requested', CHILD)]).pendingRequests).toBe(1);
     expect(run([ev('subagent.started', CHILD)]).childAgents).toEqual({ active: 0, done: 0 });

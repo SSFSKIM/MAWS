@@ -193,6 +193,12 @@ describe('attention service merges broker items with the derived kinds', () => {
       expect(last().map((i) => i.summary)).toEqual(['The turn ended with an error', 'Stopped at the turn limit', 'Stopped at the budget', 'Stopped at the budget', 'The turn ended with an error (overloaded)']);
     });
 
+    it('a failed background task’s summary is its preview (plan 2.6): no owner marks', () => {
+      const { batch, last } = setup();
+      batch(event('task.notification', { taskId: 'task-9', toolUseId: null, status: 'failed', summary: '<to-human>\n<essential>npm test exited 1</essential>\n</to-human>', outputFile: null, reason: null }));
+      expect(last().map((i) => i.summary)).toEqual(['Background task failed: npm test exited 1']);
+    });
+
     it('a human prompt read from the transcript on disk (origin null, backfill.ts) retires it; engine, peer and task-notification turns do not', () => {
       const { batch, last } = setup();
       batch(failedTurn());

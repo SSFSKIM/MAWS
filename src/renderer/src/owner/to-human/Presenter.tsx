@@ -1,7 +1,7 @@
 import { useDisclosure } from '../../transcript/view/context';
 import { Chevron } from '../../transcript/view/rows/parts';
 import { Markdown } from '../../transcript/view/markdown/Markdown';
-import { parse, type Kind, type Part } from './parser';
+import { parse, type Kind, type Part } from '@shared/owner/to-human-parser';
 import './presenter.css';
 
 const labels: Record<Kind, string> = { 'to-human': 'to human', essential: 'essential', 'need-input': 'need input', insight: 'insight' };

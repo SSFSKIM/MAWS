@@ -11,7 +11,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionDigest } from '@shared/ipc/schema';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { stripAnsi } from '@shared/wire/ansi';
+import { previewLine } from '@shared/owner/preview';
 
 export const SEEN_WINDOW = 2_000;
 const LAST_LINE_MAX = 160;
@@ -54,12 +54,12 @@ export function activityForTool(toolName: string, toolInput: unknown): string {
   }
 }
 
-// The first non-blank line of a text block, ANSI stripped (a MessageDisplay hook's display form carries colour codes,
-// which the transcript strips too; W1).
+// The line a text block shows in a summary: the owner-aware preview (E11 F2b, `@shared/owner/preview`), chosen from the
+// whole block before the cap, ANSI stripped (a MessageDisplay hook's display form carries colour codes, which the
+// transcript strips too; W1).
 function firstLine(block: { type: string } & Record<string, unknown>): string | null {
   if (block.type !== 'text') return null;
-  const line = stripAnsi(text(block.text)).split('\n').find((candidate) => candidate.trim().length > 0);
-  return line === undefined ? null : line.trim().slice(0, LAST_LINE_MAX);
+  return previewLine(text(block.text), LAST_LINE_MAX);
 }
 
 // The engine reports cost as the process's running total (`result.total_cost_usd`; the probe's pass2/rewind results read
