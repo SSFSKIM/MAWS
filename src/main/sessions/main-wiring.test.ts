@@ -70,6 +70,9 @@ describe('main setup-intent and shell-environment wiring', () => {
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
     vi.stubEnv('CLAUDE_CONFIG_DIR', join(state.root, 'dock-config'));
     vi.stubEnv('MAWS_HARNESS', '');
+    // E11 §2.7: electron.vite.config.ts defines main's build stamp for its bundle; vitest does not
+    vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
+    vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
     const events = new EventEmitter();
     state.model = {
       record: () => null, allRecords: () => [],
@@ -80,7 +83,7 @@ describe('main setup-intent and shell-environment wiring', () => {
     await state.ready!();
     await state.deps!.intents.load();
   });
-  afterEach(() => { vi.unstubAllEnvs(); rmSync(state.root, { recursive: true, force: true }); });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.root, { recursive: true, force: true }); });
 
   it('lists accepted additional directories before first send and revokes them when the intent changes', async () => {
     const directory = join(state.root, 'additional');
