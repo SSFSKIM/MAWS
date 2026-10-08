@@ -14,7 +14,8 @@
 //                          the owner's step F (e2e/support/oopif-page.ts) snapshotted through `__maws_browser.agent.run`.
 //   S6 (the C3 stall row) 8 ten row Resumes, each in a fresh app launch, each bounded 30 s to first output.
 //   A-47                 a permission request on a session not in front: C5's fallback toast with no window focused,
-//                          retracted once the request is answered.
+//                          retracted once the request is answered. The fallback is forced whatever the desktop allows:
+//                          the app's Notification.show() fails in its main process, as the unsigned build's does.
 //
 // The cap: MAWS_P1_LIVE_MAX_USD (default US$1.20, S3, S4 and S6's caps summed). The run's spend is read from every
 // journal under its scratch root before each case and each launch; a case does not start once the cap is spent
@@ -798,6 +799,9 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
 
 // ---- A-47: the fallback permission toast retracts ---------------------------------------------------------------------------
 
+// What the app's Notification.show() answers in the A-47 case: macOS's refusal, as the unsigned build gets it.
+const FORCED_REFUSAL = 'refused by e2e/p1-live.spec.ts (A-47): the fallback forced';
+
 test('A-47: a permission request on a session not in front raises the fallback toast with no window focused; answering it retracts the toast', async () => {
   const note = sittingLog(OUT, 'a47');
   await relayGate(note, 'A-47');
@@ -810,6 +814,18 @@ test('A-47: a permission request on a session not in front raises the fallback t
     const [front, back] = live.ids as [AppSessionId, AppSessionId];
     await show(sceneOf(live), front);
     value(await invoke(live.page, 'settings.set', { notifications: { enabled: true, kinds: { approvals: true } } }));
+    // C5's notifier (src/main/attention/notifier.ts) falls back to the dock bounce and the page's toast when macOS has no
+    // notification support or refuses one (`failed`, as it does for the unsigned build), and stays there; a build macOS
+    // lets post delivers `os` and shows no toast, so the desktop's notification state would decide the case. No setting
+    // or MAWS_E2E seam chooses the fallback, so the case makes macOS's refusal itself, in the app's own main process
+    // through Playwright's handle (no production change; nothing reaches the desktop): every Notification's show()
+    // fails at once, and the notifier's real `failed` path takes over.
+    await live.maws.app.evaluate(({ Notification }, reason) => {
+      Notification.prototype.show = function (this: InstanceType<typeof Notification>) {
+        this.emit('failed', {}, reason);
+      };
+    }, FORCED_REFUSAL);
+    note(`A-47: the OS notification refused in the app's main process (${FORCED_REFUSAL}), so the notifier takes its fallback`);
     const focus = () => live.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
     let focused = await focus();
     if (focused !== null) {
@@ -837,7 +853,7 @@ test('A-47: a permission request on a session not in front raises the fallback t
     const notifiedAt = Date.parse(notified!.at);
     note(`A-47: window focused at the request: ${focused === null ? 'none' : `window ${focused}`}; the main view's tab ${JSON.stringify(shownTab)} (the back session not in front); permission.requested ${requested!.toolName} ${requested!.requestId}; attention.notified delivery ${notified!.delivery} at ${notified!.at}; the toast ${JSON.stringify(toastText)}; session.answer ${JSON.stringify(answer)} ${answeredAt - notifiedAt} ms after the notice; the toast gone ${goneAt - answeredAt} ms after the answer (${goneAt - notifiedAt} ms after the notice; the toast's own timeout is 6 s)`);
     expect(focused, 'no MAWS window focused').toBeNull();
-    expect(notified!.delivery, 'the unsigned build’s fallback').toBe('fallback');
+    expect(notified!.delivery, 'the notifier’s fallback (the OS notification refused)').toBe('fallback');
     expect(shownTab).not.toBe(`session:${back}`);
     expect(answer).toEqual({ outcome: 'delivered' });
     // retracted, not timed out: gone inside the toast's own 6 s (TOAST_DURATION_MS), or still shown past it until the answer
