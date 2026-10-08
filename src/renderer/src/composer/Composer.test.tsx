@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { TabSet } from '@shared/ipc/schema/layout'; // E9
-import { digest, humanTurn, record, status } from '../../../../test/support/builders'; // C12: digest
+import { digest, humanTurn, item, record, status } from '../../../../test/support/builders'; // C12: digest; E11 F2b: item
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -441,6 +441,17 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label')).toBe(`Permission mode ${label} · This model does not support auto mode`);
     await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
     expect(within(composerOf(0)).queryByRole('note', { name: 'Permission mode notice' })).toBeNull();
+  });
+
+  // E11 F2b (plan 2.4): an error seen in its session stays as the notice above the frame until dismissed or the next turn
+  it('keeps an error it has seen as its notice, and drops it once dismissed', () => {
+    live(A);
+    const error = item(A, 'error', '2026-10-08T10:00:00.000Z', { summary: 'The turn ended with an error', state: 'confirmed', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [error]), version: s.version + 1 }));
+    mount([{ index: 0, id: A }]);
+    expect(within(composerOf(0)).getByText('The turn ended with an error')).toBeTruthy();
+    act(() => useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [{ ...error, state: 'retired' }]), version: s.version + 1 })));
+    expect(within(composerOf(0)).queryByText('The turn ended with an error')).toBeNull();
   });
 
   it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {

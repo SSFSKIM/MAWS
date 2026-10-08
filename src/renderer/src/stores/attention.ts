@@ -148,6 +148,9 @@ export function selectPendingOf(state: Pick<AttentionState, 'bySession'>, appSes
   return open;
 }
 
+// Every item of the session, open or not (E11 F2b: the composer's swap keeps an error seen there as its notice).
+export const selectItemsOf = (state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): AttentionItem[] => state.bySession.get(appSessionId) ?? EMPTY;
+
 // E11 F2b (plan 2.4; owner decision 1): the session's latest error that is seen or dismissed, out of Needs you, which
 // its glyph keeps saying ("Ended with an error <when>") until the next turn retires it; null when there is none.
 const endedCache = new WeakMap<AttentionItem[], AttentionItem | null>();
