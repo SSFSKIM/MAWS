@@ -2,7 +2,7 @@
 // `../schema/side.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`: an entry
 // added there adds its name here.
 export const commands = [
-  'side.thread.open', 'side.sendToMain', 'side.question.list', 'side.question.clear',
+  'side.thread.open', 'side.sendToMain', 'side.screenshot.preview', 'side.question.list', 'side.question.clear',
 ] as const;
 
 export const events = [] as const;

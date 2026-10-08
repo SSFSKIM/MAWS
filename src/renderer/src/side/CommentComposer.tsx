@@ -2,15 +2,16 @@
 // every producer opens through E5's seam (`openCommentComposer`), naming what the comment is about, taking the comment
 // in a plain textarea (Enter sends, Shift+Enter breaks a line; no mentions or attachments: a comment is short, and the
 // composer's typed slash seam must not run here), and sending it to a side thread (the default, P-6) or to the main
-// conversation. A producer's screenshot shows as a chip the person can remove; the sheet has no screenshot of its own.
+// conversation. A producer's screenshot shows as a thumbnail the person can remove (E11 F2b, Q4); the sheet has no screenshot of its own.
 // While a side thread starts the form is disabled and Send reads Starting…; a refusal stays under the form with Retry
 // (disabled once its destination cannot send) and, while the parent runs, Send to main instead; a refusal arriving after
 // the sheet closed is a toast. Its own small store, as E5's editor sheets have, so it never
 // collides with C10's one-sheet dialog store or E1's sheets.
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ipc } from '../ipc/client';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { toast } from '../stores/notices';
@@ -87,14 +88,7 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
             {anchor.locator}
           </p>
         )}
-        {screenshot !== null && (
-          <div className="flex items-center justify-between gap-2 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui-sm text-fg-muted" data-comment-screenshot="">
-            <span>{COPY.screenshot(screenshot.width, screenshot.height)}</span>
-            <button type="button" className={QUIET} disabled={sending} onClick={() => setScreenshot(null)}>
-              {COPY.removeScreenshot}
-            </button>
-          </div>
-        )}
+        {screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={screenshot} disabled={sending} onRemove={() => setScreenshot(null)} />}
         <textarea
           aria-label={COPY.field}
           placeholder={COPY.placeholder}
@@ -122,6 +116,35 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
         )}
       </SheetForm>
     </Sheet>
+  );
+}
+
+// E11 F2b (Q4, owner-decided: "a small image preview"): the producer's screenshot as a thumbnail of itself, so the area can
+// be checked before sending, named as the chip was ("Screenshot · W × H"); main reads it through the send's own checks
+// (`side.screenshot.preview`). Until it answers, or when it refuses, the size in words stands in. Remove is its own button.
+function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: { parent: AppSessionId; screenshot: AnchorScreenshot; disabled: boolean; onRemove(): void }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void ipc.invoke('side.screenshot.preview', { appSessionId: parent, screenshot }).then((result) => {
+      if (live && result.ok) setDataUrl(result.value.dataUrl);
+    });
+    return () => {
+      live = false;
+    };
+  }, [parent, screenshot]);
+  const name = COPY.screenshot(screenshot.width, screenshot.height);
+  return (
+    <div className="flex items-end justify-between gap-2 rounded-sm border border-border bg-bg-raised p-1.5 text-ui-sm text-fg-muted" data-comment-screenshot="">
+      {dataUrl === null ? (
+        <span className="px-0.5">{name}</span>
+      ) : (
+        <img src={dataUrl} alt={name} title={name} className="max-h-24 max-w-[60%] rounded-sm border border-border object-contain" />
+      )}
+      <button type="button" className={QUIET} disabled={disabled} onClick={onRemove}>
+        {COPY.removeScreenshot}
+      </button>
+    </div>
   );
 }
 

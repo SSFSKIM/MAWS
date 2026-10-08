@@ -40,6 +40,14 @@ export const commands = {
     output: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: SendToMainDispositionSchema }),
     owner: 'main',
   },
+  // E11 F2b (Q4, owner-decided): the comment composer's thumbnail of a producer's screenshot, read by main through the
+  // send's own checks (under `<userData>/` or the session's directories, a regular image of at most 5 MiB); a refusal is
+  // `invalid_input` naming the screenshot's reason, and the composer then shows the screenshot's size in words.
+  'side.screenshot.preview': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, screenshot: AnchorScreenshotSchema }),
+    output: z.strictObject({ dataUrl: z.string() }),
+    owner: 'main',
+  },
   // The session's side questions, oldest first (none for a session this host does not hold).
   'side.question.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ exchanges: z.array(SideExchangeSchema) }), owner: 'engine-host' },
   // A new side conversation: answered and failed exchanges go; pending ones stay, so their completions find them.

@@ -40,6 +40,7 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   // E3 start: the side namespace's main commands (E3 execution document, Design §3, §8 and §9)
   registerMainHandler('side.thread.open', ({ appSessionId, from }) => relaySide(['from'], () => service.openSideThread(id(appSessionId), from)));
   registerMainHandler('side.sendToMain', (input) => relaySide([], () => service.sendToMain(input)));
+  registerMainHandler('side.screenshot.preview', ({ appSessionId, screenshot }) => relaySide([], () => service.screenshotPreview(id(appSessionId), screenshot.path))); // E11 F2b (Q4)
   // E3 end
 }
 

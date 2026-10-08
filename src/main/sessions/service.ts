@@ -35,6 +35,7 @@ import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SideThreadFrom } from '@shared/ipc/schema/side';
 import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
+import { screenshotPreview } from '../side/screenshot'; // E11 F2b (Q4)
 import { InvalidSideInput } from '../side/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
 // E3 end
@@ -725,6 +726,13 @@ export class SessionService {
     return sendToMain(await this.ready(), this.deps.userData, input);
   }
   // E3 end
+
+  // E11 F2b (Q4): `side.screenshot.preview`, the comment composer's thumbnail, under the roots the send would accept.
+  async screenshotPreview(appSessionId: AppSessionId, path: string): Promise<{ dataUrl: string }> {
+    const session = (await this.ready()).sessions.get(appSessionId);
+    const roots = session === null ? [this.deps.userData] : await screenshotRoots(this.deps.userData, session);
+    return { dataUrl: await screenshotPreview(path, roots) };
+  }
 
   private dropForkIntent(forkId: AppSessionId): Promise<void> {
     return this.serial(forkId, async () => {

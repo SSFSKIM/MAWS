@@ -982,9 +982,9 @@ describe('ipc schema validates both directions', () => {
   // E3 start: anchored comments and side questions (P1 ledger §5)
   describe('E3 entries', () => {
     const anchor = { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 };
-    it('adds the side namespace: two main commands, two engine-host commands, no event', () => {
+    it('adds the side namespace: three main commands (E11 F2b: the screenshot preview), two engine-host commands, no event', () => {
       expect(Object.fromEntries(Object.entries(side.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'side.thread.open': 'main', 'side.sendToMain': 'main', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
+        'side.thread.open': 'main', 'side.sendToMain': 'main', 'side.screenshot.preview': 'main', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
       });
       expect([...NAMES.side.commands]).toEqual(Object.keys(side.commands));
       expect(Object.keys(side.events)).toEqual([]);
