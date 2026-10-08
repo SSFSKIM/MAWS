@@ -6,6 +6,13 @@ const idleSpan = (ms: number) => (ms % 60_000 === 0 ? `${ms / 60_000} min` : `${
 // The exit's cause when main knows it (only for a supervisor this app run spawned): the code, else the signal.
 const exitCause = (code: number | null, signal: string | null) => (code !== null ? `exit ${code}` : signal);
 
+// E11 §2.7: Diagnostics' app build row, which main is answering.
+export const MAIN_BUILD_ROW = {
+  label: 'MAWS build',
+  unknown: 'MAWS · build unknown',
+  line: (version: string, commit: string, builtAt: string) => `MAWS ${version} · build ${commit} · built ${builtAt}`,
+};
+
 export const SUPERVISOR_ROW = {
   label: 'supervisor',
   unknown: 'supervisor · unknown',

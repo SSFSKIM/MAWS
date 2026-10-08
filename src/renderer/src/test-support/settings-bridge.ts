@@ -60,7 +60,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V11): Setti
     // the harness); a test replaces these to show a detached supervisor
     'engine.hostState': () => ({ state: 'ready', pid: 1111, restarts: 0, revision: 1 }),
     'pty.hostState': () => ({ state: 'ready', pid: 2222, restarts: 0, revision: 1 }),
-    'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null }),
+    'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null }),
     'host.restart': () => undefined,
     // E10 end
     // E4a start: Settings › Browser's profile select (E4b writes the profiles; none by default)

@@ -5,6 +5,8 @@ import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
+import { describeMainBuild, olderInstanceNotice, type MainBuild } from './build-identity'; // E11 §2.7
+import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
@@ -121,13 +123,30 @@ registerDeliverableScheme();
 // Only an explicit quit (Cmd+Q, the menu, the Dock) ends the app.
 app.on('window-all-closed', () => {});
 
+// E11 §2.7: main's own build (electron.vite.config.ts's stamp), logged once at startup so a log says which main ran, and
+// handed to the running instance by a second launch, which brings the running one forward and, when the launch is a
+// newer build, says the running one is older and offers to quit it (before, the second launch exited with no word).
+const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
+console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
+let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
+const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
+function answerSecondLaunch(launched: MainBuild | null): void {
+  const win = bringForward();
+  const notice = olderInstanceNotice(MAIN_BUILD, launched, builtAtLabel);
+  if (notice === null) return;
+  const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
+  void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then(({ response }) => {
+    if (response === 0) app.quit(); // the ordinary quit, its question about running sessions included
+  });
+}
+
 void startWithProfileLock(app, () => {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts();
+  const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
@@ -530,6 +549,16 @@ void startWithProfileLock(app, () => {
     if (shutdown.quitting()) return; // W-B review M6: the services are stopped or stopping (the keep-quit hold)
     if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
+  // E11 §2.7: a second launch brings this instance forward, as activate does
+  bringForward = () => {
+    if (shutdown.quitting()) return null;
+    const win = appWindows()[0] ?? openWindow();
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    app.focus({ steal: true });
+    return win;
+  };
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
   // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
   // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
@@ -547,4 +576,4 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
-});
+}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7

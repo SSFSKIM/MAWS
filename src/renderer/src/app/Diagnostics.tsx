@@ -11,6 +11,7 @@ import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { StoreDiagnostics } from './StoreDiagnostics';
 import { SupervisorRow } from './SupervisorRow'; // E10
+import { MainBuildRow } from './MainBuildRow'; // E11 §2.7
 // C7 start
 import { ResumeLauncher } from '../composer/dev/ResumeLauncher';
 // C7 end
@@ -60,6 +61,8 @@ export function Diagnostics() {
           ))}
         </div>
       </div>
+      {/* E11 §2.7: which main is answering, apart from the supervisor */}
+      <MainBuildRow />
       <HostRow label="engine host" state={engine} />
       <HostRow label="pty host" state={pty} />
       {/* E10: the supervisor (main's host.status), on a row of its own */}

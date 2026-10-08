@@ -1057,7 +1057,7 @@ describe('ipc schema validates both directions', () => {
       mode: 'detached', pid: 4321, startedAt: '2026-10-06T10:00:00.000Z', buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', liveSessions: 1, rows: 2,
       idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0,
     };
-    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
+    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
       expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.status', 'host.restart', 'host.openLog']);
@@ -1097,6 +1097,9 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('host.status', { ...status, supervisor: null, matches: null, state: 'crashed', reason: 'held_lock' }).ok).toBe(true);
       expect(validateEventPayload('host.status', { ...status, lastExit: { code: null, signal: 'SIGKILL', at: 't', interrupted: 2 } }).ok).toBe(true);
       expect(validateEventPayload('host.status', { ...status, matches: 'other' }).ok).toBe(false);
+      // E11 §2.7: main's own build, apart from the engine-host bundle's appBuildId
+      expect(validateEventPayload('host.status', { ...status, mainBuild: undefined }).ok).toBe(false);
+      expect(validateEventPayload('host.status', { ...status, mainBuild: { ...status.mainBuild, extra: 1 } }).ok).toBe(false);
       // E10 Task 2.4: the live count an incompatible supervisor reported, for the banner's N; main-owned, off the wire
       const waiting = { ...status, supervisor: null, matches: 'wire', state: 'crashed', reason: 'incompatible', waitingLiveSessions: 2 };
       expect(validateEventPayload('host.status', waiting).ok).toBe(true);

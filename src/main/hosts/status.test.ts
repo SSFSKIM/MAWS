@@ -14,6 +14,7 @@ import { startHostStatus, type HostStatusDeps } from './status';
 
 const APP_BUILD = 'b0b0b0b0b0b0b0b0';
 const APP_WIRE = 'w1w1w1w1w1w1w1w1';
+const MAIN_BUILD = { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }; // E11 §2.7
 
 const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatus => ({
   mode: 'detached', pid: 4242, startedAt: '2026-10-06T10:00:00.000Z', buildId: APP_BUILD, protocol: SOCKET_PROTOCOL, wire: APP_WIRE,
@@ -40,6 +41,7 @@ function harness(transport: HostFacts['transport'] = 'detached') {
     },
     appBuildId: () => APP_BUILD,
     appWire: () => APP_WIRE,
+    mainBuild: MAIN_BUILD,
     logPath: () => (transport === 'detached' ? '/u/supervisor/host.log' : null),
     emit: (status) => void emitted.push(status),
     register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as HostStatusDeps['register'],
@@ -68,7 +70,7 @@ describe('host.status', () => {
   it('answers with no supervisor while none has reported, and is emitted at every transition', async () => {
     const h = harness();
     await expect(h.call('host.status')).resolves.toEqual({
-      transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
+      transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, mainBuild: MAIN_BUILD, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
     });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'ready', supervisor: null, matches: null });
