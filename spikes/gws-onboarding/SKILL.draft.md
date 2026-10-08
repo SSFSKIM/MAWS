@@ -47,7 +47,11 @@ even that. This skill is for the first account.
 
 ## The wizard as the spine, the agent in the gaps
 
-The human runs `gws auth setup --login` in the terminal. In order, with who acts:
+Run `gws auth setup --login` in a tmux session so the agent can drive the TUI itself
+(`tmux send-keys` for keys, `capture-pane -p` to read; verified on the VM: account
+picker, project picker, API picker with Space to toggle and "a" for all, then the pause).
+The human only needs to watch, or to take the keyboard for the choices they care about.
+In order, with who acts:
 
 1. gcloud check, then `gcloud auth login`: the wizard opens the consent in Chrome. The
    agent drives it (account chooser, Google Cloud SDK consent, Allow). Google's own
@@ -65,9 +69,10 @@ The human runs `gws auth setup --login` in the terminal. In order, with who acts
    never adds a test user, and cannot create a client (removed when the IAP admin API
    was deprecated). It pauses asking for a Client ID and Secret. This is the agent's
    part, in Chrome, while the terminal waits: consent screen, test user, Desktop
-   client (steps 4 to 6 below). Then the human pastes the ID and secret into the
-   wizard, or the agent moves the downloaded JSON to `~/.config/gws/client_secret.json`
-   and the human answers the prompt with it.
+   client (steps 4 to 6 below). Then feed the ID and secret into the
+   wizard's prompts with `tmux send-keys -l`, read from the downloaded JSON on that
+   machine (`python3 -c` into the command substitution, never printed); the prompt
+   pre-fills from an existing `~/.config/gws/client_secret.json` if one is there.
 5. `--login` continues into `gws auth login`: the agent drives the consent (below),
    and the human types the password and approves the phone prompt the moment the
    agent says the field is on screen.
