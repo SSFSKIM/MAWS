@@ -125,6 +125,24 @@ describe('every widget renders its fixture response', () => {
     expect(Sandbox.present({ ...base, enabled_in_settings: true }).reason).toBe('Turned on in your settings but not in effect');
   });
 
+  // F2a review 1: the engine runs excluded commands outside the sandbox whatever the fallback says, so with any excluded
+  // the first read names them and the refused fallback speaks only of the other commands.
+  it('sandbox: on with excluded commands names them in the first read, and the refused fallback covers only the rest', () => {
+    const base = line<GetSandboxDialogResponse>('reads', 75);
+    const on = { ...base, enabled: true, enabled_in_settings: true };
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: false })).toMatchObject({ reason: 'Commands run only inside the sandbox', outside: null });
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: false, excluded_commands: ['docker', 'npm'] })).toMatchObject({
+      reason: 'Other commands run only inside the sandbox',
+      outside: 'Run outside it: docker, npm',
+      excluded: ['docker', 'npm'],
+    });
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: true, excluded_commands: ['docker', 'npm', 'git', 'make', 'kubectl'] })).toMatchObject({
+      reason: 'A command that fails in the sandbox may run outside it, with your permission',
+      outside: 'Run outside it: docker, npm, git and 2 more',
+    });
+    expect(Sandbox.present({ ...base, excluded_commands: ['docker'] }).outside, 'off: every command already runs outside it').toBeNull();
+  });
+
   it('diff: 0 files on the working tree; a null diff says why', () => {
     expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' });
     expect(Diff.present({ diff: null }).line).toBe('No diff · not a git repository, or a merge, rebase or cherry-pick is in progress');

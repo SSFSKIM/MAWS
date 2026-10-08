@@ -1,9 +1,10 @@
 // `/sandbox` (C11 execution document, the widget table; E11's sitting, owner-notes 00-consolidated-plan §2.2):
 // `get_sandbox_dialog` read first as "Sandbox on" or "Sandbox off", with why it is off (not turned on in your settings,
 // turned on but unavailable or not in effect, or not supported on this Mac) or, when on, what happens to a command that
-// fails inside it (the unsandboxed fallback), and a policy lock. Dependency problems stay in view; the settings behind
-// the first read, excluded commands and every non-empty restriction are under Details. Read-only: the terminal's toggle
-// writes settings.
+// fails inside it (the unsandboxed fallback), the excluded commands that run outside it whatever the fallback says
+// (named there, so "only inside" is never read without its exceptions), and a policy lock. Dependency problems stay in
+// view; the settings behind the first read, the full excluded list and every non-empty restriction are under Details.
+// Read-only: the terminal's toggle writes settings.
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSandboxDialogResponse } from '@shared/wire/control';
@@ -20,6 +21,7 @@ const text = (value: unknown): string | null => (typeof value === 'string' && va
 export interface SandboxView {
   headline: string; // Sandbox on, Sandbox off
   reason: string; // why it is off, or what happens to a command that fails inside it
+  outside: string | null; // when on, the excluded commands, which run outside it
   locked: boolean; // set by policy
   rows: { label: string; value: string }[];
   dependencies: { errors: string[]; warnings: string[] };
@@ -27,8 +29,8 @@ export interface SandboxView {
   restrictions: { label: string; values: string[] }[];
 }
 
-function reasonOf(dialog: GetSandboxDialogResponse): string {
-  if (dialog.enabled) return dialog.unsandboxed_fallback === false ? SANDBOX.fallbackRefused : SANDBOX.fallbackAllowed;
+function reasonOf(dialog: GetSandboxDialogResponse, excluded: string[]): string {
+  if (dialog.enabled) return dialog.unsandboxed_fallback === false ? (excluded.length > 0 ? SANDBOX.fallbackRefusedOthers : SANDBOX.fallbackRefused) : SANDBOX.fallbackAllowed;
   if (!dialog.supported) return SANDBOX.unsupported(text(dialog.unsupported_reason));
   if (dialog.enabled_in_settings !== true) return SANDBOX.notInSettings;
   const unavailable = text(dialog.unavailable_reason);
@@ -37,10 +39,12 @@ function reasonOf(dialog: GetSandboxDialogResponse): string {
 
 export function present(dialog: GetSandboxDialogResponse): SandboxView {
   const restrictions = (typeof dialog.restrictions === 'object' && dialog.restrictions !== null ? dialog.restrictions : {}) as Record<string, unknown>;
-  const excluded = Strings.safeParse(dialog.excluded_commands);
+  const parsed = Strings.safeParse(dialog.excluded_commands);
+  const excluded = parsed.success ? parsed.data : [];
   return {
     headline: dialog.enabled ? SANDBOX.on : SANDBOX.off,
-    reason: reasonOf(dialog),
+    reason: reasonOf(dialog, excluded),
+    outside: dialog.enabled && excluded.length > 0 ? SANDBOX.outside(excluded) : null,
     locked: dialog.locked === true,
     rows: [
       { label: SANDBOX.inSettings, value: dialog.enabled_in_settings === true ? SHARED.on : dialog.enabled_in_settings === false ? SHARED.off : '—' },
@@ -50,7 +54,7 @@ export function present(dialog: GetSandboxDialogResponse): SandboxView {
       ...(restrictions.network_managed === true ? [{ label: SANDBOX.network, value: SANDBOX.managed }] : []),
     ],
     dependencies: DependenciesSchema.catch({ errors: [], warnings: [] }).parse(dialog.dependencies),
-    excluded: excluded.success ? excluded.data : [],
+    excluded,
     restrictions: Object.entries(SANDBOX.restriction).flatMap(([key, label]) => {
       const values = Strings.safeParse(restrictions[key]);
       return values.success && values.data.length > 0 ? [{ label, values: values.data }] : [];
@@ -63,6 +67,7 @@ export function SandboxBody({ view }: { view: SandboxView }) {
   return (
     <div className="flex flex-col">
       <p className="m-0 font-semibold">{view.headline}</p>
+      {view.outside && <p className="m-0 text-ui-sm text-fg-muted">{view.outside}</p>}
       <p className="m-0 text-ui-sm text-fg-muted">{view.reason}</p>
       {view.locked && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{SANDBOX.locked}</p>}
       {problems.length > 0 && (

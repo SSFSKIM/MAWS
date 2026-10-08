@@ -147,6 +147,9 @@ export const SANDBOX = {
   unsupported: (reason: string | null) => `Not supported on this Mac${reason ? `: ${reason}` : ''}`,
   fallbackAllowed: 'A command that fails in the sandbox may run outside it, with your permission',
   fallbackRefused: 'Commands run only inside the sandbox',
+  fallbackRefusedOthers: 'Other commands run only inside the sandbox', // under `outside`: the excluded ones are named first
+  // the excluded commands, which run outside the sandbox whatever the fallback says: the first three, then a count
+  outside: (commands: string[]) => `Run outside it: ${commands.slice(0, 3).join(', ')}${commands.length > 3 ? ` and ${commands.length - 3} more` : ''}`,
   locked: 'Set by your organization; it cannot be changed here',
   details: 'Details',
   inSettings: 'In your settings',
