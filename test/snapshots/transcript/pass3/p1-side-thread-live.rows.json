@@ -139,6 +139,10 @@
       "locator": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1",
       "path": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
     },
+    "anchorFrame": {
+      "destination": "main",
+      "screenshot": true
+    },
     "at": "2026-10-06T11:03:57.322Z",
     "attachments": [
       {

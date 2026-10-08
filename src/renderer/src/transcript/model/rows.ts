@@ -9,6 +9,7 @@ import type { AskCancelReason } from '@shared/maws/ask'; // E1
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // E1
 // E3 start
 import type { Anchor, AnchorKind } from '@shared/anchor/anchor';
+import type { Destination } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 // E3 end
 import type { ListingSection } from './agent-listing'; // E7
@@ -33,6 +34,13 @@ export interface ToolClassification {
   humanDecision: boolean; // a permission.requested for this tool use was resolved by the human ('user')
 }
 
+// E11 (scale-review C scalpel-2#1): the framing X10's parse took off an anchored prompt besides its anchor: where the
+// comment went (null for a `/btw` promotion, which has no lead) and whether its lead announced a screenshot.
+export interface AnchorFrame {
+  destination: Destination | null;
+  screenshot: boolean;
+}
+
 export interface RowBase {
   id: RowId;
   turnId: TurnId | null;
@@ -48,6 +56,7 @@ export type Row = RowBase &
         // E3 start: what the prompt is about, when MAWS framed it as an anchored comment (X10; parsed from its own text by
         // `userTextOf`, which strips the framing from `text`); absent on every other prompt
         anchor?: Anchor;
+        anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }

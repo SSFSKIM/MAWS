@@ -1453,8 +1453,8 @@ export { isEngineOrigin };
 
 // E3 start: the anchored prompt's anchor, carried only when the prompt has one (the user row's field is optional, so
 // every other row reads as before)
-function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']> } {
-  return text.anchor === null ? {} : { anchor: text.anchor };
+function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']> } {
+  return text.anchor === null || text.frame === null ? {} : { anchor: text.anchor, anchorFrame: text.frame };
 }
 
 // A side thread's events within one block (a turn's, or the loose events after one turn): the first creates the

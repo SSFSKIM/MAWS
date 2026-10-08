@@ -13,6 +13,8 @@ import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
 import type { DictationSink } from '../composer/editor/controller'; // E9
+import type { Anchor } from '@shared/anchor/anchor'; // E11
+import type { AnchorFrame } from '../transcript/model/rows'; // E11
 
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
@@ -35,6 +37,7 @@ export interface InlineEdit {
   text: string;
   bodies: NonNullable<Prefill['bodies']>;
   images: NonNullable<Prefill['images']>;
+  framing?: { anchor: Anchor } & AnchorFrame; // E11 (scale-review C scalpel-2#1): an anchored bubble's framing, which the resend restores around the edited comment
 }
 
 export interface FocusTarget {

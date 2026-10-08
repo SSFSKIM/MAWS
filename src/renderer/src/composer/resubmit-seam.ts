@@ -36,7 +36,8 @@ import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
 import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
 import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
-import { serializeDraft } from './editor/serialize';
+import { serializeDraft, type Serialized } from './editor/serialize';
+import { anchoredTextOf } from '../transcript/model/user-text';
 import { precheck, submitSerialized, type Dispatch } from './editor/submit';
 import type { ContentBlock } from '@shared/graph/events';
 
@@ -78,7 +79,8 @@ export function startInlineEdit(appSessionId: AppSessionId, row: UserRow & { mes
   const rows = useTranscriptStore.getState().rows(appSessionId);
   const prefill = rowPrefill(row);
   dispose(appSessionId);
-  setInlineEdit(appSessionId, { messageUuid: row.messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [] });
+  const framing = row.anchor && row.anchorFrame ? { framing: { anchor: row.anchor, ...row.anchorFrame } } : {}; // E11: the bubble edits the comment alone
+  setInlineEdit(appSessionId, { messageUuid: row.messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [], ...framing });
   setResubmit(appSessionId, 'idle');
   return true;
 }
@@ -178,11 +180,21 @@ export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
 
 // What the edit sends: its text through the composer's serialiser as a prompt as written (a leading `!` or `#` is
 // text, never the composer's bash or memory mode), the pasted bodies framed as the terminal frames them and the images
-// re-attached, so a resend is the message as typed.
+// re-attached, so a resend is the message as typed; an anchored bubble's comment goes back in its framing.
 function serialized(appSessionId: AppSessionId, edit: InlineEdit) {
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
   const sessionId = status?.engineSessionId ?? useSessions.getState().records.get(appSessionId)?.engineSessionId ?? null;
-  return serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd: status?.cwd ?? '', literal: true });
+  return framed(serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd: status?.cwd ?? '', literal: true }), edit.framing);
+}
+
+// E11 (scale-review C scalpel-2#1): the edited comment (X10's anchored message) framed again with the lead, the
+// side-thread preamble and the `<maws_anchor/>` tag it was sent with, so the agent still knows what it is about and the
+// resent row draws its chip; the lead names a screenshot only while the resend still carries an image.
+function framed(s: Serialized, framing: InlineEdit['framing']): Serialized {
+  if (!framing || s.empty) return s;
+  const blocks = typeof s.content === 'string' ? [] : s.content.filter((block) => block.type !== 'text');
+  const text = anchoredTextOf({ ...framing, screenshot: framing.screenshot && blocks.some((block) => block.type === 'image') }, s.text);
+  return { ...s, text, content: blocks.length === 0 ? text : [...blocks, { type: 'text', text }] };
 }
 
 // The edit's one send or fork (the old composer controller's guard): `sending` holds Send, Fork, Cancel and another edit

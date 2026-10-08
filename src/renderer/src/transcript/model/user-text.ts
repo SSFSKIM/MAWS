@@ -8,9 +8,9 @@ import { slashCommandLine } from '@shared/wire/local-command';
 export { slashCommandLine } from '@shared/wire/local-command';
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
 import type { Anchor } from '@shared/anchor/anchor';
-import { parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, parseAnchoredText } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
-import type { Attachment } from './rows';
+import type { AnchorFrame, Attachment } from './rows';
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 
@@ -20,6 +20,7 @@ export interface UserText {
   placeholders: number[]; // where each pasted block's placeholder was put in `text`, the n-th block's at [n - 1]
   lines: number;
   anchor: Anchor | null; // E3: what an anchored comment is about; null for every other message
+  frame: AnchorFrame | null; // E11: the framing taken off with it, null exactly when `anchor` is
 }
 
 // The n-th match becomes a `text` attachment; its place in the text is `[Pasted text #n +L lines]`, keeping one
@@ -103,7 +104,16 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
   const body = anchored?.text ?? joined;
   const split = splitPastedSegments(slashCommandLine(body) ?? body);
   const text = split.text;
-  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null };
+  const frame = anchored ? { destination: anchored.destination, screenshot: joined.split('\n', 1)[0] === anchorLead(anchored.anchor, true) } : null;
+  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null, frame };
+}
+
+// E11 (scale-review C scalpel-2#1): `userTextOf`'s parse inverted, a comment put back in the framing it was sent in, so
+// an anchored bubble edited and resent keeps its anchor for the agent and its chip in the transcript. A `/btw`
+// promotion (no destination) had no lead or preamble to restore: its text is followed by the tag alone.
+export function anchoredTextOf(framed: { anchor: Anchor } & AnchorFrame, text: string): string {
+  const { anchor, destination, screenshot } = framed;
+  return destination === null ? `${text.trim()}\n\n${anchorTag(anchor)}` : anchoredMessage({ anchor, text, destination, screenshot });
 }
 
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these

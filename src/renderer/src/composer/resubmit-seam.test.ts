@@ -1,6 +1,8 @@
 // The resubmit state machine over a bubble edited in place (W3, B6): Send rewinds once with the seen cursor and resends
 // the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Anchor } from '@shared/anchor/anchor';
+import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -14,7 +16,9 @@ import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
 import { applyEvents, createState } from '../transcript';
+import { rowsOf } from '../transcript/model/derive';
 import { builder, uuid } from '../transcript/model/test-events';
+import { userTextOf } from '../transcript/model/user-text';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
   cancelInlineEdit,
@@ -505,6 +509,39 @@ describe('the pasted bodies an edit sends', () => {
     expect(prefill.text).toBe('compare with [Pasted text #2 +1 lines]');
     const s = serializeDraft(prefillToDoc(prefill), { sessionId: 'eng-a', cwd: '/' });
     expect([bodiesOf(s.content), s.omitted]).toEqual([['two'], 0]);
+  });
+});
+
+describe('an anchored bubble edited in place (scale-review C scalpel-2#1)', () => {
+  const ANCHOR: Anchor = { kind: 'file-line', locator: '/repo/src/x.ts#L42', label: 'x.ts:42', path: '/repo/src/x.ts', line: 42 };
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBAGADWLC/WeCk2QAAAAAElFTkSuQmCC';
+  // The transcript's user row for `content`, as the model derives it (its framing parsed off into `anchor`).
+  function anchoredRow(content: string | { type: string; [key: string]: unknown }[]) {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u-1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u-1'), content: content as never, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.end(['u-1']);
+    return rowsOf(applyEvents(createState(null, null), b.events)).find((row) => row.kind === 'user') as never;
+  }
+
+  it("a side thread's opener: the bubble edits the comment alone, and the resend carries its lead, preamble and tag again, so the resent row has its chip", async () => {
+    expect(startInlineEdit(A, anchoredRow(anchoredMessage({ anchor: ANCHOR, text: 'Why so wide?', destination: 'thread', screenshot: false })), 'blocked')).toBe(true);
+    expect(edit()!.text).toBe('Why so wide?');
+    setInlineText(A, 'Why so narrow?');
+    expect(await sendInlineEdit(client, A)).toBe('sent');
+    const { content } = sends()[0] as { content: string };
+    expect(content).toBe(anchoredMessage({ anchor: ANCHOR, text: 'Why so narrow?', destination: 'thread', screenshot: false }));
+    expect(parseAnchoredText(content)).toEqual({ anchor: ANCHOR, text: 'Why so narrow?', destination: 'thread' });
+    expect(userTextOf(content)).toMatchObject({ anchor: ANCHOR, text: 'Why so narrow?' });
+  });
+
+  it('a comment sent to main with its screenshot: the image re-attached first and the lead still says so', async () => {
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } };
+    startInlineEdit(A, anchoredRow([image, { type: 'text', text: anchoredMessage({ anchor: ANCHOR, text: 'Too wide', destination: 'main', screenshot: true }) }]), 'blocked');
+    setInlineText(A, 'Far too wide');
+    expect(await sendInlineEdit(client, A)).toBe('sent');
+    const { content } = sends()[0] as { content: { type: string; text?: string }[] };
+    expect(content).toEqual([image, { type: 'text', text: anchoredMessage({ anchor: ANCHOR, text: 'Far too wide', destination: 'main', screenshot: true }) }]);
   });
 });
 
