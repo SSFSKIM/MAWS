@@ -229,3 +229,30 @@ a dialog that has no listener of its own, so the dialog closed 1 ms after it ope
 (the held callback was never called; the wrap, its route and the lease were all in place). S1 ran on the bare Electron
 binary and never saw it. The e2e harness (Playwright) cannot observe the held route for the same reason; the dialog
 pins are unit tests (src/main/browser/cua/dialogs.test.ts, agent/dialogs.test.ts) plus this live run.
+
+==== S3: the vendor's plain screenshot is a screencast first (E13 whole-branch review), run 2026-10-08 ====
+Question: the vendor's tab.screenshot() (tab_screenshot, css mode) and the AX state's screenshot start a screencast,
+take the first fresh Page.screencastFrame, stop and ack it, and capture with Page.captureScreenshot only when no frame
+comes within 2 s (vendor browser-service.mjs BS:43892-44050). Does a MAWS-shaped view yield frames, placed and parked?
+  node_modules/.bin/electron spikes/cua-backend/s3-screencast.mjs        (exit 0, ~10 s; run twice, same shape)
+Per view, three rounds of the vendor's sequence on a static page (frame: ms to the first frame, else the 2 s lapse;
+fresh: its metadata.timestamp is at or after the start, the vendor's own test; capture: Page.captureScreenshot's ms):
+  placed (a shown, transparent, inactive window; the page reads hidden)   no frame (2000), frame 21 ms, frame 18 ms
+  placed + Emulation.setFocusEmulationEnabled {enabled:true}              frame 32, 20, 20 ms (page reads visible)
+  placed in a never-shown window                                          no frame (2000), frame 17 ms, frame 18 ms
+  parked (never added to a window, 1280 x 800: MAWS's parking)            no frame in all three rounds (2000 each)
+  parked + focus emulation                                                frame 22, 20, 18 ms (page reads visible)
+Every frame that came was fresh; Page.captureScreenshot took 18-78 ms on every view. Verdict: a view yields screencast
+frames once its page reads visible; the vendor sends Emulation.setFocusEmulationEnabled {enabled:true} on every attach
+(BS:48115-48131), so on the real route a parked, never-placed agent tab answers the screencast in about 20 ms and never
+pays the 2 s fallback. MAWS's lease reset turns focus emulation off on release; the vendor's next attach turns it on
+again before any screenshot, so the rule holds per lease. Were a host ever to screenshot without focus emulation, a parked
+tab would pay 2 s per screenshot (then capture): the dependency is recorded here, not as debt.
+
+Live, the same day, on a plain MAWS (serve-plain.cjs, own userData under /tmp, a harness build of the final fix wave at f3519ff8) with
+cua serve from cua-wt-13 (CUA_HOME=/tmp/cua-h13), one agent tab (unselected, so parked): createBrowserTab, a locator
+click, then tab.screenshot() three times: 74, 66, 66 ms, each a 1280 x 800 JPEG. A trace of the lease's commands showed
+per screenshot Page.startScreencast {maxHeight:800, maxWidth:1280} forwarded about 50 ms after it arrived (the cursor's
+hide and its grace), the first frame 13 ms later, stop and ack; one "screenshot" activity each (three rows). After the
+cell the vendor took one more screencast, unbounded (no maxWidth/maxHeight, device mode): its response-metadata capture
+of the surface (BS:64978-65075, `_meta["codex/browserUse"]`), which MAWS neither hides the cursor for nor rows.
