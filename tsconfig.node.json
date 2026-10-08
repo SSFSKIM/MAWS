@@ -29,10 +29,13 @@
     "src/renderer/src/side/copy.ts",
     "src/renderer/src/composer/submit/submit-state.ts",
     // E3 end
-    // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest, and
-    // test/support/scratch-env.test.ts the e2e launches' environments
+    // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest,
+    // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
+    // sittings' pure parts and the OOPIF page (Task 6.1)
     "e2e/support/processes.ts",
-    "e2e/support/scratch-env.ts"
+    "e2e/support/scratch-env.ts",
+    "e2e/support/p1-live.ts",
+    "e2e/support/oopif-page.ts"
     // E11 end
   ]
 }
