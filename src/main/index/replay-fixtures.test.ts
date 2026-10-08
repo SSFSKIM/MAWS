@@ -49,9 +49,10 @@ describe('replay fixtures in the index', () => {
     const w1 = ['w1-compact', 'w1-hooks-blocking', 'w1-steer-next-cancelled', 'w1-steer-next-disk', 'w1-steer-next-interrupted', 'w1-steer-next-then-now', 'w1-terminal-queued']; // W1's disk records under a scratch config home
     const wave7 = ['dw7-hooks-flipped']; // debt wave 7: blocking hooks with W1's forms flipped
     const e1 = ['p1-maws-ask-async']; // E1 M2: an async maws ask answered by its steer, the disk path's record
+    const e11 = ['p1-maws-ask-interrupt']; // E11 S1: a blocking maws ask withdrawn by the interrupt, the disk path's record
     const e2 = ['p1-maws-artifacts']; // E2 M2: the artifact tools' session, the disk path's record
     const e4c = ['p1-maws-browser']; // E4c M4: the browser tools' session, the disk path's record
-    expect(transcripts.map((f) => f.name).sort()).toEqual(['interrupt-marker', 'rewind-real', 'rewind-terminal', 'sdk-unended', 'subagent-parent', 'torn-tail', ...w1, ...wave7, ...e1, ...e2, ...e4c].sort());
+    expect(transcripts.map((f) => f.name).sort()).toEqual(['interrupt-marker', 'rewind-real', 'rewind-terminal', 'sdk-unended', 'subagent-parent', 'torn-tail', ...w1, ...wave7, ...e1, ...e2, ...e4c, ...e11].sort());
     expect(transcripts.find((f) => f.name === 'p1-maws-ask-async')?.sessionId).toBe('ccd2c390-f412-47ce-a480-87c2524d643e'); // its first record's
     expect(transcripts.find((f) => f.name === 'subagent-parent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
     for (const fixture of fixtures) expect(existsSync(fixture.path), fixture.path).toBe(true);
