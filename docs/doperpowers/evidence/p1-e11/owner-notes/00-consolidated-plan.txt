@@ -180,6 +180,11 @@ F1 (part). A plain sidebar click already replaces the current session tab (W12/I
 5. Extensions Browse: the engine's configured sources only; sandbox toggles deferred to a separate decision.
    Resume scope: current project with All projects one click away. (Architect's picks, stated to the owner;
    reversible.)
+6. Browser profile settings (answered 2026-10-08, after the sitting): clicking the profile pill in a Browser tab
+   opens a floating popover anchored to the pill (profile name, signed-in state, switch profile, re-import;
+   dismissed on click-away); nothing leaves the current page. Not a sidebar tab. Owner's choice among popover,
+   sidebar tab and both. Belongs to the in-app browser ticket owned by the cua_repl session (3.E), not to E11's
+   fix waves; E11 records it against owner-results rows D6 and N4b.10.
 
 == 4b. Findings relayed from the joint sitting (fork session maws-5d, notes in
       /tmp/maws-owner-joint-sitting-1044c16c.txt, copied here when the sitting ends)
@@ -212,7 +217,7 @@ Owner requirements and taste, verbatim where given:
   the main tab) were handed to that session to fold into its ticket.
 - Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
   either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
-  tab; floating widget or sidebar tab, the owner has not chosen.
+  tab. Answered after the sitting: the floating popover anchored to the pill (§4 decision 6).
 - Deliverables viewer (taste): "로딩하는건 좋은데 사이즈가 adjustment가 너무 부족한것 같다": small images and videos sit
   in large, mostly empty viewers; fit, zoom and size adjustment are insufficient.
 
