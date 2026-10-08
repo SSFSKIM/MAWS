@@ -13,7 +13,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
-import { placeholdersOf, untaggedUserText } from '../../model/user-text';
+import { copiedUserText, placeholdersOf } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
 // E4d start
 import { useRowSession } from '../context';
@@ -101,7 +101,7 @@ export function UserRow({ row }: { row: UserRowData }) {
       </div>
       <div className="transcript-user-actions">
         <span>{clockTime(row.at)}</span>
-        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
+        <button type="button" onClick={() => copyText(copiedUserText(row))}>
           Copy
         </button>
         {row.editable && !row.pending && (

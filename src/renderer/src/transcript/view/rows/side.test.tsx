@@ -3,7 +3,7 @@
 // screenshot; the row reads opened, finished with the turn count, or failed, and its Open shows the thread in the
 // parent's Side pane.
 import { cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -11,6 +11,7 @@ import { rowsOf } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
 import type { Row } from '../../model/rows';
 import { builder, uuid } from '../../model/test-events';
+import { serializeRows } from '../../model/serialize';
 import { renderRow, rowOf } from './test-support';
 
 afterEach(cleanup);
@@ -36,6 +37,20 @@ describe('the anchored prompt', () => {
     expect(content).not.toContain('maws_anchor');
     expect(content).not.toContain('Comment on');
     expect(container.querySelectorAll('img.transcript-attachment-image')).toHaveLength(1);
+  });
+
+  it('Copy and the markdown export keep what the chip names: the anchor in words, then the comment (scale-review C scalpel-2#2)', () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: anchoredMessage({ anchor: ANCHOR, text: 'Why so wide?', destination: 'thread', screenshot: false }), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const row = rowOf(rowsOf(applyEvents(createState(null, null), b.events)), 'user');
+    const words = 'Comment on "x.ts:42" (file /repo/src/x.ts, line 42):\nWhy so wide?';
+    renderRow(row);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith(words);
+    expect(serializeRows([row])).toBe(`**You**\n\n${words}`);
   });
 
   it('an anchor with no path is a label, not a button', () => {

@@ -8,7 +8,7 @@ import { previewHidesBody } from './rows'; // E7
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import type { Cell, Row } from './rows';
-import { untaggedUserText } from './user-text';
+import { copiedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
 
 const indent = (text: string, by: string) => text.split('\n').map((line) => `${by}${line}`).join('\n');
@@ -27,7 +27,7 @@ function cellLines(cell: Cell, by: string): string[] {
 function partOf(row: Row): string | null {
   switch (row.kind) {
     case 'time': return `### ${row.label}`;
-    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments, row.placeholders)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
+    case 'user': return `**You**\n\n${copiedUserText(row)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
     case 'assistant_text': return row.markdown;
     case 'divider': return `*${dividerCopy({ ...row, durationMs: row.summary.durationMs ?? Date.parse(row.endedAt ?? row.startedAt) - Date.parse(row.startedAt) })}*`;
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');

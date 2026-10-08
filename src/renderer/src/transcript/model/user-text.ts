@@ -56,6 +56,15 @@ export function placeholdersOf(text: string, attachments: Attachment[], placehol
   });
 }
 
+// A user row as Copy and the markdown export give it (scale-review C scalpel-2#2): its text untagged, after the anchor
+// in words when it is an anchored comment (the lead X10 writes; for an anchorless `/btw` promotion its label), so what
+// the chip names is not lost.
+export function copiedUserText(row: { text: string; attachments: Attachment[]; placeholders: number[]; anchor?: Anchor }): string {
+  const text = untaggedUserText(row.text, row.attachments, row.placeholders);
+  if (row.anchor === undefined) return text;
+  return `${row.anchor.kind === 'none' ? `${row.anchor.label}:` : anchorLead(row.anchor, false)}\n${text}`;
+}
+
 // Copy and export: each recorded placeholder replaced by its body, untagged (the engine's own behaviour); text typed
 // in the placeholder's shape stays as typed.
 export function untaggedUserText(text: string, attachments: Attachment[], placeholders: number[]): string {
