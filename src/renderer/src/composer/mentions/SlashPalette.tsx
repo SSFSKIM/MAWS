@@ -4,7 +4,7 @@
 // registered widget opens; a headless command is inserted as `/<name> ` for the engine to parse from the prompt; a MAWS
 // action runs; an unavailable row stays listed and disabled with its hint.
 import type { Editor, Range } from '@tiptap/core';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'; // C11: useEffect, useState
+import { useMemo, useState, useSyncExternalStore } from 'react'; // C11: useState
 import { enabledActions, runAction, subscribeActions } from '../../keymap/actions-runtime';
 import { mawsItems, ORIGIN_LABEL, ORIGIN_ORDER, slashItems, type SlashItem, type SlashOrigin } from './items'; // C11: ORIGIN_ORDER, SlashOrigin
 import { GroupLabel, Listbox, useListKeys, type PopupItem, type PopupProps } from './popup'; // C11: GroupLabel
@@ -76,13 +76,10 @@ export function SlashPalette(props: PopupProps) {
     setActive(rows.indexOf(ranked[0]));
   }
   const optionId = (i: number) => `composer-slash-${i}`;
-  // the chosen row may sit in a group below the fold: keep it in view, on open and as the arrows move
-  useEffect(() => {
-    document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-  }, [active, rows]);
   if (rows.length === 0) return null;
+  // the chosen row may sit in a group below the fold: the list keeps it in view, on open and as the arrows move
   return (
-    <Listbox label="Commands" activeId={optionId(active)} size="slash">
+    <Listbox label="Commands" activeId={optionId(active)} size="slash" revealKey={rows}>
       {groups.map((group) => (
         <div key={group.origin} role="group" aria-label={ORIGIN_LABEL[group.origin]}>
           <GroupLabel>{ORIGIN_LABEL[group.origin]}</GroupLabel>

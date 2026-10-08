@@ -19,6 +19,7 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -647,6 +648,22 @@ test.describe('sessions', () => {
     await expect(editor(page), 'W9 (H3): the Overview must not obscure the composer that takes focus').toBeFocused();
     await page.keyboard.type('a thought from the Overview');
     await expect(editor(page)).toHaveText('a thought from the Overview');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  // E11 F2b (plan 2.1): an unstarted New chat's composer is centred in its pane, so the room above and below the caret
+  // are alike and neither holds the palette's 384px; the old bottom-first palette hung past the window's foot and its
+  // row reveal scrolled the whole window. Now it opens above, capped by the room there, and moves nothing
+  // (support/palette-geometry.ts; shell.spec.ts runs the same over a started session's docked composer).
+  test('the slash palette opens above an unstarted New chat’s centred composer and moves nothing', async () => {
+    const { page, maws } = await begin({ fixtures: [] });
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 640 }));
+    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    const overview = page.getByRole('dialog', { name: 'Overview' });
+    await overview.getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(overview).toHaveCount(0);
+    await expect(editor(page)).toBeFocused();
+    await slashPaletteMovesNothing(page, 'an unstarted New chat');
     expect(maws.consoleErrors()).toEqual([]);
   });
 

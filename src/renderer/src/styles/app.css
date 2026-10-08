@@ -79,6 +79,18 @@
     height: 100%;
   }
 
+  /* E11 F2b (plan 2.1): the window is the workstation's viewport, never a scroller; the panes, the transcript and the
+     lists scroll inside it. The body and #root clip rather than hide, so nothing they hold can grow the document's
+     scrollable area for a scrollIntoView to move. */
+  html {
+    overflow: hidden;
+  }
+
+  body,
+  #root {
+    overflow: clip;
+  }
+
   body {
     margin: 0;
     background: var(--bg);

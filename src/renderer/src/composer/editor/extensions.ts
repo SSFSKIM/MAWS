@@ -87,6 +87,10 @@ const PastedNumbers = Extension.create({
   },
 });
 
+// F2b (plan 2.1): both popups are fixed overlays above the caret, never flipped below; `suggestionRenderer` applies the
+// placement itself, these say the same to the plugin's Floating UI.
+const ABOVE = { placement: 'top-start', flip: false, floatingUi: { strategy: 'fixed' } } as const;
+
 export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
   const at: Omit<SuggestionOptions<PopupItem, PopupItem>, 'editor'> = {
     char: '@',
@@ -96,6 +100,7 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
     items: () => [],
     command: run,
     render: suggestionRenderer(AtMenu, env, atKey),
+    ...ABOVE,
   };
   const slash: Omit<SuggestionOptions<PopupItem, PopupItem>, 'editor'> = {
     char: '/',
@@ -104,6 +109,7 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
     items: () => [],
     command: run,
     render: suggestionRenderer(SlashPalette, env, slashKey),
+    ...ABOVE,
   };
   return [
     ComposerDocument,

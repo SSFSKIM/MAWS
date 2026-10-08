@@ -12,6 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page, type T
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
@@ -125,6 +126,24 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
       const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
       return [value.version, value.current, Object.keys(value.sets).sort()];
     }, { message: 'version 2, one set per project with tabs' }).toEqual([2, 'none', ['none', 'proj-codex-somersault', 'proj-maws']]);
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// E11 F2b (plan 2.1): a started session's composer, docked at the pane's foot, in a window too short for the palette's
+// 384px cap above it: the palette opens above the editor, capped by the room there, and moves nothing
+// (support/palette-geometry.ts; sessions.spec.ts runs the same over an unstarted New chat's centred composer).
+test('the slash palette opens above a started session’s composer and moves nothing', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { app, page } = maws;
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 440 }));
+    await (await sidebarRow(page, NORTH)).click();
+    await expect(page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' })).toBeVisible();
+    await slashPaletteMovesNothing(page, 'a started session');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
