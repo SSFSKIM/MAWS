@@ -1,0 +1,8 @@
+Command: pnpm e2e:c7 (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== e2e-c7 head 59c9fdf start 2026-10-08T19:58:30Z load { 14.85 25.23 25.29 }
+eligible: load 14.85 after 0s
+slot slot.1 acquired at 12:58:30 load { 14.85 25.23 25.29 }
+  29 passed (1.1m)
+== e2e-c7 exit 0 end 2026-10-08T20:00:05Z

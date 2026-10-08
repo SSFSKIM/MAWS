@@ -1,0 +1,14 @@
+Command: pnpm e2e:panel (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== e2e-panel head 59c9fdf start 2026-10-08T18:38:35Z load { 17.93 21.48 23.53 }
+eligible: load 17.93 after 0s
+slot slot.1 acquired at 11:38:35 load { 17.93 21.48 23.53 }
+  ✘  22 e2e/panel.spec.ts:954:7 › the product host over a scenario derived from C5’s records › the product host rests on the summary and follows the focused session (6.5s)
+    Error: expect(locator).toContainText(expected) failed
+    Expected substring: "Trust this folder to see PR state"
+    Received string:    "Push state1 ahead of origin/main"
+  1 failed
+  22 passed (47.5s)
+[ELIFECYCLE] Command failed with exit code 1.
+== e2e-panel exit 1 end 2026-10-08T18:39:55Z

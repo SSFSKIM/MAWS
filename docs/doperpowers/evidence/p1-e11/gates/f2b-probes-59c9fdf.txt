@@ -1,0 +1,9 @@
+Command: pnpm test:probes (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== probes head 59c9fdf start 2026-10-08T18:32:24Z load { 27.75 27.72 25.99 }
+# tests 176
+# pass 176
+# fail 0
+# skipped 0
+== probes exit 0 end 2026-10-08T18:32:24Z

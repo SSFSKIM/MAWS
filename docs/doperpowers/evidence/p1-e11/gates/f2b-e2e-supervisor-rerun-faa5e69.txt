@@ -1,0 +1,12 @@
+Command: pnpm e2e:supervisor (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: faa5e69
+--- summary lines
+== e2e-supervisor head faa5e69 start 2026-10-08T20:11:08Z load { 6.70 14.09 19.24 }
+eligible: load 6.70 after 0s
+slot slot.1 acquired at 13:11:08 load { 6.70 14.09 19.24 }
+  ✘  2 e2e/supervisor.spec.ts:374:5 › (b) G2: a kept session streams on while the app is closed; the relaunch reconnects, its undelivered tail reaches main, and it ends as a control run does (8.3s)
+    Error: page.evaluate: Target page, context or browser has been closed
+  1 failed
+  7 passed (1.5m)
+[ELIFECYCLE] Command failed with exit code 1.
+== e2e-supervisor exit 1 end 2026-10-08T20:13:04Z

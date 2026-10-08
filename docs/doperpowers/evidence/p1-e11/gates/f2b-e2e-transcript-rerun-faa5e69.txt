@@ -1,0 +1,8 @@
+Command: pnpm e2e:transcript (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: faa5e69
+--- summary lines
+== e2e-transcript head faa5e69 start 2026-10-08T20:14:12Z load { 7.20 10.86 16.86 }
+eligible: load 7.20 after 0s
+slot slot.1 acquired at 13:14:12 load { 7.20 10.86 16.86 }
+  31 passed (3.0m)
+== e2e-transcript exit 0 end 2026-10-08T20:17:43Z

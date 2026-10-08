@@ -1,0 +1,5 @@
+Command: pnpm typecheck (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 23fccfe
+--- summary lines
+== typecheck head 23fccfe start 2026-10-08T20:24:40Z load { 12.43 8.73 12.28 }
+== typecheck exit 0 end 2026-10-08T20:26:03Z

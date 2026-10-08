@@ -1,0 +1,5 @@
+Command: pnpm lint (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 23fccfe
+--- summary lines
+== lint head 23fccfe start 2026-10-08T20:26:03Z load { 61.58 29.08 19.94 }
+== lint exit 0 end 2026-10-08T20:26:31Z
