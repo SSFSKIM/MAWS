@@ -162,19 +162,24 @@ F1 (part). A plain sidebar click already replaces the current session tab (W12/I
     with All projects one click away. Claude Desktop's picker rows show title, branch, folder badge and time (no
     message count). Report: F-tabs-and-resume.txt §4.2.
 
-== 4. Owner decisions still open (product or taste; recommendations first)
+== 4. Owner decisions (answered 2026-10-08 02:55 PDT; binding for the wave and the P2 cut)
 
-1. Error cards: clear when the notice is viewed in the opened session, plus Dismiss (recommended), or only on
-   explicit Dismiss.
-2. Tabs: clean unpinned non-session views are replaced too; pins and unsaved work stay visibly (recommended), or
-   literally only a pin ever preserves a tab with dirty work recoverable off-strip.
-3. To-human: a choice click sends immediately through the queue (recommended) or fills the composer and waits for
-   Enter; essential is read on explicit Mark read (recommended) or on view.
-4. Sessions: action-driven startup with saved facts shown instantly (recommended) or warm the foreground session
-   on open; a terminal-held session stays read-only with an explicit Take over (recommended).
-5. Extensions Browse: the engine's configured sources only (recommended) or a broad discovery feed; sandbox
-   toggles: defaults for new MAWS sessions only, or shared Claude Code settings.
-6. Resume scope: current project with All projects one click away (recommended) or all folders first.
+1. Error cards: clear when the notice is viewed in the opened session, plus an explicit Dismiss; the session row
+   keeps an "ended with an error" badge with the time. (Owner: yes.)
+2. Opening a session replaces the current main tab, whatever the current tab shows; the explicit way to a new tab
+   is the session's right-click menu "Open in new tab" (⌘-click and middle-click stay as shortcuts). Pins and
+   unsaved work stay visibly, as 2.5 says. (Owner's words: "when opening a session, it currently opens in a new
+   tab; instead replace the current tab; the user can right-click to open a certain session in a new tab". The
+   rule is about the main tab, not about the sidebar.)
+3. To-human: a choice click sends immediately as the next prompt through the queue. Free text is written inline
+   on the question card itself (a Reply field in the card, opened by its Reply action), sent from there through
+   the same path, after which focus returns to the composer; the composer is never used for the answer and its
+   draft is untouched. Essential is read on explicit Mark read (architect's pick; not asked).
+4. Sessions: an engine starts on the owner's first action that needs it (Send, a chip change, a fresh read);
+   saved facts show instantly before that; a terminal-held session stays read-only with an explicit Take over.
+5. Extensions Browse: the engine's configured sources only; sandbox toggles deferred to a separate decision.
+   Resume scope: current project with All projects one click away. (Architect's picks, stated to the owner;
+   reversible.)
 
 == 5. Routing
 
