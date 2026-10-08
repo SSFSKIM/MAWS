@@ -7,7 +7,8 @@
 //     LABEL_LOOKUP_MS (looked up through the same lease, so it is attributed as the agent's; a failure leaves null and is
 //     not retried);
 //   - typed characters as a count, coalesced per TYPED_COALESCE_MS, and a named key (Enter, Tab, …) on its own;
-//   - a screenshot, a download's end, a dialog's answer, a tab opened or closed.
+//   - a screenshot (a capture, or a screencast's first frame: connection.ts), a download's end, a dialog's answer, a tab
+//     opened or closed.
 // Typed text never leaves main. At most ACTIVITY_MAX_PER_SECOND activities per tab reach the windows (mouse moves are
 // never activities, so a storm of them costs nothing; a burst beyond the bound is dropped). What was told is kept per
 // session, the last BROWSER_ACTIVITIES_KEPT for the app's life, for `browser.agent.activities.list`: a window lists them

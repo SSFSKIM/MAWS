@@ -5,10 +5,10 @@
 // failed; Reveal in Finder shows the saved file. Under the e2e alone, `MAWS_E2E_SAVE_PATH` names the folder the file is
 // saved into without the dialog. A download from no tab of ours is cancelled.
 //
-// E13 (the in-app browser spec of 2026-10-08, "Downloads"): a download from a tab under a cua lease is the agent's,
-// saved without a dialog in the Downloads folder under its own name, " (1)", " (2)"… before its extension when the name
-// is taken there or by a download still in flight, and reported through `agent` (cua/downloads.ts: the host, the
-// windows, the deliverable). Its line and Reveal in Finder are a person's download's.
+// E13 (the in-app browser spec of 2026-10-08, "Downloads"): a download from a tab under a cua lease that the person does
+// not hold is the agent's, saved without a dialog in the Downloads folder under its own name, " (1)", " (2)"… before its
+// extension when the name is taken there or by a download still in flight, and reported through `agent`
+// (cua/downloads.ts: the host, the windows, the deliverable). Its line and Reveal in Finder are a person's download's.
 import { existsSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type { DownloadItem, Session, WebContents } from 'electron';
@@ -64,7 +64,7 @@ export class Downloads {
     if (!entry) return item.cancel();
     const { tabId, appSessionId } = entry.tab;
     // E13: the agent's, through cua: no dialog, the folder's next free name, reported as it goes
-    const agent = this.deps.agent?.owns(tabId) ? this.deps.agent : undefined;
+    const agent = this.deps.agent?.owns(entry) ? this.deps.agent : undefined;
     if (agent) {
       const exists = this.deps.exists ?? existsSync;
       const path = uniqueDownloadPath(this.deps.saveDir ?? this.deps.downloadsDir(), filename, (candidate) => this.inFlight.has(candidate) || exists(candidate));

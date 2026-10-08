@@ -16,8 +16,8 @@
 // vendor's moveMouse) adds a `move` so the pointer shows where the agent aims before a locator click, and the cursor is
 // hidden when the lease is released. An agent's screenshot never carries the overlay (Design §9, which E4c's tools kept
 // with a hiding stylesheet and a `hide` before `capturePage`; the spec's "Cursor", M4 fix wave): before a
-// `Page.captureScreenshot` is forwarded the cursor is hidden and the overlay's grace waited out; the agent's next mouse
-// event draws it again.
+// `Page.captureScreenshot`, or the `Page.startScreencast` the vendor's plain screenshot begins with, is forwarded the
+// cursor is hidden and the overlay's grace waited out; the agent's next mouse event draws it again.
 import type { AgentCursor } from '../agent/cursor';
 import type { TabControls } from '../agent/control';
 import type { TabEntry, TabStore } from '../tabs';

@@ -98,6 +98,69 @@ describe('the takeover gate through a lease', () => {
   });
 });
 
+describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spec's final-review rule)", () => {
+  it('its commands read: an idle tab stays idle, and while the person holds the tab they pass at once and leave it human', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    await t.send('Page.startScreencast', { format: 'jpeg', quality: 80, everyNthFrame: 1 });
+    await t.send('Page.screencastFrameAck', { sessionId: 1 });
+    await t.send('Page.stopScreencast');
+    expect(t.entry.tab.control).toBe('idle');
+    h.store.setControl(t.entry.tab.tabId, 'human');
+    const started = Date.now();
+    expect(await t.send('Page.startScreencast', { format: 'jpeg' }, 500)).toEqual({ echoed: 'Page.startScreencast' });
+    expect(await t.send('Page.stopScreencast', {}, 500)).toEqual({ echoed: 'Page.stopScreencast' });
+    expect(Date.now() - started).toBeLessThan(380); // never held for the person
+    expect(t.entry.tab.control).toBe('human');
+  });
+
+  it('Page.startScreencast is forwarded only after the cursor\'s hide and its grace', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 6 });
+    await t.host.request('cursor.move', { tabId: t.id, x: 40, y: 50 });
+    const page = h.page(t.entry);
+    const order: [string, number][] = [];
+    const send = page.send.bind(page);
+    page.send = (channel: string, message: unknown) => {
+      order.push([(message as { kind: string }).kind, Date.now()]);
+      send(channel, message);
+    };
+    const command = t.cdp.sendCommand.bind(t.cdp);
+    t.cdp.sendCommand = (method: string, params?: unknown, sessionId?: string) => {
+      order.push([method, Date.now()]);
+      return command(method, params, sessionId);
+    };
+    await t.send('Page.startScreencast', { format: 'jpeg' });
+    const shot = order.filter(([what]) => what === 'hide' || what === 'Page.startScreencast');
+    expect(shot.map(([what]) => what)).toEqual(['hide', 'Page.startScreencast']);
+    expect(shot[1]![1] - shot[0]![1]).toBeGreaterThanOrEqual(CURSOR_HIDE_GRACE_MS - 5); // timer granularity
+  });
+
+  it('one Screenshot row per screenshot: at the first frame after a start, or at a capture, so the 2 s fallback is one row', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    const frame = (sessionId: number) => t.cdp.event('Page.screencastFrame', { data: 'AAAA', sessionId, metadata: { timestamp: Date.now() / 1000 } });
+    // the screencast answers: frames after the start, one row
+    await t.send('Page.startScreencast', { format: 'jpeg' });
+    frame(1);
+    frame(2);
+    await t.send('Page.stopScreencast');
+    await t.send('Page.screencastFrameAck', { sessionId: 2 });
+    frame(3); // late, after the stop
+    await settle();
+    expect(h.activities().map((a) => a.activity)).toEqual([{ kind: 'tabOpened', url: 'about:blank' }, { kind: 'screenshot' }]);
+    // no frame within the vendor's 2 s: it stops the screencast and captures instead, one row
+    await t.send('Page.startScreencast', { format: 'jpeg' });
+    await t.send('Page.stopScreencast');
+    await t.send('Page.captureScreenshot', { format: 'jpeg' });
+    await settle();
+    expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'screenshot')).toHaveLength(2);
+    // the frames reached the host as any event does
+    expect(t.host.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.screencastFrame')).toHaveLength(3);
+  });
+});
+
 describe('the agent\'s activity, told to the windows', () => {
   it('a tab opened, a navigation, a labelled click, typing as a count (never the text), a key, a screenshot, a tab closed; in the connection\'s session', async () => {
     const h = harness({ presence: true });
@@ -192,7 +255,7 @@ describe('the file chooser and the agent\'s downloads', () => {
   it('reports a leased tab\'s download to its host in Chrome\'s shape, tells the windows its end, and records a completed one only', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h);
-    expect(h.backend.downloads.owns(t.entry.tab.tabId)).toBe(true);
+    expect(h.backend.downloads.owns(t.entry)).toBe(true);
     const end = h.backend.downloads.started(t.entry, { url: 'http://127.0.0.1:9/r', finalUrl: 'http://127.0.0.1:9/report.pdf', path: '/Users/o/Downloads/cua-report.pdf' });
     const created = await t.host.waitFor('downloads.created');
     expect(created.params).toEqual({ id: expect.any(Number), url: 'http://127.0.0.1:9/r', finalUrl: 'http://127.0.0.1:9/report.pdf', filename: '/Users/o/Downloads/cua-report.pdf', state: 'in_progress' });
@@ -207,6 +270,22 @@ describe('the file chooser and the agent\'s downloads', () => {
       { kind: 'download', filename: 'cua-report.pdf', state: 'complete' },
       { kind: 'download', filename: 'b.bin', state: 'cancelled' },
     ]);
-    expect(h.backend.downloads.owns(h.personTab().tab.tabId)).toBe(false); // a tab under no lease: the person's
+    expect(h.backend.downloads.owns(h.personTab())).toBe(false); // a tab under no lease: the person's
+  });
+
+  it('a leased tab\'s download is the agent\'s only while the person does not hold it (the rule dialogs and navigations follow)', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    const { tabId } = t.entry.tab;
+    expect(h.backend.downloads.owns(t.entry)).toBe(true); // idle, nobody near: the agent's own page work
+    t.entry.input.emit({ kind: 'mouse', source: 'human', at: Date.now() }); // the person touched the idle tab
+    expect(t.entry.tab.control).toBe('idle');
+    expect(h.backend.downloads.owns(t.entry)).toBe(false);
+    t.entry.input.lastHumanAt = Date.now() - 3_100;
+    expect(h.backend.downloads.owns(t.entry)).toBe(true);
+    h.store.setControl(tabId, 'human');
+    expect(h.backend.downloads.owns(t.entry)).toBe(false);
+    h.store.setControl(tabId, 'agent');
+    expect(h.backend.downloads.owns(t.entry)).toBe(true);
   });
 });

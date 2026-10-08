@@ -1,7 +1,9 @@
 // What a cua connection may send through its lease (the in-app browser spec of 2026-10-08, "Debugger leases, automation
 // ownership and the command filter"; P1 A-51): E4c's bridge boundary (`src/main/browser/agent/bridge.ts`) lifted into the
 // server. Electron's debugger client is trusted, so a page session's own Target domain could reach every target in the
-// process (MAWS's renderer among them): no `Browser.*`, `Storage.*`, `SystemInfo.*`, `Tethering.*`; of `Target.*` only
+// process (MAWS's renderer among them): no `Browser.*`, `Storage.*`, `SystemInfo.*`, `Tethering.*`, nor the `Network.*`
+// methods that reach the partition's cookie jar (it can be the owner's imported Chrome profile, and the socket path is in
+// every process the session starts; the vendor's own code never sends them; A-51, amended); of `Target.*` only
 // what auto-attach needs, `getTargets` answered from MAWS's own inventory, and `closeTarget` emulated as closing the tab.
 // Everything else passes unchanged, Chromium's own error strings included.
 //
@@ -12,13 +14,14 @@
 export type CommandRoute = 'pass' | 'refuse' | 'target' | 'getTargets' | 'closeTarget';
 
 const REFUSED_DOMAINS = new Set(['Browser', 'Storage', 'SystemInfo', 'Tethering']);
+const REFUSED_METHODS = new Set(['Network.getAllCookies', 'Network.getCookies', 'Network.setCookie', 'Network.setCookies', 'Network.deleteCookies', 'Network.clearBrowserCookies']);
 const TARGET_ALLOWED = new Set(['Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo', 'Target.attachToTarget']);
 
 export const methodNotAllowed = (method: string) => `Method not allowed: ${method}`;
 
 export function routeCommand(method: string): CommandRoute {
   const domain = method.split('.', 1)[0]!;
-  if (REFUSED_DOMAINS.has(domain)) return 'refuse';
+  if (REFUSED_DOMAINS.has(domain) || REFUSED_METHODS.has(method)) return 'refuse';
   if (domain !== 'Target') return 'pass';
   if (method === 'Target.getTargets') return 'getTargets';
   if (method === 'Target.closeTarget') return 'closeTarget';
@@ -72,10 +75,12 @@ export function undoCommands(toggles: AgentToggles, { mawsFocusEmulation }: { ma
 // The takeover gate's classes (the in-app browser spec of 2026-10-08, "Acting and reading commands"): the vendor acts
 // through more than `Input.*` (a select's option is an injected script, locators evaluate through `Runtime.*`), so a
 // command is *reading* only when listed here and *acting* otherwise, `Runtime.evaluate`, `Runtime.callFunctionOn` and
-// `Target.closeTarget` included. A paused request must proceed or the page stalls, so Fetch's continuations read.
+// `Target.closeTarget` included. A paused request must proceed or the page stalls, so Fetch's continuations read. The
+// vendor's plain screenshot is a screencast first (start, the first frame, stop and ack; `Page.captureScreenshot` only
+// when no frame comes within 2 s, BS:43892-44050), so the screencast's commands read as the capture does.
 // Reading commands pass while the person holds the tab and never change who drives it.
 const READING = new Set([
-  'Page.captureScreenshot', 'Page.getFrameTree', 'Page.getNavigationHistory', 'Page.getLayoutMetrics',
+  'Page.captureScreenshot', 'Page.startScreencast', 'Page.stopScreencast', 'Page.screencastFrameAck', 'Page.getFrameTree', 'Page.getNavigationHistory', 'Page.getLayoutMetrics',
   'DOM.getDocument', 'DOM.describeNode', 'DOM.getBoxModel', 'DOM.getContentQuads', 'DOM.getNodeForLocation', 'DOM.resolveNode',
   'Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo', 'Target.attachToTarget', 'Target.getTargets',
   'Runtime.enable', 'Runtime.disable', 'Page.enable', 'Page.disable', 'Network.enable', 'Network.disable', 'Fetch.enable', 'Fetch.disable',

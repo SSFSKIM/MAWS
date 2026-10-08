@@ -43,6 +43,10 @@ export const RESET_BOUND_MS = 1_000; // the undo of the agent's toggles never ho
 export const DEFAULT_GROUP_TITLE = 'cua'; // the host's name for a session's group until the agent names it
 export const AGENT_BADGE = 'agent'; // the panel's badge on an agent tab whose group has no name of its own
 
+// The commands that read the page's pixels: the vendor's plain screenshot starts a screencast and takes its first frame,
+// capturing only when no frame comes (BS:43892-44050), so the overlay is hidden before either.
+const CAPTURES = new Set(['Page.captureScreenshot', 'Page.startScreencast']);
+
 export const ERRORS = {
   noTab: (tabId: unknown) => `No tab with id: ${String(tabId)}`,
   noTarget: 'No target with given id found',
@@ -82,6 +86,7 @@ interface Leased {
   byTarget: Set<string>; // children the host attached by target id
   stops: (() => void)[];
   closing: boolean; // letting go: no new command is taken
+  awaitingFrame: boolean; // a screencast started on the page and its first frame, the screenshot's row, not yet seen
   released: Promise<void> | null; // the letting go under way, which a new attach waits for
 }
 
@@ -306,7 +311,7 @@ export class CuaConnection {
       this.refuseHeld(entry);
       fail(ERRORS.notLoaded(debuggee.tabId));
     }
-    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, released: null };
+    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, released: null };
     leased.stops.push(
       dbg!.on('*', (params, sessionId, method) => this.forward(leased, params, sessionId, method)),
       dbg!.onDetach(() => {
@@ -359,7 +364,7 @@ export class CuaConnection {
     const sent = method === 'Target.attachToTarget' ? { ...commandParams, flatten: true } : commandParams;
     return this.hold(leased, deadline, commandClass(method) === 'acting', async (self) => {
       // an agent's screenshot never carries the cursor's overlay (presence.ts); a command cancelled meanwhile is not sent
-      if (method === 'Page.captureScreenshot' && this.ctx.presence) {
+      if (CAPTURES.has(method) && this.ctx.presence) {
         await this.ctx.presence.beforeCapture(leased.entry);
         if (!this.held.has(self)) return {};
       }
@@ -372,9 +377,14 @@ export class CuaConnection {
   // What a command the agent sends on the page's own session did, for the windows: a press is told once its node is
   // named (looked up through this lease, before the press reaches the page, hit-testing as the press does: an element
   // with pointer-events none, the agent cursor's own overlay among them, is not what it clicked), typed characters as a
-  // count.
+  // count. A screencast's screenshot is told at its first frame (`forward`), so a start that yields none and the
+  // vendor's fallback capture after it are one row.
   private observe(leased: Leased, method: string, params: Record<string, unknown>, session: string): void {
     if (session !== '' || !this.ctx.feed) return;
+    if (method === 'Page.startScreencast' || method === 'Page.stopScreencast') {
+      leased.awaitingFrame = method === 'Page.startScreencast';
+      return;
+    }
     const activity = commandActivity(method, params);
     if (!activity) return;
     const { entry, dbg } = leased;
@@ -506,6 +516,10 @@ export class CuaConnection {
       leased.children.set(p.sessionId, { targetId: info.targetId as string, type: String(info.type ?? 'other'), title: String(info.title ?? ''), url: String(info.url ?? '') });
     }
     if (sessionId === '' && method === 'Page.frameNavigated') this.navigated(leased.entry, params);
+    if (sessionId === '' && method === 'Page.screencastFrame' && leased.awaitingFrame) {
+      leased.awaitingFrame = false;
+      this.tell(leased.entry, { kind: 'screenshot' });
+    }
     const tabId = this.idOf(leased.entry.tab.tabId);
     this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
     const child = sessionId ? leased.children.get(sessionId) : undefined;

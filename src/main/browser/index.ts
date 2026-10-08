@@ -125,7 +125,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const downloads = new Downloads({
     store, emit, downloadsDir: () => app.getPath('downloads'), saveDir: e2eSaveDir(env), reveal: seam.reveal,
     // E13: a leased tab's download is the agent's (cua/downloads.ts); asked only once a page downloads, after start
-    agent: { owns: (tabId) => cua.downloads.owns(tabId), started: (entry, download) => cua.downloads.started(entry, download) },
+    agent: { owns: (entry) => cua.downloads.owns(entry), started: (entry, download) => cua.downloads.started(entry, download) },
   });
   const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
   const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });

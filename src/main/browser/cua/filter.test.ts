@@ -7,10 +7,14 @@ describe('the command filter (E4c bridge boundary, lifted; A-51)', () => {
       expect(routeCommand(method), method).toBe('refuse');
     }
     expect(methodNotAllowed('Browser.getVersion')).toBe('Method not allowed: Browser.getVersion');
+    // the partition's cookie jar (it can be the owner's imported Chrome profile): A-51's reason for Storage.* covers it
+    for (const method of ['Network.getAllCookies', 'Network.getCookies', 'Network.setCookie', 'Network.setCookies', 'Network.deleteCookies', 'Network.clearBrowserCookies']) {
+      expect(routeCommand(method), method).toBe('refuse');
+    }
     for (const method of ['Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo', 'Target.attachToTarget']) expect(routeCommand(method), method).toBe('target');
     expect(routeCommand('Target.getTargets')).toBe('getTargets');
     expect(routeCommand('Target.closeTarget')).toBe('closeTarget');
-    for (const method of ['Input.dispatchMouseEvent', 'Runtime.evaluate', 'DOM.getDocument', 'Page.navigate', 'Network.enable', 'Fetch.enable', 'Emulation.setDeviceMetricsOverride', 'Accessibility.getFullAXTree', 'Page.handleJavaScriptDialog', 'Page.setInterceptFileChooserDialog']) {
+    for (const method of ['Input.dispatchMouseEvent', 'Runtime.evaluate', 'DOM.getDocument', 'Page.navigate', 'Network.enable', 'Network.getResponseBody', 'Fetch.enable', 'Emulation.setDeviceMetricsOverride', 'Accessibility.getFullAXTree', 'Page.handleJavaScriptDialog', 'Page.setInterceptFileChooserDialog']) {
       expect(routeCommand(method), method).toBe('pass');
     }
   });
@@ -59,6 +63,8 @@ describe('acting and reading commands (the takeover gate\'s classes)', () => {
       'Runtime.enable', 'Runtime.disable', 'Page.enable', 'Page.disable', 'Network.enable', 'Network.disable', 'Fetch.enable', 'Fetch.disable',
       'Fetch.continueRequest', 'Fetch.continueResponse', 'Fetch.failRequest',
       'Emulation.setFocusEmulationEnabled', 'Emulation.setDeviceMetricsOverride', 'Emulation.clearDeviceMetricsOverride',
+      // the vendor's plain screenshot is a screencast first (BS:43892-44050)
+      'Page.startScreencast', 'Page.stopScreencast', 'Page.screencastFrameAck',
     ]) expect(commandClass(method), method).toBe('reading');
   });
 
@@ -66,7 +72,7 @@ describe('acting and reading commands (the takeover gate\'s classes)', () => {
     for (const method of [
       'Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText', 'Runtime.evaluate', 'Runtime.callFunctionOn',
       'Page.navigate', 'Page.reload', 'Page.close', 'Target.closeTarget', 'DOM.setFileInputFiles', 'DOM.focus', 'DOM.scrollIntoViewIfNeeded',
-      'Page.setInterceptFileChooserDialog', 'Page.handleJavaScriptDialog', 'Fetch.fulfillRequest', 'Network.setCookie', 'Emulation.setTouchEmulationEnabled',
+      'Page.setInterceptFileChooserDialog', 'Page.handleJavaScriptDialog', 'Fetch.fulfillRequest', 'Network.setExtraHTTPHeaders', 'Emulation.setTouchEmulationEnabled',
     ]) expect(commandClass(method), method).toBe('acting');
   });
 });
