@@ -29,3 +29,31 @@ export function olderInstanceNotice(running: MainBuild, launched: MainBuild | nu
   if (Number.isNaN(ran) || Number.isNaN(came) || came <= ran) return null;
   return `An older MAWS is running (built ${formatTime(running.builtAt)}); quit it to use this build`;
 }
+
+// E11 F2b (plan 2.7b; the owner's actual case): after a rebuild at the same bundle path, opening the app activates the
+// running copy (macOS starts no second process), so no second launch hands its build over. The running instance then
+// asks the disk: the bundle it loaded (packaged, `<resources>/app.asar`; in development, `out/main/index.js`) written
+// after this process started is a newer build. The mtime is the build's own write: electron-builder writes a fresh
+// archive and electron-vite a fresh main, and nothing else touches either file.
+export const loadedBundlePath = ({ packaged, resourcesPath, appPath }: { packaged: boolean; resourcesPath: string; appPath: string }): string =>
+  packaged ? `${resourcesPath}/app.asar` : `${appPath}/out/main/index.js`;
+
+export interface StaleBuildCheckDeps {
+  bundlePath: string;
+  stat: (path: string) => number | null; // the file's mtime in ms, null when it cannot be read
+  startedAt: number; // this process's start, ms
+  running: MainBuild;
+  formatTime: (iso: string) => string;
+}
+
+// Each call (on `activate`, and at a second launch) answers the notice when the bundle on disk is newer than this
+// process, once per build on disk: the mtime shown is remembered, and a later rebuild is said again.
+export function staleBuildCheck({ bundlePath, stat, startedAt, running, formatTime }: StaleBuildCheckDeps): () => string | null {
+  let shown: number | null = null;
+  return () => {
+    const mtime = stat(bundlePath);
+    if (mtime === null || mtime <= startedAt || mtime === shown) return null;
+    shown = mtime;
+    return `An older MAWS is running, built ${formatTime(running.builtAt)}; the build on disk is newer; quit to use it`;
+  };
+}

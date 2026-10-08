@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
 import { app, BrowserWindow, dialog, screen } from 'electron';
@@ -5,7 +6,7 @@ import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
-import { describeMainBuild, olderInstanceNotice, type MainBuild } from './build-identity'; // E11 §2.7
+import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
@@ -131,15 +132,42 @@ const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
 console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
 let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
 const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
-function answerSecondLaunch(launched: MainBuild | null): void {
-  const win = bringForward();
-  if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
-  const notice = olderInstanceNotice(MAIN_BUILD, launched, builtAtLabel);
-  if (notice === null) return;
+function offerQuit(win: BrowserWindow, notice: string): void {
   const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
   void dialog.showMessageBox(win, options).then(({ response }) => {
     if (response === 0) app.quit(); // the ordinary quit, its question about running sessions included
   });
+}
+// E11 F2b (plan 2.7b; the owner's actual case): opening the app after a rebuild at the same bundle path activates this
+// process and starts no other, so `activate` (and a second launch too) compares the bundle main loaded, as it is on disk
+// now, with this process's start, once per build on disk (`staleBuildCheck`). Built on first use: the paths are read then.
+const STARTED_AT = Date.now() - process.uptime() * 1000;
+const bundleMtime = (path: string): number | null => {
+  const asar = process.noAsar;
+  process.noAsar = true; // the archive file itself, not the directory Electron's fs makes of it
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  } finally {
+    process.noAsar = asar;
+  }
+};
+let diskCheck: (() => string | null) | null = null;
+const diskBuildIsNewer = (): string | null =>
+  (diskCheck ??= staleBuildCheck({
+    bundlePath: loadedBundlePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+    stat: bundleMtime,
+    startedAt: STARTED_AT,
+    running: MAIN_BUILD,
+    formatTime: builtAtLabel,
+  }))();
+function answerSecondLaunch(launched: MainBuild | null): void {
+  const win = bringForward();
+  if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
+  const onDisk = diskBuildIsNewer(); // asked either way, so the build on disk this answer covers is not said again
+  const notice = olderInstanceNotice(MAIN_BUILD, launched, builtAtLabel) ?? onDisk;
+  if (notice !== null) offerQuit(win, notice);
 }
 
 void startWithProfileLock(app, () => {
@@ -550,7 +578,9 @@ void startWithProfileLock(app, () => {
   // ---- end C5 ----
   app.on('activate', () => {
     if (shutdown.quitting()) return; // W-B review M6: the services are stopped or stopping (the keep-quit hold)
-    if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
+    const win = appWindows()[0] ?? openWindow(); // E2: a capture window is not the app's
+    const notice = diskBuildIsNewer(); // E11 F2b (plan 2.7b): a rebuild on disk, said once per build
+    if (notice !== null) offerQuit(win, notice);
   });
   // E11 §2.7: a second launch brings this instance forward, as activate does
   bringForward = () => {
