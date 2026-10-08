@@ -297,7 +297,7 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'Push first' });
     fireEvent.click(remoteAction('push')!);
     const sheet = await screen.findByRole('dialog', { name: 'Push' });
-    await waitFor(() => expect(sheet.querySelector('[data-scm-plan-command]')?.textContent).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main'));
+    await waitFor(() => expect(sheet.querySelector('[data-scm-plan-command]')?.textContent).toBe('/usr/bin/git push --progress --recurse-submodules=no origin refs/heads/main:refs/heads/main'));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
 

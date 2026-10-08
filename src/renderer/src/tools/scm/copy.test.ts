@@ -5,8 +5,8 @@ import { destinationLabel, shellWords } from './copy';
 
 describe('shellWords quotes the plan for display', () => {
   it('leaves plain words bare', () => {
-    expect(shellWords('/usr/bin/git', ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'])).toBe(
-      '/usr/bin/git push --progress origin refs/heads/main:refs/heads/main',
+    expect(shellWords('/usr/bin/git', ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'])).toBe(
+      '/usr/bin/git push --progress --recurse-submodules=no origin refs/heads/main:refs/heads/main',
     );
   });
 

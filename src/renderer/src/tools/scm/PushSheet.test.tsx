@@ -39,7 +39,7 @@ afterEach(() => {
 describe("push and PR sheets show the plan's command and destination and run only its token", () => {
   it('Push: shows the plan’s remote, destination, branch, count and exact command, and pushes only its token', async () => {
     const sheet = open();
-    await waitFor(() => expect(commandOf(sheet)).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main'));
+    await waitFor(() => expect(commandOf(sheet)).toBe('/usr/bin/git push --progress --recurse-submodules=no origin refs/heads/main:refs/heads/main'));
     expect(main.callsOf('scm.push.plan')).toEqual([{ appSessionId: A }]); // main picks the default remote
     expect(rowOf(sheet, 'remote')).toContain('origin');
     expect(destinationsOf(sheet)).toEqual(['github.com/o/r']);
@@ -61,7 +61,7 @@ describe("push and PR sheets show the plan's command and destination and run onl
   });
 
   it('Push: says it sets upstream from the plan’s argv, and that a branch tracking another branch is re-pointed', async () => {
-    const publish = planOf({ branch: 'feature', upstream: 'origin/feature', argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/feature:refs/heads/feature'] });
+    const publish = planOf({ branch: 'feature', upstream: 'origin/feature', argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'origin', 'refs/heads/feature:refs/heads/feature'] });
     main.state.answers['scm.push.plan'] = () => ok(publish);
     let sheet = open(statusOf({ branch: 'feature', upstream: null, ahead: 0 }));
     await waitFor(() => expect(rowOf(sheet, 'branch')).toContain('feature → origin/feature · sets upstream'));
@@ -91,7 +91,7 @@ describe("push and PR sheets show the plan's command and destination and run onl
     expect(submitOf(sheet).disabled).toBe(true);
     fireEvent.submit(submitOf(sheet).closest('form')!);
     expect(main.callsOf('scm.push')).toEqual([]);
-    answer.resolve(ok(planOf({ token: OTHER_TOKEN, remote: 'fork', pushUrls: ['git@github.com:me/r.git'], argv: ['push', '--progress', '--set-upstream', 'fork', 'refs/heads/main:refs/heads/main'] })));
+    answer.resolve(ok(planOf({ token: OTHER_TOKEN, remote: 'fork', pushUrls: ['git@github.com:me/r.git'], argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'fork', 'refs/heads/main:refs/heads/main'] })));
     await waitFor(() => expect(destinationsOf(sheet)).toEqual(['github.com/me/r']));
     const run = deferred<ReturnType<typeof ok>>();
     main.state.answers['scm.push'] = () => run.promise;

@@ -168,7 +168,7 @@ export function planOf(over: Partial<RemotePlan> = {}): RemotePlan {
     kind: 'push',
     cwd: DIR,
     program: '/usr/bin/git',
-    argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'],
+    argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'],
     remote: 'origin',
     remoteUrl: 'https://github.com/o/r.git',
     pushUrls: ['https://github.com/o/r.git'],

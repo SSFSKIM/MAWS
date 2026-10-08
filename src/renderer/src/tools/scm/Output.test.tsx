@@ -58,7 +58,7 @@ describe('output appends chunks in order, drops a seq at or below the snapshot�
     await waitFor(() => expect(text()).toBe('one\ntwo\nthree'));
     expect(ui.getState().output).toBe(true);
     expect(state()?.textContent).toBe('Push · Running…');
-    expect(section().querySelector('[data-scm-output-command]')?.textContent).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main');
+    expect(section().querySelector('[data-scm-output-command]')?.textContent).toBe('/usr/bin/git push --progress --recurse-submodules=no origin refs/heads/main:refs/heads/main');
 
     main.emit('scm.remote.output', out(2, 'two again\n'));
     main.emit('scm.remote.output', out(3, 'three again\n'));
