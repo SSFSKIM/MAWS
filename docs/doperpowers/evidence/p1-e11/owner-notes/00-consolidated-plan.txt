@@ -181,6 +181,34 @@ F1 (part). A plain sidebar click already replaces the current session tab (W12/I
    Resume scope: current project with All projects one click away. (Architect's picks, stated to the owner;
    reversible.)
 
+== 4b. Findings relayed from the joint sitting (fork session maws-5d, notes in
+      /tmp/maws-owner-joint-sitting-1044c16c.txt, copied here when the sitting ends)
+
+Owner requirements and taste, verbatim where given:
+- Browser (requirement, P2 child candidate 3.E): "프로필 임포트는 됐지만, 뭔가 크롬의 사용자 경험과 다르다. 그 이유는
+  크롬처럼 위의 바가 없다. 북마크바, 익스텐션바 등등. 그걸 만들어야한다": the browser tab needs Chrome's top chrome:
+  a bookmarks bar from the imported profile's bookmarks and an extensions bar with the imported extensions'
+  actions and popups. Scope for the P2 cut with E4's import design as the base; not a fix-wave item.
+- Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
+  either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
+  tab; floating widget or sidebar tab, the owner has not chosen.
+- Deliverables viewer (taste): "로딩하는건 좋은데 사이즈가 adjustment가 너무 부족한것 같다": small images and videos sit
+  in large, mostly empty viewers; fit, zoom and size adjustment are insufficient.
+
+Functional findings for M7.2:
+- A side-thread completion summary leaks raw ANSI sequences around a to-human span (fix row).
+- The Files pane in an unstarted new chat fails with "unknown app session" until the session starts (fix row).
+- A4.2: the merge view shows inline Keep mine / Take theirs, not the script's exact wording (script-versus-
+  product check, likely a script correction).
+- A comment fork cannot append to the original artifact ("no artifact demo in this session"; a fresh v1 is
+  created in the fork): recorded as the artifact registry's per-session boundary, to be classified (design
+  boundary with copy, or a tracker row).
+- The engine banner compares against 2.1.283 (2.8 above); the sitting's engine is 2.1.294.
+Passed in the fork's pass (details in its notes): A1 read-only reopen and Finder reveal, A2 media rendering for
+HTML, PDF, PNG, MP4, WAV and Markdown, A4 editor changed-on-disk, save comparison and close guard, A9.2 supervisor
+identity, A12.1 anchored browser comment, A12.5 right-click at 125 %, nested thread listing and /btw in a comment
+fork, artifact blocked link and reload. Human-only groups remain the owner's.
+
 == 5. Routing
 
 Section 1 items become owner-results rows verified on the relaunched app (pass expected) plus the A regression
