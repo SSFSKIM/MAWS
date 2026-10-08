@@ -8,13 +8,15 @@
 // `queued_command` attachment in its disk transcript (O3). A second app launch over the same home reads the session from
 // disk (x) and then resumes it under CLAUDE_CODE_TASK_LIST_ID (ix's override) with the engine's fork gate off, so that a
 // foreground dispatch really runs in the foreground (vii; the product's launch backgrounds every agent). Children run on haiku
-// (`subagentModel`), the parent on Sonnet. What the run measured is printed as `[c8b-live]` lines and written to
+// (`subagentModel`), the parent on Haiku too (E11 S2(a): the standing rule's Haiku only; E7 and C8b ran it on Sonnet). What the run measured is printed as `[c8b-live]` lines and written to
 // `<scratch>/observations.json`, the journals copied beside it. The owner's ~/.claude and ~/.claude.json are only read,
 // after the run, to check that nothing names it. Run on purpose only; it spends money (about US$1.7–1.9
-// per full run, measured 2026-09-29):
+// per full run on a Sonnet parent, measured 2026-09-29):
 //   pnpm exec electron-vite build -c e2e/support/dev-surface.vite.config.mjs
 //   MAWS_C8B_LIVE=1 pnpm exec playwright test e2e/agent-tools-live.spec.ts
 // MAWS_C8B_LIVE_STEPS=i,ii,… runs a subset (setup always runs); MAWS_C8B_LIVE_KEEP=1 keeps the scratch clone and home.
+// MAWS_C8B_LIVE_MAX_USD (default 3) is the run's cap: every launch carries what the run has left of it as its
+// `--max-budget-usd` (the seed at most US$0.5, the second launch at most US$1), so no session can spend past it unseen.
 import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -44,6 +46,10 @@ const skip = skipReason();
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 75 * 60_000 });
 
+// E11 S2(a): the run's cap in US$, read before anything spends; each launch's budget is what is left of it.
+const CAP_USD = Number(process.env.MAWS_C8B_LIVE_MAX_USD ?? '3');
+if (!Number.isFinite(CAP_USD) || CAP_USD <= 0) throw new Error(`MAWS_C8B_LIVE_MAX_USD must be a positive amount in US$, not ${JSON.stringify(process.env.MAWS_C8B_LIVE_MAX_USD)}`);
+const left = (spentUsd: number, most = Infinity) => Number(Math.min(most, CAP_USD - spentUsd).toFixed(4));
 const STEPS = new Set((process.env.MAWS_C8B_LIVE_STEPS ?? 'i,ii,iii,iv,v,vi,vii,viii,ix,x').split(',').map((s) => s.trim()));
 const RUN = Date.now().toString(36);
 // Distinct /tmp paths per run (the dispatch's rule), each named in the step's prompt.
@@ -440,7 +446,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
   let created: { session_id: string; total_cost_usd: number };
   try {
     created = JSON.parse(
-      execFileSync(ENGINE_BIN, ['-p', 'Reply with exactly: C8B LIVE READY', '--model', 'sonnet', '--max-budget-usd', '0.5', '--output-format', 'json'], {
+      execFileSync(ENGINE_BIN, ['-p', 'Reply with exactly: C8B LIVE READY', '--model', 'haiku', '--max-budget-usd', String(left(0, 0.5)), '--output-format', 'json'], {
         cwd: clone,
         env: engineEnv,
         encoding: 'utf8',
@@ -490,7 +496,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
   };
   const launchSession = async (invoke: Invoke, record: { appId: string; directory: string }, maxBudgetUsd: number, extraEnv: Record<string, string> | null = null) => {
     const spec = {
-      appSessionId: record.appId, cwd: record.directory, additionalDirectories: [], model: 'sonnet', effort: null, permissionMode: 'auto',
+      appSessionId: record.appId, cwd: record.directory, additionalDirectories: [], model: 'haiku', effort: null, permissionMode: 'auto',
       gateway: 'gateway', subagentModel: 'haiku', resume: { sessionId: created.session_id, fork: false }, sessionId: null, trust: null, mcpConfig: null,
       extraSettings: { enableWorkflows: true, skipWorkflowUsageWarning: true, ...(extraEnv ? { env: extraEnv } : {}) }, maxBudgetUsd, replay: null, inheritGrantsFrom: null,
     };
@@ -504,7 +510,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const first = await open({});
     maws = first.launch;
     const { page, invoke, record } = first;
-    await launchSession(invoke, record, 3);
+    await launchSession(invoke, record, left(created.total_cost_usd));
     const s = new Session(page, invoke, record.appId, record.title.text);
     const status0 = await s.status();
     journals.push(status0.journalPath);
@@ -889,7 +895,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
 
       if (STEPS.has('ix') || STEPS.has('vii')) {
         // Resumed under the task-list override, with the fork gate off (see `foreground`).
-        await launchSession(second.invoke, second.record, 1, { CLAUDE_CODE_FORK_SUBAGENT: 'false' });
+        await launchSession(second.invoke, second.record, left(created.total_cost_usd + journalCost(join(kept, basename(status1.journalPath))), 1), { CLAUDE_CODE_FORK_SUBAGENT: 'false' });
         const s2 = new Session(p2, second.invoke, second.record.appId, second.record.title.text);
         journals.push((await s2.status()).journalPath);
 
