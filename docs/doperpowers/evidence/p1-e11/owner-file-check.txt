@@ -37,3 +37,6 @@ S5 (2026-10-08, keep-quit live on the packaged build and E10's probes Q6 and Q7;
 S6 (2026-10-08, twenty resumes of one scratch session, ten terminal and ten app, plus run 1's ten terminal; live-s6.txt):
   before 04:17:37Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after  04:21:03Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta identical at every reading of both runs)
+S7 (2026-10-08, E8's plugins live run re-run; live-s7.txt):
+  before 04:22:02Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  04:24:19Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no key added or removed)
