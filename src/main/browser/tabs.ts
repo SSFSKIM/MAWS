@@ -627,6 +627,7 @@ export class TabStore {
       covered: false,
       createdAt: at,
       lastShownAt: at,
+      agentBadge: null, // E13: an agent's badge is live, never restored
     };
   }
 

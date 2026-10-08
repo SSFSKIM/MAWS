@@ -1118,7 +1118,7 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't',
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */,
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
@@ -1133,6 +1133,7 @@ describe('ipc schema validates both directions', () => {
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
         'browser.agent.acting', // E4c
+        'browser.agent.activity', // E13
       ]);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
@@ -1271,7 +1272,7 @@ describe('ipc schema validates both directions', () => {
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1405,6 +1406,29 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('browser.agent.acting', acting).ok).toBe(true);
       expect(validateEventPayload('browser.agent.acting', { ...acting, tabId: 'nope' }).ok).toBe(false);
       expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(false); // who acts is named
+    });
+
+    it('E13: validates an agent\'s activity through cua: one of the listed kinds, typed text as a count only', () => {
+      const at = '2026-10-08T00:00:00.000Z';
+      const ok = (activity: unknown) => validateEventPayload('browser.agent.activity', { appSessionId: 'a', tabId: TAB_ID, at, activity }).ok;
+      for (const activity of [
+        { kind: 'navigated', url: 'https://example.com/', title: '' },
+        { kind: 'clicked', x: 10, y: 20.5, label: 'button Submit' },
+        { kind: 'clicked', x: 0, y: 0, label: null },
+        { kind: 'typed', chars: 12 },
+        { kind: 'key', key: 'Enter' },
+        { kind: 'screenshot' },
+        { kind: 'download', filename: 'cua-report.pdf', state: 'complete' },
+        { kind: 'dialog', type: 'confirm', excerpt: 'Leave?', answered: 'default' },
+        { kind: 'tabOpened', url: 'about:blank' },
+        { kind: 'tabClosed', url: 'https://example.com/' },
+      ]) expect(ok(activity), JSON.stringify(activity)).toBe(true);
+      expect(ok({ kind: 'typed', chars: 3, text: 'abc' })).toBe(false); // the text itself never travels
+      expect(ok({ kind: 'typed', chars: 0 })).toBe(false);
+      expect(ok({ kind: 'clicked', x: 1, y: 1, label: 'x'.repeat(41) })).toBe(false);
+      expect(ok({ kind: 'dialog', type: 'prompt', excerpt: '', answered: 'accepted' })).toBe(false);
+      expect(ok({ kind: 'moved', x: 1, y: 1 })).toBe(false);
+      expect(validateEventPayload('browser.agent.activity', { appSessionId: 'a', tabId: 'nope', at, activity: { kind: 'screenshot' } }).ok).toBe(false);
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

@@ -17,6 +17,9 @@ import { validateBrowserUrl } from '../../browser/url';
 // E4c start
 import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 // E4c end
+// E13 start
+import { BrowserAgentActivitySchema } from '../../browser/activity';
+// E13 end
 import type { CommandSpec } from './common';
 // E4d start
 import { AnchorSchema } from '../../anchor/anchor';
@@ -261,4 +264,8 @@ export const events = {
   // parent's tab, Decision Log 29; else the owner), so the once counts the turn that acts
   'browser.agent.acting': z.strictObject({ appSessionId: AppSessionIdSchema, tabId: BrowserTabIdSchema, actingSessionId: AppSessionIdSchema }),
   // E4c end
+  // E13 start: what an agent did in a tab through cua (the in-app browser spec of 2026-10-08, "Action rows"), at most 20
+  // per second per tab; the windows attach each to the session's cua_repl `js` call
+  'browser.agent.activity': BrowserAgentActivitySchema,
+  // E13 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
