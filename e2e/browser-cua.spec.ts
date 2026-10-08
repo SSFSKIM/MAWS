@@ -5,6 +5,10 @@
 // in the session's panel, a page navigated and read, a click dispatched through the lease, a cross-origin frame's child
 // session, the filter, isolation between sessions, one automation owner per tab against the old maws tools, the agent
 // state undone on detach, the emulated Target.closeTarget, and a lease let go when its host disconnects.
+// M3's case: takeover and the cursor through a lease (acceptance 8 and 9 through the seam's `sendInput`, `control` and
+// `cursorMessages`): the agent's cursor drawn for `cursor.move` and hidden when the lease goes; the person's click takes
+// the page, an acting command in the same second is refused within 2 s while a reading one passes, and 3 s after the
+// person's last input the same command goes through.
 // Runs under `pnpm e2e:browser-cua` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); the launch passes
 // MAWS_HARNESS=0 (the product app) and MAWS_E2E_QUIET=1, over a profile under /tmp (a Unix socket path is short).
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -45,7 +49,14 @@ function startPages(): Promise<{ origin: string; url(path: string): string; clos
 interface Seam {
   __maws_browser: {
     cua: { socketPathFor(appSessionId: string): string | null; inspect(): Record<string, { connections: number; held: number; leased: string[] }> };
-    agent: { run(appSessionId: string, tool: string, args: unknown): Promise<unknown>; driverState(tabId: string): string };
+    agent: {
+      run(appSessionId: string, tool: string, args: unknown): Promise<unknown>;
+      driverState(tabId: string): string;
+      control(tabId: string): { control: string } | null;
+      lastInputs(tabId: string): { kind: string; source: string }[];
+      sendInput(tabId: string, event: Record<string, unknown>): boolean;
+      cursorMessages(tabId: string): number;
+    };
   };
 }
 const seam = (maws: MawsLaunch) => ({
@@ -53,6 +64,10 @@ const seam = (maws: MawsLaunch) => ({
   inspect: () => maws.app.evaluate(() => (globalThis as unknown as Seam).__maws_browser.cua.inspect()),
   run: (appSessionId: string, tool: string, args: unknown) => maws.app.evaluate((_electron, [id, name, input]) => (globalThis as unknown as Seam).__maws_browser.agent.run(id as string, name as string, input), [appSessionId, tool, args] as const),
   driverState: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.driverState(tab), tabId),
+  control: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.control(tab)?.control ?? null, tabId),
+  inputs: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.lastInputs(tab).map((i) => `${i.kind}/${i.source}`), tabId),
+  sendInput: (tabId: string, event: Record<string, unknown>) => maws.app.evaluate((_electron, [tab, input]) => (globalThis as unknown as Seam).__maws_browser.agent.sendInput(tab as string, input as Record<string, unknown>), [tabId, event] as const),
+  cursorMessages: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.cursorMessages(tab), tabId),
 });
 
 // The CDP helpers a host uses, through the fake host's primitives.
@@ -154,6 +169,66 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
     expect(await host.request<unknown[]>('tabs.query')).toHaveLength(2);
   } finally {
     for (const host of hosts) await host.close();
+    await maws.cleanup();
+    await pages.close();
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+test('takeover and the cursor through a lease: cursor.move draws, the person\'s click takes the page, an acting command is refused within 2 s and a reading one passes, 3 s later the same command goes through, letting go hides the cursor', async () => {
+  const userData = mkdtempSync('/tmp/mcua-e2e-');
+  const pages = await startPages();
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  let host: FakeHost | null = null;
+  try {
+    const app = seam(maws);
+    host = await connectFakeHost((await app.socketPathFor(A))!);
+    const created = await host.request<{ id: number }>('tabs.create', { url: 'about:blank', group: { key: 's', title: 'cua' } });
+    await host.request('debugger.attach', { tabId: created.id });
+    const tab = (await app.inspect())[A]!.leased[0]!;
+    const send = cdp(host, created.id);
+    await send('Page.enable');
+    await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await send('Page.navigate', { url: pages.url('/') });
+    expect(await until(() => evaluate(send, `document.querySelector('#marker')?.textContent`), (v) => v === MARKER)).toBe(MARKER);
+
+    // the cursor: drawn where the agent aims (the vendor's moveMouse), then by the agent's own mouse, the tab the agent's
+    const drawn = await app.cursorMessages(tab);
+    expect(await host.request('cursor.move', { tabId: created.id, x: 100, y: 80 })).toEqual({});
+    await expect.poll(() => app.cursorMessages(tab)).toBeGreaterThan(drawn);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 80 });
+    expect(await app.control(tab)).toBe('agent');
+
+    // the person clicks the page: theirs at once
+    const clickedAt = Date.now();
+    expect(await app.sendInput(tab, { type: 'mouseDown', x: 100, y: 80, button: 'left', clickCount: 1 })).toBe(true);
+    expect(await app.sendInput(tab, { type: 'mouseUp', x: 100, y: 80, button: 'left', clickCount: 1 })).toBe(true);
+    await expect.poll(async () => (await app.inputs(tab)).slice(-2)).toEqual(['mouse/human', 'mouse/human']);
+    await expect.poll(() => app.control(tab)).toBe('human');
+
+    // an acting command in the same second: refused within 2 s; a reading one passes and leaves the person the page
+    const click = { expression: `document.querySelector('#state').textContent = 'agent'; 1`, returnByValue: true };
+    const refusedAt = Date.now();
+    await expect(send('Runtime.evaluate', click, { timeoutMs: 3_000 })).rejects.toThrow('A person is using this tab; wait and retry');
+    expect(Date.now() - refusedAt).toBeLessThan(2_000);
+    expect(await send('Page.captureScreenshot', { format: 'jpeg' })).toHaveProperty('data');
+    expect(await app.control(tab)).toBe('human');
+
+    // 3 s after the person's last input the page is handed back, and the same command goes through
+    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    expect(Date.now() - clickedAt).toBeGreaterThanOrEqual(2_900);
+    expect(await evaluate(send, `document.querySelector('#state').textContent`)).toBe('clicked'); // the person's click; the refused command never ran
+    expect(await send('Runtime.evaluate', click, { timeoutMs: 3_000 })).toMatchObject({ result: { value: 1 } });
+    expect(await evaluate(send, `document.querySelector('#state').textContent`)).toBe('agent');
+    expect(await app.control(tab)).toBe('agent');
+
+    // letting go: the tab idle and the cursor hidden
+    const before = await app.cursorMessages(tab);
+    await host.request('debugger.detach', { tabId: created.id });
+    expect(await app.control(tab)).toBe('idle');
+    await expect.poll(() => app.cursorMessages(tab)).toBeGreaterThan(before);
+  } finally {
+    await host?.close();
     await maws.cleanup();
     await pages.close();
     rmSync(userData, { recursive: true, force: true });
