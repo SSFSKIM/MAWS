@@ -1,0 +1,8 @@
+step test-probes
+command: pnpm test:probes
+head 964a0d0a  ended 2026-10-08T04:31:38Z  load { 18.28 11.97 9.93 }  1s
+# tests 176
+# pass 176
+# fail 0
+# skipped 0
+exit 0
