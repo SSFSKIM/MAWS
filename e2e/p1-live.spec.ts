@@ -224,6 +224,7 @@ interface Live {
   started: { label: string; id: AppSessionId }[];
   launchBudgets: Map<string, number>; // each session's `--max-budget-usd` at its launch
   ownerPluginsSeen: string[];
+  a15Breaches: string[]; // every A-15 reading's breach (a key of the run's own appearing or vanishing), asserted at the end
 }
 const sceneOf = (live: Live) => ({ maws: live.maws, page: live.page, pane: live.pane, panel: live.panel }) as unknown as Scene;
 
@@ -235,7 +236,7 @@ async function openLive(sc: CaseScratch, note: (line: string) => void, a15First:
     note, sc, maws, page: maws.page, a15First,
     pane: maws.page.locator('[data-region="main"] [data-pane="0"]'),
     panel: maws.page.locator('[data-region="panel"]'),
-    ids: [], pids: new Set([maws.app.process().pid!]), started: [], launchBudgets: new Map(), ownerPluginsSeen: [],
+    ids: [], pids: new Set([maws.app.process().pid!]), started: [], launchBudgets: new Map(), ownerPluginsSeen: [], a15Breaches: [],
   };
   try {
     await recordEvents(maws.page);
@@ -349,6 +350,15 @@ function checkPlugins(live: Live, label: string, id: string): void {
   }
 }
 
+// An A-15 reading against the case's first: its line logged and any breach kept for closeLive's assertion, so a
+// breach seen after a session fails the case even when a later reading no longer shows it.
+function readA15(live: Live, label: string): void {
+  const now = a15Reading();
+  live.note(`  ${a15Line(label, live.a15First, now, [ROOT])}`);
+  const { breach } = compareA15(live.a15First.keys, now.keys, [ROOT]);
+  if (breach.length > 0) live.a15Breaches.push(`${label}: ${JSON.stringify(breach)}`);
+}
+
 // The session stopped (its process exits), its spend, init plugins and the A-15 reading after it recorded.
 async function stopSession(live: Live, label: string, id: AppSessionId): Promise<void> {
   const status = await statusOf(live, id);
@@ -361,7 +371,7 @@ async function stopSession(live: Live, label: string, id: AppSessionId): Promise
   const dir = join(live.sc.userData, 'engine-host', 'journal', id);
   live.note(`  ${label} ${id} stopped; spend ${journalSpend(live.sc.userData).usd.toFixed(4)} for the case's profile so far; journals ${dir}`);
   checkPlugins(live, label, id);
-  live.note(`  ${a15Line(`after ${label}`, live.a15First, a15Reading(), [ROOT])}`);
+  readA15(live, `after ${label}`);
 }
 
 // Every process under `pid`, its children's children included.
@@ -379,26 +389,33 @@ function descendants(pid: number): number[] {
   return found;
 }
 
-// The case's end: every session still running stopped, the app closed, the A-15 reading after it (no key of the run's
-// own), the owner plugins none, and no process of the app or its engines left.
+// The case's end: every session still running stopped, the app closed, the A-15 reading after it, no breach in any of
+// the case's readings (no key of the run's own), the owner plugins none, and no process of the app or its engines left;
+// a session that could not be stopped fails the case after the checks have run.
 async function closeLive(live: Live): Promise<void> {
+  const stopErrors: unknown[] = [];
   try {
-    for (const { label, id } of [...live.started].reverse()) await stopSession(live, label, id).catch((error: unknown) => live.note(`  ${label} ${id}: could not be stopped: ${String(error)}`));
+    for (const { label, id } of [...live.started].reverse()) {
+      await stopSession(live, label, id).catch((error: unknown) => {
+        stopErrors.push(error);
+        live.note(`  ${label} ${id}: could not be stopped: ${String(error)}`);
+      });
+    }
     live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`);
     for (const pid of descendants(live.maws.app.process().pid!)) live.pids.add(pid); // the app's helpers and hosts
   } finally {
     await live.maws.cleanup();
   }
-  const after = a15Reading();
-  live.note(a15Line('after the app closed', live.a15First, after, [ROOT]));
+  readA15(live, 'after the app closed');
   const survivors = [...live.pids].filter((pid) => isAlive(pid) && /claude|Electron|MAWS/.test(ps(pid, 'command')));
   const naming = processesNaming(live.sc.root);
   live.note(`survivor check: ${survivors.length === 0 && naming.length === 0 ? `none of ${live.pids.size} recorded pids (${[...live.pids].join(', ')}) and no process naming ${live.sc.root}` : `SURVIVORS ${JSON.stringify(survivors.map((pid) => `${pid} ${ps(pid, 'command')}`))} ${JSON.stringify(naming)}`}; maws-supervisor processes: ${execFileSync('/bin/sh', ['-c', 'pgrep -fl maws-supervisor || true'], { encoding: 'utf8' }).trim() || 'none'}`);
   for (const pid of survivors) process.kill(pid, 'SIGKILL');
-  expect(compareA15(live.a15First.keys, after.keys, [ROOT]).breach, 'no project of the run’s scratch in the owner file (A-15)').toEqual([]);
+  expect(live.a15Breaches, 'no project of the run’s scratch appeared in or vanished from the owner file at any reading (A-15)').toEqual([]);
   expect(live.ownerPluginsSeen, 'the engines loaded none of the owner’s plugins (Decision Log 22, 30)').toEqual([]);
   expect(survivors, 'no process of the app or its engines outlives the case').toEqual([]);
   expect(naming, 'no process names the case’s scratch').toEqual([]);
+  if (stopErrors.length > 0) throw stopErrors[0];
 }
 
 // `prerun-<item>-<surface>-<theme>.png` in both themes under MAWS_E11_SHOTS=1, toasts cleared first unless the shot is
