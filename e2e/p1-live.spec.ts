@@ -12,7 +12,8 @@
 //   S4 (item 7)          5 E4c's recording prompt against the real browser on E4c's server. 6 skipped: E4d's M5 proved
 //                          the live anchor resolution (A-49; Decision Log 9 and 20). 7 no engine turn: the OOPIF page of
 //                          the owner's step F (e2e/support/oopif-page.ts) snapshotted through `__maws_browser.agent.run`.
-//   S6 (the C3 stall row) 8 ten row Resumes, each in a fresh app launch, each bounded 30 s to first output.
+//   S6 (the C3 stall row) 8 ten row Resumes, each in a fresh app launch, each bounded 30 s to first output. 8t ten
+//                          `claude -p --resume` of the same session from a terminal under its scratch home, the same bound.
 //   S2 (b, c, d)         the listing's Message between two sessions, a peer message into a terminal session and the teammate
 //                          attempt (Task 6.4; their own block and caps at the end of this file).
 //   A-47                 a permission request on a session not in front: C5's fallback toast with no window focused,
@@ -58,7 +59,7 @@
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
 // (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -865,11 +866,13 @@ function captureStall(dir: string, pid: number): void {
   writeFileSync(join(dir, 'sample.txt'), sh('/usr/bin/sample', [String(pid), '3'], 40_000));
 }
 
+const S6_TITLE = 'E11 S6: the resumed session';
+
 test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 s to first output; a stall recorded with its capture', async () => {
   const note = sittingLog(OUT, 's6');
   await relayGate(note, 'S6 case 8');
   refuseOverCap(note, 'S6 case 8', 's6');
-  const sc = caseScratch('s6', ['E11 S6: the resumed session']);
+  const sc = caseScratch('s6', [S6_TITLE]);
   const a15 = a15Reading();
   opening(note, 'S6 case 8', sc, a15);
   // the session: its seeded conversation resumed once with one turn, so the ten resumes reopen a real conversation
@@ -938,6 +941,106 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
   const stalls = results.filter((r) => !r.ok);
   note(`S6 case 8: ${results.length} resumes, ${stalls.length} stalls${stalls.length > 0 ? ` (${stalls.map((r) => r.i).join(', ')})` : ''}; spend ${spendLine('s6')}`);
   for (const r of results) expect.soft(r.ok, `resume ${r.i} reached first output within ${FIRST_OUTPUT_MS / 1000} s with no no_output`).toBe(true);
+  expect(results).toHaveLength(10);
+});
+
+// S6's terminal half: ten `claude -p --resume` of case 8's session from a terminal under its scratch home (scratch-env.ts's
+// terminalEnvironment through terminalEnv: the runner's CLAUDE* variables dropped, the relay, the scratch config home),
+// in its repository, each with what S6 and the run leave as its `--max-budget-usd`, reserved in `charges.jsonl` before
+// the call and settled to the call's receipt (kept whole when no result came). First output (any byte on stdout) is
+// bounded 30 s: a stall is captured (ps with the engine's children, `security` among them if it is the Keychain lookup
+// the C3 row suspects; lsof; `sample`) and the call is given 90 s more before it is killed. Run after case 8 in the
+// same run root (MAWS_P1_LIVE_STAMP), whose scratch it reuses.
+const TERMINAL_RESUME_MS = 120_000;
+
+test('S6 8t: ten terminal resumes of the same session, each bounded 30 s to first output; a stall recorded with its capture', async () => {
+  const note = sittingLog(OUT, 's6');
+  const root = join(ROOT, 's6');
+  const config = join(root, 'claude-config');
+  const repo = join(root, 'repo');
+  const projects = join(config, 'projects', existsSync(repo) ? realpathSync(repo).replace(/[^a-zA-Z0-9]/g, '-') : '-');
+  // case 8's session: the transcript seeded under its title (the file the engine resumes in place)
+  const seeded = existsSync(projects) ? readdirSync(projects).filter((n) => n.endsWith('.jsonl') && readFileSync(join(projects, n), 'utf8').split('\n', 1)[0]!.includes(S6_TITLE)) : [];
+  if (seeded.length !== 1) {
+    note(`S6 8t: not run: case 8's scratch ${root} holds ${seeded.length} transcripts seeded as "${S6_TITLE}" (run case 8 first under the same MAWS_P1_LIVE_STAMP)`);
+    test.skip(true, 'S6 8t needs case 8’s scratch');
+  }
+  await relayGate(note, 'S6 8t');
+  refuseOverCap(note, 'S6 8t', 's6');
+  const sessionId = seeded[0]!.replace(/\.jsonl$/, '');
+  const { bin, version } = theEngine();
+  const env = terminalEnv(config);
+  const a15 = a15Reading();
+  const breaches: string[] = [];
+  const owners: string[] = [];
+  note(`==== S6 8t, ${new Date().toISOString()}; ten terminal resumes of ${sessionId} in ${repo}; ${bin.replace(homedir(), '~')} (${version}) through the relay ${env.ANTHROPIC_BASE_URL}, Haiku; the environment's CLAUDE* variables ${JSON.stringify(Object.keys(env).filter((k) => k.startsWith('CLAUDE')).sort())}; spent so far ${spendLine('s6')}`);
+  note(a15Line('before S6 8t', a15, a15, [ROOT]));
+
+  const results: { i: number; ok: boolean; firstOutputMs: number | null; result: string | null; costUsd: number | null }[] = [];
+  const pids: number[] = [];
+  for (let i = 1; i <= 10; i++) {
+    const budget = budgetFor('s6');
+    const refusal = budgetRefusal(budget, CAP);
+    if (refusal !== null) {
+      note(`terminal resume ${i}: ${refusal}`);
+      break;
+    }
+    const key = `s6:terminal-resume:${i}`;
+    const reserved = budget.usd;
+    charge(note, { key, case: 's6', label: `terminal resume ${i}'s --max-budget-usd`, usd: reserved });
+    const args = ['-p', '--resume', sessionId, '--output-format', 'stream-json', '--verbose', '--model', 'haiku', '--max-budget-usd', reserved.toFixed(4), 'Reply OK'];
+    const t0 = Date.now();
+    const child = spawn(bin, args, { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    pids.push(child.pid!);
+    let out = '';
+    let firstOutputMs: number | null = null;
+    child.stdout.on('data', (chunk: Buffer) => {
+      firstOutputMs ??= Date.now() - t0;
+      out += String(chunk);
+    });
+    let err = '';
+    child.stderr.on('data', (chunk: Buffer) => (err += String(chunk)));
+    const exited = new Promise<number | null>((done) => child.once('exit', (code) => done(code)));
+    let captured: string | null = null;
+    const stallTimer = setTimeout(() => {
+      if (firstOutputMs !== null || child.exitCode !== null) return;
+      captured = join(root, 'stalls', `terminal-resume-${i}-${child.pid}`);
+      captureStall(captured, child.pid!);
+    }, FIRST_OUTPUT_MS);
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), TERMINAL_RESUME_MS);
+    const code = await exited;
+    clearTimeout(stallTimer);
+    clearTimeout(killTimer);
+    const frames = out.split('\n').filter(Boolean).flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    });
+    const init = frames.find((f) => f.type === 'system' && f.subtype === 'init') as { session_id?: string; model?: string; plugins?: { name: string; source: string; path?: string }[] } | undefined;
+    const result = frames.findLast((f) => f.type === 'result') as { subtype?: string; result?: string; total_cost_usd?: number; session_id?: string } | undefined;
+    const costUsd = typeof result?.total_cost_usd === 'number' ? result.total_cost_usd : null;
+    charge(note, costUsd === null
+      ? { key, case: 's6', label: `terminal resume ${i}'s --max-budget-usd, kept whole: no result came`, usd: reserved }
+      : { key, case: 's6', label: `terminal resume ${i}, settled to its receipt`, usd: costUsd });
+    const plugins = init?.plugins ?? [];
+    owners.push(...ownerPlugins(plugins, [ROOT]));
+    const ok = firstOutputMs !== null && firstOutputMs <= FIRST_OUTPUT_MS && result?.subtype === 'success';
+    results.push({ i, ok, firstOutputMs, result: result?.result ?? null, costUsd });
+    note(`terminal resume ${i}: ${ok ? 'ok' : 'STALL'}: first output ${firstOutputMs ?? '—'} ms after spawn, exit ${code} after ${Date.now() - t0} ms, pid ${child.pid}; init session ${init?.session_id ?? '—'} model ${init?.model ?? '—'} plugins ${JSON.stringify(plugins.map((p) => p.source))}; result ${result?.subtype ?? 'none'} ${JSON.stringify(result?.result ?? null)} US$${costUsd?.toFixed(4) ?? '—'}${err.trim() ? `; stderr ${JSON.stringify(err.trim().slice(0, 300))}` : ''}${captured ? `; captured under ${captured}` : ''}`);
+  }
+  const a15After = a15Reading();
+  note(a15Line('after S6 8t', a15, a15After, [ROOT]));
+  const { breach } = compareA15(a15.keys, a15After.keys, [ROOT]);
+  if (breach.length > 0) breaches.push(JSON.stringify(breach));
+  const survivors = pids.filter(isAlive);
+  note(`S6 8t: ${results.length} terminal resumes, ${results.filter((r) => !r.ok).length} stalls; survivor check: ${survivors.length === 0 ? `none of the ${pids.length} engine pids (${pids.join(', ')})` : `SURVIVORS ${JSON.stringify(survivors)}`}; spend ${spendLine('s6')}`);
+  for (const pid of survivors) process.kill(pid, 'SIGKILL');
+  for (const r of results) expect.soft(r.ok, `terminal resume ${r.i} reached first output within ${FIRST_OUTPUT_MS / 1000} s and a result`).toBe(true);
+  expect(owners, 'the engines loaded none of the owner’s plugins').toEqual([]);
+  expect(breaches, 'no project of the run’s scratch appeared in or vanished from the owner file (A-15)').toEqual([]);
+  expect(survivors, 'no terminal engine outlives its call').toEqual([]);
   expect(results).toHaveLength(10);
 });
 
