@@ -1,0 +1,14 @@
+E11 M6 fix (skip-run): pnpm e2e:p1-live without MAWS_P1_LIVE, through the slot (MAWS_HARNESS=1 electron-vite build && playwright test e2e/p1-live.spec.ts) at f1a4d0d (2026-10-07 19:35; load { 14.09 65.84 57.67 })
+-  1 e2e/p1-live.spec.ts:414:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 1 artifacts: create, main’s real capture whose PNG shows the page’s colour, update; the row, the Deliverables tool, v2 and its switch, the record
+-  2 e2e/p1-live.spec.ts:484:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 2 a comment picked on the artifact goes to a Side thread, which answers in the Side pane and sums itself up in the parent; the parent’s turns unchanged
+-  3 e2e/p1-live.spec.ts:529:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row
+-  4 e2e/p1-live.spec.ts:566:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged
+-  5 e2e/p1-live.spec.ts:595:7 › S4: the browser (item 7) › 5 E4c’s recording prompt against the real browser: the seven rows, the reference, the screenshot record, the agent’s cursor, the Browser tool opened once
+-  6 e2e/p1-live.spec.ts:662:7 › S4: the browser (item 7) › 6 the live anchor resolution: E4d’s own live proof stands
+-  7 e2e/p1-live.spec.ts:667:7 › S4: the browser (item 7) › 7 the OOPIF page of the owner’s step F: a browser_snapshot through the seam shows a text field inside a cross-site frame (no engine turn)
+-  8 e2e/p1-live.spec.ts:726:5 › S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 s to first output; a stall recorded with its capture
+-  9 e2e/p1-live.spec.ts:805:5 › A-47: a permission request on a session not in front raises the fallback toast with no window focused; answering it retracts the toast
+9 skipped
+e2e:p1-live exit 0
+sibling evidence changed by the run: 0
+survivors: 0 scratch processes, 0 maws-supervisor; log dir /tmp/maws-e11-p1-live absent; run roots 0

@@ -1,0 +1,6 @@
+E11 M6 fix (probes): pnpm test:probes (node --test spikes/protocol-probe/*.test.mjs) at f1a4d0d (2026-10-07 19:33; load { 66.07 105.19 67.46 })
+# tests 173
+# pass 173
+# fail 0
+# skipped 0
+test:probes exit 0
