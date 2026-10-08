@@ -1,0 +1,271 @@
+E11 M6 sitting S6: twenty resumes of one scratch session (the C3 stall row), ten from a terminal, ten row Resumes in the app
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S6 and §8, Task 6.5 (the twenty results for Task 7.3); cap
+  US$0.30; child spend before S6 US$0.2121 (after S5).
+Worktree head at start: 3d7d5d6b. The terminal half was added to e2e/p1-live.spec.ts as case 8t at d56a139e (beside case 8,
+  sharing its scratch, its spend ledger and its stall capture); case 8's one harness fix at 9a05259d (Decision Log 30's
+  round). The counted run (run 2) ran on 9a05259d.
+Verdict: PASSED. Twenty clean resumes on one session (a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45): ten terminal, ten app, no
+  stall, every first output within 0.4 s of the spawn. Run 1 adds ten more clean terminal resumes on another scratch session
+  (be461891-2e01-4665-a100-abd1d3c6f0cb). No MAWS behavioural finding; no stall to capture.
+Engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay; Haiku (claude-haiku-5-5 in every
+  init frame of the terminal resumes and the seed turn).
+
+Pre-sitting (2026-10-08T04:17:37Z)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200 (again 200 at 04:19:40Z before run 2)
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  load: 5.47 7.51 10.40; the slot admitted each command at once (loads 6.79, 5.99, 3.90)
+  survivors before: none (pgrep -fl maws-e11-, pgrep -fl maws-supervisor empty)
+
+Commands (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  04:16:34Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_HARNESS=1 pnpm exec electron-vite build
+    (the spec header's harness build; "built in 24.90s")
+  04:17:40Z run 1: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=0.30
+    MAWS_P1_LIVE_STAMP=s6-20261008T0418Z MAWS_P1_LIVE_OUT=/private/tmp/maws-e11-s6-log pnpm exec playwright test
+    e2e/p1-live.spec.ts -g "S6 8" -> case 8 failed after its seed turn (harness), case 8t passed (26.1s)
+  04:19:43Z run 2 (after 9a05259d; a fresh run root, so the run cap carries what run 1 spent: MAWS_P1_LIVE_MAX_USD=0.2425 =
+    0.30 - 0.0575, MAWS_P1_LIVE_STAMP=s6-20261008T0420Z) -> "2 passed (41.3s)" at 04:20:44Z
+
+How each resume is made and judged
+  scratch: /private/tmp/maws-e11-p1live-<stamp>/s6/ with claude-config/ (settings.json {}, .claude.json trusting repo/), repo/
+    (a git repository holding the seeded transcript), user-data/ (the app's profile). Case 8 first resumes the seeded
+    transcript in place in the app with one turn ("Reply with exactly: OK", US$0.0009), so the resumes reopen a real
+    conversation.
+  terminal (case 8t): `claude -p --resume <id> --output-format stream-json --verbose --model haiku --max-budget-usd <S6 and the
+    run's remainder> "Reply OK"` spawned in repo/ with terminalEnv(claude-config) (scratch-env.ts's terminalEnvironment: the
+    runner's CLAUDE* variables dropped; the environment's CLAUDE* keys were CLAUDE_CODE_SUBAGENT_MODEL and CLAUDE_CONFIG_DIR;
+    ANTHROPIC_BASE_URL the relay). Time to first output = the first stdout byte after the spawn (the init frame); bound 30 s;
+    a stall would have been captured (ps of the engine with `pgrep -lP` of its children, `security` among them if so; lsof;
+    `sample <pid> 3`) under <scratch>/stalls/ and the call given 90 s more. Verdict ok = first output within 30 s and a
+    `result` success. Each call's --max-budget-usd reserved in charges.jsonl before it and settled to its receipt.
+  app (case 8): a fresh launch of the app per resume (the harness build as the product, MAWS_HARNESS=0), the session's sidebar
+    row › Resume (Trust and start if asked); time to first output = the journal's first `in` or `stderr` row
+    after the `spawn` meta row; verdict ok = ready, first output within 30 s, no `no_output` init failure, exactly one launch.
+    A row Resume runs no turn.
+
+The twenty, run 2, session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 (path, time to first output, verdict)
+  terminal  1: 349 ms, ok (exit 0 after 1551 ms, result success "OK")
+  terminal  2: 375 ms, ok (exit 0 after 1264 ms, "OK")
+  terminal  3: 360 ms, ok (1383 ms, "OK")
+  terminal  4: 344 ms, ok (1458 ms, "OK")
+  terminal  5: 357 ms, ok (1531 ms, "OK")
+  terminal  6: 340 ms, ok (1323 ms, "OK")
+  terminal  7: 355 ms, ok (1487 ms, "OK")
+  terminal  8: 334 ms, ok (1296 ms, "OK")
+  terminal  9: 359 ms, ok (1298 ms, "OK")
+  terminal 10: 355 ms, ok (1271 ms, "OK")
+  app  1: 384 ms, ok (ready in 586 ms, no_output false, 1 launch)
+  app  2: 315 ms, ok (ready 463 ms)
+  app  3: 395 ms, ok (ready 580 ms)
+  app  4: 332 ms, ok (ready 482 ms)
+  app  5: 313 ms, ok (ready 459 ms)
+  app  6: 320 ms, ok (ready 463 ms)
+  app  7: 334 ms, ok (ready 486 ms)
+  app  8: 359 ms, ok (ready 583 ms)
+  app  9: 318 ms, ok (ready 459 ms)
+  app 10: 327 ms, ok (ready 461 ms)
+  Order in run 2: the ten app resumes first, then the ten terminal resumes. Every terminal init frame named the same session
+  id (in-place resume). No stall, so nothing under <scratch>/stalls/ (the directory was never created).
+
+Run 1 (session be461891-2e01-4665-a100-abd1d3c6f0cb): ten more terminal resumes, all ok: 358, 398, 347, 366, 357, 352, 342,
+  337, 350, 375 ms to first output (exit 0 after 1.2 to 1.6 s, each "OK"). Case 8 failed before its first app resume: the
+  harness, not MAWS. In the first fresh launch after the seed turn, sidebarRow clicked the project line while the tree
+  re-rendered and the project stayed collapsed (aria-expanded "false" after 5 s, support/sidebar.ts:32). 9a05259d retries
+  the expansion within 30 s, as supervisor.spec.ts's rowOf does. Verification: tsc --noEmit -p tsconfig.e2e.json
+  --composite false and eslint on the spec, clean. Run 2's case 8 then passed, each resume ready within 0.6 s of its click.
+
+Init plugin lists: every terminal resume's init frame (twenty, both runs) and the seed turn's: cc-plugin-agents-md@builtin,
+  cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin, the engine's built-ins only, none of the owner's (the
+  spec asserts ownerPlugins(...) is empty). A row Resume runs no turn, so its launch has no init frame ("no system/init (no
+  turn in this launch)", logged per resume).
+
+Spend (the spec's ledger: journal receipts plus charges.jsonl)
+  run 1: seed turn US$0.0009 + ten terminal receipts US$0.0566 (0.0044 rising to 0.0070) = US$0.0575
+  run 2: seed turn US$0.0009 + ten terminal receipts US$0.0329 (0.0020 rising to 0.0046); the ten app resumes US$0 (no turn)
+    = US$0.0338
+  S6 total: US$0.0913 of US$0.30. Child total after S6: US$0.3034.
+  A note on the receipts: each `-p --resume` result's total_cost_usd grew by about US$0.0003 per call, so it looks like it
+  includes the session's restored cost. Summing the receipts would then over-count (the safe side of a cap); the ledger sums
+  them anyway.
+
+Post-sitting (2026-10-08T04:21:03Z)
+  A-15 after: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta identical at
+    every reading: before and after each app launch and resume, before and after 8t, in both runs)
+  survivor check: the spec's after each app launch: none of the recorded pids (app, engine, helpers) and no process naming
+    the scratch; maws-supervisor none; 8t: none of the ten engine pids per run alive. After the sitting: pgrep -fl maws-e11-
+    none, pgrep -fl maws-supervisor none.
+  scratch: /private/tmp/maws-e11-p1live-s6-20261008T0418Z (run 1, after its charges were summed) and
+    /private/tmp/maws-e11-p1live-s6-20261008T0420Z (run 2) removed
+  sibling evidence: git status --porcelain docs/doperpowers/evidence shows no sibling modified (case 8 and 8t write no shots)
+
+The spec's own log, run 1 then run 2 (MAWS_P1_LIVE_OUT=/private/tmp/maws-e11-s6-log, ANSI stripped; the charge lines kept):
+  ==== S6 case 8, 2026-10-08T04:17:42.276Z; run root /private/tmp/maws-e11-p1live-s6-20261008T0418Z
+  engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S6 US$0.0000 of US$0.30, the run US$0.0000 of US$0.30
+  scratch: /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6 (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+  A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    charged US$0.3000 to S6 for the launch budget of the first turn (counted beyond 46774220-fc6c-43ea-bd06-65fa119e4118's receipts) [s6:launch:46774220-fc6c-43ea-bd06-65fa119e4118]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+  the first turn 46774220-fc6c-43ea-bd06-65fa119e4118: launched on Haiku, default mode, maxBudgetUsd 0.3000 (the smaller of what S6 and the run leave), resuming be461891-2e01-4665-a100-abd1d3c6f0cb in place; pid 87089
+    the first turn 46774220-fc6c-43ea-bd06-65fa119e4118 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6/user-data/engine-host/journal/46774220-fc6c-43ea-bd06-65fa119e4118
+    the first turn init plugins (d3ekl654.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+    A-15 after the first turn: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (86781, 87089, 86804, 86807, 86865, 86910, 86911) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6; maws-supervisor processes: none
+    charged US$0.0000 to S6 for the launch budget of the first turn, settled to its receipts (US$0.0009) (counted beyond 46774220-fc6c-43ea-bd06-65fa119e4118's receipts) [s6:launch:46774220-fc6c-43ea-bd06-65fa119e4118]; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.30
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.30
+  S6: engine session be461891-2e01-4665-a100-abd1d3c6f0cb in /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6/repo under CLAUDE_CONFIG_DIR /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6/claude-config (the sitting's ten terminal resumes take the same id)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 6 recorded pids (88011, 88063, 88064, 88075, 88087, 88088) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.30
+  ==== S6 8t, 2026-10-08T04:17:52.703Z; ten terminal resumes of be461891-2e01-4665-a100-abd1d3c6f0cb in /private/tmp/maws-e11-p1live-s6-20261008T0418Z/s6/repo; ~/.local/share/claude/versions/2.1.293 (2.1.293) through the relay http://127.0.0.1:8641, Haiku; the environment's CLAUDE* variables ["CLAUDE_CODE_SUBAGENT_MODEL","CLAUDE_CONFIG_DIR"]; spent so far S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.30
+  A-15 before S6 8t: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    charged US$0.2991 to S6 for terminal resume 1's --max-budget-usd [s6:terminal-resume:1]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0044 to S6 for terminal resume 1, settled to its receipt [s6:terminal-resume:1]; S6 US$0.0053 of US$0.30, the run US$0.0053 of US$0.30
+  terminal resume 1: ok: first output 358 ms after spawn, exit 0 after 1592 ms, pid 88988; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0044
+    charged US$0.2947 to S6 for terminal resume 2's --max-budget-usd [s6:terminal-resume:2]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0046 to S6 for terminal resume 2, settled to its receipt [s6:terminal-resume:2]; S6 US$0.0099 of US$0.30, the run US$0.0099 of US$0.30
+  terminal resume 2: ok: first output 398 ms after spawn, exit 0 after 1535 ms, pid 89295; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0046
+    charged US$0.2901 to S6 for terminal resume 3's --max-budget-usd [s6:terminal-resume:3]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0049 to S6 for terminal resume 3, settled to its receipt [s6:terminal-resume:3]; S6 US$0.0148 of US$0.30, the run US$0.0148 of US$0.30
+  terminal resume 3: ok: first output 347 ms after spawn, exit 0 after 1535 ms, pid 90087; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0049
+    charged US$0.2852 to S6 for terminal resume 4's --max-budget-usd [s6:terminal-resume:4]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0052 to S6 for terminal resume 4, settled to its receipt [s6:terminal-resume:4]; S6 US$0.0201 of US$0.30, the run US$0.0201 of US$0.30
+  terminal resume 4: ok: first output 366 ms after spawn, exit 0 after 1517 ms, pid 90446; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0052
+    charged US$0.2799 to S6 for terminal resume 5's --max-budget-usd [s6:terminal-resume:5]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0055 to S6 for terminal resume 5, settled to its receipt [s6:terminal-resume:5]; S6 US$0.0256 of US$0.30, the run US$0.0256 of US$0.30
+  terminal resume 5: ok: first output 357 ms after spawn, exit 0 after 1537 ms, pid 90619; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0055
+    charged US$0.2744 to S6 for terminal resume 6's --max-budget-usd [s6:terminal-resume:6]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0058 to S6 for terminal resume 6, settled to its receipt [s6:terminal-resume:6]; S6 US$0.0314 of US$0.30, the run US$0.0314 of US$0.30
+  terminal resume 6: ok: first output 352 ms after spawn, exit 0 after 1544 ms, pid 90980; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0058
+    charged US$0.2686 to S6 for terminal resume 7's --max-budget-usd [s6:terminal-resume:7]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0061 to S6 for terminal resume 7, settled to its receipt [s6:terminal-resume:7]; S6 US$0.0375 of US$0.30, the run US$0.0375 of US$0.30
+  terminal resume 7: ok: first output 342 ms after spawn, exit 0 after 1513 ms, pid 91107; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0061
+    charged US$0.2625 to S6 for terminal resume 8's --max-budget-usd [s6:terminal-resume:8]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0064 to S6 for terminal resume 8, settled to its receipt [s6:terminal-resume:8]; S6 US$0.0439 of US$0.30, the run US$0.0439 of US$0.30
+  terminal resume 8: ok: first output 337 ms after spawn, exit 0 after 1215 ms, pid 91450; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0064
+    charged US$0.2561 to S6 for terminal resume 9's --max-budget-usd [s6:terminal-resume:9]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0067 to S6 for terminal resume 9, settled to its receipt [s6:terminal-resume:9]; S6 US$0.0505 of US$0.30, the run US$0.0505 of US$0.30
+  terminal resume 9: ok: first output 350 ms after spawn, exit 0 after 1231 ms, pid 91854; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0067
+    charged US$0.2495 to S6 for terminal resume 10's --max-budget-usd [s6:terminal-resume:10]; S6 US$0.3000 of US$0.30, the run US$0.3000 of US$0.30
+    charged US$0.0070 to S6 for terminal resume 10, settled to its receipt [s6:terminal-resume:10]; S6 US$0.0575 of US$0.30, the run US$0.0575 of US$0.30
+  terminal resume 10: ok: first output 375 ms after spawn, exit 0 after 1433 ms, pid 92333; init session be461891-2e01-4665-a100-abd1d3c6f0cb model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0070
+  A-15 after S6 8t: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  S6 8t: 10 terminal resumes, 0 stalls; survivor check: none of the 10 engine pids (88988, 89295, 90087, 90446, 90619, 90980, 91107, 91450, 91854, 92333); spend S6 US$0.0575 of US$0.30, the run US$0.0575 of US$0.30
+  ----
+  ==== S6 case 8, 2026-10-08T04:19:45.470Z; run root /private/tmp/maws-e11-p1live-s6-20261008T0420Z
+  engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S6 US$0.0000 of US$0.30, the run US$0.0000 of US$0.24
+  scratch: /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6 (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+  A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    charged US$0.2425 to S6 for the launch budget of the first turn (counted beyond 44a13723-afbf-4314-a6f6-e23e0cfa1fe1's receipts) [s6:launch:44a13723-afbf-4314-a6f6-e23e0cfa1fe1]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+  the first turn 44a13723-afbf-4314-a6f6-e23e0cfa1fe1: launched on Haiku, default mode, maxBudgetUsd 0.2425 (the smaller of what S6 and the run leave), resuming a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 in place; pid 13057
+    the first turn 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    the first turn init plugins (rwqoqcky.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+    A-15 after the first turn: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (12412, 13057, 12792, 12796, 12843, 12862, 12863) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+    charged US$0.0000 to S6 for the launch budget of the first turn, settled to its receipts (US$0.0009) (counted beyond 44a13723-afbf-4314-a6f6-e23e0cfa1fe1's receipts) [s6:launch:44a13723-afbf-4314-a6f6-e23e0cfa1fe1]; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  S6: engine session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 in /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/repo under CLAUDE_CONFIG_DIR /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/claude-config (the sitting's ten terminal resumes take the same id)
+  resume 1: ok: ready in 586 ms, first output 384 ms after spawn, no_output false, launches 1, process ready, pid 13460
+    resume 1 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 1 init plugins (vgk5ootm.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 1: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (13312, 13460, 13322, 13323, 13327, 13331, 13332) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 2: ok: ready in 463 ms, first output 315 ms after spawn, no_output false, launches 1, process ready, pid 13865
+    resume 2 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 2 init plugins (fuboreh2.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 2: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (13772, 13865, 13780, 13781, 13783, 13787, 13788) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 3: ok: ready in 580 ms, first output 395 ms after spawn, no_output false, launches 1, process ready, pid 14269
+    resume 3 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 3 init plugins (cmbgrmjy.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 3: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (14166, 14269, 14179, 14180, 14183, 14196, 14197) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 4: ok: ready in 482 ms, first output 332 ms after spawn, no_output false, launches 1, process ready, pid 15322
+    resume 4 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 4 init plugins (tqqbrquu.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 4: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (14971, 15322, 15106, 15108, 15118, 15122, 15123) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 5: ok: ready in 459 ms, first output 313 ms after spawn, no_output false, launches 1, process ready, pid 15654
+    resume 5 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 5 init plugins (5r7wjbjy.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 5: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (15556, 15654, 15568, 15569, 15572, 15575, 15576) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 6: ok: ready in 463 ms, first output 320 ms after spawn, no_output false, launches 1, process ready, pid 16125
+    resume 6 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 6 init plugins (xngrs4uv.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 6: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (15970, 16125, 16022, 16024, 16028, 16044, 16045) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 7: ok: ready in 486 ms, first output 334 ms after spawn, no_output false, launches 1, process ready, pid 16509
+    resume 7 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 7 init plugins (o63kblgl.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 7: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (16259, 16509, 16269, 16270, 16273, 16278, 16279) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 8: ok: ready in 583 ms, first output 359 ms after spawn, no_output false, launches 1, process ready, pid 17286
+    resume 8 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 8 init plugins (it6jldw7.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 8: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (16951, 17286, 17000, 17001, 17004, 17008, 17009) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 9: ok: ready in 459 ms, first output 318 ms after spawn, no_output false, launches 1, process ready, pid 17908
+    resume 9 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 9 init plugins (zpq3qjsz.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 9: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (17759, 17908, 17770, 17771, 17774, 17778, 17779) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  resume 10: ok: ready in 461 ms, first output 327 ms after spawn, no_output false, launches 1, process ready, pid 18348
+    resume 10 44a13723-afbf-4314-a6f6-e23e0cfa1fe1 stopped; spend 0.0009 for the case's profile so far; journals /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/user-data/engine-host/journal/44a13723-afbf-4314-a6f6-e23e0cfa1fe1
+    resume 10 init plugins (ul256xai.jsonl): no system/init (no turn in this launch)
+    A-15 after resume 10: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: none of 7 recorded pids (18046, 18348, 18065, 18066, 18072, 18075, 18076) and no process naming /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6; maws-supervisor processes: none
+  spend: the case's profile 0.0009; S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  S6 case 8: 10 resumes, 0 stalls; spend S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  ==== S6 8t, 2026-10-08T04:20:11.630Z; ten terminal resumes of a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 in /private/tmp/maws-e11-p1live-s6-20261008T0420Z/s6/repo; ~/.local/share/claude/versions/2.1.293 (2.1.293) through the relay http://127.0.0.1:8641, Haiku; the environment's CLAUDE* variables ["CLAUDE_CODE_SUBAGENT_MODEL","CLAUDE_CONFIG_DIR"]; spent so far S6 US$0.0009 of US$0.30, the run US$0.0009 of US$0.24
+  A-15 before S6 8t: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    charged US$0.2416 to S6 for terminal resume 1's --max-budget-usd [s6:terminal-resume:1]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0020 to S6 for terminal resume 1, settled to its receipt [s6:terminal-resume:1]; S6 US$0.0029 of US$0.30, the run US$0.0029 of US$0.24
+  terminal resume 1: ok: first output 349 ms after spawn, exit 0 after 1551 ms, pid 18514; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0020
+    charged US$0.2396 to S6 for terminal resume 2's --max-budget-usd [s6:terminal-resume:2]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0023 to S6 for terminal resume 2, settled to its receipt [s6:terminal-resume:2]; S6 US$0.0052 of US$0.30, the run US$0.0052 of US$0.24
+  terminal resume 2: ok: first output 375 ms after spawn, exit 0 after 1264 ms, pid 18716; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0023
+    charged US$0.2373 to S6 for terminal resume 3's --max-budget-usd [s6:terminal-resume:3]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0026 to S6 for terminal resume 3, settled to its receipt [s6:terminal-resume:3]; S6 US$0.0077 of US$0.30, the run US$0.0077 of US$0.24
+  terminal resume 3: ok: first output 360 ms after spawn, exit 0 after 1383 ms, pid 19154; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0026
+    charged US$0.2348 to S6 for terminal resume 4's --max-budget-usd [s6:terminal-resume:4]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0028 to S6 for terminal resume 4, settled to its receipt [s6:terminal-resume:4]; S6 US$0.0106 of US$0.30, the run US$0.0106 of US$0.24
+  terminal resume 4: ok: first output 344 ms after spawn, exit 0 after 1458 ms, pid 19734; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0028
+    charged US$0.2319 to S6 for terminal resume 5's --max-budget-usd [s6:terminal-resume:5]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0031 to S6 for terminal resume 5, settled to its receipt [s6:terminal-resume:5]; S6 US$0.0137 of US$0.30, the run US$0.0137 of US$0.24
+  terminal resume 5: ok: first output 357 ms after spawn, exit 0 after 1531 ms, pid 20028; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0031
+    charged US$0.2288 to S6 for terminal resume 6's --max-budget-usd [s6:terminal-resume:6]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0034 to S6 for terminal resume 6, settled to its receipt [s6:terminal-resume:6]; S6 US$0.0171 of US$0.30, the run US$0.0171 of US$0.24
+  terminal resume 6: ok: first output 340 ms after spawn, exit 0 after 1323 ms, pid 20225; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0034
+    charged US$0.2254 to S6 for terminal resume 7's --max-budget-usd [s6:terminal-resume:7]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0037 to S6 for terminal resume 7, settled to its receipt [s6:terminal-resume:7]; S6 US$0.0208 of US$0.30, the run US$0.0208 of US$0.24
+  terminal resume 7: ok: first output 355 ms after spawn, exit 0 after 1487 ms, pid 20536; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0037
+    charged US$0.2217 to S6 for terminal resume 8's --max-budget-usd [s6:terminal-resume:8]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0040 to S6 for terminal resume 8, settled to its receipt [s6:terminal-resume:8]; S6 US$0.0249 of US$0.30, the run US$0.0249 of US$0.24
+  terminal resume 8: ok: first output 334 ms after spawn, exit 0 after 1296 ms, pid 20674; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0040
+    charged US$0.2176 to S6 for terminal resume 9's --max-budget-usd [s6:terminal-resume:9]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0043 to S6 for terminal resume 9, settled to its receipt [s6:terminal-resume:9]; S6 US$0.0292 of US$0.30, the run US$0.0292 of US$0.24
+  terminal resume 9: ok: first output 359 ms after spawn, exit 0 after 1298 ms, pid 20867; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0043
+    charged US$0.2133 to S6 for terminal resume 10's --max-budget-usd [s6:terminal-resume:10]; S6 US$0.2425 of US$0.30, the run US$0.2425 of US$0.24
+    charged US$0.0046 to S6 for terminal resume 10, settled to its receipt [s6:terminal-resume:10]; S6 US$0.0338 of US$0.30, the run US$0.0338 of US$0.24
+  terminal resume 10: ok: first output 355 ms after spawn, exit 0 after 1271 ms, pid 21335; init session a5fe8f9a-3df2-460e-8f61-b5c4aa13bd45 model claude-haiku-5-5 plugins ["cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; result success "OK" US$0.0046
+  A-15 after S6 8t: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  S6 8t: 10 terminal resumes, 0 stalls; survivor check: none of the 10 engine pids (18514, 18716, 19154, 19734, 20028, 20225, 20536, 20674, 20867, 21335); spend S6 US$0.0338 of US$0.30, the run US$0.0338 of US$0.24
