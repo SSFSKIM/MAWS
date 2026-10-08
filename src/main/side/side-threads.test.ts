@@ -92,6 +92,19 @@ describe('side-thread rows in the parent’s stream', () => {
     ]);
   });
 
+  // E11's sitting (joint-sitting notes, A3.3): a side thread's summary showed raw escape fragments around "to human". The
+  // turn's result text is what the engine displayed, so a MessageDisplay hook's colour codes are in it
+  // (test/fixtures/transcript/hooks-after-answer.jsonl seq 26); the summary is cleaned as the transcript and the digest are.
+  it('summarises a result text a display hook coloured without its escape codes', () => {
+    index.sideThreads.opened(child.appId, parent.appId, '2026-10-06T12:00:00.000Z');
+    batch(child.appId, turnEnded({ resultText: '\n\u001b[1;36mto human\u001b[0m\n\nDoing fine and ready to work.\n\nNothing is in progress.\n' }));
+    expect(emitted.map((e) => SessionEventSchema.parse(e))).toEqual([expect.objectContaining({ kind: 'side.thread.summarised', text: 'to human\n\nDoing fine and ready to work.\n\nNothing is in progress.', turns: 1 })]);
+    expect(summaryText(`\u001b[1m${'a'.repeat(395)}\u001b[0m`)).toBe('a'.repeat(395)); // the cap counts what is shown
+    // a row an earlier build wrote with the codes in it reads clean in the parent's snapshot
+    index.sideThreads.summarised(child.appId, { id: 'e-old' as never, at: '2026-10-08T09:00:00.000Z', text: '\u001b[1;36mto human\u001b[0m Done.', isError: false });
+    expect(sideThreadEvents({ sessions: index.sessions, sideThreads: index.sideThreads }, parent.appId).find((e) => e.kind === 'side.thread.summarised')).toMatchObject({ text: 'to human Done.', turns: 2 });
+  });
+
   it('counts nothing from an engine-initiated turn, an echo receipt, an agent’s turn or the disk form, and a repeated batch once', () => {
     index.sideThreads.opened(child.appId, parent.appId, '2026-10-06T12:00:00.000Z');
     batch(child.appId, turnEnded({ origin: 'task-notification' }), turnEnded({ isEchoReceipt: true }), turnEnded({ agentId: 'a1' as never }), turnEnded({ seq: null, origin: null, resultText: null }));
