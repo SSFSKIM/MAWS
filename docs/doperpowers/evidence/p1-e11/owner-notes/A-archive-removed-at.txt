@@ -1,0 +1,88 @@
+1 What the owner saw
+
+In the Archive “hi”? confirmation sheet, pressing Archive produced the red error “no such column: removed_at”. The copy promised to end the engine process, hide the session from its project, and retain the transcript.
+
+Root cause of that SQL error: the session index lacks a column that the archive operation writes. The known cause of this schema shape is an already-released v1 migration amended in place. However, ac8724a6 and the stated master head already contain an unconditional-on-needed-column startup repair for every supported post-v1 schema version. No archive-specific bypass of that repair was found. The strongest explanation for seeing this today is an older/stale main-process build actually running, not a missing migration in current master. That runtime explanation is a hypothesis, not a verified fact: this research did not inspect the running executable, logs, or the owner's database.
+
+2 Grounding
+
+All repository paths below are absolute. This was source/history research only; no app was launched and no tests, builds, or package-manager commands were run. The owner's MAWS user-data, Chrome profile, ClaudeUsage app, and relay were not accessed.
+
+Exact archive path and failing statement
+
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/ArchiveDialog.tsx:35–43 calls archiveSession and puts its error into state; lines 57–58 render the error in text-danger.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/record-ops.ts:36–39 invokes session.archive and returns result.error.message on failure.
+- /Users/new/Developer/GitHub/MAWS/src/shared/ipc/schema/session.ts:456 declares session.archive main-owned. /Users/new/Developer/GitHub/MAWS/src/main/sessions/service-register.ts:31 forwards it to service.archive. /Users/new/Developer/GitHub/MAWS/src/main/sessions/service.ts:737–738 serializes the operation and calls archiveRecord after ready().
+- /Users/new/Developer/GitHub/MAWS/src/main/sessions/record-actions.ts:31–43 reads the record, checks current holder authority, optionally calls the engine host's session.stop, then calls s.sessions.update(appSessionId, { archived: true }).
+- /Users/new/Developer/GitHub/MAWS/src/main/index/sessions.ts:453–471 loads SELECT * FROM sessions WHERE app_id = ?, sets archived=true and removed_at=null, and calls write. The SELECT does not explicitly name removed_at and succeeds against the historical table. Its returned object has no removed_at property, so the JavaScript value is undefined. write at lines 651–661 compares undefined with null and includes removed_at among the changed columns.
+- /Users/new/Developer/GitHub/MAWS/src/main/index/db.ts:58–63 produces this exact SQL for a previously unarchived row:
+  UPDATE sessions SET archived = :archived, removed_at = :removed_at, updated_at = :updated_at WHERE app_id = :key__
+  Bindings are archived=1, removed_at=null, updated_at=the current ISO timestamp, key__=the app session id. SQLite raises “no such column: removed_at” when Db.prepare (lines 33–37) prepares that UPDATE. If already archived, the unchanged archived assignment is omitted; removed_at still causes the same failure.
+- /Users/new/Developer/GitHub/MAWS/src/main/ipc/router.ts:119–124 catches the exception, logs it, and returns an internal-error envelope with the original message. This explains the literal database error in the sheet.
+
+The database transaction rolls back this UPDATE (/Users/new/Developer/GitHub/MAWS/src/main/index/db.ts:65–88). A preceding session.stop is an external host operation and is not rolled back: a live engine may already have stopped even though the record remains unarchived. The archive path does not delete the transcript. This is a storage-compatibility failure, not incorrect confirmation copy or a project-name issue.
+
+One repaired database handle, not an uninitialized second connection
+
+/Users/new/Developer/GitHub/MAWS/src/main/index.ts:151 constructs one Index at <userData>/index.sqlite, before registering the index handlers; lines 292–314 pass that same index into SessionService. /Users/new/Developer/GitHub/MAWS/src/main/index/index.ts:26–37 calls openDb(path, MIGRATIONS, REPAIRS) synchronously, then constructs SessionStore and the other stores using the returned Db. /Users/new/Developer/GitHub/MAWS/src/main/sessions/service.ts:122–125 puts deps.index.sessions directly into the setup used by archiveRecord.
+
+/Users/new/Developer/GitHub/MAWS/src/main/index/db.ts:131–189 probes the version, checks missing columns, runs repairs BEFORE pending migrations inside their opening transaction, commits, and only then returns the wrapper. Its repair SQL is ALTER TABLE sessions ADD COLUMN removed_at TEXT. Statement caching is lazy inside each Db; no archive statement is prepared at module load or before repair. The same DatabaseSync handle used for ALTER TABLE is wrapped and used for archive.
+
+Searching production connection sites found no alternate MAWS index opener in the engine host or a worker. Browser import has separate SQLite staging databases, unrelated to sessions. The only second connection in the index opener is for a future user_version greater than the known version: the probe closes, the file reopens read-only, and every Db operation is blocked with “index unavailable: user_version … is newer …”, not “no such column”. A repair failure closes the connection and throws; it cannot quietly return an unrepaired usable Index.
+
+Coverage of historical shapes
+
+/Users/new/Developer/GitHub/MAWS/src/main/index/migrations.ts:118 declares REPAIRS for version 1, table sessions, column removed_at, definition TEXT. /Users/new/Developer/GitHub/MAWS/src/main/index/db.ts:163–174 selects a repair when repair.version <= existing user_version AND the column is absent; it enters the transaction when either pending migrations OR missing repairs exist.
+
+- Pre-amendment database at user_version 3: repaired first, then migrations 4 and 5 apply.
+- Such a database carried forward to version 4: still repaired, then version 5 applies.
+- Such a database carried forward to current version 5 without the column: repaired even though there are NO pending migrations. The repair is not guarded by pending.length alone.
+- Fresh database created after the v1 amendment but before the repair: the column already exists; repair correctly does nothing. If “created by that build” instead means that build reused an older database, the preceding cases apply.
+- Versions 1 and 2 are also covered by the same predicate. A genuinely fresh version-0 database gets the column from v1. A future version beyond 5 is intentionally unavailable, not repaired. Arbitrarily corrupted/manually mis-versioned schemas are not a supported upgrade history.
+
+/Users/new/Developer/GitHub/MAWS/src/main/index/index.test.ts:186–289 already covers pre-amendment v3 with existing rows, preservation of the owner's archive, disappearance/reappearance, fresh databases, idempotent reopening, repair-before-later-SQL, and rollback when a pending migration fails. It does not explicitly cover a missing-column database already at the current version with no pending migration, nor the archive action on that historical database. Those are useful narrowly targeted additions. These tests were read, not executed.
+
+History and existing documentation
+
+The requested git log -S REPAIRS --oneline and git log -S removed_at --oneline -- src/main/index identify:
+- d2dd68de: v1 amended to include removed_at, 2026-09-28 (author 21:45:46, commit 22:18:58, UTC−07). The diff explicitly calls v1 “unshipped”; that assumption was wrong for the owner's database.
+- ff2b3a7d: repair implementation, 2026-10-06 05:35:30 UTC−07; merged to master in 8e6f5cbc at 05:41:24.
+- 60bb5417: released-migration SHA-256 pinning tests, 2026-10-07 14:09:05 UTC−07.
+
+Git history scoped to ac8724a6 contains ff2b3a7d as the most recent change to db.ts, and contains the subsequent Index/migrations changes that retain REPAIRS. Therefore a build genuinely made from ac8724a6 contains this repair; so does the stated 5dcddd70 head.
+
+/Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-05-p1-extension.md:441 already records this exact historical schema gap and repair. /Users/new/Developer/GitHub/MAWS/docs/charter.md:1003 records the version-3 owner's database, stale discovery summaries, repair merge, and “The owner's app takes the repair at the next rebuild.” Line 1012 also references the missing column. The current /Users/new/Developer/GitHub/MAWS/docs/tech-debt-tracker.md has no remaining removed_at / C4 · index migration-pinning row: git log -p 60bb5417 shows it was removed when /Users/new/Developer/GitHub/MAWS/src/main/index/migrations.test.ts:1–32 pinned released migrations 1–5. This is already documented fixed debt, not an undiscovered need for migration 6.
+
+What current logs can and cannot distinguish
+
+First correlate one main-process launch with its archive failure. Relevant literal lines are:
+- “[index] <path>: added sessions.removed_at, which migration 1 was amended to create after this database had applied it” (db.ts:182). Emitted only after successful COMMIT. Its presence proves that opener committed the repair; absence does not prove old code, because a database already containing the column is silent.
+- “[ipc] session.archive failed” followed by the Error/stack (router.ts:123). The stack should identify Db.prepare/update and SessionStore.write/update, confirming the operation described above rather than guessing from sheet text alone.
+- “[index] fs.sessionChanged could not be applied: no such column: removed_at” (source.ts:221, 418–427). Repeated discovery failures corroborate the same historical missing-column problem.
+- “[index] <path>: user_version N is newer than this app knows (5); the index is unavailable this run and the file is left as it is” (db.ts:148) identifies the different, intentionally blocked future-schema case.
+
+These are main-process console messages. The detached supervisor's host.log and “[hosts] connected to supervisor pid … build …” describe the engine host, not proof that main has this repair. Its build identity hashes the engine-host bundle (/Users/new/Developer/GitHub/MAWS/src/main/hosts/identity.ts:1–25), so an old kept supervisor does not explain an unrepaired main index. No main-process git-revision startup stamp or persistent main-log setup was found in the inspected startup/build wiring; current logs alone cannot conclusively identify main's source commit.
+
+A likely operational mechanism is a rebuilt bundle on disk while the old main process remains alive, or launching a different installed copy. /Users/new/Developer/GitHub/MAWS/src/main/index.ts:120–122 explicitly keeps the app running after all windows close. /Users/new/Developer/GitHub/MAWS/src/main/files/profile-lock.ts:5–15 quits a second instance before opening its stores. Thus closing the window or attempting another launch need not run the new opener. This possibility is grounded in code, but the owner's actual process/build remains unverified. If the successful repair line and this archive error genuinely occur in the same main lifetime against the same database, stale-build attribution is insufficient: capture that contradiction before inventing another schema change.
+
+3 Reference apps (brief)
+
+Skipped detailed comparison after the bounded lookup allowed by the brief. /Users/new/Developer/GitHub/MAWS/research/SOURCES.md points to the readable Claude Desktop app-2.16120.0 and Codex chatgpt-26.928.40906 trees; their MAP.md and INDEX.md were consulted, but no directly comparable SQLite migration runner was quickly established. I make no unverified claim about their migration policy. MAWS already has the appropriate ordered transactional migrations, explicit historical repair, and released-SQL pinning; reference research is not needed to choose this fix.
+
+4 Rough fix plan
+
+Recommendation: verify the running main artifact and exercise the existing repair, rather than add a duplicate repair or silently suppress removed_at writes.
+
+1. In the follow-up execution task, identify the running main's executable/bundle and correlate the above startup/error logs. Confirm that the development-signed artifact actually contains the current Index opener and REPAIRS. A git checkout at master and a valid development signature do not by themselves establish the running code. Fully quit and relaunch the verified current main through the normal app lifecycle; merely closing a window is insufficient. Handle any live-session quit choice through the app, not force-killing processes. No database deletion, index rebuild, manual ALTER against the owner's store, or relay change is needed for this known shape. Nothing in this step was performed during research.
+
+2. Add table-driven synthetic historical-db tests in /Users/new/Developer/GitHub/MAWS/src/main/index/index.test.ts for versions 3, 4 and 5 missing removed_at. Open through new Index, archive an existing unarchived record, check archived=true and removed_at=null, reopen and verify preservation/idempotence. Include a discovery refresh proving the owner's archive stays archived. Version 5 must assert applied=[] while the repair still happens. Add one service-level case in /Users/new/Developer/GitHub/MAWS/src/main/sessions/service.test.ts using a repaired historical index to connect session.archive to this upgrade history; existing archive cases at lines 705 onward use healthy indexes. Keep fixtures synthetic and temporary.
+
+3. If present diagnostics cannot establish the artifact, add a small startup identity/schema-success diagnostic in /Users/new/Developer/GitHub/MAWS/src/main/index.ts, with build identity supplied by /Users/new/Developer/GitHub/MAWS/electron.vite.config.ts and a focused diagnostic test. Distinguish MAIN identity from supervisor identity. Log successful index initialization/schema version and repair outcome so silence no longer leaves the central ambiguity. Do not design a larger telemetry system for this bug.
+
+4. Only if verified current main reproduces the failure after a successful open, use its stack/startup evidence to locate the discrepant path and fix that path in /Users/new/Developer/GitHub/MAWS/src/main/index/db.ts or /Users/new/Developer/GitHub/MAWS/src/main/index/index.ts. Present source gives no justification for changing their repair algorithm. Do not amend released MIGRATIONS entries or remove the owner-versus-transcript-removal distinction. Adding an unconditional migration that re-adds removed_at is not a sound alternative: healthy histories already have the column.
+
+Rough size: S for artifact/relaunch verification and focused historical archive regressions; M only if adding build provenance across packaging or if a verified-current reproduction reveals another cause. No charter Decision Log entry is needed: this restores existing archive and upgrade intent without changing a contract or product decision. Record the observation and its verified disposition in the P1 owner's-sitting results/acceptance record, linking the existing P1 surprise and charter repair entry; do not reopen the already-closed migration-pinning debt as if it were unresolved. No documentation was edited here.
+
+5 Open questions for the owner (product or taste only)
+
+None. Archive semantics are already specified, and this is a technical compatibility/runtime-identity investigation. The outstanding fact—what main executable was actually running—is technical evidence to gather, not a product choice to send back to the owner.

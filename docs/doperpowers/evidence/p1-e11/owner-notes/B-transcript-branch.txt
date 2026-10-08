@@ -1,0 +1,114 @@
+1 What the owner saw
+
+Root cause: the old filesystem follower mistook ordinary engine bookkeeping and split tool-response records for changes of conversation branch. Its retraction events were real MAWS events but often did not describe anything the human or model had retracted. The old renderer then kept each boundary outside the collapsed work group. This explains both an interleaved boundary/notice after a tool and a column of boundaries after the tools themselves have folded away.
+
+Important provenance correction: the literal B1/B2 wording is not the current master's wording. On master 5dcddd70, transcript_branch renders as “Conversation continued from an earlier point”, and the generic past-tense “Another process wrote a sibling branch into this transcript” is absent from product source. These fixes predate E11. The coordinator independently checked the installed dist/mac-arm64/MAWS.app: built 2026-10-08 02:05 PDT, with the new copy and no old generic notice in app.asar. The screenshots therefore describe an older bundle/process, not that bundle's current renderer. An old process surviving window closure is a possible explanation supplied by the coordinator, not independently investigated in this assignment.
+
+B1 has a directly verified ordinary single-writer structural explanation. B2's placement is also explained, but its exact six events and the particular 34-second interrupted turn have NOT been matched to an identified JSONL segment under the structure-only constraint. Six visually empty boundaries do not establish six empty removed sets. They can be nonempty cuts of invisible attachments, or cuts through a split response whose surviving/re-delivered tool rows are inside the fold. Do not report the exact six as proved, or infer that the interrupt caused six branch changes.
+
+2 Grounding
+
+All repository paths below are rooted at /Users/new/Developer/GitHub/MAWS. No edits to the repository, builds, test runs, pnpm commands, real MAWS user-data access, Chrome-profile access, or relay calls were made. Transcript inspections used jq-selected structure only; no message text, tool inputs, or tool outputs were printed. The recent files were selected by their record timestamps; filesystem modification times were not independently established.
+
+Exact current mechanism, verified by reading:
+
+- src/engine-host/fs/chain-follower.ts:172-221 ignores duplicate UUIDs, retains a skeleton for each UUID-bearing record, and normalizes absent/non-string parentUuid to null. A progress record remains a skeleton but never becomes the leaf or emits an event; throughProgress at 526-534 follows its parent links.
+- handleRecord at 274-296 extends when the effective parent equals the current leaf. Otherwise it first tries an announced rewind continuation, then a null-parent system/compact_boundary restart; everything else enters branch(). Thus a candidate branch is a parent/tip mismatch, NOT simply “two records have the same parent”. A new UUID-bearing null-parent record can be a new root. Anonymous records are handled separately at 224-242: file-history-snapshot, queue-operation, summary and ordinary last-prompt bookkeeping do not fork the chain. last-prompt matters for a rewind only with leafUuid and rewound:true (244-271).
+- branch at 327-353 walks known parents backwards and joins the existing prefix at the first on-chain ancestor, stopping on a missing parent/cycle with a gap. removed is the old chain minus the new chain. It preserves an already-recovered response-group prefix, rather than reverting it to raw ancestry.
+- Attachment-only removal is silent (354-356). Same-response interleaves are retained in file order (357-370): assistant message.id, result sourceToolAssistantUUID/parentUuid, matching agentId/isSidechain, and established delivery ownership identify the group (445-460). The incoming record AND every displaced record must belong to that group, or the specified eligible interleaved delivery. A human prompt or another response is not arbitrarily swallowed.
+- Empty cuts, local-command-only cuts and synthetic no-response-only cuts are silent (372-381). This is semantic suppression at the producer, not cosmetic renderer hiding.
+- W7 hold-back is different (382-389, 463-468). It requires a current foreign holder, an incoming record not attributed to MAWS, and a removed record attributed to MAWS. It keeps the old chain and emits HELD_NOTICE with key transcript_branch_held once per held episode/core. It does NOT emit a retraction for every tool. FsService wires holder count, pin and ownership at src/engine-host/fs/service.ts:429-431 and refolds when the foreign holder exits at 155-158.
+- For a nonsilent cut, terminalRewind (471-486) recognizes the constrained old-turn-boundary prompt shape with at most one holder. An unanchored rewind may also explain the cut. Otherwise 396-408 emits boundary.retraction with reason transcript_branch and the removed UUIDs. Current code does not emit the generic writer notice there. A W7 refold can emit one reconciliation retraction and its separate exit notice at 782-795.
+- src/renderer/src/transcript/model/reduce.ts:651-664 routes the boundary to affected turns, or the current/loose stream if no indexed message/hook owns the UUIDs. derive.ts:327 collects retracted UUIDs; 603-606 always adds a row for a received boundary. isPersistentRow at 115-126 and the folded projection at 742-775 keep boundaries visible while tools, thinking and ordinary notices can disappear into the work group. Hence B2's adjacent empty-looking dividers. There is no “deduplicate every six” or “hide invisible cuts” fix here; the producer must not emit false cuts.
+- derive.ts:1312-1320 and copy.ts:278-286 now use neutral conversation-history copy, with the reason and UUIDs in technical detail. view/rows/requests.test.tsx:229-243 explicitly excludes the old visible wording.
+
+Correction to a supplied anchor: X3 divider.cause is NOT transcript_branch. src/renderer/src/transcript/model/rows.ts:64 and schema.ts:76 allow only the optional value crash, added by E11 W-C to distinguish an engine crash from a user's stop. transcript_branch is the X1 boundary.retraction reason. These are separate row types and separate facts.
+
+Real recent JSONL evidence:
+
+A. /Users/new/.claude/projects/-Users-new-Developer-GitHub-doperpowers/d41fc1fa-af22-4a09-82cb-5c5f01339254.jsonl
+Record times 2026-10-06T23:25:49.158Z to 2026-10-07T02:11:14.420Z; version 2.1.292; 1,187 total records. UUID-bearing nonnull-parent children grouped by each parent: 578 parents have one child, 134 have two. Of the 134 sibling pairs, 130 are attachment/hook_success plus user/tool_result; three are two string-content user records; one is assistant/tool_use plus user/tool_result. All 144 sourceToolAssistantUUID-bearing records are result-source links. No forward-written parents and no unresolved parents were found.
+
+Counts by type: assistant 288; attachment 335; user 173; system/informational 6, local_command 15, stop_hook_summary 15, turn_duration 15; queue-operation 6; file-history-snapshot 20; file-history-delta 4; last-prompt 57; ai-title 40; atis-latch 57; dev-mods 41; mode 57; permission-mode 57; cost-state 1. No progress, summary, or isSidechain:true records. The anonymous bookkeeping types have no parentUuid; there is one null-parent root user record. They are not the 130 hook/result forks.
+
+Concrete B1 shape at lines 1135-1149 (three successive tool calls, no content inspected):
+  assistant thinking -> assistant tool_use A1
+  attachment hook_success H1, parent=A1
+  user tool_result R1, parent=A1, toolUseResult present
+  attachment output_style O1, parent=R1
+  assistant thinking -> assistant tool_use A2
+  attachment hook_success H2, parent=A2
+  user tool_result R2, parent=A2, toolUseResult present
+  attachment output_style O2, parent=R2
+  assistant thinking -> assistant tool_use A3
+  attachment hook_success H3, parent=A3
+  user tool_result R3, parent=A3, toolUseResult present
+  attachment output_style O3, parent=R3
+
+The old follower advances its tip to each H, then sees the result's parent A rather than H. It swaps out H and emits a retraction plus the unfounded notice: exactly one pair per hooked tool, N pairs for N such tools. H is invisible, so nothing visible was actually retracted. In current source each removed set is attachment-only: line 356 -> silentSwap at 381 -> no boundary at 396, no notice, no held state. The following output_style attachments legitimately continue the chain; ignoring ALL attachments would be wrong.
+
+B. /Users/new/.claude/projects/-Users-new-Developer-GitHub-doperpowers/7baaaed6-3443-4927-9353-6459d3d263c5.jsonl
+368 records, 2026-10-07, version 2.1.292. 192 parents with one child and 34 with two; 33 hook_success/result sibling pairs and one user/user pair. No sidechains, missing parents or forward parents. This independently repeats B1's ordinary shape.
+
+C. /Users/new/.claude/projects/-Users-new-Developer-GitHub-doperpowers/f14fe9c9-e568-4e2c-8050-0d2a156bc5a7.jsonl
+2,415 records, last timestamp 2026-10-07T02:30:51.316Z, version 2.1.291. 1,308 parents with one child, 278 with two, three with three. Sibling shapes: 258 hook_success/result pairs; 16 assistant/tool_use versus user/tool_result pairs; three user/user pairs; three user triples; one user/user pair with text/image block types. No sidechains, missing parents or forward parents.
+
+Lines 420-431 show a real three-tool API response: thinking T; assistant A1 parent T; assistant A2 parent A1; hook H parent A2; result R1 parent/source A1; two delivery attachments after R1; result R2 parent/source A2; an attachment; assistant A3 continuing there with the same API message.id; hook; result R3 parent/source A3. These blocks are distinct assistant records sharing message.id, NOT three assistant records all sharing one parent. Tool completion can interleave before later blocks of the same response are written. Across this file, every multi-record assistant group inspected has distinct raw parents; some are directly chained, others have intervening result/attachment records. Current responseGroup/delivery ownership rules retain the crossed response members and their eligible attachments without a retraction. The three user/user sibling classes are not covered by attachment suppression and may correctly remain genuine rewinds/forks; their semantics cannot be determined from block types alone.
+
+Pinned-version comparison:
+- Real doperpowers file f0172f84-c3f9-4677-92cc-ed3cba5734ec.jsonl has 25 records at 2026-10-08T09:11:31-34Z, version 2.1.293, 13 attachments, two assistants, one user, one stop_hook_summary, and anonymous bookkeeping. It has no shared-parent pair and provides no tool-heavy regression coverage.
+- spikes/protocol-probe/fixtures/pass3/e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl: 35 records, 2.1.293, no shared-parent groups, one chained thinking/text split response.
+- spikes/protocol-probe/fixtures/pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl: 39 records, 2.1.293, no shared-parent groups, two chained thinking/tool_use split responses and one thinking/text split response.
+Thus splitting is present at 2.1.293, and ordinary hook/result siblings already exist at 2.1.291/292 and much earlier. There is no evidence of a 2.1.293 regression. The two new pinned disk fixtures do not exercise the problematic hooked/parallel shape, so they cannot establish that 2.1.293 never emits it.
+
+Existing regression coverage, read but NOT run:
+- test/fixtures/transcript-sibling-attachments.jsonl; chain-follower.test.ts:75-142 asserts no retraction, rewind or notice in both backfill and tail modes, including pinned W7 and unanchored-rewind cases.
+- test/fixtures/transcript-parallel-tool-group.jsonl; chain-follower.test.ts:144-175 asserts whole groups retained, each result once, and no boundary/notice.
+- test/fixtures/transcript-fx8-empty-cut.jsonl; chain-follower-fx8.test.ts:185-198 asserts a forward-parent continuation that removes nothing yields no boundary/notice. Eligible delivery-tail and genuine-fork controls are at 68-108.
+
+Existing fix chronology from git log -S (local PDT timestamps; all before E11):
+- FX5: 14fc1bff, 2026-10-04 19:43:56 -07, “Swap attachment leaf siblings before branch and rewind handling”; merge 438a5755. This fixes B1's invisible attachment cuts.
+- FX6: ed1f3230, 2026-10-04 20:13:51 -07, “Preserve parallel response groups while following transcripts”; merge 9d67ddf3. This fixes split-assistant/result false branches.
+- FX8: 3b2985e4, 2026-10-04 21:53:56 -07, “Suppress retractions and notices for empty cuts”.
+- FX8: 26a7d6d3, 2026-10-04 21:58:15 -07, “Show quiet conversation-fork boundaries without inferred writer warnings”; merge d7f0dec7. This removes the old generic notice and changes the literal copy in both observations.
+
+History/debt search:
+The precise earlier owner report, empirical cohort and rules are already documented at docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md:441-459, with landings at 688-700. That earlier survey found 3,335/3,345 sampled branch points were attachment/result siblings; FX5 then exposed the parallel-response shape, fixed by FX6. Its seven truly empty cuts were caused by forward-written parents, not an interrupt. That is existing evidence, not a fresh experiment performed here.
+
+R-parents remains explicitly deferred at that document:455-457: parent records arriving after their children require a proper unresolved-component lifecycle. Empty cuts themselves are already suppressed; some nonempty consequences remain possible. The recent files inspected above have no such forward/missing parents. Grepping docs/tech-debt-tracker.md and the P1 extension spec found no dedicated R-parents/transcript_branch row. The tracker does retain the related, separate FX8 closed-local-turn result-routing limitation at line 25. E11 triage.txt:32,237 records the hook-row retraction fix W-C 256ce327, and the interface ledger:120 records divider.cause. These did not introduce a transcript_branch cause.
+
+E11 live evidence: docs/doperpowers/evidence/p1-e11/prerun.txt:175-204 identifies the 2.1.293 S1 ask-interrupt and S2 peer/team fixtures. S1 is a blocking-ask cancellation fixture, not a three-tool hooked terminal transcript. S2's new files are the disk fixtures summarized above. No evidence found in test/live/support or these sitting reports directly records either B screenshot or proves the exact six-boundary case.
+
+3 How Claude Code itself and the reference apps treat the chain
+
+The engine file is a graph, not an array of alternating chat messages. A parent mismatch does not prove a second writer.
+
+Charter docs/charter.md:138-148 binds C4 to the latest leaf's parent chain, rather than file order; C4's child is at 357 onward. X3 transcript derivation is C6, at 418 onward; C7 owns composer/requests. The older C4 prose about an unexplained branch warning is superseded by the later FX8 rule; it is not a reason to restore the old warning.
+
+Empirical engine resume evidence: spikes/protocol-probe/findings-pass2.md:171-184 and fixtures/pass3/w7-collision-disk/transcript.jsonl. In the intentional two-writer experiment, after the terminal exited, MAWS's resume continued from the terminal branch at the end of the file, not MAWS's abandoned second turn. This validates latest active branch selection for a REAL collision, not “all siblings are collisions”.
+
+Readable Claude Desktop 2.16120.0 source, /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-Dun3kJZF.js:32839-32925, builds the UUID graph, identifies eligible non-sidechain terminal leaves in reverse file order, finds a conversational leaf, walks parents, then calls response-group recovery. At 32938-33085 it indexes shared assistant message IDs and recovers results through parent/source links and tool IDs with scope checks. At 33314-33323 the reader applies this reconstruction before filtering displayable messages. This is more nuanced than blindly taking the last JSON line; anonymous records and sidechain bookkeeping are not a new answer. The source is a reference implementation, not a claim that every helper exactly matches pinned CLI 2.1.293.
+
+T3 Code at the documented 148e6dee baseline calls getSessionMessages in /Users/new/t3code-src/apps/server/src/provider/Layers/ClaudeAdapter.ts:5478-5484 for rollback/history reconstruction, through /Users/new/t3code-src/apps/server/src/claudeHistoryWorker.ts:1,29-30. It is not proof that T3 imports/renders arbitrary terminal history the way MAWS does; the MAWS audit explicitly corrected that overstatement at fundamentals-waves.md:469.
+
+Current MAWS has corresponding attachment and response recovery. Its remaining known mismatch is incremental unresolved-parent handling, whereas a whole-file loader already has later parent records available. No W7 contention evidence is needed to explain B1, and none was obtained for B2.
+
+4 Rough fix plan
+
+Recommendation: do not implement a second copy of FX5/FX6/FX8. Verify the already-fixed behavior in a genuinely current running app before changing code.
+
+Size S, verification/provenance only. Use docs/doperpowers/evidence/p1-e11/owner-script.txt pre.6 (lines 31-32, a live terminal session visible as an interactive peer) and pre.7 (record engine version). Those are the closest existing steps; the script has NO dedicated branch-regression step, so do not pretend that J4 or C6 already asserts this behavior. Add the following acceptance check to that sitting record when execution is authorized:
+1. Ensure the process running the app actually comes from the current installed bundle, rather than only closing/reopening its windows. Coordinate shutdown of any live work rather than killing it blindly.
+2. Open the same affected terminal session from the session list without taking it over. Expand the three consecutive hooked tools from B1. Each tool/result appears once; no history boundary or second-writer notice appears between them.
+3. Open the interrupted turn from B2, first collapsed and then expanded. Its stopped summary remains appropriate, the tools remain inspectable, and no empty boundary column remains. Reopen the transcript and verify the same result after cold backfill, as well as after a live append.
+4. A genuine earlier-point resume may correctly retain ONE or more causally real “Conversation continued from an earlier point” boundaries. Do not hide those globally merely to make a screenshot clean.
+
+No product file needs changing for the verified B1 and split-response/empty-cut shapes. No charter Decision Log or X3 contract change is needed to ship the existing fixes. If provenance still cannot distinguish the running build, a small build/process identity diagnostic is a separate integration task, not a transcript algorithm rewrite.
+
+If a current-build reproduction remains, first obtain its session ID and approximate turn time, then pin a content-free/synthetic structural fixture. Add a focused cold-backfill + one-line-tail regression at src/engine-host/fs/chain-follower.test.ts or chain-follower-fx8.test.ts and a follower -> reducer -> derive folded/expanded regression; the expected count is zero FALSE boundaries and exactly-once tools/results, not merely replacement wording. Existing request-row test covers real-fork copy only. Add a pinned-version scratch recording with a post-tool hook and parallel calls only if an engine-shape uncertainty remains; that is not authorized or run in this research.
+
+Separate known residual: R-parents, size M. Recommended design is to park an unresolved component, reconcile when its missing parent arrives, and settle unresolved gaps at backfill end without inventing a writer. Touch chain-follower.ts and its tests plus a structural forward-parent fixture; preserve W7, rewinds, compaction, response recovery and delivery identity. Track it in the current debt/spec ledger before implementation because it is presently buried in the fundamentals plan. It needs a short explicit C4 design/spec amendment; no X3 change if represented through existing follow gap/state fields. A new human-facing incomplete-ancestry row would be an additional product/contract decision. This residual was not observed in the recent sampled files and must not be presented as the verified cause of B2.
+
+5 Open questions for the owner
+
+No product/taste decision is needed to remove these false boundaries: that behavior and the neutral genuine-fork copy were already approved and implemented. First verify the two original turns in the current running build. The missing exact session/time attribution for B2 is a technical evidence gap, not a reason to ask the owner to choose an algorithm. Whether to add a richer “previous path, not in context” history disclosure is a separate future product decision explicitly outside these fixes.

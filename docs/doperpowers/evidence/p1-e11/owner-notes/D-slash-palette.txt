@@ -1,0 +1,129 @@
+1 What the owner saw
+
+The shift is document scrolling, not a slash list inserted into the composer's flex layout. MAWS already mounts the menu outside the composer, under document.body. Its combination of bottom-first/absolute positioning, a mount interval before positioning is applied, unrestricted scrollIntoView on the selected slash row, and an unconstrained document scroll root lets opening/navigating the menu move the entire app.
+
+Both supplied MAWS screenshots show the same important clue: the sidebar's bottom “Local workspace” strip is well above the bottom of the image, with empty page beneath it. That is not what shrinking only the transcript flex child would do. In image 9 the composer and the “to-human view · full transcript” band have moved upward together, and the menu continues below them. The earlier screenshot shows the same relationship. Codex image 10 instead shows an elevated menu above the input, with icons, names, descriptions and submenu chevrons.
+
+The composer is normally bottom-docked for a started session, even when its transcript is empty or short. Only a genuinely unstarted session (no SessionRecord yet) intentionally centers its composer. These are different states; do not fix this by making all new-chat composers bottom-docked.
+
+The “to-human view” band is not a transcript header and not a slash-menu section. It is the doperpowers engine mod's AbovePrompt content. The button says “full transcript” because that is the action it offers from report-only mode. The mod source at /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/hooks/mods/to-human.tsx:846–865 registers AbovePrompt and renders those exact strings. MAWS displays it through /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/frame/PluginSites.tsx:17–35; /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/Composer.tsx:388 puts it above the frame only for started sessions. Thus this screenshot is not evidence of intentional unstarted-session centering.
+
+Evidence boundary: this was read-only source/screenshot research. No app launch, interaction, build or test was run. The code establishes the scroll leak and the screenshots support whole-document movement; the exact first-frame ordering and scroll offsets still need the proposed browser regression to be measured. It would be incorrect to report a runtime-confirmed flex reflow bug.
+
+2 Grounding (file:line, the exact layout mechanism)
+
+Popup construction and location
+
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/editor/extensions.ts:90–107 creates both suggestion configurations without a placement, container, flip or floatingUi override. Slash is start-of-line only; @ has its own prefix rules.
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/popup.tsx:42–66 creates a ReactRenderer, marks its element data-key-sink="composer", sets only zIndex=50, then calls p.mount(renderer.element). It does not render the list beneath EditorContent inside Composer and does not establish a composer-relative absolute containing block.
+• The installed, pinned @tiptap/suggestion 3.31.3 supplies the omitted defaults: /Users/new/Developer/GitHub/MAWS/node_modules/@tiptap/suggestion/src/suggestion.ts:60–64 sets placement='bottom-start' and flip=true. /Users/new/Developer/GitHub/MAWS/node_modules/@tiptap/suggestion/src/plugin/floating-ui.ts:23–48 adds a 4px main-axis offset and flip middleware, with strategy='absolute'. This is cursor/decoration-rect anchoring, not anchoring to the whole composer frame.
+• That dependency's floating-ui.ts:81–100,119–168 appends the element to document.body, sets visibility:hidden and width:max-content, then starts computePosition/autoUpdate. Only in the asynchronous .then at 149–164 does it apply position:absolute, left and top and reveal it. Hidden visibility does not remove the initially static block from layout. There is a transient body-flow element after the full-height app, not a permanent in-composer flow element.
+• The resulting settled menu is body-portaled in the DOM and absolutely positioned. It requests below the caret first and may flip above when the measured geometry calls for it. There is no explicit viewport-size middleware or shift middleware in our configuration.
+
+Where page movement enters
+
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/SlashPalette.tsx:79–82 runs document.getElementById(optionId(active))?.scrollIntoView({block:'nearest'}) whenever active or rows changes. This API may scroll all scrollable ancestors, including the document; block:'nearest' does not mean “only scroll the nearest container.” It is intended to reveal the selected row inside the menu but does not restrict itself to that menu.
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/styles/app.css:75–90 gives html, body and #root height:100%, but no document overflow containment. A body-appended static popup during mounting, or an absolutely positioned popup outside the viewport, can enlarge the document's scrollable extent. The row-reveal operation can then move the window. The initial hidden state prevents a visual flash, not this layout/scroll side effect.
+• The ordinary app layout does not protect a body-level popup: /Users/new/Developer/GitHub/MAWS/src/renderer/src/app/Shell.tsx:27–38 is a full-height grid with a clipped main region; /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/Pane.tsx:56–63 clips the pane; both are descendants of #root, not ancestors of the body popup.
+• Tiptap also issues an immediate renderer update while fetching suggestion items, even here where items returns []: /Users/new/Developer/GitHub/MAWS/node_modules/@tiptap/suggestion/src/plugin/view.ts:168–185,221–223. Our env/context and row props update through popup.tsx:46–48,58. Do not assume there is only one detached first render and therefore the slash effect cannot run during startup.
+
+This is the exact source-level combination to fix: popup.tsx:54–55 leaves initial positioning to a later promise; extensions.ts:91–107 accepts bottom/absolute defaults; SlashPalette.tsx:81 performs an ancestor-scrolling reveal; app.css:75–90 permits the root to scroll. “Make the palette absolute” alone is not a diagnosis or a sufficient repair—it already becomes absolute.
+
+Normal session geometry, height and @ behavior
+
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/session/SessionPane.tsx:65–85 gives started sessions a flex h-full flex-col wrapper, a min-h-0 flex-1 overflow-auto transcript, and a shrink-0 composer footer. Short and long started transcripts both leave the composer at the pane bottom; a full transcript scrolls in its own region. An overlay should change neither region's allocation.
+• The same file:38–49 centers only unstarted sessions with justify-center overflow-auto. Its composer should remain in its original position when a menu opens, even though that position is not the window bottom.
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/popup.tsx:119–130 caps slash at max-h-96 (24rem, normally 384px), min-width 15rem, max-width min(32rem,80vw), width:max-content; @ is max-h-80 (20rem, normally 320px), width min(28rem,80vw). Both have overflow-y-auto. These are fixed caps, not caps computed from the remaining space above/below the anchor.
+• /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/SlashPalette.tsx:13,69 limits the ranked result to 40 rows before grouping. Its active row may begin in a group below the fold, explaining the reveal effect.
+• @ shares the mount, positioning defaults and root-scroll exposure, but /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/AtMenu.tsx:86–126 does NOT contain slash's active-row scrollIntoView effect. It is inaccurate to promise an identical reproduction: the common positioning weakness is shared; slash has an additional direct scroll trigger. Cover both in the fix, including @ results arriving asynchronously.
+
+Design intent
+
+• /Users/new/Developer/GitHub/MAWS/docs/charter.md:200 (§5.4) explicitly distinguishes centered unstarted composition from bottom-docked started composition; it also pins the shared transcript/composer width and the model/effort selector above its chip.
+• charter.md:202 explicitly calls the slash list a CARET-ANCHORED POPOVER, 240–512px wide and at most 384px tall, modeled on Claude Desktop. It does not mandate below-first placement. It separately specifies floating dialogs for command widgets; do not confuse those dialogs with the suggestion menu.
+• /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-09-28-c7-composer-requests.md:558 records ReactRenderer plus the suggestion plugin's built-in Floating UI, listbox/aria-activedescendant, editor-held focus, Escape containment and the 40-row cap. It does not prescribe bottom-start. Line 46 explicitly inherits D-20's reference-app quality rule. Charter D-13 at :38 makes the slash palette a power feature; fixing placement changes no engine contract.
+• The current grouping is explicit code/spec intent, not accidental DOM debris: /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/items.ts:16–19 has Engine, Skills, Plugins, Custom, Widget, MAWS and “Terminal only”; SlashPalette.tsx:53–62,85–105 groups those rows. A registered widget runs, a headless command inserts text, a MAWS action dispatches locally, an unavailable row remains disabled (:17–50). Keep those semantics in the layout repair.
+
+3 Reference apps (cited, with the positioning approach of each)
+
+Codex, build chatgpt-26.928.40906
+
+String-to-component route: /Users/new/codex-app-src/readable/chatgpt-26.928.40906/ui-strings.json:80738–80744 identifies composer.goalSlashCommand.setDescription; :81730–81736 identifies composer.mcpSlashCommand.description. Their registrations are in /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/app/app-primary-fc3cefe64ba8.js:71083–71140 and :71665–71733. “Don't work in a project” also appears in that file:70551 (Chat command) and :73291 (project option).
+
+The typed-slash host is E5c in /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:710512–710530, defaulting to top. It renders the autocomplete through F8c at :710916–710933. F8c (:709020–709111) uses an overlayAnchorRef when supplied, 8px gap, constrainHeightToViewport, portalRoot='body', anchor tracking and z-30. Without that ref, I8c (:709113–709229) derives an element/inline-bounds anchor from the composer chrome and uses the same overlay primitive. This is deliberately above the composer boundary, rather than letting a body-flow menu push it.
+
+The actual positioning primitive is custom geometry, not a Radix Popover: /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/app/app-shared-360504a28a87.js:390877–391013 computes the anchor rect, viewport/dialog bounds, zoom, width and available height. Element anchors match their inline bounds; cursor-mode has a 360px target width and 12px viewport margins. The container is body or the closest .codex-dialog (:390981–390986). The renderer is fixed when portaled to body, absolute in a dialog, translateY(-100%) when opening above, then createPortal (:391192–391255). It uses the bundled Floating UI autoUpdate implementation for anchor observation (Mv at :59729 onward; calls at :391068–391107), but computes positions itself. There is NO automatic top-to-bottom flip in this primitive: caller placement chooses the side; available height is clamped on that side (:390995–390996). This is an important difference from MAWS's default flip=true.
+
+Height/scroll: /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:658769–658772 caps the normal menu to min(--max-height-suggestion-menu, --composer-overlay-available-height); :658142–658188 creates its own overflow-y-auto region. /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/css/app-shared-24ce7a84cb1a.css:51023 sets the base cap to 320px; the browser-window variant has a ten-row formula at :50800–50811. Home menus use their separate composer-home-top-menu sizing path; do not assume every Codex surface has the same pixel cap.
+
+Rows/sections/submenus: app-initial:709975–710060 draws optional left icon/accessory, title, truncated description, right accessory and a chevron when the command has a submenu. :709835–709889 builds command groups or submenu sections. :710198–710203 filters the selected submenu's sections; :710269–710315 handles searchable submenu state and non-searchable submenu source changes. A chevron does not necessarily mean a lateral flyout: the typed-slash flow can replace the list with submenu content. Commands/actions are deliberately curated; it is not just a raw backend command enumeration.
+
+Keys: app-initial:490943–491050 handles ArrowUp/Down (also Mac Ctrl-P/N), unmodified Enter, optional Tab, Escape, IME protection and captured keydown; :658725–658754 connects the menu to it. This list also uses scrollIntoView internally (:490871–490875), but it is inside an already-positioned, available-height-constrained overlay. The lesson is correct isolation and timing, not “reference apps never use scrollIntoView.”
+
+Claude Desktop, build app-2.16120.0
+
+The composer slash subsystem is in /Users/new/claude-desktop-re/readable/app-2.16120.0/web/app/v1/shared-13-DG4pYUEQ.js. A useful string anchor is gcRrwu3vv4 / “Type to filter” in /Users/new/claude-desktop-re/readable/app-2.16120.0/ui-strings-web.json:75227–75232, used in shared-13:8325. Its slash-command-menu-anchor class is at :8010; the popup wrapper is _Component12 (:8079–8225), and _Component13 (:8249–8272) is its actual slash call site.
+
+It prefers NATIVE CSS ANCHOR POSITIONING when supported and when transformed ancestors do not disqualify it (:8012–8040,8093–8109). The main menu is fixed, anchored to --slash-command-menu, position-area block-start span-inline-end, with horizontal shift/pin fallback rules and a height cap based on available space (:8044–8063). The JS fallback is Floating UI useFloating with offset, optional flip, shift(padding 8), size(availableHeight minus 16), and autoUpdate (:8131–8151). The slash call explicitly disables flip (:8265), defaults to top-start, -16px cross offset and 10px main offset (:8082–8084). Thus it stays above and shrinks/scrolls rather than preferring below.
+
+The shell is min-w-60 max-w-lg max-h-96 (:8208), matching MAWS's 240–512 / 384px sizing intention. The slash suggestion renderer creates a ReactRenderer and appends its host to the editor owner's document.body (:8740–8749); optional wrapper-level createPortal is available too (:8220–8223). Its root list is already an overlay, not composer flow.
+
+The lazy popup body /Users/new/claude-desktop-re/readable/app-2.16120.0/web/app/v1/ccc334009-DgUL-nxL.js supports separators/loading rows (:64–75), selectable items with icons (:311–375), submenu affordances and right-start submenu overlays (:396–416), and virtualized/managed scrolling (:120–145). The suggestion plugin intercepts Escape and reserves Enter/Tab/Up/Down without sending them to the editor (shared-13:8765–8774). It is not accurate to describe this slash menu as simply a Radix Popover: native CSS anchors plus Floating UI fallback is the actual positioning mechanism in this build.
+
+T3 Code, commit 148e6deea046658639aae9fef5b349781cec39d1
+
+Verified the checkout's main ref matches the requested 148e6dee pin. Its approach is particularly readable: /Users/new/t3code-src/apps/web/src/components/chat/ChatComposer.tsx:857–935 defines ComposerCommandMenuLayer. It measures the actual composer main surface (falling back to the form/anchor), calculates bottom from window.innerHeight - rect.top with an intentional 1rem+1px drawer overlap, uses the composer's inset width, derives maximum height from space above, and creates a fixed z-40 body portal. Resize and captured scroll listeners plus ResizeObserver on the anchor AND ancestors keep it aligned as side panels move (:894–915). It does not use Floating UI or Radix for this layer and does not flip below.
+
+/Users/new/t3code-src/apps/web/src/components/chat/ComposerCommandMenu.tsx:92–127 provides the drawer surface and a max-h-72 list (18rem/288px at the normal root size). Rows include label and description, with file/skill/provider context icons/badges as relevant (:151–218), not a uniform Codex-style icon on every built-in slash action. The active row reveal is :84–90. The caller mounts the layer at ChatComposer.tsx:6477–6489 and handles Up/Down, Enter/Tab and Escape at :3999–4030. Base UI Autocomplete underlies its Command components (/Users/new/t3code-src/apps/web/src/components/ui/command.tsx:7–15 and /Users/new/t3code-src/apps/web/src/components/ui/autocomplete.tsx:3); this is separate from the manually positioned drawer layer.
+
+MAWS already has the necessary technology
+
+/Users/new/Developer/GitHub/MAWS/package.json:89–99 pins the Tiptap 3.31.3 packages and :115 declares radix-ui. Floating UI is already present via @tiptap/suggestion; /Users/new/Developer/GitHub/MAWS/node_modules/@tiptap/suggestion/package.json:42,47 declares @floating-ui/dom. There is no direct @floating-ui dependency in MAWS package.json. Use Tiptap's existing positioning configuration where possible; if product code imports size/shift/computePosition directly, declare that direct dependency rather than relying on transitive resolution. No new competing popup library is needed.
+
+4 Rough fix plan
+
+Recommendation: keep the existing portal and suggestion lifecycle, make the popups genuinely isolated overlays from the instant they attach, and make slash open above with a constrained internal scroll region. Do not restructure SessionPane or move the plugin band to compensate for scrolling.
+
+1. In the shared suggestion renderer, establish out-of-flow positioning BEFORE p.mount appends the element (prefer a consistent fixed strategy for a body overlay), retain hidden-until-positioned handling, and ensure there is no static body-flow interval. Configure an explicit above-first/top-start placement rather than inheriting bottom-start. For the owner's requested stable behavior, keep slash above and cap it to available space instead of flipping it downward; use viewport padding and horizontal shift. Apply the same safe lifecycle to @, with an explicitly chosen placement policy rather than accidental defaults.
+
+2. Replace the slash row's document-level scrollIntoView with a reveal scoped to the listbox scroll element, using its own scrollTop/row bounds. It must change only the list's scroll offset. Share this helper with @ if adding active-row reveal there, so keyboard navigation actually keeps selected rows visible without moving the page. Use per-popup refs rather than global document lookup. Preserve editor focus, Escape/Enter/Tab behavior, disabled-row behavior, IME handling and outside-dismiss cleanup.
+
+3. Make html/body/#root a non-scrolling workstation viewport; internal transcript/unstarted-pane/list scroll containers remain the only intended scrollers. Add this as a second containment boundary, not as the only fix or a way to hide an offscreen menu. Verify existing dialogs/popovers and narrow windows after changing global overflow.
+
+4. Bound list height by available space on the chosen side, with today's 384px slash / 320px @ caps as maxima, not promises. Retain token-based surface styles and existing light/dark behavior. Avoid adding a replacement popup framework.
+
+5. First land the layout correction without rebuilding the command catalogue. A mature next list would give recognized actions meaningful icons, use user-facing sections while preserving origin information, show chevrons only for real model/mode/MCP-style submenus, and retain explicit disabled reasons rather than silently hiding unsupported commands. Do not infer headless support from a pretty row or expose terminal-only commands as executable. This content redesign is a separate product-sized follow-up, not necessary to stop the page moving.
+
+Primary files to touch
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/popup.tsx
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/editor/extensions.ts
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/SlashPalette.tsx
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/SlashPalette.test.tsx
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/styles/app.css
+/Users/new/Developer/GitHub/MAWS/e2e/composer.spec.ts
+
+Potential supporting files: AtMenu.tsx for shared bounded row reveal; Editor.tsx or frame/Frame.tsx for an explicit composer anchor; package.json/lockfile only if importing Floating UI directly. SessionPane.tsx is an integration-test subject, not presently the cause.
+
+Tests to add, not just CSS assertions
+
+• A browser regression on the actual Shell/SessionPane layout: record the composer frame's bounding box, sidebar footer position, window.scrollY/document.scrollingElement.scrollTop, transcript viewport size and transcript scrollTop. Open a large slash list, navigate to rows below the fold, filter, close and reopen. Composer/sidebar/transcript geometry and outer scroll offsets must remain unchanged (subpixel tolerance); the menu must lie above the intended anchor, stay inside the viewport, and its own scrollTop must change to reveal the active row.
+• Cover a started empty transcript, a long transcript both at bottom and deliberately scrolled up, a centered unstarted session, a short window and a split/narrow pane. Include a query whose initial best match sits in a lower origin group—the existing effect specifically caters to that case. Include asynchronous @ result growth, multi-line input and viewport resize.
+• /Users/new/Developer/GitHub/MAWS/e2e/composer.spec.ts:225–280 already checks @ insertion, slash catalogue/grouping, disabled reasons and Escape. It does not assert geometry or root scroll. Reuse its deterministic replay data, but mount/test the real session pane; a stand-alone editor harness alone cannot prove the sidebar no longer moves.
+• Replace the unit test at /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/mentions/SlashPalette.test.tsx:106–118, which currently asserts that unrestricted scrollIntoView was called, with behavior around bounded list scrolling. Add a renderer-lifecycle test that inspects the popup at mount time to prove it is already fixed/out-of-flow, plus cleanup/key-sink tests. Do not pretend a DOM-only unit runner validates browser layout.
+
+Rough size: M for the robust shared-popup repair and meaningful browser regressions. A one-line top-start change is S, but leaves the root-scroll leak and startup interval unresolved. Rich sections/icons/submenus are a separate M product pass.
+
+Alternatives and when they win
+
+• Minimal, charter-preserving route: retain caret anchoring and the current width/cap, configure top-start/fixed plus viewport constraints, and fix the scroll/lifecycle issues. Best immediate repair when the request is specifically “nothing moves and it opens above.” No charter decision changes are needed.
+• Exact Codex composition: anchor slash to the composer's top edge/width, so even a multi-line draft always gets a menu wholly above the box, while @ may remain caret-anchored. Best if matching the supplied Codex silhouette is the required acceptance. Reuse Floating UI with an explicit composer reference rather than copying Codex's geometry implementation. This requires updating the explicit CARET-ANCHORED / 240–512px language in charter §5.4 (:202) and its child record; it is not an engine-protocol change or a change to D-1. The owner's new request supplies the direction, but the record should not silently retain contradictory wording.
+• A local absolute bottom:100% popup would avoid document positioning, but the pane/main ancestors intentionally clip overflow and centered/small panes need collision handling. Prefer it only if the composer has a deliberate non-clipping overlay host and all split-pane/short-window cases are covered. It is not the default recommendation.
+
+5 Open questions for the owner
+
+Above rather than below, with no page movement, is already answered by the owner's request; there is no reason to ask it again.
+
+One taste/scope distinction remains worth showing rather than guessing: retain the smaller caret-width palette (the current charter) or adopt the Codex composer-width, composer-top-edge menu, especially for multi-line drafts? I would take the former for the bounded bug repair, then the latter if the supplied screenshot is intended as exact width/anchoring acceptance. Record that choice in §5.4 if it changes the explicit current rule.
+
+The layout fix does not need a decision on renaming “Widget,” icon selection or submenu taxonomy. Those can be reviewed as a separate content-design follow-up once the menu is stable. Keep the doperpowers AbovePrompt band; it belongs to the owner's plugin and is not the layout defect.

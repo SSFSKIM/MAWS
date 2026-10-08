@@ -1,0 +1,191 @@
+G — To-human as a default MAWS mod
+Research only, 2026-10-08. Repository supplied as master 5dcddd70. No code/settings changes, builds, tests, engine launches, relay access, Chrome access, or reads of MAWS's real user-data/index. The only authored file is this report.
+
+1 What the owner asked
+
+"integrate to-human mods into our app. let it be default plugins. agent 'sends' message to human (via to-human tag, signal important parts via essential and insights tag, ask async question via need-input) these are default application behavior from now".
+
+The intent is a dependable human-message channel for unattended sessions, not merely XML-tag styling: every MAWS session should know how to send reports, highlight must-read information, explain choices, and leave asynchronous questions the human can answer later. The working transcript remains accessible. The actual educational tag is singular <insight>, not <insights>.
+
+Recommendation: ship a small, built-in MAWS To-human mod, enabled by default, with an app-owned delivery/answer/attention lifecycle and one versioned instruction contract. Supply that contract to owned engine launches with --append-system-prompt unless a verified active compatible output style already supplies it. Do not require installation of the whole doperpowers plugin or silently change the human's Claude settings. The MAWS plugin widget should distinguish built-in MAWS mods from engine-installed plugins rather than falsely listing a native module as a Claude-installed plugin.
+
+Important correction: today there are TWO implementations. The screenshot's "to-human view · full transcript" bar belongs to the live doperpowers engine mod; MAWS's owner Presenter is the offline/unattached fallback. The live mod already has clickable need-input choices, but clicking fills the composer; Enter still sends. The fallback's choices are inert. Neither establishes tag-derived MAWS attention.
+
+2 Grounding
+
+Mod model and ownership
+
+- /Users/new/Developer/GitHub/MAWS/CLAUDE.md:3 and /Users/new/Developer/GitHub/MAWS/docs/charter.md:11,30 (D-5) explicitly keep the base general and owner workflows as later plugins. Charter :34 (D-9, subsequently amended) originally deferred extension surfaces; :82 specifically deferred a native to-human lane.
+- A "mod" is an ordinary Claude Code plugin with a hooks/hooks.json modules entry pointing to TypeScript function hooks, executed by the engine's sandboxed worker. It is not a separate MAWS manifest format or an arbitrary React plugin loaded into Electron. /plugin-authoring is an engine-provided skill, not evidence of a MAWS-native mod marketplace.
+  Grounding: /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md:369-378. Its K1 study says there is no separate "mod" directory/command/manifest; UI surfaces are driven by ui_surface_v1, ui_attach/render/press and plain-data trees. Function hooks became default-enabled in engine 2.1.286; the older doperpowers README's environment-gate wording is not a current MAWS requirement.
+- R0 probed the protocol; R1 handled toast/status/log; R2 added desktop surfaces, panes, bands and prompt read/fill/suggest; R3 added transcript sites. These were post-baseline UX waves, not a newly invented P1 plugin runtime. R4 landed the stored-text owner vocabulary fallback (67b0b2d1).
+  /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md:473,527,698.
+- C11 established the /plugins widget; P1 E8 added plugin/marketplace management and reload. E8 delegates registry authority to the engine: claude plugin list --json, marketplace list, --available; mutations through the engine CLI after a confirmation sheet naming the command and write locations; reload_plugins/reload_skills for live processes. No native MAWS default-mod registry was found. Engine status lists what system/init or reload_plugins says is loaded.
+  /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-05-p1-extension.md:93-95,322 onward.
+  /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-05-e8-plugins.md:7,27-32,89-92.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/PluginsWidget.tsx:1-8,85-115.
+  Implementation: /Users/new/Developer/GitHub/MAWS/src/engine-host/plugins/runner.ts; /Users/new/Developer/GitHub/MAWS/src/engine-host/plugins/reload-after.ts; /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/plugins/.
+- MAWS currently does not bundle/default-enable a To-human engine plugin. Its local owner Presenter is always eligible for recognized text when no surface is attached; it has no on/off preference.
+- /Users/new/Developer/GitHub/MAWS/plugins/cua/ is a real distributable Claude plugin, but MAWS explicitly does NOT load it as a plugin: it bundles cua-shim.mjs as a resource and places its server in --mcp-config. The repo is also a local Claude marketplace. Thus a plugins/ directory alone does not mean a MAWS runtime module is registered.
+  /Users/new/Developer/GitHub/MAWS/plugins/cua/README.md, "Install" and "For MAWS"; manifests at /Users/new/Developer/GitHub/MAWS/plugins/cua/.claude-plugin/plugin.json and /Users/new/Developer/GitHub/MAWS/plugins/cua/.claude-plugin/marketplace.json.
+
+To-human support today
+
+- Stored parser recognizes exact lowercase <to-human>, <essential>, <need-input>, <insight>; matching closing tags; flat <choice> and <choice recommended> inside need-input. Choice body is trimmed; blank choices removed; nonempty choice-only questions preserved. Nested paired marks switch the current kind. Unknown, crossing/unbalanced marks remain literal; nested choice markup remains literal. It is not an HTML/Markdown parser: balanced tag examples inside code also count. This last limitation is especially significant before adding notifications.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/parser.ts:1-68.
+- Presenter shows labeled Markdown sections, essential emphasized, insight as an HTML aside. Choices are an ordered list with a Recommended badge; EVERY need-input ends "Resume this session to answer." It has no buttons, answer dispatch, answered state, or durable question model. Mixed plain text stays behind working-record disclosure or the turn fold.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/Presenter.tsx:7-40.
+- An aside is not currently a marginal note beside the message. The owner report container is a vertical flex column; insight gets a yellow label within the same flow. Essential gets a green label and heavier type, not a must-read lifecycle.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/presenter.css:1-12.
+- The seam is explicitly exclusive: attached surface => no local assistantPresentation; unattached => local presenter if recognized, otherwise ordinary text. for-human ink promotes marked commentary out of the working fold; mounted/probed rows are handled for virtualization.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/transcript/surface/Rows.tsx:36-52,55-98.
+- The general Markdown sanitizer intentionally leaves raw tags literal until an extension handles them; it does not execute them as HTML.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/transcript/view/markdown/sanitize.ts:15-36.
+- Live behavior comes from installed doperpowers 7.141.2, confirmed via /Users/new/.claude/plugins/installed_plugins.json's user-scoped doperpowers entry. Its single hooks module registers to-human, agents, kairos and compact; there is no independent to-human enable switch in that registration.
+  /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/hooks/mods/register.tsx:1-22.
+- Live mod starts in report mode but does not activate until the first marked assistant message. Then it folds ordinary messages/tools/working record, retains selected human-facing rows, and its AbovePrompt button toggles the entire transcript between mod report and engine drawing. This is not currently an app-wide persisted view setting.
+  /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/hooks/mods/to-human.tsx:592-611,847-881.
+- Live need-input choices and reply button write an "Answering \"<question first line>\": <answer>" line into the human's composer. They intentionally do NOT submit, because $.prompt.submit would produce a plugin-origin message. Answers to several questions can coexist in the box. prompt.submit later marks matching questions answered, and a resumed session reconstructs answers from transcript. Matching by first line is not a suitable final identity scheme for two identical questions.
+  /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/hooks/mods/README.md:67-86.
+  /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/hooks/mods/to-human.tsx:673-681,883-924.
+- MAWS implements the bridge needed for that fill: plugin.ask prompt_read/fill/suggest is routed to the mounted session composer. No mounted composer means refusal; a hidden session is refused by the host deadline. This is therefore already interactive in a live owned MAWS session, but not an offscreen durable inbox.
+  /Users/new/Developer/GitHub/MAWS/src/renderer/src/engine-surface/asks.ts:1-9,40-66.
+- No to-human/essential/need-input tag extraction exists in attention service or notifier. Existing attention comes from broker requests, failed turns/tasks, lost approvals and held peer messages. No new attention kind exists for essential or async input.
+  /Users/new/Developer/GitHub/MAWS/src/main/attention/service.ts:1-11,25-26,139 onward.
+  /Users/new/Developer/GitHub/MAWS/src/shared/graph/enums.ts:26-31.
+  /Users/new/Developer/GitHub/MAWS/src/main/index/attention-service.ts:1-7 delegates to that service; /Users/new/Developer/GitHub/MAWS/src/main/index/attention.ts persists it.
+- Notification plumbing can be reused: one notification per pending actionable item ID, only when no MAWS window is focused and the group is enabled; hydration is silent; badge and navigation are integrated. Tags cannot trigger that path today.
+  /Users/new/Developer/GitHub/MAWS/src/main/attention/notifier.ts:1-11,24-35,94-107.
+
+How the style reaches the engine
+
+- The owner's /Users/new/.claude/settings.json:299 sets outputStyle to "doperpowers:to-human". The user-scoped plugin is installed at /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2. This is an owner installation/configuration fact, not a MAWS-supplied default.
+- MAWS starts with --setting-sources user,project,local and merges its own --settings JSON. It does not set outputStyle, append system instructions, or supply a to-human plugin directory in the inspected launch builder. Session mapping initializes extraSettings to null.
+  /Users/new/Developer/GitHub/MAWS/src/engine-host/launch.ts:41-56,190-212.
+  /Users/new/Developer/GitHub/MAWS/src/main/sessions/launch-mapping.ts:51-69.
+  /Users/new/Developer/GitHub/MAWS/src/shared/engine/initialize.ts:8-14 supplies capabilities/trust/MCP, not a behavior prompt.
+- The normalizer retains system/init output_style, so actual engine selection is observable: /Users/new/Developer/GitHub/MAWS/src/engine-host/normalizer.ts:227. A user setting alone is not a complete deduplication detector: project/local/flag/managed settings, disabled/missing plugins, and runtime changes can differ.
+- D-1 remains no engine patches. Small correction to the task's shorthand "pinned engine": product D-1 was amended to resolve the installed binary at each launch, never refuse solely by version; pins apply to fixtures/harnesses. Use 2.1.293 as this research's target/conformance baseline, not a newly imposed product lock.
+  /Users/new/Developer/GitHub/MAWS/docs/charter.md:26.
+
+Flag verification without launching the engine
+
+- Read-only literal searches of /Users/new/.local/share/claude/versions/2.1.293 found its CLI option signatures:
+  --append-system-prompt <prompt>, byte offsets 72399152 and 202047822;
+  --settings <file-or-json>, offsets 72405140, 202054081, 202131311;
+  --plugin-dir <path>, including offsets 72406968 and 202055920.
+  These are static option-signature evidence from the exact installed version, not an executed help command or a behavioral probe. No --output-style string was found in that executable; do not invent that CLI flag. Output-style selection is a settings key.
+- Independently, --settings is exercised by the 2.1.293 recording /Users/new/Developer/GitHub/MAWS/spikes/protocol-probe/fixtures/pass3/p1-maws-ask-interrupt.jsonl:1-2 (provenance/spawn), with init seq 30 reporting 2.1.293. Spawn has --settings {"dialogExpiry":"never"}. This verifies the flag, not a to-human overlay.
+- The prior readable extraction /Users/new/claude-code-bundle/2.1.292/cli.pretty.js:517670 contains the append-system-prompt option declaration. No 2.1.293 readable extraction was present. The eventual child must record a small 2.1.293 launch/resume/compaction/dedup fixture for the selected contract path; this read-only assignment did not verify that behavior.
+
+3 The output style contract
+
+Source of truth read: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.141.2/output-styles/to-human.md:1-50. The earlier cached 7.141.0 file was also read; the installed 7.141.2 file is the citation used here.
+
+- Metadata: name to-human; keep-coding-instructions: true. The normal coding instructions must remain, not be replaced by a tiny formatting prompt.
+- The human is away; ordinary prose, tool calls and results are the agent's working record. <to-human> spans, wherever written, are the messages delivered to them (:7-12).
+- What the human must not miss uses <essential> instead (:12).
+- Blocking questions use AskUserQuestion. Only questions for which the agent can continue other useful work use <need-input>, one question per mark (:14-19).
+- Optional choices are flat <choice> lines; the recommended choice has the bare recommended attribute. The answer is a human click or their own words, delivered as the next human message (:21-30). If this is the last remaining work and the agent is waiting, use AskUserQuestion, not an async mark.
+- Write directly and literally; do not substitute mannered metaphors for precise statements (:32-40).
+- Teach relevant implementation choices around the work: before and after code changes, brief educational explanations of 2-3 codebase-specific points in <insight>. They belong in the conversation, not files, and should appear during work rather than only at the end (:42-50).
+- The style itself specifies semantics, not a transport, notification policy, persistent question ID, read receipt, dismissal, or viewport placement algorithm. Those are MAWS product/application responsibilities. It also does not say every to-human span needs an OS notification.
+
+MAWS should carry a short versioned contract preserving these semantics, not unrelated doperpowers workflow instructions. An instruction-only append preserves the base coding prompt and an independently selected output style. The style's coding-instruction preservation must be retained if the alternative output-style mechanism is used.
+
+4 Reference apps (brief)
+
+Source maps and citation convention: /Users/new/Developer/GitHub/MAWS/research/SOURCES.md:9-14,17-39; /Users/new/claude-desktop-re/readable/app-2.16120.0/MAP.md:48-70; /Users/new/codex-app-src/readable/chatgpt-26.928.40906/MAP.md:15-19,44-48. INDEX.md locates the big compiled modules; ui-strings maps visible concepts. These vendor sources are implementation evidence, not files to copy into MAWS.
+
+Claude Desktop, app-2.16120.0
+- The Agent SDK constructs an initialize request carrying systemPrompt and appendSystemPrompt; these are protocol fields, not edits to the engine binary. Source: /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-Dun3kJZF.js:61329-61345,63899-63918. The build's INDEX.md:10 indexes this module.
+- Warm process claims also accept append_system_prompt, sourced from the append portion of the configured system prompt: /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-BT0bw7S3.js:1532-1565 and /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-Dun3kJZF.js:64348-64363.
+- Cowork assembles a segmented host-specific prompt including renderer appends, plugin sets and enabled host capabilities, then hands it to the session environment. /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-B2pgMh2t.js:13784-13820,13878-13931. INDEX.md:15 identifies the module; MAP.md:58-70 locates Cowork and artifacts.
+- Artifacts need not be magic parsed XML: the local Cowork create_artifact tool description explicitly teaches when to create one, file-based input, light UI constraints and the host bridge. /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-Db4co9QZ.js:1552-1569. This is prompt instruction attached to a host tool plus native storage/UI, not just renderer pattern matching. I did not establish that Claude Desktop's local Code mode uses the web chat's historical artifact tags; that analogy is unnecessary here.
+
+Codex desktop, chatgpt-26.928.40906
+- Its pet activity indicator is instructions PLUS a tool: developer instructions ask the agent to call update_running_summary for substantial-work intent and meaningful phase changes, not on a timer. The app appends that instruction only when the corresponding dynamic tool exists. /Users/new/codex-app-src/readable/chatgpt-26.928.40906/main-process/bootstrap-DZvtH5qH.js:52912-52923,53192-53218,53245-53248. INDEX.md:9 identifies this module. Visible pet entry points are catalogued at /Users/new/codex-app-src/readable/chatgpt-26.928.40906/ui-strings.json:83794-83809.
+- Writing blocks are the closer tag-contract analogue: a host developer-instruction string defines :::writing syntax, IDs and intended semantics; enabling the feature appends it to developerInstructions. Same absolute bootstrap path :52924-52926,53252-53259. The app composes with existing instructions rather than replacing the core agent prompt.
+- Goal mode is not merely a prompt: it uses thread/goal/set with objective and active/status updates, plus native thread state. Same bootstrap path :65733-65781. The corresponding Goal UI strings are /Users/new/codex-app-src/readable/chatgpt-26.928.40906/ui-strings.json:80714-80740.
+- Takeaway: choose the narrowest supported channel. A formatting/delivery convention belongs in appended instructions; questions/read state require host lifecycle state; dedicated tools/protocol are warranted when persistence or precise semantics need them. Do not infer that every app-level mode is prompt-only. The pet, writing-block and goal examples establish the distinction without a full review-mode archaeology.
+
+5 Rough plan
+
+Recommended shape
+
+A built-in MAWS mod, not a dependency on the owner's entire doperpowers installation, and not a general third-party Electron plugin SDK. Give the built-in module a stable ID, contract version, default-enabled flag and app/session settings. Its three responsibilities are (a) behavior contract injection; (b) report/question presentation; (c) semantic attention/read/answer state. Initially a small static registration is sufficient. List it in a truthful "MAWS mods · Built in" section of the plugins widget; retain the engine's own Installed/Loaded sections unchanged.
+
+This is a P2 child, not a P1 bugfix. R4 deliberately made detached choices inert and live drawing engine-owned. The request changes the default agent behavior, makes owner vocabulary general, changes data/state contracts, and adds notification/read semantics. A focused P2 child can own it, with bounded internal waves; no need for a broad extension-platform project first. Overall size L.
+
+Engine side — M
+
+- Add a contract version/source to launch configuration, resolved centrally for every MAWS-owned cold start, resume and fork, including supervisor reconnect/relaunch. Do not inject by prepending an ordinary human message. Exclude non-conversation utility/probe launches unless they explicitly request the behavior.
+- Preferred mechanism: --append-system-prompt <contract>, statically verified in exact 2.1.293 as above. Add a typed field to LaunchSpec and append exactly once in buildLaunch. Keep the base prompt, current model configuration and current user output style. The new instructions should define the human channel, not overwrite user taste unrelated to it.
+- Detect a known compatible active style before adding instructions: resolve effective outputStyle in the launch's settings context (config-home override, project/local scopes, flag settings and applicable policy) and verify that the supplying plugin/style is actually available. Recognize doperpowers:to-human by versioned compatibility metadata, not by arbitrary substring matches in unrelated files. Merely finding doperpowers installed or one historical <to-human> span is insufficient.
+- Record source='external-compatible-style' or source='maws-contract' per launch; compare against the engine's observed output_style before the first user prompt and surface a mismatch. The existing SessionStart timeout settings reader is incomplete for this job (it explicitly omits managed settings/root scopes); do not repurpose its heuristic as an authoritative resolver. If effective style cannot be established, the resolver must make the ambiguity visible rather than silently double-inject.
+- A terminal-running session remains foreign-live/read-only: MAWS presents its marks but cannot change that process's prompt. On later MAWS-owned resume, apply the same selection rules. Do not write ~/.claude or ~/.claude.json. Keeping existing external behavior is not the same as a MAWS off switch removing someone else's style.
+- An app/session disable stops future MAWS injection. Existing in-flight context cannot be erased by a toggle; label when instruction changes take effect (recommended: next owned launch/resume, with immediate presentation preference changes). Do not promise reload_plugins removes an already appended prompt.
+- Candidate files: /Users/new/Developer/GitHub/MAWS/src/shared/engine/launch-spec.ts; /Users/new/Developer/GitHub/MAWS/src/main/sessions/launch-mapping.ts; /Users/new/Developer/GitHub/MAWS/src/main/settings/session-settings.ts; /Users/new/Developer/GitHub/MAWS/src/engine-host/launch.ts; /Users/new/Developer/GitHub/MAWS/src/engine-host/launcher.ts; a new app-owned contract/resolution module under /Users/new/Developer/GitHub/MAWS/src/shared/mods/ or the child-approved equivalent. Do not scatter the prompt over renderer components.
+
+Renderer and answers — L
+
+- Promote parser semantics to a shared, versioned, UI-independent boundary. Keep raw transcript immutable. Preserve existing safe Markdown rendering and the accessible full-transcript/working-record escape hatch. Default report view on for enabled sessions, without hiding all untagged imported history before the contract is actually in effect.
+- Consolidate live/unattached behavior: MAWS owns report/essential/insight/async-question semantics regardless of which viewport is mounted. Do not let the attached engine surface automatically bypass the application contract as Rows.tsx does now.
+- Establish explicit presentation ownership so the existing doperpowers to-human hooks do not produce a second report toggle, second question handler or contradictory folds. Best cooperative solution: advertise a MAWS native-to-human capability to the external mod, which then defers ONLY its to-human UI on that surface. It keeps its terminal UI and other mods. This requires a small compatible doperpowers change; it must not be approximated by disabling the whole doperpowers plugin. If there is no cooperation, scope a host-native report view with clearly defined precedence; do not silently reinterpret or filter arbitrary engine trees by their English labels. This is a real integration design point, not solved by prompt deduplication.
+- To-human: message cards/lane. Essential: visually prominent must-read item plus unread state. Insight: adjacent annotation at sufficient width, in-flow labeled aside at narrow width; preserve reading order/accessibility. Need-input: one question card, recommended choice, answer status, choice actions and a free-text Reply action.
+- Choice click should use MAWS's existing human send path as the owner's requested next prompt, not $.prompt.submit/plugin-origin. If engine is busy, use the application's existing queue semantics by default; do not silently interrupt/steer. Free-text Reply associates the composer draft with the question. Preserve unrelated draft content. The two options (instant choice send versus populate-and-Enter) are a taste decision below; recommendation follows the owner's request for click-to-answer.
+- Give each question a stable identity derived from session + source message UUID/block + span position, not just its first line. Keep question and answer correlation distinct from displayed text. Multiple identical questions, multiple answers in one draft, queue cancellation, send failures and retry must work.
+- Persist unanswered/queued/answered and essential-unread state across process exit, view unmount, restart, replay, compact and terminal import. Mark answered only when the corresponding human send has actually been accepted/delivered, not when a button is clicked or a draft is filled. Queue cancellation returns to unanswered. Imported legacy "Answering ..." messages can be recognized conservatively; ambiguous duplicate headings must not auto-resolve multiple questions.
+- A foreign-live card offers open/read or take-over/resume only through existing custody rules, never a second concurrent writer.
+- Candidate files: /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/parser.ts; /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/Presenter.tsx; /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/presenter.css; /Users/new/Developer/GitHub/MAWS/src/renderer/src/transcript/surface/Rows.tsx; /Users/new/Developer/GitHub/MAWS/src/renderer/src/engine-surface/asks.ts; /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/submit/; /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/composer.ts. Move the now-general feature out of owner/ or document the temporary location explicitly.
+
+Attention, sidebar and persistence — M/L
+
+- Derive semantic marks from canonical assistant events/disk backfill, not from rendered DOM or virtualized row mounts. Only finalized, attributable assistant spans create durable attention. Do not interpret user prompts, tool output, or educational code examples as actionable messages. Revisit the current "tags inside code count" grammar before default notifications; version any change rather than silently breaking stored presentation.
+- Add separate async-input and essential-unread attention reasons with a source anchor. An asynchronous question is "waiting for your input" but the ENGINE may still be running; do not reuse blocking AskUserQuestion's engine-state or permission-broker semantics. An unrelated next turn must not retire either item.
+- Reuse attention persistence, navigation and notifier. Show unresolved questions and unread essential items in sidebar/session attention; essential has a read action, need-input an answer action. Ordinary to-human and insight should not generate OS notifications by default. Respect global/per-kind notification switches, focus policy and deduplication. Replay restores badges without notifying old history again.
+- Keep source transcripts authoritative; index derived status/correlations, not a second conversation log. Define archive/fork/rewind semantics and rebuildability. Avoid replaying hundreds of historic essential alerts on first upgrade.
+- Candidate files: /Users/new/Developer/GitHub/MAWS/src/shared/graph/enums.ts; /Users/new/Developer/GitHub/MAWS/src/shared/graph/attention.ts; /Users/new/Developer/GitHub/MAWS/src/main/attention/service.ts; /Users/new/Developer/GitHub/MAWS/src/main/attention/notifier.ts; /Users/new/Developer/GitHub/MAWS/src/main/index/attention.ts; /Users/new/Developer/GitHub/MAWS/src/main/index/migrations.ts; /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/; /Users/new/Developer/GitHub/MAWS/src/renderer/src/attention/. Use a dedicated derived-message table if attention_items alone cannot express answer/read correlations cleanly.
+
+Settings and registration — S/M
+
+- Per-app enabled-by-default setting; per-session inherit/on/off override, persisted without user Claude settings writes. Keep report/full-transcript view preference separate from turning the contract off. Add essential/async notification group policy and explicit current instruction source.
+- Plugins widget shows built-in To-human, version, enabled state, source/compatibility with doperpowers, and per-session override. A built-in entry is not uninstallable through claude plugin uninstall. Existing engine plugin list remains truthful.
+- Candidate files: /Users/new/Developer/GitHub/MAWS/src/shared/settings/defaults.ts; /Users/new/Developer/GitHub/MAWS/src/shared/ipc/schema/settings.ts; /Users/new/Developer/GitHub/MAWS/src/main/settings/store.ts; /Users/new/Developer/GitHub/MAWS/src/renderer/src/settings-tab/SettingsView.tsx; /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/PluginsWidget.tsx; /Users/new/Developer/GitHub/MAWS/src/main/settings/session-settings.ts and session record/preferences schema selected by the child.
+
+What remains doperpowers-owned
+
+Its skills, workflow policies, agents/kairos/compact mods and terminal presentation stay external. Its to-human output style remains a compatible producer of the shared vocabulary. MAWS owns the GUI's read/answer state, sidebar, notifications, native rendering and default delivery contract when no compatible producer already supplies it. Do not copy all doperpowers hooks merely to obtain one convention. Confirm redistribution/license and shared contract-version ownership before vendoring any actual plugin code.
+
+Alternatives, and when they win
+
+A. A bundled ordinary Claude plugin under /Users/new/Developer/GitHub/MAWS/plugins/to-human/ with output-styles/to-human.md, loaded through --plugin-dir <path>, selected through the existing --settings JSON's outputStyle. This is preferable if the owner wants the same independently installable To-human package for terminal/other hosts and a real engine-loaded plugin entry. It is not necessary merely to inject instructions. Preserve keep-coding-instructions; never pass an invented --output-style flag. Detection can keep a compatible doperpowers style instead of selecting the bundled one. Cost: packaging/discovery/precedence and reconciling two UI mods; selecting outputStyle also competes with a user's different style. Need fixture coverage before shipping.
+
+B. Keep doperpowers as the only engine mod and auto-enable it from MAWS. This wins only if MAWS is intentionally an owner-specific distribution and the owner explicitly accepts that dependency and its other behavior. It conflicts with the present general-base purpose and makes per-feature opt-out awkward. Not recommended.
+
+C. Only improve Presenter.tsx. Suitable for a narrow offline-history bugfix, not this request: no engine instructions for clean installs, no live consistency, no offscreen attention or durable answer state. Insufficient.
+
+Tests and evidence to require — M, distributed across the waves
+
+- Launch tests: new/resume/fork/reconnect all inject once; inherited compatible style injects zero times; unrelated style is preserved; disabled/missing compatible plugin does not falsely suppress the contract; project/local/flag/config-home/policy cases; per-app/session off; foreign-live never spawned or changed.
+- A small scratch-home 2.1.293 recorded probe: appended prompt actually influences new and resumed sessions, survives compaction as intended, honors disabled state on next launch, and coexists with doperpowers without duplicate prompt/UI. The static flag signatures are not this test.
+- Parser tests: all five tags, streamed/split/incomplete marks, nested/unbalanced/unknown marks, fenced/inline examples, choice-only questions, malicious HTML/link text, Unicode, several questions and stable identity. Preserve existing cases unless a versioned grammar change is approved.
+- Lifecycle tests: click/queued/delivered/failure/cancel/retry; text reply correlation and unrelated drafts; identical question headings; restart, history hydration, fork/rewind and terminal import; no premature answered/read state; no second writer for foreign-live.
+- Renderer tests: native live/unattached parity; one toggle and one handler; full transcript reachable; essential read state; responsive insight aside; keyboard/screen reader operation; recommendations do not auto-select/send. Existing anchors include /Users/new/Developer/GitHub/MAWS/src/renderer/src/owner/to-human/Presenter.test.tsx, parser.test.ts, /Users/new/Developer/GitHub/MAWS/src/renderer/src/engine-surface/SurfaceRow.fixtures.test.tsx and /Users/new/Developer/GitHub/MAWS/src/engine-host/conformance/fixtures.test.ts.
+- Attention/notifier tests: no viewport dependency, one notification per new item, focus/settings honored, hydration silent, unread essential persists until read, async input persists until answered, background engine can keep running, no notifications from quoted tags/tools/user messages.
+- End-to-end acceptance: in a clean settings home with no doperpowers, start a session, receive all four marks, leave its tab, see essential/question attention, answer a choice once and a free-text question, restart and resume, then repeat with the external doperpowers style active and with the mod off.
+
+Decisions and documentation
+
+- Record a dated charter Decision Log entry and a new decision (next unused D-n, do not assume a number): default, removable/disableable communication mods are general application behavior, distinct from owner workflow plugins. Explicitly amend D-5's interpretation and the R4 S0 attached/live ownership decision; update X1/X2 attention/state and X6 launch additions as needed. Keep D-1 and no-silent-user-settings-write intact.
+- Suggested future wording for /Users/new/Developer/GitHub/MAWS/CLAUDE.md: the app is "general at the base, with a small set of default, disableable application mods; owner-specific workflows arrive as additional plugins." This report does not edit that file; charter approval and the parent agent's normal documentation process should do so.
+- Update /Users/new/Developer/GitHub/MAWS/docs/charter.md's deferred to-human item and P2 roadmap after approval. The completed P1 record should be linked, not rewritten as if this behavior already shipped.
+
+6 Open questions for the owner (product/taste only)
+
+1. Should a choice send immediately, or fill the composer and require Enter as doperpowers does today? Recommendation: immediate send/queue for an explicit choice, free-text through the composer, with a visible queued state. This matches the new request but changes current behavior.
+2. Does "essential" stay unread until explicitly marked read, or clear when its message has visibly been read in the focused session? Recommendation: explicit Mark read for the must-not-miss guarantee, with optional bulk read.
+3. Do you want insight notes in a true adjacent margin on wide layouts, or the existing labeled inline aside? Recommendation: adjacent when space permits, inline on narrow splits.
+4. Is independent terminal distribution of the MAWS To-human mod a goal now? Recommendation: ship the built-in MAWS contract/lifecycle first and retain doperpowers terminal compatibility; choose the real bundled Claude-plugin alternative if independent terminal installation is part of this initiative.
+
+No owner answer is needed for implementation mechanics, parser safety, registry truthfulness, exact-once delivery, or avoiding silent settings writes. Those are engineering responsibilities. The questions above are the remaining product/taste choices, not permission to begin implementation under this read-only assignment.

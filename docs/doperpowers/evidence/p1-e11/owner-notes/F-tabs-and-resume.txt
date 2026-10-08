@@ -1,0 +1,228 @@
+F — MAIN-TAB NAVIGATION AND THE /RESUME PICKER
+Read-only source research, 2026-10-08. MAWS baseline supplied by coordinator: master 5dcddd70. No app launch, build, tests, database inspection, Chrome-profile access, relay access, or repository changes were performed. This report is the only authored artifact. Test coverage below means inspected test source, not tests run in this research session.
+
+1. WHAT THE OWNER SAW AND WANTS
+
+F1: Clicking a session in the sidebar should substitute the session in the current MAIN tab, not accumulate main tabs. This is not about sidebar tabs.
+
+Important correction: current master already defaults to replacement. The owner's requested rule landed on 2026-10-01 as W12/I2. The current implementation has exceptions broad enough to produce the reported experience. The coordinator reports that the installed bundle was built after E11, so the investigation should start with those exceptions, not implement the old requested rule again. This research did not reproduce the owner's particular click and cannot identify which exception they encountered.
+
+My recommendation: keep click-to-navigate and explicit new-tab gestures, but remove the blanket exemption for every non-session tab. A clean, unpinned file/diff/agent/browser/settings/deliverable view should not make routine sidebar navigation accumulate tabs. Keep explicit pins and genuinely unsaved/in-flight work safe; make preservation visible. Never move a draft's text into a different session. Started-session drafts already belong to their session, not their tab.
+
+F2: The owner wants a recognizable, searchable, previewable session chooser like Claude Desktop, rather than MAWS's bare command-widget list. The screenshots show two materially different surfaces:
+- Claude Desktop screenshot: /Users/new/Documents/Claude Architect Cert/Claude Architect Vault/Pasted image 20261005183339.png
+- MAWS screenshot: /Users/new/Documents/Claude Architect Cert/Claude Architect Vault/Pasted image 20261005183409.png
+
+The Claude image is a light two-column dialog. The left side has a focused search field, All folders / This folder / This branch segmented scope, Today and Yesterday groups, and rows containing title, branch glyph/name, a folder-basename badge, and clock time. The selected row has a filled background. The right side shows the selected title, full folder, branch, relative last activity, and a scrollable “Where you left off” transcript excerpt. Its “4 commands run” line is a tool-activity summary INSIDE the preview, not a per-session message-count column. No per-row message count is visible. Footer: Up/Down move, Escape close, Enter resume. Close button at top right.
+
+The MAWS image is the slash-command Resume widget: status glyph, truncated title, age, repeated Open and Resume links; some Resume links disabled; no search, branch, folder/project badge, day grouping, selected-row preview, or keyboard legend. It also exposes implementation-oriented footer copy about the sessions list, the wire, and C10. That is not useful owner-facing help. Light theme remains the project default; the screenshot's dark appearance is not a request to change that.
+
+2. GROUNDING
+
+2.1 Main-tab model and current click behavior
+
+/Users/new/Developer/GitHub/MAWS/src/shared/ipc/schema/layout.ts:17–29,112–119 defines TabRef kinds and LayoutMain v2: current project, a map of project tab sets, each with one or two panes, tabs and activeTabId, focusedPane and splitRatio, plus closedTabs. Each TabRef has pinned. There is no VS Code-style preview/permanent lifecycle bit. The session record's sidebar pin, the main tab's pin, and a right-panel tool pin are separate concepts.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/SessionRow.tsx:71–72:
+- Plain row click calls openSession(id, {}).
+- Command-click calls openSession(id, { how: 'tab' }).
+- Middle-click calls the same explicit-tab path.
+- This handler has no Shift/Option/Ctrl replacement override. It is a macOS-specific Meta-key choice, not a generic Ctrl-click new-tab rule.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts:249–291:
+- openSession defaults to replaceActive.
+- If the destination session is already open ANYWHERE, activate its existing tab and pane; do not replace another tab and do not duplicate it.
+- Otherwise switch to the destination session's project set, then inspect that set's focused pane.
+- Replace an active unpinned SESSION tab in place, using the destination session's deterministic tab id. The old tab enters the ten-entry reopen history.
+- If the active tab is pinned, is any NON-SESSION kind, or there is no active tab, open a new tab after it instead.
+- { how: 'tab' } explicitly adds a tab unless the deterministic id already exists.
+- { split: true } explicitly targets the other pane. A plain click does not request this.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.ts:243–264 supplies the destination project and the unstarted-session guard. Critical details:
+- A New chat with no indexed SessionRecord is an unstarted session, not just an ordinary composer containing unsent text.
+- When a default replace meets such an unpinned unstarted tab, the target session opens beside it immediately. The guard then decides whether to discard the old intent/tab.
+- If discarded, the draft tab disappears without a reopen entry. If declined, both remain.
+- If the draft starts while the guard is deciding, preserve its tabs and panel.
+- A pre-hydration click replayed over an unstarted saved tab preserves that draft and asks nothing; both can remain.
+- Already-open destination, explicit new-tab and explicit split bypass this replacement guard.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/keymap/actions-runtime.ts:93–94 defines unstarted as absence of a SessionRecord. Its :127–132 discardForReplace runs the close guard and drops the unstarted marker; /Users/new/Developer/GitHub/MAWS/src/renderer/src/app/shell-actions.ts:69 registers the replacement guard.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/setup-actions.ts:208–231 supplies the actual guard:
+- Blank New chat: discard silently, including its intent.
+- Typed text/attachments or a held first message: “Discard this unstarted session?” / “Its draft will be lost.” / Discard; Cancel keeps it.
+- Start in flight: “Starting…” toast, keep it.
+- Intent-discard failure: error toast, keep it.
+This means a blank New chat normally adds a tab only transiently while the discard resolves. A nonempty New chat is a routine exception; an ordinary draft in a started session is NOT.
+
+/Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/editor/controller.ts:110–122 reads/writes session.drafts keyed by appSessionId. /Users/new/Developer/GitHub/MAWS/src/renderer/src/composer/Composer.tsx:93,256 chooses the session/intent draft port. Do not propose carrying A's prompt into B as a fix: that changes prompt ownership. The system already preserves started-session drafts separately from the visible tab.
+
+Exception inventory, including cases that are NOT new-tab exceptions:
+
+A. Explicitly pinned active main tab -> a new tab. Common only for owners who pin. Affordance: a very small filled dot with accessible label “Pinned”; Pin tab / Unpin tab is only in the tab context menu. There is no inline explanation that the pin caused this navigation to add a tab. /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/Tab.tsx:137,164–165.
+
+B. Any active non-session main tab -> a new tab, even if clean and unpinned. This includes file, diff, agent drill-in, browser, deliverable, Settings, Diagnostics. This is the strongest routine candidate for a supervising/deep-work owner moving from tools back to sessions. No copy says “Opened a new tab because this was a file/diff/etc.” The preservation rule is implicit in the type check. /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts:285. A slash widget or a right-panel tool is NOT itself a main TabRef; opening a widget over a session does not turn that session tab into a non-session tab.
+
+C. Unstarted New chat -> add target beside draft, then discard/keep rules above. Routine when a half-written new prompt or trust/relay-held first send is left open; NOT every unsent follow-up. Cancel and Starting… provide partial explanation, but the dialog describes discarding rather than a navigation model. /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.ts:245–264; /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/setup-actions.ts:208–231.
+
+D. Empty destination pane/project set -> create its first tab. Expected, not crowding by itself. Cross-project click first restores/switches to the destination PROJECT'S tab set; it does not replace a tab in the project just left. Each project's focused tab can independently hit A/B/C. /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts:279–285; /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.ts:143–150,266. Visible clue: “Tabs of <project>” at the strip's left, /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/TabStrip.tsx:161–178.
+
+E. Split present -> NOT by itself an add-new exception. Replace in the focused pane, leave the other pane alone. Focused pane is indicated by the accent inset, /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/TabStrip.tsx:155–156. If the focused pane contains a pin/non-session/draft, A/B/C applies there. Explicit Open in split is a different action.
+
+F. Target already open in another pane/set -> NOT a new-tab exception. Activate that existing tab, changing pane/set as needed. No duplicate. This can feel like failure to replace the current view but cannot explain an increasing tab count. /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts:281; :241–246 handles the unique tab.
+
+G. Sidebar project row -> switches current project set and expands/collapses that project, never creates a session tab. /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/Sidebar.tsx:164–165. Its new-chat '+' is an explicit creation action, not row navigation.
+
+H. Slash Resume widget Open -> same openSession default and A/B/C exceptions. Resume -> registered action opens through openSession, then starts/resumes via C10. /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/ResumeWidget.tsx:58–73; /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/actions.ts:88–90.
+
+I. Sidebar Resume… picker -> Enter or row selection uses openSession; Command-Enter uses openTab. /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/ResumePicker.tsx:89–106,148–151. This is a different component from the pictured slash widget.
+
+2.2 Closing, limits, overflow, and existing tests
+
+Closing is through requestCloseTab, not “stop this session”: /Users/new/Developer/GitHub/MAWS/src/renderer/src/keymap/actions-runtime.ts:69–125 centralizes per-kind guards and focus return. Tab close button, middle-click, context-menu Close/Close others: /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/Tab.tsx:107–109,141–170. Delete/Backspace on a focused tab: /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/TabStrip.tsx:61–79. Command-W and Command-Shift-T are shell actions, exercised by /Users/new/Developer/GitHub/MAWS/e2e/shell.spec.ts:506–513. Pinned tabs survive Close others, but are explicitly closable. Closing a tab is not terminating its engine; guards for drafts and dirty editors must not be bypassed by a broadened replacement rule.
+
+There is no open-tab cap in the inspected schema/store/model. The cap is ten CLOSED-history entries, not ten open tabs: /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts:21,291. Overflow is horizontal scrolling with hidden scrollbar and active-tab scrollIntoView: /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/TabStrip.tsx:53–56,137. It handles access, not clutter.
+
+Inspected coverage:
+- Pure-model unit tests already assert replacement, same-session deduplication across panes, pinned/Settings/file/empty exceptions, focused split replacement, and explicit new-tab: /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.test.ts:192–230.
+- Store units cover draft discard, cancel, start-during-guard and hydration races: /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.test.ts:166–265; project-set behavior begins :269.
+- End-to-end shell explicitly tests project switching, first tab, default replacement and reopen: /Users/new/Developer/GitHub/MAWS/e2e/shell.spec.ts:65–94. Its tab-count setup now uses Command-click, not every plain click: :491–495. It tests closing, split drag/move and restoring layout: :506–539,592–649.
+- Picker end-to-end smoke is /Users/new/Developer/GitHub/MAWS/e2e/resume-picker.spec.ts; sidebar units test Command-Enter and plain keyboard replacement: /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/Sidebar.test.tsx:554–556,654.
+- Started-session draft survival has end-to-end tests: /Users/new/Developer/GitHub/MAWS/e2e/composer.spec.ts:337–363,475–496. Unstarted draft relaunch: /Users/new/Developer/GitHub/MAWS/e2e/sessions.spec.ts:696–713.
+- I did NOT find end-to-end tests specifically clicking an ordinary sidebar row while the ACTIVE MAIN TAB is pinned, a non-session view, or a nonempty unstarted draft and asserting the resulting count. Nor did I find a direct sidebar-click-in-focused-split replacement test (split manipulation is covered separately). These have unit coverage but need interaction-level regression cases. Right-panel/terminal pin e2es are different pins and do not cover A.
+
+2.3 Design intent and authority
+
+/Users/new/Developer/GitHub/MAWS/docs/charter.md:11–20 makes supervision of many live sessions and depth in one session equally important; it does not require accumulating one main tab per inspection. D-8 at :33 requires browser-like tabs with one optional split; D-10 at :35 is RIGHT-PANEL pinning, not a main-tab replacement rule.
+
+The actual navigation rule is §5.2, /Users/new/Developer/GitHub/MAWS/docs/charter.md:178, not §4 alone: each project has its own set; sidebar click replaces active session; existing destination activates; unstarted guard; pinned or non-session tab stays; explicit Command/middle/context menu/drag adds. C5 owns the shell: :382–404. The initial C5 tab model supported deliberate multi-session access and one tab per session, overflow and reopen; it is not evidence that “every inspection must add a tab” is necessary for supervision.
+
+The dated W12 landing is explicit in /Users/new/Developer/GitHub/MAWS/docs/charter.md:914. Child detail: /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-09-28-c5-shell.md:843–845. Therefore no new Decision Log entry is required merely to fix a defect violating the existing replacement rule. Broadening replacement to non-session tabs or changing unstarted-draft treatment DOES change the written rule and needs a dated charter §5.2/Decision Log amendment plus C5's child amendment. No need to repeal D-8 or the two-scene purpose.
+
+P1 has no independent “every click creates tabs” child. Relevant extensions are E3 side threads/sidebar lineage, E4 browser main tabs, E5 file editor/dirty state, E2 deliverables and E7 orchestration; /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-10-05-p1-extension.md:255–312,366. P1 makes the old non-session exemption more visible because several new tool kinds occupy main tabs. That is a strong reason to re-evaluate the exception rather than remove multi-session capability.
+
+2.4 /resume implementations and data
+
+Pictured slash widget: /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/ResumeWidget.tsx:1–5,21–31,34–98. It reads the renderer's useSessions records/digests, not the engine's own interactive picker or a wire list command. It excludes self and archived, limits to same project (same directory when no project), sorts record.updatedAt descending, and slices TWENTY. Rows show glyph/title/sessionAge. Open navigates; Resume uses C10 and is unavailable for foreign-live holders. It has no search/grouping/preview.
+
+Separate sidebar Resume… chooser already supplies reusable scaffolding: /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/ResumePicker.tsx:1–8,28–45,75–160 and /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/resume.ts:1–49. It is a Radix modal containing cmdk, project scoped initially, All projects/Current branch/All worktrees toggles, 100 newest matches, keyboard navigation and Command-Enter. It excludes archived/hidden-project sessions and defaults to no worktrees. Existing search is title/project name/directory, NOT branch text: /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/derive.ts:20–28. A richer slash surface should converge with this picker rather than become a third chooser.
+
+Index data already available:
+- /Users/new/Developer/GitHub/MAWS/src/main/index/sessions.ts:30–75 stores project, directory, worktree, branch, custom/AI/override title, timestamps, first prompt, last assistant text, transcript size/mtime, and summary JSON.
+- :147–183 projects SessionRecord title/cwd/branch/worktree/holder and timestamps; it does NOT project the whole summary or lastAssistantText into SessionRecord.
+- :197–210 lists records and retrieves stored transcript summaries.
+- /Users/new/Developer/GitHub/MAWS/src/shared/wire/store.ts:106–132 defines that summary. “summary” here means discovery metadata, not a generated prose synopsis. LastAssistantText is limited to the first 200 characters of the last assistant text block. There is NO message-count field in this schema.
+- /Users/new/Developer/GitHub/MAWS/src/shared/ipc/schema/session.ts:300–309 exposes renderer digest activity, lastAssistantLine (<=160 characters), turn start/end, child-agent counts, pending-request count, usage/cost. Child-agent and pending-request counts are not transcript message counts.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/overview/derive.ts:104–109 uses latest turn start/end (discovered sessions seeded from transcript last-record time), then record.updatedAt. Use this for recency and day grouping; slash ResumeWidget's updatedAt sort can reflect metadata changes/discovery rather than actual work.
+
+Thus search/rows/scopes/day groups/short last-answer preview are mostly renderer work with current data. Full recent-turn preview is NOT supplied by those list records. /Users/new/Developer/GitHub/MAWS/src/renderer/src/transcript/source/ipc.ts:52–70 currently requests session.events with afterSeq:null, limit:null; its full transcript path should not simply be mounted for every hovered row. Review a bounded selected-session read, cancellation/race handling and cache before promising a purely renderer-only Desktop-equivalent preview. A truthful message count would need extra indexing/read work; the reference screenshot does not require it, so omit it.
+
+3. REFERENCE APPS AND CONVENTIONS
+
+Source provenance: /Users/new/Developer/GitHub/MAWS/research/SOURCES.md:9–39. Reference research read first: /Users/new/Developer/GitHub/MAWS/research/claude-desktop-ux-and-engine.md and /Users/new/Developer/GitHub/MAWS/research/codex-thread-ux.md. Static shipped code proves implemented paths, not the owner's enabled flags or live behavior.
+
+3.1 Claude Desktop 2.16120.0 — the strongest F2 reference
+
+Strings: /Users/new/claude-desktop-re/readable/app-2.16120.0/i18n-web.json:5255 (“Where you left off”), :5354 (“All folders”), :22389 (“Search by title, folder, or branch”); /Users/new/claude-desktop-re/readable/app-2.16120.0/ui-strings-web.json:47545,75925 locates the inline messages.
+
+Picker component: /Users/new/claude-desktop-re/readable/app-2.16120.0/web/app/v1/cc43287c9-ua-2O55p.js:34300–35069.
+- :34323–34341 reads LocalSessions.listResumableCliSessions and applies search/scope; :34345–34372 groups by lastActivityAt and uses clock/date labels.
+- :34477–34517 guards IME composition and implements arrows/Enter/type-to-search; :34542–34589 declares All folders/This folder/This branch and search copy.
+- :34625–34660 defines large modal, approximately 45%-width list at larger sizes, combobox with aria-activedescendant. :34717–34747 renders groups and conditionally makes a single click select/preview and double-click commit. That distinction matters: a preview picker should not immediately navigate on every selection movement.
+- :34817–34885 is the row: title, branch, folder basename, time or Resuming; status when applicable. No message-count column.
+- :34909–34932 lazily reads selected CLI transcript: first asks totalMessages, then the tail window; cache staleTime 30s; selection is settled/debounced before fetching. :34958–35025 is the full-folder/branch/last-active metadata and preview with loading/error/empty states. :35037–35069 renders user/assistant text and compact tool summaries, with an earlier-messages-omitted notice.
+
+IPC: /Users/new/claude-desktop-re/readable/app-2.16120.0/ipc-services.md:815,819–820 declares readCliTranscript(handle,offset,limit), listResumableCliSessions(limit), resumeCliSession(handle). Implementation forwarding: /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-CgsUJx9p.js:3840–3842,3867–3872. Actual CLI inventory/read service: /Users/new/claude-desktop-re/readable/app-2.16120.0/main-process/index.chunk-BvFMb8a_.js:454–504 enumerates disk CLI sessions, checks writer liveness/trust, returns handle/cwd/title/gitBranch/folderMissing/lastActivityAt/liveness; :506–528 enforces trusted cwd and returns messages plus totalMessages. It is Desktop-owned IPC over CLI history, not the Claude Code interactive terminal picker. MAWS should use its own index and holder policy, not reproduce Desktop's import identity layer.
+
+For F1, Desktop supports route-selected primary content PLUS explicit split panes and popout windows, rather than requiring every inspected session to become a permanent browser tab. Concrete split/new-window source: /Users/new/claude-desktop-re/readable/app-2.16120.0/web/app/v1/shared-25-C_M72Q4j.js:5151–5156 (addPane), :17017–17053 (Open in split view/Open in new window), :22515–22562 (primary pane promotion/routing); /Users/new/claude-desktop-re/readable/app-2.16120.0/ipc-services.md:1549–1556 persists popouts/layout. I did not complete a line-by-line trace of the ordinary Code-sidebar row callback or establish that every mode lacks session tabs; do not turn this into a blanket “Claude Desktop never has tabs” claim. The prior study's /Users/new/Developer/GitHub/MAWS/research/claude-desktop-ux-and-engine.md:44–66 also records the sidebar and side-by-side sessions.
+
+3.2 Codex / ChatGPT desktop 26.928.40906
+
+The local thread list renders selected/active thread rows, with a separate explicit open-in-new-window command. Relevant recovered source: /Users/new/codex-app-src/readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:462196–462267 (sidebar thread row selection state), :461875–461900 (activate thread summary without adding to recents and group activation), :462457–462474 (list's currentThreadKey), :227424–227434 (Codex Open in New Window command). Project groups are capped/expanded instead of displaying the whole archive: :545575–545589. This supports deliberate multiple windows alongside selection-driven thread browsing.
+
+Caveat: this is the merged ChatGPT/Work/Codex build, not a pure single-view app. It also ships a Dock Chat action explicitly described as tab or left/right split placement: /Users/new/codex-app-src/readable/chatgpt-26.928.40906/ui-strings.json:310696–310715. I did not trace every shared navigation intermediary or prove that a Code row always replaces a single global view under every workspace mode. Therefore do not claim “Codex has no tabs or splits” or borrow unrelated Work/Chat tab behavior as the Code baseline. The useful precedent is navigation without obligatory accumulation, with additional views made explicit.
+
+3.3 T3 Code at 148e6dee
+
+Verified the local main ref is 148e6deea046658639aae9fef5b349781cec39d1 by reading /Users/new/t3code-src/.git/HEAD and /Users/new/t3code-src/.git/refs/heads/main, without executing Git.
+
+/Users/new/t3code-src/apps/web/src/components/Sidebar.tsx:2882–2894 navigates to /$environmentId/$threadId. :3042–3063 plain click navigates; Command-click on Mac (Ctrl elsewhere) toggles multi-selection; Shift-click range-selects; the trailing double-click is ignored. This is NOT the proposed MAWS Command-click-new-tab rule and should not be copied blindly. The thread is the route-selected main conversation. Its tab machinery should not be confused with a main session strip: /Users/new/t3code-src/apps/web/src/rightPanelStore.ts:1–8,22–28 explicitly describes thread-scoped auxiliary surfaces (browser/terminal/files/diff). No main multi-session-tab behavior was established in this inspected path.
+
+3.4 Editor convention, and why not to over-import it
+
+The useful VS Code analogy is a preview editor: single selection opens a replaceable preview, another selection replaces it; double-click or editing makes it durable. This is a convention comparison, not a traced VS Code implementation in this research. In particular, “Command-click opens beside” is not a universal VS Code Explorer rule (modifier meanings depend on surface/keymap; Explorer also has multiselect). MAWS should document its own Command/middle-click-new-tab and explicit Open in split rather than assert a universal shortcut.
+
+MAWS already implements replacement without a preview bit. Adding double-click-pins/edit-pins everywhere would be a new policy and persistent state vocabulary, not a necessary fix. Its existing explicit pin is enough if the automatic preservation exceptions become narrow and legible.
+
+4. ROUGH FIX PLAN
+
+4.1 F1 — fix the exceptions, not the already-landed default (M)
+
+Recommended behavior:
+1. Plain sidebar click/keyboard Enter and picker confirmation navigate in the focused destination-project pane. Existing destination anywhere activates once, never duplicates. Keep project sets and the maximum two-pane model.
+2. An ordinary unpinned tab is replaceable regardless of kind when replacing it does not discard unsaved work. Remove the blanket non-session exemption. In particular, a clean file, diff, agent transcript, browser view, deliverable viewer, Settings or Diagnostics must not force a new tab merely because of its kind.
+3. An explicit main-tab pin resists replacement. Make it a recognizable pin icon/control with a tooltip (“Keep this tab when switching sessions”), not only a tiny dot and context-menu action. Do not confuse it with sidebar favorites or right-panel pins.
+4. Unsaved file buffers, pending saves and unstarted launches must never be silently disposed. Initially preserve them and mark why (“Unsaved changes — kept open” / “Starting — kept open”), rather than quietly growing the strip. Run the existing kind-specific lifecycle guard; browser/deliverable cleanup needs the same discipline. Do not equate replacing a view with terminating the session or destroying its resources.
+5. For started sessions keep the already-session-scoped draft when navigating; no new feature needed and no text moves to another session. For an unstarted New chat, preserve the intent/draft under its own identity when navigating rather than treating navigation as destructive discard. Give it a recoverable Draft/New chat entry or reopen path before removing its visible tab; never hide the only way to retrieve it. This part is M rather than an S type-check edit because current discard and retention semantics are tab-coupled. If that recovery affordance is not included, retain the current guarded preservation rather than lose a draft.
+6. Command-click/middle-click and Open in new tab remain explicit new-tab gestures; split remains explicit. Opening an already-open destination activates it even for these gestures, per the existing unique-tab contract. Add clear gesture/pin help to the keymap/help surface and relevant tooltips. No new arbitrary tab cap.
+
+Why this recommendation: it directly removes the most frequent non-session surprise while retaining the workstation's deliberate multiple-session and file/tool views. Running/background work itself should not pin a tab; the engine is independent of the view and the sidebar/Overview carries supervision.
+
+Implementation seams:
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.ts: factor the pure replacement transition so it can replace an eligible active kind, preserve position/history, and retain the existing deduplication/project routing.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.ts: orchestrate an eligibility/lifecycle guard rather than make the pure model read editor state; recheck target identity after asynchronous decisions, keep hydration races safe.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/keymap/actions-runtime.ts: share per-kind protection with navigation but distinguish preserve/suspend from explicit destructive close; preserve focus ownership.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/Tab.tsx and /Users/new/Developer/GitHub/MAWS/src/renderer/src/main/TabStrip.tsx: visible pin and protection affordances. Follow existing semantic tokens and accessible hit targets.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/setup-actions.ts and /Users/new/Developer/GitHub/MAWS/src/renderer/src/sessions/connect.ts: unstarted-intent preservation/recovery. Reuse current session draft storage; do not move content across ids.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/SessionRow.tsx: generally retain its correct click wiring. Only add discoverability or consistent gesture handling, not a second independent navigation rule.
+- /Users/new/Developer/GitHub/MAWS/docs/charter.md and /Users/new/Developer/GitHub/MAWS/docs/doperpowers/plans/2026-09-28-c5-shell.md: dated owner-approved exception-policy amendment. E5 editor lifecycle remains binding.
+
+Tests to adapt/add:
+- Existing /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout-model.test.ts:212–219 intentionally expects non-session preservation; change that expectation only for newly eligible clean kinds. Keep pin/dedup/split/project invariants.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/layout.test.ts: preserve draft/start/hydration race tests while changing destructive-discard expectations if intent suspension is chosen.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/Sidebar.test.tsx: plain/Command/middle/key behavior and discoverability.
+- /Users/new/Developer/GitHub/MAWS/e2e/shell.spec.ts: add a table of plain-click cases from clean file/diff/agent/browser/Settings, pinned main tab, dirty file, nonempty New chat, held first launch, both split focus positions, already-open destination and another project. Assert tab count AND focused content, draft/buffer retention and process independence.
+- /Users/new/Developer/GitHub/MAWS/e2e/composer.spec.ts and /Users/new/Developer/GitHub/MAWS/e2e/sessions.spec.ts: actual row-click draft recovery across navigation and relaunch, not just direct tab switches.
+No evidence supports a wholesale wave replacing “new tab per plain click” assertions: the main suite already uses Command-click when it wants several tabs.
+
+Alternatives, only when they win:
+- S: keep current eligibility, fix only visible pin/exception explanation and an actual reproduced regression. Wins if the owner intentionally wants every file/tool view preserved and the particular observed extra tab is a narrow bug. Does not solve routine non-session accumulation.
+- M/L: one reusable navigation slot that can suspend ANY unpinned view, including dirty editor buffers and unstarted drafts, with all resources retained outside tabs. Wins if the owner wants literal “only a pin ever preserves a tab.” Requires recoverable hidden working state and lifecycle/persistence design; do not silently implement it as closing/discarding dirty work.
+- VS Code preview/durable tabs with double-click/edit promotion: wins only if the owner wants that additional mental model. Not required for F1; otherwise redundant with current replacement plus explicit pins.
+
+4.2 F2 — one rich Resume chooser reused by slash and sidebar (M; full lazy preview M+)
+
+Recommended surface:
+- A large light-default, token-styled modal with search and scoped filters on the left, preview on the right at desktop width. At narrow width retain the list and expose selected preview without squeezing both columns.
+- Rows: title first; compact branch and project/folder badge; last-activity clock/date; one status mark with accessible words where relevant. No per-row repeated Open/Resume link pair and no unverified message-count column.
+- Search title, project/folder, branch; sort by actual last activity with stable ties. Use day groups (Today, Yesterday, Earlier) and folder/project badges, matching the supplied reference. Do not stack project groups inside day groups by default; project scope/filter already supplies that dimension.
+- Scope is seeded from the invoking session/project, with an obvious All projects choice. Whether slash /resume initially shows all folders or current project is the remaining small taste choice; recommend current project when context exists, All projects otherwise. Preserve access to worktree sessions intentionally; existing CLI toggles should not silently hide the target under a nicer presentation.
+- Click/arrows select and preview; Enter/double-click confirms. Escape closes and restores composer focus. Command-Enter opens in a new main tab. IME and filter-button keyboard ownership must be retained. Merely previewing must not launch an engine, mark a session read or claim its writer lease.
+- Confirmation opens in the current tab using F1's shared navigation path. An exited session may then resume via existing C10 rules; foreign-live remains view-only with explicit reason and the existing take-over path, never auto-taken-over. Label action truthfully (Open vs Resume according to state) and keep a failed resume recoverable.
+- Preview immediately shows cached title/full cwd/branch/activity/last-answer excerpt. Lazy-load a bounded recent-turn preview only for the settled selection, with stale-response rejection, cache, loading/error/empty states and explicit truncation. Do not hydrate every candidate transcript or count every message on opening the dialog.
+- Replace internal footer text about wire/C10 with keyboard help and a concise state-specific explanation.
+
+Implementation seams:
+- Reuse/refactor /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/ResumePicker.tsx into the common chooser, not duplicate modal/key handling.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/resume.ts: shared candidate filtering, branch search, recency and grouping derivation.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/ResumeWidget.tsx and /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/copy.ts: slash entry delegates to the same chooser with invocation context; avoid nested modal focus traps.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/overview/derive.ts and /Users/new/Developer/GitHub/MAWS/src/renderer/src/stores/sessions.ts: reuse current activity/digest facts.
+- Full preview may need a bounded read contract alongside /Users/new/Developer/GitHub/MAWS/src/shared/ipc/schema/session.ts, with main/engine-host ownership following existing session.events/disk readers. Verify it does not create long-lived follows per selection; prefer an existing appropriate bounded read if one is found in implementation. Do not add full-transcript data to every SessionRecord.
+- No required index migration for rows/search/groups. Add metadata/read projection only if the chosen preview cannot be served efficiently through the existing boundary. No engine binary patch or invented wire resume control.
+
+Tests:
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/widgets/SessionWidgets.test.tsx: replace twenty-row/Open+Resume assertions with delegation/context and launch/navigation behavior.
+- /Users/new/Developer/GitHub/MAWS/src/renderer/src/sidebar/Sidebar.test.tsx and the picker/filter unit tests: title/folder/branch matching, hidden/archived/worktree scopes, actual-activity order, date groups, selection stability while data changes, selected row remaining in view, empty/error/loading, Command-Enter/IME/focus restoration.
+- Preview tests: selection A->B before A resolves, unmount/close, bounded read, no engines launched, no visible/read-state mutation during preview, foreign/contested state changes, truncation, inaccessible/missing transcript and omitted counts.
+- /Users/new/Developer/GitHub/MAWS/e2e/resume-picker.spec.ts: both slash and sidebar launch the same surface; search and preview with no navigation until confirmation; current-tab count per F1; explicit-new-tab and keyboard access; preview layout in light/dark and narrow window with realistic long titles, Korean text and long branches.
+
+Size: M for a shared two-column chooser using current metadata and excerpt; M+ for the bounded recent-turn preview that makes the reference genuinely useful. L only if scope grows into full-text transcript search/message-count indexing or a new import/resume subsystem; none is necessary for this request. The Desktop-equivalent recent-work preview is worth doing, not a decorative panel containing only metadata.
+
+Authority: update C11's slash-widget design and C5's Resume picker record because the existing twenty-item widget and CLI-style picker were deliberate scoped implementations. If default scope/interaction changes the charter's current §5.1 specification, add the dated amendment there. No D-1/D-12 or engine contract change is implied.
+
+5. OPEN QUESTIONS FOR THE OWNER — TASTE ONLY
+
+1. Recommended: clicking a session replaces clean unpinned tool/file/browser views too; explicit pins and genuinely unsaved/in-flight work are visibly kept. Is that the intended exception rule, or should literally only an explicit pin preserve a tab, with dirty work/drafts recoverable off-strip? This is the substantive F1 choice. Do not ask whether ordinary started-session drafts should be discarded: they should not, and already persist.
+2. For /resume, recommend day groups with project/folder badges, and current-project scope when invoked from a project/session, with All projects one click away. Prefer all folders initially, exactly like the shown Desktop dialog, instead?
+
+Not owner taste and therefore not an approval question: determine the exact active tab kind/pin/project/focused pane for a failing click in a safe reproduction; verify guard/resource lifecycle before replacing non-session views; choose the bounded preview read path; keep drafts bound to their own sessions. No such live reproduction or runtime validation was performed here.

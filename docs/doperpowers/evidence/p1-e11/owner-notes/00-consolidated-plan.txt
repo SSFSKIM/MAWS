@@ -1,0 +1,184 @@
+Owner observation notes, grounded and planned (architect, 2026-10-08)
+
+Sources: the owner's messages of 2026-10-08 02:13 to 02:50 PDT (images 5 to 18), the owner's vault note of
+2026-10-05 (owner-vault-note-2026-10-05.txt), and eight grounding reports A to H in this directory, written by
+research agents against master 5dcddd70 and the reference sources named in research/SOURCES.md. Nothing here is
+implemented; this is the routing proposal for E11's M7.2 (owner rows) and the seed of the P2 cut.
+
+Provenance of the screenshots. The MAWS process on the owner's screen until 02:24 PDT (pid 44903) had started on
+2026-10-04 18:41 PDT; the bundle on disk was rebuilt at 02:05 PDT from master after the E11 merge, but the old
+process kept running (closing windows leaves main alive; a second launch exits under the profile lock). The owner
+relaunched at 02:24:19 PDT (pid 80813, bundle 02:05:53, HEAD 5dcddd70). Images 5 to 9 and 12 are from the old
+process; images 13 to 18 are from the current build.
+
+== 1. Already fixed on master before E11 (verify on the relaunched app, no work)
+
+A. Archive dialog "no such column: removed_at". The archive UPDATE names sessions.removed_at; databases created
+   before the v1 amendment (d2dd68de, Sept 28) lacked it. REPAIRS adds the column on open since ff2b3a7d
+   (Oct 6, merged 8e6f5cbc); ac8724a6 contains it; the repair covers user_version 3, 4 and 5. Follow-up S: add
+   table-driven archive regressions for v3/v4/v5 histories (src/main/index/index.test.ts, service.test.ts).
+   Report: A-archive-removed-at.txt.
+B. "Response retracted · transcript_branch" after every tool call, and six empty retractions after an interrupt.
+   The old follower read hook attachments (hook_success/tool_result pairs sharing a parent: 33 to 258 pairs per
+   recent transcript) and split tool responses as forks. Fixed by FX5 14fc1bff, FX6 ed1f3230, FX8 3b2985e4 and
+   26a7d6d3 (all Oct 4 evening): those shapes draw nothing; a real fork reads "Conversation continued from an
+   earlier point"; only a holder-backed W7 contest posts a branch notice. Verify: open the same terminal session,
+   expand the hooked tools, no divider between them; the interrupted turn collapsed and expanded, no empty
+   boundary column. Report: B-transcript-branch.txt.
+E (part). Plugin and marketplace management exists since E8 (P1 P-10): install, enable per scope (user, project,
+   local), update, uninstall, marketplaces add/refresh/remove, Available browsing, automatic reload after a
+   mutation (3 s settle, one verify retry). What remains is the interface (section 2.2 and 3.B).
+F1 (part). A plain sidebar click already replaces the current session tab (W12/I2, Oct 1; charter §5.2). What
+   remains is the exception list (section 2.5).
+
+== 2. Live on master: fix now, one bounded wave (E11 M7.2 "F2 small fixes" by a fresh executor, reviewer-high)
+
+2.1 Slash palette pushes the page (D). Size M. The palette is already a body portal (Tiptap suggestion plus
+    Floating UI) but it is attached before its position is applied, inherits bottom-start/absolute, and
+    SlashPalette.tsx:81 calls an unrestricted scrollIntoView while html/body can scroll: the document scrolls,
+    taking the composer and the sidebar footer with it. Fix: fixed positioning computed before attachment
+    (hidden until positioned), open above the composer with the available height as the cap (no downward
+    flip), reveal the active row inside the listbox only, make html/body/#root non-scrolling, same lifecycle
+    for the @ popup. Tests: Shell/SessionPane browser assertions that the composer and sidebar bounding boxes
+    and the outer scroll offsets do not change when the palette opens, filters or navigates. No charter change
+    (caret anchoring per §5.4 stays). Codex, Claude Desktop and T3 all place the menu above in a height-bound
+    overlay. Report: D-slash-palette.txt.
+2.2 Provenance footers and jargon (E, S). Remove WidgetFrame's "Read with …" footer and its readWith plumbing
+    across all 19 framed widgets (inventory in E-plugins-skills-sandbox.txt §2.2); keep scope, write-consequence,
+    lock and destructive confirmations where they matter, inside the action sheets, never as a footer. Sandbox
+    copy: "Sandbox on" / "Sandbox off" with the fallback reason, restrictions under a disclosure. /reload-plugins
+    becomes a MAWS action (the existing reload_plugins control) instead of "Terminal only"; label it "Reload
+    plugins". Decision Log entry: supersedes E8 D-12's mandatory cache-provenance footer and C11's footer rule.
+2.3 Setting-change echoes in the transcript (image 15, new). Size S. The engine's local-command echo for /model
+    ("Set model to `fable (…)`") renders as a "Command output" card; the model chip already shows the change.
+    Rule: a local-command echo that only confirms a setting change (/model, /effort, /output-style,
+    /permission-mode and the like, matched on the engine's known confirmation lines) draws nothing; informative
+    outputs (/cost, /status, /help, /context) keep the card. Decision Log entry: W1 made local-command output
+    persistent in the fold; this narrows it for confirmations. Files: transcript/model/derive.ts localCommandRow,
+    user-text.ts, reduce tests with the 2.1.293 echo fixtures.
+2.4 Needs you error cards (H1). Size S/M. Error attention comes from a failed parent turn.ended or a failed
+    background task and never ages out, is not cleared by opening the session, and has no dismiss. Terminal bug:
+    retirement requires turn.started.origin === 'human' (src/main/attention/service.ts:146) while disk backfill
+    emits human turns with origin null (engine-host/fs/backfill.ts:261, 291), so a terminal session's later
+    prompt never clears its error. Fix: retire on any human-authored turn start including backfilled ones (keep
+    the aborted_tools exclusion: the 2.1.293 interrupt fixture proves error_during_execution with is_error can
+    mean an abort); clear the card when its notice is viewed in the opened session, plus an explicit Dismiss;
+    keep the fact on the session row as an "ended with an error" badge with the time; copy translating subtypes
+    ("The turn ended with an error", "Stopped at the turn limit", "Stopped at the budget"); "waiting 2w" becomes
+    "2 weeks ago". No arbitrary TTL, no new board section. Report: H-needs-you-errors.txt.
+2.5 Session click opens a new tab (F1). Size M. The remaining exception is a clean non-session tab (file, diff,
+    agent, browser, deliverable, Settings, Diagnostics): all force a new tab (stores/layout-model.ts, test at
+    :212–219 pins it). Fix: an unpinned tab of any kind is replaceable when nothing unsaved is lost; an explicit
+    pin resists, with a visible pin icon and tooltip instead of the dot; unsaved buffers, pending saves and
+    unstarted launches are kept and say why; an unstarted New chat draft is preserved recoverably; ⌘-click,
+    middle-click and Open in new tab stay the explicit new-tab gestures. Charter amendment on C5's exception
+    policy. Report: F-tabs-and-resume.txt §4.1.
+2.6 Raw tags in previews (H2). Size S/M. Sidebar rows, Needs you cards, notifications (attention item.summary)
+    and the dashboard print digest.lastAssistantLine verbatim, truncated before presentation, so a tag-only
+    first line hides the body. Fix: one owner-aware preview helper applied before truncation, choosing the
+    need-input question, else the essential text, else the to-human text, else the plain line; used by every
+    compact summary producer including the cached index refresh and the notifier. This extends the Oct 4 S0
+    decision (owner-layer presentation for transcripts) to summaries; the Oct 1 raw-tag tracker row is closed by
+    it. Part of 3.C in spirit, worth landing now.
+2.7 The launch trap (A, new). Size S. A rebuilt app launched while an old process is alive exits silently under
+    the profile lock. Fix: the second instance focuses the running one and, when the running bundle is older
+    than the launched one, shows "An older MAWS is running (built <time>); quit it to use this build"; show the
+    build commit and time in Settings › Diagnostics and in the main-process startup log (identity supplied by
+    electron.vite.config.ts), distinct from the supervisor's identity.
+2.8 Verified engine version (joint sitting, new). Size S. TESTED_ENGINE_VERSION in src/engine-host/engine-compat.ts
+    is still '2.1.283', so the owner's app shows "Claude Code 2.1.294 is newer than the version MAWS was verified
+    against (2.1.283); some events were not understood". E11 verified the live paths on 2.1.293; bump the constant
+    to 2.1.293 with E11's evidence as the citation. Provenance for M7.2: the owner's installed engine is 2.1.294
+    (`claude --version` at 02:50 PDT), not the 2.1.293 named in prerun.txt; the owner-results header records 2.1.294.
+
+== 3. P2 children (the next cut; each needs its own grill and execution document)
+
+3.A Every session behaves as running (C). Size L; first slice M. Today discovery creates records, not engine
+    processes; "The session is not running" gates Send (only records carrying the released digest marker resume
+    transparently), model/mode/add-directory chips, the context ring, /plugins, /btw, side questions, peer
+    replies. Design: availability separate from process status (usable now, starting, resumable, foreign-held,
+    archived, missing directory, needs trust, failed), one acquisition service in main that coalesces demands
+    and joins an initializing launch; Send resumes transparently for every eligible record (editor contents kept
+    until accepted, trust card when needed, no auto-unarchive, no takeover of a terminal holder); read-only
+    surfaces show last-known facts immediately with freshness labels ("Loaded last time" vs "Loaded now",
+    unknown never shown as empty), persisted in the host sidecar as an observed-facts snapshot; chips and
+    widgets that need current facts acquire the engine and show "Starting…" inside the surface; no engine per
+    sidebar row, the memory budget and keep-alive rules unchanged, no wake/release churn from mounted widgets.
+    Probe gate before promising a fresh plugin inventory without a prompt: a resume emits initialize but
+    system/init only after a user prompt; reload_plugins is a real reload, not a read. Charter: Decision Log
+    amending §4.4 and C10/C11 (durable sessions are available on demand; process absence is not an error;
+    C10's "never auto-resumes" means no blanket replay, not a ban on owner-action-driven acquisition); X2/X6
+    additions for acquire and observed facts. Claude Desktop warms eligible sessions on view mount and on widget
+    opens with a configurable attended idle timeout; Codex resumes threads on view hydration and re-ensures on
+    Send; T3 acquires lazily on persisted resume cursors. Report: C-session-not-running.txt.
+3.B Extensions library: Claude Desktop's plugin interface ported over E8 (E). Size M for the library and skills,
+    M/L for the detail enrichment, M for sandbox settings if authorized separately. The owner chose Desktop's
+    composition as-is. Shape: a library-sized centred dialog (not the 560 px utility widget); header "My items /
+    Browse" beside the title, Search, filter, sort and an Add menu holding Add marketplace and Manage
+    marketplaces; My items grouped "In this project", "From Anthropic & Partners", "From marketplaces you added"
+    with one row per plugin identity (display name, icon, author and description, date, overflow), scopes as
+    chips in the detail, never 132 installation rows or "unknown" versions; detail with purpose, author, version,
+    source, scopes, enable control for the selected scope, Update in the header, Uninstall in the overflow with
+    E8's confirmation, "Enabled for this project" distinct from "Loaded in this session", and "What's inside"
+    (commands, skills, agents, hooks, MCP servers read from the installed manifest and directories by a narrow
+    read-only host service, no plugin code executed, secrets redacted); Browse cards from the engine's configured
+    sources with truthful installed state, no fabricated popularity; Manage marketplaces as Desktop's sheet ("
+    Removing one also uninstalls its plugins"); Skills with the same header and grouped rows, "Use in chat" as the
+    primary action; Sandbox: truthful status now, toggles only after a separate decision on writing settings.
+    Decision Log under D-20/§5.4 (library-sized dialogs; the copy rule; E8 footer superseded). Report:
+    E-plugins-skills-sandbox.txt §4 (element-to-data mapping in §4.1, matrix in §4.2).
+3.C To-human as default application behaviour (G, plus images 16 to 18). Size L. Today the live toggle and the
+    choice buttons are doperpowers' engine mod (hooks/mods/to-human.tsx) drawn through MAWS's engine surface;
+    MAWS's own Presenter handles detached transcripts read-only ("Resume this session to answer"); choices fill
+    the composer and need Enter; no attention from essential or need-input; MAWS injects no contract itself
+    (the owner's settings.json selects doperpowers:to-human). Shape: a built-in MAWS mod with a stable id,
+    contract version, enabled by default, per-app and per-session off switch, listed in the plugins widget under
+    "MAWS mods · Built in". Engine side: the contract appended once per MAWS-owned launch, resume and fork through
+    --append-system-prompt (verified in the 2.1.293 binary; no --output-style flag exists) unless a compatible
+    style is already effective in that launch's settings context (recognised by versioned metadata, mismatch
+    surfaced); never a prompt prepended as a human message; foreign-live sessions untouched. Renderer: MAWS owns
+    the report view and its fold regardless of which surface is mounted: to-human cards; essential as a
+    must-read item with unread state; insight as an adjacent note on wide layouts and an inline aside on narrow
+    ones; need-input as one question card with the recommended choice, where a choice click sends the answer as
+    the next prompt through the app's own send and queue path and free text goes through the composer, the
+    question keeping a stable identity and persisting until the answer is actually delivered. The report view's
+    fold (owner, images 16 to 18): everything between the prompt and the answer folds into one "working record";
+    clicking it shows the ordinary collapsed divider "Worked for 10s · 2 tool calls"; clicking that expands the
+    tool rows exactly as in the full transcript. Today the second level renders a one-line summary that cannot
+    expand; that is the mod's drawing and is fixed by MAWS owning the view. Attention: separate reasons for an
+    unanswered question ("waiting for your input", engine may still run) and an unread essential, persisted,
+    shown in the sidebar and the Needs you board, OS notification for those two only, no replay of old history on
+    upgrade. Coexistence: advertise native to-human support so the doperpowers mod defers its to-human UI on
+    MAWS (a small compatible change in that plugin) rather than disabling the plugin. Charter: a new D-n (default,
+    disableable communication mods are general application behaviour, distinct from owner workflow plugins),
+    amending D-5's reading and R4's live-versus-detached ownership; CLAUDE.md's line becomes "general at the
+    base, with a small set of default, disableable application mods; owner-specific workflows as additional
+    plugins". Report: G-to-human-default.txt.
+3.D Resume chooser (F2). Size M, M+ with the lazy preview. One shared chooser for /resume and the sidebar's
+    Resume…: search over title, folder and branch; day groups (Today, Yesterday, Earlier) with project and branch
+    badges; preview pane with cached title, cwd, branch, activity and last-answer excerpt, then a bounded lazy
+    read of the recent turns for the settled selection only (no engine launched, no read-state change); Enter
+    opens in the current tab via 2.5's navigation, ⌘-Enter in a new tab; scope seeded from the invoking project
+    with All projects one click away. Claude Desktop's picker rows show title, branch, folder badge and time (no
+    message count). Report: F-tabs-and-resume.txt §4.2.
+
+== 4. Owner decisions still open (product or taste; recommendations first)
+
+1. Error cards: clear when the notice is viewed in the opened session, plus Dismiss (recommended), or only on
+   explicit Dismiss.
+2. Tabs: clean unpinned non-session views are replaced too; pins and unsaved work stay visibly (recommended), or
+   literally only a pin ever preserves a tab with dirty work recoverable off-strip.
+3. To-human: a choice click sends immediately through the queue (recommended) or fills the composer and waits for
+   Enter; essential is read on explicit Mark read (recommended) or on view.
+4. Sessions: action-driven startup with saved facts shown instantly (recommended) or warm the foreground session
+   on open; a terminal-held session stays read-only with an explicit Take over (recommended).
+5. Extensions Browse: the engine's configured sources only (recommended) or a broad discovery feed; sandbox
+   toggles: defaults for new MAWS sessions only, or shared Claude Code settings.
+6. Resume scope: current project with All projects one click away (recommended) or all folders first.
+
+== 5. Routing
+
+Section 1 items become owner-results rows verified on the relaunched app (pass expected) plus the A regression
+tests. Section 2 is E11 M7.2's small-fixes wave (2.1 to 2.7), each with its Decision Log line where named, then
+2.2's e2e expectations and the widget copy tests updated. Section 3 seeds the P2 cut: four children, A and C
+first (they change contracts the others build on), B and D after. The reports stay here as the grounding record.

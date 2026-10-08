@@ -1,0 +1,62 @@
+
+
+Some sessions keep reporting That session is not running.But in Claude code CLI, even if you just started the session, you should be able to see /plugins, /sandbox, and more. This is definitely the deficiency in our side.
+
+
+![[Pasted image 20261005182317.png]]
+our plugins 
+
+![[Pasted image 20261005183025.png]]
+vs
+![[Pasted image 20261005182437.png]]
+
+![[스크린샷 2026-10-05 오후 6.24.56.png]]
+--> Over a much poorer UI design and we need a more organized richer UI
+
+for /skill:
+
+Claude Desktop:
+![[Pasted image 20261005182535.png]]
+
+Us:
+![[Pasted image 20261005182715.png]]
+
+just simply need better UI design
+
+![[스크린샷 2026-10-05 오후 6.27.26.png]]
+
+should also show marketplaces
+
+
+
+additionally some wierd UI bug when typed '/' -- the whole page goes down
+![[Pasted image 20261005182616.png]]
+also why do we not have /reload-plugin? is it automatic for us?
+
+Claude App:
+
+![[Pasted image 20261005182753.png]]![[Pasted image 20261005182905.png]]![[스크린샷 2026-10-05 오후 6.29.07.png]]![[스크린샷 2026-10-05 오후 6.29.20.png]]![[스크린샷 2026-10-05 오후 6.29.26.png]]
+--> much richer interface in general
+
+
+
+
+/sandbox:
+
+![[Pasted image 20261005183118.png]]
+Claude:
+![[Pasted image 20261005183149.png]]
+
+
+General note here, drop all the "read with get_sandbox_... whatever" Because users don't want to know how the application read it. They just want to know what's sandbox setting, what's plugin settings and so on. We do not need to know how the menu bar is reading it technically. Same for "Read with system/init .." for /plugins
+
+
+
+![[Pasted image 20261005183339.png]]
+--> this is what /resume shows for Claude Desktop.
+
+for us:
+![[Pasted image 20261005183409.png]]
+This work and this is like Claude CLI, but we can definitely do as great as claude code desktops' implementation
+
+
