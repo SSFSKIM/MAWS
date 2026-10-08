@@ -7,7 +7,9 @@ import type { SessionEvent } from '@shared/graph/events';
 
 export { ENGINE_COMPAT_NOTICE_KEY };
 
-export const TESTED_ENGINE_VERSION = '2.1.283';
+// E11's live sittings ran every P1 live path on the installed 2.1.293 (docs/doperpowers/evidence/p1-e11/prerun.txt and
+// live-s1.txt to live-s8.txt); the fixtures recorded before E11 (2.1.283 to 2.1.292) are older and still replay clean.
+export const TESTED_ENGINE_VERSION = '2.1.293';
 
 // The numeric parts of a version (`2.1.287`, `2.1.290-dev`); null when it does not start with one.
 function partsOf(version: string): number[] | null {
