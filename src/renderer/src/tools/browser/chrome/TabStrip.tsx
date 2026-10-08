@@ -82,6 +82,7 @@ function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean;
         )}
         {tab.control === 'agent' && <ActingDot /> /* E4c */}
         <span className={`min-w-0 truncate ${tab.loading ? 'browser-chip-loading' : ''}`}>{title}</span>
+        {tab.agentBadge !== null && <AgentBadge text={tab.agentBadge} /> /* E13 */}
       </button>
       <button
         type="button"
@@ -102,3 +103,14 @@ function ActingDot() {
   return <span data-browser-acting role="img" aria-label={BROWSER_COPY.acting} title={BROWSER_COPY.acting} className="size-1.5 shrink-0 rounded-full bg-accent" />;
 }
 // E4c end
+
+// E13 start: a tab an agent created through cua (the in-app browser spec of 2026-10-08): a small badge after the title
+// with the text main gives it ("agent", or the name the agent gave its session), in the agent tint mentions use.
+function AgentBadge({ text }: { text: string }) {
+  return (
+    <span data-agent-badge="" title={BROWSER_COPY.agentBadge} className="max-w-20 shrink-0 truncate rounded-sm bg-accent-soft px-1 text-fg">
+      {text}
+    </span>
+  );
+}
+// E13 end

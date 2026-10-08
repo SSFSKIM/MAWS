@@ -7,6 +7,7 @@ import { agentListCopy } from './copy'; // E7
 import { previewHidesBody } from './rows'; // E7
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
+import { browserActivityLine } from './copy'; // E13
 import type { Cell, Row } from './rows';
 import { copiedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
@@ -51,6 +52,7 @@ function partOf(row: Row): string | null {
     case 'agent_list': return listPart(row); // E7
     case 'artifact': return `**${artifactHeading(row)}**`; // E2
     case 'browser_action': return browserActionPart(row); // E4c
+    case 'browser_activity': return `- ${browserActivityLine(row.activity)}`; // E13
   }
 }
 

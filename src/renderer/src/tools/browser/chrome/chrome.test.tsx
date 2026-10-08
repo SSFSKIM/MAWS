@@ -538,3 +538,25 @@ describe('the acting dot', () => {
   });
 });
 // E4c end
+
+// E13 (the in-app browser spec of 2026-10-08; acceptance 2): a tab an agent created through cua carries a small badge
+// beside its title, with the text main gives it ("agent", or the name the agent gave its session).
+describe('the agent badge', () => {
+  it('marks the chip of a tab an agent opened, with its text, and no other chip', () => {
+    const { rerender } = render(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab({ title: 'Page A' }), browserTab(T2, A, { title: 'Features', agentBadge: 'agent' })]} />);
+    const badges = () => [...document.querySelectorAll('[data-agent-badge]')];
+    expect(badges()).toHaveLength(1);
+    const chip = document.querySelector(`[data-browser-chip="${T2}"]`) as HTMLElement;
+    expect(chip.contains(badges()[0]!)).toBe(true);
+    expect(badges()[0]!.textContent).toBe('agent');
+    expect(badges()[0]!.getAttribute('title')).toBe(BROWSER_COPY.agentBadge);
+    expect(badges()[0]!.className).toContain('bg-accent-soft');
+    // after the title
+    const title = within(chip).getByText('Features');
+    expect(title.compareDocumentPosition(badges()[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab({ title: 'Page A' }), browserTab(T2, A, { title: 'Features', agentBadge: 'checkout run' })]} />);
+    expect(badges()[0]!.textContent).toBe('checkout run');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab({ title: 'Page A' }), browserTab(T2, A, { title: 'Features', agentBadge: null })]} />);
+    expect(badges()).toHaveLength(0);
+  });
+});

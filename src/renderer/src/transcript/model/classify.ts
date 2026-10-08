@@ -22,6 +22,13 @@ export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
 };
 // E1 end
 
+// E13 start: the cua plugin's `js` tool (the in-app browser spec of 2026-10-08, "Action rows"), as the engine names it
+// when the plugin is installed and when cua_repl is registered by hand. The agent's browser work arrives as these calls,
+// opaque to MAWS; what it did in the in-app browser (`browser.agent.activity`) is shown under them.
+export const CUA_JS_TOOLS = ['mcp__plugin_cua_cua_repl__js', 'mcp__cua_repl__js'] as const;
+export const isCuaJsTool = (toolName: string): boolean => (CUA_JS_TOOLS as readonly string[]).includes(toolName);
+// E13 end
+
 const ROW_KIND_TOOLS: Record<string, Presentation> = {
   Agent: 'subagent', Task: 'subagent', Workflow: 'subagent',
   SendMessage: 'agent_message',
@@ -78,6 +85,11 @@ const TABLE: Record<string, TableRow> = {
   [MAWS_TOOL_USE.artifact_list]: standalone('other'),
   [MAWS_TOOL_USE.artifact_screenshot]: standalone('other'),
   // E2 end
+  // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
+  // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)
+  [CUA_JS_TOOLS[0]]: standalone('mcp'),
+  [CUA_JS_TOOLS[1]]: standalone('mcp'),
+  // E13 end
 };
 
 export const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/;

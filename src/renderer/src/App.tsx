@@ -109,6 +109,7 @@ import { connectBrowserImport } from './tools/browser/import/store';
 import { openBrowserTab } from './tools/browser/agent/actions';
 import { connectBrowserAgent } from './tools/browser/agent/connect';
 import { connectBrowserProgress } from './tools/browser/agent/progress';
+import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
 
@@ -269,6 +270,7 @@ export function App() {
   // E4c start: the browser tools' rows (E4c execution document, Design §10): main's waiting reports for the row's line,
   // and the row's Open tab; the Browser tool following the agent into the tab it acts on
   useEffect(() => connectBrowserProgress(), []);
+  useEffect(() => connectBrowserActivity(), []); // E13: what an agent did through cua, for the transcript's rows
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
   useEffect(() => connectBrowserAgent(), []);
   // E4c end

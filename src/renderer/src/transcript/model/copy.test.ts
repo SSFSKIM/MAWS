@@ -1,8 +1,10 @@
+import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
   activeGroupLabel, boundaryCopy, cellLabel, dividerCopy, groupSummary, liveThinkingLabel, plural, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, type GroupPhraseInput,
 } from './copy';
+import { browserActivityLine } from './copy'; // E13
 
 const cell = (id: string) => id as CellId;
 
@@ -181,5 +183,43 @@ describe('subagent and boundary copy', () => {
     expect(plural(1, 'file')).toBe('1 file');
     expect(plural(3, 'file')).toBe('3 files');
     expect(cell('x')).toBe('x');
+  });
+});
+
+// E13 (the in-app browser spec of 2026-10-08, "Action rows"): what an agent did through cua, one line per activity, in
+// the browser action row's words. Page strings are shown as given (plain text), cut; typed text is only ever a count.
+describe('browser activity lines', () => {
+  it.each<[string, BrowserActivity, string]>([
+    ['navigated', { kind: 'navigated', url: 'https://example.com/form?q=1', title: 'Form' }, 'Navigated to example.com'],
+    ['navigated, port', { kind: 'navigated', url: 'http://127.0.0.1:17391/features.html', title: '' }, 'Navigated to 127.0.0.1:17391'],
+    ['navigated, not http', { kind: 'navigated', url: 'about:blank', title: '' }, 'Navigated to about:blank'],
+    ['navigated, long data url', { kind: 'navigated', url: `data:text/html,${'x'.repeat(100)}`, title: '' }, `Navigated to data:text/html,${'x'.repeat(44)}…`],
+    ['clicked', { kind: 'clicked', x: 120, y: 48, label: 'button Submit' }, 'Clicked button Submit'],
+    ['clicked, no label', { kind: 'clicked', x: 120.4, y: 47.6, label: null }, 'Clicked at 120, 48'],
+    ['typed one', { kind: 'typed', chars: 1 }, 'Typed 1 character'],
+    ['typed many', { kind: 'typed', chars: 12 }, 'Typed 12 characters'],
+    ['key', { kind: 'key', key: 'Enter' }, 'Pressed Enter'],
+    ['screenshot', { kind: 'screenshot' }, 'Screenshot'],
+    ['download', { kind: 'download', filename: 'cua-report.pdf', state: 'complete' }, 'Downloaded cua-report.pdf'],
+    ['download failed', { kind: 'download', filename: 'cua-report.pdf', state: 'interrupted' }, 'Download failed: cua-report.pdf'],
+    ['download cancelled', { kind: 'download', filename: 'cua-report.pdf', state: 'cancelled' }, 'Download cancelled: cua-report.pdf'],
+    ['alert', { kind: 'dialog', type: 'alert', excerpt: 'Saved!', answered: 'accepted' }, 'Alert "Saved!" closed'],
+    ['alert, default', { kind: 'dialog', type: 'alert', excerpt: 'Saved!', answered: 'default' }, 'Alert "Saved!" answered by default after 30 s'],
+    ['confirm accepted', { kind: 'dialog', type: 'confirm', excerpt: 'Delete it?', answered: 'accepted' }, 'Confirm "Delete it?" accepted'],
+    ['confirm dismissed', { kind: 'dialog', type: 'confirm', excerpt: 'Delete it?', answered: 'dismissed' }, 'Confirm "Delete it?" dismissed'],
+    ['confirm, default', { kind: 'dialog', type: 'confirm', excerpt: 'Delete it?', answered: 'default' }, 'Confirm "Delete it?" answered by default after 30 s'],
+    ['confirm, no text, lines folded', { kind: 'dialog', type: 'confirm', excerpt: '', answered: 'accepted' }, 'Confirm accepted'],
+    ['dialog, multiline', { kind: 'dialog', type: 'alert', excerpt: 'Line one\n  line two', answered: 'dismissed' }, 'Alert "Line one line two" closed'],
+    ['tab opened', { kind: 'tabOpened', url: 'https://example.com/' }, 'Opened a tab at example.com'],
+    ['tab opened blank', { kind: 'tabOpened', url: 'about:blank' }, 'Opened a tab'],
+    ['tab closed', { kind: 'tabClosed', url: 'https://example.com/a' }, 'Closed the tab at example.com'],
+    ['tab closed blank', { kind: 'tabClosed', url: '' }, 'Closed a tab'],
+  ])('%s', (_name, activity, expected) => {
+    expect(browserActivityLine(activity)).toBe(expected);
+  });
+
+  it('cuts a long label', () => {
+    expect(browserActivityLine({ kind: 'clicked', x: 0, y: 0, label: `link ${'y'.repeat(35)}` })).toBe(`Clicked link ${'y'.repeat(35)}`);
+    expect(browserActivityLine({ kind: 'dialog', type: 'alert', excerpt: 'z'.repeat(200), answered: 'accepted' })).toBe(`Alert "${'z'.repeat(59)}…" closed`);
   });
 });

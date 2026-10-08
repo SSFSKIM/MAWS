@@ -20,6 +20,9 @@ import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
 import { RowView } from './rows/Row';
+import { useStandaloneBrowserActivity } from './rows/BrowserActivity'; // E13
+import { withBrowserActivityRows } from '../model/browser-activity'; // E13
+import type { AppSessionId } from '@shared/graph/ids'; // E13
 import './transcript.css';
 
 export const SCROLL_END_THRESHOLD = 80;
@@ -34,6 +37,7 @@ const ESTIMATES: Record<RowKind, number> = {
   agent_list: 96, // E7: the self line and one short section
   artifact: 44, // E2
   browser_action: 34, // E4c: one line and its bottom padding
+  browser_activity: 34, // E13: as a browser action's
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;
@@ -211,7 +215,10 @@ const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
-  const rows = useMemo(() => withQueueTail(derived, withdrawn, tail), [derived, withdrawn, tail]);
+  // E13: a session's browser activity with no `js` call to stand under, as rows at their time (a child's transcript
+  // shows only what its own calls did)
+  const standalone = useStandaloneBrowserActivity(storeKey, variant === 'session' ? (storeKey as AppSessionId) : null);
+  const rows = useMemo(() => withQueueTail(withBrowserActivityRows(derived, standalone), withdrawn, tail), [derived, standalone, withdrawn, tail]);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));

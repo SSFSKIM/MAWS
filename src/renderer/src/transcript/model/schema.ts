@@ -8,6 +8,7 @@ import { AskCancelReasonSchema } from '@shared/maws/ask'; // E1
 import { AskAnswerSchema, AskQuestionSchema } from '@shared/maws/tools'; // E1
 import { ANCHOR_KINDS, AnchorSchema } from '@shared/anchor/anchor'; // E3
 import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '@shared/maws/browser'; // E4c
+import { BrowserActivitySchema } from '@shared/browser/activity'; // E13
 import { TOOL_CATEGORIES } from './rows';
 
 const nullable = <T extends z.ZodType>(schema: T) => schema.nullable();
@@ -138,4 +139,5 @@ export const RowSchema = z.discriminatedUnion('kind', [
     truncated: z.boolean(), tabCount: nullable(z.number()), state: z.enum(['running', 'done', 'error', 'cancelled']), detail: nullable(z.string()), answered: z.boolean(),
   }),
   // E4c end
+  z.strictObject({ ...base, kind: z.literal('browser_activity'), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
 ]);
