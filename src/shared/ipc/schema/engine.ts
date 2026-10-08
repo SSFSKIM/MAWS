@@ -19,8 +19,8 @@ import { AbsolutePathSchema } from './settings';
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
 // W13 (charter D-1 as amended 2026-10-01): `path` is the real path the next launch spawns (the installed Claude Code
-// unless Settings names a binary), `version` its `--version`, `testedVersion` the version MAWS's fixtures were recorded
-// on (information, never a refusal); `ok` false only for a missing binary or one that prints no version.
+// unless Settings names a binary), `version` its `--version`, `testedVersion` the version MAWS was verified
+// against (E11: its live sittings; the replay fixtures are this release or older; information, never a refusal); `ok` false only for a missing binary or one that prints no version.
 export const BinaryInfoSchema = z.strictObject({ path: z.string(), testedVersion: z.string(), version: z.string().nullable(), ok: z.boolean(), error: z.string().nullable() });
 export type BinaryInfo = z.infer<typeof BinaryInfoSchema>;
 

@@ -1,6 +1,6 @@
 // What MAWS knows about the Claude Code versions it runs (charter D-1 as amended 2026-10-01, W13; waves plan §2 J1),
-// keyed by `claude_code_version`: the version its fixtures and conformance tests were recorded on, a comparison, and the
-// one notice a session gets when an engine newer than that sends something MAWS did not understand. Information only:
+// keyed by `claude_code_version`: the version MAWS was verified against (E11's live sittings; the replay fixtures and
+// conformance tests were recorded on it or an older release, test/support/engine-pin), a comparison, and the one notice a session gets when an engine newer than that sends something MAWS did not understand. Information only:
 // the product runs whatever Claude Code the user has installed and never refuses a version.
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice';
 import type { SessionEvent } from '@shared/graph/events';

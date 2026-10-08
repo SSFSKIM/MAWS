@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBinaryProbe, INSTALLED_LINK } from './binary-info';
-import { TESTED_ENGINE_VERSION } from './engine-compat';
+import { compareVersions, TESTED_ENGINE_VERSION } from './engine-compat';
 import { setBinaryConfig } from './launch';
 import { FIXTURE_ENGINE_VERSION } from '../../test/support/engine-pin';
 
@@ -66,7 +66,7 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
 
   it('never refuses a version other than the tested one', async () => {
     link(engine(version('9.0.0'), '9.0.0 (Claude Code)'));
-    expect(await probeWith()()).toMatchObject({ version: '9.0.0', testedVersion: '2.1.283', ok: true, error: null });
+    expect(await probeWith()()).toMatchObject({ version: '9.0.0', testedVersion: TESTED_ENGINE_VERSION, ok: true, error: null });
   });
 
   it('a chosen path wins over the installed link and answers its own real path', async () => {
@@ -148,6 +148,9 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
   });
 });
 
-it('the tested version MAWS reports is the fixtures’ pin', () => {
-  expect(TESTED_ENGINE_VERSION).toBe(FIXTURE_ENGINE_VERSION);
+// E11 (M7.2 F2a 2.8): the tested version is the release MAWS was verified against live (2.1.293, E11's sittings); the
+// replay fixtures keep the release most were recorded on, never newer, so a replay never reads as newer than tested.
+it('the fixtures’ pin is never newer than the tested version MAWS reports', () => {
+  expect(TESTED_ENGINE_VERSION).toBe('2.1.293');
+  expect(compareVersions(FIXTURE_ENGINE_VERSION, TESTED_ENGINE_VERSION)).toBeLessThanOrEqual(0);
 });
