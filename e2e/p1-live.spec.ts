@@ -23,14 +23,18 @@
 // (`charges.jsonl` under the run's root, below); the next paid call may spend the smaller of the sitting's and the run's
 // remainders, a case does not start once either is spent (`not run (budget)`), and every session the spec launches
 // carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
-// no turn).
+// no turn). That budget is reserved in `charges.jsonl` before the launch, against the session's own receipts (the
+// session counts as spent at the larger of the two), and settled at the case's end once its process is gone: to its
+// receipts, or kept whole when a prompt went unreceipted (a timeout or a crash before its result). So the next case,
+// or a fresh Playwright worker reading the run root, never sees a remainder a running session may still spend.
 // Case 2's side thread is a fork of the parent and takes no `--max-budget-usd` (src/main/sessions/launch-mapping.ts;
 // whether it should is owner question Q12), so the test bounds it: the parent launches with FORK_ALLOCATION_USD and
 // BTW_RESERVATION_USD held back from its budget, case 2 starts only when what is left covers the allocation, charges it
 // before the comment is sent, stops the thread through the app once its journal's receipts reach it, and after the
-// thread stops settles the charge to its receipts (or keeps the whole allocation when a prompt went unreceipted); case 3
-// starts only when what is left still covers what the parent may spend under its launch budget. US$0.08 is about two
-// and a half times a recorded fork turn (spikes/protocol-probe/fixtures/resume-fork-*.jsonl: US$0.027 to 0.032).
+// thread stops settles the charge to its receipts (or keeps the whole allocation when a prompt went unreceipted); the
+// parent's own launch budget stays reserved through the four cases, so case 3 needs no allowance of its own. US$0.08
+// is about two and a half times a recorded fork turn (spikes/protocol-probe/fixtures/resume-fork-*.jsonl: US$0.027 to
+// 0.032).
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
 // response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
@@ -61,7 +65,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { deliverableUrl } from '../src/shared/maws/deliverable';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { assertConfigHomeSafe } from '../test/live/support/live';
+import { assertConfigHomeSafe, journalCost } from '../test/live/support/live';
 import { ownerPlugins } from '../test/support/claude-env';
 import { compareA15 } from '../test/support/owner-file';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -75,7 +79,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, resumeNoOutput, runRoot, settleAll, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -132,19 +136,28 @@ const charges = (): Charge[] => (existsSync(CHARGES) ? readFileSync(CHARGES, 'ut
 function charge(note: (line: string) => void, c: Charge): void {
   mkdirSync(ROOT, { recursive: true });
   appendFileSync(CHARGES, `${JSON.stringify(c)}\n`);
-  note(`  charged US$${c.usd.toFixed(4)} to ${CASE_SITTING[c.case].toUpperCase()} for ${c.label} [${c.key}]; ${spendLine(CASE_SITTING[c.case])}`);
+  note(`  charged US$${c.usd.toFixed(4)} to ${CASE_SITTING[c.case].toUpperCase()} for ${c.label}${c.against ? ` (counted beyond ${c.against}'s receipts)` : ''} [${c.key}]; ${spendLine(CASE_SITTING[c.case])}`);
+}
+
+// One session's receipts, each of its launch journals summed as journalSpend sums them.
+function sessionReceipts(name: CaseName, id: string): number {
+  const dir = join(ROOT, name, 'user-data', 'engine-host', 'journal', id);
+  if (!existsSync(dir)) return 0;
+  return readdirSync(dir).filter((file) => file.endsWith('.jsonl')).reduce((usd, file) => usd + journalCost(journal(join(dir, file))).costUsd, 0);
 }
 
 // What each sitting and the run have spent: every journal of every case's profile under the run's root (a resumed or
 // forked process may restore its session's cost, so summing journals can only over-count, the safe side of a cap),
-// plus the charges.
+// plus the charges, a launch reservation counted beyond its session's receipts.
 function spent() {
   const receipts: Partial<Record<CaseName, number>> = {};
   for (const name of Object.keys(CASE_SITTING) as CaseName[]) {
     const dir = join(ROOT, name, 'user-data');
     if (existsSync(dir)) receipts[name] = journalSpend(dir).usd;
   }
-  return spentBySitting(receipts, charges());
+  const all = charges();
+  const reservedFor = Object.fromEntries(all.filter((c) => c.against !== undefined).map((c) => [c.against!, sessionReceipts(c.case, c.against!)]));
+  return spentBySitting(receipts, all, reservedFor);
 }
 const budgetFor = (sitting: Sitting): Budget => budgetOf(sitting, spent(), CAP);
 const spendLine = (sitting: Sitting): string => {
@@ -182,6 +195,7 @@ const theEngine = () => (engine ??= installedEngine());
 // ---- a case's scratch and its app ---------------------------------------------------------------------------------------
 
 interface CaseScratch {
+  name: CaseName; // its directory under the run's root
   sitting: Sitting; // the sitting whose cap the case spends
   root: string;
   config: string;
@@ -208,7 +222,7 @@ function caseScratch(name: CaseName, titles: string[], seed: (repo: string) => v
   git('init', '-q');
   git('add', '-A');
   git('commit', '-qm', 'seed');
-  return { sitting: CASE_SITTING[name], root, config, repo, userData, engineIds: seedTranscripts(config, repo, titles) };
+  return { name, sitting: CASE_SITTING[name], root, config, repo, userData, engineIds: seedTranscripts(config, repo, titles) };
 }
 
 interface Live {
@@ -222,7 +236,7 @@ interface Live {
   a15First: A15Reading; // the owner file before the case
   pids: Set<number>; // the app's and every engine's, for the survivor check
   started: { label: string; id: AppSessionId }[];
-  launchBudgets: Map<string, number>; // each session's `--max-budget-usd` at its launch
+  reservations: Map<string, Charge>; // each launched session's `--max-budget-usd`, reserved until closeLive settles it
   ownerPluginsSeen: string[];
   a15Breaches: string[]; // every A-15 reading's breach (a key of the run's own appearing or vanishing), asserted at the end
 }
@@ -236,7 +250,7 @@ async function openLive(sc: CaseScratch, note: (line: string) => void, a15First:
     note, sc, maws, page: maws.page, a15First,
     pane: maws.page.locator('[data-region="main"] [data-pane="0"]'),
     panel: maws.page.locator('[data-region="panel"]'),
-    ids: [], pids: new Set([maws.app.process().pid!]), started: [], launchBudgets: new Map(), ownerPluginsSeen: [], a15Breaches: [],
+    ids: [], pids: new Set([maws.app.process().pid!]), started: [], reservations: new Map(), ownerPluginsSeen: [], a15Breaches: [],
   };
   try {
     await recordEvents(maws.page);
@@ -279,7 +293,8 @@ const outUsers = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out
 
 // A session launched under the record `id` as the app launches (C7's X6 fields; Haiku, default mode, the gateway),
 // fresh or resuming `resume` in place, with what its sitting and the run leave (the smaller) as its budget, less
-// `reserve`, what the case holds back for paid calls the session's own budget does not bound; waits for `ready`.
+// `reserve`, what the case holds back for paid calls the session's own budget does not bound; the budget reserved
+// before the launch (closeLive settles it); waits for `ready`.
 async function launchSession(live: Live, label: string, id: AppSessionId, opts: { resume?: string; reserve?: { usd: number; for: string } } = {}): Promise<void> {
   const budget = budgetFor(live.sc.sitting);
   const reserved = opts.reserve?.usd ?? 0;
@@ -289,7 +304,9 @@ async function launchSession(live: Live, label: string, id: AppSessionId, opts: 
     live.note(`${label}: ${refusal}`);
     test.skip(true, refusal);
   }
-  live.launchBudgets.set(id, remaining);
+  const reservation = launchReservation(live.sc.name, id, label, remaining);
+  charge(live.note, reservation);
+  live.reservations.set(id, reservation);
   const spec = { ...launchDefaults(id, live.sc.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: remaining, ...(opts.resume ? { resume: { sessionId: opts.resume as SessionId, fork: false } } : {}) };
   expect(value(await invoke(live.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
   live.started.push({ label, id });
@@ -389,8 +406,10 @@ function descendants(pid: number): number[] {
   return found;
 }
 
-// The case's end: every session still running stopped, the app closed, the A-15 reading after it, no breach in any of
-// the case's readings (no key of the run's own), the owner plugins none, and no process of the app or its engines left.
+// The case's end: every session still running stopped, the app closed, the A-15 reading after it, every launch budget
+// settled to its session's receipts once no process of the case is left (kept whole for a prompt gone unreceipted), no
+// breach in any of the case's readings (no key of the run's own), the owner plugins none, and no process of the app or
+// its engines left.
 // Every step runs whatever an earlier one threw (a session that would not stop, the app's cleanup rejecting): the
 // survivor scan, its SIGKILL fallback and the checks still run, and the errors are rethrown after them (settleAll).
 async function closeLive(live: Live): Promise<void> {
@@ -402,7 +421,6 @@ async function closeLive(live: Live): Promise<void> {
   };
   await settleAll([
     ...[...live.started].reverse().map(({ label, id }) => () => stopSession(live, label, id).catch(failed(`${label} ${id} could not be stopped`))),
-    () => live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`),
     () => {
       for (const pid of descendants(live.maws.app.process().pid!)) live.pids.add(pid); // the app's helpers and hosts
     },
@@ -422,6 +440,11 @@ async function closeLive(live: Live): Promise<void> {
         }
       }
     },
+    ...[...live.reservations].map(([id, reserved]) => () => {
+      charge(live.note, settledReservation(reserved, sessionRows(live, id)));
+      live.reservations.delete(id);
+    }),
+    () => live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`),
     () => expect(live.a15Breaches, 'no project of the run’s scratch appeared in or vanished from the owner file at any reading (A-15)').toEqual([]),
     () => expect(live.ownerPluginsSeen, 'the engines loaded none of the owner’s plugins (Decision Log 22, 30)').toEqual([]),
     () => expect(survivors, 'no process of the app or its engines outlives the case').toEqual([]),
@@ -628,12 +651,12 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
   test('3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row', async () => {
     const l = live!;
     test.skip(artifact === null, 'case 1 recorded no artifact');
-    // the parent's process keeps the budget it launched with: what it may still spend under it must fit what is left
-    // now that case 2's thread is charged
-    const launched = l.launchBudgets.get(parent) ?? 0;
-    const allowance = Number((launched - chargeOf(sessionRows(l, parent), 0).receipted).toFixed(4));
-    refuseOverCap(note, 'S3 case 3', 's3', { usd: allowance, for: `what the parent may still spend under its launch budget US$${launched.toFixed(4)}` });
-    note(`case 3: the parent may spend up to US$${allowance.toFixed(4)} more under its launch budget; ${spendLine('s3')}`);
+    // the parent's process keeps the budget it launched with, reserved since its launch (counted beyond its receipts),
+    // so what it may still spend is already in the sitting's spend: refused only once S3 or the run is spent (case 2's
+    // thread overspending its allocation, say)
+    refuseOverCap(note, 'S3 case 3', 's3');
+    const launched = l.reservations.get(parent)?.usd ?? 0;
+    note(`case 3: the parent may spend up to US$${Math.max(0, launched - chargeOf(sessionRows(l, parent), 0).receipted).toFixed(4)} more under its launch budget US$${launched.toFixed(4)} (reserved); ${spendLine('s3')}`);
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const allowed: string[] = [];
     await sendFromComposer(l, parent, PROMPTS.slow);

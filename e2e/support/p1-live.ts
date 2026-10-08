@@ -1,7 +1,7 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1; Design §5
 // S3, S4, S6 and A-47 through e2e/p1-live.spec.ts, S1 through test/live/maws-ask-interrupt.live.test.ts): each sitting's
 // cap and the run's, what each sitting has spent and what the next paid call may spend, a paid call's charge when no
-// receipt shows it, the case's end that runs every step, S6's stall reading, where the logs go, the scratch root every case of one run shares, the A-15
+// receipt shows it, a launch budget's reservation and its settlement, the case's end that runs every step, S6's stall reading, where the logs go, the scratch root every case of one run shares, the A-15
 // reading in the standing rule's exact form and its log line, the screenshot's dominant colour, the site of a URL and
 // the engine's init plugin list. Free of Playwright, so test/support/p1-live.test.ts runs it under vitest.
 import { createHash } from 'node:crypto';
@@ -44,12 +44,14 @@ const usd4 = (usd: number): number => Number(usd.toFixed(4));
 // What a case spent that its journals' receipts do not show: a paid call with no receipt (a side question, a prompt
 // whose result never came) charged its reservation or allocation. The spec keeps charges on disk so a fresh worker
 // still counts them; a later charge under the same key replaces the earlier (a reservation settled once its receipt
-// came).
+// came). A charge `against` a session is a reservation its own receipts draw down: it counts only what it holds beyond
+// them, so the session is spent at the larger of the two.
 export interface Charge {
   key: string;
   case: CaseName;
   label: string;
   usd: number;
+  against?: string; // the app session id whose receipts it stands in for
 }
 
 export interface Spent {
@@ -57,12 +59,33 @@ export interface Spent {
   run: number;
 }
 
-// Each sitting's spend: its cases' receipts (`receipts`, by case directory) plus their charges.
-export function spentBySitting(receipts: Partial<Record<CaseName, number>>, charges: readonly Charge[]): Spent {
+// Each sitting's spend: its cases' receipts (`receipts`, by case directory) plus their charges, a charge against a
+// session counting what it holds beyond that session's receipts (`sessionReceipts`, by app session id).
+export function spentBySitting(receipts: Partial<Record<CaseName, number>>, charges: readonly Charge[], sessionReceipts: Readonly<Record<string, number>> = {}): Spent {
   const sittings: Record<Sitting, number> = { s3: 0, s4: 0, s6: 0 };
   for (const [name, usd] of Object.entries(receipts) as [CaseName, number][]) sittings[CASE_SITTING[name]] += usd;
-  for (const charge of new Map(charges.map((c) => [c.key, c])).values()) sittings[CASE_SITTING[charge.case]] += charge.usd;
+  for (const charge of new Map(charges.map((c) => [c.key, c])).values()) {
+    sittings[CASE_SITTING[charge.case]] += charge.against === undefined ? charge.usd : Math.max(0, charge.usd - (sessionReceipts[charge.against] ?? 0));
+  }
   return { sittings, run: Object.values(sittings).reduce((sum, usd) => sum + usd, 0) };
+}
+
+// A session's `--max-budget-usd`, reserved before it launches: until settled, the session counts as spent at the larger
+// of it and its receipts, so the next case (or a fresh Playwright worker reading the run root) never sees a remainder
+// the running session may still spend.
+export function launchReservation(name: CaseName, id: string, label: string, usd: number): Charge {
+  return { key: `${name}:launch:${id}`, case: name, label: `the launch budget of ${label}`, usd, against: id };
+}
+
+// The reservation settled once the session's process is gone (`rows`, every launch's journal in order): nothing beyond
+// its receipts when a result followed its last prompt; the whole budget kept (still against its receipts) when a prompt
+// went unreceipted, a timeout or a crash before its result, since an absent receipt never gives money back.
+export function settledReservation(reserved: Charge, rows: readonly JournalRow[]): Charge {
+  const { settled, receipted } = chargeOf(rows, reserved.usd);
+  const shown = `US$${receipted.toFixed(4)}`;
+  return settled
+    ? { ...reserved, label: `${reserved.label}, settled to its receipts (${shown})`, usd: 0 }
+    : { ...reserved, label: `${reserved.label}, kept whole: a prompt went unreceipted (its receipts ${shown})` };
 }
 
 export interface Budget {

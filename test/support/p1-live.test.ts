@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, resumeNoOutput, settleAll, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -32,6 +32,31 @@ describe('the caps', () => {
     expect(spent.sittings.s4).toBeCloseTo(0.07, 10);
     expect(spent.sittings.s6).toBe(0);
     expect(spent.run).toBeCloseTo(0.23, 10);
+  });
+
+  it('counts a launch budget reserved against a session as the larger of it and the session’s receipts until settled', () => {
+    const reserved = launchReservation('s3', 'app-1', 'parent', 0.37);
+    expect(reserved).toEqual({ key: 's3:launch:app-1', case: 's3', label: 'the launch budget of parent', usd: 0.37, against: 'app-1' });
+    // before any receipt the whole budget is spent; the session's receipts eat into it, never added on top
+    expect(spentBySitting({ s3: 0 }, [reserved]).sittings.s3).toBeCloseTo(0.37, 10);
+    expect(spentBySitting({ s3: 0.1 }, [reserved], { 'app-1': 0.1 }).sittings.s3).toBeCloseTo(0.37, 10);
+    expect(spentBySitting({ s3: 0.45 }, [reserved], { 'app-1': 0.45 }).sittings.s3).toBeCloseTo(0.45, 10);
+    // another session's receipts in the same case do not reduce it
+    expect(spentBySitting({ s3: 0.13 }, [reserved], { 'app-1': 0.1, 'app-2': 0.03 }).sittings.s3).toBeCloseTo(0.4, 10);
+    // settled to its receipts: only they count
+    expect(spentBySitting({ s3: 0.1 }, [reserved, { ...reserved, usd: 0 }], { 'app-1': 0.1 }).run).toBeCloseTo(0.1, 10);
+  });
+
+  it('settles a launch reservation to the session’s receipts, keeping the whole budget when a prompt went unreceipted', () => {
+    const reserved = launchReservation('s4-browser', 'app-5', 'browser', 0.4);
+    const settled = settledReservation(reserved, [prompt(1), result(2, 0.06)]);
+    expect(settled).toMatchObject({ key: reserved.key, case: 's4-browser', usd: 0, against: 'app-5' });
+    expect(settled.label).toBe('the launch budget of browser, settled to its receipts (US$0.0600)');
+    // a timeout or a crash before the result: the whole budget stays, still against the receipts (the larger counts)
+    const kept = settledReservation(reserved, [prompt(1), result(2, 0.06), prompt(3)]);
+    expect(kept).toMatchObject({ key: reserved.key, usd: 0.4, against: 'app-5' });
+    expect(kept.label).toBe('the launch budget of browser, kept whole: a prompt went unreceipted (its receipts US$0.0600)');
+    expect(settledReservation(reserved, []).usd).toBe(0); // launched, nothing asked
   });
 
   it('allocates the smaller of the sitting’s and the run’s remainders', () => {
