@@ -18,7 +18,7 @@ import { validateBrowserUrl } from '../../browser/url';
 import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 // E4c end
 // E13 start
-import { BrowserAgentActivitySchema } from '../../browser/activity';
+import { BROWSER_ACTIVITIES_KEPT, BrowserAgentActivitySchema } from '../../browser/activity';
 // E13 end
 import type { CommandSpec } from './common';
 // E4d start
@@ -237,6 +237,15 @@ export const commands = {
     owner: 'main',
   },
   // E4b end
+  // E13 start: a session's agent activity main kept for the app's life (the last 500, oldest first), which a transcript
+  // lists when it mounts and merges the live `browser.agent.activity` events after (the in-app browser spec of
+  // 2026-10-08, "Action rows")
+  'browser.agent.activities.list': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema }),
+    output: z.strictObject({ activities: z.array(BrowserAgentActivitySchema).max(BROWSER_ACTIVITIES_KEPT) }),
+    owner: 'main',
+  },
+  // E13 end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

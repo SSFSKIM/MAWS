@@ -1127,6 +1127,7 @@ describe('ipc schema validates both directions', () => {
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
+        'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
@@ -1268,7 +1269,7 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
@@ -1436,6 +1437,11 @@ describe('ipc schema validates both directions', () => {
       expect(ok({ kind: 'dialog', type: 'prompt', excerpt: '', answered: 'accepted' })).toBe(false);
       expect(ok({ kind: 'moved', x: 1, y: 1 })).toBe(false);
       expect(validateEventPayload('browser.agent.activity', { appSessionId: 'a', tabId: 'nope', at, activity: { kind: 'screenshot' } }).ok).toBe(false);
+      // the session's kept activity, listed when a transcript mounts
+      const kept = { appSessionId: 'a', tabId: TAB_ID, at, activity: { kind: 'screenshot' } };
+      expect(validateCommandInput('browser.agent.activities.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.activities.list', { activities: [kept] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.activities.list', { activities: Array(501).fill(kept) }).ok).toBe(false);
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

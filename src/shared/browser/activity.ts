@@ -1,15 +1,17 @@
 // What an agent did in a tab through cua (the in-app browser spec of 2026-10-08, "Action rows"; cua repository): the
 // agent's work arrives as cua_repl `js` calls, opaque to MAWS, so main synthesizes these from the primitive stream of a
 // leased tab and tells the windows (`browser.agent.activity`), which show them as rows under the session's `js` call.
-// Live state, never an X1 event. Typed text never leaves main: a `typed` activity carries only how many characters were
-// typed (a cell can type a substituted secret); a dialog's excerpt and a click's label are page text, capped, shown as
-// plain text.
+// Never an X1 event: main keeps each session's last BROWSER_ACTIVITIES_KEPT for the app's life, which a window lists when
+// its transcript mounts (`browser.agent.activities.list`); an app restart loses them. Typed text never leaves main: a
+// `typed` activity carries only how many characters were typed (a cell can type a substituted secret); a dialog's
+// excerpt and a click's label are page text, capped, shown as plain text.
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../graph/ids';
 import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from './dialog';
 import { BrowserTabIdSchema } from './tab';
 
 export const BROWSER_ACTIVITY_LABEL_MAX_CHARS = 40; // a click's label: the node's tag and accessible text
+export const BROWSER_ACTIVITIES_KEPT = 500; // per session, for the app's life (`browser.agent.activities.list`)
 export const BROWSER_ACTIVITY_KEY_MAX_CHARS = 32; // a named key (Enter, Tab, ArrowDown): never a typed character
 
 export const BrowserActivitySchema = z.discriminatedUnion('kind', [

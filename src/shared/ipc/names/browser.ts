@@ -11,6 +11,7 @@ export const commands = [
   'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
   'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
   // E4b end
+  'browser.agent.activities.list', // E13
 ] as const;
 
 export const events = [
