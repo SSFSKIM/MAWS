@@ -202,6 +202,11 @@ Owner requirements and taste, verbatim where given:
   MAWS MCP tools (browser_tabs, browser_snapshot, browser_act) while the outer GUI assistant uses cua_repl
   separately. Replacement versus integration of the two routes is undecided and is a grill question for the P2
   cut, not a choice to make here.
+  Ownership (owner, 2026-10-08 03:40 PDT): the session named cua_repl (id 1ea561bc-a60d-4437-a6ac-fa7cd5eda54f)
+  owns the in-app browser and the cua_repl wiring under its already-registered ticket; a Chrome extension that
+  lets an agent use the owner's Chrome profile is already built. 3.E is therefore not a child of my P2 cut; the
+  owner's browser requirements above (bookmarks import and bar, extensions bar, avatar, profile settings not in
+  the main tab) were handed to that session to fold into its ticket.
 - Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
   either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
   tab; floating widget or sidebar tab, the owner has not chosen.
