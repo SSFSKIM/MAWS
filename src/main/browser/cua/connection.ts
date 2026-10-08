@@ -365,8 +365,8 @@ export class CuaConnection {
     const acting = commandClass(method) === 'acting';
     if (acting) this.acting(leased);
     return this.hold(leased, deadline, acting, async (self) => {
-      // an agent's screenshot, a capture or the screencast the vendor's starts with, never carries the cursor's overlay
-      // (presence.ts, activity.ts `agentCapture`); a command cancelled meanwhile is not sent
+      // an agent's screenshot (a capture, or the screencast the vendor's plain screenshot starts with) never carries the
+      // cursor's overlay (presence.ts, activity.ts `agentCapture`); a command cancelled meanwhile is not sent
       if (agentCapture(method, commandParams) && this.ctx.presence) {
         await this.ctx.presence.beforeCapture(leased.entry);
         if (!this.held.has(self)) return {};
