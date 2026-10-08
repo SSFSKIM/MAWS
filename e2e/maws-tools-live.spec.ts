@@ -20,6 +20,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AskQuestion } from '@shared/maws/tools';
+import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -386,23 +387,25 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await end(s, session, before, costs);
     });
 
-    await test.step('4 show_pane: the Terminal opens, a pane this build lacks and an unknown pane are error cells', async () => {
+    // E2 landed the Deliverables tool after E1's sitting, so the deliverable pane exists and target "none" names no record
+    // (the replay spec's expectation, maws-tools.spec.ts); E1's build answered "not available in this build"
+    await test.step('4 show_pane: the Terminal opens, a deliverable that does not exist and an unknown pane are error cells', async () => {
       const session = await begin(s, 'show_pane', showPaneId, PROMPTS.showPane);
       await drive(s, session, 'the turn end', async () => ofKind(await s.events(session.id), 'turn.ended').some((e) => e.parentToolUseId === null) && (await idleNow(s, session.id)));
       const shown = ofKind(await s.events(session.id), 'maws.pane.shown');
       expect(shown.map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
         ['terminal', 'panel-tool', null],
-        ['deliverable', null, 'show_pane: the deliverable pane is not available in this build of MAWS'],
+        ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
       ]);
       await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ })).toHaveAttribute('aria-selected', 'true');
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
       if ((await divider.getAttribute('aria-expanded')) === 'false') await divider.click();
       await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
-      await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
+      await expect(s.pane.getByText('Could not open pane: no deliverable "none" in this session')).toBeVisible();
       await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
       await shoot(s, 'pane');
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
-      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: the deliverable pane is not available…", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
+      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no deliverable "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
       await end(s, session, before, costs);
     });
   } finally {
