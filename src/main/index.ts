@@ -133,10 +133,11 @@ let bringForward: () => BrowserWindow | null = () => null; // the started app's 
 const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
 function answerSecondLaunch(launched: MainBuild | null): void {
   const win = bringForward();
+  if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
   const notice = olderInstanceNotice(MAIN_BUILD, launched, builtAtLabel);
   if (notice === null) return;
   const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
-  void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then(({ response }) => {
+  void dialog.showMessageBox(win, options).then(({ response }) => {
     if (response === 0) app.quit(); // the ordinary quit, its question about running sessions included
   });
 }
