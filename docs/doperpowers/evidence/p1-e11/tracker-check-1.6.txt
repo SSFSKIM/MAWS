@@ -99,3 +99,18 @@ print('RESULT: ' + ('PASS' if not failures else 'FAIL'))
 for f in failures:
     print('  ' + f)
 sys.exit(1 if failures else 0)
+
+== M4 close, 2026-10-08 (tracker with the two scale-review rows added; HEAD df5f3160; script as saved above, run from the worktree root) ==
+E11 Acceptance 4 check, tracker and triage at HEAD df5f3160
+1. rows matching `^| 2026`: 83
+2. non-table lines inside the table (lines 23-107): none
+3. rows without exactly five cells: none
+4. kept rows whose "Closes when" names no owner: none
+5. "— closed" annotations left: none
+6. original rows in triage.txt: 159; with a disposition: 159; missing: none; unknown dispositions: none
+7. kept rows whose "now line" is not a tracker row: none; gone rows without an existing commit: none
+8. dispositions: dropped 1, fixed 79, open until 5.2 2, open until 7.3 3, re-deferred 64, re-deferred, narrowed 3, removed 7
+   original rows still in the tracker: 72; rows added after M0: 11; total 83
+   open until a later E11 step: [31, 32, 35, 106, 157]
+RESULT: PASS
+exit 0
