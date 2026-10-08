@@ -1,0 +1,6 @@
+E11 M6 code (probes): pnpm test:probes (node --test spikes/protocol-probe/*.test.mjs) at 22fa6cc (2026-10-07 19:13; load { 15.43 12.65 12.07 })
+# tests 173
+# pass 173
+# fail 0
+# skipped 0
+test:probes exit 0

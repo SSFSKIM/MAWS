@@ -1,0 +1,5 @@
+E11 M6 code (units): pnpm exec vitest run test/support/p1-live.test.ts test/support/claude-env.test.ts test/support/scratch-env.test.ts test/support/processes.test.ts test/live/support/harness.test.ts at 22fa6cc (2026-10-07 19:13; load { 15.43 12.65 12.07 })
+ Test Files  5 passed (5)
+      Tests  31 passed (31)
+Type Errors  no errors
+focused units exit 0
