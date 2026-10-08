@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -13,8 +13,8 @@ const result = (seq: number, usd: number) => row(seq, 'in', { type: 'result', su
 
 describe('the caps', () => {
   it('holds each sitting to its own cap (Design §5) and the run to MAWS_P1_LIVE_MAX_USD, their sum when unset', () => {
-    expect(SITTING_CAP_USD).toEqual({ s3: 0.5, s4: 0.4, s6: 0.3 });
-    expect(DEFAULT_CAP_USD).toBeCloseTo(0.5 + 0.4 + 0.3, 10);
+    expect(SITTING_CAP_USD).toEqual({ s2b: 0.15, s2c: 0.15, s2d: 0.2, s3: 0.5, s4: 0.4, s6: 0.3 });
+    expect(DEFAULT_CAP_USD).toBeCloseTo(0.5 + 0.4 + 0.3, 10); // S3, S4 and S6; S2's cases run with the variable set
     expect(capUsd({})).toBe(1.2);
     expect(capUsd({ MAWS_P1_LIVE_MAX_USD: '0.5' })).toBe(0.5);
     expect(() => capUsd({ MAWS_P1_LIVE_MAX_USD: 'lots' })).toThrow(/MAWS_P1_LIVE_MAX_USD/);
@@ -32,6 +32,13 @@ describe('the caps', () => {
     expect(spent.sittings.s4).toBeCloseTo(0.07, 10);
     expect(spent.sittings.s6).toBe(0);
     expect(spent.run).toBeCloseTo(0.23, 10);
+  });
+
+  it('gives each S2 case its own sitting, every sitting counted from zero', () => {
+    expect(CASE_SITTING).toMatchObject({ s2b: 's2b', s2c: 's2c', s2d: 's2d' });
+    const spent = spentBySitting({ s2c: 0.004 }, [{ key: 's2c:terminal', case: 's2c', label: 'the terminal session', usd: 0.07 }]);
+    expect(spent.sittings).toEqual({ s2b: 0, s2c: expect.closeTo(0.074, 10), s2d: 0, s3: 0, s4: 0, s6: 0 });
+    expect(spent.run).toBeCloseTo(0.074, 10);
   });
 
   it('counts a launch budget reserved against a session as the larger of it and the session’s receipts until settled', () => {
@@ -66,10 +73,10 @@ describe('the caps', () => {
   });
 
   it('allocates the smaller of the sitting’s and the run’s remainders', () => {
-    const spent = { sittings: { s3: 0.16, s4: 0.07, s6: 0 }, run: 0.23 };
+    const spent = { sittings: { s2b: 0, s2c: 0, s2d: 0, s3: 0.16, s4: 0.07, s6: 0 }, run: 0.23 };
     expect(budgetOf('s3', spent, 1.2)).toEqual({ sitting: 's3', sittingLeft: 0.34, runLeft: 0.97, usd: 0.34 });
     expect(budgetOf('s3', spent, 0.3)).toEqual({ sitting: 's3', sittingLeft: 0.34, runLeft: 0.07, usd: 0.07 });
-    expect(budgetOf('s6', { sittings: { s3: 0, s4: 0, s6: 0.35 }, run: 0.35 }, 1.2).usd).toBe(0);
+    expect(budgetOf('s6', { sittings: { s2b: 0, s2c: 0, s2d: 0, s3: 0, s4: 0, s6: 0.35 }, run: 0.35 }, 1.2).usd).toBe(0);
   });
 
   it('refuses a case once either remainder is spent, or when what is left does not cover what the case reserves', () => {
@@ -105,6 +112,32 @@ describe('a paid call’s charge', () => {
     expect(attemptBudget(0.15, 0.02, 2)).toBe(0.065);
     expect(attemptBudget(0.15, 0.1, 1)).toBe(0.05);
     expect(attemptBudget(0.15, 0.16, 1)).toBe(0);
+  });
+});
+
+// S2(c) and S2(d): an interactive terminal session takes no budget flag and writes no result frame; what it spent is
+// bounded from its transcript while it runs and read from /cost's screen at its end.
+describe('a terminal session’s spend', () => {
+  const assistant = (id: string, at: string, usage: Record<string, number>) => ({ type: 'assistant', timestamp: at, message: { id, model: 'claude-haiku-5-5', usage } });
+  it('bounds its transcript’s assistant messages at Haiku 4.5’s list rates, each message once, only those since the start', () => {
+    const usage = { input_tokens: 1256, output_tokens: 333, cache_read_input_tokens: 18329, cache_creation_input_tokens: 19320 };
+    const records = [
+      { type: 'user', timestamp: '2026-10-08T00:00:01Z' },
+      assistant('msg_0', '2026-10-07T23:59:00Z', usage), // before the start: not counted
+      assistant('msg_1', '2026-10-08T00:00:02Z', usage),
+      assistant('msg_1', '2026-10-08T00:00:03Z', usage), // the same message's next block: once
+      assistant('msg_2', '2026-10-08T00:00:04Z', { output_tokens: 1000 }),
+    ];
+    // (1256 × 1 + 333 × 5 + 18329 × 0.10 + 19320 × 1.25) / 1e6 + 1000 × 5 / 1e6: ten times S1's receipt for the same
+    // usage (US$0.00289 on claude-haiku-5-5), so the bound is on the safe side
+    expect(terminalUsdBound(records, Date.parse('2026-10-08T00:00:00Z'))).toBeCloseTo(0.0289039 + 0.005, 7);
+    expect(terminalUsdBound([], 0)).toBe(0);
+  });
+
+  it('reads the last total /cost printed on the screen, or null when none was', () => {
+    expect(costShown('> /cost\n  ⎿  Total cost:            $0.0123\n     Total duration (API): 4.1s\n')).toBe(0.0123);
+    expect(costShown('Total cost:            $0.0100\nmore\nTotal cost:            $0.0412\n')).toBe(0.0412);
+    expect(costShown('no cost here')).toBeNull();
   });
 });
 

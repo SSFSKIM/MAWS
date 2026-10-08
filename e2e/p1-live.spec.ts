@@ -13,6 +13,8 @@
 //                          the live anchor resolution (A-49; Decision Log 9 and 20). 7 no engine turn: the OOPIF page of
 //                          the owner's step F (e2e/support/oopif-page.ts) snapshotted through `__maws_browser.agent.run`.
 //   S6 (the C3 stall row) 8 ten row Resumes, each in a fresh app launch, each bounded 30 s to first output.
+//   S2 (b, c, d)         the listing's Message between two sessions, a peer message into a terminal session and the teammate
+//                          attempt (Task 6.4; their own block and caps at the end of this file).
 //   A-47                 a permission request on a session not in front: C5's fallback toast with no window focused,
 //                          retracted once the request is answered. The fallback is forced whatever the desktop allows:
 //                          the app's Notification.show() fails in its main process, as the unsigned build's does.
@@ -67,7 +69,9 @@ import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { deliverableUrl } from '../src/shared/maws/deliverable';
 import { RELAY_URL } from '../src/engine-host/launch';
-import { assertConfigHomeSafe, journalCost } from '../test/live/support/live';
+import { assertConfigHomeSafe, journalCost, redactJournal } from '../test/live/support/live';
+import { ENGINE_BIN } from '../test/support/engine-pin';
+import { relayText } from '../src/renderer/src/tools/agents/model/relay';
 import { ownerPlugins } from '../test/support/claude-env';
 import { compareA15 } from '../test/support/owner-file';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -77,11 +81,11 @@ import { agentOk, cursorMessages, refIn } from './support/browser-tools-scene';
 import { ORDER_REFERENCE, startBrowserToolsServer } from './support/browser-tools-server';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
-import { journalSpend } from './support/c12-prerun';
+import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
+import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -1013,4 +1017,353 @@ test('A-47: a permission request on a session not in front raises the fallback t
   } finally {
     await closeLive(live);
   }
+});
+
+// ---- S2: agents between sessions (E7's residue, A-32) ------------------------------------------------------------------------
+//
+// S2(b) the listing's Message (relay.ts's 'message' wording) from session A to session B, both MAWS sessions under one scratch
+// home, sent from the composer under B's row of A's ListAgents listing; S2(c) a MAWS session's SendMessage into an
+// interactive terminal `claude` (ptyEngine, Haiku) under the same home, the terminal's transcript exported redacted for the
+// backfill's fixture and its peer record's form recorded; S2(d) one attempt at a team in an interactive terminal under
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (SPEC 39 forms one only there; Decision Log 6). A terminal session takes no budget
+// flag: its allocation is charged before it starts, it is ended at three minutes or once the bound on its transcript's spend
+// (terminalUsdBound, an upper bound) passes that allocation, and the charge settles to the figure its own /cost prints (the
+// scratch home's `lastCost` when the screen shows none; the whole allocation when neither). Its plugins: a terminal writes
+// no `system/init`, so the list is read from the scratch home's own plugin state and the terminal's CLAUDE* variables
+// (Decision Log 30). Run on their own:
+//   MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=<what S2 has left> pnpm exec playwright test e2e/p1-live.spec.ts -g 'S2'
+
+const S2_TEXT = { b: 'E11 S2b: hello from A through the listing. No reply needed.', c: 'E11 S2c: hello from a MAWS session. No reply needed.' } as const;
+const S2_PROMPTS = {
+  ready: 'Reply with exactly READY.',
+  list: 'Call the ListAgents tool (load it with ToolSearch first if needed) and reply with its listing verbatim, nothing else.',
+  toTerminal: `Call the ListAgents tool (load it with ToolSearch first if needed). Then use the SendMessage tool (load it the same way) to send the one session listed under "Peer sessions", by the name the listing gives it, exactly this message: "${S2_TEXT.c}". Then reply SENT.`,
+  // E7's team prompt (spikes/protocol-probe/scenarios/pass3/e7-team.mjs), verbatim, and its second listing
+  team: 'Spawn a general-purpose Agent named "scout" in the background, model haiku: read one.txt and reply. Then call ListAgents (find it with ToolSearch) and reply with the listing.',
+  teamList: 'Call ListAgents again and reply with the listing verbatim.',
+} as const;
+const S2B_B_USD = 0.06; // B's launch budget in S2(b), held back from A's (A lists and sends; B answers READY and the message)
+const S2C_TERMINAL_USD = 0.1; // the terminal's allocation in S2(c); the MAWS session launches with what is left
+const TERMINAL_WALL_MS = 180_000;
+
+type TranscriptRecord = Record<string, unknown> & {
+  type?: string; timestamp?: string; isMeta?: boolean; promptSource?: unknown; turnOrigin?: unknown; origin?: { kind?: string };
+  attachment?: { type?: string; origin?: { kind?: string }; isMeta?: boolean; prompt?: string };
+  message?: { content?: unknown; stop_reason?: string };
+};
+type Block = { type?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: unknown; text?: string };
+
+const parseLines = (text: string): TranscriptRecord[] =>
+  text.split('\n').filter(Boolean).flatMap((line) => {
+    try {
+      return [JSON.parse(line) as TranscriptRecord];
+    } catch {
+      return []; // a line still being written
+    }
+  });
+const readRecords = (file: string): TranscriptRecord[] => (existsSync(file) ? parseLines(readFileSync(file, 'utf8')) : []);
+// Every record of every transcript under `dir` (the session's own and its agents' under `<id>/subagents/`).
+const recordsUnder = (dir: string): TranscriptRecord[] =>
+  existsSync(dir) ? (readdirSync(dir, { recursive: true }) as string[]).filter((name) => name.endsWith('.jsonl')).flatMap((name) => readRecords(join(dir, name))) : [];
+const blocksOf = (r: TranscriptRecord): Block[] => (Array.isArray(r.message?.content) ? (r.message.content as Block[]) : []);
+const contentText = (content: unknown): string => (typeof content === 'string' ? content : Array.isArray(content) ? (content as Block[]).map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join('\n') : '');
+const turnEndedSince = (records: TranscriptRecord[], sinceMs: number) => records.some((r) => r.type === 'assistant' && Date.parse(r.timestamp ?? '') > sinceMs && r.message?.stop_reason === 'end_turn');
+
+// A message from another session in a transcript: an idle one's `user` record of the peer origin, a mid-turn one's
+// `queued_command` attachment of that origin.
+const peerRecords = (records: TranscriptRecord[]) =>
+  records.filter((r) => (r.type === 'user' && r.origin?.kind === 'peer') || (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'peer'));
+// A tool's uses in a transcript, each with its result's text once written.
+function toolPairs(records: TranscriptRecord[], name: string): { input: unknown; result: string | null }[] {
+  const uses = records.filter((r) => r.type === 'assistant').flatMap(blocksOf).filter((b) => b.type === 'tool_use' && b.name === name);
+  const results = records.filter((r) => r.type === 'user').flatMap(blocksOf).filter((b) => b.type === 'tool_result');
+  return uses.map((u) => {
+    const res = results.find((b) => b.tool_use_id === u.id);
+    return { input: u.input, result: res === undefined ? null : contentText(res.content) };
+  });
+}
+
+interface Terminal {
+  pty: PtyEngine;
+  cwd: string;
+  started: number;
+  projectDir: string;
+  allocation: number;
+  chargeKey: string;
+  pids: Set<number>;
+  ended: string | null; // why the watchdog ended it, or null
+  approvals: number; // the terminal's own permission prompts answered with their default (Yes)
+  bound: number;
+  watchdog: NodeJS.Timeout | null;
+}
+
+// An interactive `claude` on Haiku in `cwd` under the case's scratch home (W-E's ptyEngine: the runner's CLAUDE* variables
+// dropped, the relay, `env` last), its allocation charged first; a watchdog every two seconds bounds its spend and its wall
+// time, answers the terminal's own permission prompt with its default, and keeps the pids under it for the survivor check.
+async function openTerminal(sc: CaseScratch, note: (line: string) => void, cwd: string, allocation: number, env: Record<string, string> = {}): Promise<Terminal> {
+  const chargeKey = `${sc.name}:terminal`;
+  charge(note, { key: chargeKey, case: sc.name, label: 'the terminal session’s allocation (it takes no --max-budget-usd)', usd: allocation });
+  const started = Date.now();
+  const pty = await ptyEngine(sc.config, cwd, [], join(sc.root, 'terminal-screen.txt'), { model: 'haiku', env });
+  const projectDir = join(sc.config, 'projects', realpathSync(cwd).replace(/[^a-zA-Z0-9]/g, '-'));
+  const t: Terminal = { pty, cwd, started, projectDir, allocation, chargeKey, pids: new Set([pty.pid]), ended: null, approvals: 0, bound: 0, watchdog: null };
+  const vars = Object.keys(terminalEnv(sc.config, env)).filter((k) => k.startsWith('CLAUDE')).sort();
+  note(`terminal: pid ${pty.pid}, ${ENGINE_BIN.replace(homedir(), '~')} --model haiku in ${cwd}; its CLAUDE* variables ${JSON.stringify(vars)}; allocation US$${allocation.toFixed(4)}, ended at ${TERMINAL_WALL_MS / 60_000} min or once its spend's bound passes the allocation`);
+  t.watchdog = setInterval(() => {
+    for (const pid of descendants(pty.pid)) t.pids.add(pid);
+    t.bound = terminalUsdBound(recordsUnder(projectDir), started - 1_000);
+    const prompts = (pty.screen().match(/Do you want to proceed\?/g) ?? []).length;
+    if (prompts > t.approvals && isAlive(pty.pid)) {
+      t.approvals = prompts;
+      note(`terminal: its permission prompt ${prompts} answered with the default (Yes): ${JSON.stringify(pty.screen().slice(-600))}`);
+      pty.say('').catch(() => {}); // Enter: the prompt's first option
+    }
+    const why = Date.now() - started > TERMINAL_WALL_MS ? 'three minutes passed' : t.bound > allocation ? `its spend's bound US$${t.bound.toFixed(4)} passed the allocation` : null;
+    if (why !== null && t.ended === null && isAlive(pty.pid)) {
+      t.ended = why;
+      note(`terminal: ENDED by the watchdog: ${why}`);
+      for (const pid of [...t.pids].reverse()) {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {
+          // gone
+        }
+      }
+    }
+  }, 2_000);
+  return t;
+}
+
+// The terminal's end: /cost read off its screen, /exit, every pid under it gone (SIGKILL for a survivor), its charge settled
+// to the engine's own figure, and what it loaded read from the scratch home (a terminal writes no `system/init`).
+async function closeTerminal(sc: CaseScratch, note: (line: string) => void, t: Terminal): Promise<{ costUsd: number | null; survivors: string[] }> {
+  if (t.watchdog !== null) clearInterval(t.watchdog);
+  for (const pid of descendants(t.pty.pid)) t.pids.add(pid);
+  t.bound = terminalUsdBound(recordsUnder(t.projectDir), t.started - 1_000);
+  let shown: number | null = null;
+  if (isAlive(t.pty.pid) && t.ended === null) {
+    await t.pty.say('/cost');
+    for (const until = Date.now() + 10_000; Date.now() < until && costShown(t.pty.screen()) === null; ) await new Promise((r) => setTimeout(r, 250));
+    shown = costShown(t.pty.screen());
+  }
+  await t.pty.exit();
+  await new Promise((r) => setTimeout(r, 1_000));
+  const state = JSON.parse(readFileSync(join(sc.config, '.claude.json'), 'utf8')) as { projects?: Record<string, { lastCost?: number }> };
+  const lastCost = state.projects?.[realpathSync(t.cwd)]?.lastCost ?? state.projects?.[t.cwd]?.lastCost ?? null;
+  const costUsd = shown ?? lastCost;
+  charge(note, {
+    key: t.chargeKey,
+    case: sc.name,
+    label: costUsd === null ? 'the terminal session’s allocation, kept whole: neither /cost nor the home’s lastCost showed its spend' : `the terminal session, settled to ${shown !== null ? '/cost’s figure' : 'the scratch home’s lastCost'}`,
+    usd: costUsd ?? t.allocation,
+  });
+  const survivors: string[] = [];
+  for (const pid of t.pids) {
+    if (!isAlive(pid)) continue;
+    survivors.push(`${pid} ${ps(pid, 'command')}`);
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // gone since
+    }
+  }
+  const plugins = join(sc.config, 'plugins');
+  const settings = JSON.parse(readFileSync(join(sc.config, 'settings.json'), 'utf8')) as { enabledPlugins?: unknown };
+  note(`terminal: /cost ${shown === null ? 'showed no total' : `US$${shown.toFixed(4)}`}; the scratch home's lastCost ${lastCost === null ? 'none' : `US$${lastCost.toFixed(4)}`}; the transcript's spend bound US$${t.bound.toFixed(4)} (Haiku 4.5 list rates, an upper bound); ${t.ended === null ? 'exited by /exit' : `ended by the watchdog (${t.ended})`}; ${Math.round((Date.now() - t.started) / 1000)} s; permission prompts answered ${t.approvals}`);
+  note(`terminal plugins (no system/init in a terminal; Decision Log 30): the scratch home's plugins/ ${existsSync(plugins) ? JSON.stringify(readdirSync(plugins, { recursive: true })) : 'absent'}, settings.json enabledPlugins ${JSON.stringify(settings.enabledPlugins ?? null)}`);
+  note(`terminal survivor check: ${survivors.length === 0 ? `none of ${t.pids.size} pids (${[...t.pids].join(', ')})` : `SURVIVORS ${JSON.stringify(survivors)}`}; ${spendLine(sc.sitting)}`);
+  return { costUsd, survivors };
+}
+
+// A transcript copied redacted (the live harness's redaction) to `<case>/exports/<name>.jsonl` for the sitting to admit.
+function exportRedacted(sc: CaseScratch, file: string, name: string): string {
+  const dir = join(sc.root, 'exports');
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, `${name}.jsonl`);
+  writeFileSync(dest, redactJournal(readFileSync(file, 'utf8')));
+  return dest;
+}
+
+// The owner file after a case without the app, against its first reading; a key of the run's own appearing or vanishing fails it.
+function readA15Terminal(note: (line: string) => void, first: A15Reading): void {
+  const now = a15Reading();
+  note(a15Line('after the case', first, now, [ROOT]));
+  expect(compareA15(first.keys, now.keys, [ROOT]).breach, 'no project of the run’s scratch in the owner file (A-15)').toEqual([]);
+}
+
+test.describe('S2: agents between sessions and a team (E7’s residue)', () => {
+  test('S2(b) the listing’s Message: A’s composer under B’s row sends relay.ts’s wording; B shows the message from another session, A’s line reads sent', async () => {
+    const note = sittingLog(OUT, 's2b');
+    await relayGate(note, 'S2(b)');
+    refuseOverCap(note, 'S2(b)', 's2b');
+    const sc = caseScratch('s2b', ['E11 S2b: A', 'E11 S2b: B']);
+    const a15 = a15Reading();
+    opening(note, 'S2(b)', sc, a15);
+    const live = await openLive(sc, note, a15);
+    try {
+      const [a, b] = live.ids as [AppSessionId, AppSessionId];
+      // B first, so it is registered and idle when A lists; B launches with S2B_B_USD, A with the rest
+      await show(sceneOf(live), b);
+      await launchSession(live, 'B', b, { reserve: { usd: SITTING_CAP_USD.s2b - S2B_B_USD, for: 'session A' } });
+      await sendFromComposer(live, b, S2_PROMPTS.ready);
+      await drive(live, live.pane, b, 'B’s first turn', async () => mainTurnsEnded(await events(live, b)).length > 0 && (await idleNow(live, b)));
+      await show(sceneOf(live), a);
+      await launchSession(live, 'A', a);
+      await sendFromComposer(live, a, S2_PROMPTS.list);
+      await drive(live, live.pane, a, 'A’s listing', async () => mainTurnsEnded(await events(live, a)).length > 0 && (await idleNow(live, a)));
+      await unfoldWork(live.pane); // the listing folds with its turn's work, as the owner opens it
+
+      const listing = live.pane.locator('section.transcript-listing').last();
+      await expect(listing).toBeVisible();
+      const peers = listing.locator('.transcript-listing-section[data-section="Peer sessions"] li.transcript-listing-entry');
+      const names = await peers.evaluateAll((lis) => lis.map((li) => li.getAttribute('data-name') ?? ''));
+      note(`case S2(b): A's listing ${JSON.stringify((await listing.textContent())?.trim())}; peer rows ${JSON.stringify(names)}`);
+      expect(names, 'one peer session listed: B').toHaveLength(1);
+      const name = names[0]!;
+      const row = peers.first();
+      await row.getByRole('button', { name: `Message ${name}`, exact: true }).click();
+      const composer = row.locator('[data-part="peer-composer"]');
+      await composer.locator('textarea').fill(S2_TEXT.b);
+      const promptsBefore = outUsers(sessionRows(live, a)).length;
+      await composer.getByRole('button', { name: 'Send', exact: true }).click();
+      const line = composer.locator('[data-part="peer-line"]');
+      const lineNow = async () => {
+        await row.scrollIntoViewIfNeeded({ timeout: 1_000 }).catch(() => {}); // the steer's turn below may scroll the column
+        return ((await line.textContent({ timeout: 1_000 }).catch(() => null)) ?? '').trim();
+      };
+      await drive(live, live.pane, a, 'A’s line reading sent', async () => / sent it with SendMessage$/.test(await lineNow()));
+      const lineText = await lineNow();
+      const steer = outUsers(sessionRows(live, a)).slice(promptsBefore)[0]?.frame as { message?: { content?: unknown }; priority?: string } | undefined;
+      const sends = ofKind(await events(live, a), 'tool.use').filter((e) => e.toolName === 'SendMessage' && e.agentId === null);
+      note(`case S2(b): the steer A was sent ${JSON.stringify(steer)}; A's SendMessage inputs ${JSON.stringify(sends.map((e) => e.input))}; A's line ${JSON.stringify(lineText)}`);
+      expect(contentText(steer?.message?.content), 'relay.ts’s message wording').toBe(relayText({ kind: 'peer', address: name, name, mode: 'message' }, S2_TEXT.b));
+      expect(steer?.priority).toBe('next');
+      expect(lineText).toMatch(/ sent it with SendMessage$/);
+
+      // B: the message from another session arrives (its own peer turn) and draws as an inbound row
+      let inbound: Extract<SessionEvent, { kind: 'peer.message' }> | undefined;
+      await expect.poll(async () => (inbound = ofKind(await events(live, b), 'peer.message').find((e) => e.text.includes(S2_TEXT.b))) !== undefined, { timeout: 120_000, message: 'B’s peer.message' }).toBe(true);
+      await show(sceneOf(live), b);
+      await drive(live, live.pane, b, 'B’s peer turn', async () => idleNow(live, b));
+      const shown = live.pane.locator('.transcript-peer[data-peer="inbound"]').filter({ hasText: 'E11 S2b' });
+      await expect(shown, 'B’s transcript shows the message from another session').toBeVisible({ timeout: 15_000 });
+      note(`case S2(b): B's peer.message ${JSON.stringify(inbound)}; B's row ${JSON.stringify((await shown.textContent())?.trim())}`);
+      expect(inbound!.midTurn).toBe(false);
+      note('case S2(b): PASS');
+    } finally {
+      await closeLive(live);
+    }
+  });
+
+  test('S2(c) a MAWS session’s SendMessage into an interactive terminal session: the terminal’s transcript holds the peer record (its form recorded, the transcript exported)', async () => {
+    const note = sittingLog(OUT, 's2c');
+    await relayGate(note, 'S2(c)');
+    refuseOverCap(note, 'S2(c)', 's2c', { usd: S2C_TERMINAL_USD + 0.01, for: 'the terminal’s allocation and at least US$0.01 for the MAWS session' });
+    const sc = caseScratch('s2c', ['E11 S2c: the MAWS session']);
+    const termDir = join(sc.root, 'terminal'); // its own directory: ptyEngine names its session by the newest transcript there
+    mkdirSync(termDir, { recursive: true });
+    writeFileSync(join(termDir, 'README.md'), 'E11 S2c terminal\n');
+    const a15 = a15Reading();
+    opening(note, 'S2(c)', sc, a15);
+    const t = await openTerminal(sc, note, termDir, S2C_TERMINAL_USD);
+    let live: Live | null = null;
+    let closed: { costUsd: number | null; survivors: string[] } | null = null;
+    try {
+      await t.pty.say(S2_PROMPTS.ready);
+      await t.pty.replied(/READY/, 120_000);
+      const terminalId = t.pty.sessionId();
+      const file = transcriptFile(sc.config, termDir, terminalId);
+      note(`case S2(c): the terminal session ${terminalId} answered READY; its transcript ${file}`);
+
+      live = await openLive(sc, note, a15);
+      const l = live;
+      const [m] = l.ids as [AppSessionId];
+      await show(sceneOf(l), m);
+      await launchSession(l, 'the MAWS session', m);
+      await sendFromComposer(l, m, S2_PROMPTS.toTerminal);
+      await drive(l, l.pane, m, 'the MAWS session’s send', async () => mainTurnsEnded(await events(l, m)).length > 0 && (await idleNow(l, m)));
+      const all = await events(l, m);
+      const sends = ofKind(all, 'tool.use').filter((e) => e.toolName === 'SendMessage' && e.agentId === null);
+      const results = ofKind(all, 'tool.result').filter((e) => sends.some((s) => s.toolUseId === e.toolUseId));
+      note(`case S2(c): the MAWS session's SendMessage ${JSON.stringify(sends.map((e) => e.input))} answered ${JSON.stringify(results)}`);
+      expect(sends.some((e) => JSON.stringify(e.input).includes(S2_TEXT.c)), 'the MAWS session sent the text').toBe(true);
+
+      // the terminal: the peer record in its transcript, then its own turn on it
+      let peer: TranscriptRecord | undefined;
+      await expect.poll(() => (peer = peerRecords(readRecords(file)).find((r) => JSON.stringify(r).includes('E11 S2c'))) !== undefined, { timeout: 120_000, message: 'the terminal’s transcript holds the message from another session' }).toBe(true);
+      const at = Date.parse(peer!.timestamp ?? '');
+      await expect.poll(() => turnEndedSince(readRecords(file), at), { timeout: 90_000 }).toBe(true).catch(() => note('case S2(c): the terminal’s turn on the message did not end within 90 s'));
+      await new Promise((r) => setTimeout(r, 2_000));
+      const p = peer!;
+      const form = { type: p.type, isMeta: p.type === 'attachment' ? (p.attachment?.isMeta ?? null) : (p.isMeta ?? null), promptSource: p.promptSource ?? null, turnOrigin: p.turnOrigin ?? null, origin: p.origin ?? p.attachment?.origin ?? null, keys: Object.keys(p).sort() };
+      note(`case S2(c): the terminal's peer record ${JSON.stringify(form)}; its content ${JSON.stringify(contentText(p.message?.content) || p.attachment?.prompt || '')}`);
+      closed = await closeTerminal(sc, note, t);
+      const exported = exportRedacted(sc, file, terminalId);
+      note(`case S2(c): exported ${exported} (${readRecords(exported).length} records)`);
+      note(`case S2(c): PASS (the peer record is ${form.isMeta === true ? 'isMeta' : 'NOT isMeta'})`);
+    } finally {
+      await settleAll([
+        async () => {
+          if (closed === null) closed = await closeTerminal(sc, note, t);
+        },
+        async () => {
+          if (live !== null) await closeLive(live);
+        },
+        () => readA15Terminal(note, a15),
+        () => expect(closed?.survivors ?? [], 'no process of the terminal outlives the case').toEqual([]),
+      ]);
+    }
+  });
+
+  test('S2(d) one teammate attempt in an interactive terminal under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1: does ListAgents name a Teammates section', async () => {
+    const note = sittingLog(OUT, 's2d');
+    await relayGate(note, 'S2(d)');
+    refuseOverCap(note, 'S2(d)', 's2d');
+    const sc = caseScratch('s2d', [], (repo) => writeFileSync(join(repo, 'one.txt'), 'ONE\n'));
+    const a15 = a15Reading();
+    const { bin, version } = theEngine();
+    note(`==== S2(d), ${new Date().toISOString()}; run root ${ROOT}`);
+    note(`engine: ${bin.replace(homedir(), '~')} (${version}) as an interactive terminal (ptyEngine), unmodified, through ClaudeUsage's relay ${RELAY_URL}, Haiku; CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in its environment; spent so far ${spendLine('s2d')}`);
+    note(`scratch: ${sc.root} (claude-config/ settings.json {} and .claude.json trusting repo/, which holds one.txt)`);
+    note(a15Line('before the case', a15, a15, [ROOT]));
+    const t = await openTerminal(sc, note, sc.repo, budgetFor('s2d').usd, { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' });
+    let closed: { costUsd: number | null; survivors: string[] } | null = null;
+    try {
+      await t.pty.say(S2_PROMPTS.team);
+      const answered = () => {
+        try {
+          return toolPairs(readRecords(transcriptFile(sc.config, sc.repo, t.pty.sessionId())), 'ListAgents').filter((p) => p.result !== null).length;
+        } catch {
+          return 0; // no transcript yet
+        }
+      };
+      await expect.poll(answered, { timeout: 150_000, message: 'ListAgents answered' }).toBeGreaterThanOrEqual(1);
+      const id = t.pty.sessionId();
+      const file = transcriptFile(sc.config, sc.repo, id);
+      const team = () => toolPairs(readRecords(file), 'ListAgents').find((p) => /^Teammates \(\d+\):/m.test(p.result ?? ''));
+      if (team() === undefined && t.ended === null) {
+        // E7's probe listed again once its agent had run; the same here, within the one attempt
+        await expect.poll(() => turnEndedSince(readRecords(file), t.started), { timeout: 60_000 }).toBe(true).catch(() => {});
+        await new Promise((r) => setTimeout(r, 15_000));
+        await t.pty.say(S2_PROMPTS.teamList);
+        await expect.poll(answered, { timeout: 90_000 }).toBeGreaterThanOrEqual(2).catch((error) => note(`case S2(d): the second listing: ${String(error).split('\n')[0]}`));
+      }
+      const pairs = toolPairs(readRecords(file), 'ListAgents');
+      const agents = toolPairs(recordsUnder(t.projectDir), 'Agent');
+      const formed = team();
+      note(`case S2(d): session ${id}; Agent inputs ${JSON.stringify(agents.map((p) => p.input))}; ListAgents results ${JSON.stringify(pairs.map((p) => p.result))}; the scratch home's teams/ ${existsSync(join(sc.config, 'teams')) ? JSON.stringify(readdirSync(join(sc.config, 'teams'), { recursive: true })) : 'absent'}`);
+      closed = await closeTerminal(sc, note, t);
+      const exported = exportRedacted(sc, file, formed ? 'e7-team-terminal' : `e7-team-terminal-negative-${id}`);
+      note(`case S2(d): exported ${exported}`);
+      note(formed ? `case S2(d): TEAM FORMED: ${JSON.stringify(formed.result)}` : `case S2(d): NO Teammates section on ${version} (the one attempt; Decision Log 6)`);
+    } finally {
+      await settleAll([
+        async () => {
+          if (closed === null) closed = await closeTerminal(sc, note, t);
+        },
+        () => readA15Terminal(note, a15),
+        () => expect(closed?.survivors ?? [], 'no process of the terminal outlives the case').toEqual([]),
+      ]);
+    }
+  });
 });

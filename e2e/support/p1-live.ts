@@ -19,15 +19,18 @@ type Env = Record<string, string | undefined>;
 // ---- the caps ----------------------------------------------------------------------------------------------------------
 
 // Each sitting's own cap (Design §5). The A-47 case is S4's: Decision Log 23 hands it to S4, whose one paid case leaves
-// room, while S3 already holds back its side thread's allocation and its side question's reservation.
-export const SITTING_CAP_USD = { s3: 0.5, s4: 0.4, s6: 0.3 } as const;
+// room, while S3 already holds back its side thread's allocation and its side question's reservation. S2(b), (c) and (d)
+// (the listing's Message between two sessions, a peer message into a terminal session, the teammate attempt) are three
+// sittings of their own, each with its cap.
+export const SITTING_CAP_USD = { s2b: 0.15, s2c: 0.15, s2d: 0.2, s3: 0.5, s4: 0.4, s6: 0.3 } as const;
 export type Sitting = keyof typeof SITTING_CAP_USD;
 
-// The run's cap when MAWS_P1_LIVE_MAX_USD is unset: the three sittings' caps summed; each sitting stays within its own.
+// The run's cap when MAWS_P1_LIVE_MAX_USD is unset: S3's, S4's and S6's caps summed (the Interfaces' default; S2's cases
+// are run on their own with the variable set to what S2 has left); each sitting stays within its own.
 export const DEFAULT_CAP_USD = 1.2;
 
 // The sitting each case's scratch directory (`<run root>/<case>`) spends for.
-export const CASE_SITTING = { s3: 's3', 's4-browser': 's4', 's4-oopif': 's4', a47: 's4', s6: 's6' } as const satisfies Record<string, Sitting>;
+export const CASE_SITTING = { s2b: 's2b', s2c: 's2c', s2d: 's2d', s3: 's3', 's4-browser': 's4', 's4-oopif': 's4', a47: 's4', s6: 's6' } as const satisfies Record<string, Sitting>;
 export type CaseName = keyof typeof CASE_SITTING;
 
 // MAWS_P1_LIVE_MAX_USD, the run's cap in US$; a value that is not a positive amount stops the run before it spends.
@@ -62,7 +65,7 @@ export interface Spent {
 // Each sitting's spend: its cases' receipts (`receipts`, by case directory) plus their charges, a charge against a
 // session counting what it holds beyond that session's receipts (`sessionReceipts`, by app session id).
 export function spentBySitting(receipts: Partial<Record<CaseName, number>>, charges: readonly Charge[], sessionReceipts: Readonly<Record<string, number>> = {}): Spent {
-  const sittings: Record<Sitting, number> = { s3: 0, s4: 0, s6: 0 };
+  const sittings = Object.fromEntries(Object.keys(SITTING_CAP_USD).map((s) => [s, 0])) as Record<Sitting, number>;
   for (const [name, usd] of Object.entries(receipts) as [CaseName, number][]) sittings[CASE_SITTING[name]] += usd;
   for (const charge of new Map(charges.map((c) => [c.key, c])).values()) {
     sittings[CASE_SITTING[charge.case]] += charge.against === undefined ? charge.usd : Math.max(0, charge.usd - (sessionReceipts[charge.against] ?? 0));
@@ -140,6 +143,30 @@ export const forkOverspend = (receiptedUsd: number, allocationUsd: number): stri
 
 // One S1 attempt's `maxBudgetUsd`: what the sitting's cap leaves, shared by the attempts still to run, so the three fit.
 export const attemptBudget = (capUsd: number, spentUsd: number, attemptsLeft: number): number => usd4(Math.max(0, capUsd - spentUsd) / attemptsLeft);
+
+// ---- a terminal session's spend (S2(c), S2(d)) ----------------------------------------------------------------------------
+
+// An interactive terminal session takes no `--max-budget-usd` and writes no result frame, so while it runs its spend is
+// bounded from its transcript: every assistant message since `sinceMs` (once per message id) priced at Haiku 4.5's list
+// rates (US$ per million tokens: 1 input, 5 output, 0.10 cache read, 1.25 cache write). claude-haiku-5-5 bills a tenth
+// of that for the same usage (S1's receipt: US$0.00289 against this bound's US$0.0289), so the bound only errs high.
+export function terminalUsdBound(records: readonly unknown[], sinceMs: number): number {
+  const seen = new Map<string, Record<string, number>>();
+  for (const record of records) {
+    const r = record as { type?: string; timestamp?: string; message?: { id?: string; usage?: Record<string, number> } };
+    if (r.type !== 'assistant' || !r.timestamp || Date.parse(r.timestamp) < sinceMs || !r.message?.id || !r.message.usage) continue;
+    seen.set(r.message.id, r.message.usage);
+  }
+  let usd = 0;
+  for (const u of seen.values()) usd += ((u.input_tokens ?? 0) * 1 + (u.output_tokens ?? 0) * 5 + (u.cache_read_input_tokens ?? 0) * 0.1 + (u.cache_creation_input_tokens ?? 0) * 1.25) / 1e6;
+  return usd;
+}
+
+// The engine's own figure for a terminal session: the last `Total cost:` its `/cost` printed on the screen, or null.
+export function costShown(screen: string): number | null {
+  const all = [...screen.matchAll(/Total cost:\s+\$([0-9]+(?:\.[0-9]+)?)/g)];
+  return all.length === 0 ? null : Number(all.at(-1)![1]);
+}
 
 // ---- the case's end ---------------------------------------------------------------------------------------------------
 
