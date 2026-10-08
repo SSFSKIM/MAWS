@@ -113,6 +113,23 @@ export function chargeOf(rows: readonly JournalRow[], allocationUsd: number): { 
 // One S1 attempt's `maxBudgetUsd`: what the sitting's cap leaves, shared by the attempts still to run, so the three fit.
 export const attemptBudget = (capUsd: number, spentUsd: number, attemptsLeft: number): number => usd4(Math.max(0, capUsd - spentUsd) / attemptsLeft);
 
+// ---- the case's end ---------------------------------------------------------------------------------------------------
+
+// Every step run in order whatever an earlier one threw; then the first error rethrown, or all of them together when
+// more than one failed, so a failed cleanup never skips the checks after it.
+export async function settleAll(steps: readonly (() => unknown)[]): Promise<void> {
+  const errors: unknown[] = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, errors.map((e) => (e instanceof Error ? e.message : String(e))).join('\n---\n'));
+}
+
 // ---- where things go ----------------------------------------------------------------------------------------------------
 
 // The directory the sittings' logs are written to (`live-<sitting>.txt`), for the sitting to copy into evidence.

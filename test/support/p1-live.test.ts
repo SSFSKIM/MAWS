@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, settleAll, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -74,6 +74,17 @@ describe('a paid call’s charge', () => {
     expect(attemptBudget(0.15, 0.02, 2)).toBe(0.065);
     expect(attemptBudget(0.15, 0.1, 1)).toBe(0.05);
     expect(attemptBudget(0.15, 0.16, 1)).toBe(0);
+  });
+});
+
+describe('the case’s end', () => {
+  it('runs every step whatever an earlier one threw, then rethrows the first error, or all of them together', async () => {
+    const ran: string[] = [];
+    const boom = new Error('cleanup failed');
+    await expect(settleAll([() => void ran.push('stop'), async () => { ran.push('cleanup'); throw boom; }, () => void ran.push('survivors')])).rejects.toBe(boom);
+    expect(ran).toEqual(['stop', 'cleanup', 'survivors']);
+    await expect(settleAll([() => { throw new Error('one'); }, () => Promise.reject(new Error('two'))])).rejects.toThrow(/one[\s\S]*two/);
+    await expect(settleAll([() => undefined])).resolves.toBeUndefined();
   });
 });
 

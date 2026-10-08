@@ -75,7 +75,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, settleAll, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -390,32 +390,43 @@ function descendants(pid: number): number[] {
 }
 
 // The case's end: every session still running stopped, the app closed, the A-15 reading after it, no breach in any of
-// the case's readings (no key of the run's own), the owner plugins none, and no process of the app or its engines left;
-// a session that could not be stopped fails the case after the checks have run.
+// the case's readings (no key of the run's own), the owner plugins none, and no process of the app or its engines left.
+// Every step runs whatever an earlier one threw (a session that would not stop, the app's cleanup rejecting): the
+// survivor scan, its SIGKILL fallback and the checks still run, and the errors are rethrown after them (settleAll).
 async function closeLive(live: Live): Promise<void> {
-  const stopErrors: unknown[] = [];
-  try {
-    for (const { label, id } of [...live.started].reverse()) {
-      await stopSession(live, label, id).catch((error: unknown) => {
-        stopErrors.push(error);
-        live.note(`  ${label} ${id}: could not be stopped: ${String(error)}`);
-      });
-    }
-    live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`);
-    for (const pid of descendants(live.maws.app.process().pid!)) live.pids.add(pid); // the app's helpers and hosts
-  } finally {
-    await live.maws.cleanup();
-  }
-  readA15(live, 'after the app closed');
-  const survivors = [...live.pids].filter((pid) => isAlive(pid) && /claude|Electron|MAWS/.test(ps(pid, 'command')));
-  const naming = processesNaming(live.sc.root);
-  live.note(`survivor check: ${survivors.length === 0 && naming.length === 0 ? `none of ${live.pids.size} recorded pids (${[...live.pids].join(', ')}) and no process naming ${live.sc.root}` : `SURVIVORS ${JSON.stringify(survivors.map((pid) => `${pid} ${ps(pid, 'command')}`))} ${JSON.stringify(naming)}`}; maws-supervisor processes: ${execFileSync('/bin/sh', ['-c', 'pgrep -fl maws-supervisor || true'], { encoding: 'utf8' }).trim() || 'none'}`);
-  for (const pid of survivors) process.kill(pid, 'SIGKILL');
-  expect(live.a15Breaches, 'no project of the run’s scratch appeared in or vanished from the owner file at any reading (A-15)').toEqual([]);
-  expect(live.ownerPluginsSeen, 'the engines loaded none of the owner’s plugins (Decision Log 22, 30)').toEqual([]);
-  expect(survivors, 'no process of the app or its engines outlives the case').toEqual([]);
-  expect(naming, 'no process names the case’s scratch').toEqual([]);
-  if (stopErrors.length > 0) throw stopErrors[0];
+  let survivors: number[] = [];
+  let naming: ReturnType<typeof processesNaming> = [];
+  const failed = (what: string) => (error: unknown) => {
+    live.note(`  ${what}: ${String(error)}`);
+    throw error;
+  };
+  await settleAll([
+    ...[...live.started].reverse().map(({ label, id }) => () => stopSession(live, label, id).catch(failed(`${label} ${id} could not be stopped`))),
+    () => live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`),
+    () => {
+      for (const pid of descendants(live.maws.app.process().pid!)) live.pids.add(pid); // the app's helpers and hosts
+    },
+    () => live.maws.cleanup().catch(failed('the app’s cleanup failed')),
+    () => readA15(live, 'after the app closed'),
+    () => {
+      survivors = [...live.pids].filter((pid) => isAlive(pid) && /claude|Electron|MAWS/.test(ps(pid, 'command')));
+      naming = processesNaming(live.sc.root);
+      live.note(`survivor check: ${survivors.length === 0 && naming.length === 0 ? `none of ${live.pids.size} recorded pids (${[...live.pids].join(', ')}) and no process naming ${live.sc.root}` : `SURVIVORS ${JSON.stringify(survivors.map((pid) => `${pid} ${ps(pid, 'command')}`))} ${JSON.stringify(naming)}`}; maws-supervisor processes: ${execFileSync('/bin/sh', ['-c', 'pgrep -fl maws-supervisor || true'], { encoding: 'utf8' }).trim() || 'none'}`);
+    },
+    () => {
+      for (const pid of survivors) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // gone since the scan
+        }
+      }
+    },
+    () => expect(live.a15Breaches, 'no project of the run’s scratch appeared in or vanished from the owner file at any reading (A-15)').toEqual([]),
+    () => expect(live.ownerPluginsSeen, 'the engines loaded none of the owner’s plugins (Decision Log 22, 30)').toEqual([]),
+    () => expect(survivors, 'no process of the app or its engines outlives the case').toEqual([]),
+    () => expect(naming, 'no process names the case’s scratch').toEqual([]),
+  ]);
 }
 
 // `prerun-<item>-<surface>-<theme>.png` in both themes under MAWS_E11_SHOTS=1, toasts cleared first unless the shot is
