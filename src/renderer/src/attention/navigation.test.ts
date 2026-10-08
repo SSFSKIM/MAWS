@@ -2,7 +2,7 @@ import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AttentionId, RequestId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, RequestId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
@@ -10,6 +10,7 @@ import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { hideSideChild, showSideChild } from '../side/store';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 import { connectAttention } from './navigation';
@@ -163,6 +164,33 @@ describe('the fallback toast', () => {
     notify(engineAsk);
     notify(mawsAsk); // its originating event read as `maws.ask.opened`, as swapOf reads it
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${engineAsk.id}`]);
+  });
+
+  // scale-review C scalpel-2#3: a side thread drawn in its parent's Side pane is its whole session pane, docked card and
+  // all, as visibility.ts counts it, so its request is on screen while the panel is open
+  it('posts no toast for a thread drawn in the open Side pane, and one once the panel is collapsed or the thread hidden', () => {
+    const parent = idOf('Fix sidebar drag');
+    const child = idOf('Quota reset recovery') as AppSessionId;
+    const item = nine.attention.find((a) => a.appSessionId === child)!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: child, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    useLayout.getState().openSession(parent);
+    useLayout.getState().setPanel({ maximized: false, collapsed: false });
+    showSideChild(parent, child);
+    try {
+      notify();
+      expect(toasted()).toEqual([]);
+      useLayout.getState().setPanel({ collapsed: true });
+      notify();
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      useNotices.setState({ notices: [] });
+      useLayout.getState().setPanel({ collapsed: false });
+      hideSideChild(parent, child);
+      notify();
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+    } finally {
+      hideSideChild(parent, child);
+    }
   });
 
   // E11 (W-C; E10's crash screenshot; A-47): the toast names an item; once that item is no longer open (answered,

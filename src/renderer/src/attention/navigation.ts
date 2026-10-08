@@ -16,6 +16,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { sideChildrenShown } from '../side/store';
 import { askSheet } from '../tools/maws/ask/store';
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
@@ -44,13 +45,16 @@ function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
 // W-C review m1: an ask's surface is the panel's Question sheet, which E1 opens whenever the session is the shown one
 // (a file tab of it counting), so for a `maws` ask the open panel showing that session is on screen too. Scale-review C
 // scalpel-3#1: only a `maws` ask; the engine's AskUserQuestion is a `question` item as well, but its card docks in the
-// session's own composer (swap.ts), so the panel does not show it.
+// session's own composer (swap.ts), so the panel does not show it. Scale-review C scalpel-2#3: a side thread drawn in
+// the open panel's Side pane is its whole session pane, docked card included (visibility.ts counts it the same way).
 function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undefined): boolean {
   const { main, regions } = useLayout.getState();
   const panelOpen = !regions.panel.collapsed;
   const inFront = currentSet(main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
   if (inFront && !(regions.panel.maximized && panelOpen)) return true;
-  return item !== undefined && isMawsAsk(item) && panelOpen && shownSession(main) === appSessionId;
+  const shown = shownSession(main);
+  if (panelOpen && shown !== null && sideChildrenShown().get(shown) === appSessionId) return true;
+  return item !== undefined && isMawsAsk(item) && panelOpen && shown === appSessionId;
 }
 
 // A `maws` ask's item: its originating event read as `maws.ask.opened` (swapOf's test), or, not read yet, an ask the
