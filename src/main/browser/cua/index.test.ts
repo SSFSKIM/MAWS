@@ -402,4 +402,17 @@ describe('targets, events and closing', () => {
     await expect(two.request('debugger.attach', { tabId: theirs.id })).rejects.toThrow('Tab is held by another agent session');
     expect(two.notifications.some((n) => n.method === 'tabs.adopted')).toBe(false);
   });
+
+  it('a person\'s pop-up resumed later under a leased opener is not taken for a new window', async () => {
+    const h = harness();
+    const opener = h.personTab();
+    const child = h.store.adoptChild(opener, { url: 'https://child.test/', select: false, webContents: new FakeContents('FRAME-p') as unknown as WebContents });
+    h.store.suspend(child.tab.tabId);
+    const a = await h.host();
+    await a.request('debugger.attach', { tabId: await h.idOf(a, opener) });
+    h.store.load(child.tab.tabId, 'https://child.test/');
+    await settle();
+    expect(a.notifications.some((n) => n.method === 'tabs.adopted')).toBe(false);
+    expect((await a.request<{ id: number; url: string }[]>('tabs.query')).length).toBe(2);
+  });
 });

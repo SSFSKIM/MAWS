@@ -56,6 +56,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const sessions = new Map<AppSessionId, Listening>();
   const tooLong = new Set<AppSessionId>();
   const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log };
+  const viewed = new WeakSet<TabEntry>();
   const everyConnection = () => [...sessions.values()].flatMap((listening) => [...listening.connections]);
 
   const listen = (appSessionId: AppSessionId, path: string): Listening => {
@@ -87,7 +88,10 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     deps.store.onUpdated((entry) => {
       for (const connection of everyConnection()) connection.tabUpdated(entry);
     }),
+    // only a tab's first view is a page's new window; a later one is the same tab resumed, never an adoption
     deps.store.onViewCreated((child: TabEntry) => {
+      if (viewed.has(child)) return;
+      viewed.add(child);
       const opener = child.openerTabId === null ? undefined : deps.store.entry(child.openerTabId);
       const holder = opener && claims.leasedTo(opener.tab.tabId);
       if (opener && holder) holder.adopted(opener, child);

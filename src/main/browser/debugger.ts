@@ -115,7 +115,7 @@ export class TabDebugger {
       },
     };
     try {
-      await this.connect1();
+      await this.ensureAttached();
     } catch (error) {
       this.holders.delete(token);
       throw error;
@@ -126,7 +126,7 @@ export class TabDebugger {
 
   // The owner's implicit lease (idempotent per owner), attaching if nothing is attached.
   async attach(owner: DebuggerOwner = 'shared'): Promise<void> {
-    if (this.owners.has(owner)) return this.connect1();
+    if (this.owners.has(owner)) return this.ensureAttached();
     const lease = await this.lease();
     if (this.owners.has(owner)) lease.release(); // two attaches of one owner raced: one lease is kept
     else this.owners.set(owner, lease);
@@ -146,7 +146,7 @@ export class TabDebugger {
   }
 
   // Attaches if nothing is attached; every caller in the meantime shares the one attachment.
-  private connect1(): Promise<void> {
+  private ensureAttached(): Promise<void> {
     if (!this.connection) {
       const generation = this.generation;
       this.connection = this.connect(generation).catch((error: unknown) => {
@@ -173,7 +173,7 @@ export class TabDebugger {
   // Sends one command to the page (or to a child session) and answers its result; attaches first when needed. While
   // attached, an Input command is in the table by the time this returns.
   send<T = unknown>(method: string, params?: CommandParams, sessionId?: string): Promise<T> {
-    const sent = this.isAttached ? this.command(method, params, sessionId) : this.connect1().then(() => this.command(method, params, sessionId));
+    const sent = this.isAttached ? this.command(method, params, sessionId) : this.ensureAttached().then(() => this.command(method, params, sessionId));
     return sent as Promise<T>;
   }
 

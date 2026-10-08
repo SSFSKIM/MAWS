@@ -375,7 +375,6 @@ describe('startBrowserAgent', () => {
       sessions: { get: (id: AppSessionId) => (id === THREAD ? ({ lineage: { kind: 'side-thread', parentAppSessionId: A } } as never) : null) },
       hosts: hosts as never,
       emit,
-      env: {},
       views,
       userData: '/nonexistent/maws-user-data',
       drivers,

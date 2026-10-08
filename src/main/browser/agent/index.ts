@@ -249,7 +249,6 @@ export interface BrowserAgentDeps {
   sessions: Pick<SessionStore, 'get'>;
   hosts: Pick<HostSupervisor, 'onEvent' | 'dispatch' | 'onState'>;
   emit: BrowserEmit;
-  env: NodeJS.ProcessEnv; // the mode of focus emulation, as startBrowser read it
   views: Pick<ViewManager, 'park'>; // E4a's view manager, for parking (visible.ts)
   userData: string; // main's own: browser_screenshot writes its file under the session's deliverables
   drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise

@@ -173,7 +173,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // E4d end
   // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
   const agent = hosts
-    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, env, views, userData, cua /* E13 */ })
+    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, views, userData, cua /* E13 */ })
     : null;
   if (inspector && agent) inspector.agent = agent.seam;
   // E4c end
