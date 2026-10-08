@@ -22,5 +22,6 @@ export const events = [
   // E4b start
   'browser.import.progress', 'browser.import.finished', 'browser.import.changed',
   // E4b end
+  'browser.agent.acting', // E4c (removed with the browser tools, restored by E13 for cua's leases: P1 A-54)
   'browser.agent.activity', // E13
 ] as const;

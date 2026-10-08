@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BROWSER_CURSOR_CHANNEL } from '@shared/browser/cursor';
 import { CURSOR_HIDE_GRACE_MS, PERSON_USING_TAB } from './presence';
-import { harness, takeDown } from './server.fake';
+import { A, harness, S, takeDown } from './server.fake';
 
 // What the person sees and keeps while an agent drives a tab through cua (the in-app browser spec of 2026-10-08, M3),
 // through the real socket: the takeover gate on acting commands, control and the cursor by lease, the activity told to
@@ -95,6 +95,43 @@ describe('the takeover gate through a lease', () => {
     expect(shot[1]![1] - shot[0]![1]).toBeGreaterThanOrEqual(CURSOR_HIDE_GRACE_MS - 5); // timer granularity
     await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 7, y: 8 });
     expect(page.sentToPage.at(-1)).toEqual({ channel: BROWSER_CURSOR_CHANNEL, message: { kind: 'move', x: 7, y: 8 } });
+  });
+});
+
+describe('the Browser panel follows the agent (the owner\'s decision; E4c\'s browser.agent.acting, P1 A-54)', () => {
+  const acting = (h: ReturnType<typeof harness>) => h.emitted.filter((e) => e.name === 'browser.agent.acting').map((e) => e.payload);
+
+  it('a lease\'s first acting command tells the windows once, naming the tab and who acts; reads do not; the tab stays unselected', async () => {
+    const h = harness({ presence: true });
+    const person = h.personTab();
+    const t = await leasedTab(h);
+    await t.send('Page.enable');
+    await t.send('Runtime.enable');
+    await t.send('Page.captureScreenshot', { format: 'jpeg' });
+    expect(acting(h)).toEqual([]);
+    await t.send('Page.navigate', { url: 'https://shop.test/' });
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+    expect(acting(h)).toEqual([{ appSessionId: 'A', tabId: t.entry.tab.tabId, actingSessionId: 'A' }]);
+    expect(h.store.list(A).selected[A]).toBe(person.tab.tabId); // the person's selection stands
+    // the next lease (the host attaches again in a later turn) tells again; the renderer counts once per turn
+    await t.host.request('debugger.detach', { tabId: t.id });
+    await t.host.request('debugger.attach', { tabId: t.id });
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
+    expect(acting(h)).toHaveLength(2);
+  });
+
+  it('a side thread acting in its parent\'s tab names itself as the session acting; closing a tab opens nothing', async () => {
+    const h = harness({ presence: true });
+    const person = h.personTab(A);
+    const thread = await h.host(S);
+    const id = await h.idOf(thread, person);
+    await thread.request('debugger.attach', { tabId: id });
+    await thread.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Runtime.callFunctionOn', params: { functionDeclaration: 'function(){}' }, timeoutMs: 5_000 });
+    expect(acting(h)).toEqual([{ appSessionId: 'A', tabId: person.tab.tabId, actingSessionId: 'S' }]);
+    const t = await leasedTab(h);
+    const target = (await t.host.request<{ targetId: string; tabId: number }[]>('debugger.getTargets')).find((x) => x.tabId === t.id)!;
+    await t.send('Target.closeTarget', { targetId: target.targetId });
+    expect(acting(h)).toHaveLength(1);
   });
 });
 

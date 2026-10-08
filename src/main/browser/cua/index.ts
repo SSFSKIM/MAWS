@@ -41,7 +41,7 @@ export interface CuaBackendDeps {
   log?(line: string): void;
   // M3: control's transitions, the takeover gate and the agent's cursor (absent: the bare server, no transitions)
   presence?: Omit<PresenceDeps, 'store'>;
-  emit?: BrowserEmit; // M3: `browser.agent.activity` to the windows (absent: nothing told)
+  emit?: BrowserEmit; // M3: `browser.agent.activity` (and, since the final fix wave, `browser.agent.acting`) to the windows (absent: nothing told)
   // M3: an agent's finished download to the session's engine host (`maws.download.recorded`), which records it once
   recordDownload?(download: MawsDownloadRecorded): Promise<unknown>;
   now?(): number;
@@ -80,7 +80,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const tooLong = new Set<AppSessionId>();
   const feed = deps.emit ? new ActivityFeed({ emit: deps.emit, now: deps.now }) : null;
   const presence = deps.presence ? new AgentPresence({ ...deps.presence, store: deps.store }) : null;
-  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed };
+  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed, emit: deps.emit ?? null };
   const viewed = new WeakSet<TabEntry>();
   const everyConnection = () => [...sessions.values()].flatMap((listening) => [...listening.connections]);
 

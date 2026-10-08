@@ -16,7 +16,9 @@
 //
 // - (M3) What the person sees and keeps (presence.ts): an acting command passes the takeover gate before it is sent and
 //   makes the tab the agent's; the cursor follows `cursor.move`; letting go returns the tab to idle and hides the cursor.
-//   What the agent did is told to the windows (activity.ts); a tab created through the connection carries the panel's
+//   What the agent did is told to the windows (activity.ts); a lease's first acting command tells them
+//   `browser.agent.acting`, which opens the session's Browser panel as E4c's tools did (the tab is not selected: the
+//   owner's choice for agent tabs; P1 A-54, amended); a tab created through the connection carries the panel's
 //   badge (its group's title, else "agent") until the connection lets it go; the agent's downloads are reported to the
 //   host as Chrome's would be.
 //
@@ -27,7 +29,7 @@ import { BROWSER_AGENT_BADGE_MAX_CHARS } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
 import { personHolds } from '../agent/control';
 import type { DebuggerLease, TabDebugger } from '../debugger';
-import type { TabEntry, TabStore } from '../tabs';
+import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
 import { agentCapture, clickLabel, commandActivity, LABEL_LOOKUP_MS, navigatedUrl, within, type ActivityFeed } from './activity';
 import { commandClass, noteToggle, noToggles, methodNotAllowed, routeCommand, undoCommands, type AgentToggles } from './filter';
@@ -64,6 +66,7 @@ export interface ServerContext {
   log(line: string): void;
   presence: AgentPresence | null; // M3: control, takeover and the cursor (null: the bare server's tests)
   feed: ActivityFeed | null; // M3: what the agent did, to the windows
+  emit: BrowserEmit | null; // the final fix wave: `browser.agent.acting`, to the windows
 }
 
 interface Child {
@@ -83,6 +86,7 @@ interface Leased {
   stops: (() => void)[];
   closing: boolean; // letting go: no new command is taken
   awaitingFrame: boolean; // the agent's screencast started on the page, its first frame (the screenshot's row) not yet seen
+  acted: boolean; // an acting command arrived through this lease: the windows were told `browser.agent.acting`
   released: Promise<void> | null; // the letting go under way, which a new attach waits for
 }
 
@@ -307,7 +311,7 @@ export class CuaConnection {
       this.refuseHeld(entry);
       fail(ERRORS.notLoaded(debuggee.tabId));
     }
-    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, released: null };
+    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, acted: false, released: null };
     leased.stops.push(
       dbg!.on('*', (params, sessionId, method) => this.forward(leased, params, sessionId, method)),
       dbg!.onDetach(() => {
@@ -358,7 +362,9 @@ export class CuaConnection {
         }
     }
     const sent = method === 'Target.attachToTarget' ? { ...commandParams, flatten: true } : commandParams;
-    return this.hold(leased, deadline, commandClass(method) === 'acting', async (self) => {
+    const acting = commandClass(method) === 'acting';
+    if (acting) this.acting(leased);
+    return this.hold(leased, deadline, acting, async (self) => {
       // an agent's screenshot, a capture or the screencast the vendor's starts with, never carries the cursor's overlay
       // (presence.ts, activity.ts `agentCapture`); a command cancelled meanwhile is not sent
       if (agentCapture(method, commandParams) && this.ctx.presence) {
@@ -398,6 +404,16 @@ export class CuaConnection {
       default:
         return this.tell(entry, activity);
     }
+  }
+
+  // A lease's first acting command arrived (closing a tab is not one: it never comes here): the windows open the
+  // session's Browser panel, as E4c's tools had them do, before the takeover gate, as E4c's pause point came after it.
+  // The tab is not selected, so the panel shows the session's selection, the person's tab when they hold one.
+  private acting(leased: Leased): void {
+    if (leased.acted) return;
+    leased.acted = true;
+    const { appSessionId, tabId } = leased.entry.tab;
+    this.ctx.emit?.('browser.agent.acting', { appSessionId, tabId, actingSessionId: this.appSessionId });
   }
 
   // The debuggee's lease and the CDP session the command goes to ('' for the page's own).

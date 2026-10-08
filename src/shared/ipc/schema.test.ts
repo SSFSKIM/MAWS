@@ -1130,6 +1130,7 @@ describe('ipc schema validates both directions', () => {
       expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
+        'browser.agent.acting', // E4c, restored by E13 (P1 A-54)
         'browser.agent.activity', // E13
       ]);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
@@ -1269,7 +1270,7 @@ describe('ipc schema validates both directions', () => {
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.activity' /* E13, appended after E4b */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1350,17 +1351,24 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4b end
-  // E4c start: what stays of E4c's IPC once the browser tools left the `maws` server (P1 A-54): no `maws.browser.*` bridge
-  // and no `browser.agent.acting`; the notice for a dialog MAWS answered; E13's download record and agent activity
+  // E4c start: what stays of E4c's IPC once the browser tools left the `maws` server (P1 A-54): no `maws.browser.*` bridge;
+  // `browser.agent.acting`, restored for cua's leases (A-54, amended); E13's download record and agent activity
   describe('E4c entries', () => {
     const TAB_ID = 'b_000000000001';
 
-    it('the browser tools\' bridge and the acting tab left with the tools', () => {
+    it('the browser tools\' bridge left with the tools', () => {
       expect(Object.keys(commands).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
-      expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.') || name === 'browser.agent.acting')).toEqual([]);
+      expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
       expect([...NAMES.maws.events]).toEqual(Object.keys(maws.events));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
+    });
+
+    it('validates the acting tab: its owner, the tab and the session acting (E4c\'s event, restored for cua\'s leases)', () => {
+      const acting = { appSessionId: 'a', tabId: TAB_ID, actingSessionId: 'thread' };
+      expect(validateEventPayload('browser.agent.acting', acting).ok).toBe(true);
+      expect(validateEventPayload('browser.agent.acting', { ...acting, tabId: 'nope' }).ok).toBe(false);
+      expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(false); // who acts is named
     });
 
     it('E13: validates an agent\'s finished download through cua', () => {

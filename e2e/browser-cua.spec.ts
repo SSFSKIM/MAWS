@@ -13,12 +13,18 @@
 // page's node, typing as a count only.
 // Runs under `pnpm e2e:browser-cua` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); the launch passes
 // MAWS_HARNESS=0 (the product app) and MAWS_E2E_QUIET=1, over a profile under /tmp (a Unix socket path is short).
+// The final fix wave's case (the owner's decision; P1 A-54, amended): the Browser panel follows the agent again. In a
+// window that shows a seeded session, a lease's reading commands open nothing, its first acting command opens the
+// session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
+import type { AppSessionId } from '@shared/graph/ids';
 import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
+import { browserIn, tabsOf } from './support/browser-scene';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { closeScene, launchScene, scratchProject, show } from './support/maws-tools';
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -256,5 +262,53 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
     await maws.cleanup();
     await pages.close();
     rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+test('the Browser panel follows the agent: a lease\'s first acting command opens the shown session\'s Browser tool, and the agent\'s tab is not selected', async () => {
+  const tmp = process.env.TMPDIR;
+  process.env.TMPDIR = '/tmp'; // the scratch profile under /tmp: a Unix socket path is short
+  const scratch = scratchProject({ titles: ['E13: the panel follows the agent'], label: 'cua-panel' });
+  if (tmp === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = tmp;
+  const pages = await startPages();
+  let host: FakeHost | undefined;
+  try {
+    const s = await launchScene(scratch);
+    try {
+      const [id] = s.ids as [AppSessionId];
+      await show(s, id);
+      const app = seam(s.maws);
+      const panelBrowser = browserIn(s, 'panel');
+      await expect(panelBrowser).toHaveCount(0);
+
+      // the person's tab, the session's selection (opened from the window, as the address field does)
+      expect(await app.open(id, pages.url('/'))).toMatchObject({ ok: true });
+      const person = (await tabsOf(s, id)).selected;
+      expect(person).not.toBeNull();
+
+      host = await connectFakeHost((await app.socketPathFor(id))!);
+      const created = await host.request<{ id: number }>('tabs.create', { url: 'about:blank' });
+      await host.request('debugger.attach', { tabId: created.id });
+      const send = cdp(host, created.id);
+      await send('Page.enable'); // reading: the panel stays as it is
+      await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      await s.page.waitForTimeout(300);
+      await expect(panelBrowser).toHaveCount(0);
+
+      await send('Page.navigate', { url: pages.url('/') }); // the lease's first acting command
+      await expect(panelBrowser).toBeVisible();
+      const { tabs, selected } = await tabsOf(s, id);
+      expect(tabs).toHaveLength(2);
+      expect(selected).toBe(person); // the agent's tab is not selected
+      await host.close();
+      host = undefined;
+    } finally {
+      await closeScene(s);
+    }
+  } finally {
+    await host?.close();
+    await pages.close();
+    rmSync(scratch.root, { recursive: true, force: true });
   }
 });
