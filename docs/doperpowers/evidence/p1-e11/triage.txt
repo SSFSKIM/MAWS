@@ -405,3 +405,7 @@ Log 6) is the first chance to see the real form; no tracker row is filed for a f
 Tracker counts: 159 rows at 1582e97c; 79 removed by the waves and 1 added (W-A); 1.6 removed 8 (7 annotated closed, the C4
 intermediate-commits row) and added 8; 81 at e8434055. Acceptance 4's check: tracker-check-1.6.txt.
 The empty line inside the table noted at the top (line 51 at 1582e97c) was dropped at a3a781f0.
+
+== Dispositions at 5.2 (2026-10-08) ==
+32 | C12 busy-quit hang | closed at 3f877e1b: three quiet e2e:c12 runs (E10 final driver; M2 gates/postdebt-e2e-c12-07e50719.txt; M5 gates/final-e2e-c12-06ca330d.txt)
+35 | C7 keyboard failures | kept, owner P2: M5's chained e2e:c7 lost an Escape with the owner at the desktop (gates/final-retries-06ca330d.txt), green on its retry alone; row re-worded at 3f877e1b
