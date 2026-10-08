@@ -201,7 +201,10 @@ Owner requirements and taste, verbatim where given:
   in-app browser that the cua plugin's cua_repl can drive. Today the sitting agent drives MAWS's browser through the
   MAWS MCP tools (browser_tabs, browser_snapshot, browser_act) while the outer GUI assistant uses cua_repl
   separately. Replacement versus integration of the two routes is undecided and is a grill question for the P2
-  cut, not a choice to make here.
+  cut, not a choice to make here. Decided later the same sitting (owner, verbatim): "대체하는게 결정이다. cua_repl이
+  인앱 브라우저를 바로 사용하는것": replacement, not coexistence; the MAWS-specific agent browser-tool route
+  (browser_tabs, browser_snapshot, browser_act) is replaced by the cua plugin's cua_repl driving the in-app browser
+  directly. Planning-only scope still holds; the technical design is the owning session's.
   Ownership (owner, 2026-10-08 03:40 PDT): the session named cua_repl (id 1ea561bc-a60d-4437-a6ac-fa7cd5eda54f)
   owns the in-app browser and the cua_repl wiring under its already-registered ticket; a Chrome extension that
   lets an agent use the owner's Chrome profile is already built. 3.E is therefore not a child of my P2 cut; the
