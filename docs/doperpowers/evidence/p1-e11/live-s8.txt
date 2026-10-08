@@ -1,0 +1,120 @@
+E11 M6 sitting S8: E1's app-level live sitting (e2e/maws-tools-live.spec.ts) re-run on the final head (items 5 and 8)
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S8 and §8, Task 6.3; cap US$0.20; child spend before S8 US$0.00.
+Worktree head at start: f71f5d14 (branch worktree-agent-ac1b5d6ccf4ac2092); the bounded harness fix c26c3805 sits on it for attempt 2.
+Verdict: HARNESS FAILURE, not passed. Steps 1 to 3 (send_file, the blocking ask, the async ask folded into its turn) passed
+  live in both attempts; step 4 (show_pane) failed on the spec's own assertions twice, each time with MAWS behaving
+  correctly; the one bounded fix Design §8 allows was spent on the first, so the second is reported, not fixed.
+  No MAWS behavioural finding.
+
+Pre-sitting (2026-10-08T02:44:12Z)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200 (again 200 at 02:45:33Z and 02:48:16Z, before each attempt)
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the 2026-10-07 baseline)
+  load: 26.79 32.25 41.93 at the check; the slot admitted each command below 20 (waitload20.sh lines below)
+  survivors before: none (pgrep -fl maws-e11-, maws-supervisor, maws-e1-sitting all empty); a stale scratch
+    /tmp/maws-e1-sitting-lxdh1a from E1's 2026-10-06 sitting exists, not this sitting's, left alone
+  scratch root: /private/tmp/maws-e11-s8-20261008T024533Z (logs, MAWS_E1_LIVE_OUT); the spec makes its own engine scratch
+    under /tmp/maws-e1-sitting-XXXXXX (config home claude-config/ with settings.json {} and a .claude.json trusting its repo)
+
+Commands (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  02:44:28Z build: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_HARNESS=1 pnpm exec electron-vite build
+    -> "eligible: load 18.14 after 30s"; exit 0 at 02:45:29Z ("built in 28.69s"); the spec header's build
+  02:45:40Z attempt 1: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_E1_LIVE=1
+    MAWS_E1_LIVE_OUT=/private/tmp/maws-e11-s8-20261008T024533Z/out pnpm exec playwright test e2e/maws-tools-live.spec.ts
+    -> "eligible: load 14.25 after 0s"; 1 failed at 02:46:26Z
+  02:48:16Z attempt 2 (same command, after c26c3805) -> "eligible: load 14.22 after 0s"; 1 failed at 02:49:03Z
+  Model: the spec hard-wires Haiku (launch spec model 'haiku', subagentModel 'haiku', maxBudgetUsd 0.5 per session,
+    e2e/maws-tools-live.spec.ts:134); every journal's system/init and assistant frames read claude-haiku-5-5.
+  Output went to MAWS_E1_LIVE_OUT; docs/doperpowers/evidence/p1-e1 was not rewritten (git status clean there after both runs).
+
+Engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay.
+Init plugin list (G1, both attempts): cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin,
+  cc-plugin-plugin-authoring@builtin: the engine's built-ins only, none of the owner's (the spec asserts
+  ownerPlugins(init.plugins, [scratch]) is empty, and it passed). The CLAUDE_* scrub (launchEnvironment) held.
+
+Assertions per step (both attempts)
+  1 send_file: init lists the maws tools and the sdk server connected; no owner plugin; maws.delivery.file with caption
+    "the greeting" and hello.txt; the record file; the row "Delivered hello.txt · the greeting"; Open externally and
+    Reveal in Finder logged through the seam; reply DELIVERED. PASS (both).
+  2 blocking ask: five questions in five modalities through the Question sheet; Submit wrote the answer set as given
+    (Blue; Mon, Wed + Other Fri; q3 skipped; the assets folder through main's pick seam; q5 decide_for_me); the
+    attention item left Needs you; capsule "Answered"; View answers read-only; the reply lists them. PASS (both).
+  3 async ask: blocking false; the acknowledgement {status: asked, askId} written before the answer's steer; capsule
+    "Asked, answer when ready"; the steer went while Bash ran and folded into the running turn (one main result);
+    reply carries ANSWER: Yes. PASS (both, the two soft checks included).
+  4 show_pane: the engine and MAWS answered correctly both times (journal: terminal shown and the Terminal panel tab
+    selected; deliverable target "none" -> show_pane: no deliverable "none" in this session; nope -> unknown pane).
+    Attempt 1 FAILED on a stale assertion: the spec expected E1's-era "show_pane: the deliverable pane is not
+      available in this build of MAWS"; E2 has since landed the Deliverables tool, so target "none" names no record
+      and the host answers TOOL_ERRORS.deliverableNotFound('none'), as the replay spec (e2e/maws-tools.spec.ts:376-380)
+      already expects. Harness (spec) failure. Bounded fix c26c3805: the event expectation and the cell text follow
+      deliverableNotFound('none'); the step title and G5 line say so.
+    Attempt 2 passed the event expectation, then FAILED on a selector: s.pane.getByText('Opened Terminal') (substring,
+      case-insensitive) resolved to two elements, the cell label <span class="transcript-cell-label">Opened Terminal</span>
+      and the model's markdown reply "terminal: shown (opened Terminal panel, tab terminal:iiomskez)" (strict mode
+      violation, e2e/maws-tools-live.spec.ts:403). The model's wording varies per run; the cell itself was present.
+      Harness (selector) failure; the one bounded fix is spent, so it is reported, not fixed. The fix it needs:
+      the cell by role, s.pane.getByRole('button', { name: 'Opened Terminal' }) (or getByText(..., { exact: true })),
+      and the same scoping for the two "Could not open pane" cells, which the reply can quote too. The two error
+      cells after it were not reached in attempt 2; e1-pane-*.png were not shot in either attempt.
+
+Spend (read from the journals' result frames, total_cost_usd; cross-checked by a separate read of the kept journals)
+  attempt 1: send_file 0.0031; blocking ask 0.0016; async ask 0.0018; show_pane 0.0015; total US$0.0080
+  attempt 2: send_file 0.0018; blocking ask 0.0016; async ask 0.0016; show_pane 0.0015; total US$0.0065
+  S8 total US$0.0145 (cap US$0.20). Every session also carried --max-budget-usd 0.5, hard-wired by the spec (above the
+    sitting's cap; Design §5 asks for the remaining cap per launch. Recorded, not changed: actual spend per session
+    was under US$0.004).
+
+A-15 (the spec's own readings, after every session and after the app closed, and the standing command)
+  before:  25 keys, 42a98859ccfdc08994dca565482aa00ba0254ca8 (02:44:12Z)
+  between attempts: 25 keys, 42a98859ccfdc08994dca565482aa00ba0254ca8 (02:48:11Z)
+  after:   25 keys, 42a98859ccfdc08994dca565482aa00ba0254ca8 (02:49:29Z)
+  delta verdict: identical after each of the eight sessions and after each app close; no scratch key appeared or
+    vanished. Note: this spec compares whole /tmp-key digests (end(), :193 and :420), not Decision Log 35's
+    checkA15 delta; a key another owner session added meanwhile would have failed it falsely. None was added.
+
+Survivor check (02:49:29Z): pgrep -fl maws-e11- (none), pgrep -fl maws-supervisor (none), pgrep -fl maws-e1-sitting
+  (none), electron from this worktree's node_modules or out/main (none); ps for Electron and the 2.1.293 binary shows
+  only Discord's crashpad and the owner's 8-hour-old claude bg-pty-host, neither started here. The spec's cleanup closed the app after
+  stopping every session (each stopped {"exited":true,"code":0}).
+Cleanup: the two engine scratches /tmp/maws-e1-sitting-nBHnor and -Na0B1u removed after the costs and the show_pane
+  journal were read (no MAWS finding needs them); the sitting root removed after this file was written; the stray
+  tsconfig.e2e.tsbuildinfo from a typecheck removed. Sibling evidence: none modified (nothing to restore).
+Fix verification before attempt 2: tsc --noEmit -p tsconfig.e2e.json --composite false and eslint on the spec, clean.
+
+---- attempt 1, the spec's live-sitting.txt verbatim (MAWS_E1_LIVE_OUT) ----
+    E1 live sitting (M5), 2026-10-08T02:45:42.267Z
+    engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641 (GET /api/hello 200), Haiku, default permission mode, maxBudgetUsd 0.5 per session
+    app: the product build (out/main/index.js, MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR /private/tmp/maws-e1-sitting-nBHnor/claude-config (settings.json {}, .claude.json trusting /private/tmp/maws-e1-sitting-nBHnor/repo); MAWS_E2E_OPEN_LOG seam for the delivery row's buttons
+    A-15 before the first launch: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8
+    G1: session.init (the journal's system/init) lists 38 tools, ["mcp__maws__artifact_create","mcp__maws__artifact_list","mcp__maws__artifact_screenshot","mcp__maws__artifact_update","mcp__maws__ask","mcp__maws__browser_act","mcp__maws__browser_eval","mcp__maws__browser_navigate","mcp__maws__browser_screenshot","mcp__maws__browser_snapshot","mcp__maws__browser_tabs","mcp__maws__send_file","mcp__maws__show_pane"]; mcp_servers [{"name":"maws","status":"connected","source":"sdk"}]; plugins [{"name":"cc-plugin-agents-md","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner's)
+    G2: maws.delivery.file [{"id":"893ee90f-01fe-409f-b9e0-3bf0d5c76f7b","name":"hello.txt"}] caption "the greeting"; record 893ee90f-01fe-409f-b9e0-3bf0d5c76f7b.json kind file; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ["<scratch>/repo/hello.txt","reveal <scratch>/repo/hello.txt"]; reply "DELIVERED"
+      send_file: appSessionId 08d5f4d7-0b6e-494d-8aa7-f67e3e4f064e; journal /private/tmp/maws-e1-sitting-nBHnor/journals/send_file/57ukw7nv.jsonl; main results 1; total_cost_usd 0.0031; permissions allowed once through the card: ["Bash","mcp__maws__send_file"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    G3: maws.ask.opened 5 questions [["q1","choice",false],["q2","choice",true],["q3","text",false],["q4","folder",false],["q5","repository",false]]; the capsule reads "Waiting for you"; the sheet opened by itself on the shown session
+    G3: Submit wrote ["[\"q1\",\"answered\",[\"Blue\"],null]","[\"q2\",\"answered\",[\"Mon\",\"Wed\"],\"Fri\"]","[\"q3\",\"skipped\",null,null]","[\"q4\",\"answered\",[\"<scratch>/repo/assets\"],null]","[\"q5\",\"decide_for_me\",null,null]"]; the attention item left Needs you; the capsule reads "Answered"; View answers reopened it read-only; reply "q1: Blue\nq2: Mon, Wed, Fri (Fri came in through \"Other\")\nq3: SKIPPED\nq4: <scratch>/repo/assets\nq5: DECIDE"
+      blocking ask: appSessionId 70cf4b21-8b14-4d33-80cb-6fe513330b1a; journal /private/tmp/maws-e1-sitting-nBHnor/journals/blocking ask/kcqn5pvn.jsonl; main results 1; total_cost_usd 0.0016; permissions allowed once through the card: ["mcp__maws__ask"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    G4: maws.ask.opened blocking false; the acknowledgement {status: "asked", askId} written at seq 111, before the answer's steer; the capsule read "Asked, answer when ready"; the steer (priority next, seq 140) went while Bash ran (its tool_use at seq 135, its result at seq 144), and folded into the running turn (one main result, seq 167); replies ["The Bash command printed `WAITED`.\n\nANSWER: Yes"]
+      async ask: appSessionId 70c4e50e-da8f-403b-9497-1363318368a1; journal /private/tmp/maws-e1-sitting-nBHnor/journals/async ask/2amskyqj.jsonl; main results 1; total_cost_usd 0.0018; permissions allowed once through the card: ["mcp__maws__ask"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+      show_pane: the step failed; the session is stopped and booked here
+      show_pane: appSessionId 4283091c-6622-4580-98e0-e322cec29a50; journal /private/tmp/maws-e1-sitting-nBHnor/journals/show_pane/w7ne4uea.jsonl; main results 1; total_cost_usd 0.0015; permissions allowed once through the card: ["mcp__maws__show_pane","mcp__maws__show_pane","mcp__maws__show_pane"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    spend: send_file 0.0031; blocking ask 0.0016; async ask 0.0018; show_pane 0.0015; total US$0.0080
+    the app closed (every engine process it launched was stopped first; cleanup closes the app or fails); A-15 after the run: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    scratch kept for inspection: /private/tmp/maws-e1-sitting-nBHnor (journals under journals/)
+
+---- attempt 2 (after c26c3805), the spec's live-sitting.txt verbatim (MAWS_E1_LIVE_OUT) ----
+    E1 live sitting (M5), 2026-10-08T02:48:18.409Z
+    engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641 (GET /api/hello 200), Haiku, default permission mode, maxBudgetUsd 0.5 per session
+    app: the product build (out/main/index.js, MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR /private/tmp/maws-e1-sitting-Na0B1u/claude-config (settings.json {}, .claude.json trusting /private/tmp/maws-e1-sitting-Na0B1u/repo); MAWS_E2E_OPEN_LOG seam for the delivery row's buttons
+    A-15 before the first launch: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8
+    G1: session.init (the journal's system/init) lists 38 tools, ["mcp__maws__artifact_create","mcp__maws__artifact_list","mcp__maws__artifact_screenshot","mcp__maws__artifact_update","mcp__maws__ask","mcp__maws__browser_act","mcp__maws__browser_eval","mcp__maws__browser_navigate","mcp__maws__browser_screenshot","mcp__maws__browser_snapshot","mcp__maws__browser_tabs","mcp__maws__send_file","mcp__maws__show_pane"]; mcp_servers [{"name":"maws","status":"connected","source":"sdk"}]; plugins [{"name":"cc-plugin-agents-md","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner's)
+    G2: maws.delivery.file [{"id":"7c78a1b7-f499-4b9b-b548-1933f1c7edc6","name":"hello.txt"}] caption "the greeting"; record 7c78a1b7-f499-4b9b-b548-1933f1c7edc6.json kind file; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ["<scratch>/repo/hello.txt","reveal <scratch>/repo/hello.txt"]; reply "DELIVERED"
+      send_file: appSessionId 429ea136-2e8d-49f4-ab63-5084e142c0b0; journal /private/tmp/maws-e1-sitting-Na0B1u/journals/send_file/wluoeywj.jsonl; main results 1; total_cost_usd 0.0018; permissions allowed once through the card: ["Bash","mcp__maws__send_file"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    G3: maws.ask.opened 5 questions [["q1","choice",false],["q2","choice",true],["q3","text",false],["q4","folder",false],["q5","repository",false]]; the capsule reads "Waiting for you"; the sheet opened by itself on the shown session
+    G3: Submit wrote ["[\"q1\",\"answered\",[\"Blue\"],null]","[\"q2\",\"answered\",[\"Mon\",\"Wed\"],\"Fri\"]","[\"q3\",\"skipped\",null,null]","[\"q4\",\"answered\",[\"<scratch>/repo/assets\"],null]","[\"q5\",\"decide_for_me\",null,null]"]; the attention item left Needs you; the capsule reads "Answered"; View answers reopened it read-only; reply "q1: Blue\nq2: Mon, Wed, Fri (Fri was entered under \"Other\")\nq3: SKIPPED\nq4: <scratch>/repo/assets\nq5: DECIDE"
+      blocking ask: appSessionId 24dd8aa9-2cf7-4867-bdd8-ffee12e766eb; journal /private/tmp/maws-e1-sitting-Na0B1u/journals/blocking ask/j2pr4bv7.jsonl; main results 1; total_cost_usd 0.0016; permissions allowed once through the card: ["mcp__maws__ask"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    G4: maws.ask.opened blocking false; the acknowledgement {status: "asked", askId} written at seq 111, before the answer's steer; the capsule read "Asked, answer when ready"; the steer (priority next, seq 132) went while Bash ran (its tool_use at seq 127, its result at seq 136), and folded into the running turn (one main result, seq 155); replies ["ANSWER: Yes\n\nThe Bash check ran in the foreground and printed `WAITED`."]
+      async ask: appSessionId 842567c9-388b-4316-8e37-b6e4993008b4; journal /private/tmp/maws-e1-sitting-Na0B1u/journals/async ask/b6l4t6v6.jsonl; main results 1; total_cost_usd 0.0016; permissions allowed once through the card: ["mcp__maws__ask"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+      show_pane: the step failed; the session is stopped and booked here
+      show_pane: appSessionId 8de61559-3ebd-432c-aeaa-42bcc8cd711c; journal /private/tmp/maws-e1-sitting-Na0B1u/journals/show_pane/gq2qs6il.jsonl; main results 1; total_cost_usd 0.0015; permissions allowed once through the card: ["mcp__maws__show_pane","mcp__maws__show_pane","mcp__maws__show_pane"]; stopped {"exited":true,"code":0,"signal":null}; A-15 after: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    spend: send_file 0.0018; blocking ask 0.0016; async ask 0.0016; show_pane 0.0015; total US$0.0065
+    the app closed (every engine process it launched was stopped first; cleanup closes the app or fails); A-15 after the run: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+    scratch kept for inspection: /private/tmp/maws-e1-sitting-Na0B1u (journals under journals/)

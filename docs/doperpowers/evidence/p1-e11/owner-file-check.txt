@@ -9,3 +9,7 @@ Relay: GET http://127.0.0.1:8641/api/hello -> 200 (2026-10-07, no engine run).
 Helpers: /tmp/maws-review/waitload20.sh printed "eligible: load 5.61 after 0s"; /tmp/maws-review/with-slot.sh present.
 Install: the worktree's node_modules is a symlink to the main checkout's (brief: shared node_modules; no install on
   the shared tree; the main checkout's package.json and pnpm-lock.yaml are byte-equal to this branch's at f0691bf9, cmp).
+
+S8 (2026-10-08, E1's live sitting re-run, two attempts, docs/doperpowers/evidence/p1-e11/live-s8.txt):
+  before 02:44:12Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  02:49:29Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no scratch key appeared or vanished; no other key added)
