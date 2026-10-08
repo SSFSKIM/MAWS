@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, settleAll, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, resumeNoOutput, settleAll, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -74,6 +74,16 @@ describe('a paid call’s charge', () => {
     expect(attemptBudget(0.15, 0.02, 2)).toBe(0.065);
     expect(attemptBudget(0.15, 0.1, 1)).toBe(0.05);
     expect(attemptBudget(0.15, 0.16, 1)).toBe(0);
+  });
+});
+
+describe('a row Resume’s stall', () => {
+  const stalled = [row(1, 'meta', { event: 'spawn' }), row(2, 'meta', { event: 'init_failed', code: 'no_output' })];
+  const clean = [row(1, 'meta', { event: 'spawn' }), row(2, 'in', { type: 'system', subtype: 'init' })];
+  it('is read only from the journals created since the resume began, its retry included', () => {
+    expect(resumeNoOutput({ 'a.jsonl': stalled, 'b.jsonl': clean }, ['a.jsonl'])).toBe(false);
+    expect(resumeNoOutput({ 'a.jsonl': clean, 'b.jsonl': stalled, 'c.jsonl': clean }, ['a.jsonl'])).toBe(true);
+    expect(resumeNoOutput({ 'a.jsonl': stalled }, ['a.jsonl'])).toBe(false);
   });
 });
 

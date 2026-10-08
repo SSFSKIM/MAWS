@@ -75,7 +75,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, settleAll, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, resumeNoOutput, runRoot, settleAll, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -859,7 +859,9 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
     }
     live = await openLive(sc, note, a15);
     try {
-      const journals = () => (existsSync(join(sc.userData, 'engine-host', 'journal', id)) ? readdirSync(join(sc.userData, 'engine-host', 'journal', id)).filter((n) => n.endsWith('.jsonl')).length : 0);
+      // the session's journal files, one per launch; this resume's are those created since `before`
+      const dir = join(sc.userData, 'engine-host', 'journal', id);
+      const journals = () => (existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith('.jsonl')) : []);
       const before = journals();
       const row = await sidebarRow(live.page, { appSessionId: id });
       await row.click({ button: 'right' });
@@ -883,12 +885,12 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
       const readyMs = status?.process === 'ready' ? Date.now() - t0 : null;
       if (status?.pid) live.pids.add(status.pid);
       const rows = status ? journal(status.journalPath) : [];
-      const all = sessionRows(live, id);
+      const since = Object.fromEntries(journals().filter((name) => !before.includes(name)).map((name) => [name, journal(join(dir, name))]));
       const spawned = rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'spawn');
       const first = rows.find((r) => r.direction === 'in' || r.direction === 'stderr');
       const firstOutputMs = spawned && first ? Date.parse(first.at) - Date.parse(spawned.at) : null;
-      const noOutput = all.some((r) => r.direction === 'meta' && (r.frame as { event?: string; code?: string }).event === 'init_failed' && (r.frame as { code?: string }).code === 'no_output');
-      const launches = journals() - before;
+      const noOutput = resumeNoOutput(since, before);
+      const launches = Object.keys(since).length;
       const ok = readyMs !== null && firstOutputMs !== null && firstOutputMs <= FIRST_OUTPUT_MS && !noOutput && launches === 1;
       results.push({ i, ok, readyMs, firstOutputMs, noOutput, launches, process: status?.process ?? null });
       note(`resume ${i}: ${ok ? 'ok' : 'STALL'}: ready in ${readyMs ?? '—'} ms, first output ${firstOutputMs ?? '—'} ms after spawn, no_output ${noOutput}, launches ${launches}, process ${status?.process ?? 'none'}, pid ${status?.pid ?? '—'}${captured ? `; captured under ${join(sc.root, 'stalls')}` : ''}`);

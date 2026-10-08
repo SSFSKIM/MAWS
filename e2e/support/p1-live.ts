@@ -130,6 +130,17 @@ export async function settleAll(steps: readonly (() => unknown)[]): Promise<void
   if (errors.length > 1) throw new AggregateError(errors, errors.map((e) => (e instanceof Error ? e.message : String(e))).join('\n---\n'));
 }
 
+// ---- S6's resumes ------------------------------------------------------------------------------------------------------
+
+// Whether a row Resume hit the engine host's first-output bound: a `no_output` init failure in a journal created since
+// the resume began (`before`, the session's journal files then), its one retry included; an earlier resume's stall never
+// marks a later one.
+export function resumeNoOutput(journals: Readonly<Record<string, readonly JournalRow[]>>, before: readonly string[]): boolean {
+  return Object.entries(journals)
+    .filter(([name]) => !before.includes(name))
+    .some(([, rows]) => rows.some((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'init_failed' && (r.frame as { code?: string }).code === 'no_output'));
+}
+
 // ---- where things go ----------------------------------------------------------------------------------------------------
 
 // The directory the sittings' logs are written to (`live-<sitting>.txt`), for the sitting to copy into evidence.
