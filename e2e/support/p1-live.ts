@@ -162,10 +162,18 @@ export function terminalUsdBound(records: readonly unknown[], sinceMs: number): 
   return usd;
 }
 
-// The engine's own figure for a terminal session: the last `Total cost:` its `/cost` printed on the screen, or null.
+// The engine's own figure for a terminal session: the last `Total cost:` its `/cost` printed on the screen, or null. The
+// screen is cursor-addressed, so once its escapes are stripped the spaces may be gone ("Totalcost:$0.0082", S2(d)).
 export function costShown(screen: string): number | null {
-  const all = [...screen.matchAll(/Total cost:\s+\$([0-9]+(?:\.[0-9]+)?)/g)];
+  const all = [...screen.matchAll(/Total\s*cost:\s*\$([0-9]+(?:\.[0-9]+)?)/g)];
   return all.length === 0 ? null : Number(all.at(-1)![1]);
+}
+
+// The transcript's own cost record: the `totalCostUSD` of the last `cost-state` record, which the engine writes into an
+// interactive session's transcript at its exit (2.1.293: the figure /cost shows and the home's `lastCost`), or null.
+export function costRecorded(records: readonly unknown[]): number | null {
+  const state = records.findLast((r) => (r as { type?: unknown }).type === 'cost-state' && typeof (r as { totalCostUSD?: unknown }).totalCostUSD === 'number');
+  return state === undefined ? null : (state as { totalCostUSD: number }).totalCostUSD;
 }
 
 // ---- the case's end ---------------------------------------------------------------------------------------------------

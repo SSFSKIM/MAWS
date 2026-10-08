@@ -85,7 +85,7 @@ import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } 
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -1027,8 +1027,9 @@ test('A-47: a permission request on a session not in front raises the fallback t
 // backfill's fixture and its peer record's form recorded; S2(d) one attempt at a team in an interactive terminal under
 // CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (SPEC 39 forms one only there; Decision Log 6). A terminal session takes no budget
 // flag: its allocation is charged before it starts, it is ended at three minutes or once the bound on its transcript's spend
-// (terminalUsdBound, an upper bound) passes that allocation, and the charge settles to the figure its own /cost prints (the
-// scratch home's `lastCost` when the screen shows none; the whole allocation when neither). Its plugins: a terminal writes
+// (terminalUsdBound, an upper bound) passes that allocation, and the charge settles to its transcript's own cost record (the
+// `cost-state` the engine writes at exit; else what /cost printed, else the scratch home's `lastCost`; else the whole
+// allocation). Its plugins: a terminal writes
 // no `system/init`, so the list is read from the scratch home's own plugin state and the terminal's CLAUDE* variables
 // (Decision Log 30). Run on their own:
 //   MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=<what S2 has left> pnpm exec playwright test e2e/p1-live.spec.ts -g 'S2'
@@ -1150,11 +1151,18 @@ async function closeTerminal(sc: CaseScratch, note: (line: string) => void, t: T
   await new Promise((r) => setTimeout(r, 1_000));
   const state = JSON.parse(readFileSync(join(sc.config, '.claude.json'), 'utf8')) as { projects?: Record<string, { lastCost?: number }> };
   const lastCost = state.projects?.[realpathSync(t.cwd)]?.lastCost ?? state.projects?.[t.cwd]?.lastCost ?? null;
-  const costUsd = shown ?? lastCost;
+  let recorded: number | null = null;
+  try {
+    recorded = costRecorded(readRecords(transcriptFile(sc.config, t.cwd, t.pty.sessionId())));
+  } catch {
+    // no transcript: the terminal never took a prompt
+  }
+  const costUsd = recorded ?? shown ?? lastCost;
+  const source = recorded !== null ? 'its transcript’s cost-state' : shown !== null ? '/cost’s figure' : 'the scratch home’s lastCost';
   charge(note, {
     key: t.chargeKey,
     case: sc.name,
-    label: costUsd === null ? 'the terminal session’s allocation, kept whole: neither /cost nor the home’s lastCost showed its spend' : `the terminal session, settled to ${shown !== null ? '/cost’s figure' : 'the scratch home’s lastCost'}`,
+    label: costUsd === null ? 'the terminal session’s allocation, kept whole: neither its transcript, /cost nor the home’s lastCost showed its spend' : `the terminal session, settled to ${source}`,
     usd: costUsd ?? t.allocation,
   });
   const survivors: string[] = [];
@@ -1169,7 +1177,7 @@ async function closeTerminal(sc: CaseScratch, note: (line: string) => void, t: T
   }
   const plugins = join(sc.config, 'plugins');
   const settings = JSON.parse(readFileSync(join(sc.config, 'settings.json'), 'utf8')) as { enabledPlugins?: unknown };
-  note(`terminal: /cost ${shown === null ? 'showed no total' : `US$${shown.toFixed(4)}`}; the scratch home's lastCost ${lastCost === null ? 'none' : `US$${lastCost.toFixed(4)}`}; the transcript's spend bound US$${t.bound.toFixed(4)} (Haiku 4.5 list rates, an upper bound); ${t.ended === null ? 'exited by /exit' : `ended by the watchdog (${t.ended})`}; ${Math.round((Date.now() - t.started) / 1000)} s; permission prompts answered ${t.approvals}`);
+  note(`terminal: its transcript's cost-state ${recorded === null ? 'none' : `US$${recorded.toFixed(4)}`}; /cost ${shown === null ? 'showed no total' : `US$${shown.toFixed(4)}`}; the scratch home's lastCost ${lastCost === null ? 'none' : `US$${lastCost.toFixed(4)}`}; the transcript's spend bound US$${t.bound.toFixed(4)} (Haiku 4.5 list rates, an upper bound); ${t.ended === null ? 'exited by /exit' : `ended by the watchdog (${t.ended})`}; ${Math.round((Date.now() - t.started) / 1000)} s; permission prompts answered ${t.approvals}`);
   note(`terminal plugins (no system/init in a terminal; Decision Log 30): the scratch home's plugins/ ${existsSync(plugins) ? JSON.stringify(readdirSync(plugins, { recursive: true })) : 'absent'}, settings.json enabledPlugins ${JSON.stringify(settings.enabledPlugins ?? null)}`);
   note(`terminal survivor check: ${survivors.length === 0 ? `none of ${t.pids.size} pids (${[...t.pids].join(', ')})` : `SURVIVORS ${JSON.stringify(survivors)}`}; ${spendLine(sc.sitting)}`);
   return { costUsd, survivors };

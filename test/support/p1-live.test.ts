@@ -4,7 +4,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, launchReservation, liveOutDir, resumeNoOutput, settleAll, settledReservation, siteOf, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
@@ -138,6 +138,15 @@ describe('a terminal session’s spend', () => {
     expect(costShown('> /cost\n  ⎿  Total cost:            $0.0123\n     Total duration (API): 4.1s\n')).toBe(0.0123);
     expect(costShown('Total cost:            $0.0100\nmore\nTotal cost:            $0.0412\n')).toBe(0.0412);
     expect(costShown('no cost here')).toBeNull();
+    // the cursor-addressed screen of S2(d)'s terminal, its spaces gone once the escapes are stripped
+    expect(costShown('Usagebymodel:\nTotalcost:$0.0082Totalduation(API):8s')).toBe(0.0082);
+  });
+
+  it('reads the transcript’s own cost record, the last cost-state the engine wrote at its exit, or null before one', () => {
+    const state = (usd: number) => ({ type: 'cost-state', sessionId: 's', totalCostUSD: usd, modelUsage: {} });
+    expect(costRecorded([{ type: 'user' }, state(0.0031), { type: 'assistant' }, state(0.004817005)])).toBe(0.004817005);
+    expect(costRecorded([{ type: 'user' }])).toBeNull();
+    expect(costRecorded([{ type: 'cost-state' }])).toBeNull(); // no figure in it
   });
 });
 
