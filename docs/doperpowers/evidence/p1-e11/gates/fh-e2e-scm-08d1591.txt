@@ -1,0 +1,8 @@
+E11 M4.2 F-H gate: e2e-scm
+command: pnpm e2e:scm
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:56:52Z
+load at start: { 9.20 11.86 12.29 }
+summary:
+      8 passed (31.2s)
+exit: 0

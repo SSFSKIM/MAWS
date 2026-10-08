@@ -1,0 +1,9 @@
+E11 M4.2 F-H gate: e2e-browser-tools
+command: pnpm e2e:browser-tools
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:57:50Z
+load at start: { 8.71 11.37 12.09 }
+summary:
+      1 skipped
+      11 passed (48.1s)
+exit: 0

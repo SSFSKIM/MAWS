@@ -1,0 +1,23 @@
+E11 M4.2 F-H: scale review E scalpel-1#1, the will-quit listener count proven able to fail
+The spec as committed at 1b9dcf4d, run alone (MAWS_C12_E2E=1 playwright test e2e/c12-quit.spec.ts -g "nothing busy")
+after an electron-vite build: once on the real main, once with a scratch second listener added to src/main/index.ts
+(never committed; the file restored from a copy and rebuilt). Through /tmp/maws-review/with-slot.sh, 2026-10-07 16:46 local.
+
+slot slot.1 acquired at 16:46:36 load { 9.10 10.59 11.32 }
+== real build
+build exit 0
+[c12-quit] report 0 ms; quit to exit 154 ms
+  ok 1 e2e/c12-quit.spec.ts:157:5 › a quit with nothing busy asks nothing and exits within the probe bound (1.7s)
+  1 passed (2.2s)
+real exit 0
+== scratch: a second will-quit listener
+136:  app.on('will-quit', () => {}); // F-H SCRATCH, never committed
+build exit 0
+    Error: one will-quit listener
+    Expected: 1
+    Received: 2
+    > 166 |     expect(await app.evaluate(({ app: electron }) => electron.listenerCount('will-quit')), 'one will-quit listener').toBe(1);
+  1 failed
+scratch exit 1
+scratch lines left: 0
+rebuild exit 0

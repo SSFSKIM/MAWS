@@ -1,0 +1,8 @@
+E11 M4.2 F-H gate: e2e-c12
+command: pnpm e2e:c12
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:53:27Z
+load at start: { 16.70 15.16 13.33 }
+summary:
+      4 passed (13.5s)
+exit: 0

@@ -1,0 +1,8 @@
+E11 M4.2 F-H gate: e2e-supervisor
+command: pnpm e2e:supervisor
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:54:09Z
+load at start: { 13.09 14.42 13.14 }
+summary:
+      8 passed (2.2m)
+exit: 0
