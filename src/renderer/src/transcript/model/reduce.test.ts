@@ -543,7 +543,7 @@ describe('turn boundaries', () => {
       'Fast mode ON · Draws from usage credits',
       'Fast mode OFF',
       '\u001b[33m↯\u001b[0m Kept Fast mode ON',
-      'Set effort level to high (this session only): Comprehensive implementation with extensive testing',
+      'Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation',
       'Effort level set to auto',
       'Output style set to Explanatory',
       'Enabled plan mode',
@@ -557,6 +557,7 @@ describe('turn boundaries', () => {
       'Set effort level to high (saved, though your organization starts new sessions on opus at medium effort): Comprehensive',
       'Current model: opus',
       'Session renamed to: C4 acceptance',
+      'Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation\nWarning: settings could not be saved',
     ];
     const b = builder();
     confirmations.forEach((text, i) => b.emit('user.message', { messageUuid: uuid(`c${i}`), content: `<local-command-stdout>${text}</local-command-stdout>`, isReplay: true, isSynthetic: false, origin: i % 2 === 0 ? 'local-command' : null, bash: null }));

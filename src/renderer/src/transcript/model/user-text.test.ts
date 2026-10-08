@@ -11,7 +11,7 @@ import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { builder, uuid } from './test-events';
-import { slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
+import { confirmsSettingChange, slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
 
 // The golden fixture: one 40-line block wrapped exactly as the grammar frames it, typed text before and after.
 const fixture = JSON.parse(readFileSync(join(__dirname, '../../../../../test/fixtures/composer/pasted-40-lines.json'), 'utf8')) as { typed: string; pasted: { id: string; body: string }[]; sent: string };
@@ -133,5 +133,32 @@ describe('slash-command records', () => {
     expect(slashCommandLine('<command-message>x</command-message>')).toBeNull();
     expect(slashCommandLine('please run <command-name>/compact</command-name> later')).toBeNull();
     expect(userTextOf('please run <command-name>/compact</command-name> later').text).toBe('please run <command-name>/compact</command-name> later');
+  });
+});
+
+// F2a review 2 and 3: a setting-change echo is hidden only when every line of it is a known confirmation, so a warning
+// joined to one keeps the card; `/effort`'s confirmation carries 2.1.293's own descriptions (`$oo`, the `Oe` table:
+// xhigh's ends "(on supported models)"), and a variant with anything more is still kept.
+describe('setting-change confirmations', () => {
+  const effort = {
+    low: 'Quick, straightforward implementation with minimal overhead',
+    medium: 'Balanced approach with standard implementation and testing',
+    high: 'Comprehensive implementation with extensive testing and documentation',
+    xhigh: 'Deeper reasoning than high, just below maximum (on supported models)',
+    max: 'Maximum capability with deepest reasoning. May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.',
+  };
+
+  it('rejects an effort confirmation carrying anything more', () => {
+    expect(confirmsSettingChange(`Set effort level to high (this session only): ${effort.high} · burns fastest — medium handles most tasks`)).toBe(false);
+    expect(confirmsSettingChange(`Set effort level to xhigh (this session only): ${effort.xhigh} (applied locally — this remote transport can’t change the remote session’s settings)`)).toBe(false);
+    expect(confirmsSettingChange(`Set effort level to high (this session only): ${effort.high} (applied locally — this remote transport can’t change the remote session’s settings)`)).toBe(false);
+  });
+
+  it('hides a multi-line echo only when every line is a confirmation', () => {
+    expect(confirmsSettingChange(`Set effort level to high (this session only): ${effort.high}\nWarning: settings could not be saved`)).toBe(false);
+    expect(confirmsSettingChange('Set model to `opus\nWarning: settings could not be saved`')).toBe(false);
+    expect(confirmsSettingChange('Output style set to Explanatory\nWarning: settings could not be saved')).toBe(false);
+    expect(confirmsSettingChange('Set model to `haiku`\nFast mode OFF')).toBe(true);
+    expect(confirmsSettingChange('\n')).toBe(false);
   });
 });

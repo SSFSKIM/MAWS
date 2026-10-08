@@ -144,7 +144,9 @@ export const isLocalCommand = (origin: string | null, content: string | ContentB
 // (2.1.293's `/model`, `/fast`, `/effort`, `/output-style`, `/plan`, `/theme` and `/color` messages, as the binary
 // writes them, and the `Set model to` echoes recorded on 2.1.283), so a confirmation carrying anything more (a save that
 // failed, an override still in force, a note about new sessions) keeps its card; informative outputs (`/cost`,
-// `/status`, `/context`, `/help`) never match. The text is the echo with its tags and colours stripped.
+// `/status`, `/context`, `/help`) never match. The text is the echo with its tags and colours stripped; each of its
+// lines is tested on its own, and the echo is hidden only when every line is a confirmation (F2a review 2: a warning
+// joined to one keeps the card).
 const SCOPE = String.raw`(?: for this session only| and saved as your default for new sessions)?`;
 const FAST = String.raw`(?: · (?:Fast mode ON|Fast mode OFF|Draws from usage credits))*`;
 const SETTING_CONFIRMATIONS: readonly RegExp[] = [
@@ -159,7 +161,10 @@ const SETTING_CONFIRMATIONS: readonly RegExp[] = [
   /^Session color (?:set to: \S+|reset to default)$/,
 ];
 
-export const confirmsSettingChange = (text: string): boolean => SETTING_CONFIRMATIONS.some((pattern) => pattern.test(text));
+export function confirmsSettingChange(text: string): boolean {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => SETTING_CONFIRMATIONS.some((pattern) => pattern.test(line)));
+}
 
 // The engine's own marker for an interrupted request (C3 tags it `origin: 'interrupt-marker'`): no row and no turn; the
 // divider's stopped state already says it.
