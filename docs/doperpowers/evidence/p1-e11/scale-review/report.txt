@@ -35,4 +35,31 @@ E | scalpel-1#4 | P3 | e2e/support/plugins-live.ts:21-22 | Return a skip reason 
 Dismissed: none. Deferred: none (at routing). [parent-impact]: none (no finding reveals a wire fact a child read wrongly
 or contradicts a P-n or a binding mark).
 
-Commits per finding: filled in after the waves (below).
+Commits per finding (F-H 81a345df..50219ea0 reviewed by reviewer-high on astra under P-26; F-R 50219ea0..06a216b3):
+A sweep#1      cd12f78f (+ a373e727 comment) — HALF-FIXED: the republish batch is byte-bounded (BATCH_BYTES 16 MiB, a quarter
+               of the line cap) and the cursor advances only past accepted batches; the 256 MiB writable-cap half (lines the
+               socket buffered count as delivered and are lost if a later write in the same synchronous burst passes the cap)
+               needs acknowledgement or backpressure through HostEmit — tracker row naming X13, owner P2 (architect's ruling).
+A scalpel-2#1  e256c30c — PARTLY FIXED: a call withdrawn during the image read or the exclusive-queue wait writes no record;
+               the F-H reviewer found a withdrawal during the asynchronous `deliverables.write(record)` itself still persists
+               and announces the record — tracker row, owner P2 (a few milliseconds of disk write; no third review round).
+A scalpel-5#1  cfc71d51 (+ 08d15914 wording)
+B scalpel-3#1  79cff6c7
+B scalpel-4#1  5c9b3b28 (+ F-R's d2b38f83 renderer and schema fixtures; remote-runner.test.ts's argv in the M4 close)
+C scalpel-2#1  0a193096 (P2; the user row's optional anchorFrame, Decision Log 34)
+C scalpel-1#1  672dff90
+C scalpel-1#2  05fe9c5a
+C scalpel-2#2  4f2ccf6f
+C scalpel-2#3  15430441
+C scalpel-3#1  f5bfc8df
+C scalpel-5#1  621171d8
+C scalpel-5#2  7411aae7
+C scalpel-5#3  ed3ebcc3
+C scalpel-5#4  a004e333
+C scalpel-5#5  d93225b0
+D scalpel-2#1  7b125dce
+E scalpel-1#1  1b9dcf4d (P2; the count check proven able to fail: gates/fh-c12-listener-proof-1b9dcf4.txt)
+E scalpel-1#2  766aea24 (MAWS_E4D_LIVE_OUT)
+E scalpel-1#4  ce6ad2aa
+
+Counts: confirmed 20; fixed 18 whole, 2 partly (their remainders to the tracker); tracker 2 rows; dismissed 0; deferred 0.
