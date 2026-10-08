@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-agents
+command: pnpm e2e:agents
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:36:14Z
+load at start: { 16.15 16.26 17.06 }
+summary:
+  23 passed (59.7s)
+exit: 0

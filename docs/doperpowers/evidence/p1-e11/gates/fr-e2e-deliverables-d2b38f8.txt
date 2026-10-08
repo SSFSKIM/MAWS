@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-deliverables
+command: pnpm e2e:deliverables
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:37:45Z
+load at start: { 15.46 15.94 16.85 }
+summary:
+  10 passed (48.7s)
+exit: 0

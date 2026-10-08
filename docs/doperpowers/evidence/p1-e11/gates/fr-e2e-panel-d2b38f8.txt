@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-panel
+command: pnpm e2e:panel
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:29:13Z
+load at start: { 11.90 11.99 16.27 }
+summary:
+  23 passed (43.3s)
+exit: 0

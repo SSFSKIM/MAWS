@@ -1,0 +1,7 @@
+E11 M4.2 F-R gate: typecheck
+command: pnpm typecheck
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:22:52Z
+load at start: { 12.00 17.51 19.99 }
+summary:
+exit: 0

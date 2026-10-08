@@ -1,0 +1,10 @@
+E11 M4.2 F-R gate: units
+command: pnpm exec vitest run src/renderer src/shared --maxWorkers=4
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:24:07Z
+load at start: { 10.70 15.85 19.15 }
+summary:
+ Test Files  394 passed | 1 skipped (395)
+      Tests  5651 passed | 1 skipped (5652)
+Type Errors  no errors
+exit: 0

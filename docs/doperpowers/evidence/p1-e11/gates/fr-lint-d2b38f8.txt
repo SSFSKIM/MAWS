@@ -1,0 +1,7 @@
+E11 M4.2 F-R gate: lint
+command: pnpm lint
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:23:40Z
+load at start: { 11.15 16.40 19.44 }
+summary:
+exit: 0

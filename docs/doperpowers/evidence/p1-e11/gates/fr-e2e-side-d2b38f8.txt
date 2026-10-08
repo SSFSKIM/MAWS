@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-side
+command: pnpm e2e:side
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:30:34Z
+load at start: { 17.30 13.59 16.49 }
+summary:
+  8 passed (42.6s)
+exit: 0

@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-c7
+command: pnpm e2e:c7
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:32:01Z
+load at start: { 28.99 17.73 17.76 }
+summary:
+  29 passed (1.2m)
+exit: 0
