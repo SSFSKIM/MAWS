@@ -1,8 +1,7 @@
 // The browser's tab store (E4a execution document, Design §2): main's record of every browser tab, keyed by tab id,
-// each belonging to one session (P-21), with each session's selected tab (what the panel tool shows; what E4c's
-// `browser_tabs select` moves). Every change goes through `update`, which marks the tab's session dirty and sends
-// `browser.tabs.changed` with that session's whole list on the next macrotask, so a page load's dozen changes in a frame
-// reach the renderer once.
+// each belonging to one session (P-21), with each session's selected tab (what the panel tool shows). Every change goes
+// through `update`, which marks the tab's session dirty and sends `browser.tabs.changed` with that session's whole list
+// on the next macrotask, so a page load's dozen changes in a frame reach the renderer once.
 //
 // A tab is *loaded* when it has a view; the view is created when a URL is first loaded into the tab (opened with one,
 // navigated, or resumed), never for an empty or suspended tab alone. At most BROWSER_LOADED_TABS_MAX tabs are loaded

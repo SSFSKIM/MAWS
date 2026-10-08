@@ -1,7 +1,7 @@
 // Downloads (E4a execution document, Design §8; A-31; Decision Log 18): a download is the human's, through the native
 // save dialog (Electron's, drawn above every view) opened at the Downloads folder with the file's name; one started while
-// the agent holds the page is cancelled and reported (`browser.download.refused`, E4c's tool error, and the chrome's
-// notice). Each tab shows one download line at a time (a second replaces it), following the item to done, cancelled or
+// the agent holds the page with no cua lease on it is cancelled and reported (`browser.download.refused` and the
+// chrome's notice). Each tab shows one download line at a time (a second replaces it), following the item to done, cancelled or
 // failed; Reveal in Finder shows the saved file. Under the e2e alone, `MAWS_E2E_SAVE_PATH` names the folder the file is
 // saved into without the dialog. A download from no tab of ours is cancelled.
 //
@@ -79,9 +79,6 @@ export class Downloads {
     } else if (entry.tab.control === 'agent') {
       item.cancel();
       emit('browser.download.refused', { tabId, url: item.getURL(), filename });
-      // E4c start: told in main too, beside the IPC emission: the agent's call that started it answers downloadRefused
-      this.notifyRefused({ tabId, url: item.getURL(), filename });
-      // E4c end
       emit('browser.notice', { appSessionId, tabId, kind: 'downloadRefusedAgent' });
       return;
     }
@@ -110,24 +107,4 @@ export class Downloads {
     this.deps.reveal(download.path);
     return { revealed: true };
   }
-
-  // E4c start: the in-process hook for `browser.download.refused` (E4c execution document, Design §6; Decision Log 36,
-  // 43): main's browser tools listen for the refusal of the tab they act on and turn it into their call's error.
-  private readonly refusedListeners = new Set<(refused: { tabId: string; url: string; filename: string }) => void>();
-
-  onRefused(listener: (refused: { tabId: string; url: string; filename: string }) => void): () => void {
-    this.refusedListeners.add(listener);
-    return () => void this.refusedListeners.delete(listener);
-  }
-
-  private notifyRefused(refused: { tabId: string; url: string; filename: string }): void {
-    for (const listener of [...this.refusedListeners]) {
-      try {
-        listener(refused);
-      } catch (error) {
-        console.error('[browser] a download-refusal listener failed:', error);
-      }
-    }
-  }
-  // E4c end
 }

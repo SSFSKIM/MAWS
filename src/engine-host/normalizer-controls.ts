@@ -13,8 +13,8 @@ import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
-// E4c start
-import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+// E4c start (frozen since the browser tools left the server, P1 A-54)
+import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, parseBrowserToolArguments, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 // E4c end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
@@ -137,7 +137,9 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       if (message.kind !== 'request' || message.method !== 'tools/call') return;
       const { name, args, toolUseId } = toolCallOf(message.params);
       const tool = typeof name === 'string' ? name : '';
-      const admitted = isMawsToolName(tool) && parseToolArguments(tool, args).ok;
+      // E4c: a call of a removed browser tool (P1 A-54) is admitted as the server admitted it then, so a journal written
+      // before the removal maps as it always did
+      const admitted = isMawsToolName(tool) ? parseToolArguments(tool, args).ok : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
       const ask = admitted && tool === 'ask' ? parseToolArguments('ask', args) : null;
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
       remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
@@ -237,7 +239,8 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
   }
   // E2 end
   // E4c start: `maws.browser.action` for an admitted browser tool call the host answered, a success that parses as the
-  // tool's result or a refusal (its text the `error`), so the row's facts come from the journal (E4c Design §10)
+  // tool's result or a refusal (its text the `error`), so the row's facts come from the journal (E4c Design §10). Frozen
+  // for journals written before the tools left the server (P1 A-54).
   if (isBrowserToolName(call.tool)) {
     const action = browserActionOf(call.tool, call.args, isError ? null : json, isError ? text : null);
     if (action !== null) out.emit({ kind: 'maws.browser.action', toolUseId: call.toolUseId, requestId, ...action }, attribution);
@@ -274,7 +277,7 @@ export function mapMawsAskMeta(meta: Record<string, unknown>, out: EventSink, at
 type BrowserAction = Omit<Extract<EventPayload, { kind: 'maws.browser.action' }>, 'kind' | 'toolUseId' | 'requestId'>;
 
 function browserActionOf(tool: BrowserToolName, rawArgs: unknown, json: unknown, error: string | null): BrowserAction | null {
-  const args = parseToolArguments(tool, rawArgs);
+  const args = parseBrowserToolArguments(tool, rawArgs);
   if (!args.ok) return null;
   const call = browserCallOf(tool, args.data);
   let result: BrowserResultFields | null = null;

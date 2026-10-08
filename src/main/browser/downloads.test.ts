@@ -134,24 +134,6 @@ describe('Downloads (E4a Design §8; A-31: the human\'s, through a save dialog)'
   });
 });
 
-// E4c start: the in-process hook beside the IPC emission (E4c Design §6; Decision Log 43)
-describe('Downloads.onRefused (E4c)', () => {
-  it("tells main's listeners of a refusal, and only of a refusal", () => {
-    const h = harness();
-    const heard = vi.fn();
-    const stop = h.downloads.onRefused(heard);
-    h.start(new FakeItem('free.bin'));
-    expect(heard).not.toHaveBeenCalled(); // the person's download is theirs
-    h.store.setControl(h.entry.tab.tabId, 'agent');
-    h.start(new FakeItem());
-    expect(heard).toHaveBeenCalledWith({ tabId: h.entry.tab.tabId, url: 'https://a.test/file.bin', filename: 'file.bin' });
-    stop();
-    h.start(new FakeItem());
-    expect(heard).toHaveBeenCalledTimes(1);
-  });
-});
-// E4c end
-
 describe('an agent\'s download through cua (E13: the in-app browser spec of 2026-10-08, "Downloads")', () => {
   const agentRoute = (leased = true) => {
     const ends: unknown[] = [];

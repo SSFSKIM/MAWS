@@ -2,15 +2,15 @@ import { EventEmitter } from 'node:events';
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '@shared/browser/dialog';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabStore, type TabEntry } from '../tabs';
 import { DIALOG_BOUND_WINDOW_MS, PageDialogs, routeDialog, wrapRunDialog, type RunDialogInfo } from './dialogs';
 
 // The `-run-dialog` wrap (E4c Decision Log 33, 35 and A-42's conditions 1 to 4; Decision Log 44 (a), 60): the guard (one
-// listener, Electron's own, or no wrap), the routing table, the agent's buffer `take` drains, the never-placed tab's
-// `dialogAnswered` held until it is shown, and the bound on an adopted pop-up's repeated dialogs.
+// listener, Electron's own, or no wrap), the routing table, the agent-held tab's defaults, the never-placed tab's
+// `dialogAnswered` held until it is shown, the bound on an adopted pop-up's repeated dialogs, and cua's held route.
 
 const A = 'App-A' as AppSessionId;
 type Callback = (accept: boolean, text: string) => void;
@@ -130,8 +130,8 @@ describe('wrapRunDialog: the guard (A-42 condition 4)', () => {
   });
 });
 
-describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 68)', () => {
-  it('answers an agent-held tab\'s alert and confirm with the page\'s defaults, never natively, and keeps them for the next result', () => {
+describe('PageDialogs: an agent-held tab with no lease (A-42 condition 2)', () => {
+  it('answers its alert and confirm with the page\'s defaults, never natively, with no notice', () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.store.setControl(entry.tab.tabId, 'agent');
@@ -140,53 +140,17 @@ describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 
     expect(alert).toHaveBeenCalledWith(false, '');
     expect(confirm).toHaveBeenCalledWith(false, '');
     expect(wc.native).not.toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([
-      { type: 'alert', message: 'Saved.' },
-      { type: 'confirm', message: 'Leave this page?' },
-    ]);
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
+    expect(h.heldCalls).toEqual([]);
     expect(h.notices()).toEqual([]);
   });
 
-  it('keeps the last ten, each message cut to the cap as plain text', () => {
-    const h = harness();
-    const { entry, wc } = h.open();
-    h.store.setControl(entry.tab.tabId, 'agent');
-    for (let i = 0; i < 12; i++) wc.dialog('alert', `n${i}`);
-    wc.dialog('confirm', `<b>${'x'.repeat(600)}</b>`);
-    const taken = h.dialogs.take(entry.tab.tabId);
-    expect(taken).toHaveLength(BROWSER_DIALOGS_MAX);
-    expect(taken[0]).toEqual({ type: 'alert', message: 'n3' });
-    expect(taken.at(-1)!.message).toHaveLength(BROWSER_DIALOG_MESSAGE_MAX_CHARS);
-    expect(taken.at(-1)!.message.startsWith('<b>xxx')).toBe(true);
-  });
-
-  it('never cuts a message inside a surrogate pair', () => {
-    const h = harness();
-    const { entry, wc } = h.open();
-    h.store.setControl(entry.tab.tabId, 'agent');
-    wc.dialog('alert', `${'x'.repeat(BROWSER_DIALOG_MESSAGE_MAX_CHARS - 1)}😀tail`);
-    expect(h.dialogs.take(entry.tab.tabId)[0]!.message).toBe('x'.repeat(BROWSER_DIALOG_MESSAGE_MAX_CHARS - 1));
-  });
-
-  it('a prompt is left to Electron (unsupported: answered at once, shown nowhere) and not reported', () => {
+  it('a prompt is left to Electron (unsupported: answered at once, shown nowhere)', () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.store.setControl(entry.tab.tabId, 'agent');
     const callback = wc.dialog('prompt');
     expect(wc.native).toHaveBeenCalledTimes(1);
     expect(callback).toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
-  });
-
-  it('forgets a closed tab\'s dialogs', async () => {
-    const h = harness();
-    const { entry, wc } = h.open();
-    h.store.setControl(entry.tab.tabId, 'agent');
-    wc.dialog('alert');
-    h.store.close(entry.tab.tabId);
-    await Promise.resolve();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
   });
 });
 
@@ -210,7 +174,6 @@ describe('PageDialogs: a tab under a cua lease (A-53)', () => {
     expect(alert).toHaveBeenCalledWith(false, ''); // the held route answers with the page's own callback
     wc.dialog('prompt');
     expect(wc.native).toHaveBeenCalledTimes(1);
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]); // nothing for the old tools' results
   });
 
   it('a leased tab the person holds (human, or touched within 3 s) keeps A-42\'s human rows: the placed tab\'s native box', () => {
@@ -258,7 +221,14 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     h.place(entry, false);
     h.place(entry);
     expect(h.notices()).toHaveLength(1);
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]); // the person's, never the agent's
+  });
+
+  it('never cuts a held excerpt inside a surrogate pair', () => {
+    const h = harness();
+    const { entry, wc } = h.open();
+    wc.dialog('alert', `${'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1)}😀tail`);
+    h.place(entry);
+    expect(h.notices()).toEqual([expect.objectContaining({ excerpt: 'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1) })]);
   });
 
   it('a released tab is unplaced too: its dialog is answered rather than raised over a window that does not show it', () => {
@@ -278,7 +248,6 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     expect(wc.dialog('alert')).toHaveBeenCalledWith(false, '');
     expect(wc.dialog('confirm')).toHaveBeenCalledWith(false, '');
     expect(wc.native).not.toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
     expect(h.notices()).toEqual([]);
   });
 });
@@ -303,7 +272,6 @@ describe('PageDialogs: an adopted pop-up\'s repeated dialogs (Decision Log 60)',
     expect(h.wc.dialog('confirm', 'four')).toHaveBeenCalledWith(false, '');
     expect(h.wc.native).toHaveBeenCalledTimes(2);
     expect(h.notices()).toEqual([{ appSessionId: A, tabId: h.entry.tab.tabId, kind: 'dialogAnswered', dialogType: 'alert', excerpt: 'three' }]);
-    expect(h.dialogs.take(h.entry.tab.tabId)).toEqual([]);
   });
 
   it('counts a native dialog from when the person closed it, so a slow loop is still bounded', () => {

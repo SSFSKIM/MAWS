@@ -35,10 +35,10 @@ import { startCommentMode } from './comment';
 // E4d end
 // E4c start
 import type { HostSupervisor } from '../hosts/supervisor';
-import { e2eTabIds, reachableSessions, startBrowserAgent } from './agent';
+import { e2eTabIds, reachableSessions, startAgentPresence } from './agent';
 // E4c end
-// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and M3's control and
-// cursor, shared by cua's server and the old tools (one automation owner per tab)
+// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and the control and
+// cursor it drives (M3); the browser tools it replaced left on 2026-10-08 (M4, P1 A-54)
 import { startCuaBackend, type CuaBackend } from './cua';
 import { TabControls } from './agent/control';
 import { AgentCursor } from './agent/cursor';
@@ -56,9 +56,9 @@ export interface BrowserDeps {
   // The imported Chrome profiles, for a new tab's partition and `browser.profiles.list` alike: `profiles.json` read
   // from disk by default; E4b's block hands its in-memory owner here (Decision Log 40).
   profiles?(): BrowserProfile[];
-  // E4c start: the engine host's events and commands, for the browser tools (E4c Design §4; Decision Log 36); without
-  // them (E4a's own tests) the tools are not started
-  hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch' | 'onState'>;
+  // E4c start: the engine host's events and commands, for the agent's presence (who drives each tab, the cursor, the
+  // dialogs' and parking's agent rules) and an agent download's deliverable; without them (E4a's own tests) none starts
+  hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;
   // E4c end
 }
 
@@ -144,8 +144,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
-  // M3: who drives each tab and the agent's cursor, with the engine host's events (as the tools are); without them (E4a's
-  // own tests) control never moves
+  // M3: who drives each tab and the agent's cursor, with the engine host's events; without them (E4a's own tests) control
+  // never moves
   const controls = hosts ? new TabControls({ store }) : null;
   const cursor = controls ? new AgentCursor({ store, controls }) : null;
   const cua = startCuaBackend({
@@ -193,11 +193,10 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
   const commentMode = startCommentMode({ store, emit, register, userData, env });
   // E4d end
-  // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
-  const agent = hosts
-    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, views, userData, cua, control: controls ?? undefined, cursor: cursor ?? undefined /* E13 */ })
-    : null;
-  if (inspector && agent) inspector.agent = agent.seam;
+  // E4c start: the agent's presence (the dialogs' wrap, parking, the e2e seam's `agent`), re-homed from E4c's browser
+  // tools when they left (the in-app browser spec of 2026-10-08, M4)
+  const presence = controls && cursor ? startAgentPresence({ store, emit, views, controls, cursor, cua }) : null;
+  if (inspector && presence) inspector.agent = presence.seam;
   // E4c end
 
   return {
@@ -209,7 +208,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     stop: () => {
       commentMode.stop(); // E4d
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
-      void agent?.stop(); // E4c: nothing more is answered; every driver's connection closed
+      presence?.dispose(); // E4c
       stopCuaStatus?.(); // E13
       cua.dispose(); // E13: every socket closed and unlinked; each connection's leases let go
       cursor?.dispose(); // E13

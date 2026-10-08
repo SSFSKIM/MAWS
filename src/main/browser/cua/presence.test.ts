@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_AGENT_IDLE_MS } from '@shared/maws/browser';
+import { BROWSER_AGENT_IDLE_MS } from '@shared/browser/tab';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { TabControls } from '../agent/control';
 import { TabStore } from '../tabs';

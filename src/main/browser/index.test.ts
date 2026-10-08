@@ -321,8 +321,8 @@ describe('startBrowser wires comment mode (E4d)', () => {
   });
 });
 // E4d end
-// E4c start: the browser tools started inside startBrowser (E4c Design §4; Decision Log 36)
-describe('startBrowser: the browser tools (E4c)', () => {
+// E4c start: the agent's presence started inside startBrowser (E4c Design §4; Decision Log 36; P1 A-54)
+describe("startBrowser: the agent's presence (E4c's, re-homed when the browser tools left; P1 A-54)", () => {
   const fakeHosts = () => {
     const events = new Map<string, unknown>();
     return {
@@ -333,27 +333,25 @@ describe('startBrowser: the browser tools (E4c)', () => {
           return () => void events.delete(name);
         }),
         dispatch: vi.fn(async () => ({ ok: true })),
-        onState: vi.fn(() => () => {}),
       },
     };
   };
 
-  it("subscribes to the engine host's browser requests only when it is given the hosts, and stops at stop", () => {
+  it("listens to the engine host's session status only (no browser request any more), and stops at stop", () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
-    expect([...events.keys()]).toEqual(['session.status', 'maws.browser.request', 'maws.browser.cancel']); // E13's status hook first
-    expect(hosts.onState).toHaveBeenCalledWith('engine-host', expect.any(Function));
+    expect([...events.keys()]).toEqual(['session.status']); // E13's status hook
     browser.stop();
     expect(events.size).toBe(0);
   });
 
-  it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', async () => {
+  it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', () => {
     const { hosts } = fakeHosts();
     const e2e = start(fakeIndex([A]).index, { env: { MAWS_E2E: '1' }, hosts: hosts as never });
-    expect(e2e.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).toBe('b_000000000001');
-    const answer = await globalThis.__maws_browser!.agent!.run(A, 'browser_tabs', { action: 'list' });
-    expect(answer).toMatchObject({ ok: true, result: { tabs: [{ tabId: 'b_000000000001' }] } });
+    const { tabId } = e2e.store.open({ appSessionId: A, url: null, select: true }).tab;
+    expect(tabId).toBe('b_000000000001');
+    expect(globalThis.__maws_browser!.agent!.control(tabId)).toMatchObject({ control: 'idle' });
     e2e.stop();
     const plain = start(fakeIndex([A]).index, { hosts: hosts as never });
     expect(plain.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).not.toBe('b_000000000001');

@@ -6,8 +6,7 @@
 //
 // - A connection reaches its app session's tabs and its parent's (P-24); any other id answers Chrome's `No tab with id`.
 // - `debugger.attach` takes a lease on the tab's TabDebugger. A tab reserved to another live connection, or leased to
-//   one, is refused (`Tab is held by another agent session`), and so is a tab the old maws tools drive (one automation
-//   owner per tab). `{targetId}` names a child the tab's auto-attach announced: recorded, no second attachment.
+//   one, is refused (`Tab is held by another agent session`): one automation owner per tab. `{targetId}` names a child the tab's auto-attach announced: recorded, no second attachment.
 // - `debugger.sendCommand` passes through the filter (filter.ts). `Target.closeTarget` and `Page.close` close the tab
 //   through the store, for a tab reserved to this connection only: a person's tab is never closed by a primitive.
 // - Each command is held until its reply, and cancelled (`Command cancelled: <why>`) at its deadline, when its tab is
@@ -52,7 +51,6 @@ export const ERRORS = {
   targetNotAttached: (targetId: unknown) => `Debugger is not attached to the target with id: ${String(targetId)}.`,
   heldElsewhere: 'Tab is held by another agent session',
   notOwned: 'Tab is not owned by this agent session',
-  toolsDrive: 'Tab is driven by the maws tools',
   notLoaded: (tabId: unknown) => `Tab ${String(tabId)} could not be loaded`,
   cancelled: (why: string) => `Command cancelled: ${why}`,
 } as const;
@@ -302,7 +300,7 @@ export class CuaConnection {
     if (!entry.view || !dbg) fail(ERRORS.notLoaded(debuggee.tabId));
     const lease = await dbg!.lease();
     const stale = this.closed || this.ctx.store.entry(tabId) !== entry || entry.debugger !== dbg || this.leases.has(tabId);
-    if (stale || this.ctx.claims.heldByOther(tabId, this) || dbg!.heldBy('driver')) {
+    if (stale || this.ctx.claims.heldByOther(tabId, this)) {
       lease.release();
       if (stale && this.leases.has(tabId)) return { alreadyHeld: true };
       this.refuseHeld(entry);
@@ -653,7 +651,6 @@ export class CuaConnection {
 
   private refuseHeld(entry: TabEntry): void {
     if (this.ctx.claims.heldByOther(entry.tab.tabId, this)) fail(ERRORS.heldElsewhere);
-    if (entry.debugger?.heldBy('driver')) fail(ERRORS.toolsDrive);
   }
 
   private notify(method: string, params: unknown): void {

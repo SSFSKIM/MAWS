@@ -27,6 +27,7 @@ export const BrowserControlSchema = z.enum(['idle', 'agent', 'human']);
 export type BrowserControl = z.infer<typeof BrowserControlSchema>;
 
 export const BROWSER_HANDBACK_IDLE_MS = 3000; // E4c: the human's control lapses after this long without input
+export const BROWSER_AGENT_IDLE_MS = 10_000; // E4c: `control: 'agent'` lapses to idle this long after the agent's last action
 export const BROWSER_LOADED_TABS_MAX = 12; // loaded tabs across the app (Design §2; Decision Log 6)
 export const BROWSER_TABS_MEMORY_MAX_MIB = 2048; // the soft cap on loaded tabs' sampled working sets
 export const BROWSER_DENIED_MAX = 8; // a document's denied permission requests kept for the banner

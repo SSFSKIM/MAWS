@@ -35,9 +35,7 @@ describe('X9: the maws server and its seven tools', () => {
     expect(MAWS_SERVER_NAME).toBe('maws');
     expect(MAWS_TOOL_NAMES).toEqual([
       'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
-      // E4c start: the six browser tools (E4c execution document, Design §2)
-      'browser_tabs', 'browser_navigate', 'browser_snapshot', 'browser_act', 'browser_eval', 'browser_screenshot',
-      // E4c end
+      // E4c's six browser tools left on 2026-10-08 (P1 A-54): none of them, and no other tool moved
     ]);
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
     expect(mawsServerInfo('0.9.0')).toEqual({ name: 'maws', version: '0.9.0' });
@@ -75,14 +73,6 @@ describe('X9: the maws server and its seven tools', () => {
       ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
       ['artifact_list', { readOnlyHint: true, openWorldHint: false, title: 'List artifacts' }],
       ['artifact_screenshot', { readOnlyHint: true, openWorldHint: false, title: 'Screenshot artifact' }],
-      // E4c start: navigate, act and eval change the page (A-31), so the permission modes gate them
-      ['browser_tabs', { readOnlyHint: true, openWorldHint: false, title: 'Browser tabs' }],
-      ['browser_navigate', { readOnlyHint: false, openWorldHint: false, title: 'Browser navigate' }],
-      ['browser_snapshot', { readOnlyHint: true, openWorldHint: false, title: 'Browser snapshot' }],
-      ['browser_act', { readOnlyHint: false, openWorldHint: false, title: 'Browser act' }],
-      ['browser_eval', { readOnlyHint: false, openWorldHint: false, title: 'Browser eval' }],
-      ['browser_screenshot', { readOnlyHint: true, openWorldHint: false, title: 'Browser screenshot' }],
-      // E4c end
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });
@@ -274,15 +264,14 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.notRecorded('artifact_update', '/r/x.html', 'ENOSPC')).toBe('artifact_update: /r/x.html was not recorded: ENOSPC');
     expect(TOOL_ERRORS.deliverableNotFound('d1')).toBe('show_pane: no deliverable "d1" in this session');
     expect(TOOL_ERRORS.deliverableUnreadable('d1', 'EIO')).toBe('show_pane: could not read deliverable "d1": EIO');
-    expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot, browser_tabs, browser_navigate, browser_snapshot, browser_act, browser_eval, browser_screenshot'); // E4c: thirteen
+    expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot'); // E4c: thirteen; P1 A-54: seven again
   });
 });
 // E2 end
-// E4a start: the browser pane's refusal, which E4c's browser tools reuse under their own names
+// E4a start: the browser pane's refusal
 describe('E4a: the browser refusal', () => {
-  it('names the refused target and, by default, show_pane', () => {
+  it('names the refused target and show_pane', () => {
     expect(TOOL_ERRORS.navigationRefused('file:///etc/hosts')).toBe('show_pane: MAWS opens only http and https pages in its browser; refused "file:///etc/hosts"');
-    expect(TOOL_ERRORS.navigationRefused('javascript:1', 'show_pane')).toBe('show_pane: MAWS opens only http and https pages in its browser; refused "javascript:1"');
   });
 });
 // E4a end

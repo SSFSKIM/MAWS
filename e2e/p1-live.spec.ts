@@ -9,9 +9,9 @@
 //                          record. 2 a comment picked through the pick overlay goes to a Side thread, which answers in the
 //                          Side pane and sums itself up in the parent. 3 Send to main steers the parent mid-turn.
 //                          4 `/btw` answers in the Side pane. One app and one parent across the four (serial).
-//   S4 (item 7)          5 E4c's recording prompt against the real browser on E4c's server. 6 skipped: E4d's M5 proved
-//                          the live anchor resolution (A-49; Decision Log 9 and 20). 7 no engine turn: the OOPIF page of
-//                          the owner's step F (e2e/support/oopif-page.ts) snapshotted through `__maws_browser.agent.run`.
+//   S4 (item 7)          retired on 2026-10-08 with the browser tools it drove (P1 A-54; the cases ran green in E11,
+//                          evidence/p1-e11/live-s4.txt); cua_repl's route is proven by the in-app browser spec's M5.
+//                          Its budget still carries the A-47 case.
 //   S6 (the C3 stall row) 8 ten row Resumes, each in a fresh app launch, each bounded 30 s to first output. 8t ten
 //                          `claude -p --resume` of the same session from a terminal under its scratch home, the same bound.
 //   S2 (b, c, d)         the listing's Message between two sessions, a peer message into a terminal session and the teammate
@@ -77,16 +77,12 @@ import { ownerPlugins } from '../test/support/claude-env';
 import { compareA15 } from '../test/support/owner-file';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
-import { browserIn, openBrowser, pageAt, type BrowserScene } from './support/browser-scene';
-import { agentOk, cursorMessages, refIn } from './support/browser-tools-scene';
-import { ORDER_REFERENCE, startBrowserToolsServer } from './support/browser-tools-server';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
-import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -121,16 +117,6 @@ const PROMPTS = {
   slow: 'Run the Bash command `sleep 25; echo SLEPT` yourself, in the foreground (never in the background, never through an agent), then reply with its output.',
   steer: 'When you reply, add the word STEER_SEEN at the end.',
   btw: 'In one word: what was the background colour of the artifact’s first version?',
-  // E4c's recording prompt (E4c execution document, Design §13; test/live/maws-browser.live.test.ts), verbatim
-  browser:
-    'Use the MAWS browser tools, calling each tool yourself, one after another, never through an agent. ' +
-    'First call mcp__maws__browser_tabs with action "open" and url "http://127.0.0.1:17391/form.html" and note the tabId it returns. ' +
-    'Then call mcp__maws__browser_snapshot on that tab and find the refs of the Name field, the Email field and the Submit button. ' +
-    'Then call mcp__maws__browser_act with action "fill" on the Name field with value "Ada Lovelace", then mcp__maws__browser_act with action "fill" on the Email field with value "ada@example.test", then mcp__maws__browser_act with action "click" on the Submit button. ' +
-    'The snapshot shows the Submit button as disabled, but the page enables it by itself once both fields are filled, so click it right after the second fill without taking another snapshot first. ' +
-    'Then call mcp__maws__browser_snapshot again and read the reference number the page shows. ' +
-    'Then call mcp__maws__browser_screenshot on the tab with no target. ' +
-    'Reply with one line: the reference number exactly as shown, and the word "image" if you received a picture.',
   resumeSeed: 'Reply with exactly: OK',
   a47: 'Run the Bash command `touch a47-marker.txt` yourself, never through an agent, then reply DONE.',
 } as const;
@@ -727,124 +713,6 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     expect.soft(answer).toMatch(V1.word);
     await shoot(l, '10', 'btw');
     note('case 4: PASS');
-  });
-});
-
-// ---- S4: the browser under a live engine ----------------------------------------------------------------------------------
-
-test.describe('S4: the browser (item 7)', () => {
-  const note = sittingLog(OUT, 's4');
-
-  test('5 E4c’s recording prompt against the real browser: the seven rows, the reference, the screenshot record, the agent’s cursor, the Browser tool opened once', async () => {
-    await relayGate(note, 'S4 case 5');
-    refuseOverCap(note, 'S4 case 5', 's4');
-    const sc = caseScratch('s4-browser', ['E11 S4: the browser']);
-    const a15 = a15Reading();
-    opening(note, 'S4 case 5', sc, a15);
-    const server = await startBrowserToolsServer();
-    const live = await openLive(sc, note, a15);
-    try {
-      const [id] = live.ids as [AppSessionId];
-      await show(sceneOf(live), id);
-      await launchSession(live, 'browser', id);
-      const acting: unknown[] = [];
-      await live.page.evaluate(() => {
-        const w = window as unknown as { __e11Acting?: unknown[] };
-        w.__e11Acting = [];
-        window.maws.on('browser.agent.acting', (payload) => w.__e11Acting!.push(payload));
-      });
-      // the agent's cursor in the form's page, looked for while the turn runs (the click loads a page without it)
-      let cursorSeen = false;
-      const formUrl = server.url('/form.html');
-      const lookForCursor = async () => {
-        if (cursorSeen) return;
-        const form = live.maws.app.windows().find((p) => p !== live.page && !p.isClosed() && p.url() === formUrl);
-        if (form) cursorSeen = await form.evaluate(() => document.querySelector('maws-agent-cursor') !== null).catch(() => false);
-      };
-      const allowed: string[] = [];
-      await sendFromComposer(live, id, PROMPTS.browser);
-      await drive(live, live.pane, id, 'the browser turn', async () => {
-        await lookForCursor();
-        return mainTurnsEnded(await events(live, id)).length > 0 && (await idleNow(live, id));
-      }, allowed);
-      acting.push(...(await live.page.evaluate(() => (window as unknown as { __e11Acting: unknown[] }).__e11Acting)));
-
-      const actions = ofKind(await events(live, id), 'maws.browser.action');
-      const reply = mainTurnsEnded(await events(live, id)).at(-1)?.resultText ?? '';
-      const tabId = actions[0]?.tabId ?? null;
-      const cursor = tabId === null ? 0 : await cursorMessages(live as unknown as BrowserScene, tabId);
-      const browserTabs = live.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Browser/ });
-      const shotEvent = actions.find((e) => e.tool === 'browser_screenshot');
-      const recordFile = shotEvent?.deliverableId ? join(live.sc.userData, 'deliverables', id, `${shotEvent.deliverableId}.json`) : null;
-      const screenshotRecord = recordFile && existsSync(recordFile) ? (JSON.parse(readFileSync(recordFile, 'utf8')) as { kind: string; sourceUrl?: string }) : null;
-      note(`case 5: maws.browser.action ${JSON.stringify(actions.map((e) => [e.tool, e.action, e.tabId, e.error]))}; permissions allowed once ${JSON.stringify(allowed)}; reply ${JSON.stringify(reply)}; the screenshot's record ${JSON.stringify(screenshotRecord)}; maws-agent-cursor seen in the form's page: ${cursorSeen}, cursor messages to the tab ${cursor}; browser.agent.acting notices ${acting.length}; Browser tools in the panel ${await browserTabs.count()}`);
-      expect(actions.map((e) => [e.tool, e.action])).toEqual([
-        ['browser_tabs', 'open'],
-        ['browser_snapshot', 'snapshot'],
-        ['browser_act', 'fill'],
-        ['browser_act', 'fill'],
-        ['browser_act', 'click'],
-        ['browser_snapshot', 'snapshot'],
-        ['browser_screenshot', 'screenshot'],
-      ]);
-      expect(actions.every((e) => e.error === null && e.tabId === tabId), 'every call on the one tab, none failed').toBe(true);
-      await expect(live.pane.locator('section.transcript-browser-action')).toHaveCount(7);
-      expect(reply).toContain(ORDER_REFERENCE);
-      expect(screenshotRecord?.kind).toBe('screenshot');
-      expect(screenshotRecord?.sourceUrl?.startsWith(server.url('/done.html')), 'the screenshot is of the order’s confirmation').toBe(true);
-      expect(cursorSeen, 'the agent’s cursor drew in the page (maws-agent-cursor)').toBe(true);
-      await expect(browserTabs, 'the Browser tool opened once').toHaveCount(1);
-      await expect(browserIn(sceneOf(live), 'panel')).toBeVisible();
-      await shoot(live, '7', 'browser-rows');
-      note('case 5: PASS');
-    } finally {
-      await closeLive(live).finally(() => server.close());
-    }
-  });
-
-  test('6 the live anchor resolution: E4d’s own live proof stands', () => {
-    note('case 6: skipped: E4d M5 proved the live anchor resolution in the app (A-49; docs/doperpowers/evidence/p1-e4d/live-proof.txt), Decision Log 9 and 20');
-    test.skip(true, 'E4d’s M5 proved the live anchor resolution in the app (A-49): Decision Log 9 and 20');
-  });
-
-  test('7 the OOPIF page of the owner’s step F: a browser_snapshot through the seam shows a text field inside a cross-site frame (no engine turn)', async () => {
-    const sc = caseScratch('s4-oopif', ['E11 S4: the OOPIF page']);
-    const a15 = a15Reading();
-    opening(note, 'S4 case 7 (no engine turn, no spend)', sc, a15);
-    const served = await startOopifPage();
-    const live = await openLive(sc, note, a15);
-    try {
-      const [id] = live.ids as [AppSessionId];
-      const s = live as unknown as BrowserScene;
-      await show(sceneOf(live), id);
-      await openBrowser(sceneOf(live));
-      const tabId = (await agentOk(s, id, 'browser_tabs', { action: 'open', url: served.page })).result.tabId as string;
-      const snapshot = (await agentOk(s, id, 'browser_snapshot', { tabId })).text!;
-      const ref = refIn(snapshot, 'textbox', OOPIF_FIELD.label);
-      const lines = snapshot.split('\n');
-      const fieldLine = lines.findIndex((line) => line.includes(`textbox "${OOPIF_FIELD.label}" [ref=${ref}]`));
-      const frameLine = lines.slice(0, fieldLine).findLastIndex((line) => /- iframe \[ref=e\d+\]/.test(line));
-      const indent = (line: string) => /^ */.exec(line)![0].length;
-      // the page and the frame as Chromium holds them: the frame's URL, site and process
-      const page = await pageAt(s, served.page);
-      const fieldFrame = page.frames().find((f) => f.url() === served.frame);
-      const webContentsId = await live.maws.app.evaluate((_electron, tab) => (globalThis as unknown as { __maws_browser_comment: { state(tabId: string): { webContentsId: number | null } | null } }).__maws_browser_comment.state(tab)?.webContentsId ?? null, tabId);
-      const frames = webContentsId === null ? [] : await live.maws.app.evaluate(({ webContents }, wc) => webContents.fromId(wc)!.mainFrame.framesInSubtree.map((f) => ({ url: f.url, processId: f.processId })), webContentsId);
-      const main = frames.find((f) => f.url === served.page);
-      const field = frames.find((f) => f.url === served.frame);
-      note(`case 7: page ${served.page} (site ${siteOf(served.page)}) frames ${served.frame} (site ${siteOf(served.frame)}); the field: textbox "${OOPIF_FIELD.label}" (name="${OOPIF_FIELD.name}") at ref ${ref}, under the snapshot's iframe line ${frameLine >= 0 ? JSON.stringify(lines[frameLine]!.trim()) : 'NONE'}; Chromium's frames ${JSON.stringify(frames)}; out of process: ${main && field ? main.processId !== field.processId : 'unknown'}`);
-      note(`case 7: the snapshot:\n${snapshot}`);
-      expect(ref, 'the field’s ref names a frame (f<n>e<m>)').toMatch(/^f\d+e\d+$/);
-      expect(frameLine, 'the field sits under an iframe line').toBeGreaterThanOrEqual(0);
-      expect(indent(lines[fieldLine]!)).toBeGreaterThan(indent(lines[frameLine]!));
-      expect(siteOf(served.frame), 'the frame’s site differs from the page’s').not.toBe(siteOf(served.page));
-      expect(fieldFrame, 'Chromium holds the frame at its URL').toBeDefined();
-      await expect(fieldFrame!.getByRole('textbox', { name: OOPIF_FIELD.label })).toBeVisible();
-      expect.soft(main && field && main.processId !== field.processId, 'the frame is out of process').toBe(true);
-      note(`case 7: PASS: the owner's step F page is ${served.page}, the field "${OOPIF_FIELD.label}" in the frame from ${served.frame}; served by \`node --experimental-strip-types --no-warnings e2e/support/oopif-page.ts\``);
-    } finally {
-      await closeLive(live).finally(() => served.close());
-    }
   });
 });
 

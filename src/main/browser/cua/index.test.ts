@@ -145,15 +145,15 @@ describe('leases, reservations and the command filter', () => {
     expect(await two.request('debugger.attach', { tabId: theirs.id })).toEqual({ alreadyHeld: false });
   });
 
-  it('refuses a tab the old maws tools drive, and the old driver\'s lease is its own', async () => {
+  it('leases a tab another owner holds attached (focus emulation): its implicit lease is its own and outlives the host\'s', async () => {
     const h = harness();
     const tab = h.personTab();
-    await tab.debugger!.attach('driver');
+    await tab.debugger!.attach('focus');
     const a = await h.host();
     const id = await h.idOf(a, tab);
-    await expect(a.request('debugger.attach', { tabId: id })).rejects.toThrow('Tab is driven by the maws tools');
-    tab.debugger!.detach('driver');
     expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false });
+    await a.request('debugger.detach', { tabId: id });
+    expect([tab.debugger!.heldBy('focus'), tab.debugger!.attached]).toEqual([true, true]);
   });
 });
 

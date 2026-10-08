@@ -255,14 +255,14 @@ describe('TabDebugger: leases (MAWS in-app browser spec, "Debugger leases"; A-51
 
   it('an owner\'s attach and detach are one implicit lease: no owner\'s detach ends an attachment another still uses', async () => {
     const h = harness();
-    await h.tabDebugger.attach('driver');
-    await h.tabDebugger.attach('driver'); // idempotent per owner
+    await h.tabDebugger.attach('shared');
+    await h.tabDebugger.attach('shared'); // idempotent per owner
     await h.tabDebugger.attach('focus');
     const cua = await h.tabDebugger.lease();
-    expect([h.tabDebugger.leases, h.tabDebugger.heldBy('driver'), h.tabDebugger.heldBy('focus')]).toEqual([3, true, true]);
-    h.tabDebugger.detach('driver');
-    h.tabDebugger.detach('driver');
-    expect([h.tabDebugger.heldBy('driver'), h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([false, 0, true]);
+    expect([h.tabDebugger.leases, h.tabDebugger.heldBy('shared'), h.tabDebugger.heldBy('focus')]).toEqual([3, true, true]);
+    h.tabDebugger.detach('shared');
+    h.tabDebugger.detach('shared');
+    expect([h.tabDebugger.heldBy('shared'), h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([false, 0, true]);
     cua.release();
     expect([h.dbg.detachCalls, h.tabDebugger.attached]).toEqual([0, true]); // focus emulation keeps it
     h.tabDebugger.detach('focus');

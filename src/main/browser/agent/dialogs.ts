@@ -7,8 +7,9 @@
 // a parentless modal that freezes main. CDP's `Page.handleJavaScriptDialog` answers the page but never closes Electron's
 // box, so the one lever is that listener: every tab view's is wrapped at creation (adopted pop-ups included), and the
 // wrapper routes each dialog:
-//   - the agent holds the tab (`control: 'agent'`): `alert` dismissed, `confirm` answered false, and the dialog's type and
-//     message, cut, kept for the agent's result (`take`, drained into the next result naming the tab);
+//   - the agent holds the tab (`control: 'agent'`) with no cua lease on it (the lapse after a lease's release): `alert`
+//     dismissed, `confirm` answered false (until 2026-10-08 the type and message were kept for the browser tools'
+//     result, which left with the tools, P1 A-54);
 //   - no pane places the tab and the agent does not hold it (never placed, or released; the person's): answered with the
 //     same defaults and held, at most ten, until a pane next places the tab, when one `browser.notice` `dialogAnswered`
 //     names the last of them (A-42 condition 3: "this tab" is then the shown one);
@@ -26,12 +27,10 @@
 // native and one line is logged, so an Electron that renames or multiplies the event fails the e2e's alert step loudly
 // rather than freezing. The event is Electron-internal on a version-pinned build (A-42; the tracker's re-verify row).
 import type { WebContents } from 'electron';
-import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
 import type { BrowserControl } from '@shared/browser/tab';
-import type { BrowserDialog } from '@shared/maws/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import { personHolds } from './control';
-import type { AgentDialogs } from './handlers';
 
 export const RUN_DIALOG_EVENT = '-run-dialog';
 export const DIALOG_BOUND_WINDOW_MS = 5_000;
@@ -96,7 +95,7 @@ interface PageDialogState {
 }
 
 export interface PageDialogsDeps {
-  store: Pick<TabStore, 'all' | 'entry' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
+  store: Pick<TabStore, 'all' | 'entry' | 'onViewCreated' | 'onUpdated'>;
   emit: BrowserEmit;
   log(line: string): void;
   now?(): number;
@@ -104,10 +103,9 @@ export interface PageDialogsDeps {
   held?: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
 }
 
-export class PageDialogs implements AgentDialogs {
+export class PageDialogs {
   private readonly states = new WeakMap<TabEntry, PageDialogState>();
   private readonly wrapped = new WeakSet<object>();
-  private readonly agent = new Map<string, BrowserDialog[]>(); // per tab id, until a result reports them
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
@@ -118,19 +116,7 @@ export class PageDialogs implements AgentDialogs {
     this.unhook = [
       store.onViewCreated((entry) => this.install(entry)),
       store.onUpdated((entry) => this.shown(entry)),
-      store.onViewDestroying((entry) =>
-        queueMicrotask(() => {
-          if (store.entry(entry.tab.tabId) !== entry) this.agent.delete(entry.tab.tabId); // closed: nothing to report to
-        }),
-      ),
     ];
-  }
-
-  // AgentDialogs: the dialogs answered for the agent on this tab since its last result, forgotten once taken.
-  take(tabId: string): BrowserDialog[] {
-    const dialogs = this.agent.get(tabId) ?? [];
-    this.agent.delete(tabId);
-    return dialogs;
   }
 
   dispose(): void {
@@ -184,12 +170,8 @@ export class PageDialogs implements AgentDialogs {
     const dialogType = type as 'alert' | 'confirm';
     const message = info.messageText ?? '';
     switch (route) {
-      case 'agent': {
-        const kept = this.agent.get(entry.tab.tabId) ?? [];
-        kept.push({ type: dialogType, message: cut(message, BROWSER_DIALOG_MESSAGE_MAX_CHARS) });
-        this.agent.set(entry.tab.tabId, kept.slice(-BROWSER_DIALOGS_MAX));
+      case 'agent':
         return;
-      }
       case 'hidden':
         state.held.push({ type: dialogType, excerpt: cut(message, BROWSER_DIALOG_EXCERPT_MAX_CHARS) });
         state.held = state.held.slice(-BROWSER_DIALOGS_MAX);

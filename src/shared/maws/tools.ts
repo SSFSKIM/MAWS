@@ -5,19 +5,14 @@
 // skills target these names and shapes: they change only by a dated line in the P1 spec's Decision Log (A-1).
 // E2 appends the four artifact tools (E2 execution document, Design §6 and Interfaces "X9 additions"), listed from the
 // first `tools/list` (Decision Log 3), each with its own annotations (Decision Log 4).
-// E4c appends the six browser tools from `./browser` (E4c execution document, Design §2), after the artifact tools.
+// E4c appended six browser tools after the artifact tools; they left the server on 2026-10-08 (P1 A-54: cua_repl drives
+// the in-app browser), and `./browser` keeps their names and schemas only to read journals written before.
 import * as z from 'zod';
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
-// E4c start
-import { BROWSER_TOOL_ERRORS, BROWSER_TOOL_NAMES, BROWSER_TOOLS, type BrowserToolName } from './browser';
-// E4c end
 
 export const MAWS_SERVER_NAME = 'maws';
 export const MAWS_TOOL_NAMES = [
   'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
-  // E4c start
-  ...BROWSER_TOOL_NAMES,
-  // E4c end
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -244,9 +239,6 @@ export const MAWS_TOOLS = {
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
   // E2 end
-  // E4c start
-  ...BROWSER_TOOLS,
-  // E4c end
 } as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
 
 export interface MawsToolListEntry {
@@ -295,15 +287,10 @@ export const TOOL_ERRORS = {
   deliverableUnreadable: (id: string, message: string) => `show_pane: could not read deliverable "${id}": ${message}`, // E2: main refused the read
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
-  // E4c (2026-10-07, E4c Decision Log 31): widened in place to the six browser tools, with their own text
-  appNotOpen: (tool: 'show_pane' | 'artifact_screenshot' | BrowserToolName) =>
-    `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : tool === 'artifact_screenshot' ? 'artifact cannot be captured' : 'browser tools need the MAWS window'}`,
-  // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`); E4c's tools pass their own name
-  navigationRefused: (target: string, tool: MawsToolName = 'show_pane') => `${tool}: MAWS opens only http and https pages in its browser; refused "${target}"`,
+  appNotOpen: (tool: 'show_pane' | 'artifact_screenshot') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : 'artifact cannot be captured'}`,
+  // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`)
+  navigationRefused: (target: string) => `show_pane: MAWS opens only http and https pages in its browser; refused "${target}"`,
   // E4a end
-  // E4c start: the browser tools' refusals (`./browser`), each naming the calling tool
-  ...BROWSER_TOOL_ERRORS,
-  // E4c end
 } as const;
 
 function issuesText(error: z.ZodError): string {

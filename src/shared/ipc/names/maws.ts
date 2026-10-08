@@ -4,12 +4,10 @@
 export const commands = [
   'maws.asks.list', 'maws.ask.answer', 'maws.pane.answer',
   'maws.artifact.captured', // E2
-  'maws.browser.answer', 'maws.browser.waiting', // E4c
   'maws.download.recorded', // E13
 ] as const;
 
 export const events = [
   'maws.pane.show',
   'maws.artifact.capture', // E2
-  'maws.browser.request', 'maws.browser.cancel', 'maws.browser.progress', // E4c
 ] as const;

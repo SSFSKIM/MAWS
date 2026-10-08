@@ -1,6 +1,6 @@
 // The tab's one `webContents.debugger` attachment (E4a execution document, Design §10; A-19, A-33; Decision Log 19),
-// shared by every later piece that speaks CDP to a page: E4c's tool bridge, E4b's CHIPS import, E4d's crop, and MAWS's
-// own focus emulation (visibility.ts). It is Playwright-agnostic and never speaks WebSocket; E4c's bridge sits on it.
+// shared by every later piece that speaks CDP to a page: cua's primitive server (E13; E4c's tool bridge until
+// 2026-10-08), E4b's CHIPS import, E4d's crop, and MAWS's own focus emulation (visibility.ts). It never speaks WebSocket.
 //
 // `send` is the only way a command reaches the page: the raw debugger is never handed out. That is what makes the input
 // attribution sound (`findings-pass2.txt:143-170`): every `Input.*` command, the tools' and MAWS's own, enters the
@@ -16,9 +16,10 @@
 // Leases (the in-app browser spec of 2026-10-08, "Debugger leases"; P1 A-51): the attachment is counted, not owned. A
 // lease attaches when nothing is attached and the attachment ends when the last lease is released, so no holder's
 // release ends an attachment another holder still uses. cua's primitive server takes a lease per tab it drives; the
-// older holders (E4c's Playwright driver, focus emulation) hold one implicit lease each through `attach(owner)` and
-// `detach(owner)`. Leases count attachment, not authority: CDP state belongs to the one attachment, so whoever drives a
-// tab is decided above this class (one automation owner per tab). `end` is the store's: the page is going (closed,
+// older holders (focus emulation, and a plain `attach()` as `shared`) hold one implicit lease each through
+// `attach(owner)` and `detach(owner)` (E4c's Playwright driver held one too until it left on 2026-10-08, P1 A-54).
+// Leases count attachment, not authority: CDP state belongs to the one attachment, so whoever drives a tab is decided
+// above this class (one automation owner per tab). `end` is the store's: the page is going (closed,
 // suspended, crashed), so the attachment ends whatever is held and every lease with it, as Chromium's own detach does.
 import type { WebContents } from 'electron';
 
@@ -55,7 +56,7 @@ export interface DebuggerLease {
 }
 
 // The holders of an implicit lease, each through `attach(owner)` / `detach(owner)`.
-export type DebuggerOwner = 'shared' | 'driver' | 'focus';
+export type DebuggerOwner = 'shared' | 'focus';
 
 export class TabDebugger {
   private connection: Promise<void> | null = null; // the attachment, made or being made

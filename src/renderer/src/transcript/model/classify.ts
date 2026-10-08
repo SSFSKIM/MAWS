@@ -3,6 +3,7 @@
 // names are rows of another kind rather than cells.
 import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, type MawsToolName } from '@shared/maws/tools'; // E1
+import type { BrowserToolName } from '@shared/maws/browser'; // E4c
 import type { ToolCategory, ToolClassification } from './rows';
 
 export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action';
@@ -14,13 +15,17 @@ export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
   artifact_create: `mcp__${MAWS_SERVER_NAME}__artifact_create`, artifact_update: `mcp__${MAWS_SERVER_NAME}__artifact_update`,
   artifact_list: `mcp__${MAWS_SERVER_NAME}__artifact_list`, artifact_screenshot: `mcp__${MAWS_SERVER_NAME}__artifact_screenshot`,
   // E2 end
-  // E4c start: the browser tools (each call a `browser_action` row)
-  browser_tabs: `mcp__${MAWS_SERVER_NAME}__browser_tabs`, browser_navigate: `mcp__${MAWS_SERVER_NAME}__browser_navigate`,
-  browser_snapshot: `mcp__${MAWS_SERVER_NAME}__browser_snapshot`, browser_act: `mcp__${MAWS_SERVER_NAME}__browser_act`,
-  browser_eval: `mcp__${MAWS_SERVER_NAME}__browser_eval`, browser_screenshot: `mcp__${MAWS_SERVER_NAME}__browser_screenshot`,
-  // E4c end
 };
 // E1 end
+
+// E4c start: the six browser tools' names as tool uses carried them (each call a `browser_action` row). Frozen: the tools
+// left the `maws` server on 2026-10-08 (P1 A-54), and these names classify only journals and fixtures written before.
+export const HISTORICAL_BROWSER_TOOL_USE: Readonly<Record<BrowserToolName, string>> = Object.freeze({
+  browser_tabs: 'mcp__maws__browser_tabs', browser_navigate: 'mcp__maws__browser_navigate',
+  browser_snapshot: 'mcp__maws__browser_snapshot', browser_act: 'mcp__maws__browser_act',
+  browser_eval: 'mcp__maws__browser_eval', browser_screenshot: 'mcp__maws__browser_screenshot',
+});
+// E4c end
 
 // E13 start: the cua plugin's `js` tool (the in-app browser spec of 2026-10-08, "Action rows"), as the engine names it
 // when the plugin is installed and when cua_repl is registered by hand. The agent's browser work arrives as these calls,
@@ -46,13 +51,8 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   [MAWS_TOOL_USE.artifact_create]: 'artifact',
   [MAWS_TOOL_USE.artifact_update]: 'artifact',
   // E2 end
-  // E4c start: every browser tool call is a browser action row (E4c execution document, Design §10)
-  [MAWS_TOOL_USE.browser_tabs]: 'browser_action',
-  [MAWS_TOOL_USE.browser_navigate]: 'browser_action',
-  [MAWS_TOOL_USE.browser_snapshot]: 'browser_action',
-  [MAWS_TOOL_USE.browser_act]: 'browser_action',
-  [MAWS_TOOL_USE.browser_eval]: 'browser_action',
-  [MAWS_TOOL_USE.browser_screenshot]: 'browser_action',
+  // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
+  ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),
   // E4c end
 };
 

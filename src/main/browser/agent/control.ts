@@ -1,28 +1,27 @@
-// Who drives a tab's page (E4c execution document, Design §8's table; A-31, A-33; Decision Log 4, 27): `idle`, the
-// agent's (`agent`, from the moment an action passes its pause point or a load starts), or the person's (`human`, when
-// their input conflicts with the agent's use). `TabStore.setControl` is the only transition (it stamps `controlSince` and
-// emits `browser.control.changed`); E4a's chrome makes one of its own, Hand back (`human` to `idle`), which this module
-// observes through the store like any other change.
+// Who drives a tab's page (E4c execution document, Design §8's table; A-31, A-33; Decision Log 4, 27; since the in-app
+// browser spec of 2026-10-08, the agent is cua's, through a debugger lease, cua/presence.ts): `idle`, the agent's
+// (`agent`, from the agent's first acting command), or the person's (`human`, when their input conflicts with the agent's
+// use). `TabStore.setControl` is the only transition (it stamps `controlSince` and emits `browser.control.changed`); E4a's
+// chrome makes one of its own, Hand back (`human` to `idle`), which this module observes through the store like any
+// other change.
 //
-// The inputs: E4a's input seam (`entry.input.on`, the classifier's `{ kind, source }`), the handlers' action start
-// (`markActing`) and end (`actionEnded`), the request queue's pending count (`requestPending`), and two timers:
+// The inputs: E4a's input seam (`entry.input.on`, the classifier's `{ kind, source }`), the agent's acting command
+// (`markActing`) and its end (`actionEnded`), and two timers:
 //   - the hand-back timer, armed while `human` for the person's last input plus BROWSER_HANDBACK_IDLE_MS (3 s) and
-//     re-armed by every further human input; it returns the tab to `idle`, and waiting actions resume;
-//   - the agent-idle timer, armed for BROWSER_AGENT_IDLE_MS (10 s) when an action ends, so a model thinking between two
-//     calls does not flicker the chrome; it returns the tab to `idle`.
-// Human input takes the page only when it conflicts with the agent: while the agent holds the tab or a request for it is
-// pending or queued. A click on a page no agent holds and no request awaits leaves `idle` (E4a stamps `lastHumanAt`
-// either way), and an action that reaches its pause point within 3 s of such a click enters `human` there and waits out
-// the rest. The agent's own input (CDP, attributed by E4a's table) never takes the page.
+//     re-armed by every further human input; it returns the tab to `idle`, and held commands resume (`whenReleased`);
+//   - the agent-idle timer, armed for BROWSER_AGENT_IDLE_MS (10 s) when an action ends, so an agent thinking between two
+//     commands does not flicker the chrome; it returns the tab to `idle`.
+// Human input takes the page only when it conflicts with the agent: while the agent holds the tab. A click on a page no
+// agent holds leaves `idle` (E4a stamps `lastHumanAt` either way), and an acting command within 3 s of such a click
+// enters `human` at the takeover gate and is held (`personHolds`). The agent's own input (CDP, attributed by E4a's
+// table) never takes the page.
 //
 // While the agent holds the tab its view's background throttling is off (E4-0: a second un-hide path for rAF and
 // timers, lost on navigation, so every action re-asserts it), and it is restored when the agent lets go.
 import type { WebContentsView } from 'electron';
-import { BROWSER_HANDBACK_IDLE_MS, type BrowserControl } from '@shared/browser/tab';
-import { BROWSER_AGENT_IDLE_MS, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, type BrowserControl } from '@shared/browser/tab';
 import type { InputEmission } from '../input';
 import type { TabEntry, TabStore } from '../tabs';
-import type { AgentControl, Waited } from './handlers';
 
 export interface TabControlsDeps {
   store: Pick<TabStore, 'setControl' | 'entry' | 'all' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
@@ -31,25 +30,23 @@ export interface TabControlsDeps {
 
 interface TabControlState {
   seen: BrowserControl; // the control last observed, to tell a transition from any other patch
-  pending: number; // requests for the tab running or queued
   handBack: ReturnType<typeof setTimeout> | null;
   agentIdle: ReturnType<typeof setTimeout> | null;
-  releases: Set<() => void>; // waits at a pause point, released when control leaves `human`
+  releases: Set<() => void>; // held commands, released when control leaves `human`
   unsubscribe(): void; // from the tab's input seam
 }
 
 // The person is using the tab (Design §6 step 3, §8): they hold it, or touched it within the hand-back window though no
-// agent held it. The one statement of the rule: the pause point, and the handlers' "leave the person's tab selected".
+// agent held it. The one statement of the rule: the takeover gate, the dialog route and the activity's navigations.
 export function personHolds(entry: TabEntry, now: number): boolean {
   const { lastHumanAt } = entry.input;
   return entry.tab.control === 'human' || (lastHumanAt !== null && now - lastHumanAt < BROWSER_HANDBACK_IDLE_MS);
 }
 
-// Told after every control transition (`from`: the state it left) and every change of the pending count (`from` is
-// then the current state).
+// Told after every control transition (`from`: the state it left).
 export type ControlListener = (entry: TabEntry, from: BrowserControl) => void;
 
-export class TabControls implements AgentControl {
+export class TabControls {
   private readonly states = new WeakMap<TabEntry, TabControlState>();
   private readonly listeners = new Set<ControlListener>();
   private readonly unhook: (() => void)[];
@@ -62,8 +59,8 @@ export class TabControls implements AgentControl {
     this.unhook = [
       store.onViewCreated((entry) => this.attach(entry)),
       store.onUpdated((entry) => this.observe(entry)),
-      // a closed tab (or one whose session was deleted): nothing may fire into it; a request waiting on it is aborted by
-      // its controller (index.ts) and answers tabClosed
+      // a closed tab (or one whose session was deleted): nothing may fire into it; a command held on it is cancelled by
+      // cua's server
       store.onViewDestroying((entry) => queueMicrotask(() => store.entry(entry.tab.tabId) !== entry && this.forget(entry))),
     ];
   }
@@ -72,7 +69,7 @@ export class TabControls implements AgentControl {
   attach(entry: TabEntry): void {
     if (this.states.has(entry) || this.deps.store.entry(entry.tab.tabId) !== entry) return;
     const unsubscribe = entry.input.on((emission) => this.input(entry, emission));
-    this.states.set(entry, { seen: entry.tab.control, pending: 0, handBack: null, agentIdle: null, releases: new Set(), unsubscribe });
+    this.states.set(entry, { seen: entry.tab.control, handBack: null, agentIdle: null, releases: new Set(), unsubscribe });
   }
 
   onChange(listener: ControlListener): () => void {
@@ -80,31 +77,10 @@ export class TabControls implements AgentControl {
     return () => void this.listeners.delete(listener);
   }
 
-  pending(entry: TabEntry): number {
-    return this.states.get(entry)?.pending ?? 0;
-  }
-
-  // ---- AgentControl (handlers.ts) ---------------------------------------------------------------------------------
-
-  // The pause point (Design §6 step 3): when the person holds the page, or touched it within the last 3 s, the tab is
-  // theirs (the chrome shows "You have the page · Hand back") and the action waits for its release, reported while it
-  // waits; `waitedMs` counts from here (Decision Log 27), in whole milliseconds (Decision Log 44 (b)).
-  async pause(entry: TabEntry, signal: AbortSignal, report: (reason: BrowserWaitReason | null) => void): Promise<Waited> {
-    signal.throwIfAborted();
-    if (!this.personHolds(entry)) return { waitedFor: null, waitedMs: null };
-    if (entry.tab.control !== 'human') this.deps.store.setControl(entry.tab.tabId, 'human');
-    const started = this.now();
-    report('human');
-    try {
-      await this.whenReleased(entry, signal);
-    } finally {
-      report(null);
-    }
-    return { waitedFor: 'human', waitedMs: Math.max(0, Math.round(this.now() - started)) };
-  }
+  // ---- the agent (cua/presence.ts) --------------------------------------------------------------------------------
 
   // Resolves when the tab leaves `human` (the hand-back timer or the chrome's button); at once when it is not there.
-  // Rejects with the signal's reason when the request is aborted first.
+  // Rejects with the signal's reason when the held command is cancelled first.
   whenReleased(entry: TabEntry, signal: AbortSignal): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (signal.aborted) return reject(signal.reason);
@@ -139,12 +115,6 @@ export class TabControls implements AgentControl {
     }, BROWSER_AGENT_IDLE_MS);
   }
 
-  requestPending(entry: TabEntry, delta: 1 | -1): void {
-    const state = this.stateOf(entry);
-    state.pending = Math.max(0, state.pending + delta);
-    this.tell(entry, entry.tab.control);
-  }
-
   // The person is using the tab now (the rule `personHolds` states).
   personHolds(entry: TabEntry): boolean {
     return personHolds(entry, this.now());
@@ -161,7 +131,7 @@ export class TabControls implements AgentControl {
     if (source !== 'human' || this.deps.store.entry(entry.tab.tabId) !== entry) return;
     const state = this.stateOf(entry);
     if (entry.tab.control === 'human') return this.armHandBack(entry, state);
-    if (entry.tab.control === 'agent' || state.pending > 0) this.deps.store.setControl(entry.tab.tabId, 'human'); // observed: the timer is armed there
+    if (entry.tab.control === 'agent') this.deps.store.setControl(entry.tab.tabId, 'human'); // observed: the timer is armed there
   }
 
   // Every patch of the tab passes here; a change of `control` is a transition, whoever made it.
@@ -223,7 +193,7 @@ export class TabControls implements AgentControl {
   // A tab the store no longer has gets a state of its own that nothing keeps (a late call for a closed tab).
   private stateOf(entry: TabEntry): TabControlState {
     this.attach(entry);
-    return this.states.get(entry) ?? { seen: entry.tab.control, pending: 0, handBack: null, agentIdle: null, releases: new Set(), unsubscribe: () => {} };
+    return this.states.get(entry) ?? { seen: entry.tab.control, handBack: null, agentIdle: null, releases: new Set(), unsubscribe: () => {} };
   }
 }
 

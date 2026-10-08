@@ -1,12 +1,10 @@
-// E4c (M3, Design §10): a browser action row on screen. Its one line per tool and action ("Opened example.com",
-// "Clicked button "Submit"", "Snapshot of example.com (24,000 of 47,125 chars)"), the time it took, the waiting line
-// while main reports the person or a sheet holding the action, the disclosure of a snapshot's text or an eval's value,
-// Open tab and a screenshot's Open, a refusal's reason and a cancelled call's line.
+// E4c (M3, Design §10): a browser action row on screen, as a journal written before the browser tools left (P1 A-54)
+// draws it. Its one line per tool and action ("Opened example.com", "Clicked button "Submit"", "Snapshot of example.com
+// (24,000 of 47,125 chars)"), the time it took, the disclosure of a snapshot's text or an eval's value, Open tab and a
+// screenshot's Open, a refusal's reason and a cancelled call's line.
 import type { AppSessionId } from '@shared/graph/ids';
-import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearBrowserProgress, connectBrowserProgress, resetBrowserProgress } from '../../../tools/browser/agent/progress';
-import { installFakeMain } from '../../../test-support/code';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Row } from '../../model/rows';
 import { renderRow } from './test-support';
 
@@ -24,13 +22,7 @@ const row = (over: Partial<BrowserRow>): BrowserRow => ({ ...BASE, ...over });
 const heading = (container: HTMLElement) => container.querySelector('[data-browser-heading]')!.textContent;
 const buttons = (container: HTMLElement) => [...container.querySelectorAll('button')].map((button) => button.textContent);
 
-beforeEach(() => resetBrowserProgress());
-afterEach(() => {
-  cleanup();
-  resetBrowserProgress();
-  vi.useRealTimers();
-  delete (window as { maws?: unknown }).maws;
-});
+afterEach(() => cleanup());
 
 describe('the browser action row', () => {
   it.each<[string, Partial<BrowserRow>, string]>([
@@ -78,44 +70,6 @@ describe('the browser action row', () => {
     expect(container.querySelector('[data-browser-took]')!.textContent).toBe('3.4s · waited 3.0s for you');
     cleanup();
     expect(renderRow(row({ ms: 40 }), { storeKey: APP }).container.querySelector('[data-browser-took]')!.textContent).toBe('40ms');
-  });
-
-  it('while running, reads the waiting line main reports, ticking, and drops it when the wait ends', () => {
-    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
-    vi.setSystemTime(Date.parse('2026-10-07T10:00:12.000Z'));
-    const main = installFakeMain(() => ({ ok: true, value: undefined }));
-    const stop = connectBrowserProgress(main.bridge);
-    const progress = (waiting: 'human' | 'cover' | null) =>
-      act(() => main.emit('maws.browser.progress', { appSessionId: APP, toolUseId: 't1' as never, tabId: TAB, tool: 'browser_act', waiting, since: '2026-10-07T10:00:00.000Z' }));
-    const running = row({ state: 'running', ms: null, url: null, answered: false });
-    const view = renderRow(running, { storeKey: APP });
-    expect(view.container.querySelector('section')!.getAttribute('data-state')).toBe('running');
-    expect(screen.queryByRole('status')).toBeNull();
-    progress('human');
-    expect(screen.getByRole('status').textContent).toBe('Waiting · you have the page · 12s');
-    // scale-review C scalpel-5#2: the ticking time is a timer (live off) inside the status, so the tick is not re-announced
-    expect(within(screen.getByRole('status')).getByRole('timer').textContent).toBe('12s');
-    act(() => vi.advanceTimersByTime(2_000));
-    expect(screen.getByRole('status').textContent).toBe('Waiting · you have the page · 14s');
-    progress('cover');
-    expect(screen.getByRole('status').textContent).toBe('Waiting · a sheet covers the page · 14s');
-    progress(null);
-    expect(screen.queryByRole('status')).toBeNull();
-    stop();
-  });
-
-  it('a row whose result is in reads no waiting line, and lets the store forget the wait', () => {
-    const main = installFakeMain(() => ({ ok: true, value: undefined }));
-    const stop = connectBrowserProgress(main.bridge);
-    act(() => main.emit('maws.browser.progress', { appSessionId: APP, toolUseId: 't1' as never, tabId: TAB, tool: 'browser_act', waiting: 'human', since: '2026-10-07T10:00:00.000Z' }));
-    const view = renderRow(row({ state: 'running', answered: false, ms: null }), { storeKey: APP });
-    expect(screen.getByRole('status')).toBeTruthy();
-    view.rerenderRow(row({}));
-    expect(screen.queryByRole('status')).toBeNull();
-    view.rerenderRow(row({ state: 'running', answered: false, ms: null })); // the store no longer holds it
-    expect(screen.queryByRole('status')).toBeNull();
-    stop();
-    clearBrowserProgress('t1');
   });
 
   it('discloses a snapshot’s text and an eval’s value', () => {

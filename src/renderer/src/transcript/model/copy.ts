@@ -634,8 +634,6 @@ function browserPhrase(row: BrowserActionFacts): BrowserPhrase {
 export const BROWSER_ACTION = {
   failed: (base: string) => `Could not ${base}`,
   cancelled: 'Cancelled, the turn was interrupted',
-  waitingHuman: (elapsed: string) => `Waiting · you have the page · ${elapsed}`,
-  waitingCover: (elapsed: string) => `Waiting · a sheet covers the page · ${elapsed}`,
   waited: (reason: 'human' | 'cover', ms: number) => (reason === 'human' ? `waited ${took(ms)} for you` : `waited ${took(ms)} under a sheet`),
   openTab: 'Open tab',
   open: 'Open',

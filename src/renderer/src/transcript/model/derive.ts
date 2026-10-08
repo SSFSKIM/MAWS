@@ -11,7 +11,7 @@ import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/maws/tools'; // E2
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
-import { MAWS_TOOL_USE } from './classify'; // E2
+import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
@@ -1237,7 +1237,7 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnCont
 // snapshot's size and text, an eval's value, a listing's count); the event, when the journal has one, overrides the
 // fields it carries. A result the engine stopped (an interruption, a denial inside an aborted turn) reads cancelled, as
 // does a call whose turn closed with none; a refusal is an error with its text.
-const BROWSER_TOOL_OF_USE = new Map<string, BrowserToolName>(BROWSER_TOOL_NAMES.map((name) => [MAWS_TOOL_USE[name], name]));
+const BROWSER_TOOL_OF_USE = new Map<string, BrowserToolName>(BROWSER_TOOL_NAMES.map((name) => [HISTORICAL_BROWSER_TOOL_USE[name], name]));
 const ACT_VALUES = new Set(['select', 'press', 'check', 'scroll']); // a fill's value is what was typed: never kept
 
 function browserActionOfCall(use: Event<'tool.use'>): BrowserActionRecord {

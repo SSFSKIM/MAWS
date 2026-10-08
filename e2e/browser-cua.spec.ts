@@ -3,8 +3,8 @@
 // (test/support/cua-fake-host.ts) as cua's host drives it, against a local server on loopback. It replaces the retired
 // browser live test as the in-repo proof that the in-app browser can be driven from outside: a tab created unselected
 // in the session's panel, a page navigated and read, a click dispatched through the lease, a cross-origin frame's child
-// session, the filter, isolation between sessions, one automation owner per tab against the old maws tools, the agent
-// state undone on detach, the emulated Target.closeTarget, and a lease let go when its host disconnects.
+// session, the filter, isolation between sessions, one automation owner per tab between two hosts, the agent state
+// undone on detach, the emulated Target.closeTarget, and a lease let go when its host disconnects.
 // M3's case: takeover and the cursor through a lease (acceptance 8 and 9 through the seam's `sendInput`, `control` and
 // `cursorMessages`): the agent's cursor drawn for `cursor.move` and hidden when the lease goes; the person's click takes
 // the page, an acting command in the same second is refused within 2 s while a reading one passes, and 3 s after the
@@ -47,13 +47,12 @@ function startPages(): Promise<{ origin: string; url(path: string): string; clos
   });
 }
 
-// The e2e seam's members this case reads (globalThis.__maws_browser under MAWS_E2E=1): cua's server and the old tools.
+// The e2e seam's members this case reads (globalThis.__maws_browser under MAWS_E2E=1): cua's server and the agent's
+// presence (the person's stand-in, control and the cursor).
 interface Seam {
   __maws_browser: {
     cua: { socketPathFor(appSessionId: string): string | null; inspect(): Record<string, { connections: number; held: number; leased: string[] }> };
     agent: {
-      run(appSessionId: string, tool: string, args: unknown): Promise<unknown>;
-      driverState(tabId: string): string;
       control(tabId: string): { control: string } | null;
       lastInputs(tabId: string): { kind: string; source: string }[];
       sendInput(tabId: string, event: Record<string, unknown>): boolean;
@@ -64,8 +63,9 @@ interface Seam {
 const seam = (maws: MawsLaunch) => ({
   socketPathFor: (appSessionId: string) => maws.app.evaluate((_electron, id) => (globalThis as unknown as Seam).__maws_browser.cua.socketPathFor(id), appSessionId),
   inspect: () => maws.app.evaluate(() => (globalThis as unknown as Seam).__maws_browser.cua.inspect()),
-  run: (appSessionId: string, tool: string, args: unknown) => maws.app.evaluate((_electron, [id, name, input]) => (globalThis as unknown as Seam).__maws_browser.agent.run(id as string, name as string, input), [appSessionId, tool, args] as const),
-  driverState: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.driverState(tab), tabId),
+  // a tab the person opens in the session's Browser tool (`browser.tabs.open` from the window, as the address field does)
+  open: (appSessionId: string, url: string) =>
+    maws.page.evaluate(([id, address]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean }> } }).maws.invoke('browser.tabs.open', { appSessionId: id, url: address, select: true }), [appSessionId, url] as const),
   control: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.control(tab)?.control ?? null, tabId),
   inputs: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as Seam).__maws_browser.agent.lastInputs(tab).map((i) => `${i.kind}/${i.source}`), tabId),
   sendInput: (tabId: string, event: Record<string, unknown>) => maws.app.evaluate((_electron, [tab, input]) => (globalThis as unknown as Seam).__maws_browser.agent.sendInput(tab as string, input as Record<string, unknown>), [tabId, event] as const),
@@ -99,8 +99,7 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
     expect(host.hello).toMatchObject({ extensionId: 'maws', extensionInstanceId: `maws:${A}`, protocolVersion: 1, profileName: 'MAWS' });
 
     // a tab created unselected (the session's first tab is its selection: nothing else to show), navigated and read
-    const person = await app.run(A, 'browser_tabs', { action: 'open', url: pages.url('/') });
-    expect(person).toMatchObject({ ok: true });
+    expect(await app.open(A, pages.url('/'))).toMatchObject({ ok: true });
     const created = await host.request<{ id: number; active: boolean }>('tabs.create', { url: 'about:blank', group: { key: 's', title: 'cua' } });
     expect(created.active).toBe(false);
     expect(await host.request('debugger.attach', { tabId: created.id })).toEqual({ alreadyHeld: false });
@@ -120,13 +119,9 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
     await expect(send('Browser.getVersion')).rejects.toThrow('Method not allowed: Browser.getVersion');
     await expect(send('Target.createTarget', { url: 'about:blank' })).rejects.toThrow('Method not allowed: Target.createTarget');
 
-    // a cross-origin frame runs while the old tools drive another tab of the session, and its child session is reachable
+    // a cross-origin frame runs, and its child session is reachable
     const listed = await host.request<{ id: number; url: string }[]>('tabs.query');
     const personId = listed.find((t) => t.id !== created.id)!.id;
-    const oldTab = (person as { result: { tabId: string } }).result.tabId;
-    expect(await app.run(A, 'browser_snapshot', { tabId: oldTab })).toMatchObject({ ok: true });
-    expect(await app.driverState(oldTab)).toBe('connected');
-    await expect(host.request('debugger.attach', { tabId: personId })).rejects.toThrow('Tab is driven by the maws tools');
     await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await send('Page.navigate', { url: pages.url('/frames.html') });
     expect(await until(() => evaluate(send, `document.querySelector('#frame').textContent`), (v) => typeof v === 'string' && v.startsWith('child-ran:'))).toMatch(/^child-ran:localhost:/);

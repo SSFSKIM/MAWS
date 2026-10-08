@@ -7,7 +7,7 @@
 //
 // Takeover: before an acting command is marked and dispatched, control's `personHolds` is asked (the tab is `human`, or
 // the person touched it within the 3 s hand-back window while `idle`); a recent touch of an idle tab promotes it to
-// `human` first, as the old tools' pause point does. While `human`, the command waits for the hand-back for at most
+// `human` first, as E4c's tools' pause point did. While `human`, the command waits for the hand-back for at most
 // min(BROWSER_TAKEOVER_HOLD_MS, deadline - TAKEOVER_MARGIN_MS), then is refused with PERSON_USING_TAB; a command whose
 // deadline is already under TAKEOVER_MIN_DEADLINE_MS is refused at once. The vendor caps locator actions at 3 s and the
 // host detaches a tab on its own timeout, so a longer hold would turn the person's touch into a lost tab.
