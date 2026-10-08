@@ -172,7 +172,7 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
   }
 });
 
-test('takeover and the cursor through a lease: cursor.move draws, the person\'s click takes the page, an acting command is refused within 2 s and a reading one passes, 3 s later the same command goes through, letting go hides the cursor', async () => {
+test('takeover and the cursor through a lease: cursor.move draws, a screenshot hides it first, the person\'s click takes the page, an acting command is refused within 2 s and a reading one passes, 3 s later the same command goes through, letting go hides the cursor', async () => {
   const userData = mkdtempSync('/tmp/mcua-e2e-');
   const pages = await startPages();
   const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
@@ -203,6 +203,14 @@ test('takeover and the cursor through a lease: cursor.move draws, the person\'s 
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 80 });
     expect(await app.control(tab)).toBe('agent');
 
+    // an agent's screenshot never carries the cursor's overlay: the cursor is hidden before the capture goes (the spec's
+    // "Cursor", M4 fix wave); the agent's next mouse event draws it again
+    const shown = await app.cursorMessages(tab);
+    expect(await send('Page.captureScreenshot', { format: 'png' })).toHaveProperty('data');
+    expect(await app.cursorMessages(tab)).toBe(shown + 1);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 80 });
+    expect(await app.cursorMessages(tab)).toBe(shown + 2);
+
     // the person clicks the page: theirs at once
     const clickedAt = Date.now();
     expect(await app.sendInput(tab, { type: 'mouseDown', x: 100, y: 80, button: 'left', clickCount: 1 })).toBe(true);
@@ -230,12 +238,12 @@ test('takeover and the cursor through a lease: cursor.move draws, the person\'s 
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 100, y: 80, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 100, y: 80, button: 'left', clickCount: 1 });
     await send('Input.insertText', { text: 'secret-e2e-typed' });
-    await expect.poll(async () => (await heard()).map((a) => a.activity.kind), { timeout: 5_000 }).toEqual(['tabOpened', 'navigated', 'screenshot', 'clicked', 'typed']);
+    await expect.poll(async () => (await heard()).map((a) => a.activity.kind), { timeout: 5_000 }).toEqual(['tabOpened', 'navigated', 'screenshot', 'screenshot', 'clicked', 'typed']);
     const acts = await heard();
     expect(acts.every((a) => a.appSessionId === A)).toBe(true);
     expect(acts[1]!.activity).toMatchObject({ kind: 'navigated', url: pages.url('/') });
-    expect(acts[3]!.activity).toEqual({ kind: 'clicked', x: 100, y: 80, label: 'button Go' });
-    expect(acts[4]!.activity).toEqual({ kind: 'typed', chars: 16 });
+    expect(acts[4]!.activity).toEqual({ kind: 'clicked', x: 100, y: 80, label: 'button Go' });
+    expect(acts[5]!.activity).toEqual({ kind: 'typed', chars: 16 });
     expect(JSON.stringify(acts)).not.toContain('secret-e2e-typed');
 
     // letting go: the tab idle and the cursor hidden

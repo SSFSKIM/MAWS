@@ -357,7 +357,12 @@ export class CuaConnection {
         }
     }
     const sent = method === 'Target.attachToTarget' ? { ...commandParams, flatten: true } : commandParams;
-    return this.hold(leased, deadline, commandClass(method) === 'acting', () => {
+    return this.hold(leased, deadline, commandClass(method) === 'acting', async (self) => {
+      // an agent's screenshot never carries the cursor's overlay (presence.ts); a command cancelled meanwhile is not sent
+      if (method === 'Page.captureScreenshot' && this.ctx.presence) {
+        await this.ctx.presence.beforeCapture(leased.entry);
+        if (!this.held.has(self)) return {};
+      }
       if (session === '') noteToggle(leased.toggles, method, commandParams);
       this.observe(leased, method, commandParams, session);
       return leased.dbg.send(method, sent, session || undefined);

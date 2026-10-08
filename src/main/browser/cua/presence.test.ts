@@ -6,7 +6,7 @@ import { BROWSER_AGENT_IDLE_MS } from '@shared/browser/tab';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { TabControls } from '../agent/control';
 import { TabStore } from '../tabs';
-import { AgentPresence, BROWSER_TAKEOVER_HOLD_MS, PERSON_USING_TAB, PersonUsingTab } from './presence';
+import { AgentPresence, BROWSER_TAKEOVER_HOLD_MS, CURSOR_HIDE_GRACE_MS, PERSON_USING_TAB, PersonUsingTab } from './presence';
 
 // Control by lease and the takeover gate (the in-app browser spec of 2026-10-08, "Who drives the tab", "Takeover",
 // "Cursor"), over MAWS's real TabStore and TabControls with fake timers.
@@ -120,5 +120,27 @@ describe('the takeover gate', () => {
     s.store.setControl(s.entry.tab.tabId, 'idle');
     await vi.advanceTimersByTimeAsync(0);
     expect(s.entry.tab.control).toBe('idle');
+  });
+});
+
+describe("an agent's screenshot never carries the cursor (Design §9; the spec's \"Cursor\", M4 fix wave)", () => {
+  it(`hides the cursor, then waits the overlay's ${CURSOR_HIDE_GRACE_MS} ms grace before the capture may go`, async () => {
+    const { presence, entry, cursor } = stand();
+    let ready = false;
+    const before = presence.beforeCapture(entry).then(() => (ready = true));
+    expect(cursor.hide).toHaveBeenCalledWith(entry);
+    await vi.advanceTimersByTimeAsync(CURSOR_HIDE_GRACE_MS - 1);
+    expect(ready).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await before;
+    expect(ready).toBe(true);
+    expect(CURSOR_HIDE_GRACE_MS).toBe(50);
+  });
+
+  it('a closed tab hides nothing and waits nothing', async () => {
+    const { presence, entry, cursor, store } = stand();
+    store.close(entry.tab.tabId);
+    await presence.beforeCapture(entry);
+    expect(cursor.hide).not.toHaveBeenCalled();
   });
 });

@@ -4,8 +4,8 @@
 // (`aim`: `move` to its box's centre, then `target` with the box, so `fill` and `press`, which move no mouse, still show
 // where the agent is); `hide` follows the agent letting go. Messages go to the tab's own webContents on
 // BROWSER_CURSOR_CHANNEL only, never anywhere else; the preload (Task 3.3) draws them and the page learns nothing it could
-// not see. A screenshot sends none (its capture hides the overlay itself, Design §7). Another holder's CDP use (E4b's
-// import, E4d's crop) draws nothing: only commands sent while `control === 'agent'` are the agent's.
+// not see. An agent's screenshot through cua is preceded by a `hide` (cua/presence.ts, Design §9). Another holder's CDP
+// use (E4b's import, E4d's crop) draws nothing: only commands sent while `control === 'agent'` are the agent's.
 import { BROWSER_CURSOR_CHANNEL, type AgentCursorBox, type AgentCursorMessage } from '@shared/browser/cursor';
 import type { CommandPhase, TabDebugger } from '../debugger';
 import type { TabEntry, TabStore } from '../tabs';

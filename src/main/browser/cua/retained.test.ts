@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BROWSER_CURSOR_CHANNEL } from '@shared/browser/cursor';
-import { PERSON_USING_TAB } from './presence';
+import { CURSOR_HIDE_GRACE_MS, PERSON_USING_TAB } from './presence';
 import { harness, takeDown } from './server.fake';
 
 // What the person sees and keeps while an agent drives a tab through cua (the in-app browser spec of 2026-10-08, M3),
@@ -70,6 +70,31 @@ describe('the takeover gate through a lease', () => {
     await t.host.request('debugger.detach', { tabId: t.id });
     expect(t.entry.tab.control).toBe('idle');
     expect(page.sentToPage.at(-1)).toEqual({ channel: BROWSER_CURSOR_CHANNEL, message: { kind: 'hide' } });
+  });
+
+  it("an agent's screenshot is forwarded only after the cursor's hide and its grace; the next mouse event draws the cursor again", async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 6 });
+    await t.host.request('cursor.move', { tabId: t.id, x: 40, y: 50 });
+    const page = h.page(t.entry);
+    const order: [string, number][] = [];
+    const send = page.send.bind(page);
+    page.send = (channel: string, message: unknown) => {
+      order.push([(message as { kind: string }).kind, Date.now()]);
+      send(channel, message);
+    };
+    const capture = t.cdp.sendCommand.bind(t.cdp);
+    t.cdp.sendCommand = (method: string, params?: unknown, sessionId?: string) => {
+      order.push([method, Date.now()]);
+      return capture(method, params, sessionId);
+    };
+    expect(await t.send('Page.captureScreenshot', { format: 'jpeg' })).toEqual({ echoed: 'Page.captureScreenshot' });
+    const shot = order.filter(([what]) => what === 'hide' || what === 'Page.captureScreenshot');
+    expect(shot.map(([what]) => what)).toEqual(['hide', 'Page.captureScreenshot']);
+    expect(shot[1]![1] - shot[0]![1]).toBeGreaterThanOrEqual(CURSOR_HIDE_GRACE_MS - 5); // timer granularity
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 7, y: 8 });
+    expect(page.sentToPage.at(-1)).toEqual({ channel: BROWSER_CURSOR_CHANNEL, message: { kind: 'move', x: 7, y: 8 } });
   });
 });
 

@@ -14,7 +14,10 @@
 //
 // The cursor: AgentCursor already draws what the agent's mouse commands do while the tab is `agent`; `cursor.move` (the
 // vendor's moveMouse) adds a `move` so the pointer shows where the agent aims before a locator click, and the cursor is
-// hidden when the lease is released.
+// hidden when the lease is released. An agent's screenshot never carries the overlay (Design §9, which E4c's tools kept
+// with a hiding stylesheet and a `hide` before `capturePage`; the spec's "Cursor", M4 fix wave): before a
+// `Page.captureScreenshot` is forwarded the cursor is hidden and the overlay's grace waited out; the agent's next mouse
+// event draws it again.
 import type { AgentCursor } from '../agent/cursor';
 import type { TabControls } from '../agent/control';
 import type { TabEntry, TabStore } from '../tabs';
@@ -23,6 +26,7 @@ export const BROWSER_TAKEOVER_HOLD_MS = 1_500;
 export const TAKEOVER_MARGIN_MS = 100; // a held command answers this long before its own deadline
 export const TAKEOVER_MIN_DEADLINE_MS = 200; // a deadline under this is refused at once while the person holds the tab
 export const PERSON_USING_TAB = 'A person is using this tab; wait and retry';
+export const CURSOR_HIDE_GRACE_MS = 50; // the overlay's `hide` reaches the page before the capture reads the frame (E4c's)
 
 export interface PresenceDeps {
   controls: Pick<TabControls, 'personHolds' | 'markActing' | 'actionEnded' | 'whenReleased'>;
@@ -61,6 +65,13 @@ export class AgentPresence {
   // `cursor.move`: the pointer where the agent aims, unless the person holds the tab.
   cursorMove(entry: TabEntry, x: number, y: number): void {
     if (this.live(entry) && entry.tab.control !== 'human') this.deps.cursor.move(entry, x, y);
+  }
+
+  // Before an agent's screenshot is forwarded: the cursor hidden, and the overlay's grace waited out.
+  async beforeCapture(entry: TabEntry): Promise<void> {
+    if (!this.live(entry)) return;
+    this.deps.cursor.hide(entry);
+    await new Promise((resolve) => setTimeout(resolve, CURSOR_HIDE_GRACE_MS));
   }
 
   // The lease is released (detach, the host's timeout, turn end, disconnect) or lost: the tab is no longer the agent's.
