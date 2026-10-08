@@ -436,7 +436,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
-          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known()) }); // E7: `to` classified against what the transcript knows; the result refines it
+          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
           asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
@@ -446,7 +446,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null, resulted: false });
           items.push({ kind: 'delivery', toolUseId: event.toolUseId });
         } else if (presentation === 'agent_list') { // E7
-          items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id) });
+          items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id, context) });
         } else if (presentation === 'artifact') { // E2
           artifacts.set(event.toolUseId, artifactOfCall(event));
           items.push({ kind: 'artifact', toolUseId: event.toolUseId });
@@ -1152,8 +1152,8 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_
 
 // A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
 // parent's message down (`to_child`, its text as before), to anything else a message to another session (`between`:
-// a peer's name or address, a teammate), refined by its result.
-function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
+// a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
+function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
   const to = str(input.to);
   const message = str(input.message, str(input.content));
@@ -1168,7 +1168,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
     ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerLabel(to, name), preview), // the label the view shows
     peer: {
       sender: null, recipient: { name, address: to }, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
-      result: outcome === null ? 'pending' : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
+      result: outcome === null ? (context.closed ? 'unanswered' : 'pending') : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
       summary: typeof input.summary === 'string' && input.summary.length > 0 ? input.summary : null,
     },
   };
@@ -1187,10 +1187,14 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known
   return { ...base, text: agentMessageCopy('from_child', title, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) };
 }
 
-function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId): RowOf<'agent_list'> {
+function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, context: TurnContext): RowOf<'agent_list'> {
   const text = result === undefined ? '' : result.isError ? toolErrorText(resultText(result.content)) : resultText(result.content);
   const listing = result === undefined ? { self: null, sections: [], notes: [] } : parseListing(text);
-  return { id: rowId.agentList(use.toolUseId), turnId, at: use.at, kind: 'agent_list', toolUseId: use.toolUseId, self: listing.self, sections: listing.sections, notes: listing.notes, raw: text, pending: result === undefined };
+  return {
+    id: rowId.agentList(use.toolUseId), turnId, at: use.at, kind: 'agent_list', toolUseId: use.toolUseId, self: listing.self, sections: listing.sections, notes: listing.notes, raw: text,
+    pending: result === undefined && !context.closed,
+    ...(result === undefined && context.closed && { neverAnswered: true as const }), // E11: as the delivery row's
+  };
 }
 // E7 end
 

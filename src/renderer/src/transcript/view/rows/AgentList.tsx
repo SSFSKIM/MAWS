@@ -38,7 +38,7 @@ export function AgentListRow({ row }: { row: AgentListData }) {
     <section className="transcript-listing" aria-busy={row.pending || undefined}>
       <div className="transcript-lifecycle">
         <MessageIcon />
-        <span>{row.pending ? agentListCopy.pending : row.self !== null ? agentListCopy.self(row.self) : row.notes[0] ?? ''}</span>
+        <span>{row.pending ? agentListCopy.pending : row.neverAnswered ? agentListCopy.neverAnswered : row.self !== null ? agentListCopy.self(row.self) : row.notes[0] ?? ''}</span>
       </div>
       {row.sections.map((section) => (
         <div key={section.title} className="transcript-listing-section" data-section={section.title}>

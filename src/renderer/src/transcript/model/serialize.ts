@@ -63,6 +63,7 @@ function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
 
 function listPart(row: Extract<Row, { kind: 'agent_list' }>): string {
   if (row.pending) return `- ${agentListCopy.pending}`;
+  if (row.neverAnswered) return `- ${agentListCopy.neverAnswered}`; // E11
   if (row.sections.length === 0) return `- Agents: ${row.notes.join(' ')}`;
   const count = (title: string) => row.sections.find((section) => section.title === title)?.count ?? 0;
   return `- ${agentListCopy.serialized(count('Subagents'), count('Teammates'), count('Peer sessions'))}`;

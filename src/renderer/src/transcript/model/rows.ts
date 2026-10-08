@@ -104,7 +104,7 @@ export type Row = RowBase &
     // E3 end
     // E7 start: a `ListAgents` result as the lists it names (E7 execution document, Design §4): pending until the result
     // arrives; `raw` is the result's text, the sections and notes its parse (agent-listing.ts)
-    | { kind: 'agent_list'; toolUseId: ToolUseId; self: string | null; sections: ListingSection[]; notes: string[]; raw: string; pending: boolean }
+    | { kind: 'agent_list'; toolUseId: ToolUseId; self: string | null; sections: ListingSection[]; notes: string[]; raw: string; pending: boolean; neverAnswered?: true /* E11: as the delivery row's */ }
     // E7 end
     // E2 start: an `artifact_create` or `artifact_update` call's row (E2 execution document, Design §9): from the call,
     // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
@@ -144,7 +144,7 @@ export interface PeerMessage {
   replyTo: string | null;
   toolUseId: ToolUseId | null;
   messageUuid: MessageUuid | null;
-  result: 'pending' | 'sent' | 'failed' | null;
+  result: 'pending' | 'sent' | 'failed' | 'unanswered' | null; // E11: 'unanswered', its turn closed with no result
   resultText: string | null;
   summary: string | null;
 }

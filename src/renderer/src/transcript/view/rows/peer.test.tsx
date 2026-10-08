@@ -221,4 +221,20 @@ describe('a ListAgents listing', () => {
     renderRow(row, { storeKey: A });
     expect(screen.getByText('Listing the agents and sessions…')).toBeTruthy();
   });
+
+  it('a listing and a send whose turn closed with no result say they were never answered, not busy (scale-review C scalpel-1#1)', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.toolUse('s1', 'SendMessage', { to: 'peer-c', message: 'waiting' });
+      b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    });
+    const { container } = renderRow(rows.find((r) => r.kind === 'agent_list')!, { storeKey: A });
+    expect(screen.getByText('Listing the agents was never answered')).toBeTruthy();
+    expect(container.querySelector('[aria-busy]')).toBeNull();
+    cleanup();
+    renderRow(rows.find((r) => r.kind === 'agent_message')!, { storeKey: A });
+    expect(screen.getByText('Never answered')).toBeTruthy();
+    expect(screen.queryByText('Sending')).toBeNull();
+  });
 });

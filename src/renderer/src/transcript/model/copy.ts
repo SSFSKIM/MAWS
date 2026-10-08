@@ -451,7 +451,7 @@ export const peerMessageCopy = {
   report: (title: string | null) => `Report from ${title ?? 'agent'}`, // a subagent's hand-back; the report folds under it
   sender: (name: string) => `@ ${name}`, // the row's lead, the address as its tooltip
   recipient: (name: string) => `To @ ${name}`,
-  result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent' } as const, // an outbound send's state
+  result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent', unanswered: 'Never answered' /* E11 */ } as const, // an outbound send's state
   showMessage: 'Show the whole message',
   showReport: 'Show the report',
   hide: 'Hide',
@@ -477,6 +477,7 @@ export const peerMessageCopy = {
 
 export const agentListCopy = {
   pending: 'Listing the agents and sessions…',
+  neverAnswered: 'Listing the agents was never answered', // E11
   self: (self: string) => `This session is ${self}`,
   section: (title: string, count: number) => `${title} · ${count}`,
   message: 'Message',

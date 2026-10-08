@@ -68,7 +68,7 @@ describe('serializeRows', () => {
     expect(markdown).toBe([
       '- Agents: 2 subagents, 0 teammates, 1 peer session',
       '- Agents: Messaging is off.',
-      '- Listing the agents and sessions…',
+      '- Listing the agents was never answered', // its turn ended with no result (scale-review C scalpel-1#1)
       '- Sent to peer-b: first\n  > first\n  > second',
       '- Report from a1\n  > done\n  > all of it',
       '- Sent to peer-c: padded',
