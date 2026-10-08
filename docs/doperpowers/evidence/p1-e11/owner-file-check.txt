@@ -26,3 +26,7 @@ S4 with the A-47 case (2026-10-08, the browser under a live engine, the OOPIF pa
   before 03:24:44Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after  03:25:55Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's delta identical at every reading of cases 5, 7 and A-47;
     again identical at 03:27:51Z after the scratch root was removed)
+S2 (2026-10-08, agents: (a) the agent live suite's steps i, v, x, two runs; (b) to (d) through the P1 live spec; live-s2.txt):
+  before 03:34:15Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the whole projects key set: 129 keys)
+  after  03:56:17Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the whole projects set 129 keys, none added or removed,
+    also after (a)'s run 1 at 03:39:56Z and run 2 at 03:43:32Z; the spec's scratch-scoped delta identical at every reading of (b), (c) and (d))
