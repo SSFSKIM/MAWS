@@ -61,8 +61,10 @@ export interface IssuedPlan {
 }
 
 export function pushArgv({ remote, branch, setUpstream }: { remote: string; branch: string; setUpstream: boolean }): string[] {
-  // The explicit refspec: no option parsing reaches the branch name and no `push.default` rule redirects it.
-  return ['push', '--progress', ...(setUpstream ? ['--set-upstream'] : []), remote, `refs/heads/${branch}:refs/heads/${branch}`];
+  // The explicit refspec: no option parsing reaches the branch name and no `push.default` rule redirects it. No
+  // submodule is pushed whatever the owner's `push.recurseSubmodules` or `submodule.recurse` says: the sheet shows only
+  // this remote's destinations (E11, scale review B scalpel-4#1).
+  return ['push', '--progress', '--recurse-submodules=no', ...(setUpstream ? ['--set-upstream'] : []), remote, `refs/heads/${branch}:refs/heads/${branch}`];
 }
 
 // `head` is the branch, or `<owner>:<branch>` when the branch lives in a fork of the repository (prHead).
@@ -146,6 +148,8 @@ export async function planPush(sources: PlanSources, { remote: asked }: Pick<Scm
   if (isRefusal(status)) return status;
   const branch = status.branch;
   if (branch === null) return refusal('detached', 'HEAD is detached; check out a branch to push it');
+  // E11: an unborn branch has nothing to push; git's own error would only show in the Output after the confirm
+  if (status.head === '') return refusal('unborn', `${branch} has no commits yet; commit first, then push`);
   const upstream = await upstreamOf(sources);
   const remote = await chooseRemote(sources, asked, upstream.remote);
   if (isRefusal(remote)) return remote;

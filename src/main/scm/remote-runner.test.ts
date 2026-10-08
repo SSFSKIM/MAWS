@@ -17,7 +17,7 @@ const PID = 4242;
 
 const plan = (over: Partial<RemotePlan> = {}): RemotePlan => ({
   token: TOKEN, kind: 'push', cwd: '/repo', program: '/opt/homebrew/bin/git',
-  argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin', remoteUrl: 'https://github.com/o/r',
+  argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin', remoteUrl: 'https://github.com/o/r',
   pushUrls: ['https://github.com/o/r'], repository: null, branch: 'main', head: 'abc123', upstream: 'origin/main',
   expiresAt: '2026-10-06T12:05:00.000Z', ...over,
 });
@@ -78,7 +78,7 @@ describe('scm remote runner streams with sequence numbers, caps, cancels, times 
     expect(spawn).toHaveBeenCalledTimes(1);
     const [program, argv, options] = spawn.mock.calls[0];
     expect(program).toBe('/opt/homebrew/bin/git');
-    expect(argv).toEqual(['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main']);
+    expect(argv).toEqual(['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main']);
     expect(Object.keys(options).sort()).toEqual(['cwd', 'detached', 'env', 'stdio']);
     expect(options).toMatchObject({ cwd: '/repo', detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     expect(options.env).toMatchObject({

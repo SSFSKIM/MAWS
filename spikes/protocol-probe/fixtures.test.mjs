@@ -84,24 +84,58 @@ test('pass2 routing: user settings env routes an unrouted process; empty flag-se
 // C8c start: pass-3 fixtures (C2's R4 workspace-diff and worktree captures, C3's live captures). Integrity for every
 // file, as pass 2 checks it; the typed get_workspace_diff shapes are C3's (src/engine-host/conformance/fixtures.test.ts).
 const dir3=new URL('./fixtures/pass3/',import.meta.url);
-for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/'+file+' is ordered NDJSON with correlated replies, provenance and no secrets',()=>{
- const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+// A pass-3 journal's rows checked in order (seqs from either base with no gap, known directions, every response closing
+// a pending request or echoing one byte for byte, no parse or scenario error); answers the requests left open.
+function pass3Open(rows){
  // the probe numbers rows from 1, C3's live relay captures from 0 (their provenance row); either base, then no gap
  // and the engine echoes a host's can_use_tool answer back on its stdout (C3's plan-outcomes): an `in` response that
  // repeats, byte for byte, the `out` response which already closed its request is an echo, not an orphan
- const rows=text.trim().split('\n').map(JSON.parse);assert.ok([0,1].includes(rows[0].seq));let seq=rows[0].seq-1;const pending=new Set();const answered=new Map();
+ // and (E11, Decision Log 5, below) a `tools/call` is closed by its MCP client's `notifications/cancelled`
+ assert.ok([0,1].includes(rows[0].seq));let seq=rows[0].seq-1;const pending=new Set();const answered=new Map();const calls=new Map();
  for(const row of rows){assert.equal(row.seq,++seq);assert.ok(['in','out','meta','stderr'].includes(row.direction));const f=row.frame;
   if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
+  const mcp=f.type==='control_request'&&row.direction==='in'&&f.request?.subtype==='mcp_message'?f.request:null;
+  if(mcp?.message?.method==='tools/call')calls.set(mcp.server_name+':'+JSON.stringify(mcp.message.id),'in:'+f.request_id);
+  if(mcp?.message?.method==='notifications/cancelled')pending.delete(calls.get(mcp.server_name+':'+JSON.stringify(mcp.message.params?.requestId)));
   if(f.type==='control_response'){const key=(row.direction==='in'?'out':'in')+':'+f.response.request_id;
    if(pending.delete(key))answered.set(row.direction+':'+f.response.request_id,JSON.stringify(f));
    else assert.equal(answered.get((row.direction==='in'?'out':'in')+':'+f.response.request_id),JSON.stringify(f),'response has pending request '+key);}
   assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
+ return pending;
+}
+for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/'+file+' is ordered NDJSON with correlated replies, provenance and no secrets',()=>{
+ const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);const pending=pass3Open(rows);
  // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …); a P1 child (E0a, E8, …) names the P1
  // composite spec too, as `spec` or as `document` (docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin)
  const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^(C\d+[a-z]?|E\d+[a-z]?)$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);if(/^E/.test(prov.child))assert.match(prov.spec??prov.document,/^docs\/doperpowers\/plans\/.*\.md$/);
- assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
+ // E11 S1 (2026-10-08, docs/doperpowers/plans/2026-10-06-e11-finish.md Task 6.2): as in pass 2, exit code 1 is the
+ // engine's print-mode status when the last result was an error (p1-maws-ask-interrupt: the interrupted turn's
+ // error_during_execution, then the host's stop); every request must still be closed
+ const exit=rows.find(r=>r.frame.event==='exit')?.frame;assert.ok(exit);
+ if(exit.code!==0){assert.equal(exit.code,1);assert.equal(lastResult(rows)?.is_error,true,'exit 1 only after an error result');}
+ assert.equal(pending.size,0);
 });
 // C8c end
+// E11 (2026-10-07; docs/doperpowers/plans/2026-10-06-e11-finish.md, Decision Log 5): a `tools/call` the engine's MCP
+// client abandons is never answered (src/engine-host/tool-server/server.ts: the host writes nothing for a withdrawn
+// call), so the client's own `notifications/cancelled` naming its JSON-RPC id (matched as sent: 5 and "5" differ) closes
+// that request, on the same server. Without it a recording of an interrupted blocking ask could not be admitted. A small
+// synthetic journal: the cancelled call closes; a notification naming another id, the id as a string, or another
+// server's call leaves the call open.
+const mcpIn=(seq,requestId,server,message)=>({seq,direction:'in',at:'',frame:{type:'control_request',request_id:requestId,request:{subtype:'mcp_message',server_name:server,message}}});
+const mcpOut=(seq,requestId,response)=>({seq,direction:'out',at:'',frame:{type:'control_response',response:{subtype:'success',request_id:requestId,response:{mcp_response:response}}}});
+const cancelledAsk=cancelId=>[
+ mcpIn(1,'r1','maws',{jsonrpc:'2.0',id:5,method:'tools/call',params:{name:'ask',arguments:{}}}),
+ mcpIn(2,'r2','maws',{jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId:cancelId,reason:'interrupted'}}),
+ mcpOut(3,'r2',{jsonrpc:'2.0',result:{},id:0}),
+];
+test('pass3 integrity: a tools/call closed by the client-sent notifications/cancelled naming its id counts as closed',()=>{
+ assert.deepEqual([...pass3Open(cancelledAsk(5))],[]);
+ assert.deepEqual([...pass3Open(cancelledAsk('5'))],['in:r1']);
+ assert.deepEqual([...pass3Open(cancelledAsk(6))],['in:r1']);
+ const otherServer=cancelledAsk(5);otherServer[1].frame.request.server_name='other';assert.deepEqual([...pass3Open(otherServer)],['in:r1']);
+});
 // C8b start: the three pass-3 agent-work probes (docs/doperpowers/plans/2026-09-28-c8b-agent-work-tools.md, R1, R5, R6).
 const load3=n=>readFileSync(new URL(n+'.jsonl',dir3),'utf8').trim().split('\n').map(JSON.parse);
 const notes=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
@@ -237,7 +271,8 @@ test('pass3 e7-peer: mid-turn, the wire frame is the bare envelope right after t
  assert.deepEqual(fail.structured,{success:false,message:'No agent named \'nobody-e7\' is reachable.\nUse ListAgents to see everyone you can message.',display:'Not sent — no agent named \'nobody-e7\' is reachable.'});
 });
 test('pass3 e7-peer-transcripts: an idle peer message is a meta user record with a peer origin; a mid-turn one a queued_command attachment rendered as a system reminder',()=>{
- const dir=new URL('e7-peer-transcripts/',dir3);const files=readdirSync(dir);assert.equal(files.length,2);
+ // M0's two -p sessions, and (E11 S2(c), docs/doperpowers/plans/2026-10-06-e11-finish.md) an interactive terminal's below
+ const dir=new URL('e7-peer-transcripts/',dir3);const files=readdirSync(dir);assert.equal(files.length,3);
  for(const f of files){const text=readFileSync(new URL(f,dir),'utf8');assert.ok(!text.includes('sk-ant-'),f);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),f);}
  const aId=notes(load3('e7-peer-a'),'provenance')[0].pinnedSessionId;
  const a=readFileSync(new URL(aId+'.jsonl',dir),'utf8').trim().split('\n').map(JSON.parse);
@@ -250,6 +285,44 @@ test('pass3 e7-peer-transcripts: an idle peer message is a meta user record with
  assert.match(mid.rendered[0].content,/^<system-reminder>\nAnother Claude session sent a message while you were working:\n<cross-session-message /);
  assert.match(mid.rendered[0].content,/ After completing your current task, decide whether\/how to respond \(reply via SendMessage to the `from=` address\)\.\n<\/system-reminder>$/);
  assert.ok(a.some(r=>r.type==='queue-operation'&&r.operation==='remove'&&r.reason==='absorbed_mid_turn'&&r.commandUuid===mid.attachment.source_uuid));
+});
+// E11 S2(c) (docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5): an interactive terminal session (entrypoint cli,
+// 2.1.293, Haiku, under a scratch home) messaged by a MAWS session while idle; recorded by e2e/p1-live.spec.ts's S2(c) case,
+// redacted by the live harness. Its peer record has the -p form above (isMeta, promptSource system, turnOrigin peer), its
+// enqueue and dequeue beside it, and its own cost record at the end.
+test('pass3 e7-peer-transcripts: an interactive terminal session writes the idle peer record in the -p form',()=>{
+ const t=readFileSync(new URL('e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl',dir3),'utf8').trim().split('\n').map(JSON.parse);
+ const peer=t.filter(r=>r.type==='user'&&r.origin?.kind==='peer');assert.equal(peer.length,1);
+ assert.equal(peer[0].entrypoint,'cli');assert.equal(peer[0].version,'2.1.293');
+ assert.equal(peer[0].isMeta,true);assert.equal(peer[0].promptSource,'system');assert.equal(peer[0].turnOrigin,'peer');
+ assert.equal(peer[0].origin.body,'E11 S2c: hello from a MAWS session. No reply needed.');assert.equal(peer[0].origin.fromMode,'prompting');
+ assert.ok(peer[0].message.content.startsWith('Another Claude session sent a message:\n<cross-session-message from="uds:'));
+ assert.deepEqual(t.filter(r=>r.type==='queue-operation').map(r=>r.operation),['enqueue','dequeue']);
+ assert.equal(t.at(-1).type,'cost-state');assert.ok(t.at(-1).totalCostUSD>0&&t.at(-1).totalCostUSD<0.05);
+});
+// E11 S2(d) (Design §5; Decision Log 6): the one teammate attempt, an interactive terminal under
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (2.1.293, Haiku, a scratch home), spawning "scout" and calling ListAgents. A team
+// formed: the listing names it under Teammates, its sidecar meta names the team, and the teammate's report reaches the
+// lead as a plain user record (no origin, not isMeta) carrying a <teammate-message> envelope. The lead's transcript and
+// the teammate's sidecar as the projects folder held them (transcripts, not journals: kept in a folder of their own).
+test('pass3 e7-team-terminal: a team forms in an interactive terminal; ListAgents names the teammate under Teammates',()=>{
+ const root=new URL('e7-team-terminal/',dir3);const id='b4b10738-4b3f-4539-906b-fcb5da9669a5';
+ const files=[id+'.jsonl',id+'/subagents/agent-ascout-bcbb17e39be8c1bd.jsonl',id+'/subagents/agent-ascout-bcbb17e39be8c1bd.meta.json'];
+ for(const f of files){const text=readFileSync(new URL(f,root),'utf8');assert.ok(!text.includes('sk-ant-'),f);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),f);}
+ const lead=readFileSync(new URL(files[0],root),'utf8').trim().split('\n').map(JSON.parse);
+ const blocks=r=>Array.isArray(r.message?.content)?r.message.content:[];
+ const spawn=lead.flatMap(blocks).find(b=>b.type==='tool_use'&&b.name==='Agent');
+ assert.deepEqual([spawn.input.name,spawn.input.subagent_type,spawn.input.run_in_background],['scout','general-purpose',true]);
+ const list=lead.flatMap(blocks).find(b=>b.type==='tool_use'&&b.name==='ListAgents');
+ const listing=lead.flatMap(blocks).find(b=>b.type==='tool_result'&&b.tool_use_id===list.id).content;
+ assert.match(listing,/^This session is \S+ \[[0-9a-f]+\] — the name other sessions use to message it/);
+ assert.match(listing,/\n\nTeammates \(1\):\n {2}scout \[[0-9a-f]+\] {2}· {2}general-purpose {2}· {2}running {2}· {2}started \d+s ago$/);
+ const meta=JSON.parse(readFileSync(new URL(files[2],root),'utf8'));
+ assert.deepEqual([meta.name,meta.taskKind,meta.teamName,meta.spawnedAgentType],['scout','in_process_teammate','session-'+id.slice(0,8),'general-purpose']);
+ const report=lead.find(r=>r.type==='user'&&typeof r.message?.content==='string'&&r.message.content.includes('<teammate-message '));
+ assert.equal(report.isMeta,undefined);assert.equal(report.origin,undefined);
+ assert.match(report.message.content,/^Another Claude session sent a message:\n<teammate-message teammate_id="scout" color="blue" summary="[^"]+">\n/);
+ assert.equal(lead.at(-1).type,'cost-state');
 });
 test('pass3 e7-cron: CronCreate answers its id structured; a fire opens a turn with no user frame, its prompt only on disk (turnOrigin scheduled)',()=>{
  const c=load3('e7-cron');const at=e=>notes(c,e)[0];

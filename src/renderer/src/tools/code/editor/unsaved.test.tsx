@@ -5,7 +5,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { connectCodeEvents } from '../../../ipc/events';
@@ -132,6 +132,37 @@ describe('unsaved files for the quit guard', () => {
     expect(disk.callsOf('files.write')).toHaveLength(writes); // not written
     expect(disk.files[APP]).toBe('const a = 2;\n'); // the agent's version stays
     expect(entry(APP)).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
+  });
+
+  // E11 W-D (tracker row E5 "saveAll fallback answers merge tabs Unsaved changes"): a Save all that throws still answers,
+  // each dirty tab with the reason its bar gives: a merge-view tab its conflict, any other the unsaved mark.
+  it('answers every dirty tab when Save all throws, a tab in the merge view with its conflict', async () => {
+    const { disk, type } = await openBoth();
+    type(APP, '// app\n');
+    type(LIB, '// lib\n');
+    disk.files[APP] = 'const a = 2;\n'; // another writer, unseen by the tab
+    act(() => disk.emit('layout.saveAll', { requestId: 'r1' }));
+    await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toHaveLength(1));
+    expect(entry(APP)).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
+    type(LIB, '// more\n');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { saveAll } = useViewer.getState();
+    useViewer.setState({ saveAll: () => Promise.reject(new Error('boom')) });
+    try {
+      act(() => disk.emit('layout.saveAll', { requestId: 'r2' }));
+      await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toHaveLength(2));
+      expect(error).toHaveBeenCalledExactlyOnceWith('[editor] Save all failed; answering every dirty tab unsaved', expect.any(Error));
+    } finally {
+      useViewer.setState({ saveAll });
+      error.mockRestore();
+    }
+    expect(disk.callsOf('layout.saveAllDone')[1]).toEqual({
+      requestId: 'r2',
+      failed: [
+        { path: APP, message: 'Changed on disk since you opened it' },
+        { path: LIB, message: 'Unsaved changes' },
+      ],
+    });
   });
 
   it('answers a tab whose save was already running as not clean, saving it once', async () => {

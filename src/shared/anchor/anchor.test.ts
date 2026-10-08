@@ -1,6 +1,6 @@
 // X10's schema: E5's file-line anchor and E6's pr-line shape are members; the security caps and the one-line rule hold.
 import { describe, expect, it } from 'vitest';
-import { AnchorBoxSchema /* E4d */, AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
+import { AnchorBoxSchema /* E4d */, anchorField, AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
 
 const fileLine: FileLineAnchor = { kind: 'file-line', locator: '/r/src/app.ts#L7', label: 'app.ts:7', path: '/r/src/app.ts', line: 7 }; // E5's fileLineAnchor('/r/src/app.ts', 7)
 
@@ -86,4 +86,33 @@ describe('AnchorSchema (X10)', () => {
     });
   });
   // E4d end
+});
+
+// E11 (W-C): the producers' one strip-and-fit helper; every result passes the schema's one-line rule and its cap.
+describe('anchorField', () => {
+  const passes = (text: string) => AnchorSchema.safeParse({ ...fileLine, label: text }).success;
+
+  it('makes a field one line: a control character becomes a space, whitespace runs collapse, the ends trim', () => {
+    expect(anchorField('  Save\n\tdraft\u007f now ', 200)).toBe('Save draft now');
+    expect(passes(anchorField('a\u0000b\u001bc', 200))).toBe(true);
+  });
+
+  it('marks a control character as U+FFFD, or drops it, keeping the rest exact', () => {
+    expect(anchorField('odd\nname  .ts', 200, { control: 'mark' })).toBe('odd\uFFFDname  .ts');
+    expect(anchorField('div > a\n[x]', 200, { control: 'drop' })).toBe('div > a[x]');
+  });
+
+  it('cuts to the cap in UTF-16 units with an ellipsis, never half a surrogate pair', () => {
+    expect(anchorField('x'.repeat(200), 200)).toBe('x'.repeat(200));
+    expect(anchorField('abcdef', 4)).toBe('abc…');
+    expect(anchorField('ab\u{1F600}cd', 4)).toBe('ab…'); // the pair straddles the cut: dropped whole
+    expect(passes(anchorField('y'.repeat(500), 200))).toBe(true);
+  });
+
+  it('keeps the tail when asked (a path’s end), and cuts bare without an ellipsis', () => {
+    expect(anchorField('abcdef', 4, { keep: 'tail' })).toBe('…def');
+    expect(anchorField('a\u{1F600}bc', 4, { keep: 'tail' })).toBe('…bc'); // the pair straddles the cut: dropped whole
+    expect(anchorField('abcdef', 4, { ellipsis: false })).toBe('abcd');
+    expect(anchorField('abc\u{1F600}', 4, { ellipsis: false })).toBe('abc');
+  });
 });

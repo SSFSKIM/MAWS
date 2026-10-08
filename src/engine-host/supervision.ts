@@ -58,8 +58,8 @@ export class Supervision {
     this.refresh();
   }
 
-  // The host.* commands, and the status at the end of every connect burst (main's pushes before its ready line, and
-  // the answers to them, reach no client).
+  // The host.* commands (their deadline shapes: ipc.ts HOST_DEADLINE_SHAPES), and the status at the end of every connect
+  // burst (main's pushes before its ready line, and the answers to them, reach no client).
   register(on: HostOn, client: Pick<HostClientHooks, 'onConnect'>): void {
     on('host.supervisorStatus', async () => this.status());
     on('host.configure', async ({ idleExitMs }) => {

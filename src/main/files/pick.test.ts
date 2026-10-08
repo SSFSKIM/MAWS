@@ -34,6 +34,19 @@ describe('layout.pickFiles', () => {
     ]);
   });
 
+  // E11 (tracker row E1 "layout.pickFiles reads bytes the Question sheet drops")
+  it('answers paths only, reading no bytes, when the caller asks (the Question sheet)', async () => {
+    const png = join(dir, 'shot.png');
+    const pdf = join(dir, 'spec.pdf');
+    writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(pdf, '%PDF-1.7');
+    const { files } = await pickFiles({ kind: 'files', directory: dir, multiple: true, pathsOnly: true }, { showOpenDialog: dialogAnswering([png, pdf]) });
+    expect(files).toEqual([
+      { path: png, name: 'shot.png', bytes: 4, mediaType: 'image/png', data: null },
+      { path: pdf, name: 'spec.pdf', bytes: 8, mediaType: 'application/pdf', data: null },
+    ]);
+  });
+
   it('filters photos to images, and answers a chosen directory by path without reading it', async () => {
     const photos = dialogAnswering([]);
     await pickFiles({ kind: 'photos', directory: null, multiple: false }, { showOpenDialog: photos });

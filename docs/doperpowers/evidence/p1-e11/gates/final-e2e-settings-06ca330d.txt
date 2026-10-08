@@ -1,0 +1,5 @@
+step e2e-settings
+command: pnpm e2e:settings
+head 06ca330d  ended 2026-10-08T01:16:39Z  load { 7.06 9.06 11.23 }  48s
+  9 passed (17.1s)
+exit 0

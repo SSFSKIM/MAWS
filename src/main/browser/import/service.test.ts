@@ -437,7 +437,7 @@ describe('BrowserImportService', () => {
 
   it('fails the run and rolls back when the record cannot be written, announcing no change', async () => {
     const put = vi.fn(() => Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' })));
-    const { report } = await importAll(service({ profiles: { get: (dir) => profiles.get(dir), list: () => profiles.list(), put } }));
+    const { report } = await importAll(service({ profiles: { get: (dir) => profiles.get(dir), list: () => profiles.list(), put, readOnly: false } }));
     expect(put).toHaveBeenCalledTimes(1);
     expect(report).toMatchObject({ outcome: 'failed', failure: 'recordUnwritable' });
     expect(ImportReportSchema.safeParse(report).success).toBe(true);
@@ -511,6 +511,20 @@ describe('BrowserImportService', () => {
       svc.cancel(running.importId);
       expect((await running.finished).outcome).toBe('cancelled');
       await svc.discard(second.inspectionId);
+    });
+
+    // W-B review M8: a profiles.json a newer MAWS wrote is read-only this boot, so the run's record could never be put;
+    // refused before anything is staged or the Keychain asked, rather than failing at the end
+    it('an inspection or a start while the profile list is read-only', async () => {
+      let readOnly = false;
+      const svc = service({ profiles: { get: (dir) => profiles.get(dir), list: () => profiles.list(), put: (record) => profiles.put(record), get readOnly() { return readOnly; } } });
+      const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
+      readOnly = true;
+      expect(() => svc.start({ inspectionId: inspection.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true })).toThrow(expect.objectContaining({ reason: 'profilesReadOnly' }));
+      expect(svc.running()).toBeNull();
+      await expect(svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' })).rejects.toThrow(expect.objectContaining({ reason: 'profilesReadOnly' }));
+      expect(stagingLeft()).toEqual([]); // the refused inspection dropped the standing one and staged nothing
+      expect(keychain).not.toHaveBeenCalled();
     });
   });
 

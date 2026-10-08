@@ -1,0 +1,9 @@
+command: pnpm e2e:browser
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:47:45Z
+load at start: { 6.31 6.09 8.11 }
+slot: eligible: load 6.31 after 0s
+ended (UTC): 2026-10-07T18:48:31Z
+--- summary lines
+  8 passed (19.4s)
+--- exit code: 0

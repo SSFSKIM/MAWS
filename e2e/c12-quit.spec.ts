@@ -160,6 +160,10 @@ test('a quit with nothing busy asks nothing and exits within the probe bound', a
   try {
     const { app, page } = maws;
     await expect(page.locator('[data-region="main"]')).toBeVisible();
+    // E11 (tracker row E10 "14 will-quit listeners"; scale review E scalpel-1#1): main's will-quit steps run behind one
+    // listener (src/main/lifecycle/shutdown.ts). Counted in main: a warning on stderr cannot be caught, since every
+    // registration runs inside whenReady, before `_electron.launch` resolves and any listener on stderr attaches.
+    expect(await app.evaluate(({ app: electron }) => electron.listenerCount('will-quit')), 'one will-quit listener').toBe(1);
     const started = Date.now();
     const gone = exited(app);
     await quit(app);

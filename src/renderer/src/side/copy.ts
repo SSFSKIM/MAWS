@@ -39,6 +39,7 @@ export const SIDE_COPY = {
     openFile: (label: string) => `Open ${label}`,
     questions: '/btw', // the question view's chip: the command that asks there (a promoted thread is titled "Side question")
     questionsTitle: 'Side questions',
+    questionsLabel: '/btw side questions', // the thread header's toggle: its name begins with its visible text (scale-review C scalpel-5#4, WCAG 2.5.3)
   },
   // `/btw`: the widget and the pane's question view (the composer's refusals are its own copy, `editor/controller.ts`)
   btw: {

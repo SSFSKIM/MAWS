@@ -1,0 +1,94 @@
+E11 M3 — the scale review's five synthetic base pairs (execution document Design §4; spec A-14)
+
+Range: the P1 range 06fa09ac05692a83a47c75b1a96da4cdeabdf8ee .. 07e5071974099ecb094ad9b2d571344ab223b44b
+  (07e50719 is the post-debt code head: M1's five waves, their review fixes and Task 1.6; M2's gates ran on it;
+  any later commit before the hand-up touches only docs/doperpowers/ and is outside every area).
+Level: max. Lane overrides: deriverModel "opus", finderModel "opus", verifierModel "opus" (Decision Log 17, A-22, A-40);
+  a reviewer-high fallback also on Opus. Efforts: the architect's.
+Panel args per area: { level: "max", repo: <clone>, base: "base", baseCommit: <base>, headCommit: <review-head>, lenses: [...] }
+  Two panels at a time at most (A-13).
+
+Coverage check (Design §4): `git diff --no-renames --name-only 06fa09ac 07e50719` lists 1,579 files; 330 under docs/;
+  the five areas' pathspecs below cover the other 1,249 exactly (204 + 330 + 170 + 274 + 271 = 1,249; no file in two areas).
+  Remainder outside every area before assignment (apart from docs/): .gitignore, electron.vite.config.ts, eslint.config.js
+  (assigned to E: build configuration), src/renderer/src/relay-wait.ts (W-D's fix round, the relay wait shared by the
+  transcript and the agents tool), src/renderer/src/accounts/model.test.ts, src/renderer/src/usage/UsagePill.test.tsx
+  (assigned to C: renderer core). Remainder after assignment: docs/** only.
+
+Mechanics per area (Design §4): `git clone --shared` of the worktree into /private/tmp/maws-e11-review/<area>;
+  `git checkout -B base <head>`; `git restore --source=06fa09ac --staged --worktree -- ':(glob)<path>' …` (no-overlay);
+  commit "base: <area> at the P1 base, the rest at <head>"; `git checkout -B review-head`; `git read-tree -u --reset <head>`;
+  commit "review-head". Script: /tmp/maws-review/e11-make-pairs.sh. Every clone's `git status --porcelain` is empty.
+
+== Area A — engine host and wire ==
+repo:        /private/tmp/maws-e11-review/A
+base:        bb36a178911edb288ef8ffccc65f9c8fb3b69ef2
+review-head: 6c8daeeb470744c342e3a48faa61df867237140c
+paths:       src/engine-host/**, src/shared/{wire,graph,engine,host,maws,anchor,side,plugins,keymap}/**, spikes/protocol-probe/**
+pair  --stat: 204 files changed, 22902 insertions(+), 218 deletions(-)
+range --stat: 204 files changed, 22902 insertions(+), 218 deletions(-)   (equal)
+lenses:
+  1. X9 as a trust boundary: tool inputs from the model are untrusted (send_file paths, artifact_create html_path, show_pane targets, ask sizes, the six browser tools' tabId/url/target/expression), schema strictness, isError versus JSON-RPC errors.
+  2. Interrupt and cancel paths (notifications/cancelled, control_cancel_request, exit with pending asks, panes or browser requests) leaving no pending state.
+  3. X13 as built: journal seq, the ring and tail, exactly-once delivery, ready-then-burst, drop-when-no-client, the supervisor lock, token and socket, idle exit.
+  4. Replay parity: every P1 row kind produced by both emission sites (the live normalizer and fs/backfill.ts) through one shared parser.
+  5. The plugin CLI runner (argument construction, never -y, process-group kill, the settle before reload) and the reload's catalogue.
+
+== Area B — main process ==
+repo:        /private/tmp/maws-e11-review/B
+base:        6dcff0821c45a6849e6fec705646815e835704a2
+review-head: 015cc5050a1d6b4243ac5087832697fd50ebc950
+paths:       src/main/**, src/preload/**, src/pty-host/**, src/shared/{ipc,settings,browser,files,sessions}/**, electron-builder.yml, build/**
+pair  --stat: 330 files changed, 46955 insertions(+), 501 deletions(-)
+range --stat: 330 files changed, 46955 insertions(+), 501 deletions(-)   (equal)
+lenses:
+  1. The browser's trust boundary: the debugger bridge allowlist (Target, Browser, Storage refused; unknown sessions refused) and the in-process CDP transport, partitions never the default session, the preload's sandbox and channels, permission denials and the clipboard carve-out, downloads refused on agent paths, window.open gating, input attribution (keys and mouse), the import's key held in memory only and no value logged, CHIPS through the debugger only, removal and the boot sweep, the -run-dialog wrap.
+  2. Deliverable frames: per-record origins, CSP, will-frame-navigate, the capture window registry and partition, console attribution.
+  3. files.write under the allowlist roots with the hash; files.* admission for delivered files (read, openExternal, reveal only).
+  4. The two git runners: the mutating runner keeps transport off, the remote runner's argv for git push and gh pr create, the confirm before every remote action, trust gating.
+  5. The detached transport and the quit path: keep-quit, the ordered shutdown list and its bounded hold, stopAllForQuit, recovery of owed intents, the lock and pid checks, settings migrations 9 to 11 and index migrations 4 and 5 never edited after release.
+
+== Area C — renderer core ==
+repo:        /private/tmp/maws-e11-review/C
+base:        dffa0496d9c586665e5bdd02b0133c7d4acb691d
+review-head: 822dd892f732e9cefa1c1ceb2537cbfc46bb4b92
+paths:       src/renderer/src/{transcript,stores,panel,sidebar,side,attention,app,main,ipc,lifecycle,session,sessions,composer,keymap,palette,styles,budget,gateway,overview}/**, src/renderer/src/App.tsx, src/renderer/src/App.test.tsx, src/renderer/src/relay-wait.ts, src/renderer/src/accounts/model.test.ts, src/renderer/src/usage/UsagePill.test.tsx
+pair  --stat: 170 files changed, 11661 insertions(+), 229 deletions(-)
+range --stat: 170 files changed, 11661 insertions(+), 229 deletions(-)   (equal)
+lenses:
+  1. Replay parity from the row model's side: ask capsule states, delivery and artifact rows, side_thread summary rows, agent_list and peer rows, browser_action rows, crash-closed turns read the same from live events and from disk.
+  2. X10 serialisation and parseAnchoredText, X11 nesting (intent lineage and disk-found forks), the side pane never pulling the main view.
+  3. Attention: a blocking ask as a question item, the needs-you toast rules (including the fallback permission toast's retraction, A-47), host loss dropping statuses and synthesising exits.
+  4. The panel host's single-instance tools, show_pane targets, restored versus param-less opens.
+  5. Keyboard and accessible names of every new surface.
+
+== Area D — renderer tools ==
+repo:        /private/tmp/maws-e11-review/D
+base:        293cbeefb5edd886239861e1e1a3c56f365ca19c
+review-head: cef9f48da2c67c0ef5e7d3fa4e4cd7eb765838ba
+paths:       src/renderer/src/{tools,widgets,settings-tab,engine-surface,request-card,terminal,harness,test-support}/**
+pair  --stat: 274 files changed, 27287 insertions(+), 705 deletions(-)
+range --stat: 274 files changed, 27287 insertions(+), 705 deletions(-)   (equal)
+lenses:
+  1. State machines: the editor (dirty, conflict, merge, close guard, save all), scm (admission, held diffs, the remote run), the relay store (peer replies), the browser control state (idle/agent/human, hand-back, cover).
+  2. The viewer's read-only versus editable paths and "Open as file".
+  3. The deliverables viewer and artifact console.
+  4. The agents widget, tree, scheduled rows and tasks under P-20.
+  5. Tokens only, both themes, no colour literal (a scan).
+
+== Area E — e2e, tests, build and probes ==
+repo:        /private/tmp/maws-e11-review/E
+base:        6f6450c25a60d769004580f0a27dc46e157fd79b
+review-head: 55a1ce03d917d1f5420540fc6fb40094a0256ed9
+paths:       e2e/**, test/**, spikes/{browser-probe,supervisor-probe}/**, scripts/**, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, vitest.config.ts, playwright.config.ts, tsconfig*.json, native/**, .gitignore, electron.vite.config.ts, eslint.config.js
+pair  --stat: 271 files changed, 54077 insertions(+), 448 deletions(-)
+range --stat: 271 files changed, 54077 insertions(+), 448 deletions(-)   (equal)
+lenses:
+  1. Truthfulness of the gates: asserts versus notes, skipped cases, expect bounds that hide timing.
+  2. Fixture integrity and provenance, the pins, the snapshot suites.
+  3. Harness seams only under MAWS_E2E/MAWS_HARNESS and never in a production path.
+  4. The packaged build: asar contents, fuses, playwright-core as a production dependency and no ws (A-43), the voice helper's bundling and entitlements.
+  5. Scratch isolation: no owner-store write, the CLAUDE_* scrub on every scratch-home launch (Decision Log 22), process cleanup with survivor checks, evidence rewrites.
+
+Findings land as docs/doperpowers/evidence/p1-e11/scale-review/<A|B|C|D|E>.findings.json (the workflow's
+{verdict, findings, coverage, lenses, explanation, target} object) in the worktree; the executor resumes at M4.

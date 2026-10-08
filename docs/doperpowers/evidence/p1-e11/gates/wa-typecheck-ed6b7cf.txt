@@ -1,0 +1,8 @@
+E11 W-A gate: typecheck
+command: pnpm typecheck
+head: ed6b7cfbfe150f2cffa178d64ae8807894826036
+started (UTC): 2026-10-07T16:22:09Z
+load at start: { 9.72 9.06 7.45 }
+summary:
+  $ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+exit: 0

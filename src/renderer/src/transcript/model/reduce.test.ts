@@ -8,7 +8,7 @@ import { rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
-import { api, builder, request, task, tool, uuid, USAGE } from './test-events';
+import { api, builder, request, task, tool, uuid, USAGE, type Builder } from './test-events';
 import { parent } from './test-events'; // E7
 
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
@@ -246,6 +246,28 @@ describe('turn boundaries', () => {
     expect(state.order).toEqual([turnId.ofMessage(uuid('u0')), turnId.ofMessage(uuid('q'))]);
   });
 
+  // E11 (W-C): why the turn closed, so its divider can say who stopped it. A crash the reader had already stopped (the
+  // interruption marker on the turn) stays the reader's; a stop, a quit and a child's parent exit are no crash of the turn.
+  it('records a crash as the cause of a turn the exit closed, and no cause for a stop or a turn the reader interrupted', () => {
+    const exit = (b: Builder, reason: 'crash' | 'stop' | 'quit') => b.emit('process.exited', { code: null, signal: reason === 'crash' ? 'SIGKILL' : null, reason, lostAttentionCount: 0, budget: null });
+    for (const reason of ['stop', 'quit'] as const) {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'sleep 60' });
+      exit(b, reason);
+      const state = reduce(b.events);
+      expect(state.turns.get(turnId.ofMessage(uuid('u1'))), reason).toMatchObject({ closedBy: 'stopped', closedCause: null });
+      expect(find(rowsOf(state), 'divider'), reason).toMatchObject({ state: 'stopped' });
+      expect(find(rowsOf(state), 'divider'), reason).not.toHaveProperty('cause');
+    }
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 60' });
+    b.emit('user.message', { messageUuid: uuid('int'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    exit(b, 'crash');
+    expect(reduce(b.events).turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ closedBy: 'stopped', closedCause: null });
+  });
+
   // Whole-branch review: C3 synthesises no turn.ended for a killed process, only process.exited (its acceptance step
   // 14: kill -9 mid-turn, resume, send a prompt).
   it('a session process exit closes the running turn as stopped, so the next prompt is its own turn', () => {
@@ -256,9 +278,9 @@ describe('turn boundaries', () => {
     b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ });
     let state = reduce(b.events);
     const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
-    expect(state.turns.get(one)).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+    expect(state.turns.get(one)).toMatchObject({ state: 'closed', closedBy: 'stopped', closedCause: 'crash' });
     expect(state.turns.get(two)).toMatchObject({ state: 'open', accepted: false });
-    expect(find(rowsOf(state), 'divider')).toMatchObject({ turnId: one, state: 'stopped' });
+    expect(find(rowsOf(state), 'divider')).toMatchObject({ turnId: one, state: 'stopped', cause: 'crash' });
     prompt(b, 'u3', 'after the resume');
     b.emit('turn.started', { userMessageUuid: uuid('u3'), origin: 'human' });
     b.text('m3', 0, 'Resumed answer');

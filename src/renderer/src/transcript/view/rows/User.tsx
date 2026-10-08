@@ -13,7 +13,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
-import { placeholdersOf, untaggedUserText } from '../../model/user-text';
+import { copiedUserText, placeholdersOf } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
 // E4d start
 import { useRowSession } from '../context';
@@ -101,7 +101,7 @@ export function UserRow({ row }: { row: UserRowData }) {
       </div>
       <div className="transcript-user-actions">
         <span>{clockTime(row.at)}</span>
-        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
+        <button type="button" onClick={() => copyText(copiedUserText(row))}>
           Copy
         </button>
         {row.editable && !row.pending && (
@@ -140,7 +140,8 @@ function PastedBlock({ rowId, n, lines, attachment }: { rowId: string; n: number
 }
 
 // E3: what an anchored comment is about. A file or PR line opens the file at its line (C5's file tab through the
-// transcript's `openFile`); any other anchor is a label only until its surface exists (E4's browser, E2's viewer).
+// transcript's `openFile`); a page element opens its page in the browser (E4d's branch below); any other anchor, and
+// a page element outside a session's transcript, is a label.
 function AnchorChip({ anchor }: { anchor: Anchor }) {
   const actions = useActions();
   const content = (

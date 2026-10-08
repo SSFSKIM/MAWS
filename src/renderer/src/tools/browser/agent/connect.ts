@@ -13,13 +13,11 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
-import { panelHost, usePanelHost } from '../../../panel/host';
+import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
-import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { browserTool, type BrowserParams } from '../BrowserTool';
 
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 const hasBrowserTool = (appSessionId: AppSessionId) => useLayout.getState().panelTabsOf(appSessionId).some((tab) => tab.toolId === browserTool.id);
 const inTurn = (appSessionId: AppSessionId) => useSessions.getState().engine.get(appSessionId)?.busy === true;
 

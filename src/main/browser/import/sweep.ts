@@ -7,7 +7,8 @@
 //   4. every `browser_history` row of a `persist:maws-chrome-` partition no record lists.
 // Synchronous, so nothing can open a partition while it runs; a removal that fails is logged and skipped, never thrown,
 // because a sweep must not stop the app from starting. Names compare case-insensitively (APFS is), so a listed
-// profile's directory is never taken for an unlisted one.
+// profile's directory is never taken for an unlisted one. E11: skipped whole while profiles.json is a newer MAWS's
+// (`readOnly`): its records are unknown here, so nothing of theirs may be taken for residue.
 import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ImportedProfile } from '@shared/browser/profiles';
@@ -31,9 +32,10 @@ export function sweepBrowserImports({
   history,
 }: {
   userData: string;
-  profiles: { list(): readonly ImportedProfile[] };
+  profiles: { list(): readonly ImportedProfile[]; readOnly?: boolean };
   history: Pick<BrowserHistoryStore, 'removeImportedExcept'>;
 }): SweepResult {
+  if (profiles.readOnly === true) return { staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 }; // E11
   const records = profiles.list();
   const folders = new Set(records.map((record) => partitionDirName(record.partition).toLowerCase()));
   const storage = new Set(records.map((record) => record.storageDirName.toLowerCase()));

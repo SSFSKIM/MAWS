@@ -8,34 +8,33 @@
 import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
+import { RELAY_LONG_WAIT_MS } from '../../../relay-wait'; // after this long asked, the long-wait clause (the drill-in relay's too)
 import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
 import { duration } from '../../model/time';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
-import { useTicker } from './parts';
+import { TickingStatus, useTicker } from './parts';
 
-// After this long asked with the turn clause shown, the clause becomes the long-wait one: the session reaches no tool
-// boundary while one call runs (the drill-in relay's RELAY_LONG_WAIT_MS).
-const LONG_WAIT_MS = 30_000;
 
-// The line over the box, or null when nothing was asked of this address yet.
-export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): string | null {
+// The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
+// the argument, and that time while it ticks (an ask not yet forwarded), else null.
+export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): { line: (elapsed: string) => string; elapsed: string | null } | null {
   const state = reply?.state;
   if (!state) return null;
+  const fixed = (text: string) => ({ line: () => text, elapsed: null });
   switch (state.kind) {
     case 'asked': {
       const waited = now - Date.parse(state.sentAt);
-      const elapsed = duration(waited);
-      if (!state.parentTurnOpenAtSend) return peerMessageCopy.asked(mode, session, elapsed);
-      return waited >= LONG_WAIT_MS ? peerMessageCopy.askedLongWait(mode, session, elapsed) : peerMessageCopy.askedTurnOpen(mode, session, elapsed);
+      const copy = !state.parentTurnOpenAtSend ? peerMessageCopy.asked : waited >= RELAY_LONG_WAIT_MS ? peerMessageCopy.askedLongWait : peerMessageCopy.askedTurnOpen;
+      return { line: (elapsed) => copy(mode, session, elapsed), elapsed: duration(waited) };
     }
     case 'forwarded':
-      return peerMessageCopy.forwarded(mode, session);
+      return fixed(peerMessageCopy.forwarded(mode, session));
     case 'sent':
-      return peerMessageCopy.sent(mode, session);
+      return fixed(state.reworded ? peerMessageCopy.sentReworded(mode, session) : peerMessageCopy.sent(mode, session));
     case 'failed':
-      return peerMessageCopy.failed(mode, state.message);
+      return fixed(peerMessageCopy.failed(mode, state.message));
   }
 }
 
@@ -45,7 +44,9 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   const reply = useSyncExternalStore(peerReplies.subscribe, () => (appSessionId === null ? undefined : peerReplies.get(appSessionId, target.address)));
   const live = useSessions((s) => appSessionId !== null && s.engine.has(appSessionId));
   const session = displayTitle(useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null))));
-  const [draft, setDraft] = useState('');
+  // A failed ask's text stays in the relay store until the next edit, so a composer mounted again (its row virtualised
+  // away and back) starts with it in the box (E11 W-D).
+  const [draft, setDraft] = useState(() => (reply?.state.kind === 'failed' ? reply.text : ''));
   const [sending, setSending] = useState(false); // the steer is out and unanswered
   const reason = !live ? peerMessageCopy.disabled.notRunningHere(target.mode) : reply?.state.kind === 'asked' ? peerMessageCopy.disabled.pending(target.mode) : null;
   const canSend = reason === null && !sending && draft.trim() !== '' && appSessionId !== null;
@@ -84,9 +85,7 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   return (
     <div ref={root} data-key-sink="composer" className="transcript-peer-composer" data-part="peer-composer">
       {line !== null && (
-        <p role="status" data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined}>
-          {line}
-        </p>
+        <TickingStatus line={line.line} elapsed={line.elapsed} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
       )}
       <label htmlFor={id} className="transcript-peer-label">
         {peerMessageCopy.label(target.mode, session)}

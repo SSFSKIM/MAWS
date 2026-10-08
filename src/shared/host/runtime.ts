@@ -120,14 +120,14 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       return false;
     }
     if (!port || !ready) {
-      if (dropped++ === 0) console.error(`[host] dropping events until a client is ready (first: ${name})`);
+      if (dropped++ === 0) console.info(`[host] dropping events until a client is ready (first: ${name})`); // E11: the rule with no client, not a failure
       return false;
     }
     if (port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false) return true;
     // E10: a port that wrote nothing is closing, closed or stalled, and never writes again: the client is gone (the
     // caller's detach follows at the close), so hasClient() after a false tells a gone client from a refused payload
     ready = false;
-    console.error(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`);
+    console.info(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`); // E11: a client leaving, as a keep-quit does
     dropped += 1;
     clientGone(); // E4c
     return false;
@@ -148,7 +148,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       return;
     }
     ready = true;
-    if (dropped > 0) console.error(`[host] ${dropped} events dropped while no client was ready`);
+    if (dropped > 0) console.info(`[host] ${dropped} events dropped while no client was ready`);
     dropped = 0;
     for (const hook of connectHooks) {
       try {

@@ -65,6 +65,7 @@ export interface ViewerEntry {
   saving: boolean;
   saveError: string | null; // the last save's failure, word for word; cleared by the next edit or save
   theirs: Theirs | null; // the disk's content past the baseline while dirty
+  diskUnusable: DiskUnusable | null; // E11 W-D: the disk moved past the baseline to a file the editor cannot take, and why
   baseline: number; // bumped when `text` and `hash` move while the document stands (a save, Keep mine)
   loads: number; // loads of this entry completed, whether or not they landed anything (a superseded one when its read answers)
   pending: number; // loads of this entry in flight; the e2e's own-save barrier is a `loads` increase with `pending` at 0
@@ -81,6 +82,12 @@ export interface Theirs {
 }
 
 export type SaveResult = 'ok' | 'conflict' | 'error' | 'noop';
+
+// E11 W-D: why the disk's version under unsaved edits cannot become theirs: past the editor's cap (a head), not text
+// (an image, an external kind, a binary encoding), or not UTF-8 (a lossy decode).
+export type DiskUnusable = 'head' | 'binary' | 'encoding';
+const unusableReason = (read: Pick<LoadedFile, 'kind' | 'encoding'>): DiskUnusable =>
+  read.kind === 'head' ? 'head' : (read.kind !== 'code' && read.kind !== 'markdown') || read.encoding !== 'utf8' ? 'binary' : 'encoding';
 
 // What a view leaves behind when it unmounts; never rendered, so never reactive.
 export interface ViewState {
@@ -235,7 +242,8 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go. E5: the
-    // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked).
+    // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked). A
+    // file tab leaves the layout only by a guarded close: a session's removal and hydration keep file tabs (E11 W-D).
     const prune = () => {
       const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
@@ -268,11 +276,14 @@ export function createViewerStore(client: MawsBridge) {
     const commitChange = (tabId: string, read: LoadedFile) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
-      const ready = { status: 'ready' as const, error: null, removed: false, loadingMore: false };
-      const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore;
+      const ready = { status: 'ready' as const, error: null, removed: false, loadingMore: false, diskUnusable: null };
+      const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore && entry.diskUnusable === null;
       if (unsaved(entry)) {
+        // E11 W-D: a disk version the editor cannot take is not offered, and the bar says why; a theirs shown earlier is
+        // withdrawn, the disk no longer holding it (W-D review I1)
+        if (!isEditable(read)) return patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
         const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
-        if (differs && isEditable(read)) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
+        if (differs) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
         if (!settledAlready) patch(tabId, ready);
         return;
       }
@@ -318,7 +329,7 @@ export function createViewerStore(client: MawsBridge) {
       const head = first.value;
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
-      const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, saveError: null };
+      const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
       const commit = ({ utf8, ...loaded }: LoadedFile) =>
         reason === 'change' ? commitChange(tabId, { ...loaded, utf8 }) : patch(tabId, { ...opened, ...loaded, editable: !entry.readOnly && isEditable({ ...loaded, utf8 }) });
       // A markdown file opened at a line is shown as its source, where the line exists.
@@ -391,7 +402,7 @@ export function createViewerStore(client: MawsBridge) {
       const entry = get().entries.get(tabId);
       if (!entry) return;
       const bytes = utf8Length(next.text);
-      patch(tabId, { ...next, bytes, loaded: bytes, theirs: null, baseline: entry.baseline + 1 });
+      patch(tabId, { ...next, bytes, loaded: bytes, theirs: null, diskUnusable: null, baseline: entry.baseline + 1 });
       const document = documentOf(tabId);
       if (document !== undefined) patch(tabId, { dirty: document !== next.text });
     };
@@ -415,8 +426,14 @@ export function createViewerStore(client: MawsBridge) {
         kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
         text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8,
       };
-      // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered.
-      patch(tabId, isEditable(file) ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' } } : { saving: false, saveError: EDITOR_COPY.conflictOnSave });
+      // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered;
+      // the bar says why (E11 W-D), and a theirs shown earlier is withdrawn, the disk no longer holding it (W-D review I1).
+      patch(
+        tabId,
+        isEditable(file)
+          ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' }, diskUnusable: null }
+          : { saving: false, saveError: EDITOR_COPY.conflictOnSave, theirs: null, diskUnusable: unusableReason(file) },
+      );
       return true;
     };
 
@@ -452,7 +469,7 @@ export function createViewerStore(client: MawsBridge) {
           const fresh: ViewerEntry = {
             tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
-            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0, loads: 0, pending: 0, readOnly,
+            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly,
           };
           incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
@@ -545,7 +562,7 @@ export function createViewerStore(client: MawsBridge) {
         const { text, hash } = entry.theirs;
         const bytes = utf8Length(text);
         // The document is replaced whole (`epoch`); the owner's own act, so no Updated notice.
-        patch(tabId, { text, hash, bytes, loaded: bytes, complete: true, theirs: null, dirty: false, saveError: null, status: 'ready', error: null, removed: false, epoch: entry.epoch + 1 });
+        patch(tabId, { text, hash, bytes, loaded: bytes, complete: true, theirs: null, diskUnusable: null, dirty: false, saveError: null, status: 'ready', error: null, removed: false, epoch: entry.epoch + 1 });
       },
 
       keepMine(tabId) {
@@ -616,6 +633,16 @@ export const useViewer = createViewerStore(ipc);
 // E5 (M5): the paths of the tabs with unsaved edits, once each, sorted.
 export const unsavedPaths = (entries: ReadonlyMap<string, ViewerEntry>): string[] =>
   [...new Set([...entries.values()].filter((entry) => entry.dirty).map((entry) => entry.path))].sort();
+
+// E5 (M5): every dirty tab as a Save all that could not run answers it (E11 W-D: its fallback), each path once with its
+// bar's reason: a tab in the merge view its conflict, any other the unsaved mark.
+export const unsavedFailures = (entries: ReadonlyMap<string, ViewerEntry>): UnsavedFailure[] => {
+  const byPath = new Map<string, string>();
+  for (const entry of entries.values()) {
+    if (entry.dirty && byPath.get(entry.path) !== EDITOR_COPY.conflictOnSave) byPath.set(entry.path, entry.theirs?.view === 'merge' ? EDITOR_COPY.conflictOnSave : EDITOR_COPY.unsaved);
+  }
+  return [...byPath].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([path, message]) => ({ path, message }));
+};
 
 // E5 (M5): the window's whole dirty set to main for the quit guard (`layout.unsavedFiles`), sent whenever it changes
 // (a tab turning dirty or clean, a dirty tab's entry gone) and never otherwise; synchronously from the store's write, so

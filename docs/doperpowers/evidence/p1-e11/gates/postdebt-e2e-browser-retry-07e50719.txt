@@ -1,0 +1,9 @@
+step e2e-browser, retried alone (Decision Log 24's rule for a timing-only failure)
+first run (in the driver): 7 passed, 1 failed: case 6 "a relaunch restores the tabs suspended: both chips muted, the
+  selected one offering its last URL, nothing loaded until Open" at the sidebar row's aria-expanded ("false", expected
+  "true") right after the relaunch — the C10 expandRow-versus-restored-sidebar-state race the tracker defers (E4b-era row,
+  "one flake in seven, retried by the gate rule").
+retry: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm e2e:browser
+head 07e50719  ended 2026-10-07T23:09Z  load { 10.18 } at start
+  8 passed (20.0s)
+exit 0

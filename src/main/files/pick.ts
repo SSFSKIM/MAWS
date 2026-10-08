@@ -1,7 +1,8 @@
 // `layout.pickFiles`, the composer's "+" menu (C7 execution document, Interfaces "X2 additions"; §4.1: the renderer
 // loads nothing by path, so picked files reach it through main). The native open dialog; an image up to 20 MiB or a PDF
 // up to 32 MiB comes back with its bytes (base64) for an attachment (PNG, JPEG, GIF and WebP only), anything else by path alone (the renderer mentions
-// it). `kind: 'directory'` answers the chosen directory's path and never reads what is in it.
+// it). `kind: 'directory'` answers the chosen directory's path and never reads what is in it. E11: `pathsOnly` answers
+// every file by path alone (the Question sheet's file question, which keeps only paths), reading no bytes.
 import type { OpenDialogOptions } from 'electron';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
@@ -42,7 +43,7 @@ export async function pickFiles(input: PickFilesInput, deps: { showOpenDialog: O
       continue; // gone between the dialog and the read
     }
     const mediaType = MEDIA_TYPES[extname(path).toLowerCase()] ?? null;
-    const cap = mediaType === 'application/pdf' ? PDF_MAX_BYTES : mediaType !== null && ATTACHABLE_IMAGES.has(mediaType) ? (deps.imageMaxBytes ?? IMAGE_MAX_BYTES) : -1;
+    const cap = input.pathsOnly === true ? -1 : mediaType === 'application/pdf' ? PDF_MAX_BYTES : mediaType !== null && ATTACHABLE_IMAGES.has(mediaType) ? (deps.imageMaxBytes ?? IMAGE_MAX_BYTES) : -1;
     const data = bytes <= cap ? (await readFile(path)).toString('base64') : null;
     files.push({ path, name: basename(path), bytes, mediaType, data });
   }

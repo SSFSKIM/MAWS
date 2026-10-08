@@ -106,7 +106,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             type="button"
             aria-pressed={questionsOpen}
             title={COPY.questionsTitle}
-            aria-label={COPY.questionsTitle}
+            aria-label={COPY.questionsLabel}
             className={`${QUIET} font-mono text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
             onClick={() => setInlineQuestions(child, !questionsOpen)}
           >

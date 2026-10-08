@@ -1,6 +1,6 @@
 // E7 (M2): the rows of messages between sessions and agents and of a listing, and the Reply composer under them (E7
 // execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source.
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../../../test/support/builders';
@@ -87,18 +87,35 @@ describe('a message from another session', () => {
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Waiting for the last reply');
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date().toISOString(), parentTurnOpenAtSend: true } });
     expect(screen.getByRole('status').textContent).toBe('Asked Session A to reply · 0s · Session A sends it at its next tool boundary or when this turn ends');
+    expect(within(screen.getByRole('status')).getByRole('timer').textContent).toBe('0s'); // scale-review C scalpel-5#2: the tick is not re-announced
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date(Date.now() - 40_000).toISOString(), parentTurnOpenAtSend: true } });
     expect(screen.getByRole('status').textContent).toMatch(/^Asked Session A to reply · \d+s · Session A is inside a long tool call; it sends it when that call returns or this turn ends$/);
     put(B, { text: 'on it', state: { kind: 'forwarded' } });
     expect(screen.getByRole('status').textContent).toBe('Session A is replying with SendMessage');
+    expect(screen.queryByRole('timer')).toBeNull();
     put(B, { text: 'on it', state: { kind: 'sent' } });
     expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage');
+    put(B, { text: 'on it', state: { kind: 'sent', reworded: true } }); // E11 W-D
+    expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage, in its own words');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
     put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
     expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'on it again' } });
     expect(source.dismiss).toHaveBeenCalledWith(A, B);
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  // E11 W-D (tracker row E7 "paraphrased peer reply reads notSent"): the relay store keeps a failed reply's text, so a
+  // composer mounted again (its row virtualised away and back) puts it back in the box
+  it('puts a failed reply’s text back in the box when the composer mounts again', () => {
+    live();
+    const { source, put } = replies();
+    put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
+    renderRow(inbound(), { storeKey: A, actions: { ...spyActions(), peerReplies: source } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
   });
 
   it('shows the whole message behind its disclosure when the preview cut it, and offers no Reply when the sender cannot be reached', () => {
@@ -205,5 +222,21 @@ describe('a ListAgents listing', () => {
     }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
     renderRow(row, { storeKey: A });
     expect(screen.getByText('Listing the agents and sessions…')).toBeTruthy();
+  });
+
+  it('a listing and a send whose turn closed with no result say they were never answered, not busy (scale-review C scalpel-1#1)', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.toolUse('s1', 'SendMessage', { to: 'peer-c', message: 'waiting' });
+      b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    });
+    const { container } = renderRow(rows.find((r) => r.kind === 'agent_list')!, { storeKey: A });
+    expect(screen.getByText('Listing the agents was never answered')).toBeTruthy();
+    expect(container.querySelector('[aria-busy]')).toBeNull();
+    cleanup();
+    renderRow(rows.find((r) => r.kind === 'agent_message')!, { storeKey: A });
+    expect(screen.getByText('Never answered')).toBeTruthy();
+    expect(screen.queryByText('Sending')).toBeNull();
   });
 });

@@ -34,8 +34,8 @@ export function pushAction({ status, remotes, trusted }: ActionInput): HeaderAct
   const off = (title: string, label: string = SCM_COPY.push): HeaderAction => ({ label, title, disabled: true });
   if (trusted !== true) return off(trusted === false ? SCM_COPY.trustToPush : '');
   if (status.branch === null) return off(SCM_COPY.checkOutToPush);
+  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemote, SCM_COPY.publish); // no remote: no upstream of its own
   const own = ownUpstream(status, remotes);
-  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemote, own ? SCM_COPY.push : SCM_COPY.publish);
   if (!own) return { label: SCM_COPY.publish, title: SCM_COPY.publishBranch(status.branch), disabled: false };
   if (status.behind > 0) return off(SCM_COPY.pullFirst); // main's `behind`: MAWS never force-pushes
   if (status.ahead === 0) return off(SCM_COPY.nothingToPush);
@@ -47,7 +47,7 @@ export function prAction({ status, remotes, trusted }: ActionInput): HeaderActio
   const off = (title: string): HeaderAction => ({ label: SCM_COPY.openPr, title, disabled: true });
   if (trusted !== true) return off(trusted === false ? SCM_COPY.trustToOpenPr : '');
   if (status.branch === null) return off(SCM_COPY.checkOutToOpenPr);
-  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemote);
+  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemoteForPr);
   if (!ownUpstream(status, remotes) || status.ahead > 0 || status.behind > 0) return off(SCM_COPY.pushFirst);
   return { label: SCM_COPY.openPr, title: SCM_COPY.openPrFor(status.branch), disabled: false };
 }

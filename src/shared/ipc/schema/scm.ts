@@ -32,6 +32,7 @@ export type ScmStatus = z.infer<typeof ScmStatusSchema>;
 export const ScmRefusalCodeSchema = z.enum([
   'untrusted', 'not_repository', 'changed', 'unmerged', 'nothing_staged', 'empty_message', 'git_failed', 'busy',
   'no_remote', 'detached', 'behind', 'not_pushed', 'gh_missing', 'gh_unauthenticated', 'plan_expired',
+  'unborn', // E11: a push of a branch with no commits yet
 ]);
 export type ScmRefusalCode = z.infer<typeof ScmRefusalCodeSchema>;
 export const ScmRefusalSchema = z.strictObject({ refused: ScmRefusalCodeSchema, detail: z.string(), output: z.string() });

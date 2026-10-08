@@ -7,6 +7,10 @@
 // watcher after every mutation, and a mutation's answered status written into `useGit` could overwrite a newer one the
 // watcher would not repeat. The latest remote run per session is seeded from `scm.remote.last` while a body holds it
 // and advanced by `scm.remote.output` by sequence number.
+// E11 (tracker row E6 "two short windows"): a stage or discard of an untracked file moves the selection out of
+// Untracked once `git.changed` arrives; an untracked read asked before that mutation went out and answered after it
+// says nothing about the file (C4 may already refuse it), so its answer is dropped and the file read again once the
+// mutation answered, rather than flashing "No diff for this entry" before the selection follows the file.
 //
 // The status and the watch that keeps it current are C8a's `useGit`; the tool's body holds its watch while mounted.
 import type { StoreApi } from 'zustand/vanilla';
@@ -96,6 +100,8 @@ export interface ScmStoreOptions {
 
 export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}): UseBoundStore<StoreApi<ScmStore>> {
   const held = new Map<string, Held>();
+  let mutations = 0; // E11: stages and discards sent, counted
+  const moved = new Map<string, number>(); // E11: a path's last stage or discard, by that count
   const fileLoads = new Map<string, symbol>();
   const resumed = new Map<AppSessionId, Resumed>();
 
@@ -108,9 +114,18 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
         return;
       }
       h.reading = true;
+      const asked = mutations;
       const result = await settled(client.invoke('git.diff', diffInput(h.target)));
       h.reading = false;
       if (held.get(key) !== h) return; // released meanwhile
+      const untracked = h.target.scope === 'untracked' ? h.target.path : null;
+      if (untracked !== null && (moved.get(untracked) ?? -1) >= asked) {
+        if (h.again) {
+          h.again = false;
+          void read(key);
+        }
+        return; // E11: the file was staged or discarded since: the mutation's answer reads it again
+      }
       const next: ScopeDiff = result.ok ? answered(result.value) : { status: 'error', message: result.error.message };
       set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0\0`)) }));
       for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0\0`)) fileLoads.delete(k);
@@ -130,23 +145,38 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
     // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own, and
     // only `elsewhere` (the commit's parked draft) touches the state then. `ok` clears the last notice; a refusal or a
-    // failed call becomes it.
+    // failed call becomes it, unless a sheet that stays open shows it (`sheetShows`: the discard's, E11 W-D).
     type Landed = Extract<ScmMutation, { ok: true }>;
     const mutate = async (
       ui: StoreApi<ScmUi>,
       appSessionId: AppSessionId,
       call: Promise<CommandResult<'scm.stage'>>,
       landed?: { here(answer: Landed): Partial<ScmUi>; elsewhere(): Partial<ScmUi> },
+      sheetShows = false,
     ) => {
       const result = await settled(call);
       if (ui.getState().session !== appSessionId) {
         if (landed && result.ok && !('refused' in result.value)) ui.setState(landed.elsewhere());
         return result;
       }
-      if (!result.ok) ui.setState({ notice: { kind: 'error', text: result.error.message, output: '' } });
-      else if ('refused' in result.value) ui.setState({ notice: { kind: result.value.refused, text: result.value.detail, output: result.value.output } });
-      else ui.setState({ notice: null, ...landed?.here(result.value) });
+      if (!result.ok) {
+        if (!sheetShows) ui.setState({ notice: { kind: 'error', text: result.error.message, output: '' } });
+      } else if ('refused' in result.value) {
+        if (!sheetShows) ui.setState({ notice: { kind: result.value.refused, text: result.value.detail, output: result.value.output } });
+      } else ui.setState({ notice: null, ...landed?.here(result.value) });
       return result;
+    };
+
+    // E11: a stage or discard of these paths: an untracked read of one already asked is dropped, and each held one is
+    // read again (trailing) once the mutation answered, whether or not it ran anything
+    const moving = async (paths: readonly string[], call: () => Promise<ScmMutationResult>) => {
+      const seq = mutations++;
+      for (const path of paths) moved.set(path, seq);
+      try {
+        return await call();
+      } finally {
+        for (const [key, h] of held) if (h.target.scope === 'untracked' && paths.includes(h.target.path)) schedule(h, key);
+      }
     };
 
     const setRun = (appSessionId: AppSessionId, run: RemoteRun | null) => {
@@ -198,9 +228,9 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
         });
       },
 
-      stage: (ui, appSessionId, paths) => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths })),
+      stage: (ui, appSessionId, paths) => moving(paths, () => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths }))),
       unstage: (ui, appSessionId, paths) => mutate(ui, appSessionId, client.invoke('scm.unstage', { appSessionId, paths })),
-      discard: (ui, appSessionId, entries) => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries })),
+      discard: (ui, appSessionId, entries) => moving(entries.map((entry) => entry.path), () => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries }), undefined, true)),
 
       // The commit takes the session's draft; once it lands the draft is cleared, unless it was edited meanwhile, and
       // Skip hooks goes back off (it is a decision per commit, as `--no-verify` is in a terminal).
@@ -270,6 +300,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
         for (const r of resumed.values()) r.off();
         held.clear();
         fileLoads.clear();
+        moved.clear();
         resumed.clear();
         set({ diffs: new Map(), files: new Map(), runs: new Map() });
       },

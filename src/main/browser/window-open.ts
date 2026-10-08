@@ -7,7 +7,7 @@
 // (OAuth sign-in popups post back to it), with MAWS's own webPreferences on the child rather than any the page asked for.
 // `about:blank` is admitted here alone, for the open-then-write pattern; a `mailto:` open goes out like a `mailto:` link
 // (Decision Log 27). `linkTarget` is read at the moment of the open.
-import type { WebContents, WebPreferences, WindowOpenHandlerResponse } from 'electron';
+import type { LoadURLOptions, PostBody, Referrer, WebContents, WebPreferences, WindowOpenHandlerResponse } from 'electron';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import type { BrowserSeam } from './seam';
@@ -51,6 +51,16 @@ export function decideWindowOpen({ url, disposition, now, lastActivationAt, rece
   return { action: 'adopt', select: disposition !== 'background-tab' };
 }
 
+// E11 (tracker row E4a "modifier-click drops referrer and postBody"): the load a modifier-clicked link's own tab makes,
+// carrying what Chromium would have sent: the Referer (its policy deciding) and, for a form, the body with its content
+// type (the boundary of a multipart one included), so a POST stays a POST.
+export function loadOptionsOf(referrer: Referrer, postBody: PostBody | undefined): LoadURLOptions {
+  return {
+    ...(referrer.url !== '' ? { httpReferrer: referrer } : {}),
+    ...(postBody ? { postData: postBody.data, extraHeaders: `content-type: ${postBody.contentType}${postBody.boundary ? `; boundary=${postBody.boundary}` : ''}` } : {}),
+  };
+}
+
 export interface WindowOpenDeps {
   store: Pick<TabStore, 'entry' | 'update' | 'adoptChild' | 'open' | 'hasRoomForView'>;
   linkTarget(): LinkTarget;
@@ -64,11 +74,12 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
   // made or wired) is handed back and closed on the next tick, once Electron has taken it back, so it never lingers as
   // an invisible page. A link opened with a modifier (⌘-click, ⇧-click) comes through Electron's `-new-window` path,
   // where Chromium creates no child and `createWindow` is to open the page itself (the answer is then unused): it opens
-  // as a new tab of the opener's session in the opener's partition, as the context menu's "Open link in new tab" does.
-  const adoptChild = (opener: TabEntry, url: string, select: boolean, child: WebContents | undefined): WebContents => {
+  // as a new tab of the opener's session in the opener's partition, as the context menu's "Open link in new tab" does,
+  // with the request's referrer and post body (E11).
+  const adoptChild = (opener: TabEntry, url: string, select: boolean, child: WebContents | undefined, load: LoadURLOptions): WebContents => {
     if (!child) {
       const { appSessionId, partition } = opener.tab;
-      const opened = store.open({ appSessionId, url: url === 'about:blank' ? null : url, select, partition, opener });
+      const opened = store.open({ appSessionId, url: url === 'about:blank' ? null : url, select, partition, opener, load });
       return store.entry(opened.tab.tabId)?.view?.webContents as WebContents;
     }
     let adopted: WebContents | undefined;
@@ -84,7 +95,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
   const view = entry.view!;
   const { tabId } = entry.tab;
   let opens: number[] = [];
-  view.webContents.setWindowOpenHandler(({ url, disposition }): WindowOpenHandlerResponse => {
+  view.webContents.setWindowOpenHandler(({ url, disposition, referrer, postBody }): WindowOpenHandlerResponse => {
     if (store.entry(tabId) !== entry || entry.view !== view) return { action: 'deny' };
     const at = now();
     opens = opens.filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
@@ -106,7 +117,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
           // the browser preload is not among these: a child never ran one named here, so it is the partition's (view.ts)
           overrideBrowserWindowOptions: { webPreferences: childPreferences },
           // Chromium's child is in the options; the view must adopt that very webContents (Electron checks)
-          createWindow: (options) => adoptChild(entry, url, decision.select, (options as { webContents?: WebContents }).webContents),
+          createWindow: (options) => adoptChild(entry, url, decision.select, (options as { webContents?: WebContents }).webContents, loadOptionsOf(referrer, postBody)),
         };
     }
   });

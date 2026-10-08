@@ -8,6 +8,18 @@
 // start-up holder events predate the subscription. E10: streaming, not the `ready` state: the host emits nothing before
 // main's `ready` line (X13), which follows the `ready` transition and main's resync, and a scan's discoveries come back
 // only as `fs.sessionChanged` events. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
+// E11 (tracker row E3 · C4 "first launch after migration 4 re-summarises for ~10 s"): a scan's discoveries arrive as a
+// burst of `fs.sessionChanged` events, one per transcript. Measured on a copy of the owner's store (5,108 summaries),
+// nearly all of the ~8.5 s the burst cost main was `locate`'s linked-worktree question asked of git synchronously, once
+// per directory the cache had not seen; the transactions were the rest. So the summaries are queued, the directories
+// they name are answered off main's thread first (`warmLinkedWorktrees`, child processes), and they are then applied
+// up to DISCOVERY_BATCH to a transaction instead of one each: under 1 s of main's time for the same burst. Anything
+// else that touches the index from here (another host event, a visibility report, the holder fold, the refold) applies
+// the queue first, at once (git synchronously for a directory still cold, as before), so the index sees every change in
+// the order the host sent it. The stop drops the queue instead (W-B review M3): applying a first launch's burst there
+// would run that git inside the quit, and the next launch's `fs.scan` re-reports every dropped transcript, since the
+// index never recorded its size and mtime. A batch that fails is applied again one summary to a transaction, so one bad summary
+// costs only itself, as before.
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
@@ -34,6 +46,7 @@ export interface SourceOptions {
 }
 
 const TICK_MS = 16;
+export const DISCOVERY_BATCH = 200; // E11: summaries per transaction
 const LAST_LINE_CHARS = 160; // C5's digest `lastAssistantLine`
 
 // A record's change waiting for the tick: its latest committed state and that change's revision.
@@ -56,6 +69,9 @@ export class IndexSessionSource implements SessionSource {
   private writer: ReadModelWriter | null = null;
   private offs: (() => void)[] = [];
   private unavailableLogged = false;
+  private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
+  private draining = false; // E11: a warm-up for the queue is out
+  private stopped = false; // E11: a drain that resumes after the stop applies nothing
 
   constructor(
     private readonly index: Index,
@@ -86,13 +102,15 @@ export class IndexSessionSource implements SessionSource {
       this.index.sessions.onChange((record, cause, revision) => this.recordChanged(record, cause, revision)),
       this.index.sessions.onBinding((change) => this.bindingChanged(change)),
       this.index.projects.onChange((revision) => this.projectsChangedNow(revision)),
-      this.host.onEvent('fs.sessionChanged', ({ summary }) => this.write('fs.sessionChanged', () => this.discovered(summary))),
+      this.host.onEvent('fs.sessionChanged', ({ summary }) => this.queueDiscovery(summary)), // E11: warmed, then batched
       this.host.onEvent('fs.sessionRemoved', ({ sessionId }) => this.write('fs.sessionRemoved', () => this.index.sessions.markTranscriptRemoved(sessionId))),
       this.host.onEvent('fs.holderChanged', ({ sessionId, holder }) => {
+        this.applyDiscoveries(); // E11: in the order the host sent them
         this.remember(sessionId, holder);
         this.write('fs.holderChanged', () => this.index.sessions.setHolder(sessionId, holder));
       }),
       this.host.onEvent('session.status', ({ appSessionId, status }) => {
+        this.applyDiscoveries(); // E11: its record may be in the queue
         const record = this.index.sessions.get(appSessionId);
         if (record === null) return; // not a record the index holds (yet)
         // C3's patch leaves the holder out once the process has exited, the index's call. W7: the registry's foreign
@@ -109,6 +127,7 @@ export class IndexSessionSource implements SessionSource {
       }),
       // E10: the reset at every transition, `ready` included; a kept session's burst status re-marks it self after it
       this.host.onState('engine-host', () => {
+        this.applyDiscoveries(); // E11: what the host sent before it went
         this.live.clear(); // a host that went away took its processes with it
         this.holders.clear();
         this.write('engine-host generation', () => this.index.sessions.resetSelfHolders());
@@ -131,8 +150,11 @@ export class IndexSessionSource implements SessionSource {
       })
       .catch((error: unknown) => console.error('[index] linked-worktree warm-up failed:', error instanceof Error ? error.message : error));
 
+    this.stopped = false;
     return () => {
       stopped = true;
+      this.stopped = true;
+      this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
       for (const off of this.offs) off();
       this.offs = [];
       if (this.timer) clearTimeout(this.timer);
@@ -146,6 +168,7 @@ export class IndexSessionSource implements SessionSource {
 
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
   onSetVisible(appSessionId: AppSessionId, visible: boolean): void {
+    if (this.index.unavailable === null) this.applyDiscoveries(); // E11: what the host sent before the report, read under the visibility it had
     if (!visible) {
       this.visible.delete(appSessionId);
       return;
@@ -155,6 +178,49 @@ export class IndexSessionSource implements SessionSource {
     const record = this.index.sessions.get(appSessionId);
     if (record === null) return; // an unstarted tab: nothing to mark until its record exists
     this.write('session.setVisible', () => this.markSeen(record));
+  }
+
+  // E11: a summary joins the queue; one drain at a time, started at the end of this turn of the event loop (so the
+  // rest of the burst that turn delivers joins it), warms the queue's directories and then applies what it warmed,
+  // until the queue is empty. Summaries that arrive during a warm-up wait for the next round.
+  private queueDiscovery(summary: TranscriptSummary): void {
+    this.discoveries.push(summary);
+    if (this.draining) return;
+    this.draining = true;
+    setImmediate(() => void this.drainDiscoveries());
+  }
+
+  private async drainDiscoveries(): Promise<void> {
+    const warm = this.options.warmLinkedWorktrees ?? warmLinkedWorktrees;
+    try {
+      while (this.discoveries.length > 0 && !this.stopped) {
+        const last = this.discoveries[this.discoveries.length - 1];
+        const directories = new Set(this.discoveries.flatMap((s) => { const d = s.relocatedCwd ?? s.directory; return d ? [d] : []; }));
+        await warm([...directories]).catch((error: unknown) => console.error('[index] the discoveries\' warm-up failed:', error instanceof Error ? error.message : error));
+        // what was warmed and is still queued (another write may have applied some or all of it meanwhile)
+        if (!this.stopped) this.applyDiscoveries(this.discoveries.indexOf(last) + 1);
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  // E11: the first `count` queued summaries (all by default), DISCOVERY_BATCH to a transaction; a batch that throws
+  // (rolled back whole) is applied again one summary to a transaction, each failure logged as a single one always was.
+  private applyDiscoveries(count = this.discoveries.length): void {
+    const queued = this.discoveries.slice(0, count);
+    this.discoveries = this.discoveries.slice(count);
+    for (let at = 0; at < queued.length; at += DISCOVERY_BATCH) {
+      const batch = queued.slice(at, at + DISCOVERY_BATCH);
+      try {
+        if (this.index.unavailable !== null) return this.logUnavailable();
+        this.index.transaction(() => {
+          for (const summary of batch) this.discovered(summary);
+        });
+      } catch {
+        for (const summary of batch) this.write('fs.sessionChanged', () => this.discovered(summary));
+      }
+    }
   }
 
   // One transcript's summary: the record created or refreshed; a registry holder that arrived before the record is
@@ -347,12 +413,14 @@ export class IndexSessionSource implements SessionSource {
     return result.value as CommandOutput<N>;
   }
 
-  // Index writes from host events: a failed write is logged, never thrown into the supervisor's relay.
+  // Index writes from host events: a failed write is logged, never thrown into the supervisor's relay. E11: the queued
+  // discoveries go first, so every write lands in the order the host sent it.
   private write(what: string, fn: () => unknown): void {
     if (this.index.unavailable !== null) {
       this.logUnavailable();
       return;
     }
+    if (what !== 'fs.sessionChanged') this.applyDiscoveries();
     try {
       fn();
     } catch (error) {

@@ -205,6 +205,7 @@ describe('the quit guard', () => {
       publish: vi.fn(),
       engines: noEngines,
       unsavedFiles: () => [], // E5
+      onUnsavedFiles: () => () => {}, // E11
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()), // E5
       keepOffered: () => false, // E10: utility mode
       keepDefault: () => true, // E10
@@ -362,6 +363,43 @@ describe('quit when idle', () => {
     }
   });
 
+  // E11: a file dirtied or saved during the wait is read at its push, not at the next status change or poll
+  it('re-reads on every unsaved-files push, well inside the 2 s poll', async () => {
+    vi.useFakeTimers();
+    try {
+      const files = trackUnsavedFiles();
+      const window = Object.assign(new EventEmitter(), { id: 1 });
+      const publish = vi.fn();
+      guardDeps(modelWith([bg('a')]), { publish, ask: async () => 'when_idle', unsavedFiles: () => files.paths(), onUnsavedFiles: (listener) => files.onChange(listener) });
+      electron.app.attempt();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
+      files.update(window, ['/r/a.ts']); // dirtied during the wait
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: ['/r/a.ts'] });
+      files.update(window, []); // saved
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
+      expect(publish).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops hearing the pushes when the wait ends', async () => {
+    const files = trackUnsavedFiles();
+    const window = Object.assign(new EventEmitter(), { id: 1 });
+    const publish = vi.fn();
+    const control = guardDeps(modelWith([bg('a')]), { publish, ask: async () => 'when_idle', unsavedFiles: () => files.paths(), onUnsavedFiles: (listener) => files.onChange(listener) });
+    electron.app.attempt();
+    await settle();
+    control.cancelWait();
+    publish.mockClear();
+    files.update(window, ['/r/a.ts']);
+    await settle();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it('Quit now stops the engine and quits; Cancel stops waiting and keeps the app', async () => {
     const model = modelWith([bg('a')]);
     const publish = vi.fn();
@@ -405,7 +443,7 @@ describe('quit when idle', () => {
 });
 
 function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
-  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, saveAll: async () => new Map() /* E5 */, keepOffered: () => false /* E10 */, keepDefault: () => true /* E10 */, ...over });
+  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, onUnsavedFiles: () => () => {} /* E11 */, saveAll: async () => new Map() /* E5 */, keepOffered: () => false /* E10 */, keepDefault: () => true /* E10 */, ...over });
 }
 
 // A pty host whose every `pty.list` answers when the test says; one terminal, busy while `busy` is true.
@@ -716,6 +754,7 @@ describe('unsaved files in the quit question', () => {
       publish: vi.fn(),
       engines: noEngines,
       unsavedFiles: (): readonly string[] => [],
+      onUnsavedFiles: () => () => {}, // E11
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
       keepOffered: () => false, // E10: utility mode
       keepDefault: () => true, // E10
@@ -989,6 +1028,23 @@ describe('the unsaved files each window pushes', () => {
     expect(two.listenerCount('destroyed')).toBe(1);
   });
 
+  it('forgets a window whose renderer crashed, so Save all does not wait on it (E11: its edits are already lost)', async () => {
+    const files = trackUnsavedFiles();
+    const one = windowOf(1);
+    const two = windowOf(2);
+    files.update(one, ['/r/a.ts']);
+    files.update(two, ['/r/b.ts']);
+    const send = vi.fn();
+    const done = files.saveAll(send);
+    one.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 133 });
+    expect(files.paths()).toEqual(['/r/b.ts']);
+    files.done(two, send.mock.calls[0]![0] as string, []);
+    await done; // settles without the crashed window's answer, well inside SAVE_ALL_BOUND_MS
+    files.update(one, ['/r/a.ts']); // a reloaded renderer pushes again; listeners stay attached once
+    expect(files.paths()).toEqual(['/r/a.ts', '/r/b.ts']);
+    expect(one.listenerCount('render-process-gone')).toBe(1);
+  });
+
   it('Save all asks every window and settles once each window holding files has answered that request, with their failures', async () => {
     const files = trackUnsavedFiles();
     const one = windowOf(1);
@@ -1067,6 +1123,7 @@ describe('keeping sessions running at quit', () => {
       publish: vi.fn(),
       engines: noEngines,
       unsavedFiles: (): readonly string[] => [],
+      onUnsavedFiles: () => () => {}, // E11
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
       keepOffered: () => true, // detached mode
       keepDefault: () => true,

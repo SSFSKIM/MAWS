@@ -1,0 +1,8 @@
+step e2e-browser
+command: pnpm e2e:browser
+head 07e50719  ended 2026-10-07T23:01:26Z  load { 31.48 12.66 9.37 }  61s
+    Error: expect(locator).toHaveAttribute(expected) failed
+  1 failed
+  7 passed (34.6s)
+[ELIFECYCLE] Command failed with exit code 1.
+exit 1

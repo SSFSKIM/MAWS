@@ -10,6 +10,7 @@ import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
+import { allTabs } from '../../../stores/layout-model';
 import { fakeHash, installDisk, type DiskFile } from '../../../test-support/code-disk';
 import { useFiles } from '../files/store';
 import { openFile } from '../open-file';
@@ -224,6 +225,60 @@ describe('editor', () => {
       expect(theirsNotice()).toBeNull();
       expect(saveButton()).toBeNull();
       expect(document.querySelector('[data-updated]')).toBeNull(); // the owner's own act
+    });
+
+    // E11 W-D (tracker row E5 "change load does not say why disk cannot become theirs")
+    it('says in the bar why a change on disk under unsaved edits cannot be theirs, and drops it once the disk is text again', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      const unusable = () => document.querySelector('[data-disk-unusable]');
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB };
+      changed(disk);
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: now larger than the editor’s cap, so it cannot be merged'));
+      expect(unusable()?.getAttribute('data-disk-unusable')).toBe('head');
+      expect(entry()).toMatchObject({ dirty: true, theirs: null });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+      disk.files[APP] = { text: 'caf�\n', bytes: 5, utf8: false };
+      changed(disk);
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: no longer UTF-8, so it cannot be merged'));
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      expect(unusable()).toBeNull();
+    });
+
+    // W-D review I1: a disk version on offer that the disk no longer holds is withdrawn when the disk turns unusable, so
+    // the bar says why instead of offering Reload and Keep mine against it.
+    it('withdraws an earlier theirs when a later change on disk cannot be theirs, and says why', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB };
+      changed(disk);
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.getAttribute('data-disk-unusable')).toBe('head'));
+      expect(theirsNotice()).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+      expect(entry()).toMatchObject({ dirty: true, theirs: null, diskUnusable: 'head' });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+    });
+
+    it('withdraws an earlier theirs when a save’s conflict read finds the disk unusable, and says why', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB }; // no event
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.getAttribute('data-disk-unusable')).toBe('head'));
+      expect(theirsNotice()).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+      expect(entry()).toMatchObject({ dirty: true, saving: false, theirs: null, diskUnusable: 'head' });
+      expect(disk.files[APP]).toEqual({ text: 'log line\n', bytes: 5 * MiB }); // nothing written
     });
 
     it('leaves theirs empty when a change event’s read answers the baseline’s own hash', async () => {
@@ -475,6 +530,20 @@ describe('editor', () => {
       expect(entry('/r/f0.ts').dirty).toBe(true); // the least recently used, passed over
       act(() => useLayout.getState().closeTab('file:/r/f0.ts'));
       expect(useViewer.getState().entries.has('file:/r/f0.ts')).toBe(false);
+    });
+
+    // E11 W-D (tracker row E5 "dirty file tab pruned silently"): no path but a guarded close drops a file tab; its
+    // session's removal closes only the session's own session and agent tabs, so the edits stay in the tab
+    it('keeps a dirty file tab, its entry and its document when its session is removed', async () => {
+      const { shown } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      await waitFor(() => expect(entry().dirty).toBe(true));
+      shown.unmount();
+      act(() => useLayout.getState().dropSession(A));
+      expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).toContain(`file:${APP}`);
+      expect(entry()).toMatchObject({ dirty: true, text: 'const a = 1;\n' });
+      render(<FileViewer tab={fileTab(APP)} />);
+      await waitFor(() => expect(doc()).toBe('// mine\nconst a = 1;\n'));
     });
 
     it('keeps a dirty tab’s document when it is rebound to another session, re-reading under it into theirs', async () => {

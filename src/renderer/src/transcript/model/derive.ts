@@ -13,7 +13,7 @@ import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { MAWS_TOOL_USE } from './classify'; // E2
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
-import { firstJsonBlock } from './cells'; // E2
+import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
@@ -237,6 +237,7 @@ interface DeliveryRecord {
   caption: string | null | undefined; // undefined: no `maws.delivery.file` said
   urgency: 'normal' | 'high' | null;
   error: string | null;
+  resulted: boolean; // E11: the call's result is in
 }
 // E1 end
 // E2 start: what a turn's events say about one `artifact_create` or `artifact_update` call (its artifact row): the call
@@ -435,17 +436,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
-          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known()) }); // E7: `to` classified against what the transcript knows; the result refines it
+          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
           asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1
           const input = SendFileInputSchema.safeParse(event.input);
-          deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null });
+          deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null, resulted: false });
           items.push({ kind: 'delivery', toolUseId: event.toolUseId });
         } else if (presentation === 'agent_list') { // E7
-          items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id) });
+          items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id, context) });
         } else if (presentation === 'artifact') { // E2
           artifacts.set(event.toolUseId, artifactOfCall(event));
           items.push({ kind: 'artifact', toolUseId: event.toolUseId });
@@ -687,7 +688,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       case 'hook': {
         // A hook that ran and let things go on, or is still running, shows nothing; one that got in the way is a notice
-        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1).
+        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1). One read from disk is
+        // named after its record (C4's backfill), and goes when a retraction removes that record (a sibling branch, a
+        // rewritten file).
+        if (retracted.has(item.hookId)) break;
         const rec = hooks.get(item.hookId)!;
         const notice = hookNotice(rec);
         const at = (rec.started ?? rec.finished)!;
@@ -704,14 +708,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
         break;
       case 'delivery':
-        resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });
+        resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id, context) });
         break;
       // E1 end
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
         break;
       case 'artifact': // E2
-        resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id) });
+        resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id, context) });
         break;
       case 'browser_action': // E4c
         resolved.push({ kind: 'row', row: browserActionRow(browserActions.get(item.toolUseId)!, turn.id, context) });
@@ -764,7 +768,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({
-      id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
+      id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary,
     });
   }
@@ -1006,6 +1010,7 @@ function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>): void {
 }
 
 function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>): void {
+  delivery.resulted = true;
   if (result.isError) {
     delivery.error = toolErrorText(resultText(result.content));
     return;
@@ -1034,12 +1039,15 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   };
 }
 
-function deliveryRow(delivery: DeliveryRecord, turnId: TurnId): RowOf<'delivery'> {
+// A call whose turn closed with no result and no event was never answered (E11): the turn's closed state is the only
+// sign of it (a session that ended between the call and its result).
+function deliveryRow(delivery: DeliveryRecord, turnId: TurnId, context: TurnContext): RowOf<'delivery'> {
   const { use, input } = delivery;
   const files = delivery.delivered?.map(({ path, name, id }) => ({ path, name, id })) ?? input?.files.map((path) => ({ path, name: baseName(path), id: null })) ?? [];
   return {
     id: rowId.delivery(use.toolUseId), turnId, at: use.at, kind: 'delivery', toolUseId: use.toolUseId, files,
     caption: delivery.caption !== undefined ? delivery.caption : (input?.caption ?? null), urgency: delivery.urgency ?? input?.urgency ?? 'normal', error: delivery.error,
+    ...(context.closed && !delivery.resulted && delivery.delivered === null && { neverAnswered: true as const }),
   };
 }
 // E1 end
@@ -1144,8 +1152,8 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_
 
 // A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
 // parent's message down (`to_child`, its text as before), to anything else a message to another session (`between`:
-// a peer's name or address, a teammate), refined by its result.
-function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
+// a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
+function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
   const to = str(input.to);
   const message = str(input.message, str(input.content));
@@ -1160,7 +1168,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
     ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerLabel(to, name), preview), // the label the view shows
     peer: {
       sender: null, recipient: { name, address: to }, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
-      result: outcome === null ? 'pending' : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
+      result: outcome === null ? (context.closed ? 'unanswered' : 'pending') : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
       summary: typeof input.summary === 'string' && input.summary.length > 0 ? input.summary : null,
     },
   };
@@ -1179,10 +1187,14 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known
   return { ...base, text: agentMessageCopy('from_child', title, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) };
 }
 
-function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId): RowOf<'agent_list'> {
+function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, context: TurnContext): RowOf<'agent_list'> {
   const text = result === undefined ? '' : result.isError ? toolErrorText(resultText(result.content)) : resultText(result.content);
   const listing = result === undefined ? { self: null, sections: [], notes: [] } : parseListing(text);
-  return { id: rowId.agentList(use.toolUseId), turnId, at: use.at, kind: 'agent_list', toolUseId: use.toolUseId, self: listing.self, sections: listing.sections, notes: listing.notes, raw: text, pending: result === undefined };
+  return {
+    id: rowId.agentList(use.toolUseId), turnId, at: use.at, kind: 'agent_list', toolUseId: use.toolUseId, self: listing.self, sections: listing.sections, notes: listing.notes, raw: text,
+    pending: result === undefined && !context.closed,
+    ...(result === undefined && context.closed && { neverAnswered: true as const }), // E11: as the delivery row's
+  };
 }
 // E7 end
 
@@ -1208,12 +1220,13 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
   if (parsed.success) Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title });
 }
 
-function artifactRow(artifact: ArtifactRecord, turnId: TurnId): RowOf<'artifact'> {
+function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnContext): RowOf<'artifact'> {
   const { use } = artifact;
   return {
     id: rowId.artifact(use.toolUseId), turnId, at: use.at, kind: 'artifact', toolUseId: use.toolUseId, action: artifact.action, artifactId: artifact.artifactId,
     title: artifact.title, htmlPath: artifact.htmlPath, deliverableId: artifact.deliverableId, version: artifact.version, error: artifact.error,
     answered: artifact.answered,
+    ...(context.closed && !artifact.answered && !artifact.announced && { neverAnswered: true as const }), // E11: as the delivery row's
   };
 }
 // E2 end
@@ -1252,14 +1265,7 @@ interface BrowserResultFields {
 function textAfterJson(content: string | ContentBlock[]): string | null {
   if (typeof content === 'string') return null;
   const texts = content.filter((block) => block.type === 'text').map((block) => str(block.text));
-  const first = texts.findIndex((text) => {
-    try {
-      const value: unknown = JSON.parse(text);
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
-    } catch {
-      return false;
-    }
-  });
+  const first = texts.findIndex((text) => jsonObjectOf(text) !== null);
   const after = first < 0 ? [] : texts.slice(first + 1);
   return after.length === 0 ? null : after.join('\n');
 }
@@ -1451,8 +1457,8 @@ export { isEngineOrigin };
 
 // E3 start: the anchored prompt's anchor, carried only when the prompt has one (the user row's field is optional, so
 // every other row reads as before)
-function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']> } {
-  return text.anchor === null ? {} : { anchor: text.anchor };
+function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']> } {
+  return text.anchor === null || text.frame === null ? {} : { anchor: text.anchor, anchorFrame: text.frame };
 }
 
 // A side thread's events within one block (a turn's, or the loose events after one turn): the first creates the

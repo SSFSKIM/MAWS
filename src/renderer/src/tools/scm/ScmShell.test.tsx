@@ -297,7 +297,7 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'Push first' });
     fireEvent.click(remoteAction('push')!);
     const sheet = await screen.findByRole('dialog', { name: 'Push' });
-    await waitFor(() => expect(sheet.querySelector('[data-scm-plan-command]')?.textContent).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main'));
+    await waitFor(() => expect(sheet.querySelector('[data-scm-plan-command]')?.textContent).toBe('/usr/bin/git push --progress --recurse-submodules=no origin refs/heads/main:refs/heads/main'));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
 
@@ -342,8 +342,9 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     await waitFor(() => expect(document.querySelector('[data-scm-header]')?.textContent).toBe('⎇ feature · origin/feature · 0 ahead'));
     expect(screen.queryByRole('button', { name: 'Open PR #7 on GitHub' })).toBeNull();
     expect(remoteAction('pr')).toMatchObject({ disabled: false, title: 'Open a pull request for feature' });
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2)); // E11: main's answer names main, so it is asked again at once
     act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'head' }));
-    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(3));
     await wait(20);
     expect(remoteAction('pr')?.textContent).toBe('Open PR'); // feature has none
 
@@ -363,7 +364,7 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     main.state.status = statusOf({ files: SCRATCH_FILES, upstream: null, ahead: 0 });
     renderShell();
     await waitFor(() => expect(remoteAction('push')).toMatchObject({ disabled: true, title: 'No remote to push to' }));
-    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'No remote to push to' });
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'No remote to open a pull request on' });
 
     main.state.scm = scmStatusOf(); // git remote add origin …
     main.change(statusOf({ files: SCRATCH_FILES.slice(1), upstream: null, ahead: 0 })); // reason: index

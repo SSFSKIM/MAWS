@@ -29,7 +29,9 @@ let controls: UsageControlsAnswer; // W6 route executor: what main answers for C
 let answerAction: (action: UsageAction) => UsageActionResult | Promise<UsageActionResult>;
 
 beforeAll(async () => {
-  fixture = await new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => NOW }).snapshot([]);
+  const reader = new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => NOW });
+  fixture = await reader.snapshot([]);
+  reader.stop(); // closes the requests file the snapshot opened, rather than leaving it to the garbage collector
 });
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });

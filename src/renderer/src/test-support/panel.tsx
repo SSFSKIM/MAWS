@@ -12,12 +12,11 @@ import { useGit } from '../stores/git';
 import { useSummary } from '../stores/summary';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
-import { resetPanelHost } from '../panel/host';
+import { resetPanelHost, shownSession } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
 import type { PanelHostProps } from '../panel/host-slot';
 import type { PanelTool, PanelToolInit } from '../panel/tool';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 
 export const A = 'app-a' as AppSessionId;
@@ -87,7 +86,7 @@ export const mainShowing = (...ids: AppSessionId[]): LayoutMain => {
 export const onChangeCalls: { appSessionId: AppSessionId | null; next: PanelSessionState }[] = [];
 export function TestHost() {
   const main = useLayout((s) => s.main);
-  const appSessionId = useMemo(() => sessionOfTab(activeTab(main)), [main]);
+  const appSessionId = useMemo(() => shownSession(main), [main]);
   const pinned = useLayout((s) => s.panelPinned);
   const own = useLayout((s) => (appSessionId ? s.panelBySession.get(appSessionId) : undefined));
   const activeNoSession = useLayout((s) => s.panelActiveNoSession);

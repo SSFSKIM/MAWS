@@ -14,6 +14,34 @@ export type AnchorScreenshot = z.infer<typeof AnchorScreenshotSchema>;
 
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const ONE_LINE = /^[^\x00-\x1f\x7f]*$/; // no control characters: the lead line and the tag embed these fields, and E4's and E2's values are page- or artifact-controlled
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL = /[\x00-\x1f\x7f]/g; // the characters ONE_LINE refuses
+
+export interface AnchorFieldOptions {
+  control?: 'space' | 'mark' | 'drop'; // a space (then whitespace runs collapse and the ends trim), U+FFFD, or nothing
+  keep?: 'head' | 'tail'; // the end a cut keeps: a label's start, or a path's end
+  ellipsis?: boolean; // a cut is marked with `…` (counted in `max`) unless false (a locator, an address cut bare)
+}
+
+// E11: the one strip-and-fit helper the producers build a field with (E2's artifact pick, E6's pr-line label), so a
+// value a page, an artifact or a repository controls meets ONE_LINE and its cap: control characters handled per
+// `control`, then at most `max` UTF-16 units (what the schema's `max` counts), never half a surrogate pair. E4d's
+// `src/shared/browser/describe.ts` keeps its own copy: the browser preload bundles it without zod.
+export function anchorField(text: string, max: number, options: AnchorFieldOptions = {}): string {
+  const { control = 'space', keep = 'head', ellipsis = true } = options;
+  const line = control === 'space' ? text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : text.replace(CONTROL, control === 'mark' ? '\uFFFD' : '');
+  if (line.length <= max) return line;
+  const mark = ellipsis ? '…' : '';
+  const room = Math.max(0, max - mark.length);
+  if (keep === 'tail') {
+    let kept = line.slice(line.length - room);
+    if (/^[\uDC00-\uDFFF]/.test(kept)) kept = kept.slice(1);
+    return `${mark}${kept}`;
+  }
+  let kept = line.slice(0, room);
+  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
+  return `${kept}${mark}`;
+}
 
 // E4d start: the element's box at the pick, in whole CSS pixels of the page's document (E4d execution document, Design §6)
 export const AnchorBoxSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int().positive(), height: z.number().int().positive() });

@@ -9,8 +9,9 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
+import { shownSession } from '../panel/host';
 import { useLayout } from '../stores/layout';
-import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
+import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
 
@@ -32,7 +33,7 @@ export function visibleSessions(
   // E3 start: the open panel shows the session of the focused pane's active tab (a file tab's included, C5's region),
   // maximized or not; the child its Side pane draws is on screen
   if (!regions.panel.collapsed) {
-    const shown = sessionOfTab(activeTab(main));
+    const shown = shownSession(main);
     const child = shown === null ? undefined : sideChildren.get(shown);
     if (child !== undefined && records.has(child)) visible.add(child);
   }

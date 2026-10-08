@@ -421,6 +421,39 @@ describe('the detached transport: a served connection ends', () => {
     await expect(next.next()).resolves.toMatchObject({ t: 'welcome', pid: fake.pid });
     next.socket.destroy();
   });
+
+  // E11 (tracker row E10 "keep-quit close counts in-flight lines delivered"): the deliberate close drains, so an event
+  // the supervisor wrote (and counted delivered) before it saw main's end still reaches main's listeners
+  it('stop() still reads the events the supervisor wrote before it saw the end', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const before = { appSessionId: 'app-before', items: [] } as never;
+    await until(() => fake.emit('session.brokerItems', before)); // main's ready reached the supervisor
+    supervisor.stop();
+    const inFlight = { appSessionId: 'app-in-flight', items: [] } as never;
+    expect(fake.emit('session.brokerItems', inFlight)).toBe(true); // written: main's end has not reached the supervisor
+    await until(() => emit.mock.calls.some(([name, payload]) => name === 'session.brokerItems' && (payload as { appSessionId: string }).appSessionId === 'app-in-flight'));
+    await until(() => !fake.connected());
+    expect(fake.exits).toEqual([]);
+  });
+
+  // E11 (E10 keep-quit drain, W-A row 128 follow-up): main's shutdown waits on this before the process exits
+  // Decision Log 28 (W-B review): nothing to drain answers nothing, so an ordinary quit keeps Electron's own path
+  it('stop() answers once the drained connection has closed, and nothing when nothing is served', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    await until(() => fake.emit('session.brokerItems', { appSessionId: 'app-before', items: [] } as never)); // main's ready reached it
+    let closed = false;
+    const stopping = supervisor.stop()!.then(() => (closed = true));
+    expect(closed).toBe(false);
+    expect(fake.emit('session.brokerItems', { appSessionId: 'app-in-flight', items: [] } as never)).toBe(true);
+    await stopping;
+    expect(emit.mock.calls.some(([name, payload]) => name === 'session.brokerItems' && (payload as { appSessionId: string }).appSessionId === 'app-in-flight')).toBe(true);
+    expect(fake.connected()).toBe(false);
+    expect(supervisor.stop()).toBeUndefined(); // stopped already
+    const idle = makeSupervisor();
+    expect(idle.stop()).toBeUndefined(); // never started: nothing to drain
+  });
 });
 
 describe('the detached transport: a request held and never sent', () => {
@@ -570,6 +603,22 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     await until(() => state().state === 'ready');
     expect(state().pid).toBe(candidates[0].pid);
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null, waitingLiveSessions: null });
+  });
+
+  // E11 (tracker row E10 "arming without a holder pid logs every retry"): with no lock to read (missing or unparseable)
+  // the arming cannot be remembered by pid; it is still written at each retry (idempotent in the supervisor, and the
+  // process behind the socket may have changed), but logged once per wait
+  it('an incompatible supervisor with no readable lock: exit when idle written at each retry, logged once per wait', async () => {
+    const old = await startFake({ wire: 'other-wire', ...live(2) });
+    writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), '{ not json');
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
+    await until(() => old.exits.length >= 3); // three retries, each armed again
+    const asked = () => logs.filter((line) => line.includes('to exit when idle')).length;
+    expect(asked()).toBe(1);
+    expect(logs.find((line) => line.includes('to exit when idle'))).toBe('asked the incompatible supervisor to exit when idle');
+    await old.die(); // the wait ends: a fresh supervisor is served
+    await until(() => state().state === 'ready');
   });
 
   it('a refused protocol with sessions live: the same wait, and another incompatible process is asked again', async () => {

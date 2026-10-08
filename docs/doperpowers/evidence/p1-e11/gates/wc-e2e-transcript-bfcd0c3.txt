@@ -1,0 +1,9 @@
+command: pnpm e2e:transcript
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:31:35Z
+load at start: { 56.27 25.04 14.23 }
+slot: eligible: load 16.37 after 91s
+ended (UTC): 2026-10-07T18:36:34Z
+--- summary lines
+  31 passed (3.0m)
+--- exit code: 0

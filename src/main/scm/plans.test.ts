@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmGhState } from '@shared/ipc/schema/scm';
-import { GitFixture } from '../../../test/support/git-fixture';
+import { GitFixture, runGit } from '../../../test/support/git-fixture';
 import { createGitRunner, GitCommandError, NotARepositoryError } from '../git/runner';
 import { GitService } from '../git/service';
 import {
@@ -104,9 +104,9 @@ beforeEach(() => {
 
 describe('scm plans build the exact argv, bind the destination and expire tokens', () => {
   describe('argv', () => {
-    it('push: the explicit refspec after the remote, --progress always, --set-upstream only without an upstream', () => {
-      expect(pushArgv({ remote: 'origin', branch: 'main', setUpstream: false })).toEqual(['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main']);
-      expect(pushArgv({ remote: 'fork', branch: 'feat/x', setUpstream: true })).toEqual(['push', '--progress', '--set-upstream', 'fork', 'refs/heads/feat/x:refs/heads/feat/x']);
+    it('push: the explicit refspec after the remote, --progress and --recurse-submodules=no always, --set-upstream only without an upstream', () => {
+      expect(pushArgv({ remote: 'origin', branch: 'main', setUpstream: false })).toEqual(['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main']);
+      expect(pushArgv({ remote: 'fork', branch: 'feat/x', setUpstream: true })).toEqual(['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'fork', 'refs/heads/feat/x:refs/heads/feat/x']);
     });
 
     it('pr: --repo, --head, --base, then --title= and --body= so a leading dash is a value; --draft only when asked', () => {
@@ -139,7 +139,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       const { sources } = makeSources(world);
       expect(await planPush(sources, {})).toEqual({
         plan: {
-          kind: 'push', cwd: '/repo', program: '/opt/homebrew/bin/git', argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'],
+          kind: 'push', cwd: '/repo', program: '/opt/homebrew/bin/git', argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'],
           remote: 'origin', remoteUrl: 'https://github.com/o/r.git', pushUrls: ['https://github.com/o/r.git', '/srv/mirror.git'], repository: null,
           branch: 'main', head: HEAD, upstream: 'origin/main',
         },
@@ -152,7 +152,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       world.upstream = null;
       const draft = await planPush(makeSources(world).sources, {});
       expect(draft).toMatchObject({
-        plan: { argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'], upstream: 'origin/feat', branch: 'feat' },
+        plan: { argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'], upstream: 'origin/feat', branch: 'feat' },
         basis: { upstream: null, ownUpstream: false },
       });
     });
@@ -161,7 +161,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       world.status = statusOf({ branch: 'feat', upstream: 'origin/main', behind: 3 });
       world.upstream = { remote: 'origin', ref: 'refs/heads/main' };
       expect(await planPush(makeSources(world).sources, {})).toMatchObject({
-        plan: { argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'], upstream: 'origin/feat' },
+        plan: { argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'], upstream: 'origin/feat' },
         basis: { upstream: 'origin/main', ownUpstream: false },
       });
     });
@@ -187,7 +187,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       world.fetchUrls.fork = 'git@github.com:me/r.git';
       world.status = statusOf({ behind: 4 }); // main tracks origin/main and is behind it
       expect(await planPush(makeSources(world).sources, { remote: 'fork' })).toMatchObject({
-        plan: { remote: 'fork', argv: ['push', '--progress', '--set-upstream', 'fork', 'refs/heads/main:refs/heads/main'], upstream: 'fork/main' },
+        plan: { remote: 'fork', argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'fork', 'refs/heads/main:refs/heads/main'], upstream: 'fork/main' },
         basis: { upstream: 'origin/main', ownUpstream: false },
       });
       expect(await planPush(makeSources(world).sources, { remote: 'origin' })).toMatchObject({ refused: 'behind' });
@@ -195,7 +195,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
 
     it('with an own upstream on the chosen remote, the push keeps it: no --set-upstream, the same upstream', async () => {
       expect(await planPush(makeSources(world).sources, { remote: 'origin' })).toMatchObject({
-        plan: { argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], upstream: 'origin/main' },
+        plan: { argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'], upstream: 'origin/main' },
         basis: { ownUpstream: true },
       });
     });
@@ -211,6 +211,8 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
     it.each<[string, (w: World) => void, string, RegExp]>([
       ['not a repository', (w) => { w.status = new NotARepositoryError(); }, 'not_repository', /Not a git repository/],
       ['detached', (w) => { w.status = statusOf({ branch: null }); }, 'detached', /detached/],
+      // E11 (tracker row E6 "two short windows"): an unborn branch is refused at planning, not by the push in the Output
+      ['a branch with no commits yet', (w) => { w.status = statusOf({ head: '', upstream: null, ahead: 0 }); w.upstream = null; }, 'unborn', /^main has no commits yet/],
       ['no remote', (w) => { w.remotes = []; }, 'no_remote', /no remote/],
       ['an unknown asked remote', () => {}, 'no_remote', /"elsewhere"/],
       ['several remotes, none origin, none upstream', (w) => { w.remotes = ['a', 'b']; w.upstream = null; }, 'no_remote', /Choose/],
@@ -513,14 +515,14 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       };
       const draft = await planPush(sources, {});
       expect(draft).toMatchObject({
-        plan: { argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin', remoteUrl: origin, pushUrls: [origin, 'https://example.invalid/o/r.git'], upstream: 'origin/main' },
+        plan: { argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin', remoteUrl: origin, pushUrls: [origin, 'https://example.invalid/o/r.git'], upstream: 'origin/main' },
         basis: { upstream: 'origin/main', ownUpstream: true },
       });
       expect(await planPr(sources, { title: 't', body: '', base: 'main', draft: false })).toMatchObject({ refused: 'not_pushed', detail: expect.stringMatching(/1 commit not pushed/) });
 
       await repo.git('checkout', '-q', '-b', 'feat', 'origin/main'); // tracks origin/main, as a branch made from it does
       expect(await planPush(sources, {})).toMatchObject({
-        plan: { argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'] }, basis: { upstream: 'origin/main', ownUpstream: false },
+        plan: { argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'origin', 'refs/heads/feat:refs/heads/feat'] }, basis: { upstream: 'origin/main', ownUpstream: false },
       });
       await repo.git('checkout', '-q', 'main');
 
@@ -533,6 +535,29 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       await repo.git('commit', '-q', '-m', 'while the sheet was open');
       expect(await revalidatePlan(sources, issued)).toMatchObject({ refused: 'changed', detail: 'head changed since the sheet opened; review it again' });
       git.dispose();
+    });
+
+    // E11 scale review B scalpel-4#1: the sheet lists the superproject's push destinations only, so the planned push
+    // must not follow an owner's `push.recurseSubmodules` (or `submodule.recurse`) to a submodule's remote
+    it('the planned push reaches only the remote the sheet shows, even with the owner set to push submodules', async () => {
+      const library = await GitFixture.create();
+      const libraryRemote = await library.addBareRemote();
+      try {
+        await repo.git('-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', libraryRemote, 'lib'); // the fixture's remotes are local paths
+        await repo.git('commit', '-q', '-m', 'add lib');
+        const lib = repo.path('lib');
+        await runGit(lib, ['config', 'protocol.file.allow', 'always']);
+        await runGit(lib, ['commit', '-q', '--allow-empty', '-m', 'not on the library remote']);
+        const unpushed = (await runGit(lib, ['rev-parse', 'HEAD'])).trim();
+        await repo.git('add', 'lib');
+        await repo.git('commit', '-q', '-m', 'bump lib');
+        await repo.git('config', 'push.recurseSubmodules', 'on-demand');
+        await repo.git(...pushArgv({ remote: 'origin', branch: 'main', setUpstream: false }));
+        expect((await runGit(origin, ['rev-parse', 'main'])).trim()).toBe((await repo.git('rev-parse', 'HEAD')).trim());
+        expect((await runGit(libraryRemote, ['rev-parse', 'main'])).trim()).not.toBe(unpushed);
+      } finally {
+        library.dispose();
+      }
     });
   });
 });

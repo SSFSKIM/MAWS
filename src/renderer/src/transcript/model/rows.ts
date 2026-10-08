@@ -9,6 +9,7 @@ import type { AskCancelReason } from '@shared/maws/ask'; // E1
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // E1
 // E3 start
 import type { Anchor, AnchorKind } from '@shared/anchor/anchor';
+import type { Destination } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 // E3 end
 import type { ListingSection } from './agent-listing'; // E7
@@ -33,6 +34,13 @@ export interface ToolClassification {
   humanDecision: boolean; // a permission.requested for this tool use was resolved by the human ('user')
 }
 
+// E11 (scale-review C scalpel-2#1): the framing X10's parse took off an anchored prompt besides its anchor: where the
+// comment went (null for a `/btw` promotion, which has no lead) and whether its lead announced a screenshot.
+export interface AnchorFrame {
+  destination: Destination | null;
+  screenshot: boolean;
+}
+
 export interface RowBase {
   id: RowId;
   turnId: TurnId | null;
@@ -48,11 +56,12 @@ export type Row = RowBase &
         // E3 start: what the prompt is about, when MAWS framed it as an anchored comment (X10; parsed from its own text by
         // `userTextOf`, which strips the framing from `text`); absent on every other prompt
         anchor?: Anchor;
+        anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }
     | {
-        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
+        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary;
       }
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
@@ -82,7 +91,7 @@ export type Row = RowBase &
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }
-    | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
+    | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null; neverAnswered?: true /* E11: its turn closed with no result and no event */ }
     // E1 end
     // E3 start: a side thread opened from this session (E3 execution document, Design §5 and §6): one row per child, in
     // the turn or loose block its first event landed in, updated in place by each summary. `label`, `anchorKind` and
@@ -95,13 +104,13 @@ export type Row = RowBase &
     // E3 end
     // E7 start: a `ListAgents` result as the lists it names (E7 execution document, Design §4): pending until the result
     // arrives; `raw` is the result's text, the sections and notes its parse (agent-listing.ts)
-    | { kind: 'agent_list'; toolUseId: ToolUseId; self: string | null; sections: ListingSection[]; notes: string[]; raw: string; pending: boolean }
+    | { kind: 'agent_list'; toolUseId: ToolUseId; self: string | null; sections: ListingSection[]; notes: string[]; raw: string; pending: boolean; neverAnswered?: true /* E11: as the delivery row's */ }
     // E7 end
     // E2 start: an `artifact_create` or `artifact_update` call's row (E2 execution document, Design §9): from the call,
     // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
     // carry none), `deliverableId` and `version` null until the version is registered; `answered` once the call's result
     // is in (a result that does not parse leaves the version null on an answered row)
-    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean }
+    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true /* E11: as the delivery row's */ }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,
     // `target` as `maws.browser.action` names them; `value`: a select's option, a key, a check or a scroll amount, never
@@ -135,7 +144,7 @@ export interface PeerMessage {
   replyTo: string | null;
   toolUseId: ToolUseId | null;
   messageUuid: MessageUuid | null;
-  result: 'pending' | 'sent' | 'failed' | null;
+  result: 'pending' | 'sent' | 'failed' | 'unanswered' | null; // E11: 'unanswered', its turn closed with no result
   resultText: string | null;
   summary: string | null;
 }

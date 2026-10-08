@@ -1,0 +1,8 @@
+E11 W-A gate: e2e-deliverables
+command: pnpm e2e:deliverables
+head: ed6b7cfbfe150f2cffa178d64ae8807894826036
+started (UTC): 2026-10-07T16:25:07Z
+load at start: { 6.51 8.75 7.70 }
+summary:
+    10 passed (46.1s)
+exit: 0

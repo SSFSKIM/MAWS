@@ -65,7 +65,8 @@ describe('discard sheet names every file and needs the acknowledgement', () => {
     expect(within(sheet).getByRole('checkbox', { name: 'Discard 2 changes; this cannot be undone' })).toBeTruthy();
   });
 
-  it('shows a refusal in the sheet with what git printed and stays open; a failed call too', async () => {
+  // E11 W-D (E6's cosmetic row): the sheet says it, so the tool's notice behind it does not say it again
+  it('shows a refusal in the sheet with what git printed and stays open; a failed call too; neither becomes the tool’s notice', async () => {
     main.state.answers['scm.discard'] = () => ok(refusal('unmerged', '"a.ts" has a merge conflict; resolve it in the file or a terminal'));
     open([{ path: 'a.ts', group: 'unstaged' }]);
     const sheet = screen.getByRole('dialog', { name: 'Discard changes' });
@@ -73,11 +74,13 @@ describe('discard sheet names every file and needs the acknowledgement', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(within(sheet).getByText('"a.ts" has a merge conflict; resolve it in the file or a terminal')).toBeTruthy());
     expect(ui.getState().sheet).not.toBeNull();
+    expect(ui.getState().notice).toBeNull();
 
     main.state.answers['scm.discard'] = () => fail('unknown app session: app-a');
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(within(sheet).getByText('Failed: unknown app session: app-a')).toBeTruthy());
     expect(ui.getState().sheet).not.toBeNull();
+    expect(ui.getState().notice).toBeNull();
   });
 
   it('closes on Cancel without discarding anything', () => {

@@ -9,6 +9,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmGhState, ScmPrState, ScmPrStateInput, ScmStatus } from '@shared/ipc/schema/scm';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores, TestHost } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
@@ -37,6 +38,7 @@ const PR: ScmPrState = {
 const PASSED: ScmPrState = { ...PR, checkedAt: '2026-10-06T10:01:00.000Z', pr: { ...PR.pr!, checks: { summary: 'pass', items: [check('pass', 'lint'), check('pass', 'unit'), check('pass', 'e2e')] } } };
 
 let fake: FakeClient;
+let offPanel: () => void = () => {};
 
 function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
   fake = fakeClient({
@@ -47,6 +49,8 @@ function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
   });
   window.maws = fake.client;
   queryClient.clear(); // a case that mounts again starts from main's new answers
+  offPanel();
+  offPanel = connectPanelEvents(fake.client); // as App.tsx connects it: C4's changes into the git store, and the scm queries' re-reads
 }
 
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -66,6 +70,8 @@ beforeEach(() => {
   bridge();
 });
 afterEach(() => {
+  offPanel();
+  offPanel = () => {};
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -214,6 +220,21 @@ describe('push state row shows PR state, install and sign-in states and opens th
       await lineReads('No PR for other');
     });
 
+    // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): a fresh answer for the old branch is
+    // asked again at once rather than waiting out the poll
+    it('remounted after a switch made while nothing showed it, asks again once and shows the new branch’s answer', async () => {
+      let branch = 'feature';
+      bridge({ 'git.watch': () => (branch === 'feature' ? GIT : OTHER), 'scm.pr.state': () => (branch === 'feature' ? PR : { ...PR, checkedAt: '2026-10-06T10:02:00.000Z', branch: 'other', pr: null }) });
+      const view = await mount();
+      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      view.unmount();
+      branch = 'other';
+      setStatus(OTHER); // no surface mounted: the shared query keeps feature's answer, still fresh
+      await mount();
+      await lineReads('No PR for other');
+      expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
+    });
+
     it('hides on a detached head, and back on another branch shows no PR of the branch it left', async () => {
       await mount();
       await lineReads('PR #12 Open · 2 passed, 1 pending');
@@ -227,16 +248,17 @@ describe('push state row shows PR state, install and sign-in states and opens th
     });
   });
 
+  // A-28 (WCAG 2.5.3, label in name): the button is named by the text it shows; what it does is its description
   it('the push text opens Source control in the shown session once the tool is registered, and is plain text before', async () => {
     const user = userEvent.setup();
     const view = await mount();
-    expect(within(push()).queryByRole('button', { name: 'Open Source control' })).toBeNull();
-    expect(within(push()).getByText('Up to date with origin/feature')).toBeTruthy();
+    expect(within(push()).queryByRole('button', { name: 'Up to date with origin/feature' })).toBeNull();
+    expect(within(push()).getByText('Up to date with origin/feature').tagName).toBe('SPAN');
     view.unmount();
     const addTool = vi.spyOn(panelHost, 'addTool');
     registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
     await mount();
-    const open = within(push()).getByRole('button', { name: 'Open Source control' });
+    const open = within(push()).getByRole('button', { name: 'Up to date with origin/feature', description: 'Open Source control' });
     expect(open.textContent).toBe('Up to date with origin/feature');
     await user.click(open);
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
@@ -283,19 +305,22 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(fake.invoked('scm.pr.state')).toHaveLength(2);
   });
 
-  it('shows the push text plain and no PR line for a directory that is not the shown session’s checkout', async () => {
-    const OTHER = '/work/elsewhere';
+  // E11 W-D (tracker row E6 "PushState derives its session from the active tab"): the card names its session, so the
+  // row needs no tab to be active, and neither the row nor its queries subscribe to an event of their own
+  it('reads the session the card names with no tab active, and subscribes to no event itself', async () => {
+    const user = userEvent.setup();
+    const addTool = vi.spyOn(panelHost, 'addTool');
     registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
-    useGit.setState({ entries: new Map([[OTHER, { root: OTHER, status: { ...GIT, repoRoot: OTHER }, uncommitted: null, error: null }]]) });
+    useGit.setState({ entries: new Map([[DIR, { root: DIR, status: GIT, uncommitted: null, error: null }]]) });
+    const before = fake.calls.length;
     render(
       <QueryClientProvider client={queryClient}>
-        <PushState directory={OTHER} />
+        <PushState directory={DIR} appSessionId={A} />
       </QueryClientProvider>,
     );
-    await settle();
-    expect(within(push()).getByText('Up to date with origin/feature').tagName).toBe('SPAN');
-    expect(within(push()).queryByRole('button', { name: 'Open Source control' })).toBeNull();
-    expect(prLine()).toBeNull();
-    expect(fake.invoked('scm.status')).toEqual([]);
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    expect(fake.calls.slice(before).filter((call) => call.startsWith('on '))).toEqual([]);
+    await user.click(within(push()).getByRole('button', { name: 'Up to date with origin/feature' }));
+    expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
   });
 });

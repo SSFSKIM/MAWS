@@ -5,7 +5,7 @@
 // (E3's `AnchorSchema` caps), and puts the page's text nowhere but the label. The anchor carries X10's fields alone; a
 // screenshot of the element is Deferred.
 import * as z from 'zod';
-import type { Anchor } from '@shared/anchor/anchor';
+import { anchorField, type Anchor } from '@shared/anchor/anchor';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
 import { titleOf } from '../model';
 
@@ -35,30 +35,17 @@ const LOCATOR_MAX = 2_000; // X10's locator cap
 const TEXT_MAX = 40; // the element's text in the label (Design §10)
 const ELEMENT_MAX = 60; // `<tag>#<id>`: the id is the page's, of any length
 
-// eslint-disable-next-line no-control-regex -- the control characters are what is matched
-const CONTROL = /[\x00-\x1f\x7f]/g;
-const oneLine = (text: string): string => text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
-
-// At most `max` UTF-16 units (what the schema's `max` counts), an ellipsis marking a cut, never half a surrogate pair.
-function fit(text: string, max: number): string {
-  if (text.length <= max) return text;
-  let kept = text.slice(0, Math.max(0, max - 1));
-  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
-  return `${kept}…`;
-}
-
-// `<title> v<n> › <element> “<text>”`, the title shortened first so the element always shows.
+// `<title> v<n> › <element> “<text>”`, the title shortened first so the element always shows. Each field is one line
+// and fitted by X10's `anchorField`; the locator drops control characters and is cut bare.
 export function artifactElementAnchor(record: DeliverableRecord, version: number, picked: PickedMessage): Anchor {
-  const element = fit(oneLine(picked.label), ELEMENT_MAX);
-  const text = fit(oneLine(picked.text), TEXT_MAX);
+  const element = anchorField(picked.label, ELEMENT_MAX);
+  const text = anchorField(picked.text, TEXT_MAX);
   const rest = ` v${version} › ${element}${text === '' ? '' : ` “${text}”`}`;
-  const title = fit(oneLine(titleOf(record)), Math.max(1, LABEL_MAX - rest.length));
-  let locator = picked.selector.replace(CONTROL, '').slice(0, LOCATOR_MAX);
-  if (/[\uD800-\uDBFF]$/.test(locator)) locator = locator.slice(0, -1);
+  const title = anchorField(titleOf(record), Math.max(1, LABEL_MAX - rest.length));
   return {
     kind: 'artifact-element',
-    locator,
-    label: fit(`${title}${rest}`, LABEL_MAX),
+    locator: anchorField(picked.selector, LOCATOR_MAX, { control: 'drop', ellipsis: false }),
+    label: anchorField(`${title}${rest}`, LABEL_MAX, { control: 'drop' }), // its parts are one line already
     pageUrl: deliverableUrl(record.appSessionId, record.id, version),
   };
 }

@@ -1,0 +1,5 @@
+E11 W-E review fix: pnpm e2e:supervisor at 51ec6e6 (2026-10-07 15:16, 159 s, load { 5.28 8.73 9.72 })
+slot slot.1 acquired at 15:14:08 load { 13.06 11.17 10.63 }
+  8 passed (2.2m)
+e2e:supervisor exit 0
+survivors (pgrep -fl maws-supervisor): 

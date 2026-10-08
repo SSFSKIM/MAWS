@@ -893,7 +893,7 @@ describe('ipc schema validates both directions', () => {
       remoteUrl: null, ahead: 0, behind: 0, dirty: false, files: [], stashCount: 0, checkedAt: '2026-10-06T00:00:00.000Z',
     };
     const plan = {
-      token, kind: 'push', cwd: '/r', program: '/usr/bin/git', argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin',
+      token, kind: 'push', cwd: '/r', program: '/usr/bin/git', argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin',
       remoteUrl: 'https://github.com/o/r', pushUrls: ['https://github.com/o/r'], repository: null, branch: 'main', head: 'abc', upstream: 'origin/main', expiresAt: '2026-10-06T00:05:00.000Z',
     };
 

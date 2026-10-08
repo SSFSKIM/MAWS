@@ -639,7 +639,7 @@ describe('host supervisor', () => {
     const { engine, pty } = await startReady();
     engine.hello!.port.listeners.length = 0; // the engine host stops answering
     const pending = supervisor.dispatch('engine-host', 'engine.ping', undefined);
-    supervisor.stop();
+    expect(supervisor.stop()).toBeUndefined(); // Decision Log 28: utility hosts drain nothing, so the quit is not held
     await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     expect(engine.killed && pty.killed).toBe(true);
     await vi.advanceTimersByTimeAsync(60_000);

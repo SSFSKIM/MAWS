@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
+import type { LaunchPlan } from '../../../src/engine-host/launch';
 import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, ownerConfigHome, persistingControlOf, PROVENANCE, turnAttribution, withRawProcess } from './live';
 import { LiveHost } from './live-host';
 
@@ -90,6 +91,34 @@ describe('live suite bookkeeping', () => {
       expect(await host.callRaw('session.status', { appSessionId: 42 } as never)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
       await host.shutdown();
       expect(host.status(spec.appSessionId)).toMatchObject({ process: 'exited', exit: { reason: 'quit' } });
+    } finally {
+      await host.shutdown().catch(() => {});
+      rmSync(userData, { recursive: true, force: true, maxRetries: 10 });
+    }
+  });
+
+  // E11 W-E (Decision Log 22): a test run inside a Claude session carries that session's CLAUDE* variables into the
+  // login-shell capture; the live host starts its engines without them, CLAUDE_CONFIG_DIR its own. The launch is stopped
+  // at its spawn, which the plan reaches with the environment the engine would get.
+  it('the live host starts its engines without the CLAUDE* variables the captured environment inherited', async () => {
+    const userData = mkdtempSync(join(tmpdir(), 'maws-live-env-'));
+    const plans: LaunchPlan[] = [];
+    const host = new LiveHost({
+      userData, configHome: userData,
+      binaryProbe: async () => ({ ok: true, path: '/unused/offline-engine', version: '2.1.283', error: null }) as never,
+      checkRelay: async () => ({ ok: true }) as never,
+      captureEnv: async () => ({ PATH: '/usr/bin', HOME: homedir(), CLAUDE_CODE_PLUGIN_DIRS: '/owner/.claude/mods/prompt-autosave', CLAUDE_MODEL: 'opus', CLAUDE_CONFIG_DIR: '/owner/.claude' }),
+      spawn: (plan) => {
+        plans.push(plan);
+        throw new Error('offline spawn boundary');
+      },
+    });
+    try {
+      await host.callRaw('session.launch', { spec: liveSpec('/tmp/maws-live-host', { subagentModel: null }) });
+      await host.waitFor(() => plans[0], 'the spawn', 5_000);
+      expect(plans[0]!.env).toMatchObject({ CLAUDE_CONFIG_DIR: userData, PATH: '/usr/bin' });
+      expect(plans[0]!.env).not.toHaveProperty('CLAUDE_CODE_PLUGIN_DIRS');
+      expect(plans[0]!.env).not.toHaveProperty('CLAUDE_MODEL');
     } finally {
       await host.shutdown().catch(() => {});
       rmSync(userData, { recursive: true, force: true, maxRetries: 10 });

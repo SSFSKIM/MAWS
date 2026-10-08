@@ -1,0 +1,5 @@
+step e2e-panel
+command: pnpm e2e:panel
+head 06ca330d  ended 2026-10-08T01:08:01Z  load { 9.90 12.40 13.43 }  71s
+  23 passed (42.4s)
+exit 0

@@ -40,7 +40,7 @@ describe('pushAction: Push, or Publish for a branch with no upstream of its own'
   it('is disabled with a reason when the checkout has no remote', () => {
     expect(pushAction({ status: statusOf({ branch: 'feature', upstream: null }), remotes: [], trusted: true })).toEqual({ label: 'Publish', title: 'No remote to push to', disabled: true });
     expect(pushAction({ status: statusOf({ upstream: null }), remotes: [], trusted: true })).toMatchObject({ disabled: true, title: 'No remote to push to' });
-    expect(prAction({ status: statusOf({ upstream: null }), remotes: [], trusted: true })).toMatchObject({ disabled: true, title: 'No remote to push to' });
+    expect(prAction({ status: statusOf({ upstream: null }), remotes: [], trusted: true })).toMatchObject({ disabled: true, title: 'No remote to open a pull request on' });
   });
 
   it('publishes a branch with no upstream, or one tracking another branch', () => {

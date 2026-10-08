@@ -79,6 +79,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       const command = args.join(' ');
       if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
       if (command === 'remote') return remotes;
+      if (command === 'remote -v') return remotes.split('\n').filter(Boolean).map((name) => `${name}\thttps://github.com/o/r.git (fetch)\n${name}\thttps://github.com/o/r.git (push)\n`).join(''); // E11: status's one read
       if (command === UPSTREAM_FORMAT) return '*\0origin\0refs/heads/main\n';
       if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return '*\0origin\n';
       if (command === 'remote get-url --push --all origin') return pushUrls.map((url) => `${url}\n`).join('');
@@ -179,7 +180,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       pushUrls = ['https://user:secret@github.com/o/r.git', '/srv/mirror.git'];
       const plan = await planPush();
       expect(plan).toMatchObject({
-        kind: 'push', cwd: root, program: GIT, argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin',
+        kind: 'push', cwd: root, program: GIT, argv: ['push', '--progress', '--recurse-submodules=no', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin',
         remoteUrl: 'https://github.com/o/r.git', pushUrls: ['https://github.com/o/r.git', '/srv/mirror.git'], branch: 'main', head: HEAD,
         upstream: 'origin/main', expiresAt: '2026-10-06T12:05:00.000Z',
       });
@@ -378,6 +379,17 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
 
     it('reads the default base from the remote HEAD symbolic ref, without --short', async () => {
       expect(await scm.status(ID)).toMatchObject({ defaultRemote: 'origin', defaultBase: 'main' });
+    });
+
+    // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): the remote picker lists what a plan
+    // reads, so a remote defined only where the remote environment's git looks (a non-default XDG_CONFIG_HOME) shows
+    it('lists the remotes through the push’s own git under the remote environment, as plans read them', async () => {
+      expect(await scm.status(ID)).toMatchObject({ remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }] });
+      expect(pushReaders).toEqual([{ program: GIT, captured }]);
+      pushReaders = [];
+      remotes = '';
+      expect(await scm.prState({ appSessionId: ID, refresh: false })).toMatchObject({ error: 'no_remote' }); // the PR state's check too
+      expect(pushReaders).toEqual([{ program: GIT, captured }]);
     });
   });
 

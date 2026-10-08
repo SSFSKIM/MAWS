@@ -8,6 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, Sess
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
+import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
@@ -184,12 +185,13 @@ function peerMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillC
   if (companion) events.push({ ...base(), ...companion });
 }
 
-// A `user` record of the peer origin whose content is text: a string, or text blocks with no tool result.
+// A `user` record of the peer origin that carries text: a string, or blocks with a text block and no tool result (an
+// image beside the text too, whose text blocks the companion parses, as live parses the same frame's).
 function isPeerPrompt(record: TranscriptRecord): boolean {
   if (record.type !== 'user' || (record.origin as { kind?: unknown } | undefined)?.kind !== 'peer') return false;
   const content = messageContent(record);
   if (typeof content === 'string') return true;
-  return Array.isArray(content) && content.length > 0 && content.every((block) => isContentBlock(block) && block.type === 'text');
+  return Array.isArray(content) && content.some((block) => isContentBlock(block) && block.type === 'text') && content.every((block) => isContentBlock(block) && block.type !== 'tool_result');
 }
 
 // Shared with the follower's unended-turn rule: a record that opens a turn on this mapping, `startsTurn`'s human prompts
@@ -432,10 +434,13 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
         isEchoReceipt: false,
       });
       return;
-    case 'api_error':
-      // Live also leaves this unmapped; retain its compatibility signal rather than inventing an error row.
-      events.push({ ...base(), kind: 'frame.unknown', frameType: 'system', subtype });
+    case 'api_error': {
+      // The event live makes from the engine's `api_retry` twin of this record (normalizer-system.ts); a record without
+      // its retry counters stays a compatibility signal.
+      const retry = apiRetryOfApiError(record);
+      events.push(retry === null ? { ...base(), kind: 'frame.unknown', frameType: 'system', subtype } : { ...base(), ...retry });
       return;
+    }
     case 'model_refusal_fallback':
     case 'model_refusal_no_fallback':
       // Disk uses camelCase (the live stream uses snake_case). No-fallback retracts no messages on the live path.

@@ -122,6 +122,7 @@ export const SCM_COPY = {
   nothingToPush: 'Nothing to push',
   pullFirst: 'Pull in a terminal first',
   noRemote: 'No remote to push to',
+  noRemoteForPr: 'No remote to open a pull request on',
   trustToPush: 'Trust the folder to push',
   checkOutToPush: 'Check out a branch to push',
   openPrFor: (branch: string) => `Open a pull request for ${branch}`,
@@ -155,9 +156,7 @@ export const SCM_COPY = {
   needBase: 'Name the base branch',
   prSubmit: 'Create pull request',
   installGh: 'Install the GitHub CLI ↗',
-  ghInstallUrl: 'https://cli.github.com',
   signInGh: 'Sign in',
-  ghLoginCommand: 'gh auth login', // typed into a Terminal tool exactly (M4's decision)
   // The Output disclosure (Design §5)
   output: 'Output',
   runKind: { push: 'Push', pr: 'Pull request' },

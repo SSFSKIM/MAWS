@@ -108,7 +108,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
         )}
         <InstalledSection plugins={plugins} />
         {cwd !== null && <MarketplacesSection cwd={cwd} installed={plugins} />}
-        {cwd !== null && <AvailableSection cwd={cwd} installed={new Set(plugins.map((p) => p.id))} />}
+        {cwd !== null && <AvailableSection cwd={cwd} />}
         <section data-plugins-section="loaded" className="mt-3">
           {status && !ready && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
           {status ? <PluginsBody view={present(status)} /> : <p className="m-0 text-ui-sm text-fg-muted">{NOT_RUNNING}</p>}

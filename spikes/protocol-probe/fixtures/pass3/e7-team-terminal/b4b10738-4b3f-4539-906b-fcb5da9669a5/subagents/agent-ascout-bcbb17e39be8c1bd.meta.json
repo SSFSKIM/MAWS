@@ -1,0 +1,1 @@
+{"agentType":"scout","description":"Scout reads one.txt","name":"scout","spawnDepth":0,"requestShape":"background","requestNonInteractive":true,"model":"haiku","taskKind":"in_process_teammate","teamName":"session-b4b10738","color":"blue","planModeRequired":false,"spawnedAgentType":"general-purpose","permissionMode":"auto"}

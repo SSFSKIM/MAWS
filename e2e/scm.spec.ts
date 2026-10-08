@@ -158,8 +158,23 @@ test.describe('source control over a scratch repository', () => {
       expect(operators.length, 'the added lines draw their operator').toBeGreaterThanOrEqual(UNTRACKED_TEXT.length);
       expect(operators.every((operator) => operator.trim() === '+'), `every line added: ${JSON.stringify(operators)}`).toBe(true);
 
-      // Stage, then Unstage
-      await button(row(p, 'unstaged', 'src/app.ts'), 'Stage src/app.ts').click();
+      // Stage, then Unstage. E11 (tracker row E6 "two short windows"): the stage's git.changed comes from main's
+      // refresh of the watcher, within one status read of the stage's own answer, not from the watcher's 250 ms
+      // trailing debounce after the index write (the buttons stage below; this one is timed through the bridge)
+      const timed = await p.page.evaluate(async ([appSessionId, repoRoot]) => {
+        let changedAt: number | null = null;
+        const off = window.maws.on('git.changed', (event) => {
+          if ((event as { repoRoot: string }).repoRoot === repoRoot && changedAt === null) changedAt = performance.now();
+        });
+        const answer = await window.maws.invoke('scm.stage', { appSessionId, paths: ['src/app.ts'] } as never);
+        const answeredAt = performance.now();
+        for (let waited = 0; changedAt === null && waited < 5_000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+        off();
+        return { ok: answer.ok, gap: changedAt === null ? null : changedAt - answeredAt };
+      }, [scratch.appSessionId, scratch.dir] as const);
+      expect(timed.ok).toBe(true);
+      expect(timed.gap, 'git.changed arrived').not.toBeNull();
+      expect(timed.gap!, `git.changed ${Math.round(timed.gap!)} ms after the stage answered`).toBeLessThan(150); // W-B review M4: well clear of a debounce-driven one (250 ms less the IPC)
       await expect(row(p, 'staged', 'src/app.ts')).toBeVisible();
       await expect(row(p, 'unstaged', 'src/app.ts')).toHaveCount(0);
       expect(gitNames(scratch, '--cached'), 'git agrees').toEqual(['src/app.ts', 'src/staged.ts']);
@@ -247,7 +262,7 @@ test.describe('source control over a scratch repository', () => {
       let push = await openPushSheet(p);
       await expect(push.locator('[data-scm-plan-row="remote"]')).toContainText('origin');
       await expect(push.locator('[data-scm-destination]')).toHaveText([scratch.origin]);
-      await expect(push.locator('[data-scm-plan-command]')).toHaveText(/\/git push --progress origin refs\/heads\/main:refs\/heads\/main$/); // the program's path is this machine's
+      await expect(push.locator('[data-scm-plan-command]')).toHaveText(/\/git push --progress --recurse-submodules=no origin refs\/heads\/main:refs\/heads\/main$/); // the program's path is this machine's
       await button(push, 'Cancel').click();
       await expect(push).toHaveCount(0);
       await expect(output(p), 'nothing ran').toHaveCount(0);
@@ -336,7 +351,7 @@ test.describe('source control over a scratch repository', () => {
       const { scratch } = p;
       await openTool(p);
       const push = await openPushSheet(p);
-      await expect(push.locator('[data-scm-plan-command]'), 'the wrapper is the git the push runs').toContainText(`${scratch.root}/bin/git push --progress origin`);
+      await expect(push.locator('[data-scm-plan-command]'), 'the wrapper is the git the push runs').toContainText(`${scratch.root}/bin/git push --progress --recurse-submodules=no origin`);
       await button(push, 'Push').click();
       await expect(outputText(p)).toContainText('slow git: waiting 3 s');
       await expect(output(p).locator('[data-scm-output-state]')).toContainText('Running');

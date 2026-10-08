@@ -273,8 +273,11 @@ describe('host runtime client hooks', () => {
     expect(first.posted).toEqual([{ t: 'res', id: 'old', ok: true, value: PING }]);
   });
 
-  it('logs dropped events once per stretch without a client, then their count when one is ready', () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  // E11 (tracker row E10 "host.log expected traffic as errors"): dropping while no client is ready is the rule, not a
+  // failure, so its lines are info, never error
+  it('logs dropped events once per stretch without a client, then their count when one is ready, at info level', () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { runtime, emit } = engineHost();
     emit();
     emit();
@@ -283,6 +286,7 @@ describe('host runtime client hooks', () => {
     runtime.serve(fakePort().port);
     runtime.setReady();
     expect(log.mock.calls.some(([line]) => String(line).includes('3 events dropped'))).toBe(true);
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('answers false when the port reports it wrote nothing (a socket already closing)', () => {

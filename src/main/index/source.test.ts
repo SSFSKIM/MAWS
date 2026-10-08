@@ -16,7 +16,7 @@ import { registerFs } from '../../engine-host/fs/register';
 import { registerEngineIpc } from '../../engine-host/ipc';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
-import { IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
+import { DISCOVERY_BATCH, IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
 import { SessionReadModel, type ReadModelWriter as ModelWriter } from '../sessions/read-model'; // C12
 
 type Listener = (payload: unknown) => void;
@@ -142,6 +142,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     return source;
   };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const applied = () => new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
   const withHolders = (holders: { sessionId: SessionId; holder: Holder }[]) => ({ ...FS_STATE_EMPTY, holders: holders.map((h) => ({ ...h, appSessionId: null })) });
 
   it('starts by pushing every project and record, then scans with what the index knows and folds the holder snapshot', async () => {
@@ -233,6 +234,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     fake.setState('ready');
     await settle();
     fake.fire('fs.sessionChanged', { appSessionId: appId, summary: { ...disk, size: disk.size + 1, lastAssistantText: 'After crash' } });
+    await applied();
     expect(index.sessions.get(appId)?.holder).toEqual({ kind: 'none' });
     expect(recorded.of('setDigest').at(-1)?.lastAssistantLine).toBe('After crash');
 
@@ -266,11 +268,121 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     await settle();
     emitted.length = 0;
     for (let i = 1; i <= 4_000; i++) fake.fire('fs.sessionChanged', { summary: summary({ sessionId: sessionIdFor(0x200000 + i) }), appSessionId: null });
-    await settle();
+    await vi.waitFor(() => expect(events('session.changed')).toHaveLength(4_000), { timeout: 10_000 }); // E11: applied after the burst's turn
     const revisions = events('session.changed').map((c) => c.revision);
-    expect(revisions).toHaveLength(4_000);
     for (let i = 1; i < revisions.length; i++) expect(revisions[i]).toBeGreaterThan(revisions[i - 1]);
     expect(revisions.at(-1)).toBe(index.revision);
+  });
+
+  // E11 (tracker row E3 · C4 "first launch after migration 4 re-summarises for ~10 s"): a scan's burst of summaries is
+  // applied several to a transaction, not one transaction each
+  describe('a burst of discovered summaries', () => {
+    // Index.transaction calls that are no other's inner call: the transactions the source commits
+    const outermost = () => {
+      const original = index.transaction.bind(index);
+      let depth = 0;
+      const counted = { n: 0 };
+      vi.spyOn(index, 'transaction').mockImplementation((fn) => {
+        depth += 1;
+        if (depth === 1) counted.n += 1;
+        try {
+          return original(fn);
+        } finally {
+          depth -= 1;
+        }
+      });
+      return counted;
+    };
+
+    it('is applied in batched transactions of up to DISCOVERY_BATCH, every record created, in order', async () => {
+      const fake = scriptedHost();
+      begin(fake.host);
+      await settle();
+      const commits = outermost();
+      const burst = Array.from({ length: DISCOVERY_BATCH * 2 + 5 }, (_, i) => summary({ sessionId: sessionIdFor(0x300000 + i) }));
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      expect(index.sessions.getByEngineId(burst[0].sessionId)).toBeNull(); // queued: nothing applied inside the burst's turn
+      await vi.waitFor(() => expect(events('session.changed')).toHaveLength(burst.length), { timeout: 10_000 });
+      expect(commits.n).toBe(3);
+      expect(burst.every((s) => index.sessions.getByEngineId(s.sessionId) !== null)).toBe(true);
+      const revisions = events('session.changed').map((c) => c.revision);
+      expect(revisions).toHaveLength(burst.length);
+      for (let i = 1; i < revisions.length; i++) expect(revisions[i]).toBeGreaterThan(revisions[i - 1]);
+    });
+
+    it('one summary that cannot be applied costs only itself: the batch is applied again one by one', async () => {
+      const fake = scriptedHost();
+      begin(fake.host);
+      await settle();
+      const burst = [summary(), summary(), summary()];
+      const upsert = index.sessions.upsertFromSummary.bind(index.sessions);
+      vi.spyOn(index.sessions, 'upsertFromSummary').mockImplementation((s) => {
+        if (s.sessionId === burst[1].sessionId) throw new Error('constraint failed');
+        return upsert(s);
+      });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      await settle();
+      expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId) !== null)).toEqual([true, false, true]);
+      expect(error.mock.calls.map((c) => String(c[0]))).toEqual(['[index] fs.sessionChanged could not be applied:']);
+      expect(events('session.changed')).toHaveLength(2);
+    });
+
+    it('asks the linked-worktree question of the burst’s directories off main’s thread first, then applies it', async () => {
+      const fake = scriptedHost();
+      const warmed: string[][] = [];
+      let release: () => void = () => {};
+      source = new IndexSessionSource(index, fake.host, {
+        emit,
+        tickMs: 5,
+        warmLinkedWorktrees: (directories) => (warmed.push(directories), new Promise<void>((resolve) => (release = resolve))),
+      });
+      stop = source.start(recordingWriter().writer);
+      await settle();
+      warmed.length = 0; // the start's own warm-up of the projects
+      const burst = [summary({ directory: '/work/a' }), summary({ directory: '/work/b' }), summary({ directory: '/work/a' })];
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      await settle();
+      expect(warmed).toEqual([['/work/a', '/work/b']]);
+      expect(index.sessions.getByEngineId(burst[0].sessionId)).toBeNull(); // waiting for the warm-up
+      release();
+      await vi.waitFor(() => expect(burst.every((s) => index.sessions.getByEngineId(s.sessionId) !== null)).toBe(true));
+    });
+
+    it('applies what is queued before any other event, so a removal right after its discovery still archives the record', async () => {
+      const fake = scriptedHost();
+      begin(fake.host);
+      const s = summary();
+      fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      fake.fire('fs.sessionRemoved', { sessionId: s.sessionId, appSessionId: null });
+      expect(index.sessions.getByEngineId(s.sessionId)).toMatchObject({ archived: true });
+    });
+
+    // W-B review M3: applying a first launch's burst at the stop runs git synchronously for every directory still cold,
+    // stalling the quit; the next launch's fs.scan re-reports those transcripts, since the index never recorded their
+    // sizes, so the stop drops the queue.
+    it('the stop drops what is still queued rather than applying it, and a later drain applies nothing', async () => {
+      const fake = scriptedHost();
+      let release: () => void = () => {};
+      source = new IndexSessionSource(index, fake.host, {
+        emit,
+        tickMs: 5,
+        warmLinkedWorktrees: () => new Promise<void>((resolve) => (release = resolve)),
+      });
+      stop = source.start(recordingWriter().writer);
+      release(); // the start's own warm-up
+      await settle();
+      const burst = [summary({ directory: '/work/a' }), summary({ directory: '/work/b' })];
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      await settle(); // the drain's warm-up is out
+      stop();
+      stop = null;
+      expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId))).toEqual([null, null]);
+      release();
+      await settle();
+      expect(burst.map((s) => index.sessions.getByEngineId(s.sessionId))).toEqual([null, null]);
+      expect(index.sessions.bindings()).toEqual([]);
+    });
   });
 
   it('a tick\'s project and record events go out in revision order: the project a new record joins comes first', async () => {
@@ -335,6 +447,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
 
     const found = summary({ lastRecordAt: '2026-09-20T08:30:00.000Z' });
     fake.fire('fs.sessionChanged', { summary: found, appSessionId: null });
+    await applied();
     const record = index.sessions.getByEngineId(found.sessionId)!;
     expect(recorded.of('setDigest').filter((d) => d.appSessionId === record.appId).at(-1)).toMatchObject({ phase: 'exited', turnStartedAt: null, lastTurnEndedAt: '2026-09-20T08:30:00.000Z' });
   });
@@ -348,6 +461,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     const later = summary();
     fake.fire('fs.holderChanged', { sessionId: later.sessionId, appSessionId: null, holder: { kind: 'terminal', pid: 99 }, registry: null, job: null });
     fake.fire('fs.sessionChanged', { summary: later, appSessionId: null });
+    await applied();
     const record = index.sessions.getByEngineId(later.sessionId)!;
     expect(record.holder).toEqual({ kind: 'terminal', pid: 99 });
     expect(recorded.of('setDigest').filter((d) => d.appSessionId === record.appId).at(-1)).toMatchObject({ phase: 'foreign' });
@@ -369,6 +483,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     begin(fake.host);
     const s = summary();
     fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+    await applied();
     const appId = index.sessions.getByEngineId(s.sessionId)!.appId;
     fake.fire('fs.sessionRemoved', { sessionId: s.sessionId, appSessionId: appId });
     expect(index.sessions.get(appId)).toMatchObject({ archived: true });
@@ -464,6 +579,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       const hidden = summary();
       fake.fire('fs.sessionChanged', { summary: shown, appSessionId: null });
       fake.fire('fs.sessionChanged', { summary: hidden, appSessionId: null });
+      await applied();
       const shownId = index.sessions.getByEngineId(shown.sessionId)!.appId;
       const hiddenId = index.sessions.getByEngineId(hidden.sessionId)!.appId;
 
@@ -475,6 +591,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
 
       fake.fire('fs.sessionChanged', { summary: advance(shown, '2026-09-28T11:00:00.000Z', 'leaf-2'), appSessionId: shownId });
       fake.fire('fs.sessionChanged', { summary: advance(hidden, '2026-09-28T11:00:00.000Z', 'leaf-9'), appSessionId: hiddenId });
+      await applied();
       const shownAfter = index.sessions.get(shownId)!;
       expect(shownAfter.unread).toBe(false);
       expect(shownAfter.lastSeen.messageUuid).toBe('leaf-2');
@@ -487,6 +604,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       // Hiding it again: the next advance turns it unread; showing it marks it seen.
       source!.onSetVisible(shownId, false);
       fake.fire('fs.sessionChanged', { summary: advance(shown, '2026-09-28T12:00:00.000Z', 'leaf-3'), appSessionId: shownId });
+      await applied();
       expect(index.sessions.get(shownId)?.unread).toBe(true);
       source!.onSetVisible(shownId, true);
       expect(index.sessions.get(shownId)).toMatchObject({ unread: false, lastSeen: { messageUuid: 'leaf-3' } });
@@ -860,6 +978,7 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     const scan = await wired.host.dispatch('engine-host', 'fs.scan', {});
     expect(scan.ok).toBe(true);
     expect(changed.filter((e) => e.summary.sessionId === S[0]).map((e) => e.appSessionId)).toEqual([null]);
+    await new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
     const fresh = index.sessions.getByEngineId(S[0])!;
     expect(fresh.appId).not.toBe(first.appId);
     expect(fresh.pinned).toBe(false);

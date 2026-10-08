@@ -1,10 +1,11 @@
 // The app's one dictation controller and its key (E9 execution document, Design §6): mounted once from App.tsx beside
 // ComposerAppKeys (and from the composer harness). Holding `composer.dictate` (unbound by default; a chord bound in
-// Settings › Keyboard) presses for the focused pane's session, resolved centrally as ⌘L resolves it; letting go
-// releases. Main's `voice.event`s reach the controller here, and the toolbar's microphone button, whose clicks toggle a
-// capture, reaches it through `mountedDictation`. Losing input (the window's blur, a hidden document) cancels any
-// capture, a click-started one included.
+// Settings › Keyboard) presses for the session whose composer holds focus, else the focused pane's (resolved centrally
+// as ⌘L resolves it); letting go releases. Main's `voice.event`s reach the controller here, and the toolbar's microphone
+// button, whose clicks toggle a capture, reaches it through `mountedDictation`. Losing input (the window's blur, a
+// hidden document) cancels any capture, a click-started one included.
 import { useEffect, useMemo } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useKeyChord } from '../../keymap/useKeyChord';
@@ -14,6 +15,13 @@ import { focusedSession } from '../ComposerAppKeys';
 import { DictationController, provideDictation } from './controller';
 
 const now = () => Date.now(); // the controller's clock, read when it runs, never during a render
+
+// The session a hold dictates into (scale-review C scalpel-5#1): the composer that holds focus, wherever it is drawn (a
+// side thread's in the panel's Side pane is no pane's active tab), else the focused pane's.
+function holdSession(): AppSessionId | null {
+  const composer = document.activeElement?.closest<HTMLElement>('[data-composer]');
+  return (composer?.dataset.composer as AppSessionId | undefined) ?? focusedSession();
+}
 
 export function DictationKeys({ client = ipc }: { client?: MawsBridge }) {
   const controller = useMemo(
@@ -48,6 +56,6 @@ export function DictationKeys({ client = ipc }: { client?: MawsBridge }) {
       controller.dispose();
     };
   }, [client, controller]);
-  useKeyChord('composer.dictate', () => controller.press(focusedSession()), { onRelease: (reason) => controller.release(reason) });
+  useKeyChord('composer.dictate', () => controller.press(holdSession()), { onRelease: (reason) => controller.release(reason) });
   return null;
 }

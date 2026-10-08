@@ -5,10 +5,12 @@
 // merge view is never saved here: a save from it sends the hash the merge shows, so the sheet's default button would
 // write the unresolved document over the disk's change; the guard keeps the tab and brings it to the front instead, for
 // the owner to resolve, Reload or Keep mine there. And `file.save` (⌘S, File › Save file), which saves the focused
-// pane's active tab when it is a file tab and does nothing otherwise.
+// pane's active tab when it is a file tab and does nothing otherwise. E11: `file.commentLine` (Comment on this line)
+// opens the comment composer for that tab's cursor line, likewise.
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { registerAction, registerCloseGuard } from '../../../keymap/actions-runtime';
 import { useLayout } from '../../../stores/layout';
+import { commentOnCursorLine } from '../anchor/anchor'; // E11
 import { activeTab } from '../../../stores/layout-model';
 import { useViewer } from '../viewer/viewer-store';
 import { askClose } from './EditorDialogs';
@@ -34,7 +36,12 @@ function saveFocusedFile(): void {
   if (tab?.kind === 'file') void useViewer.getState().save(tab.id);
 }
 
+function commentOnFocusedLine(): void {
+  const tab = activeTab(useLayout.getState().main);
+  if (tab?.kind === 'file') commentOnCursorLine(tab.id);
+}
+
 export function registerEditor(): () => void {
-  const offs = [registerCloseGuard('file', guardFileClose), registerAction('file.save', saveFocusedFile)];
+  const offs = [registerCloseGuard('file', guardFileClose), registerAction('file.save', saveFocusedFile), registerAction('file.commentLine', commentOnFocusedLine)];
   return () => offs.forEach((off) => off());
 }

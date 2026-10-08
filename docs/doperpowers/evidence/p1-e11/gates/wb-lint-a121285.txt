@@ -1,0 +1,8 @@
+command: pnpm lint
+head: a121285d360c3a50d5d070aceb9cef427288e897
+started (UTC): 2026-10-07T17:38:05Z
+load at start: { 8.29 7.30 7.16 }
+slot: eligible: load 8.29 after 0s
+ended (UTC): 2026-10-07T17:38:32Z
+--- summary lines
+--- exit code: 0

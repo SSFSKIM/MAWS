@@ -34,11 +34,10 @@ import type {
   ScmStatus,
 } from '@shared/ipc/schema/scm';
 import type { SessionRecord } from '@shared/graph/session';
-import type { TrustState } from '@shared/sessions/trust';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
-import { trustStateOf } from '../sessions/trust';
+import { trustedKeyOf, type TrustedKey } from '../sessions/trust';
 import { PlanTable, planPr, planPush, revalidatePlan, type PlanSources } from './plans';
 import { GH_READ_TIMEOUT_MS, prChecksArgv, prViewArgv, readChecks, readGhProbe, readPrView } from './pr-state';
 import { childEnvironment } from './remote-env';
@@ -100,7 +99,7 @@ export class ScmService {
     const checkout = this.checkout(appSessionId);
     const [trust, gh] = await Promise.all([this.trust(checkout), this.gh(refresh)]);
     const repository = trust.keyKind === 'repo';
-    const remotes = repository ? await this.remotes(trust.directory) : [];
+    const remotes = repository ? await this.remotes(trust.directory, await this.pushReader()) : [];
     const defaultRemote = remotes.length > 0 ? await this.defaultRemote(trust.directory, remotes.map((r) => r.name)) : null;
     return {
       directory: trust.directory,
@@ -222,7 +221,7 @@ export class ScmService {
     }
     const branch = status.branch;
     if (branch === null) return answer(null, 'detached');
-    if ((await this.remoteNames(checkout)).length === 0) return answer(branch, 'no_remote');
+    if ((await this.remoteNames(checkout, await this.pushReader())).length === 0) return answer(branch, 'no_remote');
     if (gh.state === 'missing') return answer(branch, 'gh_missing');
     if (gh.state === 'unauthenticated') return answer(branch, 'gh_unauthenticated');
     // git refuses such a name, but a ref written by hand can carry one; gh would read it as an option
@@ -266,8 +265,9 @@ export class ScmService {
     return record.worktree?.path ?? record.directory;
   }
 
-  private async trust(checkout: string): Promise<TrustState> {
-    return trustStateOf(checkout, { git: this.deps.read, env: await this.deps.captured() });
+  // E11: the key and the store only; the files trust would load are the session's trust card's to read
+  private async trust(checkout: string): Promise<TrustedKey> {
+    return trustedKeyOf(checkout, { git: this.deps.read, env: await this.deps.captured() });
   }
 
   // What a plan reads, bound to the checkout: trust and the status read now, git and gh as the remote environment's PATH
@@ -288,6 +288,15 @@ export class ScmService {
       gh: () => this.gh(false),
       runGh: (program, argv) => this.collect(program, argv, checkout, captured),
     };
+  }
+
+  // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): the push's own git under the remote
+  // environment, as a plan reads the destination; the remote picker and the PR state's remote check list remotes
+  // through it, so a remote only that git sees (a non-default XDG_CONFIG_HOME) is listed where a plan would find it
+  private async pushReader(): Promise<GitRun> {
+    const captured = await this.deps.captured();
+    const program = await gitProgram(childEnvironment(captured, 'remote'), this.deps.env);
+    return (this.deps.pushRead ?? pushGitRead)(program, captured);
   }
 
   private collect(program: string, argv: string[], cwd: string, captured: Record<string, string>) {
@@ -312,9 +321,12 @@ export class ScmService {
     })();
     const probe = { at: this.now(), value };
     this.ghProbe = probe;
-    void value.then((state) => {
-      if (state.state !== 'ready' && this.ghProbe === probe) this.ghProbe = null;
-    });
+    // E11: a probe that failed is dropped as an unready answer is, and its rejection is handled here (the caller's await
+    // handles its own)
+    const drop = () => {
+      if (this.ghProbe === probe) this.ghProbe = null;
+    };
+    value.then((state) => state.state !== 'ready' && drop(), drop);
     return value;
   }
 
@@ -375,20 +387,23 @@ export class ScmService {
     return result;
   }
 
-  private async remoteNames(directory: string): Promise<string[]> {
-    return (await this.deps.read(directory, ['remote'])).split('\n').filter((name) => name !== '');
+  private async remoteNames(directory: string, read: GitRun): Promise<string[]> {
+    return (await read(directory, ['remote'])).split('\n').filter((name) => name !== '');
   }
 
-  // Every remote with its configured fetch URL (as `remote get-url` answers it, without user-info), null when it has none.
-  private async remotes(directory: string): Promise<ScmStatus['remotes']> {
-    return Promise.all((await this.remoteNames(directory)).map(async (name) => {
-      try {
-        return { name, url: withoutUserInfo((await this.deps.read(directory, ['remote', 'get-url', name])).trim()) };
-      } catch (error) {
-        if (error instanceof GitCommandError) return { name, url: null };
-        throw error;
-      }
-    }));
+  // Every remote with its configured fetch URL (without user-info), null when it has none, from one `git remote -v`
+  // (E11): a `<name>\t<url> (fetch)` line per remote with a URL (the first of several; a partial clone's carries a
+  // ` [<filter>]` suffix), `<name>\t` for one without.
+  private async remotes(directory: string, read: GitRun): Promise<ScmStatus['remotes']> {
+    const urls = new Map<string, string | null>();
+    for (const line of (await read(directory, ['remote', '-v'])).split('\n')) {
+      const tab = line.indexOf('\t');
+      if (tab <= 0) continue;
+      const name = line.slice(0, tab);
+      const fetch = /^(.*) \(fetch\)(?: \[[^\]]*\])?$/.exec(line.slice(tab + 1));
+      if (!urls.has(name) || (urls.get(name) === null && fetch)) urls.set(name, fetch ? withoutUserInfo(fetch[1]!.trim()) : null);
+    }
+    return [...urls].map(([name, url]) => ({ name, url }));
   }
 
   // The current branch's upstream remote, else `origin`, else the sole remote.

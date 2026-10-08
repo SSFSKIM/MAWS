@@ -1,0 +1,11 @@
+E11 M4.2 F-H gate: live-proof-skip
+command: env MAWS_HARNESS=1 pnpm exec playwright test e2e/browser-comment-live.spec.ts
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-08T00:00:19Z
+load at start: { 13.85 11.65 12.03 }
+summary:
+      1 skipped
+exit: 0
+live-proof.txt before: 9c881b5f3b78ff737841a1d42bc9ac5f6034d6b3  docs/doperpowers/evidence/p1-e4d/live-proof.txt
+live-proof.txt after:  9c881b5f3b78ff737841a1d42bc9ac5f6034d6b3  docs/doperpowers/evidence/p1-e4d/live-proof.txt (untouched)
+git status of p1-e4d: ''

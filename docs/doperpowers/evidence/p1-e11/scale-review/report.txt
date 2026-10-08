@@ -1,0 +1,65 @@
+E11 M4 — the scale review's routing (execution document Design §4, Task 4.1)
+
+Panels: five, level max, deriver, finders and verifier on Opus, over the pairs of pairs.txt (06fa09ac..07e50719);
+every lane status ok, no panel interrupted, each target's headCommit equal to pairs.txt. Results: <area>.findings.json.
+Confirmed findings: 20 (A 3, B 2, C 11, D 1, E 3); P1 0, P2 2, P3 18.
+Routing rule (Constraint 4, Design §4): fix when the change is contained in the touched area; a tiny leftover or a change
+that would widen a module's surface goes to the tracker with an owner; a finding that contradicts a P-n decision or a
+binding mark is dismissed with the decision cited; a deliberate P1 exclusion is deferred. No finding is fixed inline by
+the executor. Two fix waves, split by file ownership so they can run side by side (Design §2's module map):
+  F-H (engine host, main, e2e/tests: areas A, B, E) in the E11 worktree;
+  F-R (renderer core and tools: areas C, D) in a sibling worktree, merged back.
+
+area | id | priority | file:lines | title | route
+A | sweep#1 | P3 | src/engine-host/session-stream.ts:219-223 | Bound connect-burst batches by bytes, not only by event count | fix F-H (X13 exactly-once: a byte bound on the republish batch; tracker row naming X13 if not contained)
+A | scalpel-2#1 | P3 | src/engine-host/tool-server/browser.ts:87-111 | Skip the screenshot record when the call was withdrawn while it was being read | fix F-H
+A | scalpel-5#1 | P3 | src/engine-host/plugins/runner.ts:279-283 | Take the reload expectation's scope from the CLI result, not a 'user' default | fix F-H
+B | scalpel-3#1 | P3 | src/main/files/service.ts:23-32 | Rejoin the reveal sentence split by the E5 paragraph and the imports | fix F-H
+B | scalpel-4#1 | P3 | src/main/scm/plans.ts:63-66 | Keep the confirmed push from also pushing submodules to unlisted remotes | fix F-H (--recurse-submodules=no, a plans test)
+C | scalpel-2#1 | P2 | src/renderer/src/transcript/model/user-text.ts:102-104 | Keep the anchor framing when an anchored bubble is edited and resent | fix F-R (X10)
+C | scalpel-1#1 | P3 | src/renderer/src/transcript/model/derive.ts:1171,1193 | Settle ListAgents and outbound SendMessage rows when their turn closes unanswered | fix F-R
+C | scalpel-1#2 | P3 | src/renderer/src/transcript/model/serialize.ts:47 | Serialize a withdrawn ask with its interrupt wording, not "session ended" | fix F-R
+C | scalpel-2#2 | P3 | src/renderer/src/transcript/model/serialize.ts:30 | Include the anchor in a user row's Copy and markdown export | fix F-R
+C | scalpel-2#3 | P3 | src/renderer/src/attention/navigation.ts:45-51 | Suppress the fallback toast for a thread drawn in the Side pane | fix F-R
+C | scalpel-3#1 | P3 | src/renderer/src/attention/navigation.ts:175-181 | Limit the panel-shows-it rule to maws asks, not every question item | fix F-R
+C | scalpel-5#1 | P3 | src/renderer/src/composer/dictation/DictationKeys.tsx:51 | Send held dictation to the focused composer, not the main tab's | fix F-R if the focused SessionPane is readable; else tracker (E9, P2; the chord is unbound by default)
+C | scalpel-5#2 | P3 | src/renderer/src/transcript/view/rows/BrowserAction.tsx:89-95 | Stop re-announcing ticking elapsed time through role=status | fix F-R
+C | scalpel-5#3 | P3 | src/renderer/src/composer/dictation/MicControl.tsx:71 | Announce dictation failure and denial notices | fix F-R
+C | scalpel-5#4 | P3 | src/renderer/src/side/ThreadView.tsx:104-114 | Keep the visible "/btw" text in the toggle's accessible name | fix F-R
+C | scalpel-5#5 | P3 | src/renderer/src/transcript/view/rows/Delivery.tsx:48-55 | Give each delivered file's action buttons a distinct name | fix F-R
+D | scalpel-2#1 | P3 | src/renderer/src/tools/deliverables/Viewer.tsx:196,225-226 | Make Reload re-read a file body that is also shown in another view | fix F-R (a store method forcing a change load; tracker if it widens the store's surface)
+E | scalpel-1#1 | P2 | e2e/c12-quit.spec.ts:160-177 | Attach the stderr listener before startup, or the will-quit warning check can't fail | fix F-H (assert the will-quit listener count through app.evaluate)
+E | scalpel-1#2 | P3 | e2e/browser-comment-live.spec.ts:37-38,74-77,129-134 | Stop the live proof overwriting committed live-proof.txt, even on a skip | fix F-H
+E | scalpel-1#4 | P3 | e2e/support/plugins-live.ts:21-22 | Return a skip reason when the relay is down instead of throwing from curl | fix F-H (the shared relaySkipReason)
+
+Dismissed: none. Deferred: none (at routing). [parent-impact]: none (no finding reveals a wire fact a child read wrongly
+or contradicts a P-n or a binding mark).
+
+Commits per finding (F-H 81a345df..50219ea0 reviewed by reviewer-high on astra under P-26; F-R 50219ea0..06a216b3):
+A sweep#1      cd12f78f (+ a373e727 comment) — HALF-FIXED: the republish batch is byte-bounded (BATCH_BYTES 16 MiB, a quarter
+               of the line cap) and the cursor advances only past accepted batches; the 256 MiB writable-cap half (lines the
+               socket buffered count as delivered and are lost if a later write in the same synchronous burst passes the cap)
+               needs acknowledgement or backpressure through HostEmit — tracker row naming X13, owner P2 (architect's ruling).
+A scalpel-2#1  e256c30c — PARTLY FIXED: a call withdrawn during the image read or the exclusive-queue wait writes no record;
+               the F-H reviewer found a withdrawal during the asynchronous `deliverables.write(record)` itself still persists
+               and announces the record — tracker row, owner P2 (a few milliseconds of disk write; no third review round).
+A scalpel-5#1  cfc71d51 (+ 08d15914 wording)
+B scalpel-3#1  79cff6c7
+B scalpel-4#1  5c9b3b28 (+ F-R's d2b38f83 renderer and schema fixtures; remote-runner.test.ts's argv in the M4 close)
+C scalpel-2#1  0a193096 (P2; the user row's optional anchorFrame, Decision Log 34)
+C scalpel-1#1  672dff90
+C scalpel-1#2  05fe9c5a
+C scalpel-2#2  4f2ccf6f
+C scalpel-2#3  15430441
+C scalpel-3#1  f5bfc8df
+C scalpel-5#1  621171d8
+C scalpel-5#2  7411aae7
+C scalpel-5#3  ed3ebcc3
+C scalpel-5#4  a004e333
+C scalpel-5#5  d93225b0
+D scalpel-2#1  7b125dce
+E scalpel-1#1  1b9dcf4d (P2; the count check proven able to fail: gates/fh-c12-listener-proof-1b9dcf4.txt)
+E scalpel-1#2  766aea24 (MAWS_E4D_LIVE_OUT)
+E scalpel-1#4  ce6ad2aa
+
+Counts: confirmed 20; fixed 18 whole, 2 partly (their remainders to the tracker); tracker 2 rows; dismissed 0; deferred 0.

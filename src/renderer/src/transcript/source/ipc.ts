@@ -290,6 +290,11 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // can carry an exit of an earlier run, which says nothing about a child started since.
   let startAt = -1; // the child's start in the parent's snapshot
   let startedInStream = false;
+  // E11 (W-C; E10's host loss): the parent's latest live-form event while the child is live, for the loss's exit, and
+  // the exit the source synthesised when the host died with the child running: no journal holds it, so the disk re-read
+  // after the switch keeps it as the child's end unless the parent started the child again after it.
+  let lastLive: SessionEvent | null = null;
+  let hostLost: SessionEvent | null = null;
   const exitsAt = new Map<EventId, number>(); // the parent's snapshot's exits, by position
   const endsChild = (event: SessionEvent) => {
     if (finishes(event)) return true;
@@ -314,12 +319,14 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         if (starts(event)) {
           startedInStream = true;
           ended = null;
+          hostLost = null;
         } else {
           ended = event;
           changedEnd = true;
         }
       }
       if ((own(event) && liveForm(event) === (provenance === 'live')) || (provenance === 'live' && ends)) passed.push(event);
+      if (provenance === 'live' && liveForm(event)) lastLive = event;
     }
     if (passed.length > 0) subscriber.listener(passed);
     // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch.
@@ -354,11 +361,18 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         // comes after its entry was removed, unlike parent status (which can precede the index's queued unfollow).
         if (state.appSessionId === appSessionId && state.agentId === agentId && state.state === 'stopped' && provenance === 'disk') toDisk();
       });
+      // E11 (W-C): the session source's host-loss rule, for the parent's process as the live child sees it; the exit
+      // ends the child as any parent exit does (closed as stopped, then the switch to disk)
+      const offLoss = onHostLoss(client, appSessionId, () => (provenance === 'live' ? lastLive : null), (exit) => {
+        hostLost = exit;
+        receive(subscriber, [exit]);
+      });
       return () => {
         subscribers.delete(subscriber);
         subscriber.ended.abort();
         off();
         offFollow();
+        offLoss();
       };
     },
     async snapshot() {
@@ -379,10 +393,13 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       const finished = parent.findLastIndex(finishes);
       // Once this run has its own outcome, a later parent exit cannot replace it with stopped.
       const end = finished > started ? finished : parent.findLastIndex((event, i) => started >= 0 && i > started && exits(event));
-      // A batch heard during the read is newer than the snapshot; never restore its superseded completion.
-      if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : null;
+      // A batch heard during the read is newer than the snapshot; never restore its superseded completion. A host loss
+      // the parent's read cannot show stays the end of the run it ended (E11).
+      const lost = hostLost !== null && (started < 0 || Date.parse(parent[started].at) <= Date.parse(hostLost.at)) ? hostLost : null;
+      if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : lost;
       if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
         decide('live');
+        lastLive = parent.findLast(liveForm) ?? null;
         return parent.filter((event) => own(event) && liveForm(event));
       }
       if (!onDisk()) decide('disk');

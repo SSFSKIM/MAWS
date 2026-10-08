@@ -137,7 +137,10 @@ export interface DetachedTransport {
   // grace; resolves once it is gone or the start budget is spent (true), false when the lock names no such process.
   killHeld(): Promise<boolean>;
   // E10 end
-  stop(): void; // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts
+  // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts. E11: answers once
+  // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), so the
+  // quit can wait for the last lines before the process exits; nothing when nothing is served (Decision Log 28)
+  stop(): Promise<void> | undefined;
 }
 
 interface Proc {
@@ -343,7 +346,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         socket.end(`${JSON.stringify({ t: 'exit', when: 'idle' } satisfies ClientExit)}\n`);
         socket.setTimeout(timing.helloTimeoutMs, () => socket.destroy());
         if (holder) idleArmed = { pid: holder.pid, procStart: holder.procStart };
-        log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
+        // E11: with no holder to remember it by, the arming is written at every retry (idempotent in the supervisor) and
+        // logged once per wait: only the wait's first refusal finds `waitingFor` unset
+        if (holder || waitingFor === null) log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
       }
       finish();
       if (waitingFor !== refuse.liveSessions) {
@@ -612,12 +617,15 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     },
     // E10 end
     stop() {
-      if (stopped) return;
+      if (stopped) return undefined;
       stopped = true;
       cancelAttempt();
       const connection = served;
       served = null;
-      connection?.port.close(); // no `exit`: the supervisor keeps serving its sessions
+      if (!connection) return undefined;
+      const drained = new Promise<void>((resolve) => connection.port.onClose(() => resolve())); // E11
+      connection.port.close({ drain: true }); // no `exit`: the supervisor keeps serving its sessions; what it wrote before it saw the end is still read (E11)
+      return drained;
     },
   };
 }

@@ -2,13 +2,13 @@
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
-import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
+import { ASK, askAnswerCopy, askStateCopy, deliveryHeading } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { previewHidesBody } from './rows'; // E7
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import type { Cell, Row } from './rows';
-import { untaggedUserText } from './user-text';
+import { copiedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
 
 const indent = (text: string, by: string) => text.split('\n').map((line) => `${by}${line}`).join('\n');
@@ -27,7 +27,7 @@ function cellLines(cell: Cell, by: string): string[] {
 function partOf(row: Row): string | null {
   switch (row.kind) {
     case 'time': return `### ${row.label}`;
-    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments, row.placeholders)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
+    case 'user': return `**You**\n\n${copiedUserText(row)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
     case 'assistant_text': return row.markdown;
     case 'divider': return `*${dividerCopy({ ...row, durationMs: row.summary.durationMs ?? Date.parse(row.endedAt ?? row.startedAt) - Date.parse(row.startedAt) })}*`;
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');
@@ -44,8 +44,8 @@ function partOf(row: Row): string | null {
     case 'bash': return `\`\`\`\n${[bashHeader(row.command), row.stdout, row.stderr, bashFooter(row.exitCode)].filter((part) => part.length > 0).join('\n')}\n\`\`\``;
     case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
     // E1 start
-    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${row.state === 'error' ? (row.error ?? '') : ASK.state[row.state]}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
-    case 'delivery': return [`**${(row.error === null ? DELIVERY.delivered : DELIVERY.failed)(row.files)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
+    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
+    case 'delivery': return [`**${deliveryHeading(row)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
     case 'agent_list': return listPart(row); // E7
@@ -63,6 +63,7 @@ function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
 
 function listPart(row: Extract<Row, { kind: 'agent_list' }>): string {
   if (row.pending) return `- ${agentListCopy.pending}`;
+  if (row.neverAnswered) return `- ${agentListCopy.neverAnswered}`; // E11
   if (row.sections.length === 0) return `- Agents: ${row.notes.join(' ')}`;
   const count = (title: string) => row.sections.find((section) => section.title === title)?.count ?? 0;
   return `- ${agentListCopy.serialized(count('Subagents'), count('Teammates'), count('Peer sessions'))}`;

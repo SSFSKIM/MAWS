@@ -42,6 +42,11 @@ import { MAWS_DEADLINE_SHAPES } from './ipc';
 import * as sideSchema from '@shared/ipc/schema/side';
 import { SIDE_DEADLINE_SHAPES } from './ipc';
 // E3 end
+// E11 start
+import * as hostSchema from '@shared/ipc/schema/host';
+import { HOST_DEADLINE_SHAPES } from './ipc';
+import { Supervision } from './supervision';
+// E11 end
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const ROUTER_TIMEOUT_MS = 10_000; // C1's supervisor (src/main/hosts/supervisor.ts REQUEST_TIMEOUT_MS), which imports electron
@@ -111,6 +116,20 @@ describe('x2 deadlines fit the bridge', () => {
     expect(operationShaped.sort()).toEqual([...OPERATION_COMMANDS].sort());
     for (const name of Object.keys(E8_DEADLINE_SHAPES)) expect(handlers.has(name), name).toBe(true);
     expect(DEADLINE_SHAPES).toMatchObject({ 'session.launch': 'immediate', 'session.send': 'immediate', 'session.answer': 'immediate', 'session.bash': 'immediate', 'session.getUsage': 'bounded', 'session.stop': 'bounded', 'engine.shutdown': 'bounded', 'session.interrupt': 'bounded' });
+  });
+
+  // E11 (tracker row E10 "host.* commands lack deadline shapes"): the supervisor's four, registered by Supervision
+  it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
+    const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
+    expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' });
+    const registered: string[] = [];
+    new Supervision({
+      mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never,
+      table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, list: () => [] } as never,
+      plugins: { busy: () => false, onIdle: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
+    }).register((name) => void registered.push(name), { onConnect: () => {} });
+    expect(registered.sort()).toEqual(hostOwned.sort());
   });
 
   it('every bounded wait fits under the router\'s 10 s with the two IPC hops to spare', () => {
@@ -984,6 +1003,16 @@ describe('side questions (E3 M1)', () => {
     expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Lowercase?', history: [{ question: 'What word?', response: 'ZEBRA' }] });
     transport.answer('side_question', { response: 'tools?', synthetic: true });
     await until(() => completions().some((c) => c.opId === second.opId), 'the second completion');
+
+    // E11: a retry names the failed entry it asks again; the log drops that entry once the retry is entered
+    const failing = await host.call('session.sideQuestion', { appSessionId: id, question: 'Fail?' });
+    transport.answer('side_question', undefined, 'Side question cancelled');
+    await until(() => completions().some((c) => c.opId === failing.opId), 'the failing completion');
+    const retried = await host.call('session.sideQuestion', { appSessionId: id, question: 'Fail?', retryOf: failing.opId });
+    expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Fail?', history: [{ question: 'What word?', response: 'ZEBRA' }] });
+    expect((await host.call('side.question.list', { appSessionId: id })).exchanges.map((e) => [e.id, e.state])).toEqual([[first.opId, 'answered'], [second.opId, 'answered'], [retried.opId, 'pending']]);
+    transport.answer('side_question', { response: 'no', synthetic: false });
+    await until(() => completions().some((c) => c.opId === retried.opId), 'the retry’s completion');
 
     await host.call('side.question.clear', { appSessionId: id });
     const third = await host.call('session.sideQuestion', { appSessionId: id, question: 'Still there?' });

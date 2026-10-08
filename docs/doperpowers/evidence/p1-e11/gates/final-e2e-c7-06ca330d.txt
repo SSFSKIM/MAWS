@@ -1,0 +1,7 @@
+step e2e-c7
+command: pnpm e2e:c7
+head 06ca330d  ended 2026-10-08T01:09:43Z  load { 10.12 11.77 13.06 }  102s
+  1 failed
+  28 passed (1.2m)
+[ELIFECYCLE] Command failed with exit code 1.
+exit 1

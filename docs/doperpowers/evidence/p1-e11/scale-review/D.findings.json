@@ -1,0 +1,69 @@
+{
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-2#1",
+      "priority": "P3",
+      "title": "Make Reload re-read a file body that is also shown in another view",
+      "file": "src/renderer/src/tools/deliverables/Viewer.tsx",
+      "lines": "196, 225-226",
+      "comment": "Confirmed. In Viewer.tsx:196, Reload only bumps `key={reloads}` on `Body`, which remounts `FileBody`. FileBody's effect then calls `useViewer.getState().mount(tabId, ...)` with `tabId = viewerTabId(record.id, shown)`, i.e. `deliverable:<id>:v<n>` (line 226). That id is never a layout tab id; layout deliverable tabs are `deliverable:<session>:<id>`. With a single mount, the unmount's `prune()` (viewer-store.ts:248) removes the entry, so the remount starts a fresh `open` load and Reload re-reads. Now suppose the same version is mounted in the side panel and also in the main deliverable tab. That is possible because 'Open in tab' (Viewer.tsx:258) only calls `openTab` and leaves the panel on the record. Reloading one view drops `mounted` from 2 to 1, so prune keeps the entry. The remount then takes mount()'s last branch (viewer-store.ts:478-480), which loads only if `stale.delete(tabId)` succeeds. `stale` is set only by `refresh` while the entry is unmounted (line 393), and `mounted` never reached 0, so nothing is read and Reload does nothing. Files inside the session's roots still get followed through the directory watch. A delivered file outside the roots has its watch refused, and the E2 plan (line 105) names Reload as the way to re-read it, so there Reload silently fails to refresh. Impact is narrow (both views open at once, an outside file, the file changed after delivery), hence P3. The fix is to have Reload force a `change` load for the key, for example through a store method, instead of relying on remount pruning.",
+      "sources": [
+        "scalpel-2"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "State machines: the editor (dirty, conflict, merge, close guard, save all), scm (admission, held diffs, the remote run), the relay store (peer replies), the browser control state (idle/agent/human, hand-back, cover).",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "The viewer's read-only versus editable paths and \"Open as file\".",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "The deliverables viewer and artifact console.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The agents widget, tree, scheduled rows and tasks under P-20.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "Tokens only, both themes, no colour literal (a scan).",
+      "status": "ok",
+      "candidates": 0
+    }
+  ],
+  "lenses": [
+    "State machines: the editor (dirty, conflict, merge, close guard, save all), scm (admission, held diffs, the remote run), the relay store (peer replies), the browser control state (idle/agent/human, hand-back, cover).",
+    "The viewer's read-only versus editable paths and \"Open as file\".",
+    "The deliverables viewer and artifact console.",
+    "The agents widget, tree, scheduled rows and tasks under P-20.",
+    "Tokens only, both themes, no colour literal (a scan)."
+  ],
+  "explanation": "confirmed: Make Reload re-read a file body that is also shown in another view",
+  "target": {
+    "base": "base",
+    "baseCommit": "293cbeefb5edd886239861e1e1a3c56f365ca19c",
+    "headCommit": "cef9f48da2c67c0ef5e7d3fa4e4cd7eb765838ba",
+    "repo": "/private/tmp/maws-e11-review/D"
+  },
+  "level": "max"
+}

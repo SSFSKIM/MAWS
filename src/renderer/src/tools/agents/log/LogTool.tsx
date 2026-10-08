@@ -2,7 +2,7 @@
 // file the engine reported (a background task's output file, a spilled tool result), read through `fs.readSpill` in
 // pages chained by the answered `length`, at most four pages in the DOM; or, with no path, the "no file reported" state
 // that reads nothing. Never offered from "+", never pinned, never restored: the host prunes restored Log tabs, and a
-// tab created without params says so rather than failing. `openLog` keeps one tab per session and path.
+// tab restored anyway says so rather than failing. `openLog` keeps one tab per session and path.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -19,7 +19,8 @@ export interface LogParams {
   title: string;
 }
 
-// The snapshot the body renders. `restored`: created without params (a tab layout.json kept despite the host's prune).
+// The snapshot the body renders. `restored`: a tab layout.json kept despite the host's prune (the host's
+// `PanelToolInit.restored`; an open that gave no params is not one, E11 W-D).
 export interface LogState extends LogPages {
   appSessionId: AppSessionId | null;
   path: string | null;
@@ -48,9 +49,10 @@ export class LogHandle {
     appSessionId: AppSessionId | null,
     private readonly instanceId: string,
     params: LogParams | undefined,
+    restored = false,
   ) {
     const path = params?.path ?? null;
-    this.state = { ...NO_PAGES, appSessionId, path, title: params?.title ?? LOG_COPY.title, restored: params === undefined, loading: false, error: null, scrollTop: 0 };
+    this.state = { ...NO_PAGES, appSessionId, path, title: params?.title ?? LOG_COPY.title, restored, loading: false, error: null, scrollTop: 0 };
     this.key = appSessionId !== null && path !== null ? keyOf(appSessionId, path) : null;
     if (this.key !== null) openTabs.set(this.key, instanceId);
     if (path !== null) void this.read(nextRead(this.state));
@@ -233,7 +235,7 @@ export const logTool: PanelTool<LogHandle, LogParams> = {
   pinnable: false,
   multiInstance: true,
   menu: false,
-  createState: (init) => new LogHandle(init.appSessionId, init.instanceId, init.params),
+  createState: (init) => new LogHandle(init.appSessionId, init.instanceId, init.params, init.restored === true),
   beforeClose: () => Promise.resolve(true),
   dispose: (state) => state.dispose(),
   render: LogBody,

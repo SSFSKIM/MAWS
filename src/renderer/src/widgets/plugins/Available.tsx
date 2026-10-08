@@ -2,7 +2,8 @@
 // `claude plugin list --json --available` read, since that listing refreshes the engine's catalogue cache. Inside, a
 // filter and, per marketplace, a collapsed group `<marketplace> · N plugins` whose rows (drawn only while it is open:
 // the built-in directory alone lists hundreds) offer Install…; the built-in directory is listed like any other. An install
-// whose plugin the next read no longer offers keeps its result beneath the groups (M3: the widgets gate).
+// whose plugin the next read no longer offers keeps its result beneath the groups (M3: the widgets gate). The engine's
+// listing leaves installed plugins out (2.1.291), so no row is marked installed here.
 import { useMemo, useState } from 'react';
 import type { AvailablePlugin } from '@shared/ipc/schema/plugins';
 import { FRAME, PLUGIN_MANAGEMENT as W } from '../copy';
@@ -14,7 +15,7 @@ import { usePluginsRead } from './read';
 const PREFIX = 'available:';
 const availableKey = (id: string) => `${PREFIX}${id}`;
 
-function AvailableRow({ plugin, installed }: { plugin: AvailablePlugin; installed: boolean }) {
+function AvailableRow({ plugin }: { plugin: AvailablePlugin }) {
   const { ops, ask } = useManage();
   const key = availableKey(plugin.pluginId);
   const busy = ops.entries.get(key)?.state.phase === 'working';
@@ -30,19 +31,15 @@ function AvailableRow({ plugin, installed }: { plugin: AvailablePlugin; installe
         </span>
       }
       actions={
-        installed ? (
-          <span className="shrink-0 text-fg-muted">{W.installedNote}</span>
-        ) : (
-          <TextButton onClick={() => ask(key, requestFor('install', { plugin: plugin.pluginId, scope: 'user' }, null))} disabled={busy}>
-            {W.install}
-          </TextButton>
-        )
+        <TextButton onClick={() => ask(key, requestFor('install', { plugin: plugin.pluginId, scope: 'user' }, null))} disabled={busy}>
+          {W.install}
+        </TextButton>
       }
     />
   );
 }
 
-function MarketplaceGroup({ group, filtering, installed }: { group: AvailableGroup; filtering: boolean; installed: ReadonlySet<string> }) {
+function MarketplaceGroup({ group, filtering }: { group: AvailableGroup; filtering: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <details open={filtering || undefined} onToggle={(event) => setOpen(event.currentTarget.open)} className="mt-1">
@@ -50,7 +47,7 @@ function MarketplaceGroup({ group, filtering, installed }: { group: AvailableGro
       {(open || filtering) && (
         <Rows label={W.availableList(group.marketplace)}>
           {group.plugins.map((plugin) => (
-            <AvailableRow key={plugin.pluginId} plugin={plugin} installed={installed.has(plugin.pluginId)} />
+            <AvailableRow key={plugin.pluginId} plugin={plugin} />
           ))}
         </Rows>
       )}
@@ -58,7 +55,7 @@ function MarketplaceGroup({ group, filtering, installed }: { group: AvailableGro
   );
 }
 
-export function AvailableSection({ cwd, installed }: { cwd: string; installed: ReadonlySet<string> }) {
+export function AvailableSection({ cwd }: { cwd: string }) {
   // the read runs only while the section is open: its opening reads (again, once the last answer is 10 s old), and a
   // change rereads it only then; a collapsed section keeps its last answer
   const { ops } = useManage();
@@ -95,7 +92,7 @@ export function AvailableSection({ cwd, installed }: { cwd: string; installed: R
                 ) : groups.length === 0 ? (
                   <p className="m-0 text-ui-sm text-fg-muted">{W.noMatch}</p>
                 ) : (
-                  groups.map((group) => <MarketplaceGroup key={group.marketplace} group={group} filtering={filtering} installed={installed} />)
+                  groups.map((group) => <MarketplaceGroup key={group.marketplace} group={group} filtering={filtering} />)
                 )}
                 {gone.map((key) => (
                   <Gone key={key} opKey={key} name={key.slice(PREFIX.length)} data={{ 'data-plugin-result': key.slice(PREFIX.length) }} />

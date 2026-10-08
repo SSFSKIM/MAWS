@@ -425,6 +425,22 @@ describe('the console chip and Reload', () => {
     expect(frame()!.getAttribute('src')).toBe(deliverableUrl(A, ART.id, 2));
   });
 
+  // scale-review D scalpel-2#1: a file outside the session's roots is not watched, and Reload is how it is re-read; with
+  // the same version in the panel and in a main tab, the Reload of one view must still read it again
+  it('re-reads a file body shown in the panel and in a main tab at once', async () => {
+    await mount({ target: OUTSIDE.id });
+    render(<DeliverableTab tab={{ id: `deliverable:${A}:${OUTSIDE.id}`, kind: 'deliverable', appSessionId: A, deliverableId: OUTSIDE.id, pinned: false }} />);
+    await settle();
+    const reads = () => main.callsOf('files.read').filter((call) => (call as { path: string }).path === OUTSIDE.path).length;
+    await waitFor(() => expect(reads()).toBeGreaterThan(0));
+    const [panel, tab] = document.querySelectorAll<HTMLElement>('[data-deliverable-viewer]');
+    expect(tab).toBeDefined(); // both views show it
+    const before = reads();
+    fireEvent.click(within(panel!).getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    await waitFor(() => expect(within(panel!).getByText('hello')).toBeTruthy());
+  });
+
   it('counts once per version however often the frame mounts again (v2 → v1 → v2, Back and reopen)', async () => {
     const { handle } = await mount({ target: ART.id });
     const select = () => screen.getByRole('combobox', { name: 'Version' });

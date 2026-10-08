@@ -1,0 +1,10 @@
+E11 M4.2 F-H gate: test-probes
+command: pnpm test:probes
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:53:27Z
+load at start: { 17.63 15.32 13.37 }
+summary:
+    # tests 172
+    # pass 172
+    # fail 0
+exit: 0

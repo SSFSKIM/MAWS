@@ -17,6 +17,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
 import { buildLaunch, RELAY_URL, spawnMeta, type LaunchPlan } from '../../../src/engine-host/launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // FX4: the resolved live engine
+import { withoutClaudeVariables } from '../../support/claude-env';
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
 
@@ -278,7 +279,7 @@ export interface RawProcess {
 export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p: RawProcess) => Promise<void>): Promise<{ journalPath: string; rows: JournalRow[] }> {
   const configHome = process.env.CLAUDE_CONFIG_DIR ?? null;
   assertConfigHomeSafe({ configHome, controls: [] });
-  const captured = { ...(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! };
+  const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! }; // E11 W-E: no inherited CLAUDE*
   const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES });
   const rows: JournalRow[] = [];
@@ -351,6 +352,9 @@ export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p:
     log('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason: 'stop', lostAttentionCount: 0 });
     await journal.close();
     console.log(`   journal: ${journal.path}`);
+    // E11 W-E: the engine's init plugin list, for the run's record (none of the owner's, the environment dropped them)
+    const init = rows.find((r) => r.direction === 'in' && (r.frame as { type?: string; subtype?: string }).type === 'system' && (r.frame as { subtype?: string }).subtype === 'init');
+    console.log(`   init plugins: ${JSON.stringify((init?.frame as { plugins?: unknown } | undefined)?.plugins ?? null)}`);
   }
   return { journalPath: journal.path, rows };
 }

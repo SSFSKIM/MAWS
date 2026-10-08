@@ -31,6 +31,7 @@ const list = (names: string[]) => (names.length <= 1 ? (names[0] ?? '') : `${nam
 
 export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
+  cause?: 'crash' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"
   origin: 'human' | 'engine' | 'peer';
   durationMs: number;
   toolCalls: number;
@@ -38,18 +39,18 @@ export interface DividerCopyInput {
   autoDenied: number;
 }
 
-function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number): string {
+function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number, cause: DividerCopyInput['cause'] = null): string {
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < 1000 ? 'Working' : `Working for ${t}`;
     case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
-    case 'stopped': return `You stopped after ${t}`;
+    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
 }
 
 export function dividerCopy(input: DividerCopyInput): string {
-  const parts = [verb(input.state, input.origin, input.durationMs)];
+  const parts = [verb(input.state, input.origin, input.durationMs, input.cause)];
   if (input.state !== 'working' && input.toolCalls > 0) parts.push(plural(input.toolCalls, 'tool call'));
   if (input.denied > 0) parts.push(`${input.denied} denied`);
   if (input.autoDenied > 0) parts.push(`${input.autoDenied} auto-denied`);
@@ -67,7 +68,7 @@ export interface TurnSummaryCopyInput extends Omit<DividerCopyInput, 'denied' | 
 }
 
 export function turnSummaryCopy(input: TurnSummaryCopyInput): string {
-  const head = verb(input.state, input.origin, input.durationMs) + (input.model ? ` on ${input.model}` : '');
+  const head = verb(input.state, input.origin, input.durationMs, input.cause) + (input.model ? ` on ${input.model}` : '');
   const parts = [head];
   if (input.toolCalls > 0) parts.push(`${plural(input.toolCalls, 'tool call')}${input.phrases ? `: ${input.phrases}` : ''}`);
   if (input.denied.length > 0) parts.push(`${input.denied.length} denied (${[...new Set(input.denied.map((d) => d.kind))].join(', ')})`);
@@ -400,6 +401,13 @@ export const ASK = {
   decideForMe: 'Decide for me',
 } as const;
 
+// The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
+// error, a withdrawn one its interrupt wording, every other its state's.
+export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; error: string | null; cancelReason: string | null }): string {
+  if (row.state === 'error') return row.error ?? '';
+  return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
+}
+
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
 // `<name> (<directory>)` for a repository, or the two non-answers.
 export function askAnswerCopy(answer: AskAnswer | undefined): string {
@@ -416,9 +424,19 @@ export const DELIVERY = {
   delivered: (files: readonly { name: string }[]) => `Delivered ${deliveredSubject(files)}`,
   delivering: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)}`,
   failed: (files: readonly { name: string }[]) => `Could not deliver ${deliveredSubject(files)}`,
+  neverAnswered: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)} was never answered`, // E11
   openExternally: 'Open externally',
   reveal: 'Reveal in Finder',
+  actionLabel: (action: string, name: string) => `${action}: ${name}`, // E11 (scale-review C scalpel-5#5): each file's button named for it
 } as const;
+
+// E11 (W-C): the delivery row's one line: its refusal, else Delivering until the files are recorded (or never answered
+// when its turn closed first), else Delivered.
+export function deliveryHeading(row: { files: readonly { name: string; id: string | null }[]; error: string | null; neverAnswered?: true }): string {
+  if (row.error !== null) return DELIVERY.failed(row.files);
+  if (row.neverAnswered) return DELIVERY.neverAnswered(row.files);
+  return row.files.some((file) => file.id === null) ? DELIVERY.delivering(row.files) : DELIVERY.delivered(row.files);
+}
 
 // A `show_pane` cell's line: what opened (a panel tool's title, a file's name), or why nothing did.
 export const PANE_CELL = {
@@ -441,7 +459,7 @@ export const peerMessageCopy = {
   report: (title: string | null) => `Report from ${title ?? 'agent'}`, // a subagent's hand-back; the report folds under it
   sender: (name: string) => `@ ${name}`, // the row's lead, the address as its tooltip
   recipient: (name: string) => `To @ ${name}`,
-  result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent' } as const, // an outbound send's state
+  result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent', unanswered: 'Never answered' /* E11 */ } as const, // an outbound send's state
   showMessage: 'Show the whole message',
   showReport: 'Show the report',
   hide: 'Hide',
@@ -460,11 +478,14 @@ export const peerMessageCopy = {
     `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} is inside a long tool call; it sends it when that call returns or this turn ends`,
   forwarded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} is replying with SendMessage` : `${session} is sending it with SendMessage`),
   sent: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage` : `${session} sent it with SendMessage`),
+  // E11 W-D: the session's send to the address carried other words than the owner's
+  sentReworded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage, in its own words` : `${session} sent it with SendMessage, in its own words`),
   failed: (mode: PeerMode, message: string) => `${mode === 'reply' ? 'Reply' : 'Message'} failed: ${message}`,
 } as const;
 
 export const agentListCopy = {
   pending: 'Listing the agents and sessions…',
+  neverAnswered: 'Listing the agents was never answered', // E11
   self: (self: string) => `This session is ${self}`,
   section: (title: string, count: number) => `${title} · ${count}`,
   message: 'Message',
@@ -481,6 +502,7 @@ export const ARTIFACT = {
   created: (name: string, version: number | null) => (version === null ? `Artifact ${name}` : `Artifact ${name} · v${version}`),
   updated: (name: string, version: number | null) => (version === null ? `Updated artifact ${name}` : `Updated artifact ${name} · v${version}`),
   registering: (name: string) => `Registering artifact ${name}…`,
+  neverAnswered: (name: string) => `Registering artifact ${name} was never answered`, // E11
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
 } as const;
@@ -489,11 +511,12 @@ export const ARTIFACT = {
 // reads the reason alone, as the artifact cells show theirs.
 const refusalForHuman = (error: string) => error.replace(/^artifact_(create|update): /, '').replace(/; use artifact_(create|update)$/, '');
 
-// The row's one line: its refusal, else Registering until the result is in, else the version it registered (without a
-// version when the result named none).
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean }): string {
+// The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
+// E11), else the version it registered (without a version when the result named none).
+export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true }): string {
   const name = row.title ?? row.artifactId;
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
+  if (row.neverAnswered) return ARTIFACT.neverAnswered(name);
   if (row.version === null && !row.answered) return ARTIFACT.registering(name);
   return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
 }

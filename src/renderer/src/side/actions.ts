@@ -11,10 +11,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { FirstMessage } from '@shared/sessions/intent';
 import { ipc } from '../ipc/client';
-import { panelHost, usePanelHost } from '../panel/host';
+import { panelHost, shownSession, usePanelHost } from '../panel/host';
 import { adoptFork, titleOf } from '../sessions/record-ops';
-import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { SIDE_COPY } from './copy';
 import { promotable, setSideView, sidePaneOf, useSidePane, type SideView } from './store';
@@ -24,8 +22,6 @@ export const SIDE_TOOL_ID = 'side';
 export interface SideParams {
   view?: SideView;
 }
-
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 
 // The parent's Side pane on `view`: added (or re-targeted, one per session) and activated when asked.
 function openPane(parent: AppSessionId, view: SideView, activate: boolean): void {

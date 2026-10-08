@@ -128,7 +128,7 @@ describe('the sections', () => {
     mount({ askId: ASK.askId });
     await screen.findByRole('heading', { name: 'Setup' });
     fireEvent.click(within(section('q4')).getByRole('button', { name: 'Choose folder…' }));
-    expect(picks.invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: '/work/app-a', multiple: false }]);
+    expect(picks.invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: '/work/app-a', multiple: false, pathsOnly: true }]); // E11: the sheet keeps paths only
     await within(section('q4')).findByText('/work/app-a/assets');
     fireEvent.click(within(section('q4')).getByRole('button', { name: 'Remove /work/app-a/assets' }));
     expect(within(section('q4')).queryByText('/work/app-a/assets')).toBeNull();

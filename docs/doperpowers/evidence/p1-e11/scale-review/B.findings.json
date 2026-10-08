@@ -1,0 +1,81 @@
+{
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-3#1",
+      "priority": "P3",
+      "title": "Rejoin the reveal sentence split by the E5 paragraph and the imports",
+      "file": "src/main/files/service.ts",
+      "lines": "23-32",
+      "comment": "Checked at the reviewed head, in the diff to src/main/files/service.ts. Line 23 now ends mid-sentence: \"E1: `reveal` takes the same pre-check and any regular file, since\". The E5 `write` paragraph follows it. The rest of the sentence, \"// showing a file in Finder runs nothing.\", was added at line 32, between the `node:crypto` and `node:fs` imports. In that position it reads as if it describes an import. The header documents the security boundary's limits, so its rationale for `reveal` is now broken. Nothing changes at runtime. The fix is to move the clause back after \"since\", before the E5 paragraph.",
+      "sources": [
+        "scalpel-3",
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-4#1",
+      "priority": "P3",
+      "title": "Keep the confirmed push from also pushing submodules to unlisted remotes",
+      "file": "src/main/scm/plans.ts",
+      "lines": "63-66",
+      "comment": "`pushArgv` in src/main/scm/plans.ts, new in this diff, builds `push --progress [--set-upstream] <remote> refs/heads/<b>:refs/heads/<b>` without any `--recurse-submodules` flag. Nothing in src/main/scm or src/main/git mentions submodule or recurse. remote-env.ts keeps the owner's config, so `push.recurseSubmodules`, or `submodule.recurse=true` (which git applies to push as on-demand), still takes effect. Failure scenario: the repository has a submodule, the branch points at submodule commits that are not yet on the submodule's remote, and the owner has one of those settings on. The confirmed push then also pushes the submodule to its own remote. The sheet's `pushUrls` and `revalidate` cover only the superproject remote. That contradicts the E6 execution document's own promise (line 489: \"the sheet shows every push destination (`pushurl` included)\"), which the plan works hard to keep for `pushInsteadOf` and push URLs. I rank it P3 rather than P2 because it needs all three conditions together, the owner must have opted in to recursion, and the destination is a remote the owner configured, which is what a terminal `git push` would also do. Fix: add `--recurse-submodules=check` (or `=no`) to the argv so the push never reaches a destination the sheet did not show.",
+      "sources": [
+        "scalpel-4"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "The browser's trust boundary: the debugger bridge allowlist (Target, Browser, Storage refused; unknown sessions refused) and the in-process CDP transport, partitions never the default session, the preload's sandbox and channels, permission denials and the clipboard carve-out, downloads refused on agent paths, window.open gating, input attribution (keys and mouse), the import's key held in memory only and no value logged, CHIPS through the debugger only, removal and the boot sweep, the -run-dialog wrap.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "Deliverable frames: per-record origins, CSP, will-frame-navigate, the capture window registry and partition, console attribution.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "files.write under the allowlist roots with the hash; files.* admission for delivered files (read, openExternal, reveal only).",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The two git runners: the mutating runner keeps transport off, the remote runner's argv for git push and gh pr create, the confirm before every remote action, trust gating.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "The detached transport and the quit path: keep-quit, the ordered shutdown list and its bounded hold, stopAllForQuit, recovery of owed intents, the lock and pid checks, settings migrations 9 to 11 and index migrations 4 and 5 never edited after release.",
+      "status": "ok",
+      "candidates": 0
+    }
+  ],
+  "lenses": [
+    "The browser's trust boundary: the debugger bridge allowlist (Target, Browser, Storage refused; unknown sessions refused) and the in-process CDP transport, partitions never the default session, the preload's sandbox and channels, permission denials and the clipboard carve-out, downloads refused on agent paths, window.open gating, input attribution (keys and mouse), the import's key held in memory only and no value logged, CHIPS through the debugger only, removal and the boot sweep, the -run-dialog wrap.",
+    "Deliverable frames: per-record origins, CSP, will-frame-navigate, the capture window registry and partition, console attribution.",
+    "files.write under the allowlist roots with the hash; files.* admission for delivered files (read, openExternal, reveal only).",
+    "The two git runners: the mutating runner keeps transport off, the remote runner's argv for git push and gh pr create, the confirm before every remote action, trust gating.",
+    "The detached transport and the quit path: keep-quit, the ordered shutdown list and its bounded hold, stopAllForQuit, recovery of owed intents, the lock and pid checks, settings migrations 9 to 11 and index migrations 4 and 5 never edited after release."
+  ],
+  "explanation": "confirmed: Rejoin the reveal sentence split by the E5 paragraph and the imports; Keep the confirmed push from also pushing submodules to unlisted remotes",
+  "target": {
+    "base": "base",
+    "baseCommit": "6dcff0821c45a6849e6fec705646815e835704a2",
+    "headCommit": "015cc5050a1d6b4243ac5087832697fd50ebc950",
+    "repo": "/private/tmp/maws-e11-review/B"
+  },
+  "level": "max"
+}

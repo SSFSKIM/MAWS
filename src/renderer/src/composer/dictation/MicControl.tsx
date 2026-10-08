@@ -62,14 +62,15 @@ export function MicControl({ appSessionId, client = ipc }: { appSessionId: AppSe
 }
 
 // This session's dictation notice: in the toolbar's row, or in the composer's dock while a card covers the box (and the
-// toolbar with it).
+// toolbar with it). Every notice says why dictation did not run, so its message is an alert (scale-review C scalpel-5#3:
+// a note is not a live region, and the reason, a denial's included, appeared silently).
 export function DictationNotice({ appSessionId, client = ipc }: { appSessionId: AppSessionId; client?: MawsBridge }) {
   const notice = useDictationStore((s) => (s.notice?.appSessionId === appSessionId ? s.notice : null));
   if (notice === null) return null;
   const pane = PANE[notice.kind];
   return (
     <p role="note" aria-label="Dictation notice" className="m-0 flex min-w-0 items-center gap-1 px-1 text-ui-sm text-fg-muted">
-      <span className="min-w-0 truncate" title={notice.message}>
+      <span role="alert" className="min-w-0 truncate" title={notice.message}>
         {notice.message}
       </span>
       {pane && (

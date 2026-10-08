@@ -1,0 +1,6 @@
+step test
+command: pnpm test --maxWorkers=4
+head 06ca330d  ended 2026-10-08T00:55:34Z  load { 13.44 14.19 14.09 }  182s
+ Test Files  708 passed | 1 skipped (709)
+      Tests  9859 passed | 1 skipped (9860)
+exit 0

@@ -27,10 +27,9 @@ import type { MawsPaneAnswerResult, MawsPaneShow } from '@shared/ipc/schema/maws
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
-import { panelHost } from '../../../panel/host';
+import { panelHost, shownSession } from '../../../panel/host';
 import type { PanelTool } from '../../../panel/tool';
 import { useLayout } from '../../../stores/layout';
-import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { normalizeLexically, openFile } from '../../code/open-file';
 
@@ -47,7 +46,7 @@ function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSess
   const layout = useLayout.getState();
   const existing = layout.panelBySession.get(appSessionId)?.tabs.find((tab) => tab.toolId === tool.id);
   if (!existing) return null;
-  if (sessionOfTab(activeTab(layout.main)) !== appSessionId) layout.openSession(appSessionId);
+  if (shownSession(layout.main) !== appSessionId) layout.openSession(appSessionId);
   panelHost.selectTab(existing.id);
   return existing.id;
 }

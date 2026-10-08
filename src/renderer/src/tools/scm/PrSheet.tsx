@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
+import { GH_INSTALL_URL, GH_SIGN_IN } from '../../panel/summary/pr-line';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { openTerminal } from '../terminal';
@@ -150,10 +151,10 @@ function refusalAction(planned: Planned, { appSessionId, directory, ui }: { appS
     case 'not_pushed':
       return button(SCM_COPY.pushFirst, () => ui.setState({ sheet: { kind: 'push' } }));
     case 'gh_missing':
-      return button(SCM_COPY.installGh, () => openLink(SCM_COPY.ghInstallUrl));
+      return button(SCM_COPY.installGh, () => openLink(GH_INSTALL_URL));
     case 'gh_unauthenticated':
       return button(SCM_COPY.signInGh, () => {
-        openTerminal({ appSessionId, cwd: directory, command: SCM_COPY.ghLoginCommand });
+        openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN });
         ui.setState({ sheet: null });
       });
     default:

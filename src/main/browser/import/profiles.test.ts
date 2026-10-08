@@ -130,7 +130,7 @@ describe('ImportedProfiles', () => {
 describe('a broken profiles.json (Design §13; Decision Log 35)', () => {
   for (const [label, text] of [
     ['not JSON', '{"version": 1, "profiles": [ e4b-sentinel-profiles'],
-    ['another version', JSON.stringify({ version: 2, profiles: [] })],
+    ['a version no build wrote', JSON.stringify({ version: 0, profiles: [] })], // E11: a newer one is read-only, below
     ['a record its schema refuses', JSON.stringify({ version: 1, profiles: [{ ...RECORD, partition: 'persist:maws-browser', note: 'e4b-sentinel-profiles' }] })],
   ] as const) {
     it(`moves ${label} aside, starts empty, says so once without the content, and reports fileBroken`, () => {
@@ -146,6 +146,26 @@ describe('a broken profiles.json (Design §13; Decision Log 35)', () => {
       expect(String(warn.mock.calls[0]![0])).not.toContain('sentinel');
     });
   }
+
+  // E11 (tracker row E4b "newer profiles.json treated as broken; sweep deletes imports"): as `openDb` opens a newer index
+  it('opens a file a newer MAWS wrote read-only: nothing listed, nothing moved, nothing written', async () => {
+    const newer = JSON.stringify({ version: 2, profiles: [{ ...RECORD, futureField: 'e4b-sentinel-profiles' }], more: true });
+    writeRaw(newer);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const store = ImportedProfiles.open(dir.path, { now: () => 7 });
+    expect(store).toMatchObject({ fileBroken: false, readOnly: true });
+    expect([store.list(), store.browsable(), store.get('Default')]).toEqual([[], [], null]);
+    await expect(store.put(RECORD)).rejects.toThrow('profiles.json was written by a newer MAWS (version 2); it is read-only in this one');
+    await expect(store.remove('Default')).rejects.toThrow('read-only');
+    expect(readFileSync(file(), 'utf8')).toBe(newer);
+    expect(readdirSync(join(dir.path, 'browser'))).toEqual(['profiles.json']);
+    const lines = [...error.mock.calls, ...warn.mock.calls].map((call) => String(call[0]));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('fileNewer');
+    expect(lines[0]).not.toContain('sentinel');
+  });
 
   it('writes a fresh file beside the moved one at the next put', async () => {
     writeRaw('not json');

@@ -1,0 +1,54 @@
+E11 W-A: tracker row E10 "host.log expected traffic as errors", checked on the host.log lines e2e:supervisor wrote into
+evidence/p1-e10 (idle.txt, relaunch.txt, crash.txt) at head 498c9f9 (run started 2026-10-07T16:35:04Z); the files were
+restored from git after this copy. before = the committed p1-e10 files (E10's run); after = this run. Lines grouped, ids masked.
+
+== idle.txt: error/warn lines after 2, before 18
+-- after:
+  2 x warn: [engine-host process table] idle release of <uuid>: no hard reason for 10000 ms with no app connected or exit-when-idle armed
+-- before:
+  1 x error: [host] 18 events dropped while no client was ready
+  2 x error: [host] 4 events dropped while no client was ready
+  3 x error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2 x error: [host] dropping events until a client is ready (first: session.eventBatch)
+  2 x warn: [engine-host process table] idle release of <uuid>: no hard reason for 10000 ms with no app connected or exit-when-idle armed
+  4 x warn: [engine-host] <uuid>: get_context_usage ID: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  4 x warn: [engine-host] <uuid>: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+-- the drop lines after (info level: no prefix):
+  1 x [host] 18 events dropped while no client was ready
+  2 x [host] 4 events dropped while no client was ready
+  3 x [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2 x [host] dropping events until a client is ready (first: session.eventBatch)
+
+== relaunch.txt: error/warn lines after 0, before 18
+-- after:
+-- before:
+  1 x error: [host] 29 events dropped while no client was ready
+  1 x error: [host] 3 events dropped while no client was ready
+  1 x error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  1 x error: [host] dropping events until a client is ready (first: session.eventBatch)
+  4 x warn: [engine-host] <uuid>: get_context_usage ID: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2 x warn: [engine-host] <uuid>: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2 x warn: [engine-host] <uuid>: get_hooks_listing ID: response failed its schema at events, hooks
+  2 x warn: [engine-host] <uuid>: get_settings ID: response failed its schema at effective, sources
+  2 x warn: [engine-host] <uuid>: list_permission_rules ID: response failed its schema at state
+  2 x warn: [engine-host] <uuid>: mcp_status ID: response failed its schema at mcpServers
+-- the drop lines after (info level: no prefix):
+  1 x [host] 28 events dropped while no client was ready
+  1 x [host] 3 events dropped while no client was ready
+  1 x [host] dropping events until a client is ready (first: host.supervisorStatus)
+  1 x [host] dropping events until a client is ready (first: session.eventBatch)
+
+== crash.txt: error/warn lines after 0, before 8
+-- after:
+-- before:
+  2 x error: [host] 3 events dropped while no client was ready
+  2 x error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  1 x warn: [engine-host] <uuid>: get_context_usage ID: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  1 x warn: [engine-host] <uuid>: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2 x warn: [engine-host] <uuid>: get_settings ID: response failed its schema at effective, sources
+-- the drop lines after (info level: no prefix):
+  2 x [host] 3 events dropped while no client was ready
+  2 x [host] dropping events until a client is ready (first: host.supervisorStatus)
+
+Verdict: after, no [host] drop line is at error level and no 'failed its schema' or 'get_context_usage failed' warning
+remains; the warnings left are the process table's idle-release lines (a release that happened, not this row's traffic).

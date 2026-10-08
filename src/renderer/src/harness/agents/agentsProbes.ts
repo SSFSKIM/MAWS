@@ -1,13 +1,12 @@
 // `window.__maws_harness.agents` (C8b execution document, Interfaces *Harness API*): the agent tools read as the panel
 // renders them (the selected tab's DOM, so a case asserts what the owner sees) and driven through the controls a click
 // reaches; the fake client's disk half and recorded calls; and the column's transcript hand-offs.
-import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import type { AgentId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
 import { SubagentMetaSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
-import { instanceIds, instanceOf, usePanelHost } from '../../panel/host';
+import { instanceIds, instanceOf, shownSession, usePanelHost } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
-import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { BACKGROUND_COPY, LOG_COPY, RELAY_COPY, SCHEDULED_COPY, SUBAGENTS_COPY } from '../../tools/agents/copy';
 import { relayKey, useRelays } from '../../tools/agents/relay-store';
 import { STOP_SETTLE_MS, useTaskGraph } from '../../tools/agents/store';
@@ -37,7 +36,6 @@ const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
 // ---- where things are ------------------------------------------------------------------------------------------------------
 
 const region = () => document.querySelector<HTMLElement>('[data-region="panel"]');
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 
 // The selected panel tab of the shown session (or the no-session selection), with its tool.
 function selectedTab(): { id: string; toolId: string } | null {

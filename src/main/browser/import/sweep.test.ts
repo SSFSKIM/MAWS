@@ -99,6 +99,19 @@ describe('sweepBrowserImports', () => {
     expect(history.suggest('persist:maws-browser', '')).toHaveLength(1);
   });
 
+  // E11 (tracker row E4b "newer profiles.json treated as broken; sweep deletes imports"): the records a newer MAWS wrote
+  // are unknown here, so nothing of theirs is taken for residue
+  it('is skipped for a boot whose profiles.json a newer MAWS wrote: nothing is removed', () => {
+    make('browser', 'import', 'staging');
+    make('browser', 'maws-chrome-Profile 9');
+    make('Partitions', 'maws-chrome-profile%209');
+    index.browserHistory.visit(profilePartition('Profile 9'), 'https://a.test/', { typed: false, at: Date.parse('2026-10-06T10:00:00.000Z') });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [], readOnly: true }, history: index.browserHistory });
+    expect(result).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 });
+    expect([names('browser', 'import'), names('browser'), names('Partitions')]).toEqual([['staging'], ['import', 'maws-chrome-Profile 9'], ['maws-chrome-profile%209']]);
+    expect(index.browserHistory.countPartition(profilePartition('Profile 9'))).toBe(1);
+  });
+
   it('answers zeros on a fresh userData with nothing to sweep', () => {
     expect(sweepBrowserImports({ userData: dir.path, profiles: { list: () => [] }, history: index.browserHistory })).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 });
   });

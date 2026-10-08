@@ -1,11 +1,12 @@
-// The teammates of this session and their place in the topology tree (E7 execution document, Design §5; Decision Log
-// 7, 24). The roster is the engine's own statement: the `Teammates` section of the newest `ListAgents` listing the
+// The teammates of this session and their place in the topology tree (E7 execution document, Design §5; Decision Log 7,
+// 24). The roster is the engine's own statement: the `Teammates` section of the newest `ListAgents` listing the
 // transcript's activity holds (the activity sees backfill and live across launches; the task graph does not). In the
 // tree, an active root (running, or with a running descendant) whose own name (the sidecar's `name`, never the
-// description) is a teammate's moves under one `team` header first among the running roots, with its subtree; a teammate
-// no listed agent matches is a `roster` row there (no transcript to open). A finished teammate stays under Done, as any
-// finished root does, so the running-first order and the collapsed Done hold (the architect's ruling, M4 review). M0's team probe on 2.1.291 listed none (a named agent lists under Subagents), so this
-// ships tested on hand-built listings, unverified live. Pure.
+// description) is a teammate's moves under one `team` header first among the running roots, with its subtree; a
+// teammate no listed agent matches is a `roster` row there (no transcript to open). A finished teammate stays under
+// Done, as any finished root does, so the running-first order and the collapsed Done hold (the architect's ruling, M4
+// review). M0's team probe on 2.1.291 listed none (a named agent lists under Subagents), so this ships tested on
+// hand-built listings, unverified live. Pure.
 import type { TurnActivity } from '../../../transcript/model/activity';
 import { listedAgent, type AgentTree, type TaskGraph, type TreeRow } from './task-graph';
 

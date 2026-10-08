@@ -1,0 +1,5 @@
+step e2e-supervisor-packaged
+command: pnpm e2e:supervisor:packaged
+head 07e50719  ended 2026-10-07T23:08:11Z  load { 10.92 11.40 10.06 }  2s
+  1 passed (1.4s)
+exit 0

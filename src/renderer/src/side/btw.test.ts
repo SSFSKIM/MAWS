@@ -140,14 +140,42 @@ describe('the side-question store', () => {
     expect(fake.invoked('session.sideQuestion')).toHaveLength(2);
   });
 
-  it('Retry on a host entry that failed asks again and draws the new question in its place', async () => {
+  // E11 (tracker row E3 "side-question `retried` set renderer-only"): the retry names the failed entry and the host's
+  // log drops it once the retry is entered; the renderer hides it only while its own stand-in exists
+  it('Retry on a host entry that failed asks again naming it, draws the new question in its place, and lists what the host keeps', async () => {
     useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'failed', error: 'boom' })] }]]) });
     const retry = retrySide(A, exchanges()![0]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'Q?', retryOf: 'op-1' }]);
     expect(exchanges()!.map((e) => e.id)).toEqual(['local:1']); // the new question stands in for the failed one at once
     await fake.reply('session.sideQuestion', { opId: 'op-2' });
-    await fake.reply('side.question.list', { exchanges: [entry({ state: 'failed', error: 'boom' }), entry({ id: 'op-2', askedAt: '2026-10-06T10:01:00.000Z' })] });
+    await fake.reply('side.question.list', { exchanges: [entry({ id: 'op-2', askedAt: '2026-10-06T10:01:00.000Z' })] });
     await retry;
     expect(exchanges()!.map((e) => e.id)).toEqual(['op-2']);
+    // a later listing that still held the retried entry would draw it: nothing in the renderer hides it any more
+    await act(async () => {
+      const listed = refreshSide(A);
+      await fake.reply('side.question.list', { exchanges: [entry({ state: 'failed', error: 'boom' }), entry({ id: 'op-2', askedAt: '2026-10-06T10:01:00.000Z' })] });
+      await listed;
+    });
+    expect(exchanges()!.map((e) => e.id)).toEqual(['op-1', 'op-2']);
+  });
+
+  it('a refused retry of a host entry stands in for it, failed with the refusal; its Retry names the host entry again; a reload shows the host’s', async () => {
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'failed', error: 'boom' })] }]]) });
+    const retry = retrySide(A, exchanges()![0]);
+    await fake.fail('session.sideQuestion', 'Session app-a is not ready (exited)');
+    await retry;
+    expect(exchanges()).toEqual([expect.objectContaining({ id: 'local:1', state: 'failed', error: 'Session app-a is not ready (exited)' })]);
+    void retrySide(A, exchanges()![0]);
+    expect(fake.invoked('session.sideQuestion').at(-1)).toEqual({ appSessionId: A, question: 'Q?', retryOf: 'op-1' });
+    expect(exchanges()!.map((e) => [e.id, e.state])).toEqual([['local:2', 'pending']]);
+    resetSideQuestions(); // a renderer reload: the window's own bookkeeping is gone, the host's log is what lists
+    await act(async () => {
+      const listed = refreshSide(A);
+      await fake.reply('side.question.list', { exchanges: [entry({ state: 'failed', error: 'boom' })] });
+      await listed;
+    });
+    expect(exchanges()!.map((e) => [e.id, e.state])).toEqual([['op-1', 'failed']]);
   });
 
   it('an older listing answering after a newer one is dropped', async () => {

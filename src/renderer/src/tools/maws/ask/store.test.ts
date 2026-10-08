@@ -368,7 +368,7 @@ describe('connectAsks', () => {
     });
 
     // The Overview card's or the hover card's button: the person's own way to the session, through `openAsk`, whose
-    // addTool opens the session before it writes its tab. The sheet lands on that one tab with the clicked ask, and the
+    // addTool writes its tab and then opens the session. The sheet lands on that one tab with the clicked ask, and the
     // asks that waited are the person's now: nothing re-targets the sheet afterwards.
     it('a waiting ask opened from a card goes to its session with one sheet tab, the clicked ask kept', async () => {
       await show(B);

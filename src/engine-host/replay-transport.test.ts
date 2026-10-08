@@ -301,6 +301,40 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     }
   });
 
+  // E11 (tracker row E2 · C3 "quit after a replay writes replay_mismatch"): a recording that ended with its own
+  // `end_session` (reason `stop`) meets the app's quit (`end_session` reason `quit`): the engine's answer is to exit
+  // either way, so the replay ends with exit 0, no write fails and nothing is a mismatch
+  it('an end_session whose reason differs from the recorded one ends the replay with exit 0, no mismatch', async () => {
+    const journal = [
+      row(1, 'in', { type: 'system', subtype: 'status', status: null }),
+      row(2, 'out', { type: 'control_request', request_id: 'rec-9', request: { subtype: 'end_session', reason: 'stop' } }),
+      row(3, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'rec-9' } }),
+      row(4, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const transport = replayEngine(journal, { prelude });
+    const it = transport.frames[Symbol.asyncIterator]();
+    await it.next();
+    await expect(transport.write({ type: 'control_request', request_id: 'MINT-9', request: { subtype: 'end_session', reason: 'quit' } })).resolves.toBeUndefined();
+    const rest: TransportItem[] = [];
+    for (let next = await it.next(); !next.done; next = await it.next()) rest.push(next.value);
+    expect(rest.filter((i) => i.error)).toEqual([]);
+    await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
+  });
+
+  it('any other end_session that differs from the recorded one is still a mismatch (only the app’s quit is let through)', async () => {
+    for (const written of [{ subtype: 'end_session', reason: 'archive' }, { subtype: 'end_session', reason: 'stop', extra: true }]) {
+      const journal = [
+        row(1, 'out', { type: 'control_request', request_id: 'rec-9', request: { subtype: 'end_session', reason: 'stop' } }),
+        row(2, 'meta', { event: 'exit', code: 0, signal: null }),
+      ];
+      const transport = replayEngine(journal, { prelude });
+      const write = transport.write({ type: 'control_request', request_id: 'MINT-9', request: written } as StdinFrame);
+      const items = await take(transport.frames, 1);
+      expect(items[0]?.error?.kind, written.reason).toBe('replay_mismatch');
+      await expect(write).rejects.toThrow('replay mismatch');
+    }
+  });
+
   it('onHold fires once per held out row, after every earlier row was consumed, so adjacent out rows drive themselves', async () => {
     const journal = [
       row(1, 'in', { type: 'system', subtype: 'status', status: null }),

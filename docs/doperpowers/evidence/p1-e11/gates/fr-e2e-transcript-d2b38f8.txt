@@ -1,0 +1,8 @@
+E11 M4.2 F-R gate: e2e-transcript
+command: pnpm e2e:transcript
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:25:39Z
+load at start: { 11.24 14.70 18.35 }
+summary:
+  31 passed (3.1m)
+exit: 0

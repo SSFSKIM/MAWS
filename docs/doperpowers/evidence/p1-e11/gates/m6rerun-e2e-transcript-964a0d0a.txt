@@ -1,0 +1,5 @@
+step e2e-transcript
+command: pnpm e2e:transcript
+head 964a0d0a  ended 2026-10-08T04:38:37Z  load { 7.89 9.17 9.40 }  209s
+  31 passed (3.0m)
+exit 0

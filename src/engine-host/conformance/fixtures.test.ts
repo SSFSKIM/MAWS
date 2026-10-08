@@ -81,8 +81,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // --fork-session launch, side_question idle and mid-turn, the AskUserQuestion preview format unset and html)
     const e0a = ['p1-fork-session-flag', 'p1-fork-start', 'p1-question-preview-html', 'p1-question-preview-unset', 'p1-sdk-mcp-roundtrip', 'p1-side-question-session'];
     const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
-    // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane)
-    const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
+    // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane);
+    // E11 S1: the blocking ask interrupted, recorded the same way on the installed 2.1.293
+    const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-ask-interrupt', 'p1-maws-send-file', 'p1-maws-show-pane'];
     // E3 M0: a side thread forked while the parent's turn runs, an [image, text] `next` steer, and the thread resumed by its id (2.1.291)
     const e3 = ['p1-side-thread-live', 'p1-side-thread-live-fork', 'p1-side-thread-live-resume'];
     // E7 (P1, docs/doperpowers/plans/2026-10-06-e7-orchestration.md M0): two peer sessions messaging each other, CronCreate
@@ -631,9 +632,10 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
-      // E1 M2: pass3/p1-maws-* (every recorded ask is answered before the stop, so no fixture yields maws.ask.cancelled;
-      // session-maws.test.ts pins it over a scripted session)
-      'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
+      // E1 M2: pass3/p1-maws-*; maws.ask.cancelled from E11 S1's pass3/p1-maws-ask-interrupt (the engine's
+      // notifications/cancelled withdrawing a blocking ask; the `exit` reason stays pinned over a scripted session in
+      // session-maws.test.ts)
+      'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
       'peer.message', // E7 M1: pass3/e7-peer-a and e7-peer-b (no pass journal carries an in-process agent's message: subagent.message is pinned over test/fixtures/engine/handback-pointer in normalizer.test.ts)
       // E2 start: M2's pass3/p1-maws-artifacts (a create and an update)
       'maws.delivery.artifact',
@@ -967,6 +969,31 @@ describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', ()
     const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;
     expect(refused.isError).toBe(true);
     expect(text(refused.content)).toContain(TOOL_ERRORS.unknownPane('nope'));
+  });
+
+  // E11 S1 (E11 execution document, Design §5 S1, Task 6.2): the interrupt while the blocking ask waited, on 2.1.293.
+  it('p1-maws-ask-interrupt: the engine cancels the tools/call by its JSON-RPC id, the host withdraws the ask and writes it no result', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-ask-interrupt');
+    const [opened, ...moreOpened] = ofKind(events, 'maws.ask.opened');
+    const [cancelled, ...moreCancelled] = ofKind(events, 'maws.ask.cancelled');
+    expect([moreOpened, moreCancelled, ofKind(events, 'maws.ask.answered')]).toEqual([[], [], []]);
+    expect(opened).toMatchObject({ blocking: true, askId: opened!.toolUseId });
+    type Mcp = { type?: string; request_id?: string; request?: { subtype?: string; server_name?: string; message?: { id?: unknown; method?: string; params?: { requestId?: unknown } } } };
+    const mcp = (r: { frame: unknown }) => r.frame as Mcp;
+    const call = rows.find((r) => r.direction === 'in' && mcp(r).request_id === opened!.requestId)!;
+    expect(mcp(call).request?.message?.method).toBe('tools/call');
+    const notices = rows.filter((r) => r.direction === 'in' && mcp(r).request?.subtype === 'mcp_message' && mcp(r).request?.message?.method === 'notifications/cancelled');
+    expect(notices.map((r) => [mcp(r).request?.server_name, mcp(r).request?.message?.params?.requestId])).toEqual([['maws', mcp(call).request?.message?.id]]);
+    // the cancel row, then the event: reason withdrawn, after the notice and before the host's answer to it
+    const meta = rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'maws_ask_cancelled')!;
+    expect(meta.frame).toEqual({ event: 'maws_ask_cancelled', askId: opened!.askId, toolUseId: opened!.toolUseId, reason: 'withdrawn' });
+    expect(cancelled).toMatchObject({ askId: opened!.askId, toolUseId: opened!.toolUseId, reason: 'withdrawn' });
+    expect(seq(cancelled)).toBe(meta.seq);
+    expect(notices[0]!.seq).toBeLessThan(meta.seq);
+    expect(mcpResponseOf(rows, opened!.requestId)).toBeUndefined(); // no result written for the cancelled call
+    const answer = rows.find((r) => r.direction === 'out' && (r.frame as { response?: { request_id?: string } }).response?.request_id === mcp(notices[0]!).request_id)!;
+    expect((answer.frame as { response: { response: unknown } }).response.response).toEqual({ mcp_response: { jsonrpc: '2.0', result: {}, id: 0 } });
+    expect(ofKind(events, 'turn.ended').some((e) => e.parentToolUseId === null && !e.isEchoReceipt)).toBe(true);
   });
 });
 

@@ -405,6 +405,22 @@ describe('settings view lists Voice', () => {
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'voice.openPrivacySettings', input: { pane: 'speech' } }));
   });
 
+  it('a System Settings pane that fails to open raises a warning toast naming the pane to open by hand', async () => {
+    renderView(SETTINGS_DEFAULTS_V11, null, {
+      'voice.status': status({ permission: { microphone: 'denied', speech: 'denied' } }),
+      'voice.openPrivacySettings': () => {
+        throw new Error('no handler for x-apple.systempreferences');
+      },
+    });
+    await vi.waitFor(() => expect(row('Microphone').textContent).toContain('Off for MAWS'));
+    fireEvent.click(within(row('Speech recognition')).getByRole('button', { name: 'Open System Settings' }));
+    await vi.waitFor(() => expect(useNotices.getState().notices).toHaveLength(1));
+    expect(useNotices.getState().notices[0]).toMatchObject({
+      level: 'warning',
+      text: 'Could not open System Settings: no handler for x-apple.systempreferences. Open System Settings › Privacy & Security › Speech Recognition by hand.',
+    });
+  });
+
   it('granted and not-yet-asked permissions read as such, with no button, and an on-device language says so', async () => {
     renderView(SETTINGS_DEFAULTS_V11, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
     await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks the first time you dictate'));

@@ -9,7 +9,7 @@ import type { AgentId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { SubagentMetaSchema, WorkflowJournalRowSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal';
-import { FIXTURE_DIR, loadJournal, type FixturePass } from './fixtures';
+import { FIXTURE_DIR, loadJournal, loadTranscript, type FixturePass } from './fixtures';
 
 export const REPLAY_LAUNCH = 'journal'; // the launch segment of every replayed event id
 
@@ -76,6 +76,18 @@ export function recordedReceiptRecord(kase: 'idle' | 'busy'): Record<string, unk
     throw new Error('agents-events: the rebuilt receipt record drifted from the recorded keys');
   }
   return record;
+}
+
+// E11 S2(d): the `ListAgents` listing of the one recorded team, an interactive terminal's under the teams gate on 2.1.293
+// (pass3/e7-team-terminal, the lead's transcript): `Teammates (1):` naming scout, the teammate it spawned.
+export function recordedTeamListing(): string {
+  type Block = { type?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown };
+  const blocks = loadTranscript('pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl').flatMap((record) => {
+    const content = (record.message as { content?: unknown } | undefined)?.content;
+    return Array.isArray(content) ? (content as Block[]) : [];
+  });
+  const use = blocks.find((b) => b.type === 'tool_use' && b.name === 'ListAgents')!;
+  return blocks.find((b) => b.type === 'tool_result' && b.tool_use_id === use.id)!.content as string;
 }
 
 export const upTo = (events: SessionEvent[], seq: number) => events.filter((e) => e.seq !== null && e.seq <= seq);

@@ -158,15 +158,30 @@ describe('transcript records map to X1 events', () => {
     expect(compactions[1]).toMatchObject({ trigger: 'manual', preTokens: 0, logicalParentUuid: null, at: at(4) }); // no timestamp: the previous event's `at`
   });
 
-  it('maps API errors to the same unknown frame as the live normalizer, not an invented error row', () => {
-    const events = mapAll([rec({
-      type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1),
-      level: 'error', error: { message: 'Connection unavailable', formatted: 'Connection unavailable', connection: {}, isNetworkDown: true, rateLimits: null, noResponse: null },
-      retryInMs: 1000, retryAttempt: 1, maxRetries: 3, source: 'api',
-    })]);
-    const live = mapSystemFrame({ type: 'system', subtype: 'api_error' }, { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() });
+  // The transcript keeps the `api_error` record; stdout carries only the engine's `api_retry` twin of it (the headless
+  // filter drops `api_error`; 2.1.292 cli.pretty.js:191483-191484 builds the twin, `Wyn` :728815 names the error). The
+  // disk record must make the event the live twin makes, so one API error is one retry row on both paths.
+  it('maps an API error record to the api.retry event the live path makes from its api_retry twin', () => {
+    const registry = { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() };
+    const cases = [
+      { error: { message: '529 {"type":"error","error":{"type":"overloaded_error"}}', status: 529, formatted: 'Overloaded', connection: null, isNetworkDown: false, rateLimits: null, noResponse: null },
+        twin: { attempt: 2, max_retries: 10, retry_delay_ms: 1234, error_status: 529, error: 'overloaded' }, retryAttempt: 2, maxRetries: 10, retryInMs: 1234 },
+      { error: { message: 'Connection unavailable', formatted: 'Connection unavailable', connection: {}, isNetworkDown: true, rateLimits: null, noResponse: null },
+        twin: { attempt: 1, max_retries: 3, retry_delay_ms: 1000, error_status: null, error: 'unknown' }, retryAttempt: 1, maxRetries: 3, retryInMs: 1000 },
+      { error: { message: 'Too many requests', status: 429, formatted: 'Rate limited', connection: null, isNetworkDown: false, rateLimits: { rateLimitType: 'five_hour' }, noResponse: null },
+        twin: { attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: 429, error: 'rate_limit' }, retryAttempt: 1, maxRetries: 3, retryInMs: 500 },
+    ];
+    for (const { error, twin, retryAttempt, maxRetries, retryInMs } of cases) {
+      const events = mapAll([rec({ type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1), level: 'error', error, retryInMs, retryAttempt, maxRetries, source: 'request_retry' })]);
+      const live = mapSystemFrame({ type: 'system', subtype: 'api_retry', ...twin }, registry);
+      expect(live.payloads).toHaveLength(1);
+      expect(events).toEqual([{ id: 'error', sessionId: SESSION, at: at(1), seq: null, agentId: null, parentToolUseId: null, ...live.payloads[0] }]);
+    }
+  });
+
+  it('keeps an API error record without its retry counters as an unknown frame', () => {
+    const events = mapAll([rec({ type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1), level: 'error', error: { message: 'x' } })]);
     expect(events).toEqual([{ id: 'error', sessionId: SESSION, at: at(1), seq: null, agentId: null, parentToolUseId: null, kind: 'frame.unknown', frameType: 'system', subtype: 'api_error' }]);
-    expect(events).toMatchObject(live.payloads);
   });
 
   it('maps refusals from camelCase disk fields to the live retraction payloads, with absent-field defaults', () => {
@@ -629,6 +644,44 @@ describe('peer messages from disk (E7)', () => {
     expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
     expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: blocks });
     expect(only(events, 'peer.message')[0]).toMatchObject({ text: 'hi', midTurn: false });
+  });
+
+  // E11 (tracker row E7 "isPeerPrompt requires text-only blocks"): text beside an image is still a peer message, read
+  // from its text blocks, as live reads the same frame; never observed, so the frame is hand-built from the text case.
+  it('reads a peer record whose blocks mix text and an image, as the live normaliser does', () => {
+    const blocks = [
+      { type: 'text', text: '<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nsee the shot\n</cross-session-message>' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+    ];
+    const origin = { kind: 'peer', from: 'uds:/tmp/cc-socks/1.sock' };
+    const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), isMeta: true, origin, message: { role: 'user', content: blocks } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: blocks });
+    const live = new Normalizer({ appSessionId: 'app' as never, launchId: 'L', sessionId: null })
+      .push({ seq: 1, direction: 'in', at: at(1), frame: { type: 'user', uuid: 'p1', session_id: 'S', isSynthetic: true, origin, message: { role: 'user', content: blocks } } });
+    expect(payloads(events)).toEqual(payloads(live));
+    expect(payloads(events)).toEqual([expect.objectContaining({ kind: 'peer.message', text: 'see the shot' })]);
+  });
+
+  it('keeps a peer record carrying a tool result off the peer path', () => {
+    const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), origin: { kind: 'peer' }, message: { role: 'user', content: [{ type: 'text', text: 'x' }, { type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } })]);
+    expect(kinds(events)).not.toContain('peer.message');
+    expect(only(events, 'user.message').every((e) => e.origin !== 'peer')).toBe(true);
+  });
+
+  // E11 S2(c) (docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S2(c); the tracker's E7 row on a peer record
+  // that is not `isMeta`): an interactive terminal session (entrypoint cli, 2.1.293, Haiku) messaged by a MAWS session
+  // while idle writes the peer record in the form M0's `-p` sessions wrote, so the backfill takes the same path.
+  it('reads the peer record an interactive terminal session wrote, which has the -p form: its own peer turn, the synthetic message and its companion', () => {
+    const records = loadTranscript('pass3/e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl');
+    const peer = records.find((r) => r.type === 'user' && (r.origin as { kind?: string } | undefined)?.kind === 'peer')!;
+    expect(peer).toMatchObject({ entrypoint: 'cli', isMeta: true, promptSource: 'system', turnOrigin: 'peer', origin: { kind: 'peer', name: 'repo-33', fromMode: 'prompting', body: 'E11 S2c: hello from a MAWS session. No reply needed.' } });
+    const events = mapAll(records);
+    const at = events.findIndex((e) => e.kind === 'user.message' && e.messageUuid === peer.uuid);
+    expect(events[at - 1]).toMatchObject({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+    expect(events[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
+    expect(events[at + 1]).toMatchObject({ kind: 'peer.message', messageUuid: peer.uuid, seq: null, midTurn: false, fromName: 'repo-33', text: 'E11 S2c: hello from a MAWS session. No reply needed.' });
+    expect(only(events, 'turn.started').map((e) => e.origin), 'the READY turn, then the peer turn: no prompt turn opened by the message').toEqual([null, 'peer']);
   });
 });
 // E7 end

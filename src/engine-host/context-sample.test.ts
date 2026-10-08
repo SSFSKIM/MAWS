@@ -52,4 +52,21 @@ describe('context.sample once ready and at each turn end', () => {
     const digest = run.events.reduce(foldDigest, emptyDigest(run.session.status().appSessionId as AppSessionId));
     expect(digest.context).toEqual({ percent: 11, totalTokens: 21841, maxTokens: 200000, autoCompactThreshold: 167000 });
   });
+
+  // E11 (tracker row E10 "host.log expected traffic as errors", checked on e2e:supervisor's host.log): a replay that
+  // never recorded the ready read answers it with its stand-in; the session samples nothing then and logs nothing about
+  // it, since the journal's `replay_unrecorded_read` row is the account
+  it('a ready read the replay never recorded samples nothing and logs no failure', async () => {
+    const logs: string[] = [];
+    const run = await replayedSession('pass3', 'context-sample', (row, { session, ready, transport }) => {
+      const frame = row.frame as Held;
+      if (frame.type === 'user') void ready().then(() => session.send(frame.message!.content));
+      else if (frame.request?.subtype === 'end_session') void session.stop();
+      else if (frame.request?.subtype !== 'get_context_usage') transport.kill('SIGTERM');
+    }, { session: { log: (line) => void logs.push(line) } });
+    const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
+    expect(meta.filter((m) => m.event === 'replay_unrecorded_read').map((m) => m.subtype)).toEqual(['get_context_usage']);
+    expect(run.events.filter((e) => e.kind === 'context.sample')).toHaveLength(2); // the two turn ends only
+    expect(logs.filter((line) => line.includes('get_context_usage'))).toEqual([]);
+  });
 });

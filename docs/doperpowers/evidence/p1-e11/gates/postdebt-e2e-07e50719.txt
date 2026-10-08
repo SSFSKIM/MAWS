@@ -1,0 +1,6 @@
+step e2e
+command: pnpm e2e
+head 07e50719  ended 2026-10-07T22:39:33Z  load { 8.46 8.43 8.75 }  210s
+  126 skipped
+  49 passed (3.5m)
+exit 0

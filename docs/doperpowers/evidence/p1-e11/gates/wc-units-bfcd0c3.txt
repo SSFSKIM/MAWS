@@ -1,0 +1,10 @@
+command: pnpm exec vitest run src/renderer src/shared
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:30:12Z
+load at start: { 9.36 7.80 7.53 }
+slot: eligible: load 9.36 after 0s
+ended (UTC): 2026-10-07T18:31:35Z
+--- summary lines
+ Test Files  393 passed | 1 skipped (394)
+      Tests  5616 passed | 1 skipped (5617)
+--- exit code: 0

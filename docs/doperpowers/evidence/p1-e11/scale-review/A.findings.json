@@ -1,0 +1,91 @@
+{
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "sweep#1",
+      "priority": "P3",
+      "title": "Bound connect-burst batches by bytes, not only by event count",
+      "file": "src/engine-host/session-stream.ts",
+      "lines": "219-223",
+      "comment": "The defect is real, and the code is in this range: socket-port.ts and the E10 burst in session-stream.ts are both new here. `republish` (session-stream.ts:219-223) cuts the ring (RING_SIZE 5,000) into slices of BATCH_MAX=500 events only. `SocketPort.postMessage` (src/shared/host/socket-port.ts) writes each line without checking its size. It returns true unless writableLength passes WRITABLE_CAP, and the cursor moves past every batch for which it returned true. On main's side, `SocketPort`'s `splitLines` (LINE_CAP 64 MiB) calls `fail()` and destroys the connection when a line is over the cap. `tool.result` and `user.message` keep content blocks loosely (`ContentBlockSchema = z.looseObject`). The pass3 fixtures (p1-maws-browser.jsonl) show the base64 image `source.data` carried inline, and BROWSER_SCREENSHOT_MAX_BYTES is 3.5 MiB, about 4.9 MB of base64. Failure: a kept session takes a dozen or more fullPage screenshots while the app is away. At reconnect the 500-event batch is over 64 MiB, so main drops the connection, but the host has already moved `deliveredTo` past that batch, and the events never reach the client on the next burst. The 256 MiB `WRITABLE_CAP` path has the same problem: the burst is one synchronous loop, so if the whole tail passes 256 MiB, `fail()` destroys the socket with earlier batches still in its write buffer, and those batches were already counted delivered. This contradicts the exactly-once intent stated in the header comment. I rate it P3, not P2: it needs tens of MiB of inline images within 500 consecutive events, which typical viewport screenshots of a few hundred KB do not reach. The live path (`emitBatch` with its 16 ms window) is not affected in practice.",
+      "sources": [
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-2#1",
+      "priority": "P3",
+      "title": "Skip the screenshot record when the call was withdrawn while it was being read",
+      "file": "/private/tmp/maws-e11-review/A/src/engine-host/tool-server/browser.ts",
+      "lines": "87-111",
+      "comment": "Verified in src/engine-host/tool-server/browser.ts. After `bridge.request` returns 'answered', `screenshotAnswer` never checks `ctx.signal`. It awaits `stat`, `readFile`, then `deliverables.exclusive(...write(record))`, and that write can queue behind other writers for the same session. server.ts (line ~182) drops the response with `if (controller.signal.aborted || call.answered) return;` when a `control_cancel_request` or `notifications/cancelled` arrives in that window (it aborts with 'withdrawn' at line ~136), or when the process exits. Result: the screenshot deliverable record is written and announced with a toolUseId whose result the model never received. That breaks the function's own documented invariant, \"A record is written only for a picture the model receives.\" The window is a few milliseconds and the leftover is one extra deliverable that does no harm, so this is P3.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-5#1",
+      "priority": "P3",
+      "title": "Take the reload expectation's scope from the CLI result, not a 'user' default",
+      "file": "src/engine-host/plugins/runner.ts",
+      "lines": "279-283",
+      "comment": "Verified. runner.ts passes `scope: i.scope ?? 'user'` to `reloadAfter`, and reload-after.ts's `ReloadChange.scope` comment says \"the CLI's default, user, when the input named none\". `commandLine` (src/shared/plugins/cli.ts:39) passes no `--scope` when the input has none. I ran the installed CLI's help: `plugin enable` and `plugin disable` say `(default: auto-detect)`, and only `uninstall` says `(default: \"user\")`. Failure: an enable or disable sent through the plugins IPC without a scope, for a plugin installed at project or local scope. The CLI changes that scope, but `applies()` treats it as user scope. Sessions in other directories then get the expectation, a second reload after another SETTLE_MS, and are reported `not_reflected`. The defect is latent: the only renderer callers always pass a scope (Installed.tsx `scopeOfRow`, Available.tsx `'user'`). The IPC input schema still makes scope optional, so P3.",
+      "sources": [
+        "scalpel-5"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "X9 as a trust boundary: tool inputs from the model are untrusted (send_file paths, artifact_create html_path, show_pane targets, ask sizes, the six browser tools' tabId/url/target/expression), schema strictness, isError versus JSON-RPC errors.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "Interrupt and cancel paths (notifications/cancelled, control_cancel_request, exit with pending asks, panes or browser requests) leaving no pending state.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "X13 as built: journal seq, the ring and tail, exactly-once delivery, ready-then-burst, drop-when-no-client, the supervisor lock, token and socket, idle exit.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "Replay parity: every P1 row kind produced by both emission sites (the live normalizer and fs/backfill.ts) through one shared parser.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "The plugin CLI runner (argument construction, never -y, process-group kill, the settle before reload) and the reload's catalogue.",
+      "status": "ok",
+      "candidates": 1
+    }
+  ],
+  "lenses": [
+    "X9 as a trust boundary: tool inputs from the model are untrusted (send_file paths, artifact_create html_path, show_pane targets, ask sizes, the six browser tools' tabId/url/target/expression), schema strictness, isError versus JSON-RPC errors.",
+    "Interrupt and cancel paths (notifications/cancelled, control_cancel_request, exit with pending asks, panes or browser requests) leaving no pending state.",
+    "X13 as built: journal seq, the ring and tail, exactly-once delivery, ready-then-burst, drop-when-no-client, the supervisor lock, token and socket, idle exit.",
+    "Replay parity: every P1 row kind produced by both emission sites (the live normalizer and fs/backfill.ts) through one shared parser.",
+    "The plugin CLI runner (argument construction, never -y, process-group kill, the settle before reload) and the reload's catalogue."
+  ],
+  "explanation": "confirmed: Bound connect-burst batches by bytes, not only by event count; Skip the screenshot record when the call was withdrawn while it was being read; Take the reload expectation's scope from the CLI result, not a 'user' default",
+  "target": {
+    "base": "base",
+    "baseCommit": "bb36a178911edb288ef8ffccc65f9c8fb3b69ef2",
+    "headCommit": "6c8daeeb470744c342e3a48faa61df867237140c",
+    "repo": "/private/tmp/maws-e11-review/A"
+  },
+  "level": "max"
+}

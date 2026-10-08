@@ -287,16 +287,43 @@ describe('recovery with kept sessions (E10)', () => {
     expect(h.host.table.get(id)!.process).not.toBe('exited');
   };
 
-  it('a live row whose first message never reached C3 is handed off, not failed and removed', async () => {
+  // E11 (tracker row E10 "setup intent's first message lost on a quit"): the intent was the message's only holder
+  it('a ready live row whose first message never reached C3 is sent it once, the handoff recorded, then handed off', async () => {
     h.host.send = 'hang'; // without a kept row this is "not started": the record removed, the intent failed
     await start();
     await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
     await bound();
     const pin = pinOf();
     await h.restart({ keep: true });
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.queue.list')).toEqual([{ appSessionId: id }]); // C3 holds nothing for it
+    expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: id, content: MESSAGE.content }]);
+    handedOff(pin);
+    expect(h.host.disk.queues.get(id)).toHaveLength(1); // C3's now
+  });
+
+  it('a ready live row whose turn is open, or whose host work is in flight, is not sent the message again', async () => {
+    h.host.send = 'hang';
+    await start();
+    await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+    await bound();
+    const pin = pinOf();
+    h.host.table.set(id, { ...h.host.table.get(id)!, busy: true });
+    await h.restart({ keep: true });
     nothingRelaunchedOrResent();
     handedOff(pin);
-    expect(h.host.calledWith('session.queue.list')).toEqual([]); // the live row settles it: C3's queue is the host's
+  });
+
+  it('a ready live row whose pin has a transcript is not sent the message again', async () => {
+    h.host.send = 'hang';
+    await start();
+    await h.until(() => h.host.calls.some((c) => c.name === 'session.send'));
+    await bound();
+    const pin = pinOf();
+    h.writeTranscript(h.work, pin);
+    await h.restart({ keep: true });
+    nothingRelaunchedOrResent();
+    handedOff(pin);
   });
 
   it('a live row still initializing is handed off', async () => {
@@ -413,7 +440,8 @@ describe('recovery with kept sessions (E10)', () => {
       expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
       expect(await notes().list()).toEqual([]);
       expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]);
-      nothingRelaunchedOrResent();
+      expect(h.host.launches).toEqual([]);
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: id, content: MESSAGE.content }]); // E11: once, by the re-run's recovery
     });
 
     it('a start of an intent recovery has not reached reconciles it first, so it never rolls back a kept session', async () => {

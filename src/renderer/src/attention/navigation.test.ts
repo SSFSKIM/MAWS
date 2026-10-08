@@ -1,5 +1,8 @@
+import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AttentionId } from '@shared/graph/ids';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId, AttentionId, RequestId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
@@ -7,7 +10,9 @@ import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { hideSideChild, showSideChild } from '../side/store';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 import { connectAttention } from './navigation';
 
 const nine = scenarioFile('nine-sessions');
@@ -23,7 +28,14 @@ beforeEach(() => {
   fake = fakeClient({ 'attention.pendingNavigate': { navigate: null } });
   disconnect = connectAttention(fake.client);
 });
-afterEach(() => disconnect());
+afterEach(() => {
+  disconnect();
+  resetAskSheets();
+});
+
+// A blocking `maws` ask's originating event (what the Question sheet's store follows and `attention.request` answers).
+const askOpened = (requestId: string): SessionEvent =>
+  ({ id: `ev-${requestId}`, sessionId: 'eng', at: '2026-09-28T10:00:00Z', seq: 1, agentId: null, parentToolUseId: null, kind: 'maws.ask.opened', askId: `ask-${requestId}`, toolUseId: null, requestId, blocking: true, title: 'Setup', context: null, questions: [] }) as unknown as SessionEvent;
 
 describe('⌘⇧J (attention.next)', () => {
   it('opens the oldest Needs-you session’s tab in the focused pane, then the next one from there', () => {
@@ -93,6 +105,142 @@ describe('the fallback toast', () => {
   it('posts no toast when the OS delivered the notification', () => {
     fake.event('attention.notified', { appSessionId: idOf('Fix sidebar drag'), attentionId: 'att-x' as AttentionId, delivery: 'os', at: '2026-09-28T10:00:00Z' });
     expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  // E11 (W-C; E1's live sitting): the session in front of the reader shows its own request (the docked card, or the
+  // Question sheet E1 opens for the shown session), so a toast would only cover the panel's action bar
+  it('posts no toast for the shown session, and still one for another session', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];
+    useLayout.getState().openSession(fix.appSessionId);
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices).toEqual([]);
+    fake.event('attention.notified', { appSessionId: plan.appSessionId, attentionId: plan.id, delivery: 'fallback', at: plan.createdAt });
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`]);
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId }); // the docked card is not in a file tab
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
+  });
+
+  // W-C review m1: a maximized panel covers the main region, so a session tab in front there shows nothing; an ask's
+  // surface is the panel's Question sheet, which E1 opens for the shown session (a file tab of it counts)
+  it('counts the panel: a maximized one hides the session tab’s card; an open one shows the shown session’s Question sheet', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const question: AttentionItem = { ...fix, id: 'att-ask' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-ask' as RequestId } };
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, question] }));
+    applyAskEvents(fix.appSessionId, [askOpened('req-ask')]); // a maws ask: the Question sheet's store holds it
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().setPanel({ maximized: true, collapsed: false });
+    notify(fix); // the docked card is under the maximized panel
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    notify(question); // the Question sheet is in the panel, in front
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    useNotices.setState({ notices: [] });
+    useLayout.getState().setPanel({ maximized: false });
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
+    notify(question); // a file tab of the session shows its sheet in the open panel
+    expect(toasted()).toEqual([]);
+    notify(fix); // but not its docked card
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    useLayout.getState().setPanel({ collapsed: true });
+    notify(question); // a collapsed panel shows no sheet
+    expect(toasted()).toEqual([`attention:${fix.id}`, `attention:${question.id}`]);
+  });
+
+  // scale-review C scalpel-3#1: only a `maws` ask is on the panel's Question sheet; the engine's AskUserQuestion is a
+  // `question` item too, but its card docks in the session's own composer, so the open panel does not show it
+  it('an engine AskUserQuestion is not on the panel: a file tab of its session in front still toasts; a maws ask read as one does not', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const engineAsk: AttentionItem = { ...fix, id: 'att-auq' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-auq' as RequestId } };
+    const mawsAsk: AttentionItem = { ...fix, id: 'att-maws' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-maws' as RequestId } };
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, engineAsk, mawsAsk] }));
+    useAttention.setState({ requests: new Map([[engineAsk.id, { ...askOpened('req-auq'), kind: 'question.requested' } as unknown as SessionEvent], [mawsAsk.id, askOpened('req-maws')]]) });
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().setPanel({ maximized: false, collapsed: false });
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
+    notify(engineAsk);
+    notify(mawsAsk); // its originating event read as `maws.ask.opened`, as swapOf reads it
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${engineAsk.id}`]);
+  });
+
+  // scale-review C scalpel-2#3: a side thread drawn in its parent's Side pane is its whole session pane, docked card and
+  // all, as visibility.ts counts it, so its request is on screen while the panel is open
+  it('posts no toast for a thread drawn in the open Side pane, and one once the panel is collapsed or the thread hidden', () => {
+    const parent = idOf('Fix sidebar drag');
+    const child = idOf('Quota reset recovery') as AppSessionId;
+    const item = nine.attention.find((a) => a.appSessionId === child)!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: child, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    useLayout.getState().openSession(parent);
+    useLayout.getState().setPanel({ maximized: false, collapsed: false });
+    showSideChild(parent, child);
+    try {
+      notify();
+      expect(toasted()).toEqual([]);
+      useLayout.getState().setPanel({ collapsed: true });
+      notify();
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      useNotices.setState({ notices: [] });
+      useLayout.getState().setPanel({ collapsed: false });
+      hideSideChild(parent, child);
+      notify();
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+    } finally {
+      hideSideChild(parent, child);
+    }
+  });
+
+  // E11 (W-C; E10's crash screenshot; A-47): the toast names an item; once that item is no longer open (answered,
+  // retired, or cleared with its dead host), the toast goes with it
+  describe('leaves with its item', () => {
+    const fix = () => nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+
+    // W-C review m2: main lists only pending and delivered items (attention/service.ts drops the rest), so an answered
+    // request reaches the page as its item leaving the session's list
+    it('a permission request answered: its item, held in the list, leaves it and the toast is dismissed', () => {
+      const item = fix();
+      expect(item.kind).toBe('permission');
+      notify(item);
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }));
+      expect(toasted()).toEqual([`attention:${item.id}`]); // delivered is still open
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] })); // answered: main lists it no more
+      expect(toasted()).toEqual([]);
+    });
+
+    it('its item cleared with a dead host (gone from the list), or retired, while another toast stays', () => {
+      const item = fix();
+      const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];
+      notify(item);
+      notify(plan);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }));
+      expect(toasted()).toEqual([`attention:${plan.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: plan.appSessionId, items: [{ ...plan, state: 'retired' }] }));
+      expect(toasted()).toEqual([]);
+    });
+
+    it('an item the page’s list does not hold yet keeps its toast until it has been seen open and then leaves', () => {
+      const item = { ...fix(), id: 'att-late' as AttentionId };
+      notify(item);
+      act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Quota reset recovery'), items: [] })); // another session's change
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix(), item] }));
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix()] }));
+      expect(toasted()).toEqual([]);
+    });
+
+    it('an item already settled when its notice arrives raises no toast', () => {
+      const item = fix();
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'retired' }] }));
+      notify(item);
+      expect(toasted()).toEqual([]);
+    });
   });
 });
 

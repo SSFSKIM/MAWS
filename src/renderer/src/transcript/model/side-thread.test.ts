@@ -4,7 +4,7 @@
 // landed in, updated in place by every later summary, and the same whether the stream carried each summary or a
 // snapshot only the latest.
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage } from '@shared/anchor/message';
+import { anchoredMessage, promotionMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -17,7 +17,7 @@ import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
 import { RowSchema } from './schema';
 import { builder, uuid, type Builder } from './test-events';
-import { userTextOf } from './user-text';
+import { anchoredTextOf, userTextOf } from './user-text';
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row): row is RowOf<K> => row.kind === kind);
@@ -67,6 +67,20 @@ describe('the anchored prompt', () => {
     }
   });
 
+  it('the framing is kept beside the anchor, so the comment framed again is the message as sent (scale-review C scalpel-2#1)', () => {
+    const sent: [string, { destination: 'thread' | 'main' | null; screenshot: boolean }][] = [
+      [anchoredMessage({ anchor: ANCHOR, text: comment, destination: 'thread', screenshot: false }), { destination: 'thread', screenshot: false }],
+      [anchoredMessage({ anchor: ANCHOR, text: comment, destination: 'main', screenshot: true }), { destination: 'main', screenshot: true }],
+      [promotionMessage([{ question: 'Why?', response: 'Because.' }], comment), { destination: null, screenshot: false }],
+    ];
+    for (const [text, frame] of sent) {
+      const parsed = userTextOf(text);
+      expect(parsed.frame).toEqual(frame);
+      expect(anchoredTextOf({ anchor: parsed.anchor!, ...parsed.frame! }, parsed.text)).toBe(text);
+    }
+    expect(userTextOf('plain prompt').frame).toBeNull();
+  });
+
   it('the user row carries the anchor only when the prompt has one (no field on an ordinary prompt)', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
@@ -74,8 +88,9 @@ describe('the anchored prompt', () => {
     b.end(['u1']);
     b.turn('u2', 'plain prompt');
     const users = ofKind(folded(stateOf(b.events)), 'user');
-    expect(users.map((row) => [row.text, row.anchor])).toEqual([[comment, ANCHOR], ['plain prompt', undefined]]);
+    expect(users.map((row) => [row.text, row.anchor, row.anchorFrame])).toEqual([[comment, ANCHOR, { destination: 'main', screenshot: false }], ['plain prompt', undefined, undefined]]);
     expect('anchor' in users[1]).toBe(false);
+    expect('anchorFrame' in users[1]).toBe(false);
     for (const row of users) expect(RowSchema.safeParse(row).success).toBe(true);
   });
 

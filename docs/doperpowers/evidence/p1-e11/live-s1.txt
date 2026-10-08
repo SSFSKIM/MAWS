@@ -1,0 +1,113 @@
+E11 M6 sitting S1: an interrupt during a blocking maws ask (the fixture E1 and the P1 spec's §14 left to E11)
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S1 and §8, Task 6.2; cap US$0.15; child spend before S1 US$0.0213 (S8).
+Worktree head at start: 46855950 (branch worktree-agent-ac1b5d6ccf4ac2092); the admission committed as d3ea9460.
+Verdict: PASSED on attempt 1 of 3 (every expectation met; attempts 2 and 3 not needed). The fixture is admitted:
+  spikes/protocol-probe/fixtures/pass3/p1-maws-ask-interrupt.jsonl, test/fixtures/transcripts/p1-maws-ask-interrupt.jsonl,
+  test/snapshots/transcript/pass3/p1-maws-ask-interrupt.rows.json. No MAWS behavioural finding; no harness fix needed.
+
+Pre-sitting (2026-10-08T03:12:57Z)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200 (the harness's openGate checked it again, relay_health ok, 5 ms, at 03:13:09Z)
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the 2026-10-07 baseline)
+  load: 6.85 9.80 15.83
+  survivors before: none (pgrep -fl maws-e11-, pgrep -fl maws-supervisor both empty)
+  scratch root: /private/tmp/maws-e11-s1-20261008T031302Z (MAWS_P1_LIVE_OUT and the run logs); the harness made its engine
+    scratch itself under /tmp: config home /private/tmp/maws-e11-s1-config-XmxanF (settings.json {}), userData
+    /private/tmp/maws-e11-s1-live-LU1zUq, repository /private/tmp/maws-e11-s1-repo-uiiHYn (trusted in the scratch .claude.json)
+
+Commands (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  03:13:04Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_LIVE=1
+    MAWS_P1_LIVE_OUT=/private/tmp/maws-e11-s1-20261008T031302Z/out pnpm exec vitest run --project live
+    test/live/maws-ask-interrupt.live.test.ts
+    -> "eligible: load 6.35 after 0s"; "Test Files 1 passed (1) / Tests 1 passed (1)", 8.22 s, exit 0 at 03:13:16Z
+  Admission (after a look at the exports; no frame edited):
+    cp <userData>/exports/p1-maws-ask-interrupt.jsonl spikes/protocol-probe/fixtures/pass3/
+    cp <userData>/exports/p1-maws-ask-interrupt-transcript.jsonl test/fixtures/transcripts/p1-maws-ask-interrupt.jsonl
+    pnpm exec vitest run src/renderer/src/transcript/model/snapshots.test.ts -u -t 'pass3/p1-maws-ask-interrupt'
+      -> "Snapshots 1 written", only this fixture's; read by hand: 6 rows (time, the user prompt, the turn divider
+         state "stopped", the ToolSearch cell "Loaded 1 tool", the ask row state "cancelled" with cancelReason
+         "withdrawn", blocking true, the one choice question Red/Green/Blue, answers null, error = the engine's
+         rejection tool_result; the exit row "Session process exited (stop)"), the shape of p1-maws-ask-blocking's
+  03:16:15Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm e2e:transcript
+    -> "eligible: load 19.73 after 0s"; "31 passed (3.2m)", including "✓ 14 e2e/transcript.spec.ts:699:1 › every fixture
+       renders its whole work area expanded (1.9m)"; exit 0 at 03:20:10Z. git status showed no sibling evidence rewritten.
+
+Engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay. Model: launch spec model 'haiku'
+  (spawn args --model haiku); every assistant frame reads claude-haiku-5-5.
+Init plugin list: cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin: the
+  engine's built-ins only, none of the owner's (the CLAUDE_* scrub held).
+
+What the journal shows (pass3/p1-maws-ask-interrupt, 116 rows; seqs as committed)
+  84 the model's mcp__maws__ask tool_use (toolu_01Rh1TG1yT1nQyYUri1vSxEC), after a ToolSearch for it (52-55)
+  86-92 can_use_tool, allowed once; 93 the engine's tools/call, JSON-RPC id 2; maws.ask.opened (blocking true)
+  94-95 the host's interrupt (control_request subtype interrupt, reason user-cancel), sent at maws.ask.opened
+  96 the engine's mcp_message notifications/cancelled, params.requestId 2 (the ask's id), reason "AbortError: remote-cancel…"
+  97 meta maws_ask_cancelled {askId, toolUseId, reason "withdrawn"}; 98 the host's answer {"jsonrpc":"2.0","result":{},"id":0}
+  no control_response for the tools/call's request (cdf1103f-…) is ever written
+  100-101 the engine's rejection tool_result and "[Request interrupted by user for tool use]"; 103 result
+    error_during_execution, total_cost_usd 0.00289039
+  after it: maws.ask.answer -> {"outcome":"not_pending"}; session.stop; 115 exit code 1, reason stop
+
+Spend
+  journal (total_cost_usd of the one result frame): US$0.0029 (0.00289039); provenance costUsd "0.0029"
+  the case's charges (reserved per attempt before its launch, settled to the receipt after): attempt 1 reserved
+    US$0.0500 (maxBudgetUsd 0.0500, the cap over the three attempts), settled US$0.0029, its receipt
+  S1 total US$0.0029 of US$0.15. Child total after S1: US$0.0242 (S8 0.0213 + S1 0.0029).
+
+A-15 (the harness's scratch-scoped delta, Decision Log 35, and this worker's own readings)
+  before 03:12:57Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  harness: before the first launch, after attempt 1, after the sitting: 25 keys, sha1 42a98859… (identical) each
+  after  03:20:18Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  delta verdict: identical; no scratch key appeared or vanished; no other key added or removed.
+
+Decisions and discoveries
+  - The pass-3 integrity suite (spikes/protocol-probe/fixtures.test.mjs) asserted exit code 0 for every pass-3 journal.
+    On 2.1.293 the engine exits 1 when the session is stopped after an interrupted turn (the last result is
+    error_during_execution, is_error true): the engine's print-mode status, as the pass-2 rule there already says
+    ("Exit code 1 is the engine's print-mode status when the last result was an error"). The pass-3 rule now accepts
+    exit 1 only when the last result is an error, and still requires every request closed; dated comment in the file.
+    The recorded frame is untouched.
+  - Decision Log 5's widening (a tools/call closed by notifications/cancelled naming its id) was already in the
+    integrity suite with its synthetic cases; this fixture is its first real instance and passes under it.
+  - The interrupted turn cost US$0.0029, an order below the recorded blocking asks (US$0.019 to 0.026): the turn ends at
+    the ask, before any reply is generated.
+
+Suites after admission (focused; the worktree as cwd)
+  pnpm test:probes: tests 174, pass 174, fail 0
+  pnpm exec vitest run src/engine-host/conformance src/main/index/replay-fixtures.test.ts: Test Files 7 passed (7),
+    Tests 233 passed (233), Type Errors no errors (json-wire.test.ts alone: 7 passed)
+  pnpm exec vitest run snapshots.test.ts disk.test.ts fixtures.test.ts (transcript model) replay-diagnostics.test.ts:
+    Test Files 4 passed (4), Tests 227 passed (227)
+  e2e:transcript: 31 passed (3.2m), "every fixture renders" included
+
+Post-sitting
+  survivors (03:20:18Z): pgrep -fl maws-e11-, pgrep -fl maws-supervisor, and the engine binary under a maws scratch: none
+    (the case stopped its session: session.stop {"exited":true,"code":1}, process exited)
+  load at the end: 20.04 22.85 19.79 (the e2e group's)
+  scratch: /private/tmp/maws-e11-s1-20261008T031302Z and the harness's three /private/tmp/maws-e11-s1-* directories
+    removed after this log was written (no finding needs them)
+  sibling evidence: none rewritten (git status clean under docs/doperpowers/evidence apart from p1-e11)
+
+The harness's own log (MAWS_P1_LIVE_OUT/live-s1.txt, home path shortened to ~)
+==== S1, 2026-10-08T03:13:10.592Z: an interrupt during a blocking maws ask (Design §5 S1)
+engine ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay, Haiku, default permission mode; scratch home /private/tmp/maws-e11-s1-config-XmxanF; userData /private/tmp/maws-e11-s1-live-LU1zUq; cap US$0.15
+A-15 before the first launch: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+attempt 1 (as soon as maws.ask.opened arrived): live-89c3c75c, maxBudgetUsd 0.0500 (what the cap leaves over the 3 attempt(s) still to run)
+  interrupted with the ask open: {"stillQueued":[],"cancelled":[]}
+  session.stop: {"exited":true,"code":1,"signal":null}
+  ok   the ask opened: askId toolu_01Rh1TG1yT1nQyYUri1vSxEC, control request cdf1103f-5844-406e-a38a-8d7fdc7abb29, JSON-RPC id 2, blocking true
+  ok   notifications/cancelled names the ask: seq 96, request 17c0342a-5eda-4461-a219-c094004488b0
+  ok   the host answered it {result: {}, id: 0}: seq 98 {"jsonrpc":"2.0","result":{},"id":0}
+  ok   no result for the tools/call: none written
+  ok   maws_ask_cancelled withdrawn: seq 97 {"event":"maws_ask_cancelled","askId":"toolu_01Rh1TG1yT1nQyYUri1vSxEC","toolUseId":"toolu_01Rh1TG1yT1nQyYUri1vSxEC","reason":"withdrawn"}
+  ok   maws.ask.cancelled withdrawn: {"askId":"toolu_01Rh1TG1yT1nQyYUri1vSxEC","reason":"withdrawn"}
+  ok   a later answer is not_pending: {"outcome":"not_pending"}
+  ok   the turn ended: [null]
+  journal: /private/tmp/maws-e11-s1-live-LU1zUq/engine-host/journal/live-89c3c75c/qugvj6fu.jsonl (total_cost_usd 0.0029)
+  exported: /private/tmp/maws-e11-s1-live-LU1zUq/exports/p1-maws-ask-interrupt.jsonl (from /private/tmp/maws-e11-s1-live-LU1zUq/engine-host/journal/live-89c3c75c/qugvj6fu.jsonl)
+  exported: /private/tmp/maws-e11-s1-live-LU1zUq/exports/p1-maws-ask-interrupt-transcript.jsonl (transcript /private/tmp/maws-e11-s1-config-XmxanF/projects/-private-tmp-maws-e11-s1-repo-uiiHYn/b47c90c8-466d-4e73-a3fb-ebb3b72a71cd.jsonl)
+  init plugins: [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]
+  A-15 after: 25 keys (identical)
+  attempt 1: every expectation met; S1 spend US$0.0029 of US$0.15 (attempt 1 US$0.0029 its receipt); A-15 after attempt 1: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+S1: attempt 1 met every expectation; the fixture is /private/tmp/maws-e11-s1-live-LU1zUq/exports/p1-maws-ask-interrupt.jsonl
+S1 spend US$0.0029 of US$0.15 (attempt 1 US$0.0029 its receipt)
+A-15 after the sitting: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)

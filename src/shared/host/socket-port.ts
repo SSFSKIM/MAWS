@@ -2,7 +2,10 @@
 // serves a socket exactly as it serves a MessagePort, and main's side speaks the envelope over the same class. One JSON
 // value per line. Like a MessagePort, received messages queue until `start()`; the handshake reader's leftover bytes
 // (what it read past the hello) are delivered first. A line that is not JSON, a line over the cap, or a peer stalled
-// past the writable cap closes the connection with a log line; a write after the close is dropped.
+// past the writable cap closes the connection with a log line; a write after the close is dropped. A draining close
+// (main's deliberate one at a keep-quit, E11) writes nothing more but still delivers what the peer wrote before it saw
+// the end, until the peer closes (or the grace runs out): the host, which ends its side at the client's end and refuses
+// every write after it, then counts nothing delivered that the client did not read.
 import type { Socket } from 'node:net';
 import type { HostPort } from './runtime';
 import { LINE_CAP, splitLines, WRITABLE_CAP } from './socket-protocol';
@@ -14,7 +17,7 @@ export interface SocketPortOptions {
 }
 
 // How long close() waits for the peer to finish the close before it destroys the socket.
-const CLOSE_GRACE_MS = 1_000;
+export const CLOSE_GRACE_MS = 1_000; // E11: also the bound main's quit waits for a draining close
 
 type MessageListener = (event: { data: unknown }) => void;
 
@@ -23,6 +26,7 @@ export class SocketPort implements HostPort {
   private readonly closeListeners: ((hadError: boolean) => void)[] = [];
   private queue: unknown[] | null = []; // null once started
   private dead = false; // closing or closed: nothing more is delivered or written
+  private draining = false; // a draining close: nothing more is written, what arrives is still delivered (E11)
   private closedWith: boolean | null = null;
   private readonly log: (line: string) => void;
   private readonly writableCap: number;
@@ -53,7 +57,7 @@ export class SocketPort implements HostPort {
   // True when the line was handed to a live socket; false when the port is closing or closed, or when this write
   // stalled the peer past the cap (the connection is then destroyed with the line still buffered, so it never leaves).
   postMessage(message: unknown): boolean {
-    if (this.dead || !this.socket.writable) return false;
+    if (this.dead || this.draining || !this.socket.writable) return false;
     this.socket.write(`${JSON.stringify(message)}\n`);
     if (this.socket.writableLength <= this.writableCap) return true;
     this.fail(`closed the connection: the peer stalled ${this.socket.writableLength} bytes behind`);
@@ -78,9 +82,10 @@ export class SocketPort implements HostPort {
     else queueMicrotask(() => listener(closedWith));
   }
 
-  close(): void {
-    if (this.dead) return;
-    this.dead = true;
+  close(options: { drain?: boolean } = {}): void {
+    if (this.dead || this.draining) return;
+    if (options.drain) this.draining = true;
+    else this.dead = true;
     this.socket.end();
     const timer = setTimeout(() => this.socket.destroy(), CLOSE_GRACE_MS);
     timer.unref();

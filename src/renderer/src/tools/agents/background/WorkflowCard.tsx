@@ -5,11 +5,11 @@
 // `Stop workflow` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once.
 import type { TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
-import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../copy';
-import { formatElapsed, formatTokens } from '../model/elapsed';
+import { BACKGROUND_COPY } from '../copy';
 import type { TaskNode } from '../model/task-graph';
 import { runSummary, type RunSummary, type RunView } from '../model/workflow-run';
-import { StopButton, StopError, statusWord } from './TaskRows';
+import { RunBadge, runLine } from './run-parts';
+import { StopButton, StopError } from './TaskRows';
 
 interface Props {
   node: TaskNode;
@@ -21,32 +21,12 @@ interface Props {
   onStop: (taskId: TaskId) => void;
 }
 
-// The run's `workflow <name> · <elapsed> · <n> agents · <tokens>`, shared with the widget's header.
-export function runLine(node: TaskNode, view: RunView): string {
-  return BACKGROUND_COPY.workflowLine(
-    node.workflow?.workflowName ?? null,
-    view.elapsedMs === null ? SUBAGENTS_COPY.elapsedUnavailable : formatElapsed(view.elapsedMs),
-    view.agents,
-    view.tokens === null ? SUBAGENTS_COPY.tokensUnavailable : formatTokens(view.tokens),
-  );
-}
-
 const summaryText = (summary: RunSummary | null): string =>
   summary === null
     ? BACKGROUND_COPY.phasesPending
     : summary.kind === 'phase'
       ? BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
       : BACKGROUND_COPY.runSummary[summary.kind];
-
-// An ended run's state word (the card's and the widget's badge); nothing while it runs.
-export function RunBadge({ node }: { node: TaskNode }) {
-  if (node.status === 'running') return null;
-  return (
-    <span data-part="status" className={`shrink-0 text-ui-sm ${node.status === 'failed' ? 'text-danger' : 'text-fg-muted'}`}>
-      {statusWord(node.status)}
-    </span>
-  );
-}
 
 export function WorkflowCard({ node, view, live, selected, stopError, onOpen, onStop }: Props) {
   return (

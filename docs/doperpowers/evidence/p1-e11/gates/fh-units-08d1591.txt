@@ -1,0 +1,16 @@
+E11 M4.2 F-H gate: units
+command: pnpm exec vitest run src/engine-host src/main src/shared
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:51:52Z
+load at start: { 14.88 13.26 12.45 }
+summary:
+     FAIL  |node| src/main/sessions/pause-take-over.pty.test.ts > clears an unfinished line at start in /bin/zsh emacs mode before returning the CLI to the foreground
+     FAIL  |node| src/main/sessions/pause-take-over.pty.test.ts > clears an unfinished line at middle in /bin/zsh emacs mode before returning the CLI to the foreground
+     Test Files  1 failed | 329 passed (330)
+          Tests  2 failed | 4807 passed (4809)
+    Type Errors  no errors
+exit: 1
+rerun alone (rule 8, known load flake pause-take-over.pty; load 12.27 at the rerun): pnpm exec vitest run src/main/sessions/pause-take-over.pty.test.ts
+    Test Files  1 passed (1)
+    Tests  6 passed (6)
+rerun exit: 0

@@ -5,34 +5,25 @@
 // E6 (E6 execution document, Design §6): the push text opens the Source control tool, and a second row says the PR's
 // state (pr-line.ts) from `scm.status` and `scm.pr.state`, the queries the tool's header shares by key. The PR state is
 // polled every 2 minutes while the row is shown and there is something to ask (trusted, a remote), asked again when the
-// repository's head or refs move, and on demand by Refresh. The card hands this row only the checkout, so the session
-// is the shown one (the card is always the shown session's), and only while its checkout is this directory.
+// repository's head or refs move or a session's setup records trust (the app-level listener, `connectPanelEvents`), and
+// on demand by Refresh. The card hands this row its session and that session's checkout (E11 W-D).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
 import { useGit } from '../../stores/git';
-import { useLayout } from '../../stores/layout';
-import { activeTab, sessionOfTab } from '../../stores/layout-model';
-import { useSessions } from '../../stores/sessions';
 import { prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
 import { githubUrl, pushState } from './derive';
-import { prLine, prStateBehind } from './pr-line';
+import { GH_INSTALL_URL, GH_SIGN_IN, INLINE_LINK, prLine, prStateBehind } from './pr-line';
 import { actionClass, Row, Section } from './Section';
 
 const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
-const GH_INSTALL_URL = 'https://cli.github.com';
-const GH_SIGN_IN = 'gh auth login';
 
-// Inline actions read as links within the row's sentence (`PR #12`, `Install`, `Sign in`).
-const linkClass = 'rounded-sm text-accent outline-accent hover:underline focus-visible:outline-2';
-
-export function PushState({ directory }: { directory: string }) {
+export function PushState({ directory, appSessionId }: { directory: string; appSessionId: AppSessionId }) {
   const status = useGit((s) => s.entries.get(directory)?.status ?? null);
-  const appSessionId = useSessionOf(directory);
   const toolRegistered = usePanelHost((s) => s.tools.has(SCM_TOOL_ID));
   if (!status || status.branch === null) return null;
   const push = pushState(status);
@@ -52,10 +43,11 @@ export function PushState({ directory }: { directory: string }) {
           )
         }
       >
-        {appSessionId !== null && toolRegistered ? (
+        {toolRegistered ? (
+          // A-28 (WCAG 2.5.3): named by the text it shows; what it does is its title, the accessible description
           <button
             type="button"
-            aria-label={SUMMARY_COPY.openSourceControl}
+            title={SUMMARY_COPY.openSourceControl}
             className="block w-full truncate rounded-sm text-left outline-accent hover:text-accent focus-visible:outline-2"
             onClick={() => panelHost.addTool(SCM_TOOL_ID, { appSessionId })}
           >
@@ -65,31 +57,16 @@ export function PushState({ directory }: { directory: string }) {
           <span className="block truncate">{text}</span>
         )}
       </Row>
-      {appSessionId !== null && <PrRow appSessionId={appSessionId} directory={directory} root={status.repoRoot} branch={status.branch} />}
+      <PrRow appSessionId={appSessionId} directory={directory} branch={status.branch} />
     </Section>
   );
 }
 
-// The shown session when its checkout is `directory`, else null (no PR row, the push text plain).
-function useSessionOf(directory: string): AppSessionId | null {
-  const shown = useLayout((s) => sessionOfTab(activeTab(s.main)));
-  const checkout = useSessions((s) => {
-    const record = shown === null ? undefined : s.records.get(shown);
-    return record ? (record.worktree?.path ?? record.directory) : null;
-  });
-  return checkout === directory ? shown : null;
-}
-
-function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSessionId; directory: string; root: string; branch: string }) {
-  // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll, the rule for asking, and the re-read
-  // when the head or refs move.
-  const scm = useScmStatus(appSessionId, root);
-  const pr = usePrState(appSessionId, { root, branch, scm: scm.data });
+function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId; directory: string; branch: string }) {
+  // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll and the rule for asking.
+  const scm = useScmStatus(appSessionId);
+  const pr = usePrState(appSessionId, { branch, scm: scm.data });
   const [refreshing, setRefreshing] = useState(false);
-
-  // Trust is recorded in main by a session's setup, which the renderer learns of only through `session.setup` (as the
-  // tool's body re-reads it).
-  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: scmStatusKey(appSessionId) })), [appSessionId]);
   const behind = prStateBehind(scm.data, pr.data);
   useEffect(() => {
     if (behind) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
@@ -136,7 +113,7 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
         {line.kind === 'gh_missing' && (
           <>
             {`${SUMMARY_COPY.ghMissing} · `}
-            <button type="button" className={linkClass} onClick={() => openExternal(GH_INSTALL_URL)}>
+            <button type="button" className={INLINE_LINK} onClick={() => openExternal(GH_INSTALL_URL)}>
               {SUMMARY_COPY.install}
             </button>
           </>
@@ -144,7 +121,7 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
         {line.kind === 'gh_unauthenticated' && (
           <>
             {`${SUMMARY_COPY.ghSignedOut} · `}
-            <button type="button" className={linkClass} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
+            <button type="button" className={INLINE_LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
               {SUMMARY_COPY.signIn}
             </button>
           </>
@@ -152,7 +129,7 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
         {line.kind === 'no_pr' && SUMMARY_COPY.noPr(line.branch)}
         {line.kind === 'pr' && (
           <>
-            <button type="button" className={linkClass} onClick={() => openExternal(line.url)}>
+            <button type="button" className={INLINE_LINK} onClick={() => openExternal(line.url)}>
               {SUMMARY_COPY.prNumber(line.number)}
             </button>
             {` ${line.details}`}

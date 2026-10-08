@@ -234,6 +234,47 @@ describe('source control store: diffs', () => {
     third();
   });
 
+  // E11 (tracker row E6 "two short windows"): Stage moves the selection out of Untracked; a re-read asked before it and
+  // answered after it says nothing about the file, so the "No diff for this entry" flash before git.changed is gone
+  it('drops an untracked answer when a stage or discard of the file went out since the read was asked, and reads again after it', async () => {
+    vi.useFakeTimers();
+    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const reads: ((answer: 'patch' | 'gone') => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name === 'scm.stage' || name === 'scm.discard') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      if (name !== 'git.diff' || input.scope !== 'untracked') return ok();
+      const answer = await new Promise<'patch' | 'gone'>((resolve) => reads.push(resolve));
+      return answer === 'gone' ? fail(`not an untracked file: ${input.path}`) : ok({ patch: untrackedPatch, files: [{ path: input.path, oldPath: null, insertions: 2, deletions: 0, binary: false }] });
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: A });
+    const off = store.getState().hold(target);
+    await vi.advanceTimersByTimeAsync(0);
+    reads[0]('patch');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), target)).toMatchObject({ status: 'ok' });
+
+    for (const [i, mutate] of [() => store.getState().stage(ui, A, ['untracked.txt']), () => store.getState().discard(ui, A, [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
+      store.getState().statusChanged(DIR); // a re-read, in flight when the mutation goes out
+      await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+      await mutate();
+      reads[1 + 2 * i]!('gone'); // main staged it first: C4 no longer lists it as untracked
+      await vi.advanceTimersByTimeAsync(0);
+      expect(diffOf(store.getState(), target), `${i}`).toMatchObject({ status: 'ok' }); // the earlier answer stands
+      await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS); // and the file is read again once the mutation answered
+      expect(reads, `${i}`).toHaveLength(2 + 2 * i + 1);
+      reads[2 + 2 * i]!('patch');
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    store.getState().statusChanged(DIR); // with no mutation since it was asked, a refusal is the answer
+    await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+    reads[5]!('gone');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), target)).toEqual({ status: 'error', message: 'not an untracked file: untracked.txt' });
+    off();
+  });
+
   it('says why a read failed', async () => {
     const main = installFakeMain((name) => (name === 'git.diff' ? fail('not an untracked file: udir/') : ok()));
     const store = createScmStore(validated(main.bridge));
@@ -276,8 +317,13 @@ describe('source control store applies no status of its own and resumes a run fr
     await store.getState().commit(ui, A);
     expect(ui.getState()).toMatchObject({ notice: { kind: 'git_failed', text: 'pre-commit hook failed', output: 'nope\n' }, message: 'Fix', lastCommit: null });
     answer = { ok: false, error: { code: 'timeout', message: 'git timed out' } };
-    await store.getState().discard(ui, A, [{ path: 'a.ts', group: 'unstaged' }]);
+    await store.getState().unstage(ui, A, ['a.ts']);
     expect(ui.getState().notice).toEqual({ kind: 'error', text: 'git timed out', output: '' });
+    // E11 W-D: a discard's refusal or failure is its sheet's to show (the sheet stays open), not the notice behind it
+    answer = ok(refusal('unmerged', '"a.ts" has a merge conflict'));
+    ui.setState({ notice: null });
+    await store.getState().discard(ui, A, [{ path: 'a.ts', group: 'unstaged' }]);
+    expect(ui.getState().notice).toBeNull();
     expect(main.callsOf('scm.discard')).toEqual([{ appSessionId: A, entries: [{ path: 'a.ts', group: 'unstaged' }] }]);
   });
 

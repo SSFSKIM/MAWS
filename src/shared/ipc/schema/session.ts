@@ -123,7 +123,7 @@ const c3Commands = {
   'session.reloadPlugins': host(input({}), OperationReceiptSchema),
   'session.mcpReconnect': host(input({ serverName: z.string() }), OperationReceiptSchema),
   'session.mcpToggle': host(input({ serverName: z.string(), enabled: z.boolean() }), OperationReceiptSchema),
-  'session.sideQuestion': host(input({ question: z.string() }), OperationReceiptSchema),
+  'session.sideQuestion': host(input({ question: z.string(), retryOf: z.string().optional() }), OperationReceiptSchema), // E11: retryOf, the failed log entry a Retry asks again
   // structured reads
   'session.getUsage': read(GetUsageResponseSchema),
   'session.getContextUsage': host(input({ detail: z.enum(['summary', 'full']) }), GetContextUsageResponseSchema),

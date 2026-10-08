@@ -1,0 +1,12 @@
+E11 M6 fix (list): pnpm exec playwright test e2e/p1-live.spec.ts --list at f1a4d0d (2026-10-07 19:33; load { 62.38 103.78 67.18 })
+p1-live.spec.ts:414:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 1 artifacts: create, main’s real capture whose PNG shows the page’s colour, update; the row, the Deliverables tool, v2 and its switch, the record
+p1-live.spec.ts:484:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 2 a comment picked on the artifact goes to a Side thread, which answers in the Side pane and sums itself up in the parent; the parent’s turns unchanged
+p1-live.spec.ts:529:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row
+p1-live.spec.ts:566:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged
+p1-live.spec.ts:595:7 › S4: the browser (item 7) › 5 E4c’s recording prompt against the real browser: the seven rows, the reference, the screenshot record, the agent’s cursor, the Browser tool opened once
+p1-live.spec.ts:662:7 › S4: the browser (item 7) › 6 the live anchor resolution: E4d’s own live proof stands
+p1-live.spec.ts:667:7 › S4: the browser (item 7) › 7 the OOPIF page of the owner’s step F: a browser_snapshot through the seam shows a text field inside a cross-site frame (no engine turn)
+p1-live.spec.ts:726:5 › S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 s to first output; a stall recorded with its capture
+p1-live.spec.ts:805:5 › A-47: a permission request on a session not in front raises the fallback toast with no window focused; answering it retracts the toast
+Total: 9 tests in 1 file
+list exit 0

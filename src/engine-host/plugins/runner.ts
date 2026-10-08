@@ -17,7 +17,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type { PluginsOperationEvent, PluginsOutcome } from '@shared/ipc/schema/plugins';
-import { commandLine, type PluginsAction, type PluginsActionInputs } from '@shared/plugins/cli';
+import { commandLine, PLUGINS_SCOPES, type PluginsAction, type PluginsActionInputs } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
 import { mutationOutcome, resultOf, type CliRun } from './cli-result';
 import { RELOADING_ACTIONS, reloadAfter, SETTLE_MS, type ReloadTarget } from './reload-after';
@@ -279,7 +279,12 @@ export class PluginsRunner {
     const i = op.input as { plugin?: string; scope?: 'user' | 'project' | 'local' };
     const id = typeof outcome.result.pluginId === 'string' ? outcome.result.pluginId : (i.plugin ?? null);
     const plugin = id === null ? null : id.lastIndexOf('@') > 0 ? id.slice(0, id.lastIndexOf('@')) : id;
-    const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? 'user', cwd: op.cwd, plugin }, () => this.deps.reloadTargets(), {
+    const version = op.action === 'update' && typeof outcome.result.newVersion === 'string' ? outcome.result.newVersion : null;
+    // E11 (scale review A scalpel-5#1): with no scope named, the scope the CLI changed is its result's (enable and disable
+    // auto-detect it; pass3/e8-plugins-reload seq 42, 50); 'user' (install's and uninstall's default) only when it names
+    // none, or a pseudo-scope such as `managed`, which applies everywhere as user does
+    const named = PLUGINS_SCOPES.find((scope) => scope === outcome.result.scope);
+    const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? named ?? 'user', cwd: op.cwd, plugin, version }, () => this.deps.reloadTargets(), {
       sleep: (ms) => new Promise((resolve) => this.timers.setTimeout(resolve, ms)),
     });
     this.finish(op, outcome, { sessions });

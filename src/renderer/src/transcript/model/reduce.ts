@@ -51,6 +51,10 @@ export interface TurnState {
   // `subagent.finished` or `task.notification` naming the child, which the child source delivers into the slice, closes
   // its open turn with that outcome, and the parent's `process.exited` closes it as stopped.
   closedBy: 'completed' | 'failed' | 'stopped' | null;
+  // Additive (E11, W-C): why `closedBy` closed it, when the engine rather than the reader ended the turn: `crash`, its
+  // process exited unasked (C3's crash exit, E10's exit synthesised after a supervisor's death), so its divider reads in
+  // the engine's words; null otherwise (a stop, a quit, a finish, a turn the reader had interrupted).
+  closedCause: 'crash' | null;
   // Additive (M6, *Turn boundaries on this engine*): the engine accepted the turn (its `turn.started` arrived, or it
   // was opened by the engine's own output). A prompt's `user.message` arrives at the write and opens its turn pending
   // (`false`): its bubble shows, it has no divider, and it never receives another turn's events until it starts.
@@ -264,7 +268,7 @@ class Batch {
   }
 
   open(id: TurnId, origin: TurnOrigin, at: string, accepted = true): TurnState {
-    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null, accepted };
+    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null, closedCause: null, accepted };
     this.state.turns.set(id, turn);
     this.order().push(id);
     this.touched.add(id);
@@ -353,9 +357,10 @@ class Batch {
   // A turn closed without a turn.ended of its own (not retained: no row of its own): a child transcript's turn at the
   // parent's report that the child ended, and a session's turn the engine never ended (its process exited, or C4's
   // backfill shows the next prompt starting with no turn_duration for this one).
-  closeUnended(turn: TurnState, outcome: 'completed' | 'failed' | 'stopped', at: string): void {
+  closeUnended(turn: TurnState, outcome: 'completed' | 'failed' | 'stopped', at: string, cause: 'crash' | null = null): void {
     turn.state = 'closed';
     turn.closedBy = outcome;
+    turn.closedCause = cause;
     turn.endedAt = at;
     this.closeBlocks(turn, at);
     turn.version += 1;
@@ -644,7 +649,8 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'hook.callback_resolved':
       return; // requests to the host, C7's; nothing in the transcript
     case 'boundary.retraction': {
-      const owners = new Set(event.retractedMessageUuids.map((uuid) => index.messages.get(uuid)).filter((id): id is TurnId => id !== undefined));
+      // a disk hook is named after its record's uuid (C4's backfill), so a retraction may name a hook's turn
+      const owners = new Set(event.retractedMessageUuids.map((uuid) => index.messages.get(uuid) ?? index.hooks.get(uuid)).filter((id): id is TurnId => id !== undefined));
       if (owners.size === 0) {
         if (!pushRouted(null)) batch.loose(event);
       } else {
@@ -685,7 +691,7 @@ function apply(batch: Batch, event: SessionEvent): void {
       // as stopped, and the exit is the parent's row, not the child's.
       if (state.agentId !== null) {
         const turn = batch.current();
-        if (turn) batch.closeUnended(turn, 'stopped', event.at);
+        if (turn) batch.closeUnended(turn, 'stopped', event.at, event.kind === 'process.exited' && event.reason === 'crash' ? 'crash' : null);
         return;
       }
       // A session's process exiting ends every turn the engine was running (no turn.ended will come for them); a
@@ -697,7 +703,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
           if (turn.state !== 'open' || !turn.accepted) continue;
-          batch.closeUnended(batch.touch(id), event.reason !== 'unknown' || wasInterrupted(turn) ? 'stopped' : 'completed', event.at);
+          const interrupted = wasInterrupted(turn);
+          batch.closeUnended(batch.touch(id), event.reason !== 'unknown' || interrupted ? 'stopped' : 'completed', event.at, event.reason === 'crash' && !interrupted ? 'crash' : null);
         }
       }
       return batch.loose(event);

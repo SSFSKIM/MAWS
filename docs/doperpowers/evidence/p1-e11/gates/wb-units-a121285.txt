@@ -1,0 +1,11 @@
+command: pnpm exec vitest run src/main src/shared src/renderer/src/tools/scm src/renderer/src/panel/summary src/renderer/src/tools/maws/ask
+head: a121285d360c3a50d5d070aceb9cef427288e897
+started (UTC): 2026-10-07T17:38:32Z
+load at start: { 7.22 7.13 7.10 }
+slot: eligible: load 7.22 after 0s
+ended (UTC): 2026-10-07T17:39:42Z
+--- summary lines
+ Test Files  269 passed (269)
+      Tests  3704 passed (3704)
+Type Errors  no errors
+--- exit code: 0

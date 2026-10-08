@@ -15,8 +15,9 @@
 //   (g) an incompatible update (another wire): the banner, launches refused, Restart now, a new pid;
 //   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not.
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
-// observe. Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
-import { execFileSync, type ChildProcess } from 'node:child_process';
+// observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
+// scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
+import { type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,7 @@ import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
@@ -38,7 +40,7 @@ test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs unde
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
 // the request for as long as nobody answers it, which is how the cases below keep a session mid-turn.
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
-const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10');
+const EVIDENCE = process.env.MAWS_E10_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10') : null;
 const ROW_MS = '250'; // (b): about 11 s from the prompt to the request, 10 s from the answer to the result
 
 function firstPrompt(fixture: string): string {
@@ -65,34 +67,6 @@ function tailFixture(dir: string): string {
   const path = join(dir, 'permission-task-failure.jsonl');
   writeFileSync(path, `${rows.map((row, k) => JSON.stringify({ ...row, seq: k + 1 })).join('\n')}\n`);
   return path;
-}
-
-// ---- processes ---------------------------------------------------------------------------------------------------------
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-function ps(pid: number, field: 'pgid' | 'command'): string {
-  try {
-    return execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
-  } catch {
-    return ''; // no such process
-  }
-}
-// Every process whose command line names `text` (a scratch root: the supervisors' `--detached <dir>`), but this one.
-function processesNaming(text: string): { pid: number; command: string }[] {
-  const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
-  return out
-    .split('\n')
-    .map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null && m[2]!.includes(text))
-    .map((m) => ({ pid: Number(m[1]), command: m[2]! }))
-    .filter((p) => p.pid !== process.pid);
 }
 
 interface Lock { pid: number; procStart: string; socketPath: string; buildId: string }
@@ -218,18 +192,8 @@ class Scratch {
       await run.maws.cleanup().catch(() => {}); // the app is gone; a given profile is left to this cleanup
     }
     this.lock();
-    const named = processesNaming(this.root);
-    for (const pid of new Set([...this.supervisors, ...named.map((p) => p.pid)])) {
-      // a recorded pid is killed only while it is still a supervisor of this profile (never a reused pid)
-      if (!isAlive(pid) || !ps(pid, 'command').includes(this.root)) continue;
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error); // gone meanwhile is fine
-      }
-    }
     let leftover: unknown = null; // a survivor is reported, after the files are removed all the same
-    await expect.poll(() => processesNaming(this.root).map((p) => p.pid), { timeout: 10_000, message: `no process of ${this.root} outlives the case` }).toEqual([]).catch((error: unknown) => (leftover = error));
+    await killScratchProcesses(this.root, this.supervisors).catch((error: unknown) => (leftover = error));
     for (const socket of this.sockets) {
       const dir = tmpSocketDirOf(this.userData, socket); // a socket under root goes with it
       if (dir !== null) rmSync(dir, { recursive: true, force: true });
@@ -323,6 +287,7 @@ const submitOf = (page: Page) => page.locator('[data-region="main"] [data-submit
 // ---- evidence ---------------------------------------------------------------------------------------------------------
 
 function evidence(name: string, lines: string[]): void {
+  if (EVIDENCE === null) return;
   mkdirSync(EVIDENCE, { recursive: true });
   writeFileSync(join(EVIDENCE, name), `${lines.join('\n')}\n`);
 }
@@ -330,11 +295,12 @@ function evidence(name: string, lines: string[]): void {
 // `target` in both themes (light last, the default), each checked for the other theme's colours first.
 async function shots(maws: MawsLaunch, name: string, target: () => Locator | null): Promise<void> {
   const { page } = maws;
-  mkdirSync(EVIDENCE, { recursive: true });
+  if (EVIDENCE !== null) mkdirSync(EVIDENCE, { recursive: true });
   for (const theme of ['dark', 'light'] as const) {
     await menu(maws, `theme.${theme}`);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     expect(await otherThemeColours(page, { paintedOnly: true }), `${theme}: ${name}`).toEqual([]); // xterm's hidden IME view keeps fixed colours
+    if (EVIDENCE === null) continue;
     const path = join(EVIDENCE, `${name}-${theme}.png`);
     const element = target();
     if (element) await element.screenshot({ path });
@@ -501,6 +467,14 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
     const row = await showSession(second.page, id);
     await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
+    // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
+    // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
+    // `waiting`: that reading needs an engine `requires_action` state (a `session.state` event or the status's
+    // `engineState`), and both come only from `session_state_changed` frames, which permission-roundtrip.jsonl lacks
+    const digestOf = async () => value(await invoke(second.page, 'session.digests', undefined)).digests.find((d) => d.appSessionId === id);
+    await expect.poll(async () => (await digestOf())?.pendingRequests, { message: 'the digest counts the request raised while away' }).toBe(1);
+    const digest = (await digestOf())!;
+    expect(digest.phase, 'the digest reads the turn open after the resync').toBe('working');
     await expect(submitOf(second.page), 'the renderer reads the turn open').toHaveAttribute('data-submit-state', 'stop');
     await new Promise((r) => setTimeout(r, 1_000));
     const items = await pendingPermissions(second.page, id);
@@ -509,7 +483,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items[0]!.request.requestId).toBe(requested.requestId);
     expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"`,
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"; main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 
@@ -594,7 +568,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     const composer = `"${await submitOf(run.page).textContent()}" (${await submitOf(run.page).getAttribute('title')})`;
     // the transcript closes the dead turn once the successor's table does not list the session: stopped, not Working
     await expect(run.page.getByText('Session process exited (crash)')).toBeVisible();
-    await expect(run.page.getByRole('button', { name: /stopped after/i })).toBeVisible(); // the human turn's divider: "You stopped after …"
+    await expect(run.page.getByRole('button', { name: /Stopped after .*\(engine process exited\)/ })).toBeVisible(); // the human turn's divider, in the engine's words (E11)
     await expect(run.page.getByText(/^Working/)).toHaveCount(0);
     await expect(toast).toBeVisible();
     await shots(run.maws, 'notice-crashed', () => null);

@@ -327,13 +327,31 @@ describe('relay store, peer targets (E7)', () => {
     expect(peerOf(B)?.state.kind).toBe('sent');
   });
 
-  it('reads failed when the steer’s own turn ends with no SendMessage carrying the owner’s text', async () => {
+  // E11 W-D (tracker row E7 "paraphrased peer reply reads notSent"): a send to the address in the steer's own turn that
+  // carries other words is the session's reply in its own words: sent when it went, failed with the send's own words
+  it('reads a send to the address in other words as sent reworded when the steer’s own turn ends', async () => {
+    await sendPeer(B, 'the owner’s words, which the session paraphrased', REPLY_UUID);
+    batch(peerBetween(100, 140)); // A's own answer to B before the steer started: not this relay's
+    batch(peerBetween(140, 200)); // the steer's turn sends to B (seq 191) other words, answered success at 195
+    expect(peerOf(B)?.state.kind).toBe('asked');
+    batch(peerBetween(200, 220)); // command_lifecycle completed for the steer's uuid, seq 216
+    expect(peerOf(B)?.state).toEqual({ kind: 'sent', sentAt: peerA.find((e) => e.seq === 195 && e.kind === 'tool.result')!.at, reworded: true });
+    expect(fake.listeners()).toBe(0);
+  });
+
+  it('reads failed with the send’s own words when the steer’s turn sent other text to the address and it was refused', async () => {
     await sendPeer(NOBODY, 'a text the session never sends', 'c762441a-e67e-4d7d-bf40-f40a32c465ec');
-    batch(peerBetween(281, 338)); // the turn's own SendMessage to nobody-e7 carries other text: no match
+    batch(peerBetween(281, 338)); // the turn's own SendMessage to nobody-e7 carries other text, answered success: false
     expect(peerOf(NOBODY)?.state.kind).toBe('asked');
     batch(peerBetween(338, 340)); // command_lifecycle completed for the steer's uuid, seq 339
-    expect(peerOf(NOBODY)?.state).toEqual({ kind: 'failed', message: 'the session ended that turn without sending it' });
-    expect(restoreDraft('', peerOf(NOBODY))).toBe('a text the session never sends');
+    expect(peerOf(NOBODY)?.state).toEqual({ kind: 'failed', message: expect.stringContaining("No agent named 'nobody-e7' is reachable.") });
+  });
+
+  it('reads failed when the steer’s own turn ends with no SendMessage to the address', async () => {
+    await sendPeer(B, 'a text the session never sends', 'c762441a-e67e-4d7d-bf40-f40a32c465ec');
+    batch(peerBetween(281, 340)); // the turn sends only to nobody-e7, then completes
+    expect(peerOf(B)?.state).toEqual({ kind: 'failed', message: 'the session ended that turn without sending it' });
+    expect(restoreDraft('', peerOf(B))).toBe('a text the session never sends');
     expect(fake.listeners()).toBe(0);
   });
 

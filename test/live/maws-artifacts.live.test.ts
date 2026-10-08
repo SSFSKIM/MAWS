@@ -8,25 +8,21 @@
 // A-15 delta. The journal (with E2's provenance) and the engine's transcript land under the run's `<userData>/exports/`
 // (printed) and are copied into spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl and
 // test/fixtures/transcripts/p1-maws-artifacts.jsonl by hand after a look by eye.
-// The gate, the scratch repository and the session loop follow E1's maws-tools.live.test.ts.
+// The gate, the scratch repository, the allow-once loop and the export `finally` are the shared live harness's
+// (test/live/support/harness.ts), as E1's maws-tools.live.test.ts uses them.
 // `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-artifacts.live.test.ts`
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, type TestContext } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
 import { DeliverableRecordSchema } from '@shared/maws/deliverable';
 import { versionPath } from '@shared/maws/deliverable-files';
 import { TOOL_ERRORS } from '@shared/maws/tools';
-import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { createBinaryProbe } from '../../src/engine-host/binary-info';
-import { RELAY_URL } from '../../src/engine-host/launch';
-import { checkRelay } from '../../src/engine-host/relay-health';
-import { exportFixture, journalCost, liveSpec, redactJournal, type Provenance } from './support/live';
+import type { JournalRow } from '@shared/wire/journal';
+import { liveSpec } from './support/live';
 import { LiveHost } from './support/live-host';
+import { answerWhileRunning, closeSession, liveCase, openGate, readJournal, scratchRepo, type GateResult } from './support/harness';
 
 const TURN_MS = 300_000; // the machine is heavily loaded: generous waits
 const CASE_MS = 600_000;
@@ -56,73 +52,18 @@ const mainTurnsEnded = (events: SessionEvent[]) => ofKind(events, 'turn.ended').
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const textOf = (content: unknown): string => (typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: { text?: unknown }) => (typeof b.text === 'string' ? b.text : '')).join('\n') : JSON.stringify(content));
 
-interface Gate {
-  userData: string;
-  home: string; // the scratch CLAUDE_CONFIG_DIR
-  version: string;
-}
-let gate: { skip: string } | Gate;
-let a15Before: string[] = [];
+let gate: GateResult;
 const report: string[] = [];
 
-// The owner's ~/.claude.json, read only: the project keys under /tmp (A-15).
-function a15(): string[] {
-  const projects = (JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8')) as { projects?: Record<string, unknown> }).projects ?? {};
-  return Object.keys(projects).filter((k) => k.startsWith('/tmp') || k.startsWith('/private/tmp')).sort();
-}
-
-// A scratch git repository under /tmp (so a leak would show in the A-15 delta), trusted in the scratch home.
-function scratchRepo(g: Gate): string {
-  const dir = realpathSync(mkdtempSync('/tmp/maws-e2-repo-'));
-  writeFileSync(join(dir, 'one.txt'), 'ONE\n');
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', 'commit', '-qm', 'seed'], { cwd: dir });
-  const state = { hasCompletedOnboarding: true, theme: 'light', projects: { [dir]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } };
-  writeFileSync(join(g.home, '.claude.json'), `${JSON.stringify(state, null, 2)}\n`);
-  return dir;
-}
-
-function readJournal(path: string): JournalRow[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => parseJournalRow(JSON.parse(line)));
-}
-
 beforeAll(async () => {
-  if (process.env.MAWS_LIVE !== '1') {
-    gate = { skip: 'live tests skipped: MAWS_LIVE is not 1' };
-    return;
-  }
-  const relay = await checkRelay(RELAY_URL, undefined, { force: true });
-  if (!relay.ok) {
-    gate = { skip: `live tests skipped: relay at ${RELAY_URL} unreachable — start ClaudeUsage` };
-    return;
-  }
-  const check = await createBinaryProbe({ captureEnv: () => captureShellEnvironment() })();
-  if (!check.ok || check.version === null) {
-    gate = { skip: `live tests skipped: the installed engine did not answer its version (${check.error ?? check.path})` };
-    return;
-  }
-  const home = realpathSync(mkdtempSync('/tmp/maws-e2-config-'));
-  writeFileSync(join(home, 'settings.json'), '{}\n');
-  gate = { userData: realpathSync(mkdtempSync('/tmp/maws-e2-live-')), home, version: check.version };
-  a15Before = a15();
-  report.push(`engine ${check.path} (${check.version}); scratch home ${home}; userData ${gate.userData}`, `A-15 before: ${a15Before.length} keys`);
-}, 120_000);
+  gate = await openGate('e2', (line) => report.push(line));
+  if ('skip' in gate) return;
+  report.push(`engine ${gate.bin} (${gate.version}); scratch home ${gate.home}; userData ${gate.userData}`, `A-15 before: ${gate.a15Before.length} keys`);
+}, 300_000);
 
 afterAll(() => {
   for (const line of report) console.log(`   ${line}`);
 });
-
-function live(ctx: TestContext): Gate {
-  if ('skip' in gate) {
-    console.log(`↓ ${gate.skip}`);
-    ctx.skip(gate.skip);
-  }
-  return gate as Gate;
-}
 
 // The journal row the host wrote to answer the engine's `mcp_message` request `requestId`: its JSON-RPC response.
 type McpContent = { type: string; text?: string; data?: string; mimeType?: string }[];
@@ -133,28 +74,21 @@ function mcpResponseOf(rows: JournalRow[], requestId: string): { result: { conte
 
 describe('the maws artifact tools, live (E2 M2)', () => {
   it('creates, screenshots, updates and lists an artifact, and refuses an unknown id', async (ctx) => {
-    const g = live(ctx);
+    const g = liveCase(gate, ctx);
     const host = new LiveHost({ userData: g.userData, configHome: g.home, binary: null });
-    const repo = scratchRepo(g);
+    const repo = scratchRepo(g, 'e2');
     const spec = liveSpec(repo, { model: 'haiku', permissionMode: 'default', subagentModel: null });
     const id = spec.appSessionId;
     const events = () => host.events(id);
     let journalPath = '';
-    let running = true;
+    let stopAnswering = () => {};
     try {
       const { status } = await host.launch(spec, 120_000);
       journalPath = status.journalPath;
       // every permission allowed once as it arrives; every capture answered with the green square, as main would
-      const allowed = new Set<string>();
       const captured = new Set<string>();
-      void (async () => {
-        while (running) {
-          for (const ask of ofKind(events(), 'permission.requested')) {
-            if (allowed.has(ask.requestId)) continue;
-            allowed.add(ask.requestId);
-            console.log(`   allow once: ${ask.toolName} (seq ${ask.seq})`);
-            await host.call('session.answer', { appSessionId: id, requestId: ask.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }).catch((error: unknown) => console.log(`   allow failed: ${String(error)}`));
-          }
+      stopAnswering = answerWhileRunning(host, id, [
+        async () => {
           for (const e of host.emitted) {
             if (e.name !== 'maws.artifact.capture') continue;
             const capture = e.payload as MawsArtifactCapture;
@@ -166,9 +100,8 @@ describe('the maws artifact tools, live (E2 M2)', () => {
               .then((answered) => console.log(`   captured: ${JSON.stringify(answered)}`))
               .catch((error: unknown) => console.log(`   capture answer failed: ${String(error)}`));
           }
-          await delay(100);
-        }
-      })();
+        },
+      ]);
 
       await host.call('session.send', { appSessionId: id, content: PROMPT });
       const init = await host.waitFor(() => ofKind(events(), 'session.init')[0], 'the init', TURN_MS);
@@ -176,7 +109,7 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       const ended = await host.waitFor(() => mainTurnsEnded(events())[0], 'the turn', TURN_MS);
       await host.waitFor(() => host.status(id)?.turn === null && host.status(id)?.pendingRequests === 0, 'idle with nothing pending', TURN_MS);
       await delay(3_000);
-      running = false;
+      stopAnswering();
       console.log(`   reply: ${JSON.stringify(ended.resultText)}`);
       report.push(`reply: ${JSON.stringify(ended.resultText)}`);
       const stopped = await host.call('session.stop', { appSessionId: id, reason: 'stop' });
@@ -223,26 +156,12 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       // artifact nope in`)
       expect(ended.resultText).toMatch(/no artifact "?nope"?/);
     } finally {
-      running = false;
-      await host.shutdown().catch((error: unknown) => console.log(`   shutdown failed: ${String(error)}`));
-      if (journalPath) {
-        const { costUsd } = journalCost(readJournal(journalPath));
-        report.push(`journal ${journalPath}: total_cost_usd ${costUsd.toFixed(4)}`);
-        const exports = join(g.userData, 'exports');
-        mkdirSync(exports, { recursive: true });
-        const provenance: Provenance = { charter: 'docs/charter.md', child: 'E2', pin: PIN, document: 'docs/doperpowers/plans/2026-10-05-p1-extension.md', executionDocument: 'docs/doperpowers/plans/2026-10-06-e2-deliverables.md', engineVersion: g.version, model: 'haiku', scenario: SCENARIO, costUsd: costUsd.toFixed(4) };
-        writeFileSync(join(exports, `${SCENARIO}.jsonl`), exportFixture(readFileSync(journalPath, 'utf8'), undefined, undefined, provenance));
-        report.push(`exported: ${join(exports, `${SCENARIO}.jsonl`)}`);
-        const projects = join(g.home, 'projects');
-        const transcript = existsSync(projects) ? readdirSync(projects).map((dir) => join(projects, dir, `${spec.sessionId}.jsonl`)).find((path) => existsSync(path)) : undefined;
-        if (transcript) {
-          writeFileSync(join(exports, `${SCENARIO}-transcript.jsonl`), redactJournal(readFileSync(transcript, 'utf8')));
-          report.push(`exported: ${join(exports, `${SCENARIO}-transcript.jsonl`)} (transcript ${transcript})`);
-        } else report.push(`no transcript for ${spec.sessionId} under ${projects}`);
-      }
-      const after = a15();
-      report.push(`A-15 after: ${after.length} keys, ${JSON.stringify(after) === JSON.stringify(a15Before) ? 'identical' : `CHANGED: ${JSON.stringify(after)}`}`);
-      expect(after, 'the A-15 delta: no scratch project in the owner file').toEqual(a15Before);
+      stopAnswering();
+      await closeSession(host, g, {
+        appSessionId: id, journalPath, scenario: SCENARIO,
+        provenance: { charter: 'docs/charter.md', child: 'E2', pin: PIN, document: 'docs/doperpowers/plans/2026-10-05-p1-extension.md', executionDocument: 'docs/doperpowers/plans/2026-10-06-e2-deliverables.md' },
+        transcript: { name: `${SCENARIO}-transcript`, engineSessionId: spec.sessionId! },
+      }, (line) => report.push(line));
     }
   }, CASE_MS);
 });

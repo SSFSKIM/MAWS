@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
-import { DELIVERY } from '../../model/copy';
+import { DELIVERY, deliveryHeading } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { FileIcon } from './icons';
@@ -46,11 +46,11 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
       {actionable && (
         <span className="transcript-delivery-actions">
           {opensExternally(file.name) && (
-            <button type="button" className="transcript-quiet-button" disabled={appSessionId === null} onClick={() => void run(actions.openDelivered)()}>
+            <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.openExternally, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.openDelivered)()}>
               {DELIVERY.openExternally}
             </button>
           )}
-          <button type="button" className="transcript-quiet-button" disabled={appSessionId === null} onClick={() => void run(actions.revealDelivered)()}>
+          <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.reveal, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.revealDelivered)()}>
             {DELIVERY.reveal}
           </button>
         </span>
@@ -66,7 +66,7 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
 
 export function DeliveryRowView({ row }: { row: DeliveryRow }) {
   const appSessionId = useRowSession();
-  const heading = row.error !== null ? DELIVERY.failed(row.files) : row.files.some((file) => file.id === null) ? DELIVERY.delivering(row.files) : DELIVERY.delivered(row.files);
+  const heading = deliveryHeading(row);
   return (
     <section className="transcript-delivery" data-delivery="" data-urgency={row.urgency}>
       <div className="transcript-delivery-top">

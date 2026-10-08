@@ -84,6 +84,29 @@ describe('SideQuestionLog', () => {
     expect(log.list()[0]).toMatchObject({ id: 'r3', state: 'answered', response: 'C' });
   });
 
+  // E11 (tracker row E3 "side-question `retried` set renderer-only"): a Retry is marked in the host's log, not hidden by
+  // the renderer, so a reload never shows a retried failure again
+  it('drops the failed entry a retry asked again once the retry is entered, and keeps it while the retry was never written', () => {
+    const log = new SideQuestionLog();
+    asked(log, 'r1', 'q');
+    asked(log, 'r2', 'other');
+    log.settle('r1', failed('Side question cancelled'), 't1');
+    log.ask('q', 't2', 'r1'); // the retry's write threw: never bound
+    expect(log.list().map((e) => [e.id, e.state])).toEqual([['r1', 'failed'], ['r2', 'pending']]);
+    log.ask('q', 't3', 'r1').bind('r3');
+    expect(log.list().map((e) => [e.id, e.question, e.state])).toEqual([['r2', 'other', 'pending'], ['r3', 'q', 'pending']]);
+  });
+
+  it('keeps an entry a retry named once it is no longer failed (a late success answered it), and ignores an unknown one', () => {
+    const log = new SideQuestionLog();
+    asked(log, 'r1', 'q');
+    log.settle('r1', failed('timed out', 'timeout'), 't1');
+    log.settle('r1', ok('late'), 't2');
+    log.ask('q', 't3', 'r1').bind('r2');
+    log.ask('q', 't4', 'nope').bind('r3');
+    expect(log.list().map((e) => [e.id, e.state])).toEqual([['r1', 'answered'], ['r2', 'pending'], ['r3', 'pending']]);
+  });
+
   it('fails pending entries when the process exits, and a late completion after it changes nothing but a success', () => {
     const log = new SideQuestionLog();
     asked(log, 'r1', 'a');

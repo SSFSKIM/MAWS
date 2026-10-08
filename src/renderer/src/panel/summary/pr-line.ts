@@ -4,6 +4,12 @@
 import type { ScmGhState, ScmPrState, ScmStatus } from '@shared/ipc/schema/scm';
 import { SUMMARY_COPY } from '../copy';
 
+// The gh line's ways out, the same in the row, the tool's header and the PR sheet: the install page, the sign-in command
+// typed into a Terminal tool exactly (E6 M4's decision), and the inline links read as part of the sentence.
+export const GH_INSTALL_URL = 'https://cli.github.com';
+export const GH_SIGN_IN = 'gh auth login';
+export const INLINE_LINK = 'rounded-sm text-accent outline-accent hover:underline focus-visible:outline-2';
+
 export type PrLine =
   | { kind: 'hidden' } // nothing to say yet, or nothing to ask about (no remote; the first row hides on a detached head)
   | { kind: 'untrusted' }

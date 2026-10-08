@@ -1,0 +1,181 @@
+{
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-2#1",
+      "priority": "P2",
+      "title": "Keep the anchor framing when an anchored bubble is edited and resent",
+      "file": "src/renderer/src/transcript/model/user-text.ts",
+      "lines": "102-104",
+      "comment": "user-text.ts userTextOf replaces the text with parseAnchoredText(joined).text and keeps the anchor only in `anchor`. composer/edit-prefill.ts rowPrefill uses only typedFromRowText(row.text) plus attachments, and nothing in composer/ reads row.anchor. derive.ts:336-341 sets `editable` without regard to the anchor. Failure: the user edits an anchored opener, for example a side thread's first comment on a file line. The rewind resends only the bare comment: the lead line, the side-thread preamble and the <maws_anchor/> tag are gone, so the agent no longer knows which line or element it is about, and the resent row has no chip.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-1#1",
+      "priority": "P3",
+      "title": "Settle ListAgents and outbound SendMessage rows when their turn closes unanswered",
+      "file": "src/renderer/src/transcript/model/derive.ts",
+      "lines": "1171, 1193",
+      "comment": "derive.ts:1156 sendMessageRow sets peer.result to 'pending' whenever no result exists, and :1190 agentListRow sets pending to `result === undefined`. Neither function takes the closure context, unlike the delivery row (:1050 neverAnswered), the artifact row (:1225) and the browser action row (:1286, cancelled when context.closed). Failure: the process crashes between a ListAgents call and its result. AgentList.tsx:38-41 then shows aria-busy and 'Listing the agents…' for good, and live and disk replay are equally stuck. All of this code was added in this range (E7). The gap is narrow, so P3.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#2",
+      "priority": "P3",
+      "title": "Serialize a withdrawn ask with its interrupt wording, not \"session ended\"",
+      "file": "src/renderer/src/transcript/model/serialize.ts",
+      "lines": "47",
+      "comment": "serialize.ts partOf `case 'ask'` uses `ASK.state[row.state]`, which for 'cancelled' is 'Cancelled, the session ended' (model/copy.ts:396). AskCapsule.tsx:37 instead shows ASK.withdrawn ('Cancelled, the turn was interrupted') when cancelReason === 'withdrawn'. Failure: the user interrupts a turn holding a blocking ask, the engine withdraws it, and Copy turn as markdown then says the session ended while the session is still running. The two strings disagree.",
+      "sources": [
+        "scalpel-1",
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-2#2",
+      "priority": "P3",
+      "title": "Include the anchor in a user row's Copy and markdown export",
+      "file": "src/renderer/src/transcript/model/serialize.ts",
+      "lines": "30",
+      "comment": "serialize.ts `case 'user'` and User.tsx:104 Copy both serialise only untaggedUserText(row.text,…), and since this change row.text holds only the comment. row.anchor is never read, so an exported or copied 'Why so wide?' loses the element, file line or PR line that the chip shows. Copying only the typed words from the bubble may be defensible, but the turn's markdown export loses information the transcript shows. Minor.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-2#3",
+      "priority": "P3",
+      "title": "Suppress the fallback toast for a thread drawn in the Side pane",
+      "file": "src/renderer/src/attention/navigation.ts",
+      "lines": "45-51",
+      "comment": "requestOnScreen (navigation.ts:45-51) checks only main panes' active session tabs and the panel-shown session for `question` items. visibility.ts does count a thread drawn in its parent's Side pane as visible (sideChildrenShown), and ThreadView renders the thread's full SessionPane with its docked card. Failure: on the fallback path (the window was unfocused, so the notifier fell back), the thread's request raises a redundant toast over the panel even though its card is on screen. The toast's 'Open session' then moves the thread into the main pane. This is a redundant toast, not a missed one, so P3.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-3#1",
+      "priority": "P3",
+      "title": "Limit the panel-shows-it rule to maws asks, not every question item",
+      "file": "src/renderer/src/attention/navigation.ts",
+      "lines": "175-181",
+      "comment": "navigation.ts requestOnScreen's second clause is `kind === 'question' && panelOpen && shownSession(main) === appSessionId`. The comment above it justifies the clause by the panel's Question sheet, which holds only maws asks (tools/maws/ask/store.ts, from maws.ask.opened). The engine's AskUserQuestion is also a `question` item (main BROKER_KINDS), and swap.ts docks it as an answerable card in the session's own composer, not in the panel. Failure: delivery is fallback (the window was unfocused) and the panel is open, with either a file tab of the session in front or the panel maximized over the session tab. The toast is suppressed and the question is shown nowhere. The test builds its `question` item from a permission fixture, so it does not catch this. The fix is to discriminate on the request kind (maws.ask.opened), as swapOf does. It affects only the fallback path, so I rate it P3.",
+      "sources": [
+        "scalpel-3",
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-5#1",
+      "priority": "P3",
+      "title": "Send held dictation to the focused composer, not the main tab's",
+      "file": "src/renderer/src/composer/dictation/DictationKeys.tsx",
+      "lines": "51",
+      "comment": "DictationKeys.tsx:51 presses with focusedSession(), which is activeTab(main) (ComposerAppKeys.tsx:20-23). ThreadView.tsx:132 renders `SessionPane appSessionId={child}` with its own composer and focus target in the panel's Side pane. Failure: with composer.dictate bound, the user is typing in a side thread's composer and holds the chord. The controller resolves the main tab's (parent's) focus target, moves focus there and inserts the words into the parent's draft. The chord is unbound by default and the words only enter a draft, not a send, so P3.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-5#2",
+      "priority": "P3",
+      "title": "Stop re-announcing ticking elapsed time through role=status",
+      "file": "src/renderer/src/transcript/view/rows/BrowserAction.tsx",
+      "lines": "89-95",
+      "comment": "BrowserAction.tsx WaitingLine renders a role=\"status\" <p> whose text includes `duration(now - since)`. useTicker(true) (parts.tsx:46-53) re-renders it every 1000 ms ('Waiting · you have the page · 12s'), so a polite live region changes and is re-announced every second for the whole wait. PeerComposer.tsx's role=status peer-line does the same through peerReplyLine's elapsed time in the 'asked' state. This makes the transcript noisy for screen-reader users.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-5#3",
+      "priority": "P3",
+      "title": "Announce dictation failure and denial notices",
+      "file": "src/renderer/src/composer/dictation/MicControl.tsx",
+      "lines": "71",
+      "comment": "MicControl.tsx DictationNotice renders `<p role=\"note\" aria-label=\"Dictation notice\">`. role=note is not a live region, so a permission denial, a missing helper or any other failure appears silently. The capture status beside it is role=status. Failure: a screen-reader user activates Dictate, the capture is refused, and they hear only aria-pressed going back to false, never the reason or that an 'Open System Settings' button has appeared.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-5#4",
+      "priority": "P3",
+      "title": "Keep the visible \"/btw\" text in the toggle's accessible name",
+      "file": "src/renderer/src/side/ThreadView.tsx",
+      "lines": "104-114",
+      "comment": "ThreadView.tsx:104-114: the toggle's visible text is COPY.questions ('/btw'), but `aria-label={COPY.questionsTitle}` ('Side questions') overrides it, so the accessible name does not contain the visible label (WCAG 2.5.3). The sibling QuestionsChip in SideTool.tsx:65 is named by its '/btw' text and uses only `title`. A Voice Control user saying 'click /btw' gets no match on the thread header's toggle.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-5#5",
+      "priority": "P3",
+      "title": "Give each delivered file's action buttons a distinct name",
+      "file": "src/renderer/src/transcript/view/rows/Delivery.tsx",
+      "lines": "48-55",
+      "comment": "Delivery.tsx: each file's <li> holds buttons named only DELIVERY.openExternally and DELIVERY.reveal, with no aria-label naming the file. In a multi-file delivery, a rotor or button list therefore shows several identical 'Open externally' / 'Reveal in Finder' pairs. The <li> gives some context during linear reading, but the names are indistinguishable when listed. AgentList's per-entry Message button does include the entry name. This is an accessibility polish item.",
+      "sources": [
+        "scalpel-5"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "Replay parity from the row model's side: ask capsule states, delivery and artifact rows, side_thread summary rows, agent_list and peer rows, browser_action rows, crash-closed turns read the same from live events and from disk.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "X10 serialisation and parseAnchoredText, X11 nesting (intent lineage and disk-found forks), the side pane never pulling the main view.",
+      "status": "ok",
+      "candidates": 3
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "Attention: a blocking ask as a question item, the needs-you toast rules (including the fallback permission toast's retraction, A-47), host loss dropping statuses and synthesising exits.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The panel host's single-instance tools, show_pane targets, restored versus param-less opens.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "Keyboard and accessible names of every new surface.",
+      "status": "ok",
+      "candidates": 5
+    }
+  ],
+  "lenses": [
+    "Replay parity from the row model's side: ask capsule states, delivery and artifact rows, side_thread summary rows, agent_list and peer rows, browser_action rows, crash-closed turns read the same from live events and from disk.",
+    "X10 serialisation and parseAnchoredText, X11 nesting (intent lineage and disk-found forks), the side pane never pulling the main view.",
+    "Attention: a blocking ask as a question item, the needs-you toast rules (including the fallback permission toast's retraction, A-47), host loss dropping statuses and synthesising exits.",
+    "The panel host's single-instance tools, show_pane targets, restored versus param-less opens.",
+    "Keyboard and accessible names of every new surface."
+  ],
+  "explanation": "confirmed: Keep the anchor framing when an anchored bubble is edited and resent; Settle ListAgents and outbound SendMessage rows when their turn closes unanswered; Serialize a withdrawn ask with its interrupt wording, not \"session ended\"",
+  "target": {
+    "base": "base",
+    "baseCommit": "dffa0496d9c586665e5bdd02b0133c7d4acb691d",
+    "headCommit": "822dd892f732e9cefa1c1ceb2537cbfc46bb4b92",
+    "repo": "/private/tmp/maws-e11-review/C"
+  },
+  "level": "max"
+}

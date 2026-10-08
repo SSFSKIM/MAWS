@@ -1,0 +1,4 @@
+step typecheck
+command: pnpm typecheck
+head 964a0d0a  ended 2026-10-08T04:27:49Z  load { 7.90 6.44 7.98 }  45s
+exit 0

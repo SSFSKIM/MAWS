@@ -1,0 +1,6 @@
+step e2e-packaged
+command: pnpm e2e:packaged
+head 07e50719  ended 2026-10-07T23:08:09Z  load { 10.48 11.32 10.03 }  213s
+  124 skipped
+  51 passed (3.5m)
+exit 0

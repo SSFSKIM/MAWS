@@ -16,6 +16,19 @@
 // live is handed off before any fact is read (its record stays as C4 bound it, and a first message C3 queued is the
 // host's to deliver), and the boot stops a live bootstrap row before forgetting it (service.ts). One path serves both
 // host modes: a utility host never holds a row at an app start, so there the live set is empty and nothing changes.
+//
+// E11 (tracker row E10 "setup intent's first message lost on a quit"): a keep-quit or crash between a row reaching
+// `ready` and the setup's `session.send` leaves the first message in the intent alone. Before a live row is handed off,
+// a first message with no recorded handoff is sent when the row is ready and idle (no turn, no host work), C3's queue
+// holds nothing for it and the pin has no transcript, so the message never reached C3; the handoff is recorded before
+// the intent goes, as the setup records it. A row still initializing cannot take a send (C3 refuses one before ready),
+// and a fork with a rewind point would need its rewind first: both are handed off as before.
+//
+// E11 (tracker row E3 "quit before finishBinding leaves a side thread unrenamed"): a side thread's intent handed off
+// here was never bound (the setup's `finishBinding` removes the intent after binding), so the hand-off binds it as the
+// setup would have: the thread renamed through the engine (or in the index when the engine refuses, as for a thread
+// whose process is gone) and its `opened` row recorded and shown in the parent's transcript. A bind the quit
+// interrupted after its rename runs again harmlessly: the rename repeats and the row is inserted or ignored.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SetupIntent } from '@shared/sessions/intent';
@@ -23,7 +36,7 @@ import type { SetupResources } from '@shared/sessions/setup';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
 import { reconcileWorktree } from './intent-rules';
-import { retainedWorktree, type Setup } from './setup';
+import { bindSideThread, retainedWorktree, type Setup } from './setup';
 
 export type Reconciled = 'none' | 'handed_off' | 'not_started';
 
@@ -39,7 +52,11 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveR
   const appSessionId = intent.appSessionId;
   const record = s.sessions.get(appSessionId);
   if (record === null) return 'none'; // nothing reached `launching`
-  if (live.has(appSessionId)) return handOff(s, appSessionId); // E10: the row ran on while the app was away
+  const row = live.get(appSessionId);
+  if (row) {
+    await sendUnsent(s, intent, record.directory, row); // E11
+    return handOff(s, intent); // E10: the row ran on while the app was away
+  }
   const pin = intent.progress.engineSessionId;
   const sent = intent.progress.send !== null;
   const transcript = pin !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, pin)));
@@ -51,7 +68,7 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveR
       if (transcript) s.sessions.bindEngineId(appSessionId, pin!);
       else if (record.engineSessionId !== null) s.sessions.unbindEngineId(appSessionId);
     }
-    return handOff(s, appSessionId);
+    return handOff(s, intent);
   }
 
   s.sessions.remove(appSessionId);
@@ -62,7 +79,21 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveR
   return 'not_started';
 }
 
-async function handOff(s: Setup, appSessionId: AppSessionId): Promise<Reconciled> {
+async function sendUnsent(s: Setup, intent: SetupIntent, directory: string, row: EngineSessionStatus): Promise<void> {
+  const { appSessionId, message, progress } = intent;
+  if (message === null || progress.send !== null) return;
+  if (row.process !== 'ready' || row.turn !== null || row.busy) return;
+  if (intent.kind === 'fork' && (intent.source?.rewindTo ?? null) !== null) return;
+  const pin = progress.engineSessionId;
+  if (pin !== null && (await pathExists(await transcriptPathOf(s.env, directory, pin)))) return;
+  if (await queueHolds(s, appSessionId)) return;
+  const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: message.content });
+  await s.intents.put({ ...intent, updatedAt: s.now(), progress: { ...progress, send: { queueId: sent.queueId, messageUuid: sent.messageUuid, disposition: sent.disposition, at: s.now() } } });
+}
+
+async function handOff(s: Setup, intent: SetupIntent): Promise<Reconciled> {
+  const appSessionId = intent.appSessionId;
+  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage); // E11
   await s.intents.remove(appSessionId);
   s.emit('session.intent.changed', { appSessionId, intent: null });
   return 'handed_off';

@@ -1,0 +1,9 @@
+E11 W-A gate: units
+command: pnpm exec vitest run src/engine-host src/shared src/renderer/src/side src/main/hosts
+head: ed6b7cfbfe150f2cffa178d64ae8807894826036
+started (UTC): 2026-10-07T16:23:26Z
+load at start: { 11.60 9.85 7.89 }
+summary:
+   Test Files  160 passed (160)
+        Tests  2595 passed (2595)
+exit: 0

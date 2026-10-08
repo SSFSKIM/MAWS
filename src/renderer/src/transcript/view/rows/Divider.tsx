@@ -66,7 +66,7 @@ export function DividerRow({ row }: { row: DividerRowData }) {
   const store = useTranscriptStore.getState();
   // R2: a plugin hooking the Spinner gives the working label its text (a session's own transcript, never a child's)
   const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row.state === 'working');
-  const label = spinner ?? dividerCopy({ state: row.state, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
+  const label = spinner ?? dividerCopy({ state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
   const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
   return (
     <>
@@ -156,7 +156,7 @@ function SummaryText({ row, durationMs }: { row: DividerRowData; durationMs: num
   return (
     <p>
       {turnSummaryCopy({
-        state: row.state, origin: row.origin, durationMs, toolCalls: summary.toolCalls, model: summary.model, phrases: turn ? turnPhrases(turn) : '',
+        state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: summary.toolCalls, model: summary.model, phrases: turn ? turnPhrases(turn) : '',
         denied: summary.denials.filter((denial) => denial.disposition !== 'stopped'), safeguard: summary.safeguard, costUsd: summary.costUsd,
         tokens: tokensOf(summary.usage), childAgents: summary.childAgents,
       })}

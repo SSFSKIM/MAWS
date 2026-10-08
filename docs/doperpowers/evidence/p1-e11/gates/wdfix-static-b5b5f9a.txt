@@ -1,0 +1,6 @@
+head b5b5f9a 2026-10-07T21:56:31Z load { 9.75 7.88 7.26 }
+typecheck exit 0 44s load { 12.53 8.89 7.66 }
+lint exit 0 28s load { 13.07 9.31 7.85 }
+units-focused exit 0 28s load { 22.76 12.17 8.94 }
+  units-focused:  Test Files  111 passed | 1 skipped (112)
+  units-focused:       Tests  1991 passed | 1 skipped (1992)

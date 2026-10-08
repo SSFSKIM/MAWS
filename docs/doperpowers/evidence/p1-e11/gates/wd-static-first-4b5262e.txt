@@ -1,0 +1,6 @@
+W-D first static run at 4b5262e (before the lint follow-up b7ff64e0), through the slot, load 6.5:
+typecheck exit 0; lint exit 1 (1 error: src/engine-host/session.test.ts unused `_surface` binding, fixed at b7ff64e0);
+vitest src/renderer src/shared: 393 files, 5,633 passed, 1 skipped, plus 2 unhandled EnvironmentTeardownErrors (the
+lazy transcript chunk, whose dynamic imports lazy.tsx starts at module evaluation, loading after ScmTool.test.tsx's
+environment was torn down). ScmTool.test.tsx alone twice: 8/8, no error. The full run again at b7ff64e: clean
+(wd-static-b7ff64e.txt). Recorded per rule 8 as a timing race, both results kept.

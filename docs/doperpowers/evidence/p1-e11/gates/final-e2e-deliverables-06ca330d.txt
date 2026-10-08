@@ -1,0 +1,5 @@
+step e2e-deliverables
+command: pnpm e2e:deliverables
+head 06ca330d  ended 2026-10-08T01:21:24Z  load { 9.19 8.57 10.34 }  79s
+  10 passed (49.0s)
+exit 0

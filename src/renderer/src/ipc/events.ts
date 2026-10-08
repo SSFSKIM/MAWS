@@ -14,14 +14,15 @@ import { ipc } from './client';
 // C8a start
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
+import type { ScmStatus } from '@shared/ipc/schema/scm';
+import { invalidateScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // C8c end
 // E5 start
-import { pushUnsavedFiles, unsavedPaths } from '../tools/code/viewer/viewer-store';
-import { EDITOR_COPY } from '../tools/code/copy';
+import { pushUnsavedFiles, unsavedFailures } from '../tools/code/viewer/viewer-store';
 // E5 end
 // C8b start
 import { agentWorkClient, type AgentWorkClient } from '../tools/agents/client';
@@ -195,13 +196,28 @@ export function connectShell(
 
 // C8a start: the panel summary's pushed facts (C8a execution document, Repository map). A separate connection, mounted
 // by App.tsx's C8a block and by the `#panel` harness: C4's `git.changed` into the git store, and `fs.workflowChanged`
-// invalidating that session's cached `fs.workflows` (a disk-only session's Background work).
+// invalidating that session's cached `fs.workflows` (a disk-only session's Background work). E11 W-D: the one listener
+// for the scm queries the summary's push row and the Source control tool share (tools/scm/queries.ts): a head or refs
+// move re-reads both for every session whose checkout is in that repository, and a session's setup (trust recorded in
+// main) re-reads every session's `scm.status`.
 export function connectPanelEvents(client: MawsBridge = ipc): () => void {
   const offs = [
-    client.on('git.changed', (event) => useGit.getState().applyChanged(event)),
+    client.on('git.changed', (event) => {
+      useGit.getState().applyChanged(event);
+      if (event.reason === 'head' || event.reason === 'refs') invalidateScmQueries((appSessionId) => repoRootOf(appSessionId) === event.repoRoot);
+    }),
+    client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
   ];
   return () => offs.forEach((off) => off());
+}
+
+// The repository a session's checkout is in, as the git store knows it (the surfaces that read the scm queries watch
+// the checkout): the checkout from the session's record, else from its `scm.status` answer.
+function repoRootOf(appSessionId: AppSessionId): string | null {
+  const record = useSessions.getState().records.get(appSessionId);
+  const checkout = record ? (record.worktree?.path ?? record.directory) : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
+  return checkout === undefined ? null : (useGit.getState().entries.get(checkout)?.status?.repoRoot ?? null);
 }
 // C8a end
 
@@ -216,14 +232,15 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
   // E5 start (M5): the quit guard's unsaved files. The window's dirty file tabs go to main on every change of the set,
   // and main's Save all saves them and is answered with those left unsaved (after the saves' own pushes).
   const offUnsaved = pushUnsavedFiles(client);
-  // A Save all that throws still answers (fix wave 1), every dirty tab unsaved, so main never waits out its bound.
+  // A Save all that throws still answers (fix wave 1), every dirty tab unsaved (a merge-view tab as its conflict, E11
+  // W-D), so main never waits out its bound.
   const offSaveAll = client.on('layout.saveAll', ({ requestId }) =>
     void useViewer
       .getState()
       .saveAll()
       .catch((error: unknown) => {
         console.error('[editor] Save all failed; answering every dirty tab unsaved', error);
-        return unsavedPaths(useViewer.getState().entries).map((path) => ({ path, message: EDITOR_COPY.unsaved }));
+        return unsavedFailures(useViewer.getState().entries);
       })
       .then((failed) => client.invoke('layout.saveAllDone', { requestId, failed }))
       .then((result) => {

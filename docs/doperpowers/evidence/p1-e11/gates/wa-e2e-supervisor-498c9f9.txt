@@ -1,0 +1,8 @@
+E11 W-A gate: e2e-supervisor
+command: pnpm e2e:supervisor
+head: 498c9f9ac6e7a9dfeb49b43ce09b25d2e9d440d0
+started (UTC): 2026-10-07T16:35:04Z
+load at start: { 6.33 6.41 6.65 }
+summary:
+    8 passed (2.2m)
+exit: 0

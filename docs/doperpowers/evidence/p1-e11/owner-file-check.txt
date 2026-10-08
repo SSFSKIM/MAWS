@@ -1,0 +1,54 @@
+E11 owner-file check (spec A-15): the /tmp and /private/tmp project keys of ~/.claude.json, read-only.
+Command: python3 -c "import json;d=json.load(open('/Users/new/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))" | shasum
+Harness form (p1-common.mjs digest: sha1 of the sorted keys joined by newlines, first 12 hex): 770eae07f620
+
+M0.3 baseline (2026-10-07, master f0691bf9, no engine run): 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  (identical to the authoring baseline in docs/doperpowers/evidence/p1-e2/owner-file-check.txt; the 25th key,
+  /private/tmp/cua-accept, is the owner's); 129 project keys in all.
+Relay: GET http://127.0.0.1:8641/api/hello -> 200 (2026-10-07, no engine run).
+Helpers: /tmp/maws-review/waitload20.sh printed "eligible: load 5.61 after 0s"; /tmp/maws-review/with-slot.sh present.
+Install: the worktree's node_modules is a symlink to the main checkout's (brief: shared node_modules; no install on
+  the shared tree; the main checkout's package.json and pnpm-lock.yaml are byte-equal to this branch's at f0691bf9, cmp).
+
+S8 (2026-10-08, E1's live sitting re-run, two attempts, docs/doperpowers/evidence/p1-e11/live-s8.txt):
+  before 02:44:12Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  between attempts 1 and 2 02:48:11Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; live-s8.txt)
+  after  02:49:29Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no scratch key appeared or vanished; no other key added)
+S8 attempt 3 (2026-10-08, after the harness fix round 53fa5981):
+  before 02:53:03Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  02:54:48Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta read identical at all five readings)
+S1 (2026-10-08, the interrupt during a blocking maws ask; one attempt):
+  before 03:12:57Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  03:20:18Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the harness's scratch-scoped delta read identical before the launch, after attempt 1 and after the sitting)
+S3 (2026-10-08, deliverables, a side thread, Send to main and /btw through the app; docs/doperpowers/evidence/p1-e11/live-s3.txt):
+  before 03:22:38Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  03:24:44Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta read identical at every reading)
+S4 with the A-47 case (2026-10-08, the browser under a live engine, the OOPIF page, the fallback toast's retraction; live-s4.txt):
+  before 03:24:44Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  03:25:55Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's delta identical at every reading of cases 5, 7 and A-47;
+    again identical at 03:27:51Z after the scratch root was removed)
+S2 (2026-10-08, agents: (a) the agent live suite's steps i, v, x, two runs; (b) to (d) through the P1 live spec; live-s2.txt):
+  before 03:34:15Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the whole projects key set: 129 keys)
+  after  03:56:17Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the whole projects set 129 keys, none added or removed,
+    also after (a)'s run 1 at 03:39:56Z and run 2 at 03:43:32Z; the spec's scratch-scoped delta identical at every reading of (b), (c) and (d))
+S5 (2026-10-08, keep-quit live on the packaged build and E10's probes Q6 and Q7; live-s5.txt):
+  before 04:06:41Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  04:14:09Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta identical at every reading of both runs;
+    the probes' ownerFileDelta same, no key added or removed)
+S6 (2026-10-08, twenty resumes of one scratch session, ten terminal and ten app, plus run 1's ten terminal; live-s6.txt):
+  before 04:17:37Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  04:21:03Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta identical at every reading of both runs)
+S7 (2026-10-08, E8's plugins live run re-run; live-s7.txt):
+  before 04:22:02Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  04:24:19Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no key added or removed)
+
+Consolidated (Task 6.6, 2026-10-08, from live-s1.txt to live-s8.txt; no new reading taken):
+  Pairs in this file: the M0 baseline, then S8 (attempts 1 and 2, with the reading between them), S8 attempt 3, S1, S3, S4,
+  S2, S5, S6, S7: every sitting of the child, each with its before and after readings, every one 25 keys and shasum
+  42a98859ccfdc08994dca565482aa00ba0254ca8. The readings each spec took inside a sitting (after every session, after every
+  app close, before and after every terminal case; Decision Log 35's scratch-scoped delta) are in the sitting's own log
+  and read identical throughout: S8 five in attempt 3 and one per session in attempts 1 and 2; S1 three; S3 four; S4 per
+  case for 5, 7 and A-47; S2 (a) the whole projects set after runs 1 and 2, (b) to (d) per case, session and app close;
+  S5 per run and the probes' ownerFileDelta; S6 per launch and resume in both runs and around 8t; S7 the pair above.
+  Verdict: no /tmp key appeared or vanished at any reading, no other key was added or removed. Scratch keys left for the
+  owner to clean: none (the 25 keys are the authoring baseline; /private/tmp/cua-accept is the owner's).

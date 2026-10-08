@@ -1,0 +1,8 @@
+E11 M4.2 F-H gate: e2e-widgets
+command: pnpm e2e:widgets
+head: 08d159149e91d8616b2f0ebde69b55da8b9b82f8
+started (UTC): 2026-10-07T23:59:07Z
+load at start: { 8.59 10.86 11.84 }
+summary:
+      24 passed (44.3s)
+exit: 0

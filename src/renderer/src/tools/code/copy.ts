@@ -108,6 +108,12 @@ export const EDITOR_COPY = {
   saveFailed: (message: string) => `Could not save: ${message}`,
   changedOnDisk: 'Changed on disk', reload: 'Reload', keepMine: 'Keep mine', compare: 'Compare',
   conflictOnSave: 'Changed on disk since you opened it',
+  // E11 W-D: the disk's version under unsaved edits that cannot be shown as theirs, by why
+  diskUnusable: {
+    head: 'Changed on disk: now larger than the editor’s cap, so it cannot be merged',
+    binary: 'Changed on disk: no longer text, so it cannot be merged',
+    encoding: 'Changed on disk: no longer UTF-8, so it cannot be merged',
+  },
   changesFromDisk: (n: number) => `${n} ${n === 1 ? 'change' : 'changes'} from disk`,
   keepMineChunk: 'Keep mine', takeTheirs: 'Take theirs', previousChange: 'Previous change', nextChange: 'Next change',
   conflicts: (n: number) => `${n} ${n === 1 ? 'conflict' : 'conflicts'}`,

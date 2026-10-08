@@ -1,0 +1,5 @@
+E11 W-E review fix: pnpm e2e:code at 51ec6e6 (2026-10-07 15:18, 109 s, load { 10.34 9.41 9.85 })
+slot slot.1 acquired at 15:16:54 load { 5.26 8.67 9.69 }
+  36 passed (1.4m)
+e2e:code exit 0
+survivors (pgrep -fl maws-supervisor): 

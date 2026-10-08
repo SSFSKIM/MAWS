@@ -74,7 +74,9 @@ export class GitService {
     const range = base !== undefined ? [`${base}...HEAD`] : scope === 'staged' ? ['--cached'] : scope === 'all' ? ['HEAD'] : [];
     // `git diff` refreshes a stale stat cache and rewrites the index through `index.lock` whatever GIT_OPTIONAL_LOCKS
     // says (probed on Apple Git 2.50.1; `git status` honours it); `diff.autoRefreshIndex=false` turns that write off.
-    const common = ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-relative', '--no-color', '--no-ext-diff', '--no-textconv'];
+    // E11: the prefixes are pinned as the untracked scope pins them, so the owner's diff.noprefix, mnemonicPrefix or
+    // srcPrefix/dstPrefix never reshape the headers the renderer's patch reader expects
+    const common = ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-relative', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/'];
     const [patch, numstat] = await Promise.all([
       this.run(directory, [...common, `-U${context ?? 3}`, ...range, ...pathspec(path)]),
       this.run(directory, [...common, '--numstat', '-z', ...range, ...pathspec(path)]),

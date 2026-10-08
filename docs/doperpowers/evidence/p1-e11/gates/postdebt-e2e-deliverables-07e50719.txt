@@ -1,0 +1,5 @@
+step e2e-deliverables
+command: pnpm e2e:deliverables
+head 07e50719  ended 2026-10-07T22:57:49Z  load { 4.69 7.14 7.51 }  74s
+  10 passed (45.9s)
+exit 0

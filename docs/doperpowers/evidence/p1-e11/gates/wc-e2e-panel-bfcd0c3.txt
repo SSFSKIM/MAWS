@@ -1,0 +1,9 @@
+command: pnpm e2e:panel
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:36:34Z
+load at start: { 4.71 12.63 11.64 }
+slot: eligible: load 4.71 after 0s
+ended (UTC): 2026-10-07T18:37:39Z
+--- summary lines
+  23 passed (37.9s)
+--- exit code: 0

@@ -40,8 +40,14 @@ const OPENS_AS_FILE = new Set(['code', 'markdown', 'image', 'head']); // the vie
 
 const action = 'shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
-// The viewer store's key for a drawn version: one entry per record version, never a layout tab's.
-export const viewerTabId = (id: string, version: number) => `deliverable:${id}:v${version}`;
+// The viewer store's key for a drawn version: one entry per record version, never a layout tab's. Scale-review D
+// scalpel-2#1: after a Reload the view draws under a key of its own (`reloads`, from one serial for every view), whose
+// entry starts with a fresh read even while another view (the panel and a main tab) still holds the version's entry;
+// the store re-reads a remounted key only once no view holds it, and a file outside the session's roots, which is not
+// watched, is re-read only by a Reload.
+export const viewerTabId = (id: string, version: number, reloads = 0) => `deliverable:${id}:v${version}${reloads > 0 ? `:r${reloads}` : ''}`;
+let reloadSerial = 0;
+const nextReload = () => ++reloadSerial;
 
 interface Props {
   appSessionId: AppSessionId; // the record's session (in the All scope, not necessarily the shown one)
@@ -74,14 +80,14 @@ export function DeliverableViewer({ appSessionId, id, version, mode, onBack, onV
     if (gone) onGone(id);
   }, [gone, id, onGone]);
 
-  if (found?.status === 'error') return <ReadError message={found.error} onBack={onBack} onRetry={() => setReloads((n) => n + 1)} />;
+  if (found?.status === 'error') return <ReadError message={found.error} onBack={onBack} onRetry={() => setReloads(nextReload())} />;
   if (found?.status !== 'ready' || found.record === null) return <Waiting onBack={onBack} />;
   const record = found.record;
   const latest = latestVersion(record);
   const shown = version !== null && version >= 1 && version <= latest ? version : latest;
   const reload = () => {
     clearConsole(record.appSessionId, record.id, shown);
-    setReloads((n) => n + 1);
+    setReloads(nextReload());
   };
   return (
     <Shown
@@ -178,7 +184,7 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
           {record.kind === 'artifact' && <Versions record={record} shown={shown} onChange={onVersion} />}
           {body === 'html' && <ConsoleChip appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />}
         </div>
-        <Actions record={record} shown={shown} path={path} body={body} present={present} mode={mode} comment={comment} onReload={onReload} />
+        <Actions record={record} shown={shown} reloads={reloads} path={path} body={body} present={present} mode={mode} comment={comment} onReload={onReload} />
         {picking && (
           <p role="status" data-picking="" className="px-1 text-ui-sm text-accent">
             {DELIVERABLES_COPY.picking}
@@ -193,7 +199,7 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
             {DELIVERABLES_COPY.missing(path)}
           </p>
         ) : (
-          <Body key={reloads} record={record} shown={shown} path={path} body={body} title={title} picking={picking} onPick={onPick} />
+          <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} />
         )}
       </div>
     </div>
@@ -203,6 +209,7 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
 interface BodyProps {
   record: DeliverableRecord;
   shown: number;
+  reloads: number;
   path: string;
   body: BodyKind;
   title: string;
@@ -210,7 +217,7 @@ interface BodyProps {
   onPick(message: PickMessage): void;
 }
 
-function Body({ record, shown, path, body, title, picking, onPick }: BodyProps) {
+function Body({ record, shown, reloads, path, body, title, picking, onPick }: BodyProps) {
   const url = deliverableUrl(record.appSessionId, record.id, shown);
   switch (body) {
     case 'html':
@@ -223,13 +230,14 @@ function Body({ record, shown, path, body, title, picking, onPick }: BodyProps) 
     case 'audio':
       return <Media key={url} kind={body} url={url} />;
     case 'file':
-      return <FileBody key={url} tabId={viewerTabId(record.id, shown)} appSessionId={record.appSessionId} path={path} readOnly />;
+      return <FileBody key={url} tabId={viewerTabId(record.id, shown, reloads)} appSessionId={record.appSessionId} path={path} readOnly />;
   }
 }
 
 interface ActionsProps {
   record: DeliverableRecord;
   shown: number;
+  reloads: number;
   path: string;
   body: BodyKind;
   present: boolean;
@@ -238,9 +246,9 @@ interface ActionsProps {
   onReload(): void;
 }
 
-function Actions({ record, shown, path, body, present, mode, comment, onReload }: ActionsProps) {
+function Actions({ record, shown, reloads, path, body, present, mode, comment, onReload }: ActionsProps) {
   const session = useSessions((s) => s.records.get(record.appSessionId));
-  const drawnKind = useViewer((s) => (body === 'file' ? (s.entries.get(viewerTabId(record.id, shown))?.kind ?? null) : null));
+  const drawnKind = useViewer((s) => (body === 'file' ? (s.entries.get(viewerTabId(record.id, shown, reloads))?.kind ?? null) : null));
   const [problem, setProblem] = useState<{ text: string } | null>(null); // a new object per refusal, so each one is shown its full time
   useEffect(() => {
     if (problem === null) return;

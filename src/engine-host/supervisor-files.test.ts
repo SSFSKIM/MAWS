@@ -152,6 +152,89 @@ describe('takeLock', () => {
     expect(leftovers()).toEqual([]);
   });
 
+  // E11 (tracker row E10 "lock stale-break race"): a breaker died holding the break file, and two candidates judge it
+  // stale together. Neither may remove the other's fresh break file, so only one breaks the lock at a time.
+  const breakPath = () => join(dir, 'host.lock.break');
+  const deadBreaker = () => fs.writeFileSync(breakPath(), JSON.stringify({ pid: 98, procStart: 'T98', nonce: 'dead' }));
+
+  it('a dead breaker’s break file is stale at once, whatever its age; a live breaker’s is waited for', async () => {
+    writeLock({ pid: 99, procStart: 'T99' });
+    deadBreaker();
+    const sleep = vi.fn(async () => {});
+    expect(await takeLock(dir, MINE, deps(100, new Map([[100, 'T100']]), { sleep }))).toBe('taken');
+    expect(sleep).not.toHaveBeenCalled();
+    expect(leftovers()).toEqual([]);
+    fs.writeFileSync(breakPath(), JSON.stringify({ pid: 101, procStart: 'T101', nonce: 'live' }));
+    fs.unlinkSync(lockPath());
+    writeLock({ pid: 99, procStart: 'T99' });
+    const waited = vi.fn(async () => {
+      fs.unlinkSync(breakPath()); // the live breaker finishes, having found nothing to do
+    });
+    expect(await takeLock(dir, MINE, deps(100, new Map([[100, 'T100'], [101, 'T101']]), { sleep: waited }))).toBe('taken');
+    expect(waited).toHaveBeenCalledOnce();
+  });
+
+  it('two candidates after a dead breaker: the one that judged its break file stale late never removes the other’s', async () => {
+    writeLock({ pid: 99, procStart: 'T99' });
+    deadBreaker();
+    const alive = new Map([
+      [100, 'T100'],
+      [101, 'T101'],
+    ]);
+    let first: Promise<string> | null = null;
+    // B reads the dead breaker's file and judges it stale; before it acts, A runs its whole attempt and takes the lock
+    const interleaved = {
+      ...fs,
+      readFileSync: ((path: fs.PathOrFileDescriptor, options?: unknown) => {
+        const content = fs.readFileSync(path, options as never);
+        if (path === breakPath() && first === null) first = takeLock(dir, MINE, deps(100, alive));
+        return content;
+      }) as typeof fs.readFileSync,
+    };
+    const second = await takeLock(dir, MINE, deps(101, alive, { fs: interleaved }));
+    expect(await first).toBe('taken');
+    expect(second).toBe('held');
+    expect(readLock(dir, fs)?.pid).toBe(100);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it('a candidate that finds a live breaker’s fresh file where it judged a dead one’s puts it back and waits', async () => {
+    writeLock({ pid: 99, procStart: 'T99' });
+    deadBreaker();
+    const alive = new Map([
+      [100, 'T100'],
+      [101, 'T101'],
+    ]);
+    const fresh = JSON.stringify({ pid: 100, procStart: 'T100', nonce: 'fresh' });
+    let swapped = false;
+    // between B's judgement and its move, A removed the dead file and holds a fresh one of its own, mid-break
+    const racing = {
+      ...fs,
+      renameSync: ((from: fs.PathLike, to: fs.PathLike) => {
+        if (from === breakPath() && !swapped) {
+          swapped = true;
+          fs.unlinkSync(breakPath());
+          fs.writeFileSync(breakPath(), fresh);
+        }
+        return fs.renameSync(from, to);
+      }) as typeof fs.renameSync,
+    };
+    const lockBefore = fs.readFileSync(lockPath(), 'utf8');
+    let breakDuringWait: string | null = null;
+    const sleep = vi.fn(async () => {
+      breakDuringWait = fs.readFileSync(breakPath(), 'utf8');
+      expect(fs.readFileSync(lockPath(), 'utf8')).toBe(lockBefore); // B broke nothing while A held the break
+      // A finishes: its lock replaces the stale one, its break file goes
+      fs.unlinkSync(lockPath());
+      writeLock({ pid: 100, procStart: 'T100' });
+      fs.unlinkSync(breakPath());
+    });
+    expect(await takeLock(dir, MINE, deps(101, alive, { fs: racing, sleep }))).toBe('held');
+    expect(breakDuringWait).toBe(fresh); // A's break file was back in place while B waited
+    expect(readLock(dir, fs)?.pid).toBe(100);
+    expect(leftovers()).toEqual([]);
+  });
+
   it('a second candidate after the first took the lock (one directory, live holders): one taken, one held', async () => {
     const alive = new Map([
       [100, 'T100'],

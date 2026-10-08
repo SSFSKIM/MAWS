@@ -1,0 +1,9 @@
+E11 M4.2 F-R gate: e2e-voice
+command: pnpm e2e:voice
+head: d2b38f8334aafb83a9fff0ecdf0aa9aac0fae19f
+started (UTC): 2026-10-08T00:35:15Z
+load at start: { 13.58 15.80 16.96 }
+summary:
+  1 skipped
+  14 passed (28.3s)
+exit: 0

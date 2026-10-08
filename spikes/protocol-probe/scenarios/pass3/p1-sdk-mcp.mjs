@@ -7,31 +7,9 @@
 // what the tool list becomes; what the session JSONL records for the call. One fixture: p1-sdk-mcp-roundtrip.
 import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,initFrame,answer,records,transcriptPath,summarise,toolResults,toolUses,resultSummary,writeFileSync,join,delay} from './p1-common.mjs';
 import {readFileSync} from 'node:fs';
+import {SdkServer} from '../../sdk-mcp.mjs';
 
 const FILE_TEXT='MCP_ECHO_7731';
-const isRequest=m=>typeof m==='object'&&m!==null&&'method' in m&&m.id!==undefined&&m.id!==null;
-
-// A minimal MCP server: tools with a `call(args)` returning a tools/call result.
-class SdkServer{
- constructor(name,tools){this.name=name;this.tools=tools;this.seen=[];this.calls=[];}
- handle(message){
-  this.seen.push({method:message.method??null,id:message.id??null,kind:isRequest(message)?'request':'method' in message?'notification':'response'});
-  if(!isRequest(message))return null;
-  const {id,method,params}=message;
-  switch(method){
-   case 'initialize':return {jsonrpc:'2.0',id,result:{protocolVersion:params?.protocolVersion??'2025-11-25',capabilities:{tools:{listChanged:true}},serverInfo:{name:this.name,version:'0.0.1'}}};
-   case 'ping':return {jsonrpc:'2.0',id,result:{}};
-   case 'tools/list':return {jsonrpc:'2.0',id,result:{tools:this.tools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}};
-   case 'tools/call':{
-    const tool=this.tools.find(t=>t.name===params?.name);
-    this.calls.push({name:params?.name,arguments:params?.arguments??null});
-    if(!tool)return {jsonrpc:'2.0',id,error:{code:-32602,message:'unknown tool '+params?.name}};
-    try{return {jsonrpc:'2.0',id,result:tool.call(params.arguments??{})};}catch(e){return {jsonrpc:'2.0',id,result:{content:[{type:'text',text:String(e.message)}],isError:true}};}
-   }
-   default:return {jsonrpc:'2.0',id,error:{code:-32601,message:'method not found: '+method}};
-  }
- }
-}
 const echoFile=cwd=>({name:'echo_file',description:'Return the text of a file in the working directory (MAWS probe). If this tool is unavailable, use Read instead.',inputSchema:{type:'object',properties:{path:{type:'string',description:'Path relative to the working directory'}},required:['path']},call:({path})=>({content:[{type:'text',text:readFileSync(join(cwd,path),'utf8')}]})});
 const echoUpper={name:'echo_upper',description:'Return the text uppercased (MAWS probe, added mid-session).',inputSchema:{type:'object',properties:{text:{type:'string'}},required:['text']},call:({text})=>({content:[{type:'text',text:String(text).toUpperCase()}]})};
 const shout={name:'shout',description:'Return the text followed by three exclamation marks (MAWS probe, second server).',inputSchema:{type:'object',properties:{text:{type:'string'}},required:['text']},call:({text})=>({content:[{type:'text',text:String(text)+'!!!'}]})};
@@ -46,13 +24,7 @@ export default async()=>{
  const servers={maws:new SdkServer('maws',[echoFile(run.cwd)]),maws2:new SdkServer('maws2',[shout])};
  try{
   await launch('p1-sdk-mcp-roundtrip',run,{provenance:{question:'Q1: the SDK MCP round trip (initialize.sdkMcpServers, mcp_message both ways, tools/list_changed, mcp_set_servers)'}},async(p,{sessionId})=>{
-   p.on('mcp_message',r=>{
-    const server=servers[r.server_name];
-    if(!server)throw new Error('SDK MCP server not hosted here: '+r.server_name);
-    const response=server.handle(r.message);
-    // the official SDK's answer to a notification: an empty result under id 0 (S287 chunk-j0381q8k.js:591107)
-    return {mcp_response:response??{jsonrpc:'2.0',result:{},id:0}};
-   });
+   p.serve('maws',servers.maws).serve('maws2',servers.maws2); // answered by the harness's handshake (sdk-mcp.mjs)
    p.on('can_use_tool',r=>{
     p.note({event:'permission_asked',tool:r.tool_name,mcp_server:r.mcp_server??null,tool_kind:r.tool_kind??null,input:r.input});
     return r.tool_name.startsWith('mcp__maws')?{behavior:'allow',updatedInput:r.input}:{behavior:'deny',message:'Only the probe servers are in scope.'};

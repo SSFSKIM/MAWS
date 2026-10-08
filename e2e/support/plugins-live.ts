@@ -11,6 +11,7 @@ import type { ElectronApplication } from '@playwright/test';
 import { bridgeTimedOut, readTree, type InvokeTracker, type SettledInvoke, type Tree } from '../../test/support/plugins-audit';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
 import { isolatedGitEnv } from '../../test/support/git-env';
+import { relaySkipReason } from '../../test/support/relay-health';
 
 export const RELAY = 'http://127.0.0.1:8641';
 
@@ -18,8 +19,7 @@ export function pluginsLiveSkipReason(): string | null {
   if (process.env.MAWS_E8_LIVE !== '1') return 'the E8 live run runs only under MAWS_E8_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
   if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
-  const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY}/api/hello`], { encoding: 'utf8' }).trim();
-  return code === '200' ? null : `relay at ${RELAY} answered ${code}: start ClaudeUsage`;
+  return relaySkipReason(RELAY); // E11 (scale review E scalpel-1#4): a closed port or a silent relay is a skip, not a throw at collection
 }
 
 export interface PluginsScratch {

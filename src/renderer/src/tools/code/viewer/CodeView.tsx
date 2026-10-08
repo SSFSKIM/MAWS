@@ -22,7 +22,7 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, StateEffect, StateField, Text, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
-import { fileLineAnchor, openCommentComposer } from '../anchor/anchor';
+import { fileLineAnchor, openCommentComposer, registerCursorComment } from '../anchor/anchor';
 import { EDITOR_COPY } from '../copy';
 import { commentGutter, comments } from '../editor/comment-gutter';
 import { conflictBlocks, conflicts, conflictsOf, stepConflict } from '../editor/conflicts';
@@ -157,7 +157,10 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
     const detach = attachNavigation(tabId, (kind, direction) => {
       if (kind === 'change' ? stepChange(view, direction) : stepConflict(view, direction)) view.focus();
     });
+    // E11 (W-C): "Comment on this line" comments on the cursor's line, as the gutter's mark on its own
+    const offCursor = registerCursorComment(tabId, () => onComment(tabId)(view.state.doc.lineAt(view.state.selection.main.head).number));
     return () => {
+      offCursor();
       detach();
       themes.disconnect();
       if (flashTimer.current !== null) clearTimeout(flashTimer.current);

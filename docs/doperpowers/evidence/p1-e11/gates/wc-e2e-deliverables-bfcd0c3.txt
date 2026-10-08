@@ -1,0 +1,9 @@
+command: pnpm e2e:deliverables
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:45:01Z
+load at start: { 5.83 6.43 8.65 }
+slot: eligible: load 5.83 after 0s
+ended (UTC): 2026-10-07T18:46:15Z
+--- summary lines
+  10 passed (46.1s)
+--- exit code: 0

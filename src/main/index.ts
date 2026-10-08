@@ -96,6 +96,10 @@ import { registerDeliverableScheme, startDeliverables } from './deliverables';
 // E10 start
 import { engineQuitDeps } from './lifecycle/engine-quit';
 // E10 end
+// E11 start
+import { shutdownSteps } from './lifecycle/shutdown';
+import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
+// E11 end
 // E4a start
 import { startBrowser } from './browser';
 // E4a end
@@ -126,6 +130,9 @@ void startWithProfileLock(app, () => {
   const hosts = createHosts();
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
+  // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
+  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace
+  const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
   process.env.MAWS_USER_DATA = app.getPath('userData');
@@ -135,7 +142,7 @@ void startWithProfileLock(app, () => {
   // the engine host writes, the maws-deliverable: scheme and the frame policies on the window's session and the capture
   // partition, deliverables.* and the capture service; the files service below admits delivered paths through the reader.
   const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env });
-  app.on('will-quit', deliverables.stop);
+  shutdown.add('deliverables', deliverables.stop);
   // E2 end
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
@@ -161,7 +168,7 @@ void startWithProfileLock(app, () => {
   // The read-only git service (M6): git.* for any directory in a repository, and git.changed for watched roots.
   const git = new GitService({ emit: (change) => void emit('git.changed', change) });
   registerGitHandlers(git);
-  app.on('will-quit', () => {
+  shutdown.add('git, replays and attention', () => {
     git.dispose();
     replays.dispose();
     attention.stop();
@@ -190,13 +197,13 @@ void startWithProfileLock(app, () => {
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
   const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
-  app.on('will-quit', stopChatPanels);
-  app.on('will-quit', () => {
+  shutdown.add('chat panels', stopChatPanels);
+  shutdown.add('layout and sessions', () => {
     layout.flush();
     sessions.stop();
   });
   // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
-  app.on('will-quit', () => index.close());
+  shutdown.add('index', () => index.close());
   // C4 end
 
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
@@ -262,7 +269,7 @@ void startWithProfileLock(app, () => {
       }),
     }),
   );
-  app.on('will-quit', () => usage.stop());
+  shutdown.add('usage', () => usage.stop());
   // C7 end
   // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
   // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
@@ -272,7 +279,7 @@ void startWithProfileLock(app, () => {
     showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
     admitted: (appSessionId, real) => deliverables.reader.admitted(appSessionId, real), // E2: a delivered file outside the roots
   });
-  app.on('will-quit', () => filesService.dispose());
+  shutdown.add('files', () => filesService.dispose());
   // C8c end
   // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
   // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
@@ -323,14 +330,14 @@ void startWithProfileLock(app, () => {
     emit: (event) => void emit('scm.remote.output', event),
   });
   registerScmHandlers(scm);
-  app.on('will-quit', () => scm.dispose());
+  shutdown.add('scm', () => scm.dispose());
   // E6 end
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
   const stopYield = startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit });
-  app.on('will-quit', stopYield);
+  shutdown.add('yield', stopYield);
   // E3 start: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
   const stopSideThreads = startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads });
-  app.on('will-quit', stopSideThreads);
+  shutdown.add('side threads', stopSideThreads);
   // E3 end
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
@@ -349,7 +356,7 @@ void startWithProfileLock(app, () => {
     totalMemBytes: totalmem(),
     // C12 end
   });
-  app.on('will-quit', engineConfigure.stop); // C12: .stop
+  shutdown.add('engine configure', engineConfigure.stop); // C12: .stop
   // E10: the supervisor's idle time, pushed beside engine.configure at every ready
   const stopHostConfigure = startHostConfigure({
     settings: () => settings.state().settings,
@@ -359,7 +366,7 @@ void startWithProfileLock(app, () => {
     dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
     env: process.env,
   });
-  app.on('will-quit', stopHostConfigure);
+  shutdown.add('host configure', stopHostConfigure);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
@@ -404,7 +411,7 @@ void startWithProfileLock(app, () => {
   );
   // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
   const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
-  if (stopWidgetBackend) app.on('will-quit', stopWidgetBackend);
+  if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
   // C11 end
 
   // E4b start: the Chrome import's records and its boot sweep, before E4a's browser opens any partition (E4b execution
@@ -432,7 +439,7 @@ void startWithProfileLock(app, () => {
     hosts,
     // E4c end
   });
-  app.on('will-quit', browser.stop);
+  shutdown.add('browser', browser.stop);
   // E4a end
   // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
   // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is
@@ -447,7 +454,7 @@ void startWithProfileLock(app, () => {
     browser,
     profiles: browserProfiles,
   });
-  app.on('will-quit', browserImport.stop);
+  shutdown.add('browser import', browserImport.stop);
   // E4b end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
@@ -510,6 +517,7 @@ void startWithProfileLock(app, () => {
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
     unsavedFiles: () => unsavedFiles.paths(),
+    onUnsavedFiles: (listener) => unsavedFiles.onChange(listener), // E11
     saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
     // E5 end
   });
@@ -519,11 +527,13 @@ void startWithProfileLock(app, () => {
   // C12 end
   // ---- end C5 ----
   app.on('activate', () => {
+    if (shutdown.quitting()) return; // W-B review M6: the services are stopped or stopping (the keep-quit hold)
     if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
-  // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting)
-  app.on('will-quit', () => hosts.stop());
+  // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
+  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
+  shutdown.add('hosts', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
   // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.
   const voice = startVoice({
@@ -535,6 +545,6 @@ void startWithProfileLock(app, () => {
     openExternal: (url) => shell.openExternal(url),
     register: registerMainHandler,
   });
-  app.on('will-quit', () => voice.dispose());
+  shutdown.add('voice', () => voice.dispose());
   // E9 end
 });

@@ -83,6 +83,9 @@ export class ControlClient {
   private readonly answered = new Set<string>();
   private closed: string | null = null;
   private readonly warn: (message: string) => void;
+  // E11: the requests a replay answered with its own stand-in for a read it never recorded (`replay_unrecorded_read`):
+  // their empty answer failing its schema is expected and journaled as that meta row, so it is not warned
+  private readonly standIns = new Set<string>();
   readonly writer: OutboundWriter;
 
   // `writer`: the process's shared OutboundWriter (the session passes the one its read loop gates on); by default
@@ -97,12 +100,14 @@ export class ControlClient {
   }
 
   // A typed request: the response payload is parsed with the subtype's schema; a parse failure rejects with
-  // ControlError `invalid_response` (the wire changed under us) and the raw response stays in the journal.
+  // ControlError `invalid_response` (the wire changed under us) and the raw response stays in the journal. E11: a
+  // replay's stand-in for a read it never recorded rejects `replay_unrecorded`, warning nothing (its meta row says it).
   async request<S extends OutboundSubtype>(subtype: S, payload: OutboundRequest<S>, opts: RequestOptions = {}): Promise<OutboundResponse<S>> {
-    const { envelope, requestId } = await this.exchange(subtype, payload as Record<string, unknown>, opts);
+    const { envelope, requestId, standIn } = await this.exchange(subtype, payload as Record<string, unknown>, opts);
     const parsed = CONTROLS[subtype].response.safeParse(envelope.response ?? {});
     if (!parsed.success) {
       const paths = parsed.error.issues.map((issue) => issue.path.join('.') || '<root>').join(', ');
+      if (standIn) throw new ControlError(subtype, requestId, `${subtype} was not recorded in this replay`, 'replay_unrecorded');
       this.warn(`${subtype} ${requestId}: response failed its schema at ${paths}`);
       throw new ControlError(subtype, requestId, `${subtype} answered with an unexpected shape (${paths})`, 'invalid_response');
     }
@@ -115,7 +120,13 @@ export class ControlClient {
     return envelope.response;
   }
 
-  private async exchange(subtype: string, payload: Record<string, unknown>, opts: RequestOptions & { klass?: Exclude<RequestClass, 'human'> }): Promise<{ envelope: ResponseEnvelope & { subtype: 'success' }; requestId: RequestId }> {
+  // E11: the replay's announcement of a stand-in answer, heard before the answer itself (the transport yields them in
+  // that order)
+  answeredByStandIn(requestId: string): void {
+    this.standIns.add(requestId);
+  }
+
+  private async exchange(subtype: string, payload: Record<string, unknown>, opts: RequestOptions & { klass?: Exclude<RequestClass, 'human'> }): Promise<{ envelope: ResponseEnvelope & { subtype: 'success' }; requestId: RequestId; standIn: boolean }> {
     const requestId = `${this.launchId}-${++this.counter}` as RequestId;
     if (this.closed !== null) throw new ControlError(subtype, requestId, `${subtype} not sent: ${this.closed}`, 'exited');
     if (opts.signal?.aborted) throw new ControlCancelled(subtype, requestId); // never journaled or written: a mutation must not run after the caller heard "cancelled"
@@ -163,10 +174,16 @@ export class ControlClient {
     });
 
     void written.catch(() => {}); // timeout/cancellation can return before the write settles
-    const envelope = await settled;
+    let envelope: ResponseEnvelope;
+    let standIn: boolean;
+    try {
+      envelope = await settled;
+    } finally {
+      standIn = this.standIns.delete(requestId);
+    }
     await written; // a held response cannot turn a failed write into a successful exchange
     if (envelope.subtype === 'error') throw new ControlError(subtype, requestId, envelope.error, envelope.error_code ?? null);
-    return { envelope, requestId };
+    return { envelope, requestId, standIn };
   }
 
   // Restarts a still pending request's deadline: `timeoutMs` from now, its timeout saying what it counted from

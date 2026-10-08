@@ -1,0 +1,9 @@
+E11 W-A gate: conformance
+command: pnpm exec vitest run src/engine-host/conformance
+head: ed6b7cfbfe150f2cffa178d64ae8807894826036
+started (UTC): 2026-10-07T16:24:18Z
+load at start: { 9.49 9.61 7.93 }
+summary:
+   Test Files  6 passed (6)
+        Tests  224 passed (224)
+exit: 0

@@ -105,6 +105,24 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per row list, reading the follow mode of the moment
   }, [rows]);
 
+  // E11 (W-C): the viewport changing height with no scroll and no row change (the composer below growing with an
+  // attention notice) moves the end out of view; a following reader is kept at the end. Only a change of height acts:
+  // the observer's first report (at observe) is the height the list opened at, which the layout effect above handled,
+  // and acting on it could undo a jump made since.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    let height: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries.at(-1)?.contentRect.height ?? height;
+      const changed = height !== null && next !== height;
+      height = next;
+      if (changed && followingRef.current) virtualizer.scrollToEnd({ behavior: 'instant' });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [virtualizer]);
+
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => virtualizer.scrollToIndex(index, { align, behavior: 'instant' }),
     scrollToEnd: () => virtualizer.scrollToEnd({ behavior: 'instant' }),

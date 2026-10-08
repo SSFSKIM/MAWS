@@ -21,6 +21,13 @@ describe('divider and summary copy', () => {
     expect(dividerCopy({ state: 'failed', origin: 'human', durationMs: 5_000, toolCalls: 1, denied: 0, autoDenied: 0 })).toBe('Failed after 5s · 1 tool call');
   });
 
+  // E11 (W-C): a turn its engine process ended (a crash, or a supervisor's death) is not the reader's stop
+  it('reads a crash-closed turn in the engine’s words, and keeps You stopped for a stop', () => {
+    expect(dividerCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, toolCalls: 4, denied: 0, autoDenied: 0 })).toBe('Stopped after 5s (engine process exited) · 4 tool calls');
+    expect(dividerCopy({ state: 'stopped', cause: null, origin: 'human', durationMs: 5_000, toolCalls: 0, denied: 0, autoDenied: 0 })).toBe('You stopped after 5s');
+    expect(turnSummaryCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, toolCalls: 0, model: 'haiku', phrases: '', denied: [], safeguard: { reviewed: 0, flagged: 0, notEvaluated: 0 }, costUsd: null, tokens: null, childAgents: 0 })).toBe('Stopped after 5s (engine process exited) on haiku');
+  });
+
   it('suffixes the denied and auto-denied counts', () => {
     expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 134_000, toolCalls: 12, denied: 1, autoDenied: 0 })).toBe('Worked for 2m 14s · 12 tool calls · 1 denied');
     expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 134_000, toolCalls: 12, denied: 1, autoDenied: 2 })).toBe('Worked for 2m 14s · 12 tool calls · 1 denied · 2 auto-denied');

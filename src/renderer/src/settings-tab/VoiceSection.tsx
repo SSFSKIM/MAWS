@@ -10,6 +10,7 @@ import { effectiveChord } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
+import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { KEYBOARD, VOICE } from './copy';
 import { Chip, INPUT, Setting, TEXT_ACTION, writeSettings } from './parts';
@@ -106,7 +107,7 @@ function Permission({ label, pane, status }: { label: string; pane: VoicePrivacy
   const off = state !== null && OFF.includes(state);
   const open = () =>
     void ipc.invoke('voice.openPrivacySettings', { pane }).then((result) => {
-      if (!result.ok) console.warn('[settings] voice.openPrivacySettings failed', result.error);
+      if (!result.ok) toast({ level: 'warning', text: VOICE.openFailed(result.error.message, VOICE.paneByHand[pane]), actions: [], dismissible: true });
     });
   return (
     <Setting label={label}>

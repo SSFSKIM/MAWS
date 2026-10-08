@@ -22,7 +22,7 @@ import { buildChromeUserData, chromeExtensionId, SENTINEL_PREFIX, type ChromeUse
 import { launchBrowserScene, type BrowserScene } from './browser-scene';
 import type { BrowserServer } from './browser-server';
 import { invoke, value } from './c7-replay';
-import { clearToasts, scratchProject, type Scratch } from './deliverables-scene';
+import { clearToasts, scratchProject, type Scratch } from './maws-tools';
 import { onLaunched, REPO_ROOT } from './launch';
 import { menu } from './menu';
 

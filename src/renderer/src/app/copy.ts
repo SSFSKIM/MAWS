@@ -47,5 +47,5 @@ export const SUPERVISOR_NOTICES = {
     if (interrupted === 0) return `${head}; no session was interrupted.`;
     return `${head}; ${sessions(interrupted)} ${interrupted === 1 ? 'was' : 'were'} interrupted. Their transcripts are on disk; open one to resume.`;
   },
-  restartFailed: (why: string) => `The supervisor was not restarted · ${why}`, // the banners' and the row's Restart now
+  restartFailed: (why: string) => `The supervisor was not restarted · ${why}`, // Restart now's, wherever it is (the banners, the Diagnostics row, Settings)
 };

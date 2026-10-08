@@ -168,7 +168,9 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
     expect((await answer).ok).toBe(true);
   });
 
-  it('halves a capture past 4 MiB once, and refuses one still past it', async () => {
+  it('halves a capture past 3.5 MiB once (a 3.75 MiB PNG is past the cap), and refuses one still past it', async () => {
+    electron.state.bytes = (width) => (width >= 640 ? 3.75 * 1024 * 1024 : 1000);
+    expect(await captureArtifact(request(), { reader: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
     electron.state.bytes = (width) => (width >= 640 ? ARTIFACT_SCREENSHOT_MAX_BYTES + 1 : 1000);
     expect(await captureArtifact(request(), { reader: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
     electron.state.bytes = () => ARTIFACT_SCREENSHOT_MAX_BYTES + 7;

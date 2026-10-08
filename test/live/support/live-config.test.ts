@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { HostHookRegistry } from '../../../src/engine-host/host-hooks';
 import { spawnEngine } from '../../../src/engine-host/transport';
-import { assertConfigHomeSafe, liveSpec, persistingControlOf } from './live';
+import { assertConfigHomeSafe, liveSpec, persistingControlOf, withRawProcess } from './live';
 import { startDirectSession } from './live-host';
 
 vi.mock('../../support/engine-pin', () => ({ ENGINE_BIN: '/unused/offline-engine', ENGINE_VERSION: '2.1.283' }));
@@ -101,5 +101,27 @@ describe('direct live session config isolation', () => {
     const plan = vi.mocked(spawnEngine).mock.calls[0]![0];
     expect(plan.env.CLAUDE_CONFIG_DIR).toBe(scratch);
     expect(plan.env.HOME).toBe(owner);
+  });
+});
+
+// E11 W-E (Decision Log 22): what the login-shell capture inherits from a parent Claude session never reaches the engine.
+describe('live engine environments drop inherited CLAUDE* variables', () => {
+  const inherited = { CLAUDE_CODE_PLUGIN_DIRS: '/owner/.claude/mods/prompt-autosave', CLAUDE_MODEL: 'opus', CLAUDE_EFFORT: 'high', CLAUDE_CODE_SUBAGENT_MODEL: 'opus' };
+  const spawned = () => vi.mocked(spawnEngine).mock.calls[0]![0].env;
+
+  it('a direct session', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', scratch);
+    vi.mocked(captureShellEnvironment).mockResolvedValue({ HOME: owner, PATH: '/usr/bin', ...inherited });
+    await expect(startDirectSession(join(root, 'user-data'), liveSpec(scratch, { subagentModel: null }), new HostHookRegistry())).rejects.toThrow(/direct session not ready: exited/);
+    expect(spawned()).toMatchObject({ CLAUDE_CONFIG_DIR: scratch, PATH: '/usr/bin' });
+    for (const key of Object.keys(inherited)) expect(spawned()).not.toHaveProperty(key);
+  });
+
+  it('a raw process', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', scratch);
+    vi.mocked(captureShellEnvironment).mockResolvedValue({ HOME: owner, PATH: '/usr/bin', ...inherited });
+    await expect(withRawProcess({ userData: join(root, 'user-data'), scratch: () => scratch }, liveSpec(scratch, { subagentModel: null }), async () => {})).rejects.toThrow(/offline spawn boundary/);
+    expect(spawned()).toMatchObject({ CLAUDE_CONFIG_DIR: scratch, PATH: '/usr/bin' });
+    for (const key of Object.keys(inherited)) expect(spawned()).not.toHaveProperty(key);
   });
 });

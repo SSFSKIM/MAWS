@@ -1,0 +1,4 @@
+step build
+command: pnpm build
+head 964a0d0a  ended 2026-10-08T04:28:42Z  load { 8.10 6.67 7.98 }  25s
+exit 0

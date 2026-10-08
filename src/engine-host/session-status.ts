@@ -121,9 +121,14 @@ export class SessionStatusTracker {
   }
 
   // E8 (D-13): a successful reload_plugins answer is the session's plugins now, before the next turn's system/init; the
-  // answer carries only a count of errors, so the last init's errors and warnings stay.
+  // answer carries only a count of errors, so the last init's errors and warnings stay. Its commands and agents, in the
+  // initialize response's shape, are the catalogue's (a plugin's skills are among the commands); the skills and terminal
+  // commands lists come only from system/init, so the skills keep only names still among the answer's commands (W-D
+  // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9).
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
+    const names = new Set(list(answer.commands).map((command) => command.name));
+    this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {

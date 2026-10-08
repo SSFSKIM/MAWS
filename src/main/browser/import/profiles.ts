@@ -6,6 +6,10 @@
 // memory changes only once the file holds the new list. A file that cannot be read is moved aside as
 // `profiles.json.broken-<epoch>`, the store starts empty, and `fileBroken` says so for this boot (Design §13; Decision
 // Log 35): the renderer announces it, and the boot sweep then removes the partitions no record names.
+// E11 (tracker row E4b "newer profiles.json treated as broken; sweep deletes imports"): a file whose `version` is newer
+// than PROFILES_VERSION was written by a newer MAWS (the owner runs builds of several heads), so it is opened
+// read-only, as `openDb` opens a newer index: its records are not listed (this build cannot read them), nothing is
+// moved or written (`put` and `remove` reject), and `readOnly` tells the boot sweep to leave everything for that boot.
 import { mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ImportedProfileSchema, ImportedProfilesFileSchema, type ImportedProfile } from '@shared/browser/profiles';
@@ -13,6 +17,7 @@ import { atomicWriteFile } from '../../files/atomic-write';
 import { importLog } from './log';
 
 export const profilesFile = (userData: string) => join(userData, 'browser', 'profiles.json');
+const PROFILES_VERSION = 1; // E11: the file's version this build writes and reads
 
 export class ImportedProfiles {
   private writes: Promise<unknown> = Promise.resolve();
@@ -22,11 +27,21 @@ export class ImportedProfiles {
     private readonly file: string,
     private records: readonly ImportedProfile[],
     readonly fileBroken: boolean,
+    private readonly newerVersion: number | null = null, // E11: the version a newer MAWS wrote; read-only when set
   ) {}
+
+  // E11: the file a newer MAWS wrote, left as it is for this boot
+  get readOnly(): boolean {
+    return this.newerVersion !== null;
+  }
 
   static open(userData: string, { now = Date.now }: { now?: () => number } = {}): ImportedProfiles {
     const file = profilesFile(userData);
     const read = readProfilesFile(file);
+    if (typeof read === 'object' && 'newer' in read) {
+      importLog({ kind: 'error', where: 'profiles', code: 'fileNewer', message: `profiles.json is version ${read.newer}, newer than this build reads; it is left as it is and nothing is swept this boot` });
+      return new ImportedProfiles(file, [], false, read.newer);
+    }
     if (read !== 'broken') return new ImportedProfiles(file, read, false);
     const aside = `profiles.json.broken-${now()}`;
     try {
@@ -81,9 +96,10 @@ export class ImportedProfiles {
   // Each change is computed from the list as the previous write left it; `null` writes nothing.
   private write(change: (records: readonly ImportedProfile[]) => readonly ImportedProfile[] | null): Promise<void> {
     const done = this.writes.then(async () => {
+      if (this.newerVersion !== null) throw new Error(`profiles.json was written by a newer MAWS (version ${this.newerVersion}); it is read-only in this one`); // E11
       const next = change(this.records);
       if (next === null) return;
-      const text = `${JSON.stringify(ImportedProfilesFileSchema.parse({ version: 1, profiles: next }), null, 2)}\n`;
+      const text = `${JSON.stringify(ImportedProfilesFileSchema.parse({ version: PROFILES_VERSION, profiles: next }), null, 2)}\n`;
       mkdirSync(dirname(this.file), { recursive: true });
       await atomicWriteFile(this.file, text);
       this.records = next;
@@ -93,7 +109,7 @@ export class ImportedProfiles {
   }
 }
 
-function readProfilesFile(file: string): ImportedProfile[] | 'broken' {
+function readProfilesFile(file: string): ImportedProfile[] | 'broken' | { newer: number } {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
@@ -101,7 +117,10 @@ function readProfilesFile(file: string): ImportedProfile[] | 'broken' {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : 'broken';
   }
   try {
-    const parsed = ImportedProfilesFileSchema.safeParse(JSON.parse(text));
+    const json = JSON.parse(text) as unknown;
+    const version = typeof json === 'object' && json !== null ? (json as { version?: unknown }).version : undefined;
+    if (typeof version === 'number' && Number.isInteger(version) && version > PROFILES_VERSION) return { newer: version }; // E11
+    const parsed = ImportedProfilesFileSchema.safeParse(json);
     return parsed.success ? parsed.data.profiles : 'broken';
   } catch {
     return 'broken'; // a SyntaxError quotes the file: never logged

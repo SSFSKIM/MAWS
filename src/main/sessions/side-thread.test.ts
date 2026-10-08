@@ -130,6 +130,38 @@ describe('side threads', () => {
     expect(h.index.sessions.get(outcome.appSessionId)!.title).toEqual({ text: 'src/x.ts:42', source: 'user' });
   });
 
+  // E11 (tracker row E3 "quit before finishBinding leaves a side thread unrenamed"): binding recovery at launch
+  describe('a quit after the first message reached C3 and before the thread was bound', () => {
+    const quitBeforeBinding = async (keep: boolean) => {
+      const parent = parentRecord();
+      h.hangPut = (intent) => intent.progress.send !== null; // the app dies as it records the handoff
+      const outcome = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+      const child = outcome.appSessionId;
+      await h.until(() => h.gateReached);
+      expect(h.host.calledWith('session.renameSession')).toEqual([]);
+      expect(h.index.sideThreads.get(child)).toBeNull();
+      await h.restart({ keep });
+      return { parent: parent.appId, child };
+    };
+
+    it('renames the thread and records and shows its opened row once the next start hands it off', async () => {
+      const { parent, child } = await quitBeforeBinding(false);
+      expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'src/x.ts:42' }]);
+      expect(h.index.sideThreads.of(parent).map((row) => row.childAppSessionId)).toEqual([child]);
+      expect(parentEvents(parent)).toContainEqual(expect.objectContaining({ kind: 'side.thread.opened', childAppSessionId: child, id: `${parent}:side-thread:${child}:opened` }));
+      expect(await h.service.listIntents()).toEqual([]);
+      expect(h.host.disk.queues.get(child)).toHaveLength(1); // sent once, before the quit (C3's queue)
+      expect(sent(child)).toEqual([]); // and not again
+    });
+
+    it('does the same for a thread a kept supervisor still runs', async () => {
+      const { parent, child } = await quitBeforeBinding(true);
+      expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'src/x.ts:42' }]);
+      expect(h.index.sideThreads.of(parent).map((row) => row.childAppSessionId)).toEqual([child]);
+      expect(await h.service.listIntents()).toEqual([]);
+    });
+  });
+
   it('refuses a parent that is gone or was never bound, as a fork is refused', async () => {
     const parent = parentRecord();
     expect(await h.service.openSideThread('5d1b5a0e-1111-4222-8333-444444444444' as AppSessionId, { kind: 'comment', anchor, text: 'x', screenshot: null })).toMatchObject({ status: 'refused', reason: 'unknown_session' });

@@ -1,0 +1,5 @@
+step e2e-c12
+command: pnpm e2e:c12
+head 07e50719  ended 2026-10-07T22:54:02Z  load { 12.42 8.27 7.85 }  35s
+  4 passed (10.6s)
+exit 0

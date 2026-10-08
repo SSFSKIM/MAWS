@@ -48,6 +48,7 @@ import { AskAnswerMismatch } from './tool-server/ask';
 // E1 end
 // E3 start
 import type { commands as SideCommands } from '@shared/ipc/schema/side';
+import type { commands as HostCommands } from '@shared/ipc/schema/host'; // E11
 // E3 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
@@ -102,6 +103,10 @@ export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
+// E11: the supervisor's own commands (E10; registered by Supervision.register): three answer at once, `host.stopAll` is
+// engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
+type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
@@ -230,6 +235,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
         emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
+        retired: (requestId) => session.requestRetired(requestId), // E11
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));
@@ -508,9 +514,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     return operations.start(id, 'session.mcpToggle', client, 'mcp_toggle', { serverName, enabled });
   });
   // E3: the host's side-question log supplies `history` and keeps the exchange (`side.question.list`)
-  handle('session.sideQuestion', async ({ appSessionId, question }) => {
+  handle('session.sideQuestion', async ({ appSessionId, question, retryOf }) => {
     const { session, client } = ready(appSessionId);
-    return session.sideQuestion(question, (request) => operations.start(appSessionId as AppSessionId, 'session.sideQuestion', client, 'side_question', request));
+    return session.sideQuestion(question, (request) => operations.start(appSessionId as AppSessionId, 'session.sideQuestion', client, 'side_question', request), retryOf);
   });
 
   // -- structured reads --------------------------------------------------------------------------------------------------

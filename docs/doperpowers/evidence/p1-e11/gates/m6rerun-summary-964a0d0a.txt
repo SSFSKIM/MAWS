@@ -1,0 +1,13 @@
+== m6rerun head 964a0d0a 2026-10-08T04:27:04Z load { 7.64 6.08 7.96 }; product source unchanged since 06ca330d:  5 files changed, 76 insertions(+), 10 deletions(-)
+typecheck exit 0 45s 
+lint exit 0 28s 
+build exit 0 25s 
+test exit 0 175s  Test Files  710 passed | 1 skipped (711)       Tests  9900 passed | 1 skipped (9901) 
+test-probes exit 0 1s # pass 176 # fail 0 
+e2e exit 0 210s   49 passed (3.5m) 
+e2e-transcript exit 0 209s   31 passed (3.0m) 
+e2e-agents exit 0 62s   23 passed (34.3s) 
+build-restore exit 0 26s 
+stale supervisors: 0
+== done 2026-10-08T04:40:05Z load { 9.10 8.98 9.28 }
+note: the 5 files under src/ changed since 06ca330d are all test files (conformance/fixtures.test.ts, fs/backfill.test.ts, index/replay-fixtures.test.ts, agents teammates.test.ts, subagents.test.tsx; d3ea9460, 5e62c8da); no product source moved, so Design §3 re-runs typecheck, lint, the unit suite and the touched e2e groups, not the whole chain

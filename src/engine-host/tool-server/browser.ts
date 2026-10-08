@@ -8,7 +8,7 @@
 // (X12, `sourceUrl` additive) through the session's deliverable writer, which outlives the app (X13). The browser tools
 // never read the engine's working directory.
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
 import { hostOf } from '@shared/browser/url';
@@ -70,12 +70,14 @@ async function callBrowserTool(tool: BrowserToolName, args: unknown, ctx: Parame
 }
 
 // The picture main wrote, checked to be the file the host named for this record (the `.png`, or the `.jpg` beside it
-// after the JPEG fallback), read and capped, then recorded. A record is written only for a picture the model receives.
+// after the JPEG fallback), capped by its size before it is read (a refused one is removed: no record will name it),
+// then read and recorded. A record is written only for a picture the model receives: a call withdrawn meanwhile (its
+// answer is dropped by the server) writes none and removes the picture (E11, scale review A scalpel-2#1).
 async function screenshotAnswer(
   result: BrowserScreenshotResult,
   answer: Extract<MawsBrowserAnswerResult, { ok: true }>,
   request: BrowserRequest,
-  ctx: { appSessionId: AppSessionId; toolUseId: ToolUseId | null },
+  ctx: { appSessionId: AppSessionId; toolUseId: ToolUseId | null; signal: AbortSignal },
   deps: BrowserToolsDeps,
 ): Promise<McpToolResult> {
   const id = request.deliverableId!;
@@ -85,11 +87,15 @@ async function screenshotAnswer(
   if (image.path !== path) return malformed('browser_screenshot');
   let bytes: Buffer;
   try {
+    const { size } = await stat(path);
+    if (size > BROWSER_SCREENSHOT_MAX_BYTES) {
+      await unlink(path).catch(() => {}); // best effort: the answer is the refusal either way
+      return toolError(TOOL_ERRORS.screenshotTooLarge(size));
+    }
     bytes = await (deps.readFile ?? readFile)(path);
   } catch (error) {
     return toolError(TOOL_ERRORS.screenshotFailed(`the picture MAWS wrote could not be read (${messageOf(error)})`));
   }
-  if (bytes.length > BROWSER_SCREENSHOT_MAX_BYTES) return toolError(TOOL_ERRORS.screenshotTooLarge(bytes.length));
   const at = (deps.now?.() ?? new Date()).toISOString();
   const title = result.title || hostOf(result.url);
   const toolUseId = ctx.toolUseId ?? undefined;
@@ -102,7 +108,15 @@ async function screenshotAnswer(
     ...(toolUseId && { toolUseId }),
     createdAt: at,
   };
-  await deps.deliverables.exclusive(ctx.appSessionId, () => deps.deliverables.write(record));
+  const recorded = await deps.deliverables.exclusive(ctx.appSessionId, async () => {
+    if (ctx.signal.aborted) return false; // checked at the write, which may have queued behind the session's other writers
+    await deps.deliverables.write(record);
+    return true;
+  });
+  if (!recorded) {
+    await unlink(path).catch(() => {}); // best effort: no record will name it
+    return toolError(TOOL_ERRORS.interrupted('browser_screenshot')); // never written: the server answers an aborted call with nothing
+  }
   return { content: [{ type: 'image', data: bytes.toString('base64'), mimeType: image.mimeType }, ...toolText(result).content] };
 }
 

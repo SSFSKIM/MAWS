@@ -30,7 +30,11 @@ async function read(edit?: { accounts?: (a: Record<string, unknown>[]) => unknow
     writeFileSync(path, JSON.stringify(fn(parsed) ?? parsed));
   }
   const reader = new ClaudeUsageReader({ dir, emit: () => {}, log: () => {}, now: () => NOW });
-  return reader.snapshot([]);
+  try {
+    return await reader.snapshot([]);
+  } finally {
+    reader.stop(); // closes the requests file the snapshot opened, rather than leaving it to the garbage collector
+  }
 }
 
 const relay = (ok: boolean): RelayHealth => ({ url: 'http://127.0.0.1:8641', ok, status: ok ? 200 : null, latencyMs: ok ? 3.4 : null, checkedAt: new Date(NOW - 12_000).toISOString(), error: ok ? null : 'connect ECONNREFUSED 127.0.0.1:8641' });

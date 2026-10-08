@@ -13,11 +13,12 @@ import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { JournalRow } from '@shared/wire/journal';
-import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import { RELAY_URL } from '../../src/engine-host/launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
 import { assertConfigHomeSafe, journalCost } from '../../test/live/support/live';
 import { invoke, value } from './c7-replay';
 import { REPO_ROOT } from './launch';
+import { printArgs, ptyArgs, terminalEnvironment } from './scratch-env';
 
 const SCRATCH_PREFIX = '/private/tmp/maws-c12-prerun-';
 export const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/c12');
@@ -146,17 +147,10 @@ export async function captureLoginShell(): Promise<string[]> {
   return Object.keys(loginShell).filter((k) => k.startsWith('CLAUDE_')).sort();
 }
 
-// The terminal's environment for the pinned engine: the owner's login shell (so the owner's `CLAUDE_*` switches apply
-// as they do in the owner's terminal) without anything a parent Claude or Electron process injects, then the scratch
-// home, the relay and its marker token, and Haiku for subagents (spend).
+// The terminal's environment for the pinned engine under the scratch home (scratch-env.ts's terminalEnvironment over the
+// login shell captured above and this runner's environment: no CLAUDE* variable of the owner's, E11 W-E, Decision Log 22).
 export function terminalEnv(config: string, extra: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = { TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8' };
-  for (const key of ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR']) if (process.env[key]) env[key] = process.env[key]!;
-  for (const [key, v] of Object.entries(process.env)) if (key.startsWith('ANTHROPIC_DEFAULT_') && v) env[key] = v;
-  const injected = /^(CLAUDECODE|CLAUDE_CODE_(SESSION_ID|CHILD_SESSION|SESSION_ATTENDED|MESSAGING_SOCKET|MESSAGING_TOKEN|EXECPATH|ENTRYPOINT|SSE_PORT)|CLAUDE_PID|CLAUDE_EFFORT|ELECTRON_.*|NODE_OPTIONS|GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE)$/;
-  for (const [key, v] of Object.entries(loginShell)) if (!injected.test(key)) env[key] = v;
-  env.TERM = 'xterm-256color';
-  return { ...env, CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', ...extra };
+  return terminalEnvironment(config, loginShell, process.env, extra);
 }
 
 // Marks a folder trusted and onboarding done in the scratch home's `.claude.json`, as a terminal's first-run dialogs
@@ -169,10 +163,11 @@ export function trustInScratch(config: string, cwd: string): void {
 
 export interface PrintRun { sessionId: string; costUsd: number; result: string; init: Record<string, unknown> | null }
 
-// One `claude -p` exchange in `cwd`, on the stream-json output so the init frame is kept (the terminal's view of what
+// One `claude -p` exchange in `cwd` on `model` (E11 W-E: named by every caller; the C12 pre-run passes its Sonnet, a
+// sitting under E11's rule Haiku), on the stream-json output so the init frame is kept (the terminal's view of what
 // loaded: MCP servers, commands, agents, plugins).
-export function printRun(config: string, cwd: string, prompt: string, args: string[] = []): PrintRun {
-  const out = execFileSync(ENGINE_BIN, ['-p', prompt, '--model', 'sonnet', '--max-budget-usd', '0.5', '--output-format', 'stream-json', '--verbose', ...args], {
+export function printRun(config: string, cwd: string, prompt: string, model: string, args: string[] = []): PrintRun {
+  const out = execFileSync(ENGINE_BIN, printArgs(prompt, model, args), {
     cwd, env: terminalEnv(config), encoding: 'utf8', timeout: 240_000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
   });
   const frames = out.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -187,7 +182,9 @@ const ANSI = /\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The pinned engine interactively in a PTY (a terminal session), left running until `exit()`: its screen, a prompt
-// sender, the session id it writes to the scratch home. `args` may resume (`--resume <id>`).
+// sender, the session id it writes to the scratch home. `args` may resume (`--resume <id>`). `model` is named by every
+// caller (E11 W-E), and `env` adds variables to the terminal's environment (E11's teammate sitting passes
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1), set after the scratch home's own.
 export interface PtyEngine {
   screen(): string;
   say(text: string): Promise<void>;
@@ -197,11 +194,11 @@ export interface PtyEngine {
   exit(): Promise<void>;
   pid: number;
 }
-export async function ptyEngine(config: string, cwd: string, args: string[], logTo: string): Promise<PtyEngine> {
+export async function ptyEngine(config: string, cwd: string, args: string[], logTo: string, opts: { model: string; env?: Record<string, string> }): Promise<PtyEngine> {
   trustInScratch(config, cwd);
   const pty = createRequire(join(REPO_ROOT, 'package.json'))('node-pty') as typeof import('node-pty');
   const started = Date.now();
-  const term = pty.spawn(ENGINE_BIN, ['--model', 'sonnet', ...args], { name: 'xterm-256color', cols: 120, rows: 40, cwd, env: terminalEnv(config) });
+  const term = pty.spawn(ENGINE_BIN, ptyArgs(opts.model, args), { name: 'xterm-256color', cols: 120, rows: 40, cwd, env: terminalEnv(config, opts.env) });
   let raw = '';
   term.onData((d) => (raw += d));
   let alive = true;

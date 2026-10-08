@@ -66,7 +66,7 @@ export interface BrowserImportDeps {
   env: NodeJS.ProcessEnv; // the logger's e2e mirror
   partitions: Pick<Partitions, 'session'>;
   history: Pick<BrowserHistoryStore, 'importRows' | 'removePartition'>;
-  profiles: Pick<ImportedProfiles, 'get' | 'list' | 'put'>;
+  profiles: Pick<ImportedProfiles, 'get' | 'list' | 'put' | 'readOnly'>;
   emit: BrowserEmit;
   keychain: (signal: AbortSignal) => Promise<KeychainResult>; // readSafeStorageKey, bound to the environment
   createImportView: CreateImportView;
@@ -85,7 +85,8 @@ export type ImportRefusal =
   | 'unknownExtension'
   | 'notImported'
   | 'notInRecord'
-  | 'badFolder';
+  | 'badFolder'
+  | 'profilesReadOnly';
 const REFUSALS: Record<ImportRefusal, string> = {
   unknownProfile: 'not a profile of this Chrome folder',
   imported: 'this profile is already imported; remove it first',
@@ -97,6 +98,7 @@ const REFUSALS: Record<ImportRefusal, string> = {
   notImported: 'not an imported profile',
   notInRecord: 'not an extension of this imported profile',
   badFolder: 'the Chrome folder must be an absolute, normal path',
+  profilesReadOnly: 'a newer MAWS wrote the imported profiles; importing is off in this one', // W-B review M8
 };
 export class ImportRefused extends Error {
   constructor(readonly reason: ImportRefusal) {
@@ -170,6 +172,7 @@ export class BrowserImportService {
   // profile directory is admitted only as `Local State` names it and the disk holds it (local-state.ts).
   async inspect({ userDataDir, profileDir }: { userDataDir: string; profileDir: string }): Promise<BrowserImportInspection> {
     await this.dropInspection();
+    if (this.deps.profiles.readOnly) throw new ImportRefused('profilesReadOnly'); // W-B review M8: its record could never be put
     if (!CHROME_PROFILE_DIR.test(profileDir)) throw new ImportRefused('unknownProfile');
     const chrome = await readChromeProfiles(userDataDir, (dir) => this.deps.profiles.get(dir) !== null);
     const profile = chrome.profiles.find((candidate) => candidate.profileDir === profileDir);
@@ -212,6 +215,7 @@ export class BrowserImportService {
   // settles with the report the `browser.import.finished` event carries, and never rejects.
   start({ inspectionId, categories, extensionIds, allowUnverifiedExtensions }: StartInput): { importId: string; finished: Promise<ImportReport> } {
     if (this.current) throw new ImportRefused('running');
+    if (this.deps.profiles.readOnly) throw new ImportRefused('profilesReadOnly'); // W-B review M8: before the Keychain
     const inspection = this.inspection;
     if (!inspection || inspection.id !== inspectionId) throw new ImportRefused('unknownInspection');
     if (!categories.history && !categories.cookies && !categories.extensions) throw new ImportRefused('noCategory');

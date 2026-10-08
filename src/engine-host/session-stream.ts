@@ -5,8 +5,10 @@
 // the ring has evicted is rebuilt from the launch's journal through a fresh Normalizer, which reproduces the live
 // events exactly (ids and seq included) because every event derives from a journal row; a rebuilt page stops at its
 // limit and the next page resumes where it stopped. The originating `*.requested` event of each live broker item is
-// kept aside for `session.pendingRequest`, whatever the ring has evicted since. C12: once the launch has exited, its
-// ring keeps only the last EXITED_RING events (the budget's exited-history cap); older ranges rebuild from the journal.
+// kept aside for `session.pendingRequest`, whatever the ring has evicted since, and dropped once its item has left the
+// list, or without a listing when the broker retired the request unlisted (a re-delivered retired id; the exit). C12:
+// once the launch has exited, its ring keeps only the last EXITED_RING events (the budget's exited-history cap); older
+// ranges rebuild from the journal.
 import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -26,6 +28,10 @@ import { Normalizer } from './normalizer';
 export const RING_SIZE = 5_000;
 export const BATCH_MS = 16;
 export const BATCH_MAX = 500;
+// E11 (scale review A sweep#1): a connect burst's batch also stops before its events' JSON passes this many bytes, a
+// quarter of the socket's line cap (LINE_CAP), since inline screenshots ride the events as base64 and 500 of them can
+// pass the cap, which closes the connection with the batch counted delivered. A single event over it goes alone.
+export const BATCH_BYTES = 16 * 1024 * 1024;
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
 // E1 M4b: a blocking ask's attention item originates in its `maws.ask.opened` (an async ask is no item)
@@ -45,6 +51,8 @@ export interface SessionStreamOptions {
   // payload too, and a batch refused while the client is there can never be delivered, so it is skipped (absent: false
   // means the client is gone)
   hasClient?: () => boolean;
+  // E11: whether the broker has retired this request id; a re-delivered request it ignores keeps no event (absent: none)
+  retired?: (requestId: string) => boolean;
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -98,7 +106,11 @@ export class SessionStream {
   }
 
   events(batch: SessionEvent[]): void {
-    for (const event of batch) if (isRequested(event)) this.requests.set((event as { requestId: string }).requestId, event);
+    for (const event of batch) {
+      if (!isRequested(event)) continue;
+      const { requestId } = event as { requestId: string };
+      if (!this.opts.retired?.(requestId)) this.requests.set(requestId, event);
+    }
     this.ring.push(...batch);
     if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) this.trim(this.ringSize); // trims in chunks, never one shift per event
     this.pending.push(...batch);
@@ -118,6 +130,7 @@ export class SessionStream {
   status(status: EngineSessionStatus): void {
     this.flush();
     if (status.process === 'exited' && this.ring.length > this.exitedRingSize) this.trim(this.exitedRingSize); // C12: an exited launch's events are all in
+    if (status.process === 'exited') this.requests.clear(); // E11: nothing of the launch can be pending, listed or not (a request accepted while exiting never is)
     this.opts.emit('session.status', { appSessionId: this.opts.appSessionId, status });
   }
 
@@ -184,8 +197,8 @@ export class SessionStream {
   }
 
   // The client's `ready`: the row's state as ordinary events, then every event of the ring no client has received yet,
-  // in batches of BATCH_MAX. The pending batch is part of that tail (its events are in the ring and undelivered), so it is
-  // dropped rather than flushed after the burst a second time. A batch the client did not take ends the burst: the cursor
+  // in batches of at most BATCH_MAX events and BATCH_BYTES of JSON. The pending batch is part of that tail (its events
+  // are in the ring and undelivered), so it is dropped rather than flushed after the burst a second time. A batch the client did not take ends the burst: the cursor
   // stays at the last one written, and the next ready sends the rest.
   republish(state: RowState): void {
     if (this.timer !== null) clearTimeout(this.timer);
@@ -206,11 +219,13 @@ export class SessionStream {
       this.opts.log?.(`tail_gap ${this.opts.appSessionId} launch ${this.opts.launchId}: ${gap}; the burst sends the ${this.ring.length} the ring holds (${this.ring[0]?.id ?? 'none'} .. ${this.ring.at(-1)?.id ?? 'none'})`);
       this.lost = null;
     }
-    const start = intact ? cursor.index + 1 : 0;
-    for (let i = start; i < this.ring.length; i += BATCH_MAX) {
-      const batch = this.ring.slice(i, i + BATCH_MAX);
+    let start = intact ? cursor.index + 1 : 0;
+    while (start < this.ring.length) {
+      const end = burstBatchEnd(this.ring, start);
+      const batch = this.ring.slice(start, end);
       if (!this.send(batch)) return;
-      this.deliveredTo = { index: i + batch.length - 1, id: batch.at(-1)!.id };
+      this.deliveredTo = { index: end - 1, id: batch.at(-1)!.id };
+      start = end;
     }
   }
 
@@ -288,6 +303,19 @@ export class SessionStream {
     this.cursor = cursor;
     return { events, lastSeq, complete }; // `lastSeq` is the cursor for the next call
   }
+}
+
+// E11: where the burst's batch from `start` ends: before the event that would take it past BATCH_MAX events or
+// BATCH_BYTES of JSON, but never empty.
+function burstBatchEnd(ring: SessionEvent[], start: number): number {
+  let bytes = 0;
+  let end = start;
+  while (end < ring.length && end - start < BATCH_MAX) {
+    bytes += Buffer.byteLength(JSON.stringify(ring[end])) + 1; // and its comma
+    if (bytes > BATCH_BYTES && end > start) break;
+    end += 1;
+  }
+  return end;
 }
 
 // `session.events` from the ring: every event after `afterSeq`, whole rows at a time up to about `limit`.

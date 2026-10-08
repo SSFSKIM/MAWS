@@ -105,19 +105,27 @@ export interface TrustDeps {
   warn?: (message: string) => void;
 }
 
-export async function trustStateOf(directory: string, deps: TrustDeps): Promise<TrustState> {
+// E11 (tracker row E6 "small per-call costs in scm.*"): the key and whether the store trusts it, reading nothing of what
+// trust would load: what scm's gate and status need, on every command.
+export type TrustedKey = Pick<TrustState, 'directory' | 'trustKey' | 'keyKind' | 'configPath' | 'trusted'>;
+
+export async function trustedKeyOf(directory: string, deps: TrustDeps): Promise<TrustedKey> {
   const key = await trustKeyOf(directory, deps.git);
   const configPath = configFilePath(deps.env);
   const projects = await readTrustStore(configPath, { warn: deps.warn });
-  const trusted = projects[key.trustKey]?.hasTrustDialogAccepted === true;
+  return { ...key, configPath, trusted: projects[key.trustKey]?.hasTrustDialogAccepted === true };
+}
+
+export async function trustStateOf(directory: string, deps: TrustDeps): Promise<TrustState> {
+  const key = await trustedKeyOf(directory, deps);
   const home = (await realOrSelf(homeOf(deps.env))).path;
   return {
     directory: key.directory,
     trustKey: key.trustKey,
     keyKind: key.keyKind,
-    configPath,
-    trusted,
-    source: trusted ? 'trustKey' : null,
+    configPath: key.configPath,
+    trusted: key.trusted,
+    source: key.trusted ? 'trustKey' : null,
     isHome: key.directory === home,
     found: await gatedFiles(key.directory),
   };

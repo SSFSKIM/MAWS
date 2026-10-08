@@ -283,8 +283,11 @@ describe('viewer', () => {
     render(<FileViewer tab={fileTab('/r/big.log')} />);
     await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
     expect(screen.getByRole('button', { name: 'Open externally' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    const loadMore = screen.getByRole<HTMLButtonElement>('button', { name: 'Load more' });
+    fireEvent.click(loadMore);
+    expect(loadMore.disabled).toBe(true); // `loadMore` sets `loadingMore` inside the click's act, before its read answers
     await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    expect(loadMore.disabled).toBe(false); // the read that grew the head cleared `loadingMore` in the same patch
     expect(main.callsOf('files.read').map((input) => [input.offset, input.length])).toEqual([
       [0, MiB],
       [MiB, MiB],
@@ -351,24 +354,43 @@ describe('viewer', () => {
     });
     return { main, gated };
   }
-  const loadMore = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Load more' });
-  const bigLog = () => useViewer.getState().entries.get('file:/r/big.log')!;
+  const BIG_LOG = 'file:/r/big.log';
+  const bigLog = () => useViewer.getState().entries.get(BIG_LOG)!;
+  // E11 W-E: the two supersede cases drive the store the viewer mounts, not the rendered tab: CodeMirror laying out
+  // megabytes of text under happy-dom took most of their time and all of their sensitivity to load (the button is
+  // `disabled={entry.loadingMore}`, which the 20 MB Load more case asserts through the tab). Each wait is on the
+  // store's own change, and `drained` lets an answer released by hand run its course before the case checks it landed
+  // nowhere.
+  const mountBigLog = () => offs.push(useViewer.getState().mount(BIG_LOG, { appSessionId: A, path: '/r/big.log', line: null }));
+  const until = (holds: (entry: ReturnType<typeof bigLog>) => boolean) =>
+    new Promise<void>((resolve) => {
+      const check = () => {
+        const entry = useViewer.getState().entries.get(BIG_LOG);
+        if (entry && holds(entry)) {
+          off();
+          resolve();
+        }
+      };
+      const off = useViewer.subscribe(check);
+      check();
+    });
+  const drained = () => new Promise<void>((resolve) => setImmediate(resolve));
 
   it('enables Load more again when a follow-the-file re-read supersedes its read, and the next Load more lands once', async () => {
     const { main, gated } = gatedHead();
     connect();
-    render(<FileViewer tab={fileTab('/r/big.log')} />);
-    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    mountBigLog();
+    await until((entry) => entry.status === 'ready' && entry.loaded === MiB);
     const superseded = gated(MiB);
-    fireEvent.click(loadMore());
-    await waitFor(() => expect(loadMore().disabled).toBe(true));
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
-    await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
-    expect(loadMore().disabled).toBe(false);
-    fireEvent.click(loadMore());
-    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
-    await act(async () => superseded.resolve()); // its answer lands nowhere
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    useViewer.getState().loadMore(BIG_LOG);
+    expect(bigLog().loadingMore).toBe(true);
+    main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' });
+    await until((entry) => entry.updated === 1);
+    expect(bigLog().loadingMore).toBe(false);
+    useViewer.getState().loadMore(BIG_LOG);
+    await until((entry) => entry.loaded === 2 * MiB);
+    superseded.resolve(); // its answer lands nowhere
+    await drained();
     expect(bigLog()).toMatchObject({ loaded: 2 * MiB, loadingMore: false });
     expect(bigLog().text).toHaveLength(2 * MiB);
   });
@@ -376,21 +398,22 @@ describe('viewer', () => {
   it('drops a Load more answer whose text a re-read replaced while it was in flight', async () => {
     const { main, gated } = gatedHead();
     connect();
-    render(<FileViewer tab={fileTab('/r/big.log')} />);
-    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    mountBigLog();
+    await until((entry) => entry.status === 'ready' && entry.loaded === MiB);
     const reread = gated(0);
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
-    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' });
+    await drained();
+    expect(main.callsOf('files.read')).toHaveLength(2);
     const outrun = gated(MiB);
-    fireEvent.click(loadMore()); // asked while the re-read is in flight: the same load, the old text
-    await waitFor(() => expect(loadMore().disabled).toBe(true));
-    await act(async () => reread.resolve());
-    await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
-    expect(loadMore().disabled).toBe(false);
-    fireEvent.click(loadMore());
-    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
-    await act(async () => outrun.resolve());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    useViewer.getState().loadMore(BIG_LOG); // asked while the re-read is in flight: the same load, the old text
+    expect(bigLog().loadingMore).toBe(true);
+    reread.resolve();
+    await until((entry) => entry.updated === 1);
+    expect(bigLog().loadingMore).toBe(false);
+    useViewer.getState().loadMore(BIG_LOG);
+    await until((entry) => entry.loaded === 2 * MiB);
+    outrun.resolve();
+    await drained();
     expect(bigLog().text).toHaveLength(2 * MiB); // appended once, not twice
   });
 

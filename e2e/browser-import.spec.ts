@@ -25,7 +25,7 @@ import {
   profilesFile, recordIn, recordOf, recordPhases, report, settingsFile, sheetOf, shootImport, stagingLeft, suggest, type ImportScene,
 } from './support/browser-import-scene';
 import { invoke, value } from './support/c7-replay';
-import { closeScene, show } from './support/deliverables-scene';
+import { closeScene, show } from './support/maws-tools';
 
 test.describe.configure({ timeout: 240_000 });
 

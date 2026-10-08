@@ -2,8 +2,9 @@
 // run by `pnpm e2e:code` beside the code tools spec over the harness build: the product in stub mode over the scratch
 // repository, each case in its own launch. Typing goes through CodeMirror's content element, the disk is read with
 // `readFileSync` after each save, an external change is a `writeFileSync` on the scratch file, and its notice is
-// awaited with the measured wait. The last case scans both themes for other-theme colours and writes the six
-// screenshots of the editor, the merge view and the conflict view into the evidence directory.
+// awaited with the measured wait. The last case scans both themes for other-theme colours and, under MAWS_E5_SHOTS=1
+// (E11 W-E: a gate run leaves the committed evidence alone), writes the six screenshots of the editor, the merge view
+// and the conflict view into the evidence directory.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
@@ -15,7 +16,7 @@ import { MEASURED_WAIT_MS } from './support/latency';
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
 const TYPED = '// typed by the owner';
-const SHOTS = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e5/shots');
+const SHOTS = process.env.MAWS_E5_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e5/shots') : null;
 
 const read = (p: Product, relative: string) => readFileSync(p.scratch.path(relative), 'utf8');
 const write = (p: Product, relative: string, content: string) => writeFileSync(p.scratch.path(relative), content);
@@ -218,6 +219,19 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expect(chunks.first().getByRole('button', { name: 'Take theirs' })).toBeVisible();
       expect(read(p, APP), 'nothing written by the conflicting save').toBe(theirs);
 
+      // E11 W-D: at a viewer about 600 px wide the merge bar's controls take the directory's width, never the file's name
+      const [width, height] = await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
+      const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
+      const wide = (await viewer.boundingBox())!.width;
+      await resize(Math.round(width - (wide - 600)));
+      await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);
+      const name = viewer.locator('[data-path-name]');
+      await expect(name).toHaveText('app.ts');
+      const shown = await name.evaluate((el) => ({ width: el.getBoundingClientRect().width, needed: el.scrollWidth, right: el.getBoundingClientRect().right, bar: el.parentElement!.parentElement!.getBoundingClientRect().right }));
+      expect(shown.width, 'the basename drawn whole').toBeGreaterThanOrEqual(shown.needed - 0.5);
+      expect(shown.right, 'inside the bar').toBeLessThanOrEqual(shown.bar);
+      await resize(width);
+
       // The first chunk is the typed line, which the disk lacks: Take theirs drops it; the rest stays mine.
       await chunks.first().getByRole('button', { name: 'Take theirs' }).click();
       await expect(changes).toHaveText('1 change from disk');
@@ -232,6 +246,26 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expect(chunks).toHaveCount(0);
       await expect(viewer.locator('.cm-editor.cm-merge-b')).toHaveCount(0);
     });
+  });
+
+  // W-D review m4: a basename wider than the bar's lead is cut by its own box, so it ends in an ellipsis rather than
+  // being clipped mid-character by the lead.
+  test('a basename wider than the bar ends in an ellipsis', async () => {
+    const LONG = `src/${'a-file-name-longer-than-the-bar-'.repeat(6)}end.ts`;
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, LONG);
+        const name = viewer.locator('[data-path-name]');
+        await expect(name).toHaveText(LONG.slice('src/'.length));
+        const shown = await name.evaluate((el) => ({
+          width: el.clientWidth, needed: el.scrollWidth, overflow: getComputedStyle(el).textOverflow, right: el.getBoundingClientRect().right, lead: el.parentElement!.getBoundingClientRect().right,
+        }));
+        expect(shown.needed, 'the name is wider than the bar can show').toBeGreaterThan(shown.width);
+        expect(shown.overflow, 'cut with an ellipsis').toBe('ellipsis');
+        expect(shown.right, 'by its own box, inside the lead').toBeLessThanOrEqual(shown.lead + 0.5);
+      },
+      (scratch) => writeFileSync(scratch.path(LONG), 'export const long = true;\n'),
+    );
   });
 
   test('a file with conflict markers shows the block with its actions, and Accept theirs resolves it', async () => {
@@ -315,7 +349,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
   });
 
   test('the editor, the notice, the merge view and the conflict view use tokens only in both themes', async () => {
-    mkdirSync(SHOTS, { recursive: true });
+    if (SHOTS !== null) mkdirSync(SHOTS, { recursive: true });
     await withProduct(async (p) => {
       await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
       await expect.poll(() => p.page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([1280, expect.any(Number)]);
@@ -324,7 +358,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
         await p.page.mouse.move(0, 0);
         await frames(p.page);
         const box = (await viewer.boundingBox())!;
-        await p.page.screenshot({ path: join(SHOTS, `e5-${view}-${theme}.png`), clip: box });
+        if (SHOTS !== null) await p.page.screenshot({ path: join(SHOTS, `e5-${view}-${theme}.png`), clip: box });
       };
       const scan = async (theme: string, view: string) => expect(await otherThemeColours(p.page), `${theme}: ${view}`).toEqual([]);
 

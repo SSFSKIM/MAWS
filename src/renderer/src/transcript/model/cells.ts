@@ -80,14 +80,20 @@ export const toolErrorText = (text: string): string => engineRefusalOf(text) ?? 
 export function firstJsonBlock(content: string | ContentBlock[]): unknown {
   const texts = typeof content === 'string' ? [content] : content.filter((block) => block.type === 'text').map((block) => str(block.text));
   for (const text of texts) {
-    try {
-      const value: unknown = JSON.parse(text);
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value;
-    } catch {
-      // not JSON: the next block
-    }
+    const value = jsonObjectOf(text);
+    if (value !== null) return value;
   }
   return null;
+}
+
+// A text block's JSON object, null when the text is not JSON or not an object (E4c's `textAfterJson` asks the same).
+export function jsonObjectOf(text: string): object | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 // E2 end
 

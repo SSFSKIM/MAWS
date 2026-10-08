@@ -624,8 +624,8 @@ describe('cross-session rows (E7)', () => {
       ['between', 'Sent to repo-b: reply', { name: 'repo-b', address: B }, 'sent', null, 'Answer B', 's1'],
       ['between', 'Sent to nobody: hi', { name: null, address: 'nobody' }, 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
       ['between', 'Sent to peer-c: x', { name: null, address: 'peer-c' }, 'failed', 'InputValidationError: bad', null, 's3'],
-      ['between', 'Sent to peer-d: waiting', { name: null, address: 'peer-d' }, 'pending', null, null, 's4'],
-      ['between', 'Sent to 2: unnamed', { name: null, address: 'uds:/tmp/cc-socks/2.sock' }, 'pending', null, null, 's5'],
+      ['between', 'Sent to peer-d: waiting', { name: null, address: 'peer-d' }, 'unanswered', null, null, 's4'], // its turn ended with no result (scale-review C scalpel-1#1)
+      ['between', 'Sent to 2: unnamed', { name: null, address: 'uds:/tmp/cc-socks/2.sock' }, 'unanswered', null, null, 's5'],
     ]);
     expect(outbound[0]!.peer).toMatchObject({ sender: null, body: 'reply\nmore', preview: 'reply', replyTo: null });
     const folded = messages(rowsOf(reduce(b.events)));
@@ -669,6 +669,23 @@ describe('cross-session rows (E7)', () => {
       ['from_child', 'Message from Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual(['Report from Survey src']);
+  });
+
+  // scale-review C scalpel-1#1, as the delivery and artifact rows (Decision Log 29): the turn's closed state is the only
+  // sign a call went unanswered (the session ended between the call and its result), so neither row waits for good
+  it('settles a ListAgents and an outbound SendMessage whose turn closed with no result: never answered, not pending', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    b.toolUse('s1', 'SendMessage', { to: 'peer-d', message: 'waiting' });
+    const open = rows(b.events);
+    expect(find(open, 'agent_list')).toMatchObject({ pending: true });
+    expect(find(open, 'agent_list')).not.toHaveProperty('neverAnswered');
+    expect(messages(open)[0]!.peer).toMatchObject({ result: 'pending' });
+    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    const closed = rows(b.events);
+    expect(find(closed, 'agent_list')).toMatchObject({ pending: false, neverAnswered: true, self: null, sections: [], raw: '' });
+    expect(messages(closed)[0]!.peer).toMatchObject({ result: 'unanswered', resultText: null });
   });
 
   it('draws ListAgents as a listing row: pending, then the self line, sections and notes; an unknown text is notes', () => {

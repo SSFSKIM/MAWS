@@ -10,7 +10,7 @@
 // `hydrate` replaces the panel lists wholesale.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { PanelTabRef } from '@shared/ipc/schema/layout';
+import type { LayoutMain, PanelTabRef } from '@shared/ipc/schema/layout';
 import { currentTabRetention } from '../keymap/actions-runtime';
 import { pinSelection, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
@@ -79,8 +79,9 @@ const LOG_TOOL = 'log';
 const layout = () => useLayout.getState();
 const bump = () => usePanelHost.setState((s) => ({ version: s.version + 1 }));
 
-// The session the panel shows, as C5's region derives it: the focused pane's active tab's session.
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(layout().main));
+// The session the panel shows, as C5's region derives it: the focused pane's active tab's session (a file tab's
+// included). The one definition every module imports; `main` for a caller holding a layout state of its own.
+export const shownSession = (main: LayoutMain = layout().main): AppSessionId | null => sessionOfTab(activeTab(main));
 
 const selectionOf = (appSessionId: AppSessionId | null): string | null =>
   appSessionId === null ? layout().panelActiveNoSession : (layout().panelBySession.get(appSessionId)?.activeTabId ?? null);
@@ -306,8 +307,10 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   const tabId = id ?? mintTabId(tool.id);
   const ref: PanelTabRef = { id: tabId, toolId: tool.id, pinned: pin };
   createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: tabId, params });
-  if (activate && target !== null && shownSession() !== target) layout().openSession(target);
+  // The tab is written before its session is shown, so a synchronous reaction to that switch which adds the same
+  // single-instance tool finds this tab rather than making a second one.
   writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
+  if (activate && target !== null && shownSession() !== target) layout().openSession(target);
   if (activate && (target !== null || shownSession() === null)) requestFocus(tabId);
   if (activate) reveal();
   return tabId;

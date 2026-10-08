@@ -1,5 +1,5 @@
-// The editor's part of a file tab's bar (E5 execution document, M2's and M3's decisions): the last save's failure, the
-// disk's newer version (Changed on disk with Reload, Keep mine and Compare; once compared or found by a save, the merge
+// The editor's part of a file tab's bar (E5 execution document, M2's and M3's decisions): the last save's failure, why
+// the disk's newer version cannot be offered when the editor cannot take it (E11 W-D), the disk's newer version (Changed on disk with Reload, Keep mine and Compare; once compared or found by a save, the merge
 // view's line with its chunk count, ↑ ↓ through the chunks, Reload and Keep mine), the document's conflict blocks
 // counted with ↑ ↓, and Save, shown while there is anything to save and disabled while a save runs. No CodeMirror here:
 // the bar is in the main chunk; the counts and the stepping come from the shown code view (`navigation.ts`).
@@ -34,17 +34,22 @@ function Counter({ tabId, kind, label, previous, next, count }: { tabId: string;
 
 export function EditorControls({ entry }: { entry: ViewerEntry }) {
   const saveChord = useChordHint('file.save');
-  const { tabId, theirs, saving, saveError, dirty } = entry;
+  const { tabId, theirs, saving, saveError, dirty, diskUnusable } = entry;
   const counts = useEditorNavigation((s) => s.counts.get(tabId));
   const changes = theirs?.view === 'merge' ? (counts?.changes ?? null) : null;
   const conflicts = changes === null ? (counts?.conflicts ?? 0) : 0;
-  if (!dirty && theirs === null && saveError === null && conflicts === 0) return null;
+  if (!dirty && theirs === null && saveError === null && diskUnusable === null && conflicts === 0) return null;
   const viewer = useViewer.getState;
   return (
     <span data-editor-controls className="flex min-w-0 shrink items-center gap-1">
       {saveError !== null ? (
         <span role="alert" title={EDITOR_COPY.saveFailed(saveError)} className="min-w-0 truncate text-danger">
           {EDITOR_COPY.saveFailed(saveError)}
+        </span>
+      ) : null}
+      {diskUnusable !== null && theirs === null ? (
+        <span role="status" data-disk-unusable={diskUnusable} title={EDITOR_COPY.diskUnusable[diskUnusable]} className="min-w-0 truncate text-warning">
+          {EDITOR_COPY.diskUnusable[diskUnusable]}
         </span>
       ) : null}
       {theirs !== null ? (

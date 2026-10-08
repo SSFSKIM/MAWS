@@ -3,12 +3,13 @@
 // fixture recorded there. Recorded request ids and user uuids are mapped onto the ones the adapter minted and the map
 // is applied to every following `in` row, so correlation and deduplication see the host's own ids. The host's own
 // `initialize` and `get_status` are answered from the handshake prelude when the fixture's next `out` row is not that
-// request; an unrecorded `end_session` ends the replay as the engine does, with exit 0 (M4); an unrecorded read (a
-// control whose class is `read`: it mutates nothing, so answering it cannot change what the fixture replays next) is
-// answered with an empty success, announced by a `replay_unrecorded_read` item the consumer journals as a meta row
-// (debt wave 3); any other unrecorded write is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a
-// test cannot pass by advancing past a frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
-// the row's code and signal; `kill` ends a journal that has no exit row. Nothing here journals (the harness does).
+// request; an unrecorded `end_session` (or the app's quit over a recorded one, E11) ends the replay as the engine
+// does, with exit 0 (M4); an unrecorded read (a control whose class is `read`: it mutates nothing, so answering it
+// cannot change what the fixture replays next) is answered with an empty success, announced by a
+// `replay_unrecorded_read` item the consumer journals as a meta row (debt wave 3); any other unrecorded write is a
+// replay mismatch that ends the stream (`exited` `{ null, null }`), so a test cannot pass by advancing past a frame the
+// probe never saw. `stderr` rows replay; `meta exit` ends the stream with the row's code and signal; `kill` ends a
+// journal that has no exit row. Nothing here journals (the harness does).
 // R2: with `surfaceReads` (the app's replays under MAWS_ENGINE_REPLAY, never the conformance harness), the surface's
 // attach, detach, roster reads and renders, and the renderer's reports of where the keyboard, a window and the shown
 // pane are (focus, scroll, pane shown or focused, a prompt edit) are never held: the renderer sends them as its sites
@@ -336,10 +337,13 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
       }
       if (f.type === 'control_request' && (f as ControlRequest).request.subtype === 'end_session') {
         const upcoming = nextOut();
-        if (!upcoming || !sameControl(upcoming.frame as Frame, f)) {
+        const quitOverRecorded = (f as ControlRequest & { request: { reason?: unknown } }).request.reason === 'quit' && !!upcoming && !matches(upcoming.frame as Frame, f, idMap);
+        if (!upcoming || !sameControl(upcoming.frame as Frame, f) || quitOverRecorded) {
           // The engine's answer to end_session is to exit (Decision Log, controller for M4 and M5): the write reaches
           // the pipe, then the replay ends with exit 0 and no mismatch. A macrotask later, so the writer's continuation
-          // journals the out row before the stream ends.
+          // journals the out row before the stream ends. E11: the app's quit (`reason: quit`) over a recording that
+          // ended with its own end_session (`stop`) is answered the same way; any other differing end_session is still
+          // a mismatch.
           setTimeout(() => finish({ code: 0, signal: null }), 0);
           return Promise.resolve();
         }

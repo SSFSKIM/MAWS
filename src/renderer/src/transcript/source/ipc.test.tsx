@@ -937,6 +937,71 @@ describe('child source provenance', () => {
       await again;
     }
   });
+
+  // E11 (W-C), beside the session source's host-loss case below (E10): a host that dies sends no exit for the parent, so
+  // the live child hears the same loss and ends as stopped, and the disk re-read the switch starts shows it stopped too,
+  // though the successor's parent read holds no exit.
+  it('a live child whose host died ends as stopped when the successor does not list the parent, live and after the reset to disk', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 3)], lastSeq: 9, complete: true });
+    await hydrated;
+    expect(dividerOf(CHILD_KEY).state).toBe('working');
+
+    const seen: { phase: string; divider: Row | undefined }[] = []; // the live state between the exit and the reset
+    const off = useTranscriptStore.subscribe((state) => {
+      const entry = state.entries[CHILD_KEY];
+      if (entry) seen.push({ phase: entry.phase, divider: entry.rows.find((row) => row.kind === 'divider') });
+    });
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    answer(fake, 'engine.sessions', [{ appSessionId: 'other' as AppSessionId }]);
+    await flush();
+    off();
+    expect(seen[0]).toMatchObject({ phase: 'live', divider: { state: 'stopped', cause: 'crash' } }); // in the live state, before the reset
+    expect(useTranscriptStore.getState().entries[CHILD_KEY]).toMatchObject({ phase: 'hydrating' });
+
+    answer(fake, 'session.events', { events: parent, lastSeq: 9, complete: true }); // the successor's read: no exit
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'engine.sessions', 'session.events', 'fs.agentEvents']);
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 3), complete: true });
+    await flush();
+    const entry = useTranscriptStore.getState().entries[CHILD_KEY];
+    expect(entry.phase).toBe('live');
+    expect(dividerOf(CHILD_KEY)).toMatchObject({ state: 'stopped', cause: 'crash' }); // and again in the disk state
+    expect(entry.working).toBe(false);
+    store.detach(CHILD_KEY);
+  });
+
+  it('a host that still lists the parent speaks for the live child: it keeps working, and a child already on disk is not asked about', async () => {
+    const { parent, child } = live();
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
+    await hydrated;
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    answer(fake, 'engine.sessions', [{ appSessionId: APP }]);
+    await flush();
+    expect(dividerOf(CHILD_KEY).state).toBe('working');
+    store.detach(CHILD_KEY);
+
+    const second = fakeClient();
+    const onDiskChild = store.attach(CHILD_KEY, ipcSourceOver(second.client, APP, AGENT), { agentId: AGENT });
+    answer(second, 'session.events', { events: [], lastSeq: 0, complete: true }); // a disk-backed parent
+    await flush();
+    answer(second, 'fs.agentEvents', { events: onDisk(child).slice(0, 2), complete: true });
+    await onDiskChild;
+    second.emit('engine.hostState', { state: 'restarting' } as never);
+    second.emit('engine.hostState', { state: 'ready' } as never);
+    await flush();
+    expect(second.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']);
+    store.detach(CHILD_KEY);
+  });
 });
 
 describe('default loadSpill', () => {

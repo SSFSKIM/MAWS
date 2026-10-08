@@ -18,6 +18,8 @@ import { openFile } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 import { EditorDialogs, useEditorDialog } from './EditorDialogs';
+import { registerEditor } from './register'; // E11
+import { runAction } from '../../../keymap/actions-runtime'; // E11
 
 const A = 'app-a' as AppSessionId;
 const MiB = 1024 * 1024;
@@ -277,6 +279,23 @@ describe('editor modes', () => {
       await waitFor(() => expect(document.querySelectorAll('.cm-comment-mark')).toHaveLength(12));
       fireEvent.click(document.querySelectorAll<HTMLElement>('.cm-comment-mark')[7]); // the eighth line's, line 7's before
       expect(composer).toHaveBeenLastCalledWith(expect.objectContaining({ line: 8, label: 'app.ts:8' }), { appSessionId: A });
+    });
+
+    // E11 (W-C): CodeMirror hides its gutters from assistive technology, so the mark has a keyboard twin: "Comment on
+    // this line" (the palette, File ▸ Comment on this line, a chord bound in Settings ▸ Keyboard) for the cursor's line
+    it('Comment on this line opens the composer for the cursor’s line of the focused pane’s file tab, and nothing elsewhere', async () => {
+      const composer = vi.fn();
+      offs.push(registerCommentComposer(composer), registerEditor());
+      await open({ [APP]: numbered(10) });
+      act(() => view().dispatch({ selection: { anchor: view().state.doc.line(5).from + 2 } }));
+      runAction('file.commentLine');
+      expect(composer).toHaveBeenCalledWith({ kind: 'file-line', locator: `${APP}#L5`, label: 'app.ts:5', path: APP, line: 5 }, { appSessionId: A });
+      act(() => view().dispatch({ selection: { anchor: view().state.doc.line(9).to } }));
+      runAction('file.commentLine');
+      expect(composer).toHaveBeenLastCalledWith(expect.objectContaining({ line: 9 }), { appSessionId: A });
+      useLayout.setState({ main: LAYOUT_DEFAULTS.main }); // no file tab in front
+      runAction('file.commentLine');
+      expect(composer).toHaveBeenCalledTimes(2);
     });
 
     it('has the comment gutter in a read-only view too', async () => {

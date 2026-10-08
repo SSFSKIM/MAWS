@@ -3,7 +3,7 @@
 // while main reports the person or a sheet holding the action, the disclosure of a snapshot's text or an eval's value,
 // Open tab and a screenshot's Open, a refusal's reason and a cancelled call's line.
 import type { AppSessionId } from '@shared/graph/ids';
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearBrowserProgress, connectBrowserProgress, resetBrowserProgress } from '../../../tools/browser/agent/progress';
 import { installFakeMain } from '../../../test-support/code';
@@ -93,6 +93,8 @@ describe('the browser action row', () => {
     expect(screen.queryByRole('status')).toBeNull();
     progress('human');
     expect(screen.getByRole('status').textContent).toBe('Waiting · you have the page · 12s');
+    // scale-review C scalpel-5#2: the ticking time is a timer (live off) inside the status, so the tick is not re-announced
+    expect(within(screen.getByRole('status')).getByRole('timer').textContent).toBe('12s');
     act(() => vi.advanceTimersByTime(2_000));
     expect(screen.getByRole('status').textContent).toBe('Waiting · you have the page · 14s');
     progress('cover');

@@ -1,9 +1,11 @@
 // The teammates' roster from the transcript's listings and its grouping in the topology tree (E7 execution document,
 // Design §5; Decision Log 7, 24): M0's recorded listings name no teammate (a named agent lists under Subagents on
-// 2.1.291), so the grouping is pinned on hand-built `Teammates` sections.
+// 2.1.291, through MAWS's SDK launch); E11's S2(d) recorded a team an interactive terminal formed under the teams gate on
+// 2.1.293 (pass3/e7-team-terminal), which pins the read; the hand-built `Teammates` sections keep what it does not hold
+// (several teammates, a ref-less row, a newer listing replacing an older).
 import { describe, expect, it } from 'vitest';
 import type { TaskId } from '@shared/graph/ids';
-import { event } from '../../../../../../test/support/agents-events';
+import { event, recordedTeamListing } from '../../../../../../test/support/agents-events';
 import { loadJournal } from '../../../../../../test/support/fixtures';
 import type { TurnActivity } from '../../../transcript/model/activity';
 import { parseListing } from '../../../transcript/model/agent-listing';
@@ -25,6 +27,12 @@ const team = (...rows: string[]) => [SELF, '', `Teammates (${rows.length}):`, ..
 describe('teammatesOf', () => {
   it('names no teammate from M0’s recorded listings (peer sessions; a named agent under Subagents)', () => {
     expect(teammatesOf([listingTurn([recorded('e7-peer-a', 29)]), listingTurn([recorded('e7-team', 98)])])).toEqual(new Map());
+  });
+
+  it('reads the Teammates section of the recorded team (an interactive terminal under the teams gate, E11 S2(d))', () => {
+    expect(teammatesOf([listingTurn([recordedTeamListing()])])).toEqual(new Map([
+      ['scout', { name: 'scout', ref: '874319', extras: ['general-purpose', 'running', 'started 0s ago'], at: T }],
+    ]));
   });
 
   it('reads the newest listing’s Teammates section: name, ref and every extra the row carries, at the listing’s time', () => {

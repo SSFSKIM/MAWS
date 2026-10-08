@@ -962,6 +962,25 @@ describe('dictation into the focused pane’s composer', () => {
     expect(dictationStatus(1)).toBeNull();
   });
 
+  // scale-review C scalpel-5#1: a side thread's composer in the panel's Side pane is no pane's active tab; the hold
+  // follows the composer that holds focus, else the focused pane's
+  it('holding ⌥Space in a composer outside the focused pane (a side thread’s) writes there, not into the focused pane’s', async () => {
+    live(A);
+    live(B);
+    focusTabs(0, [A]); // the layout's focused pane shows A; B's composer stands for the thread's in the Side pane
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <DictationKeys />);
+    act(() => editorOf(1).focus());
+    await key(editorOf(1), altSpace);
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    expect(dictationStatus(1)?.textContent).toBe('Listening…');
+    expect(editorOf(1).editor.getText()).toBe('hello');
+    expect(editorOf(0).editor.getText()).toBe('');
+    await keyUp(altSpace);
+    voice({ kind: 'final', captureId: captureId(), text: 'Hello.', timedOut: false });
+    expect(editorOf(1).editor.getText()).toBe('Hello.');
+  });
+
   it('a card over the box refuses: the notice shows in the dock and nothing starts', async () => {
     live(A);
     focusTabs(0, [A]);
