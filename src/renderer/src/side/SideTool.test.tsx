@@ -235,18 +235,19 @@ describe('the Side pane’s question view', () => {
     listing([exchange({})]);
     act(() => openSideThread(A, ONE));
     mount();
-    expect(screen.queryByRole('button', { name: 'Side questions' })).toBeNull(); // none asked, none open
+    expect(screen.queryByRole('button', { name: '/btw side questions' })).toBeNull(); // none asked, none open
     act(() => setInlineQuestions(ONE, true));
     await screen.findByText('ZEBRA');
     expect(document.querySelector(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`)).not.toBeNull();
     expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: ONE }]);
     expect(shown()).toBe(A); // the main view stays
-    const toggle = screen.getByRole('button', { name: 'Side questions' });
+    const toggle = screen.getByRole('button', { name: '/btw side questions' }); // scale-review C scalpel-5#4: the name holds the visible "/btw"
+    expect(toggle.textContent).toBe('/btw');
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(toggle);
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
-    await userEvent.click(screen.getByRole('button', { name: 'Side questions' }));
+    expect(screen.getByRole('button', { name: '/btw side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
+    await userEvent.click(screen.getByRole('button', { name: '/btw side questions' }));
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
   });
 
