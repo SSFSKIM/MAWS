@@ -99,6 +99,11 @@ describe('the takeover gate through a lease', () => {
 });
 
 describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spec's final-review rule)", () => {
+  // tab.screenshot() and the AX state's screenshot bound the screencast to the viewport (css mode, BS:43985-44016); the
+  // vendor's device-mode capture of the surface after each cell (its response metadata, BS:65063) does not
+  const VIEWPORT_SCREENCAST = { everyNthFrame: 1, format: 'jpeg', maxHeight: 800, maxWidth: 1280, quality: 80 };
+  const SURFACE_SCREENCAST = { everyNthFrame: 1, format: 'jpeg', quality: 80 };
+
   it('its commands read: an idle tab stays idle, and while the person holds the tab they pass at once and leave it human', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h);
@@ -131,10 +136,16 @@ describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spe
       order.push([method, Date.now()]);
       return command(method, params, sessionId);
     };
-    await t.send('Page.startScreencast', { format: 'jpeg' });
+    await t.send('Page.startScreencast', VIEWPORT_SCREENCAST);
     const shot = order.filter(([what]) => what === 'hide' || what === 'Page.startScreencast');
     expect(shot.map(([what]) => what)).toEqual(['hide', 'Page.startScreencast']);
     expect(shot[1]![1] - shot[0]![1]).toBeGreaterThanOrEqual(CURSOR_HIDE_GRACE_MS - 5); // timer granularity
+    // the vendor's own unbounded capture after a cell (its response metadata, which nobody is shown): the cursor stays
+    order.length = 0;
+    await t.send('Page.stopScreencast');
+    await t.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 7, y: 8 });
+    await t.send('Page.startScreencast', SURFACE_SCREENCAST);
+    expect(order.map(([what]) => what)).toEqual(['Page.stopScreencast', 'move', 'Input.dispatchMouseEvent', 'Page.startScreencast']);
   });
 
   it('one Screenshot row per screenshot: at the first frame after a start, or at a capture, so the 2 s fallback is one row', async () => {
@@ -142,7 +153,7 @@ describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spe
     const t = await leasedTab(h);
     const frame = (sessionId: number) => t.cdp.event('Page.screencastFrame', { data: 'AAAA', sessionId, metadata: { timestamp: Date.now() / 1000 } });
     // the screencast answers: frames after the start, one row
-    await t.send('Page.startScreencast', { format: 'jpeg' });
+    await t.send('Page.startScreencast', VIEWPORT_SCREENCAST);
     frame(1);
     frame(2);
     await t.send('Page.stopScreencast');
@@ -151,13 +162,19 @@ describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spe
     await settle();
     expect(h.activities().map((a) => a.activity)).toEqual([{ kind: 'tabOpened', url: 'about:blank' }, { kind: 'screenshot' }]);
     // no frame within the vendor's 2 s: it stops the screencast and captures instead, one row
-    await t.send('Page.startScreencast', { format: 'jpeg' });
+    await t.send('Page.startScreencast', VIEWPORT_SCREENCAST);
     await t.send('Page.stopScreencast');
     await t.send('Page.captureScreenshot', { format: 'jpeg' });
     await settle();
     expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'screenshot')).toHaveLength(2);
+    // the vendor's own unbounded capture of the surface after a cell is not the agent's screenshot: no row
+    await t.send('Page.startScreencast', SURFACE_SCREENCAST);
+    frame(4);
+    await t.send('Page.stopScreencast');
+    await settle();
+    expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'screenshot')).toHaveLength(2);
     // the frames reached the host as any event does
-    expect(t.host.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.screencastFrame')).toHaveLength(3);
+    expect(t.host.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.screencastFrame')).toHaveLength(4);
   });
 });
 

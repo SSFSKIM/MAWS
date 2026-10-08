@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_ACTIVITIES_KEPT } from '@shared/browser/activity';
-import { ACTIVITY_MAX_PER_SECOND, ActivityFeed, clickLabel, commandActivity, navigatedUrl, TYPED_COALESCE_MS, within } from './activity';
+import { ACTIVITY_MAX_PER_SECOND, ActivityFeed, agentCapture, clickLabel, commandActivity, navigatedUrl, TYPED_COALESCE_MS, within } from './activity';
 
 const A = 'A' as AppSessionId;
 const T = 'b_000000000001';
@@ -24,6 +24,14 @@ describe('what one command the agent sent did', () => {
     expect(commandActivity('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter' })).toBeNull();
     expect(commandActivity('Page.captureScreenshot', { format: 'jpeg' })).toEqual({ kind: 'screenshot' });
     expect(commandActivity('Runtime.evaluate', { expression: 'document.title' })).toBeNull();
+  });
+
+  it("the agent's capture: a screenshot, or a screencast bounded to the viewport; never the vendor's own unbounded one", () => {
+    expect(agentCapture('Page.captureScreenshot', { format: 'jpeg' })).toBe(true);
+    expect(agentCapture('Page.startScreencast', { everyNthFrame: 1, format: 'jpeg', maxHeight: 800, maxWidth: 1280, quality: 80 })).toBe(true);
+    expect(agentCapture('Page.startScreencast', { everyNthFrame: 1, format: 'jpeg', quality: 80 })).toBe(false);
+    expect(agentCapture('Page.stopScreencast', {})).toBe(false);
+    expect(agentCapture('Page.screencastFrameAck', { sessionId: 1 })).toBe(false);
   });
 
   it('a committed navigation of the main frame only, with its fragment', () => {

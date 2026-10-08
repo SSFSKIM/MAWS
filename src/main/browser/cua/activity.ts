@@ -7,8 +7,8 @@
 //     LABEL_LOOKUP_MS (looked up through the same lease, so it is attributed as the agent's; a failure leaves null and is
 //     not retried);
 //   - typed characters as a count, coalesced per TYPED_COALESCE_MS, and a named key (Enter, Tab, …) on its own;
-//   - a screenshot (a capture, or a screencast's first frame: connection.ts), a download's end, a dialog's answer, a tab
-//     opened or closed.
+//   - the agent's screenshot (a capture, or its screencast's first frame: `agentCapture`, connection.ts), a download's
+//     end, a dialog's answer, a tab opened or closed.
 // Typed text never leaves main. At most ACTIVITY_MAX_PER_SECOND activities per tab reach the windows (mouse moves are
 // never activities, so a storm of them costs nothing; a burst beyond the bound is dropped). What was told is kept per
 // session, the last BROWSER_ACTIVITIES_KEPT for the app's life, for `browser.agent.activities.list`: a window lists them
@@ -49,6 +49,16 @@ export function commandActivity(method: string, params: Record<string, unknown>)
     default:
       return null;
   }
+}
+
+// Whether a command reads the page's pixels for the agent: a capture, or the start of the screencast the vendor's plain
+// screenshot is first (BS:43892-44050), which `tab.screenshot()` and the AX state's screenshot bound to the viewport
+// (`maxWidth`/`maxHeight`, css mode, BS:43985-44016). An unbounded start is the vendor's own device-mode capture: of the
+// surface after each cell, for its response metadata (`_meta["codex/browserUse"]`, BS:65063, which Claude Code never
+// shows), or of a sign-in form (BS:45047). That is no screenshot of the agent's: no row, and the cursor stays.
+export function agentCapture(method: string, params: Record<string, unknown>): boolean {
+  if (method === 'Page.captureScreenshot') return true;
+  return method === 'Page.startScreencast' && typeof params.maxWidth === 'number' && typeof params.maxHeight === 'number';
 }
 
 // A committed navigation of the page's main frame: the URL it shows (with its fragment); null for a child frame's.
