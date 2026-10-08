@@ -1,0 +1,223 @@
+E11 — the owner's sitting: results (Task 7.1's template; the owner fills it, the architect records it at M8)
+Script: docs/doperpowers/evidence/p1-e11/owner-script.txt (the step ids below are its sub-step ids).
+Each row: step | surface or check | pass/fail/note | what was seen | screenshot path. Leave a cell empty until
+  filled; write `n/a (<why>)` for a surface not reachable at the sitting. Every fail or note is routed at M8
+  (a fix, a tracker row tagged taste or with these words as evidence, or a P-n question).
+
+Date of the sitting:
+Sessions (one or two, with times):
+Engine version the owner sits with (`claude --version`; the pre-run sittings ran 2.1.293):
+The build: master at commit:
+The build's codesign -dv identity (Authority line):
+The build's TeamIdentifier:
+Chrome profile chosen for step D:
+
+step | surface or check | pass/fail/note | what was seen | screenshot path
+
+== Before ==
+pre.1 | the development-signed build; codesign -dv (identity in the header) |  |  | 
+pre.2 | the relay answers /api/hello 200 |  |  | 
+pre.3 | Codex desktop and Claude Desktop open and signed in |  |  | 
+pre.4 | a Chrome profile chosen for step D (name it in the header) |  |  | 
+pre.5 | scratch keys to clean: none (prerun.txt) |  |  | 
+pre.6 | a terminal claude running for the Overview |  |  | 
+pre.7 | claude --version (in the header) |  |  | 
+
+== A. First looks ==
+A1.1 | E1 the Question sheet from a blocking ask; main view not switched |  |  | 
+A1.2 | E1 the capsule pending and answered; View answers |  |  | 
+A1.3 | E1 the delivery row: Open externally, Reveal |  |  | 
+A2.1 | E2 viewer kinds (PDF, HTML, image, video, audio, markdown), panel and main tab |  |  | 
+A2.2 | E2 artifact versions |  |  | 
+A2.3 | E2 the artifact console |  |  | 
+A2.4 | E2 Open as file |  |  | 
+A2.5 | E2 a web link in delivered HTML: blocked page until Reload (A-34) |  |  | 
+A3.1 | E3 the comment composer's screenshot chip (Q4) |  |  | 
+A3.2 | E3 nested side threads under their parent |  |  | 
+A3.3 | E3 /btw inside a thread answers inline |  |  | 
+A3.4 | E3 the first launch after the upgrade (how long) |  |  | 
+A4.1 | E5 Changed on disk |  |  | 
+A4.2 | E5 inline conflict-marker blocks (P-19) |  |  | 
+A4.3 | E5 the close sheet |  |  | 
+A4.4 | E5 the quit question names unsaved files |  |  | 
+A5.1 | E6 hooks by default, Skip hooks box |  |  | 
+A5.2 | E6 the discard sheet names every file |  |  | 
+A5.3 | E6 the push sheet re-points a branch tracking origin/main |  |  | 
+A5.4 | E6 the empty PR body default |  |  | 
+A6.1 | E7 compact workflow cards, per-phase tables in the widget |  |  | 
+A6.2 | E7 the widget stacking under 520 px |  |  | 
+A6.3 | E7 scheduled rows: Expired <date>, the locale mix (Q2) |  |  | 
+A6.4 | E7 the Tasks panel read-only (P-20) |  |  | 
+A7.1 | E8 the removal sheet announces a superset of files |  |  | 
+A7.2 | E8 another project's installation row read-only |  |  | 
+A7.3 | E8 the engine's "Restart to apply changes" after MAWS reloaded |  |  | 
+A8.1 | E9 the mic button toggles (P-18) |  |  | 
+A8.2 | E9 the hold action unbound until bound in Settings › Keyboard |  |  | 
+A8.3 | E9 Settings › Voice's language list |  |  | 
+A9.1 | E10 the lost-terminal line, no Restart action |  |  | 
+A9.2 | E10 the supervisor as "MAWS" in Activity Monitor |  |  | 
+A9.3 | E10 Settings › Engine › Background supervisor (idle time, quit default, Stop all) |  |  | 
+A9.4 | E10 Diagnostics' supervisor row |  |  | 
+A9.5 | E10 the idle-release mark "Stopped at HH:MM while idle · Send resumes it" |  |  | 
+A10.1 | E4a the chrome and its error pages |  |  | 
+A10.2 | E4a the partition pill |  |  | 
+A10.3 | E4a the clipboard carve-out (Copy after a click) |  |  | 
+A10.4 | E4a Google as the search default |  |  | 
+A10.5 | E4a the 12-tab and 2 GiB caps' suspension |  |  | 
+A10.6 | E4a beforeunload never blocking |  |  | 
+A10.7 | E4a Session info's "Browser tabs" row |  |  | 
+A10.8 | E4a the address field: typed address first, then history |  |  | 
+A10.9 | E4a re-selecting the Browser tool takes the view back from a main tab |  |  | 
+A10.10 | E4a clipboard and window.open count key or mouse activation, not scrolls |  |  | 
+A11.1 | E4c reads proceed while the owner holds the page |  |  | 
+A11.2 | E4c the Browser tool opens at most once per busy stretch |  |  | 
+A11.3 | E4c the 10 s agent → idle decay |  |  | 
+A11.4 | E4c the fixed cursor colours |  |  | 
+A11.5 | E4c a browser-only turn: no divider, rows in view when folded (Q9) |  |  | 
+A11.6 | E4c queued time counts against the 30 s deadline (Q10) |  |  | 
+A11.7 | E4c a side thread's driver retired when its parent exits (Q10) |  |  | 
+A12.1 | E4d comment on an element, the thread's agent clicks it in the same tab |  |  | 
+A12.2 | E4d the row heading "Clicked #<id>" for a css-only act (Q8) |  |  | 
+A12.3 | E4d typed values never in an anchor's name (Q7) |  |  | 
+A12.4 | E4d the hover badge's hint over small elements |  |  | 
+A12.5 | E4d a right-click Comment at 125 % zoom |  |  | 
+A12.6 | E4d a drag picks an area named by the smallest containing element (P-25) |  |  | 
+A13 | E4b owner items: recorded in D3, D4 and D9 (write "see D") |  |  | 
+A14.1 | P-21 tabs belong to the session |  |  | 
+A14.2 | P-21 agent-opened tabs stay open at turn end |  |  | 
+A14.3 | P-21 per-extension toggles, wallets off |  |  | 
+
+== B. The panel and reference taste sitting (C8-S) ==
+B1 | Session info (light and dark; the reference surface it falls short of, if any) |  |  | 
+B2 | Review (light and dark; the reference surface it falls short of, if any) |  |  | 
+B3 | Files (light and dark; the reference surface it falls short of, if any) |  |  | 
+B4 | Terminal (light and dark; the reference surface it falls short of, if any) |  |  | 
+B5 | Subagents (light and dark; the reference surface it falls short of, if any) |  |  | 
+B6 | Background work (light and dark; the reference surface it falls short of, if any) |  |  | 
+B7 | Log (light and dark; the reference surface it falls short of, if any) |  |  | 
+B8 | Tasks (light and dark; the reference surface it falls short of, if any) |  |  | 
+B9 | Source control (light and dark; the reference surface it falls short of, if any) |  |  | 
+B10 | Side (light and dark; the reference surface it falls short of, if any) |  |  | 
+B11 | Deliverables (light and dark; the reference surface it falls short of, if any) |  |  | 
+B12 | Browser (light and dark; the reference surface it falls short of, if any) |  |  | 
+B13 | the Question sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
+B14 | the ask capsule row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B15 | the delivery row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B16 | the artifact row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B17 | the side-thread summary row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B18 | the peer row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B19 | the browser-action rows (light and dark; the reference surface it falls short of, if any) |  |  | 
+B20 | the side pane with a thread (light and dark; the reference surface it falls short of, if any) |  |  | 
+B21 | the side pane with a side question (light and dark; the reference surface it falls short of, if any) |  |  | 
+B22 | the comment composer (light and dark; the reference surface it falls short of, if any) |  |  | 
+B23 | the workflow widget (light and dark; the reference surface it falls short of, if any) |  |  | 
+B24 | the topology tree (light and dark; the reference surface it falls short of, if any) |  |  | 
+B25 | the plugins widget and its sheets (light and dark; the reference surface it falls short of, if any) |  |  | 
+B26 | Settings › Voice (light and dark; the reference surface it falls short of, if any) |  |  | 
+B27 | Settings › Engine (light and dark; the reference surface it falls short of, if any) |  |  | 
+B28 | Settings › Browser (light and dark; the reference surface it falls short of, if any) |  |  | 
+B29 | the Diagnostics row and the supervisor banners (light and dark; the reference surface it falls short of, if any) |  |  | 
+B30 | the browser chrome (light and dark; the reference surface it falls short of, if any) |  |  | 
+B31 | an error page (light and dark; the reference surface it falls short of, if any) |  |  | 
+B32 | the import consent sheet and report (light and dark; the reference surface it falls short of, if any) |  |  | 
+B33 | "You have the page · Hand back" (light and dark; the reference surface it falls short of, if any) |  |  | 
+B34 | the comment-mode overlay (light and dark; the reference surface it falls short of, if any) |  |  | 
+B35 | the editor bar (light and dark; the reference surface it falls short of, if any) |  |  | 
+B36 | the merge view (light and dark; the reference surface it falls short of, if any) |  |  | 
+B37 | the SCM panel (light and dark; the reference surface it falls short of, if any) |  |  | 
+B38 | the discard sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
+B39 | the push sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
+B40 | the PR state row (light and dark; the reference surface it falls short of, if any) |  |  | 
+
+== C. The native terminal hands (C9) ==
+C1 | Korean IME in a Terminal tab |  |  | 
+C2 | Korean IME in the composer |  |  | 
+C3 | Korean IME in an editor tab |  |  | 
+C4 | ⌘-click a terminal URL: where it opens |  |  | 
+C5 | pmset sleepnow, wake: terminal reattached, turn streaming or explained, supervisor connected |  |  | 
+C6 | any resume that stalled (write none if none did) |  |  | 
+
+== D. The Chrome profile import ==
+D1 | quit Chrome (or not): the hint |  |  | 
+D2 | the picker: every profile by its Chrome name, the last-used preselected |  |  | 
+D3 | the consent: pages, cookies, passwords off, the signed-in line, extensions, wallets chipped, Chrome-disabled unchecked |  |  | 
+D4 | the Keychain dialog for Chrome Safe Storage: Allow; it appeared once |  |  | 
+D5 | the report: cookies, history, the extensions split, wallet off, "New tabs browse as <name>" |  |  | 
+D6 | a Browser tab: the pill, signed in, history suggestions |  |  | 
+D7 | an agent turn: browser_tabs lists the tab, browser_navigate works |  |  | 
+D8 | Settings: an extension toggled off and on |  |  | 
+D9 | Remove imported profile with a tab open; relaunch: the partition folder gone; extensions at boot (Q11) |  |  | 
+D10 | no cookie value, URL path or password in Console.app |  |  | 
+D11 | the takeover: "You have the page", the agent resumes after 3 s idle or Hand back |  |  | 
+
+== E. Voice ==
+E1 | the Microphone dialog with MAWS's reason, then Speech Recognition |  |  | 
+E2 | "hello world" greyed, settling on the second click |  |  | 
+E3 | Settings › Voice: both permissions, the language (ko-KR) |  |  | 
+E4 | English (United States) dictation lands English |  |  | 
+E5 | denied in System Settings: the denial notice opens the right pane |  |  | 
+
+== F. The OOPIF human key ==
+F1 | one key into the OOPIF field while the agent holds the tab: attributed (waiting) or not (ran through) |  |  | 
+
+== G. Keep-quit on the owner's profile ==
+G1 | ⌘Q mid-turn: the default button "Quit and keep sessions running" |  |  | 
+G2 | "MAWS" in Activity Monitor through the quit |  |  | 
+G3 | relaunch: the session listed live and still streaming |  |  | 
+G4 | any resume that stalled (write none if none did) |  |  | 
+
+== H. Push and PR ==
+H1 | a commit from the panel runs the repository's hooks |  |  | 
+H2 | Push to origin through the owner's helper; the Output shows progress |  |  | 
+H3 | Open PR: a draft PR (closed after) |  |  | 
+H4 | the push-state row shows the PR and its checks |  |  | 
+H5 | the throwaway branch deleted |  |  | 
+
+== J. Plugins, /btw, tasks and peers ==
+J1 | plugins: marketplace, install, disable, enable, Reload mods; /plugins reflects each |  |  | 
+J2 | /btw in a real session: the side pane answers, main untouched |  |  | 
+J3 | show_pane "tasks": the read-only checklist or No tasks |  |  | 
+J4 | a peer SendMessage answered from the row's Reply |  |  | 
+
+== I. After: the owner questions (E11 Decision Log; owner-script.txt step I) ==
+Q1 (C10·C3) The catalogue key's environment approximation: final (the row closes), or hunt a mismatch case?
+  answer:
+Q2 (E7) Dates in scheduled rows: the app's display locale beside the engine's English, or English throughout?
+  answer:
+Q3 (C10, C4) Separate-git-dir checkouts and their linked worktrees out of scope for the worktree service?
+  answer:
+Q4 (E3·E2) The comment composer's screenshot as a chip: keep, or a thumbnail in P2?
+  answer:
+Q5 (E10) One idle time for both the row release and the supervisor's exit: keep?
+  answer:
+Q6 Which taste notes are fixed now and which go to P2 (each note's step id with now or P2)?
+  answer:
+Q7 (E4d, A-45) Typed form values never enter an anchor's name: keep privacy over label richness?
+  answer:
+Q8 (E4d, A-49) "Clicked #increment": should the result carry the matched element's role and name?
+  answer:
+Q9 (E4c, A-48) A browser-only turn has no divider and its rows stay in view when the turn folds: keep?
+  answer:
+Q10 (E4c, A-48) Queued time counts against the 30 s deadline; a thread's driver retires when its parent exits: acceptable?
+  answer:
+Q11 (E4b, A-46) The active imported profile's extensions load eagerly at every boot: keep, or lazy?
+  answer:
+Q12 (E3·E4d) Side threads carry no --max-budget-usd: give threads a cap?
+  answer:
+
+E4's open owner items, keep or overturn each (A-35, P-23, A-36, A-37):
+  the clipboard carve-out (A-35):
+  Google as the default search (A-35):
+  the 12-tab and 2 GiB caps (A-35):
+  beforeunload never blocking (A-35):
+  automatic activation after import (P-23):
+  the wallet seed list (A-36):
+  reads proceed while the human holds the page (A-37):
+  the Browser tool's open-once rule (A-37, A-48):
+  the 10 s agent → idle decay (A-37):
+  the fixed cursor colours (A-37):
+
+Irritations across the new surfaces (each becomes a tracker row or a P2 line):
+
+The P-3 measure: what, if anything, still sends the owner to a terminal:
+
