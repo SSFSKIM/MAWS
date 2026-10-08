@@ -1,0 +1,389 @@
+{
+ "question": "Q7",
+ "run": "crash",
+ "date": "2026-10-08T04:12:59.489Z",
+ "engine": {
+  "bin": "/Users/new/.local/share/claude/versions/2.1.293",
+  "version": "2.1.293"
+ },
+ "model": "haiku",
+ "electron": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+ "notes": [
+  {
+   "ms": 479,
+   "line": "wire d59157ef14c10aa7 read from the supervisor's refuse"
+  }
+ ],
+ "supervisor1": {
+  "pid": 30257,
+  "lock": {
+   "pid": 30257,
+   "procStart": "Thu Oct  8 04:12:59 2026",
+   "protocol": 1,
+   "buildId": "dd270ecc6fd89e36",
+   "socketPath": "/private/tmp/maws-e0a-e10-q7-0EmAp2/userData/supervisor/host.sock",
+   "startedAt": "2026-10-08T04:12:59.837Z"
+  },
+  "chunkBuildId": "dd270ecc6fd89e36",
+  "ps": {
+   "pid": 30257,
+   "ppid": 30144,
+   "pgid": 30257,
+   "stat": "Ss",
+   "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/out/main/index-BuxgcUAy.js --"
+  }
+ },
+ "launch1": {
+  "appSessionId": "762654c4-5831-4126-8f46-342efcef2416",
+  "launchId": "e33emiec",
+  "enginePid": 30411,
+  "engineSessionId": "84e7698c-048e-4c96-9780-0ec40d26038d"
+ },
+ "send1": {
+  "ms": 913,
+  "answer": {
+   "messageUuid": "2d17dafc-ff6c-4dda-8509-aba8cc79359d",
+   "disposition": "sent",
+   "queueId": "ff7dea1a-0cb2-4c4c-94dc-e67ea31b9ad5"
+  }
+ },
+ "beforeKill": {
+  "sinceSendMs": 3166,
+  "engine": {
+   "pid": 30411,
+   "ppid": 30257,
+   "pgid": 30411,
+   "stat": "Ss",
+   "command": "/Users/new/.local/share/claude/versions/2.1.293 -p --input-format stream-json --output-format stream-json --verbose --pe"
+  },
+  "sleeper": {
+   "pid": 31170,
+   "ppid": 31153,
+   "pgid": 31153,
+   "command": "sleep 20",
+   "ms": 3076
+  },
+  "liveLedger": {
+   "owner": {
+    "pid": 30257,
+    "procStart": "Thu Oct  8 04:12:59 2026"
+   },
+   "rows": [
+    {
+     "appSessionId": "762654c4-5831-4126-8f46-342efcef2416",
+     "pid": 30411,
+     "procStart": "Thu Oct  8 04:13:00 2026",
+     "launchId": "e33emiec"
+    }
+   ]
+  },
+  "status": {
+   "process": "ready",
+   "turnOpen": true,
+   "launchId": "e33emiec",
+   "keepAlive": [
+    "turn"
+   ]
+  },
+  "transcriptLines": 20,
+  "registryRow": true
+ },
+ "kill": {
+  "ms": 4131,
+  "supervisorExit": {
+   "code": null,
+   "signal": "SIGKILL",
+   "ms": 4138
+  },
+  "client1ClosedMs": 7
+ },
+ "afterKill": {
+  "engine": {
+   "pid": 30411,
+   "ppid": 1,
+   "pgid": 30411,
+   "stat": "Ss",
+   "command": "/Users/new/.local/share/claude/versions/2.1.293 -p --input-format stream-json --output-format stream-json --verbose --pe"
+  },
+  "sleeper": {
+   "pid": 31170,
+   "ppid": 31153,
+   "pgid": 31153,
+   "stat": "S",
+   "command": "sleep 20"
+  },
+  "staleLock": {
+   "pid": 30257,
+   "procStart": "Thu Oct  8 04:12:59 2026",
+   "protocol": 1,
+   "buildId": "dd270ecc6fd89e36",
+   "socketPath": "/private/tmp/maws-e0a-e10-q7-0EmAp2/userData/supervisor/host.sock",
+   "startedAt": "2026-10-08T04:12:59.837Z"
+  },
+  "socketFileLeft": true,
+  "liveLedger": {
+   "owner": {
+    "pid": 30257,
+    "procStart": "Thu Oct  8 04:12:59 2026"
+   },
+   "rows": [
+    {
+     "appSessionId": "762654c4-5831-4126-8f46-342efcef2416",
+     "pid": 30411,
+     "procStart": "Thu Oct  8 04:13:00 2026",
+     "launchId": "e33emiec"
+    }
+   ]
+  },
+  "registryRow": true
+ },
+ "supervisor2": {
+  "pid": 31591,
+  "lock": {
+   "pid": 31591,
+   "procStart": "Thu Oct  8 04:13:04 2026",
+   "protocol": 1,
+   "buildId": "dd270ecc6fd89e36",
+   "socketPath": "/private/tmp/maws-e0a-e10-q7-0EmAp2/userData/supervisor/host.sock",
+   "startedAt": "2026-10-08T04:13:04.376Z"
+  },
+  "chunkBuildId": "dd270ecc6fd89e36",
+  "startedSinceKillMs": 838,
+  "ps": {
+   "pid": 31591,
+   "ppid": 30144,
+   "pgid": 31591,
+   "stat": "Ss",
+   "command": "maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/out/main/index-BuxgcUAy.js --"
+  }
+ },
+ "afterSweep": {
+  "orphansKilled": 1,
+  "supervisorStatus": {
+   "mode": "detached",
+   "pid": 31591,
+   "startedAt": "2026-10-08T04:13:04.376Z",
+   "buildId": "dd270ecc6fd89e36",
+   "protocol": 1,
+   "wire": "d59157ef14c10aa7",
+   "liveSessions": 0,
+   "rows": 0,
+   "idleExitMs": 600000,
+   "idleExitAt": null,
+   "exitWhenIdle": false,
+   "socketPath": "/private/tmp/maws-e0a-e10-q7-0EmAp2/userData/supervisor/host.sock",
+   "logPath": "/private/tmp/maws-e0a-e10-q7-0EmAp2/userData/supervisor/host.log",
+   "orphansKilled": 1
+  },
+  "engine": null,
+  "engineAlive": false,
+  "sleeper": null,
+  "registryRow": false,
+  "liveLedger": {
+   "owner": {
+    "pid": 31591,
+    "procStart": "Thu Oct  8 04:13:04 2026"
+   },
+   "rows": []
+  },
+  "hostLogSweepLines": [
+   "2026-10-08T04:13:04.409Z orphan 762654c4-5831-4126-8f46-342efcef2416 (pid 30411, launch e33emiec) of the dead supervisor pid 30257: SIGTERM",
+   "2026-10-08T04:13:07.032Z orphan sweep: 1 engine(s) of the dead supervisor pid 30257 stopped"
+  ],
+  "engineSessions": [],
+  "diskEvents": {
+   "error": "session.events: internal unknown app session: 762654c4-5831-4126-8f46-342efcef2416"
+  },
+  "savedQueue": {
+   "entries": [
+    {
+     "queueId": "ff7dea1a-0cb2-4c4c-94dc-e67ea31b9ad5",
+     "appSessionId": "762654c4-5831-4126-8f46-342efcef2416",
+     "content": "Run exactly this shell command with the Bash tool, nothing else: sleep 20 && echo q7-done\nThen reply with the single word: finished",
+     "createdAt": "2026-10-08T04:13:00.403Z",
+     "state": "released",
+     "messageUuid": "2d17dafc-ff6c-4dda-8509-aba8cc79359d",
+     "submittedAt": "2026-10-08T04:13:00.403Z",
+     "uncertain": false,
+     "steer": false
+    }
+   ],
+   "paused": false,
+   "pauseReason": null
+  }
+ },
+ "transcriptAtResume": {
+  "lines": 29,
+  "tail": [
+   {
+    "type": "attachment",
+    "subtype": null,
+    "content": "null"
+   },
+   {
+    "type": "last-prompt",
+    "subtype": null,
+    "content": "null"
+   },
+   {
+    "type": "ai-title",
+    "subtype": null,
+    "content": "null"
+   },
+   {
+    "type": "atis-latch",
+    "subtype": null,
+    "content": "null"
+   }
+  ]
+ },
+ "resume": {
+  "result": "launching",
+  "launchId": "wfy64tds",
+  "enginePid": 32727,
+  "engineSessionId": "84e7698c-048e-4c96-9780-0ec40d26038d",
+  "sameEngineSession": true,
+  "readyMs": 8322,
+  "reply": "sleep 20 && echo q7-done",
+  "transcriptLinesAfter": 38,
+  "eventsThisLaunch": {
+   "count": 24,
+   "kinds": [
+    "session.reconnect",
+    "plugin.panes",
+    "notice.posted",
+    "user.message",
+    "context.sample",
+    "session.state",
+    "command.lifecycle",
+    "turn.started",
+    "session.init",
+    "assistant.block.delta",
+    "assistant.block.complete",
+    "turn.ended",
+    "usage.sample"
+   ]
+  }
+ },
+ "send2": {
+  "messageUuid": "f3d106a7-83f3-4386-88ee-8bf5b3cf2350",
+  "disposition": "sent",
+  "queueId": "61275e1d-f32b-4909-8129-aaa21275055d"
+ },
+ "q7": {
+  "checks": {
+   "supervisorKilledMidTurn": true,
+   "freshSupervisorStarted": true,
+   "orphanSwept": true,
+   "resumeLaunched": true,
+   "sameEngineSession": true,
+   "replyFromDiskTranscript": true
+  },
+  "pass": true
+ },
+ "stop": [
+  {
+   "supervisor": "S2",
+   "answer": {
+    "stopped": 1,
+    "forced": 0
+   },
+   "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 10486
+   },
+   "lockLeft": false,
+   "socketLeft": false
+  }
+ ],
+ "survivorsAfterStop": [],
+ "wire": "d59157ef14c10aa7",
+ "supervisors": [
+  {
+   "label": "S1",
+   "pid": 30257,
+   "chunkBuildId": "dd270ecc6fd89e36",
+   "servingMs": 426,
+   "exit": {
+    "code": null,
+    "signal": "SIGKILL",
+    "ms": 4138
+   }
+  },
+  {
+   "label": "S2",
+   "pid": 31591,
+   "chunkBuildId": "dd270ecc6fd89e36",
+   "servingMs": 4969,
+   "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 10486
+   }
+  }
+ ],
+ "hostLog": [
+  "2026-10-08T04:12:59.830Z supervisor 0.0.0 pid 30257 build dd270ecc6fd89e36 starting in <scratch>/userData/supervisor",
+  "2026-10-08T04:12:59.863Z [host] dropping events until a client is ready (first: host.supervisorStatus)",
+  "2026-10-08T04:12:59.865Z listening on <scratch>/userData/supervisor/host.sock",
+  "2026-10-08T04:12:59.968Z refused wire probe-placeholder from appPid 30144 (this supervisor's is d59157ef14c10aa7)",
+  "2026-10-08T04:12:59.969Z client connected: appPid 30144 build dd270ecc6fd89e36",
+  "2026-10-08T04:12:59.970Z [host] 3 events dropped while no client was ready",
+  "2026-10-08T04:13:04.367Z supervisor 0.0.0 pid 31591 build dd270ecc6fd89e36 starting in <scratch>/userData/supervisor",
+  "2026-10-08T04:13:04.404Z [host] dropping events until a client is ready (first: host.supervisorStatus)",
+  "2026-10-08T04:13:04.405Z listening on <scratch>/userData/supervisor/host.sock",
+  "2026-10-08T04:13:04.409Z orphan 762654c4-5831-4126-8f46-342efcef2416 (pid 30411, launch e33emiec) of the dead supervisor pid 30257: SIGTERM",
+  "2026-10-08T04:13:04.518Z client connected: appPid 30144 build dd270ecc6fd89e36",
+  "2026-10-08T04:13:04.519Z [host] 6 events dropped while no client was ready",
+  "2026-10-08T04:13:07.032Z orphan sweep: 1 engine(s) of the dead supervisor pid 30257 stopped",
+  "2026-10-08T04:13:09.421Z [supervisor] stop all asked (grace 3000 ms); the supervisor exits after answering",
+  "2026-10-08T04:13:09.955Z exiting (stopAll)"
+ ],
+ "cost": {
+  "usage": {
+   "input": 4,
+   "output": 172,
+   "cacheWrite": 6860,
+   "cacheRead": 30032,
+   "messages": 3
+  },
+  "estimatedUsd": 0.01244
+ },
+ "ownerFileDelta": {
+  "before": 25,
+  "after": 25,
+  "added": [],
+  "removed": [],
+  "same": true,
+  "pythonSame": true
+ },
+ "cleanup": {
+  "started": [
+   30257,
+   30411,
+   30508,
+   30514,
+   30516,
+   30693,
+   30782,
+   30826,
+   30827,
+   30874,
+   30828,
+   30976,
+   30980,
+   30981,
+   31030,
+   30982,
+   31153,
+   31170,
+   31591,
+   32727
+  ],
+  "stillAlive": [],
+  "psMatches": [],
+  "scratchRemoved": true
+ },
+ "elapsedMs": 10634
+}

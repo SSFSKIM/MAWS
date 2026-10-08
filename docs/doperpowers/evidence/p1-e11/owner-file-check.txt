@@ -30,3 +30,7 @@ S2 (2026-10-08, agents: (a) the agent live suite's steps i, v, x, two runs; (b) 
   before 03:34:15Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the whole projects key set: 129 keys)
   after  03:56:17Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the whole projects set 129 keys, none added or removed,
     also after (a)'s run 1 at 03:39:56Z and run 2 at 03:43:32Z; the spec's scratch-scoped delta identical at every reading of (b), (c) and (d))
+S5 (2026-10-08, keep-quit live on the packaged build and E10's probes Q6 and Q7; live-s5.txt):
+  before 04:06:41Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  04:14:09Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta identical at every reading of both runs;
+    the probes' ownerFileDelta same, no key added or removed)

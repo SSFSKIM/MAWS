@@ -1,0 +1,134 @@
+E11 M6 sitting S5: keep-quit live on the packaged build, and E10's supervisor probes Q6 and Q7 re-run (§2 item 9)
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S5 and §8, Task 6.5; cap US$0.25; child spend before S5 US$0.1815.
+Worktree head at start: 5914a48e. The case was built at a6c9b48a (e2e/p1-live-keep-quit.spec.ts), its one harness fix at
+  8b68c386 (Decision Log 30's round); the passing run and both probes ran on 8b68c386.
+Packaged app: dist/mac-arm64/MAWS.app, the unsigned build:app of M5 at 06ca330d. `git diff --stat 06ca330d HEAD -- src build
+  electron-builder.yml electron.vite.config.ts` lists only five *.test.ts / *.test.tsx files (tests, not shipped), so the
+  bundle is this head's product; not rebuilt. The probes ran on out/ from the controller's `pnpm build` (the product build).
+Verdict: PASSED. The app case passed on its second run after one harness fix; Q6 pass, Q7 pass. No MAWS behavioural finding.
+Engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay; Haiku (claude-haiku-5-5 in every
+  assistant frame of the app case; the probes launch model 'haiku').
+
+Pre-sitting (2026-10-08T04:06:41Z)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200 (again 200 at 04:10:39Z, 04:11:46Z, 04:12:59Z before each later run)
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the 2026-10-07 baseline)
+  load: 12.54 14.25 14.51; the slot admitted each command at once (loads 11.94, 6.07, 4.87, 7.47)
+  survivors before: none (pgrep -fl maws-e11-, pgrep -fl maws-supervisor both empty)
+
+Commands (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  04:06:47Z run 1: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_P1_LIVE=1
+    MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS MAWS_S5_MAX_USD=0.10 MAWS_S5_STAMP=20261008T0407Z
+    MAWS_P1_LIVE_OUT=/private/tmp/maws-e11-s5-log pnpm exec playwright test e2e/p1-live-keep-quit.spec.ts -> 1 failed (2.0m)
+  04:10:39Z run 2 (after 8b68c386; the same command with MAWS_S5_MAX_USD=0.0974, S5's app allotment less run 1's receipt,
+    MAWS_S5_STAMP=20261008T0415) -> "1 passed (51.9s)" at 04:11:39Z
+  04:11:46Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh node spikes/supervisor-probe/reconnect-streaming.mjs
+    --run reconnect -> pass, 04:12:46Z
+  04:12:59Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh node spikes/supervisor-probe/reconnect-streaming.mjs
+    --run crash -> pass, 04:13:59Z
+  The probes rewrite E10's spikes/supervisor-probe/results/q6-reconnect.json and q7-crash-resume.json; both copied here as
+  live-s5-q6-reconnect.json and live-s5-q7-crash-resume.json, then E10's restored (git checkout -- spikes/supervisor-probe/results).
+
+The case (e2e/p1-live-keep-quit.spec.ts): the packaged app launched as e2e/supervisor-packaged.spec.ts launches it
+  (launchMaws over MAWS_E2E_EXECUTABLE, MAWS_HOST_MODE=detached, MAWS_HARNESS=0, MAWS_E2E_ENGINE_BIN the installed engine,
+  CLAUDE_CONFIG_DIR the scratch home, no replay), scratch /private/tmp/maws-e11-s5-<stamp>/ with claude-config/
+  (settings.json {}, .claude.json trusting repo/), repo/ (a git repository, one seeded transcript), user-data/ (the profile).
+  One session resumes its seeded transcript in place on Haiku, default mode, --max-budget-usd the case's allotment; the
+  prompt asks for `sleep 45; echo DONE_<nonce>` through Bash in the foreground; four seconds into the sleep the app quits
+  with MAWS_E2E_QUIT_ANSWER=keep; it is relaunched over the same profile at once.
+
+The harness fix (run 1's failure): the case waited for a permission request for the Bash call, but 2.1.293 ran
+  `sleep 45; echo DONE_4ae10adc` in default mode without asking (the journal: tool_use at seq 68, task_started at 74, the
+  result DONE_4ae10adc at 77, no can_use_tool). The turn completed with the app open; the poll timed out at 120 s. MAWS
+  behaved correctly. 8b68c386 waits for the Bash tool.use itself and allows a permission request once only if one comes.
+  Verification: tsc --noEmit -p tsconfig.e2e.json --composite false and eslint on the spec clean; --list lists the one test.
+
+Asserted, run 2 (all held)
+  the first app's host transport detached; supervisor pid 528 (argv0 maws-supervisor, the chunk inside app.asar)
+  the Bash call toolu_01BeokDU7x5BSdMAkatepTPT `sleep 45; echo DONE_a856fdd8` ran without a permission request; four seconds
+    in: the turn open, no result for the call
+  keep-quit: "quit-guard: 1 mid-turn, auto-answered keep, 1 session kept"; the supervisor (528) and the engine (637)
+    outlived the app
+  relaunch 56 ms after the first app exited (bound 10 s); connected to the same supervisor 528
+  at the connect (778 ms after the exit): session.status process ready, turn open, the same engine pid 637; the Bash
+    call's result not yet in the host's stream; no turn ended since the quit; engine.sessions lists the session once, live
+  DONE_a856fdd8 arrived: the call's tool.result "DONE_a856fdd8" in the host's stream 41.4 s after the exit (45.6 s after
+    the call ran), in the relaunched window's live session.eventBatch, and on screen; the turn ended (success, reply
+    "DONE_a856fdd8")
+  no duplicate: 42 event ids unique in the host's stream; 12 events reached the window live, none twice; one record for
+    the engine session in session.list; one sidebar row; 4 rendered transcript rows, ids unique (the two holding
+    DONE_a856fdd8: the tool's user row and the reply's text row)
+  Stop all (Settings › Background supervisor: "Running since 21:10 · pid 528 · 1 session · exits 10 min after the last
+    session ends", then Stop all sessions and the supervisor… › Stop all): supervisor 528 and engine 637 exited; a fresh
+    supervisor 11263 served with no session; the app then quit with no question and 11263 exited with it
+  init plugins: cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin, the engine's
+    built-ins only, none of the owner's (the same in run 1)
+  no console error in the relaunched window; A-15 identical before, after the keep-quit and after the app closed
+  survivor check (the spec's): supervisors 528 and 11263 and engine 637 none alive at the cleanup; no process naming the
+    scratch; pgrep -fl maws-supervisor: none
+
+E10's probes on this head (Haiku, each launch with the probe's own maxBudgetUsd 0.15; worst case noted below)
+  Q6 --run reconnect: pass; checks burstNotEmpty, burstBeginsRightAfterFirstConnection, noDuplicate,
+    concatenationEqualsSnapshot, firstConnectionIsPrefix all true; first connection 26 events + burst 18 + live 10 = the
+    launch's 54 (snapshot complete, last seq 95); supervisor exited 0; owner file same; no survivor, scratch removed.
+    (E10 on 2.1.292: 34 + 3 + 32 = 69.)
+  Q7 --run crash: pass; checks supervisorKilledMidTurn, freshSupervisorStarted, orphanSwept, resumeLaunched,
+    sameEngineSession, replyFromDiskTranscript all true; orphansKilled 1 (host.log: "orphan … of the dead supervisor pid
+    30257: SIGTERM", "orphan sweep: 1 engine(s) … stopped"); the resume replied "sleep 20 && echo q7-done" from the disk
+    transcript; supervisors S1 SIGKILL, S2 exit 0; owner file same; no survivor, scratch removed.
+  Init plugin list: the probes do not record it; their environment is built from nothing (PATH, HOME, USER, LOGNAME,
+    TMPDIR, LANG, LC_* plus the scratch CLAUDE_CONFIG_DIR, ZDOTDIR, MAWS_USER_DATA), so no CLAUDE_* variable of the owner
+    reaches the supervisor or its engines (assertScratch).
+
+Spend
+  app case run 1: US$0.0026 (journal receipt, total_cost_usd 0.002553; the turn completed)
+  app case run 2: US$0.0012 (journal receipt)
+  Q6: US$0.0144 and Q7: US$0.0124, the probes' own estimates from the transcripts' usage at Haiku 4.5 list rates (the
+    probes keep no receipt; claude-haiku-5-5 bills less for the same usage, so these are upper bounds)
+  S5 total: US$0.0306 of US$0.25. Child total after S5: US$0.2121.
+  Worst case under the caps: the app case's launch carried --max-budget-usd 0.0974; each probe launch carries the probe's
+  own 0.15, and Q7 launches twice (the resume after the kill), so the engine-enforced worst case of the probes (0.45)
+  exceeds S5's remainder; each probe was started only with at least US$0.15 of S5 left, and their real spend was 0.0268.
+
+Post-sitting (2026-10-08T04:14:09Z)
+  A-15 after: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical to before; no key added or removed;
+    the spec's scratch-scoped delta identical at each of its readings; the probes' ownerFileDelta same and pythonSame)
+  survivor check: pgrep -fl maws-e11- none; pgrep -fl maws-supervisor none; the spec's and the probes' own checks above
+  scratch: /private/tmp/maws-e11-s5-20261008T0407ZZ (run 1) and /private/tmp/maws-e11-s5-20261008T0415Z (run 2) removed;
+    the probes removed theirs (/tmp/maws-e0a-e10-q6-*, -q7-*)
+  sibling evidence: spikes/supervisor-probe/results restored; git status shows no docs/doperpowers/evidence sibling modified
+
+The spec's own log, run 1 then run 2 (MAWS_P1_LIVE_OUT=/private/tmp/maws-e11-s5-log, ANSI stripped):
+  ==== S5, 2026-10-08T04:06:48.814Z; scratch /private/tmp/maws-e11-s5-20261008T0407ZZ
+  engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; cap US$0.1000 as the session's --max-budget-usd
+  app: /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS (packaged), MAWS_HOST_MODE=detached, MAWS_HARNESS=0, every CLAUDE* variable of the runner dropped (launchEnvironment); scratch claude-config/ (settings.json {}, .claude.json trusting repo/), user-data/ the profile
+  A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  first app pid 53300; supervisor pid 53391 (maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-Bu)
+  session 0b05eb72-ff3d-43c2-9274-b4d64c782b68 (engine session a96c8b72-f91d-41db-8fcc-444cafb09b3a) launched on Haiku, default mode, maxBudgetUsd 0.1000, resuming its seeded transcript in place; engine pid 53565
+  prompt sent at 2026-10-08T04:06:51.702Z: Run the Bash command `sleep 45; echo DONE_4ae10adc` yourself, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.
+  FAILED: the Bash call asks its permission /  / the Bash call asks its permission /  / expect(received).toBe(expected) // Object.is equality / 
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: recorded supervisors [53391], engines [53565]; alive at the cleanup [53391,53565] (after a failure: killed); processes naming the scratch after it: none; pgrep -fl maws-supervisor: none
+  ----
+  ==== S5, 2026-10-08T04:10:40.697Z; scratch /private/tmp/maws-e11-s5-20261008T0415Z
+  engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; cap US$0.0974 as the session's --max-budget-usd
+  app: /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS (packaged), MAWS_HOST_MODE=detached, MAWS_HARNESS=0, every CLAUDE* variable of the runner dropped (launchEnvironment); scratch claude-config/ (settings.json {}, .claude.json trusting repo/), user-data/ the profile
+  A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  first app pid 442; supervisor pid 528 (maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac1b5d6ccf4ac2092/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-Bu)
+  session 50c9b102-4a2e-463d-b6c4-34299ade49b7 (engine session b17e4e7d-59af-48c6-9981-ac8a2e2ea36f) launched on Haiku, default mode, maxBudgetUsd 0.0974, resuming its seeded transcript in place; engine pid 637
+  prompt sent at 2026-10-08T04:10:42.970Z: Run the Bash command `sleep 45; echo DONE_a856fdd8` yourself, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.
+  the Bash call toolu_01BeokDU7x5BSdMAkatepTPT: {"command":"sleep 45; echo DONE_a856fdd8","description":"Sleep 45 seconds then echo marker"}; permission requests none (run without asking)
+  running since 2026-10-08T04:10:44.858Z; 30 events before the quit, no result for the Bash call toolu_01BeokDU7x5BSdMAkatepTPT; the turn open
+  quit at 2026-10-08T04:10:49.048Z (4190 ms after the call ran): quit-guard: 1 mid-turn, auto-answered keep, 1 session kept
+    A-15 after the keep-quit: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  relaunched 56 ms after the first app exited (bound 10000 ms); app pid 2705
+  at the connect (778 ms after the exit): session.status process ready, turn open, pid 637; 30 events (0 since the last read before the quit); the Bash call's result in them: false
+  the Bash call's result "DONE_a856fdd8" in the host's stream at 2026-10-08T04:11:30.463Z (41415 ms after the exit, 45605 ms after the call ran), and in the window's live batches; the turn ended (success, US$0.0012, reply "DONE_a856fdd8"); 12 events reached the window live, none twice; DONE_a856fdd8 shown in the transcript
+  no duplicate: 42 event ids unique; 1 record; sidebar rows naming the session 1; 4 rendered rows unique; rows holding DONE_a856fdd8: ["user:a832dd83-6356-422b-a9d7-2840467c04f6","text:msg_011Cfp7itXzX4HoY913E6enf:0"]
+  Settings › Background supervisor before Stop all: "Running since 21:10 · pid 528 · 1 session · exits 10 min after the last session ends"
+  the confirmation: "Background supervisorStatusRunning since 21:10 · pid 528 · 1 session · exits 10 min after the last session endsSessions run in this background process, so they can keep running after MAWS quits.Exit w"
+  Stop all: supervisor 528 and engine 637 exited; a fresh supervisor 11263 serves with no session
+  the app quit (no question: nothing mid-turn); the fresh supervisor 11263 exited with it
+  init plugins: ["cc-plugin-agents-md (cc-plugin-agents-md@builtin)","cc-plugin-telemetry (cc-plugin-telemetry@builtin)","cc-plugin-plugin-authoring (cc-plugin-plugin-authoring@builtin)"] (none of the owner’s)
+  assistant models: ["claude-haiku-5-5"]; spend (the journals' main results) US$0.0012 of US$0.0974
+    A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  survivor check: recorded supervisors [528,11263], engines [637]; alive at the cleanup []; processes naming the scratch after it: none; pgrep -fl maws-supervisor: none
