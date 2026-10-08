@@ -63,6 +63,8 @@ describe('the microphone control', () => {
     act(() => notice(A, errorNotice('microphone_denied', 'denied', null)));
     const note = a.getByRole('note', { name: 'Dictation notice' });
     expect(note.textContent).toContain('Microphone access is off for MAWS');
+    // scale-review C scalpel-5#3: the reason is announced (an alert, which a screen reader speaks as it appears)
+    expect(within(note).getByRole('alert').textContent).toContain('Microphone access is off for MAWS');
     expect(b.queryByRole('note')).toBeNull();
     fireEvent.click(within(note).getByRole('button', { name: 'Open System Settings' }));
     expect(invoke).toHaveBeenCalledWith('voice.openPrivacySettings', { pane: 'microphone' });
