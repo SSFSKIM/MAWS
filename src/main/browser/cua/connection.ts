@@ -70,6 +70,7 @@ interface Leased {
   byTarget: Set<string>; // children the host attached by target id
   stops: (() => void)[];
   closing: boolean; // letting go: no new command is taken
+  released: Promise<void> | null; // the letting go under way, which a new attach waits for
 }
 
 interface Held {
@@ -217,6 +218,13 @@ export class CuaConnection {
     }
     const entry = this.tab(debuggee.tabId);
     const tabId = entry.tab.tabId;
+    // a lease still being let go (its undo bounded by RESET_BOUND_MS, the window a host's timeout falls in) is not held:
+    // the attach waits for that release, then takes a fresh lease
+    const releasing = this.leases.get(tabId);
+    if (releasing?.closing) {
+      await releasing.released;
+      return this.attach(debuggee);
+    }
     if (this.leases.has(tabId)) return { alreadyHeld: true };
     this.refuseHeld(entry);
     if (!entry.view && entry.tab.url !== '') this.ctx.store.load(tabId, entry.tab.url); // a suspended tab resumes, as Chrome reloads a discarded one
@@ -230,7 +238,7 @@ export class CuaConnection {
       this.refuseHeld(entry);
       fail(ERRORS.notLoaded(debuggee.tabId));
     }
-    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false };
+    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, released: null };
     leased.stops.push(
       dbg!.on('*', (params, sessionId, method) => this.forward(leased, params, sessionId, method)),
       dbg!.onDetach(() => {
@@ -392,7 +400,12 @@ export class CuaConnection {
 
   // The agent lets go of the tab: what it held is cancelled, what it switched on is undone (bounded), then the lease is
   // released; the attachment ends only when no other lease remains.
-  private async letGo(leased: Leased, why: string): Promise<void> {
+  private letGo(leased: Leased, why: string): Promise<void> {
+    leased.released ??= this.release(leased, why);
+    return leased.released;
+  }
+
+  private async release(leased: Leased, why: string): Promise<void> {
     leased.closing = true;
     this.cancelHeld(leased.entry.tab.tabId, why);
     const undo = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });

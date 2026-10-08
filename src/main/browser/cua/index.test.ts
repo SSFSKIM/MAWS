@@ -310,6 +310,22 @@ describe('the agent state reset', () => {
     expect([h.cdp(tab).attached, tab.debugger!.leases, h.store.all()]).toEqual([false, 0, [tab]]);
   });
 
+  it('an attach while the previous lease is still being let go (a hung undo) waits for that release, then holds a fresh lease', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    const a = await h.host();
+    const id = await h.idOf(a, tab);
+    await a.request('debugger.attach', { tabId: id });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Fetch.enable', params: {} });
+    h.cdp(tab).hang.add('Fetch.disable'); // the undo never answers: the release waits out its bound
+    const detaching = a.request('debugger.detach', { tabId: id });
+    await settle();
+    expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false });
+    await detaching;
+    expect(await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Runtime.evaluate', params: {} })).toEqual({ echoed: 'Runtime.evaluate' });
+    expect([tab.debugger!.leases, h.backend.holds(tab.tab.tabId)]).toEqual([1, true]);
+  });
+
   it('a held command is cancelled when its deadline passes and when its tab is detached', async () => {
     const h = harness();
     const tab = h.personTab();
