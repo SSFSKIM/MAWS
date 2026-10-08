@@ -24,6 +24,13 @@
 // remainders, a case does not start once either is spent (`not run (budget)`), and every session the spec launches
 // carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
 // no turn).
+// Case 2's side thread is a fork of the parent and takes no `--max-budget-usd` (src/main/sessions/launch-mapping.ts;
+// whether it should is owner question Q12), so the test bounds it: the parent launches with FORK_ALLOCATION_USD and
+// BTW_RESERVATION_USD held back from its budget, case 2 starts only when what is left covers the allocation, charges it
+// before the comment is sent, stops the thread through the app once its journal's receipts reach it, and after the
+// thread stops settles the charge to its receipts (or keeps the whole allocation when a prompt went unreceipted); case 3
+// starts only when what is left still covers what the parent may spend under its launch budget. US$0.08 is about two
+// and a half times a recorded fork turn (spikes/protocol-probe/fixtures/resume-fork-*.jsonl: US$0.027 to 0.032).
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
 // response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
@@ -68,7 +75,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -83,6 +90,7 @@ const SHOTS = process.env.MAWS_E11_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpo
 const TURN_MS = 300_000;
 const FIRST_OUTPUT_MS = 30_000; // the engine host's bound (src/engine-host/session.ts, `no_output`)
 const BTW_RESERVATION_USD = 0.05; // case 4's side question, charged since no receipt shows it (the header)
+const FORK_ALLOCATION_USD = 0.08; // case 2's side thread, which takes no --max-budget-usd (the header)
 
 // The pages of case 1, in two colours the prompt never names (E2's recording proved its capture the same way).
 const V1 = { rgb: [211, 47, 47], word: /red|crimson|scarlet/i } as const;
@@ -214,6 +222,7 @@ interface Live {
   a15First: A15Reading; // the owner file before the case
   pids: Set<number>; // the app's and every engine's, for the survivor check
   started: { label: string; id: AppSessionId }[];
+  launchBudgets: Map<string, number>; // each session's `--max-budget-usd` at its launch
   ownerPluginsSeen: string[];
 }
 const sceneOf = (live: Live) => ({ maws: live.maws, page: live.page, pane: live.pane, panel: live.panel }) as unknown as Scene;
@@ -226,7 +235,7 @@ async function openLive(sc: CaseScratch, note: (line: string) => void, a15First:
     note, sc, maws, page: maws.page, a15First,
     pane: maws.page.locator('[data-region="main"] [data-pane="0"]'),
     panel: maws.page.locator('[data-region="panel"]'),
-    ids: [], pids: new Set([maws.app.process().pid!]), started: [], ownerPluginsSeen: [],
+    ids: [], pids: new Set([maws.app.process().pid!]), started: [], launchBudgets: new Map(), ownerPluginsSeen: [],
   };
   try {
     await recordEvents(maws.page);
@@ -268,23 +277,25 @@ function sessionRows(live: Live, id: string): JournalRow[] {
 const outUsers = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 
 // A session launched under the record `id` as the app launches (C7's X6 fields; Haiku, default mode, the gateway),
-// fresh or resuming `resume` in place, with what its sitting and the run leave (the smaller) as its budget; waits for
-// `ready`.
-async function launchSession(live: Live, label: string, id: AppSessionId, opts: { resume?: string } = {}): Promise<void> {
+// fresh or resuming `resume` in place, with what its sitting and the run leave (the smaller) as its budget, less
+// `reserve`, what the case holds back for paid calls the session's own budget does not bound; waits for `ready`.
+async function launchSession(live: Live, label: string, id: AppSessionId, opts: { resume?: string; reserve?: { usd: number; for: string } } = {}): Promise<void> {
   const budget = budgetFor(live.sc.sitting);
-  const refusal = budgetRefusal(budget, CAP);
+  const reserved = opts.reserve?.usd ?? 0;
+  const remaining = Number((budget.usd - reserved).toFixed(4));
+  const refusal = budgetRefusal(budget, CAP, opts.reserve ? { usd: reserved + 0.01, for: `${opts.reserve.for} and at least US$0.01 for ${label}` } : undefined);
   if (refusal !== null) {
     live.note(`${label}: ${refusal}`);
     test.skip(true, refusal);
   }
-  const remaining = budget.usd;
+  live.launchBudgets.set(id, remaining);
   const spec = { ...launchDefaults(id, live.sc.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: remaining, ...(opts.resume ? { resume: { sessionId: opts.resume as SessionId, fork: false } } : {}) };
   expect(value(await invoke(live.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
   live.started.push({ label, id });
   await expect.poll(async () => (await statusOf(live, id)).process, { timeout: 120_000 }).toBe('ready');
   const status = await statusOf(live, id);
   if (status.pid !== null) live.pids.add(status.pid);
-  live.note(`${label} ${id}: launched on Haiku, default mode, maxBudgetUsd ${remaining.toFixed(4)} (the smaller of what ${live.sc.sitting.toUpperCase()} and the run leave)${opts.resume ? `, resuming ${opts.resume} in place` : ''}; pid ${status.pid}`);
+  live.note(`${label} ${id}: launched on Haiku, default mode, maxBudgetUsd ${remaining.toFixed(4)} (the smaller of what ${live.sc.sitting.toUpperCase()} and the run leave${opts.reserve ? `, less US$${reserved.toFixed(4)} held back for ${opts.reserve.for}` : ''})${opts.resume ? `, resuming ${opts.resume} in place` : ''}; pid ${status.pid}`);
 }
 
 // The prompt put into the shown session's composer and sent; `typed` keys it in as a person would (a slash command
@@ -435,7 +446,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     parent = live.ids[0]!;
     await show(sceneOf(live), parent);
     // resuming its seeded conversation in place (E4d's recipe), so the record stays bound to what the thread forks
-    await launchSession(live, 'parent', parent, { resume: sc.engineIds[0] });
+    await launchSession(live, 'parent', parent, { resume: sc.engineIds[0], reserve: { usd: FORK_ALLOCATION_USD + BTW_RESERVATION_USD, for: 'the side thread’s allocation and the side question’s reservation' } });
   });
 
   test.afterAll(async () => {
@@ -512,55 +523,89 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     return sheet;
   }
 
+  // The side thread of this sitting's parent, once the app lists it.
+  const sideThreadOf = async (l: Live) => (value(await invoke(l.page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? '') as AppSessionId;
+  const forkReceipted = (l: Live, child: string) => chargeOf(sessionRows(l, child), FORK_ALLOCATION_USD).receipted;
+
   test('2 a comment picked on the artifact goes to a Side thread, which answers in the Side pane and sums itself up in the parent; the parent’s turns unchanged', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 2', 's3');
+    refuseOverCap(note, 'S3 case 2', 's3', { usd: FORK_ALLOCATION_USD, for: 'the side thread’s allocation (a fork takes no --max-budget-usd: Q12)' });
     test.skip(artifact === null, 'case 1 recorded no artifact');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
     const sheet = await pickTitle(l);
     await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.thread);
+    // the thread's allocation charged before it can spend, settled once it has stopped
+    charge(note, { key: 's3-fork', case: 's3', label: 'the side thread’s allocation (reserved until its journal settles it)', usd: FORK_ALLOCATION_USD });
     await sheet.getByRole('button', { name: 'Send' }).click();
-    await expect(sheet).toHaveCount(0);
 
     let child = '' as AppSessionId;
-    await expect
-      .poll(async () => (child = (value(await invoke(l.page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? '') as AppSessionId), { timeout: 60_000 })
-      .not.toBe('');
-    l.started.push({ label: 'side thread', id: child });
-    const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
-    const anchor = record?.lineage?.anchor;
-    expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
-    const pane = l.panel.locator(`[data-side-thread-view="${child}"]`);
-    await expect(pane, 'the Side pane opens on the thread').toBeVisible({ timeout: 60_000 });
-    await expect(pane.locator('header').first(), 'the anchor at the thread’s head').toContainText(anchor!.label);
-    await expect(pane.locator('[data-chip="anchor"]').first()).toHaveAttribute('data-anchor-kind', 'artifact-element');
+    try {
+      await expect(sheet).toHaveCount(0);
+      await expect.poll(async () => (child = await sideThreadOf(l)), { timeout: 60_000 }).not.toBe('');
+      l.started.push({ label: 'side thread', id: child });
+      const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
+      const anchor = record?.lineage?.anchor;
+      expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
+      const pane = l.panel.locator(`[data-side-thread-view="${child}"]`);
+      await expect(pane, 'the Side pane opens on the thread').toBeVisible({ timeout: 60_000 });
+      await expect(pane.locator('header').first(), 'the anchor at the thread’s head').toContainText(anchor!.label);
+      await expect(pane.locator('[data-chip="anchor"]').first()).toHaveAttribute('data-anchor-kind', 'artifact-element');
 
-    const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
-    const allowed: string[] = [];
-    await drive(l, pane, child, 'the thread’s turn', async () => mainTurnsEnded(await events(l, child)).length > 0 && (await idleNow(l, child)), allowed);
-    const status = await statusOf(l, child);
-    if (status.pid !== null) l.pids.add(status.pid);
-    const reply = mainTurnsEnded(await events(l, child)).at(-1)?.resultText ?? '';
-    await expect(row).toHaveAttribute('data-state', 'finished', { timeout: 30_000 });
-    const summary = (await row.textContent())?.trim() ?? '';
-    const turnsAfter = mainTurnsEnded(await events(l, parent)).length;
-    const usersAfter = outUsers(sessionRows(l, parent)).length;
-    note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its reply ${JSON.stringify(reply)}; permissions allowed in the Side pane ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; no --max-budget-usd on the fork (Q12)`);
-    expect(reply).toContain('ANCHORED');
-    await expect(pane.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the Side pane').not.toHaveCount(0);
-    expect(summary).toContain('ANCHORED');
-    expect(turnsAfter, 'the parent ran no turn').toBe(turnsBefore);
-    expect(usersAfter, 'the main conversation received nothing').toBe(usersBefore);
-    await shoot(l, '6', 'side-thread');
-    note('case 2: PASS');
+      const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
+      const allowed: string[] = [];
+      // the thread's turn, or its receipts reaching its allocation, whichever comes first
+      const done = async () => mainTurnsEnded(await events(l, child)).length > 0 && (await idleNow(l, child));
+      await drive(l, pane, child, 'the thread’s turn', async () => forkReceipted(l, child) >= FORK_ALLOCATION_USD || (await done()), allowed);
+      if (!(await done())) throw new Error(`the side thread reached its US$${FORK_ALLOCATION_USD.toFixed(2)} allocation (receipted US$${forkReceipted(l, child).toFixed(4)}) before its turn ended; stopped`);
+      const status = await statusOf(l, child);
+      if (status.pid !== null) l.pids.add(status.pid);
+      const reply = mainTurnsEnded(await events(l, child)).at(-1)?.resultText ?? '';
+      await expect(row).toHaveAttribute('data-state', 'finished', { timeout: 30_000 });
+      const summary = (await row.textContent())?.trim() ?? '';
+      const turnsAfter = mainTurnsEnded(await events(l, parent)).length;
+      const usersAfter = outUsers(sessionRows(l, parent)).length;
+      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its reply ${JSON.stringify(reply)}; permissions allowed in the Side pane ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; no --max-budget-usd on the fork (Q12): bounded by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
+      expect(reply).toContain('ANCHORED');
+      await expect(pane.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the Side pane').not.toHaveCount(0);
+      expect(summary).toContain('ANCHORED');
+      expect(turnsAfter, 'the parent ran no turn').toBe(turnsBefore);
+      expect(usersAfter, 'the main conversation received nothing').toBe(usersBefore);
+      await shoot(l, '6', 'side-thread');
+      note('case 2: PASS');
+    } finally {
+      // the thread stopped through the app, then charged what it spent: its receipts, or its whole allocation when a
+      // prompt went unreceipted; a thread never listed keeps the whole allocation
+      if (child === '') child = await sideThreadOf(l).catch(() => '' as AppSessionId);
+      if (child === '') note('  the side thread was never listed: its whole allocation stays charged');
+      else {
+        try {
+          await stopSession(l, 'side thread', child);
+        } finally {
+          const cost = chargeOf(sessionRows(l, child), FORK_ALLOCATION_USD);
+          charge(note, {
+            key: 's3-fork',
+            case: 's3',
+            label: cost.settled
+              ? `the side thread beyond its receipts (its journal shows US$${cost.receipted.toFixed(4)}, counted there)`
+              : `the side thread: a prompt went unreceipted, so its whole allocation (its journal shows US$${cost.receipted.toFixed(4)}, counted there; charged up to US$${cost.usd.toFixed(4)} in all)`,
+            usd: Number((cost.usd - cost.receipted).toFixed(4)),
+          });
+        }
+      }
+    }
   });
 
   test('3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 3', 's3');
     test.skip(artifact === null, 'case 1 recorded no artifact');
+    // the parent's process keeps the budget it launched with: what it may still spend under it must fit what is left
+    // now that case 2's thread is charged
+    const launched = l.launchBudgets.get(parent) ?? 0;
+    const allowance = Number((launched - chargeOf(sessionRows(l, parent), 0).receipted).toFixed(4));
+    refuseOverCap(note, 'S3 case 3', 's3', { usd: allowance, for: `what the parent may still spend under its launch budget US$${launched.toFixed(4)}` });
+    note(`case 3: the parent may spend up to US$${allowance.toFixed(4)} more under its launch budget; ${spendLine('s3')}`);
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const allowed: string[] = [];
     await sendFromComposer(l, parent, PROMPTS.slow);
