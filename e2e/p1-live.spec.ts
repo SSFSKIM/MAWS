@@ -902,8 +902,14 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
       const dir = join(sc.userData, 'engine-host', 'journal', id);
       const journals = () => (existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith('.jsonl')) : []);
       const before = journals();
-      const row = await sidebarRow(live.page, { appSessionId: id });
-      await row.click({ button: 'right' });
+      // the project's expansion retried: a click landing while a fresh launch's tree re-renders can be lost (S6's first
+      // run, 2026-10-08; supervisor.spec.ts's rowOf retries the same way)
+      let row: Locator | null = null;
+      await expect(async () => {
+        row = await sidebarRow(live.page, { appSessionId: id });
+        await expect(row).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 30_000 });
+      await row!.click({ button: 'right' });
       const t0 = Date.now();
       await live.page.getByRole('menuitem', { name: 'Resume', exact: true }).click();
       const trust = live.page.getByRole('group', { name: 'Trust this folder?' });
