@@ -87,6 +87,9 @@ vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null }
 // C11 end
 
 beforeAll(async () => {
+  // E11 §2.7: electron.vite.config.ts defines main's build stamp for its bundle; vitest does not
+  vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
+  vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
   await import('./index');
   await Promise.resolve(); // let `whenReady().then(...)` run
 });
