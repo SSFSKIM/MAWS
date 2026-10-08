@@ -49,6 +49,7 @@
     "e2e:browser-import": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/browser-import.spec.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron",
     "e2e:browser-tools": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 MAWS_ENGINE_REPLAY=1 playwright test e2e/browser-tools.spec.ts",
+    "e2e:browser-cua": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/browser-cua.spec.ts",
     "e2e:browser-comment-live": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 MAWS_E4D_LIVE=1 playwright test e2e/browser-comment-live.spec.ts",
     "e2e:p1-live": "MAWS_HARNESS=1 electron-vite build && playwright test e2e/p1-live.spec.ts"
   },
