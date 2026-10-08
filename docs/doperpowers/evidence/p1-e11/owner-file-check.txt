@@ -13,3 +13,6 @@ Install: the worktree's node_modules is a symlink to the main checkout's (brief:
 S8 (2026-10-08, E1's live sitting re-run, two attempts, docs/doperpowers/evidence/p1-e11/live-s8.txt):
   before 02:44:12Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after  02:49:29Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no scratch key appeared or vanished; no other key added)
+S8 attempt 3 (2026-10-08, after the harness fix round 53fa5981):
+  before 02:53:03Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  02:54:48Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta read identical at all five readings)
