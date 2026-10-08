@@ -46,11 +46,11 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
       {actionable && (
         <span className="transcript-delivery-actions">
           {opensExternally(file.name) && (
-            <button type="button" className="transcript-quiet-button" disabled={appSessionId === null} onClick={() => void run(actions.openDelivered)()}>
+            <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.openExternally, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.openDelivered)()}>
               {DELIVERY.openExternally}
             </button>
           )}
-          <button type="button" className="transcript-quiet-button" disabled={appSessionId === null} onClick={() => void run(actions.revealDelivered)()}>
+          <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.reveal, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.revealDelivered)()}>
             {DELIVERY.reveal}
           </button>
         </span>

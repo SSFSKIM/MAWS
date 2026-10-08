@@ -97,8 +97,8 @@ describe('the delivery row', () => {
     expect(file.dataset.path).toBe(path);
     expect(file.querySelector('[title]')!.getAttribute('title')).toBe(path);
     expect(file.textContent).toContain('hello.txt');
-    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally: hello.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder: hello.txt' }));
     expect(actions.openDelivered).toHaveBeenCalledExactlyOnceWith(APP, path);
     expect(actions.revealDelivered).toHaveBeenCalledExactlyOnceWith(APP, path);
   });
@@ -108,7 +108,7 @@ describe('the delivery row', () => {
     const actions = { ...spyActions(), revealDelivered: vi.fn(async () => 'Refused: outside the session’s directories') };
     const row: RowOf<'delivery'> = { id: 'delivery:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'delivery', toolUseId: 't1' as never, files: [{ path: '/repo/a.txt', name: 'a.txt', id: 'd-1' }], caption: null, urgency: 'normal', error: null };
     renderRow(row, { storeKey: APP, actions });
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder: a.txt' })));
     expect(screen.getByRole('alert').textContent).toBe('Refused: outside the session’s directories');
     await act(async () => vi.advanceTimersByTime(3_900));
     expect(screen.queryByRole('alert')).not.toBeNull();
@@ -127,6 +127,8 @@ describe('the delivery row', () => {
     const [pdf, script] = [...view.container.querySelectorAll<HTMLElement>('[data-path]')];
     expect([...pdf!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['report.pdf', 'Open externally', 'Reveal in Finder']); // E2: the name opens the viewer
     expect([...script!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['build.py', 'Reveal in Finder']);
+    // scale-review C scalpel-5#5: each file's actions are named for it, so a list of the row's buttons tells them apart
+    expect(view.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['report.pdf', 'Open externally: report.pdf', 'Reveal in Finder: report.pdf', 'build.py', 'Reveal in Finder: build.py']);
     view.unmount();
 
     const refused = renderRow({ ...row, files: [{ path: 'missing.txt', name: 'missing.txt', id: null }], urgency: 'normal', error: 'send_file: not a file: /repo/missing.txt' }, { storeKey: APP });

@@ -427,6 +427,7 @@ export const DELIVERY = {
   neverAnswered: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)} was never answered`, // E11
   openExternally: 'Open externally',
   reveal: 'Reveal in Finder',
+  actionLabel: (action: string, name: string) => `${action}: ${name}`, // E11 (scale-review C scalpel-5#5): each file's button named for it
 } as const;
 
 // E11 (W-C): the delivery row's one line: its refusal, else Delivering until the files are recorded (or never answered
