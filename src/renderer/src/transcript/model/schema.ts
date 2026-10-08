@@ -139,5 +139,5 @@ export const RowSchema = z.discriminatedUnion('kind', [
     truncated: z.boolean(), tabCount: nullable(z.number()), state: z.enum(['running', 'done', 'error', 'cancelled']), detail: nullable(z.string()), answered: z.boolean(),
   }),
   // E4c end
-  z.strictObject({ ...base, kind: z.literal('browser_activity'), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
+  z.strictObject({ ...base, kind: z.literal('browser_activity'), toolUseId: nullable(z.string()), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
 ]);

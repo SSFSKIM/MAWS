@@ -571,9 +571,3 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 .transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
 .transcript-browser-action > .transcript-output { margin: 4px 0 2px 23px; }
 /* E4c end */
-
-/* E13 start: what an agent did in the in-app browser through cua_repl, under the `js` call's line: the browser action
-   row's compact line, indented under the call's label and a little tighter, since a call may carry several. */
-.transcript-browser-activity-lines { display: flex; flex-direction: column; margin: 0 0 2px 19px; font-size: var(--text-ui-sm); }
-.transcript-browser-activity-lines > .transcript-browser-action-line { min-height: 22px; }
-/* E13 end */

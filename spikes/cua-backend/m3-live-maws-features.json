@@ -53,7 +53,7 @@
    "added": [
     {
      "id": "2",
-     "url": "http://127.0.0.1:57852/popup"
+     "url": "http://127.0.0.1:62888/popup"
     }
    ]
   },
@@ -65,7 +65,7 @@
    "sha256Match": true,
    "createdByFixture": true,
    "inDownloads": true,
-   "elapsedMs": 274,
+   "elapsedMs": 275,
    "removed": {
     "deleted": true
    }

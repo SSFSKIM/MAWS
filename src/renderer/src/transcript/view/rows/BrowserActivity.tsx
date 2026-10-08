@@ -1,28 +1,23 @@
-// E13 (the in-app browser spec of 2026-10-08, "Action rows"): what an agent did in the in-app browser through cua_repl,
-// in the browser action row's visual language (the browser glyph and one compact line). Under a `js` call's line, the
-// activities attached to it, live as main reports them; an activity with no call to stand under is a row of its own,
-// which the transcript places at its time. Page text (a label, an excerpt, an address) is rendered as plain text.
+// E13 (the in-app browser spec of 2026-10-08, "Action rows"; M3 fix wave): what an agent did in the in-app browser
+// through cua_repl, one persistent row per activity in the browser action row's visual language (the browser glyph and
+// one compact line): under the `js` call it happened in, or standalone. Transcript.tsx places the rows; page text (a
+// label, an excerpt, an address) is rendered as plain text.
 import type { BrowserActivity } from '@shared/browser/activity';
-import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { useBrowserActivity } from '../../../tools/browser/agent/activity';
-import { attachmentOf, type BrowserActivityAttachment, type BrowserActivityEntry } from '../../model/browser-activity';
+import { attachmentOf, type BrowserActivityAttachment } from '../../model/browser-activity';
 import { browserActivityLine } from '../../model/copy';
 import type { Row } from '../../model/rows';
-import { useRowSession, useTranscriptContext } from '../context';
 import { BrowserIcon } from './icons';
 
-// A part of the attachment of the session's activity to the `js` calls of the transcript under `storeKey`. The pick
-// must return the same array while it is unchanged (attachmentOf keeps it so), and a session with no activity reads
-// the empty attachment: an event batch that changed nothing here re-renders nothing.
-function useAttachment<T>(storeKey: string, appSessionId: AppSessionId | null, pick: (attachment: BrowserActivityAttachment) => T): T {
+// The attachment of the session's activity to the `js` calls of the transcript under `storeKey`: the same object
+// while nothing in it changed (attachmentOf keeps it so), and the empty one for a session with no activity, so an event
+// batch that changed nothing here re-renders nothing.
+export function useBrowserActivityAttachment(storeKey: string, appSessionId: AppSessionId | null): BrowserActivityAttachment {
   const activities = useBrowserActivity(appSessionId);
-  return useTranscriptStore((store) => pick(attachmentOf(store.entries[storeKey]?.state ?? null, appSessionId, activities)));
+  return useTranscriptStore((store) => attachmentOf(store.entries[storeKey]?.state ?? null, appSessionId, activities));
 }
-
-const NONE: readonly BrowserActivityEntry[] = [];
-// The session's activities with no `js` call to stand under (Transcript.tsx places them by time).
-export const useStandaloneBrowserActivity = (storeKey: string, appSessionId: AppSessionId | null) => useAttachment(storeKey, appSessionId, (attachment) => attachment.standalone);
 
 function ActivityLine({ activity }: { activity: BrowserActivity }) {
   return (
@@ -33,23 +28,10 @@ function ActivityLine({ activity }: { activity: BrowserActivity }) {
   );
 }
 
-// Under a cua_repl `js` call's line: what the agent did in the browser while it ran (nothing when it did nothing).
-export function BrowserActivityLines({ toolUseId }: { toolUseId: ToolUseId }) {
-  const { storeKey } = useTranscriptContext();
-  const attached = useAttachment(storeKey, useRowSession(), (attachment) => attachment.byCall.get(toolUseId) ?? NONE);
-  if (attached.length === 0) return null;
-  return (
-    <div className="transcript-browser-activity-lines" data-browser-activity-lines="">
-      {attached.map((entry) => (
-        <ActivityLine key={entry.seq} activity={entry.activity} />
-      ))}
-    </div>
-  );
-}
-
+// One activity's row: under its `js` call (`data-tool-use`), or standalone.
 export function BrowserActivityRow({ row }: { row: Extract<Row, { kind: 'browser_activity' }> }) {
   return (
-    <section className="transcript-browser-action" data-browser-activity-row="">
+    <section className="transcript-browser-action" data-browser-activity-row="" data-tool-use={row.toolUseId ?? undefined}>
       <ActivityLine activity={row.activity} />
     </section>
   );

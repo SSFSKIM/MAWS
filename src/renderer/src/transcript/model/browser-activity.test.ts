@@ -6,7 +6,7 @@ import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { attachBrowserActivity, attachmentOf, browserActivityRow, turnSpansOf, withBrowserActivityRows, type BrowserActivityEntry, type TurnSpan } from './browser-activity';
 import { classifyTool, CUA_JS_TOOLS, isCuaJsTool, presentationOf } from './classify';
-import { rowsOf, withAllExpanded } from './derive';
+import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row, RowId, TurnId } from './rows';
 import { builder, tool, uuid } from './test-events';
@@ -165,12 +165,14 @@ describe('the classification of a cua_repl js call', () => {
   });
 });
 
+const alone = (standalone: BrowserActivityEntry[]) => ({ byCall: new Map(), calls: new Map(), standalone });
+
 describe('standalone activity rows in the flat list', () => {
   const plain = (id: string, s: number): Row => ({ id: id as RowId, turnId: null, at: at(s), kind: 'time', label: id });
 
-  it('returns the rows themselves when nothing stands alone', () => {
+  it('returns the rows themselves when there is no activity', () => {
     const rows = [plain('a', 0), plain('b', 10)];
-    expect(withBrowserActivityRows(rows, [])).toBe(rows);
+    expect(withBrowserActivityRows(rows, alone([]))).toBe(rows);
   });
 
   it('places each after the last row at or before its time, in time order, keeping its row object', () => {
@@ -179,14 +181,66 @@ describe('standalone activity rows in the flat list', () => {
     const mid = activity(12);
     const tie = activity(20);
     const late = activity(30);
-    const out = withBrowserActivityRows(rows, [late, mid, early, tie]);
+    const out = withBrowserActivityRows(rows, alone([late, mid, early, tie]));
     const ids = out.map((row) => (row.kind === 'browser_activity' ? `act${[early, mid, tie, late].findIndex((e) => e.seq === Number(row.id.split(':')[1]))}` : row.id));
     expect(ids).toEqual(['act0', 'a', 'b', 'c', 'act1', 'd', 'act2', 'act3']);
     expect(out.find((row) => row.kind === 'browser_activity' && row.id === browserActivityRow(late).id)).toBe(browserActivityRow(late));
   });
 
-  it('makes a row outside any turn that carries the activity as main sent it', () => {
+  it('makes a row outside any turn and any call that carries the activity as main sent it', () => {
     const entry = activity(3, { activity: { kind: 'download', filename: 'cua-report.pdf', state: 'complete' } });
-    expect(browserActivityRow(entry)).toEqual({ id: `browser-activity:${entry.seq}`, turnId: null, at: entry.at, kind: 'browser_activity', appSessionId: APP, tabId: TAB, activity: entry.activity });
+    expect(browserActivityRow(entry)).toEqual({ id: `browser-activity:${entry.seq}`, turnId: null, at: entry.at, kind: 'browser_activity', toolUseId: null, appSessionId: APP, tabId: TAB, activity: entry.activity });
+  });
+});
+
+// M3 fix wave: an attached activity is a persistent row of its own kind, as the old browser action rows were: right
+// under its `js` call's cell while the turn's work is open, and still in view, in the turn's persistent rows at the
+// call's place, once the turn folds; the `js` cell itself folds with the work and keeps counting in the divider.
+describe('attached activity rows', () => {
+  // A closed turn: a prompt, commentary, the js call, its result, the answer.
+  function closedJsTurn() {
+    const b = builder('2026-10-08T10:00:00.000Z');
+    b.turn('u1');
+    b.text('m0', 0, 'Opening the page.');
+    b.toolUse('j1', 'mcp__plugin_cua_cua_repl__js', { code: '1' });
+    const started = Date.parse(b.events.at(-1)!.at);
+    b.tick(2_000);
+    b.result('j1', 'ok');
+    b.text('m1', 0, 'Done.');
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const nav = activity(0, { at: new Date(started + 500).toISOString(), activity: { kind: 'navigated', url: 'https://example.com/', title: '' } });
+    const shot = activity(0, { at: new Date(started + 900).toISOString() });
+    return { state, nav, shot };
+  }
+  const shape = (rows: Row[]) => rows.map((row) => (row.kind === 'browser_activity' ? `act:${row.toolUseId}` : row.kind === 'cell' ? `cell:${row.toolUseId}` : row.kind === 'assistant_text' ? `text:${row.phase}` : row.kind));
+
+  it('sit directly under the js call’s cell while the work is open, in order, tagged with the call and its turn', () => {
+    const { state, nav, shot } = closedJsTurn();
+    const open = withAllExpanded(state);
+    const out = withBrowserActivityRows(rowsOf(open), attachmentOf(open, APP, [nav, shot]));
+    expect(shape(out)).toEqual(['time', 'user', 'divider', 'text:commentary', 'cell:j1', 'act:j1', 'act:j1', 'text:answer']);
+    const rows = out.filter((row) => row.kind === 'browser_activity');
+    expect(rows.map((row) => row.id)).toEqual([browserActivityRow(nav).id, browserActivityRow(shot).id]);
+    expect(rows.every((row) => row.turnId === state.order[0])).toBe(true);
+  });
+
+  it('stay in view when the turn folds, at the call’s place among the persistent rows, while the cell folds and still counts', () => {
+    const { state, nav, shot } = closedJsTurn();
+    const derived = rowsOf(state); // a closed turn folds by default
+    const out = withBrowserActivityRows(derived, attachmentOf(state, APP, [nav, shot]));
+    expect(shape(out)).toEqual(['time', 'user', 'divider', 'act:j1', 'act:j1', 'text:answer']);
+    const divider = out.find((row) => row.kind === 'divider')!;
+    expect(divider.kind === 'divider' && divider.toolCalls).toBe(1);
+    for (const row of out.filter((row) => row.kind === 'browser_activity')) {
+      expect(isPersistentRow(row)).toBe(true); // so the view's work area (view/motion.ts `inWorkArea`) leaves it in view
+      expect(row.turnId).not.toBeNull(); // the turn's own row, in its place
+    }
+  });
+
+  it('show nothing for a turn the list does not show (a rewound branch not revealed)', () => {
+    const { state, nav } = closedJsTurn();
+    const others = rowsOf(state).filter((row) => row.turnId !== state.order[0]);
+    expect(withBrowserActivityRows(others, attachmentOf(state, APP, [nav]))).toEqual(others);
   });
 });

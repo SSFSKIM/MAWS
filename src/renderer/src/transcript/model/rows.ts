@@ -125,10 +125,11 @@ export type Row = RowBase &
         tabCount: number | null; state: 'running' | 'done' | 'error' | 'cancelled'; detail: string | null; answered: boolean;
       }
     // E4c end
-    // E13 start: what an agent did in the in-app browser through cua with no `js` call to stand under (the in-app browser
-    // spec of 2026-10-08, "Action rows"): a download that completed after its turn, a dialog MAWS answered by default.
-    // Never derived from X1 events: the transcript view places it among the rows by its time (browser-activity.ts)
-    | { kind: 'browser_activity'; appSessionId: AppSessionId; tabId: string; activity: BrowserActivity }
+    // E13 start: what an agent did in the in-app browser through cua (the in-app browser spec of 2026-10-08, "Action
+    // rows"; M3 fix wave), a persistent row as the browser action row is: under the cua_repl `js` call it happened in
+    // (`toolUseId`, and `turnId` its turn), or standalone with neither (a download that completed after its turn, a dialog
+    // MAWS answered by default). Never derived from X1 events: the transcript view places it (browser-activity.ts)
+    | { kind: 'browser_activity'; toolUseId: ToolUseId | null; appSessionId: AppSessionId; tabId: string; activity: BrowserActivity }
     // E13 end
   );
 
