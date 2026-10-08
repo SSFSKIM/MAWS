@@ -48,6 +48,7 @@ import { baseUrlFrom, ClaudeUsageControl } from './usage/claude-usage-control'; 
 // C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
 import { registerFilesHandlers } from './files/register';
+import { allowlistOf } from './files/allowlist'; // E11
 // C8c end
 // C10 start (emit comes with C3's imports, createGitRunner with C7's, shell with C8c's)
 import { captureShellEnvironment } from '@shared/host/shell-env';
@@ -292,7 +293,8 @@ void startWithProfileLock(app, () => {
   // C7 end
   // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
   // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
-  const filesService = registerFilesHandlers(sessions.model, {
+  // E11: an unstarted session (a New chat before its first send) reads its setup intent's location
+  const filesService = registerFilesHandlers(allowlistOf(sessions.model, intents), {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
     showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal

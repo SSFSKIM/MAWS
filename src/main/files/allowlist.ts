@@ -5,9 +5,30 @@
 // resolve is dropped, never replaced by the record's string: a session with no resolvable root reads nothing.
 import fs from 'node:fs';
 import { sep } from 'node:path';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import type { SetupIntent } from '@shared/sessions/intent';
 
 export type AllowlistRecord = Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'>;
+
+// Whose directories `files.*` reads (E11's sitting: a New chat's Files pane answered "unknown app session" until the
+// session started): a session's record once it has one; before its first send, its setup intent's location, which is
+// where it will run: the chosen directory, an existing worktree, or for a worktree still to be made its repository
+// until the setup makes it. A New chat with no project chosen yet has none.
+export function allowlistOf(
+  model: { record(appSessionId: AppSessionId): AllowlistRecord | null },
+  intents: { get(appSessionId: AppSessionId): SetupIntent | null },
+): (appSessionId: AppSessionId) => AllowlistRecord | null {
+  return (appSessionId) => {
+    const record = model.record(appSessionId);
+    if (record !== null) return record;
+    const intent = intents.get(appSessionId);
+    const location = intent?.location ?? null;
+    if (intent === null || intent === undefined || location === null) return null;
+    const directory = location.kind === 'newWorktree' ? (intent.progress.worktree?.path ?? location.repoRoot) : location.path;
+    return { directory, additionalDirectories: intent.additionalDirectories, worktree: null };
+  };
+}
 
 // The roots in record order (directory, additional directories, worktree), deduplicated by realpath.
 export async function rootsOf(record: AllowlistRecord): Promise<string[]> {
