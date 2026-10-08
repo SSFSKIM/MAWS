@@ -87,8 +87,10 @@ function RefreshIcon({ className }: { className?: string }) {
   );
 }
 
-// E11: an unstarted session's directories as its intent names them, for re-listing when they change.
-const unstartedRootsKey = (intent: SetupIntent | undefined): string => (intent ? JSON.stringify([intent.location, intent.additionalDirectories]) : '');
+// E11: an unstarted session's directories as its intent names them, for re-listing when they change: a new worktree's
+// path too, which replaces its repository in main's listing once the setup makes it (F2a review 4).
+const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
+  intent ? JSON.stringify([intent.location, intent.additionalDirectories, intent.progress.worktree?.path ?? null]) : '';
 
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;

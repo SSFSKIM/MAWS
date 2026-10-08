@@ -448,7 +448,7 @@ describe('files tool', () => {
       if (name === 'files.list' && input.path === undefined) return chosen ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail(`unknown app session: ${A}`);
       return fail(`unexpected ${name}`);
     });
-    const intent = (location: unknown) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt: chosen ? '2026-10-08T10:00:01.000Z' : '2026-10-08T10:00:00.000Z' }) as never;
+    const intent = (location: unknown) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt: chosen ? '2026-10-08T10:00:01.000Z' : '2026-10-08T10:00:00.000Z', progress: { worktree: null } }) as never;
     act(() => useSetup.getState().applyIntents([intent(null)]));
     render(<TestHost />);
     openTool();
@@ -457,6 +457,34 @@ describe('files tool', () => {
     chosen = true;
     act(() => useSetup.getState().applyIntents([intent({ kind: 'directory', path: '/r' })]));
     await waitFor(() => expect(items()).toEqual(['r']));
+    act(() => useSetup.setState({ intents: new Map() }));
+  });
+
+  // F2a review 4: main lists a new worktree's repository until the setup makes the worktree, then the worktree; the
+  // location alone does not change at that step, so the pane follows the setup's progress too.
+  it("an unstarted session's pane lists the new worktree once its setup has made it", async () => {
+    useSessions.setState((s) => {
+      const records = new Map(s.records);
+      records.delete(A);
+      return { records };
+    });
+    let made = false;
+    installFakeMain((name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list' && input.path === undefined) return answer({ root: null, path: '', entries: [dir(made ? '/r-feature' : '/r')], truncated: false });
+      return fail(`unexpected ${name}`);
+    });
+    const location = { kind: 'newWorktree', repoRoot: '/r', name: 'feature', branch: { kind: 'new', name: 'feature', base: 'HEAD' } };
+    const worktree = { path: '/r-feature', branch: 'feature', head: 'abc', createdHere: true };
+    const intent = (updatedAt: string) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt, progress: { worktree: made ? worktree : null } }) as never;
+    act(() => useSetup.getState().applyIntents([intent('2026-10-08T10:00:00.000Z')]));
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(items()).toEqual(['r']));
+    made = true;
+    act(() => useSetup.getState().applyIntents([intent('2026-10-08T10:00:01.000Z')]));
+    await waitFor(() => expect(items()).toEqual(['r-feature']));
     act(() => useSetup.setState({ intents: new Map() }));
   });
 
