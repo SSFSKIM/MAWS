@@ -189,6 +189,13 @@ Owner requirements and taste, verbatim where given:
   크롬처럼 위의 바가 없다. 북마크바, 익스텐션바 등등. 그걸 만들어야한다": the browser tab needs Chrome's top chrome:
   a bookmarks bar from the imported profile's bookmarks and an extensions bar with the imported extensions'
   actions and popups. Scope for the P2 cut with E4's import design as the base; not a fix-wave item.
+  Bookmarks are not imported today: the import covers History, Cookies and Extensions, and E4b's plan deferred
+  "Importing bookmarks (`Bookmarks` JSON) into a MAWS surface; importing `Local State`'s avatar" (its line 377;
+  E11's deferred list repeats it). Owner, 2026-10-08: "are we importing bookmarks too? if not, we should". So 3.E
+  carries a fourth import category, Bookmarks (the profile's `Bookmarks` JSON: `roots.bookmark_bar`, `other`,
+  `synced`, nested folders; plain JSON, no key), with its own consent row and re-sync, rendered as the bookmarks
+  bar; the extensions bar shows each loaded extension's action with its popup and options page (E4b deferred
+  "per-extension site access, popups and options pages"); the profile avatar from `Local State` on the tab pill.
 - Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
   either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
   tab; floating widget or sidebar tab, the owner has not chosen.
