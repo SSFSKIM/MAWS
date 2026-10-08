@@ -1,0 +1,235 @@
+E11 pre-run of the P1 spec's §2 items 1 to 12 (Task 6.6; Acceptance 5)
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 (the table and the live sittings) and §8; Decision Log 1, 15.
+Written 2026-10-08 on branch worktree-agent-ac1b5d6ccf4ac2092 at 964a0d0a, from the committed evidence only (no run).
+
+The head. M5's gates ran on the final head 06ca330d (gates/final-summary-06ca330d.txt, retries in
+  gates/final-retries-06ca330d.txt). The sittings ran on later heads of the same branch (46855950 to 10eacbd9) whose product
+  is 06ca330d's: `git diff --stat 06ca330d 964a0d0a -- src build electron-builder.yml electron.vite.config.ts native
+  package.json` lists five *.test.ts / *.test.tsx files (the fixture pins of S1 and S2) and package.json's one added script
+  `e2e:p1-live` (not in `verify`); everything else E11 added after M5 is e2e, live harness and fixture files. S5 ran the
+  packaged MAWS.app of M5's unsigned build:app at 06ca330d (live-s5.txt).
+The engine. Every sitting ran on the installed engine 2.1.293 (~/.local/share/claude/versions/2.1.293, unmodified, through the
+  relay, Haiku: claude-haiku-5-5 in every assistant frame the logs read). The installed engine moved from 2.1.292 (M0's pin,
+  Progress) to 2.1.293 during M6, before S8, the first sitting.
+The rule. Items that need the owner's hands or the real home are `owner: step <x>` (owner-script.txt), never `pass`
+  (Decision Log 15). A sitting's result is what its log asserted on the installed engine under a scratch config home.
+
+M5's groups on 06ca330d cited below (counts as passed): typecheck, lint, build:app, units 9,859 (1 skipped), test:probes 172,
+  build, e2e 49, transcript 31, terminal 15, panel 23, c7 29 (on its retry alone; the chained run 28/1 lost one Escape with
+  the owner at the desktop), voice 14, code 36, agents 23, widgets 24, settings 9, c12 4, tools 8, scm 8, side 8,
+  deliverables 10, supervisor 8, browser 8, browser-comment 13, browser-import 6, browser-tools 11, requests 11, composer 18,
+  verify:fuses (RunAsNode enabled), packaged 51 (on its retry; first 50/1, a side-case timing flake), supervisor:packaged 1,
+  stale supervisors 0. Each group's file: gates/final-<group>-06ca330d.txt.
+
+== The items (one row each: §2 item | observed on the final head | E11 sitting, result, pointer | owner's step) ==
+
+1 | A Workflow run live in the panel widget (phases, agents with models); click an agent for its transcript; Stop; the
+    subagent topology tree with running and done
+  observed: e2e:agents 23 (E7's five cases over the workflow and nested-agents fixtures); evidence/p1-e7/g1-widget-{light,dark}.png,
+    g2-tree-{light,dark}.png, e2e-agents.txt
+  sitting: S2(a) PASSED on its re-run (live-s2.txt (a)): the agent live suite's E7-adapted steps i, v, x on Haiku. i: Agents ·
+    2 running, then both under the collapsed Done · 2; v: phase history Echo 0/2 to 2/2, the widget's agents alpha and beta
+    on claude-haiku-5-5 with tokens, Stop workflow read stopping… then stopped; x: the disk read ("On disk · 2", the drill-in
+    "Known only from disk", "Workflow runs on disk · 2"). Run 1 failed only C8b's R6 stop-order check (2.1.293 orders
+    task_updated, task_notification, then the empty snapshot; [parent-impact], harness fix 9ff76f42). US$0.0761.
+  owner: step A (A6.1 compact cards, A6.2 stacking under 520 px), step B (the workflow widget and the topology tree)
+
+2 | From MAWS add a marketplace, install, update, enable and disable a plugin, reload mods; the running session reflects it
+  observed: e2e:widgets 24, e2e:settings 9; E8's sixteen-step live run (evidence/p1-e8/live-run.txt, live-*.png)
+  sitting: S7 PASSED (live-s7.txt): E8's plugins live run re-run, all sixteen steps (folder and GitHub marketplaces added and
+    removed, install, Reload mods and skills, update 0.1.0 → 0.2.0, /skills after the next turn, disable, enable, uninstall,
+    a withdrawn plugin's error in the engine's words, the removal sheet naming the plugin it uninstalls), each "Reloaded in
+    1 session · reflected", every write inside the scratch config home; console errors []. US$0.0186.
+  owner: step J (J1: the owner's own marketplace, one install, disable and enable, one reload); step A (A7)
+
+3 | Hold a key, speak, the text lands in the composer
+  observed: e2e:voice 14 (the scripted recogniser); evidence/p1-e9/ (e2e-voice.txt, packaged-helper.txt, settings-voice.png,
+    dictation-listening.png, dictation-denied.png)
+  sitting: none (TCC dialogs and the microphone are hands)
+  owner: step E (in the development-signed packaged app); step A (A8)
+
+4 | Edit a file in a MAWS tab and save; a conflict opens the merge view
+  observed: e2e:code 36 (code-editor cases 1 to 7); evidence/p1-e5/shots/ (e5-editor-*, e5-conflict-*), p1-e5/gates.txt
+  sitting: none (no engine)
+  owner: step A (A4: inline conflict-marker blocks, unsaved files in the quit question, Changed on disk, the close sheet);
+    step B (the editor bar, the merge view)
+
+5 | The agent delivers a file through MAWS's tool: a row, the viewer (PDF, HTML, image, video, audio, markdown); artifacts keep
+    versions
+  observed: e2e:tools 8, e2e:deliverables 10, e2e:transcript 31; E1's live sitting (evidence/p1-e1/live-sitting.txt); E2's
+    fixtures pass3/p1-maws-artifacts and p1-sdk-mcp-image; evidence/p1-e2/e2-viewer-{pdf,html,image,media,markdown}-*.png,
+    e2-versions-*.png
+  sitting: S8 PASSED on attempt 3 (live-s8.txt): send_file's row "Delivered hello.txt · the greeting", the record file, Open
+    externally and Reveal in Finder through the seam (attempts 1 and 2 failed step 4 on stale and non-strict selectors,
+    harness fixes c26c3805 and 53fa5981, MAWS answering the same in all three). US$0.0213.
+    S3 case 1 PASSED (live-s3.txt): main's real artifact_screenshot capture answered a live engine for the first time (the
+    image block decodes to a 1280 x 800 PNG whose dominant colour rgb(211, 47, 47) is at distance 0 from the page's, 99.2%
+    of pixels; the model's word "red", never named in the prompt); the record with two copied versions, the rows "Artifact
+    P1 page · v1" and "Updated artifact P1 page · v2", the Deliverables tool listing it, the viewer on v2 with
+    [v1, v2 · latest]. Shots prerun-5-artifact-row-{light,dark}.png, prerun-5-viewer-{light,dark}.png.
+  owner: step B (the viewer kinds by eye); step A (A1.3 the delivery row's buttons, A2 the viewer kinds, versions, console,
+    Open as file, the blocked web link)
+
+6 | A comment pinned to an element in the browser or a delivered artifact opens a side thread; the agent edits and replies
+    there; main not interrupted; "Send to main" works
+  observed: e2e:side 8 (cases 1 to 7), e2e:deliverables 10 (its comment case), e2e:browser-comment 13; E3's M0 fixtures
+    pass3/p1-side-thread-live, -fork, -resume; the browser half's live proof is E4d's own (evidence/p1-e4d/live-proof.txt,
+    A-49: a side thread's Haiku agent clicked the commented element on the commented tab by css)
+  sitting: S3 cases 2 and 3 PASSED (live-s3.txt): the #title pick through the viewer's pick overlay opened a side thread
+    (lineage side-thread / comment / artifact-element) whose reply "ANCHORED" showed in the Side pane and in the parent's
+    summary row, the parent's turns 1 -> 1; Send to main steered the running parent with priority next, the anchored bubble
+    in its transcript and STEER_SEEN in its reply. Shots prerun-6-side-thread-{light,dark}.png,
+    prerun-6-send-to-main-{light,dark}.png. S4 case 6 skipped by design, citing E4d's M5 (A-49; Decision Log 9 and 20).
+  owner: step A (A3 the chip and nested threads, A12.1 watch the thread's agent click the commented element); step B (a
+    comment picked in the browser by hand)
+
+7 | The in-app browser imports a Chrome profile the owner chooses; the agent drives a tab through MAWS's browser tools; the
+    owner takes over by clicking and the agent resumes after
+  observed: e2e:browser 8, e2e:browser-import 6 (a synthetic profile), e2e:browser-tools 11 (the seam cases 3 to 9); E4c's
+    fixture pass3/p1-maws-browser
+  sitting: S4 case 5 PASSED (live-s4.txt): E4c's recording prompt against the real browser (main real, no stand-in): the
+    seven browser_action rows in order on one tab (open, snapshot, fill, fill, click, snapshot, screenshot), the reply
+    "MAWS-7731 image", the screenshot record, maws-agent-cursor in the page during the turn, the Browser tool opened once.
+    Case 7 PASSED with no engine turn: http://127.0.0.1:17393/oopif.html frames http://localhost:17393/field.html out of
+    process (frame processId 8 against the page's 7), the field textbox "Note" (name="note") inside "- iframe"; the page for
+    step F. Case A-47 PASSED (below). Shots prerun-7-browser-rows-{light,dark}.png. US$0.0051.
+  owner: step D (the import, E4b's G2 checklist, then the takeover by hand on the imported profile); step F (the OOPIF human
+    key)
+
+8 | A batch question through MAWS's tool: the capsule opens the sheet with choices, free text, files or folders, a repository
+    and "decide for me"; an async question does not block the turn
+  observed: e2e:tools 8 (cases 2 to 6); E1's live sitting (evidence/p1-e1/live-sitting.txt)
+  sitting: S8 steps 2 and 3 PASSED (live-s8.txt): five questions in five modalities through the Question sheet (single and
+    multi choice with Other, a skipped text, a folder through main's pick seam, decide for me), the capsule "Answered", View
+    answers read-only; the async ask acknowledged before the answer, the steer folded into the running turn (one result).
+    S1 PASSED on attempt 1 (live-s1.txt): an interrupt while a blocking ask waited; the engine's notifications/cancelled
+    named the ask's JSON-RPC id, the host answered {result: {}, id: 0}, wrote no result for the tools/call, withdrew the ask
+    (maws_ask_cancelled and maws.ask.cancelled, reason withdrawn); a later answer read not_pending. Fixture admitted (below).
+    US$0.0029.
+  owner: step A (A1.1 the sheet opened by a blocking ask, A1.2 the capsule's states); step B (the Question sheet's taste)
+
+9 | Quit with a turn in flight and relaunch: the session is still there and still streaming
+  observed: e2e:supervisor 8 (its case (b)), e2e:supervisor:packaged 1, e2e:packaged 51; E10's Q6 and Q7
+    (spikes/supervisor-probe/findings.txt), evidence/p1-e10/relaunch.txt
+  sitting: S5 PASSED on its second run (live-s5.txt): the packaged build under MAWS_HOST_MODE=detached, a Haiku turn running
+    `sleep 45; echo DONE_<nonce>`, keep-quit four seconds in; relaunch 56 ms after the exit onto the same supervisor and
+    engine pid with the turn open; DONE arrived once 41.4 s after the exit; no event, record, row or transcript row
+    doubled; Stop all left nothing. Run 1 failed on the harness (2.1.293 ran the Bash call without a permission request;
+    fix 8b68c386). E10's probes on this head: Q6 reconnect pass, Q7 crash pass (live-s5-q6-reconnect.json,
+    live-s5-q7-crash-resume.json). US$0.0306.
+  owner: step G (keep-quit on the owner's own profile); step C (sleep and wake with a turn streaming under the supervisor)
+
+10 | `/btw` opens a side pane with the answer; the main conversation untouched
+  observed: e2e:side 8 (case 5); fixture pass3/p1-side-question-session
+  sitting: S3 case 4 PASSED (live-s3.txt): one side_question control answered "Red" in the Side pane; the parent's turns
+    2 -> 2 and written prompts 3 -> 3. Shots prerun-10-btw-{light,dark}.png.
+  owner: step J (J2: /btw in a real session)
+
+11 | From the panel: stage, commit, push and open a PR from the session's worktree; the summary row shows PR state and checks
+  observed: e2e:scm 8 (a local bare remote, a fake gh), e2e:panel 23; evidence/p1-e6/ (scm-panel-*, discard-sheet-*,
+    push-confirm-*, pr-state-row-*)
+  sitting: none (the credentials are the owner's)
+  owner: step H (a throwaway branch pushed and a draft PR opened with the owner's helper)
+
+12 | The Tasks panel read-only via show_pane 'tasks' (P-20); cross-session messages show as rows and can be answered
+  observed: e2e:agents 23 (tasks under P-20, the peer rows), e2e:tools 8 (case 7, show_pane); evidence/p1-e7/g3-rows-*,
+    g4-tasks-*
+  sitting: S2(b) PASSED (live-s2.txt): through the app, the ListAgents row's "Message repo-48" sent relay.ts's wording as a
+    next steer, A SendMessage'd it, A's line read sent, B drew "@ repo-4d …" with Reply. US$0.0055.
+    S2(c) PASSED: a MAWS session's SendMessage into an interactive terminal session; the terminal's peer record is isMeta
+    (promptSource system, turnOrigin peer), the -p form the backfill reads; fixture admitted (below). US$0.0070.
+    S2(d): a team formed on 2.1.293 in an interactive terminal under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (ListAgents:
+    "Teammates (1): scout … running"); fixture admitted (below). Finding: the teammate's report reaches the lead's
+    transcript as a plain user record carrying a <teammate-message> envelope, which the backfill reads as an owner's prompt
+    (tracker row, owner P2). US$0.0089.
+  owner: step J (J3 show_pane 'tasks', J4 a peer message answered from the row's Reply); step A (A6.4)
+
+Item 13 (the three gaps carried from P0) is recomposition's (recomposition.txt at M8): the scale review's record is
+  scale-review/report.txt; the taste sitting and the native hands are owner's steps B and C.
+
+== Spend (read from the sittings' logs; Constraint 7, US$5.00 for the child) ==
+
+  sitting  cap      spent      what the figure is
+  S8       0.20     0.0213     journal receipts, three attempts (live-s8.txt)
+  S1       0.15     0.0029     its one result's total_cost_usd (live-s1.txt)
+  S3       0.50     0.0547     receipts 0.0047 + the /btw side question's unreceipted 0.05 reservation (live-s3.txt)
+  S4       0.40     0.0051     receipts of case 5 and the A-47 case; case 7 no engine (live-s4.txt)
+  S2       2.50     0.0975     (a) 0.0761, (b) 0.0055, (c) 0.0070, (d) 0.0089 (live-s2.txt)
+  S5       0.25     0.0306     app case receipts 0.0038 + Q6 0.0144 + Q7 0.0124 (live-s5.txt)
+  S6       0.30     0.0913     journal receipts, both runs (live-s6.txt)
+  S7       0.15     0.0186     a transcript bound at list rates (live-s7.txt)
+  total    4.45     US$0.3220 of the child's US$5.00
+Notes on the figures:
+  - S3: the harness's own ledger reads S3 US$0.4202. That is an over-count: case 3's Send to main (priority next) joined the
+    running turn and gets no result of its own, so the settlement saw three prompts and two results and kept the parent's
+    whole launch reservation (US$0.37); the second result's cumulative cost covers the steered turn. Not money spent; a
+    tracker row (2026-10-08, the p1-live spend ledger, owner P2).
+  - S5's Q6 and Q7 figures are the probes' own estimates from usage at Haiku 4.5 list rates (no receipt kept), and S7's is
+    the same kind of bound over the session's transcript (its journals went with launchMaws's temporary profile):
+    claude-haiku-5-5 bills less for the same usage, so both are upper bounds.
+  - S6: each `-p --resume` receipt includes the session's restored cost, so their sum over-counts (Decision Log 40).
+  - S2(c) and S2(d)'s terminals settled to the transcript's own cost-state record (equal to /cost and the home's lastCost).
+
+== The engine and the fixture pins ==
+
+  Every sitting S1 to S8 ran on 2.1.293 (each log's Engine line), moved from 2.1.292 during M6.
+  d3ea9460 (S1's admission) names 2.1.293 for p1-maws-ask-interrupt: the fixture's provenance row (seq 0) reads
+    {child E11, pin e09d2564f53f167d08a82cc15582991198ea4ad4, document the E11 execution document, engineVersion 2.1.293,
+    model haiku, scenario p1-maws-ask-interrupt, costUsd 0.0029} and its spawn row runs versions/2.1.293;
+    src/engine-host/conformance/fixtures.test.ts lists it in the E1 group with the comment "E11 S1: the blocking ask
+    interrupted, recorded the same way on the installed 2.1.293" (:85-86), the census comment names it as maws.ask.cancelled's
+    source (:635-638), and its per-fixture pin is headed "the interrupt while the blocking ask waited, on 2.1.293" (:974).
+  E1's earlier fixtures keep their own provenance: p1-maws-send-file, p1-maws-ask-blocking, p1-maws-ask-async and
+    p1-maws-show-pane read engineVersion 2.1.291 in their provenance rows, untouched by d3ea9460; the same list's comment
+    keeps "E1 M2: the maws tool server recorded live through MAWS's own host" for them.
+  S2's transcripts carry the engine's own version: every record with a `version` field reads 2.1.293
+    (e7-peer-transcripts/07b1a2b6-…: 17; e7-team-terminal/: 41 across the lead and scout's sidecar), pinned in
+    spikes/protocol-probe/fixtures.test.mjs (:290-296 asserts the peer record's version 2.1.293; :304-309 the team).
+
+== Fixtures admitted ==
+
+  - pass3/p1-maws-ask-interrupt.jsonl, with test/fixtures/transcripts/p1-maws-ask-interrupt.jsonl and
+    test/snapshots/transcript/pass3/p1-maws-ask-interrupt.rows.json (committed by hand: 6 rows, the ask "cancelled" with
+    cancelReason "withdrawn"), d3ea9460: the E1 list, the census (maws.ask.cancelled), a per-fixture pin; the pass-3
+    integrity rule accepts exit 1 after an error result (Decision Log 38) and the cancelled-request rule of Decision Log 5
+    met its first real instance. Green after admission: test:probes 174, conformance and replay-fixtures 233 tests,
+    e2e:transcript 31 with "every fixture renders" (live-s1.txt).
+  - pass3/e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl (S2(c), the terminal's isMeta peer record) with its
+    backfill test, 5e62c8da.
+  - pass3/e7-team-terminal/ (S2(d); a folder, Decision Log 39): the lead's transcript b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl
+    and scout's sidecar b4b10738-…/subagents/agent-ascout-bcbb17e39be8c1bd.{jsonl,meta.json}; pinned in fixtures.test.mjs,
+    teammates.test.ts and subagents.test.tsx, 5e62c8da. Green after admission: test:probes 176, conformance and
+    replay-fixtures 233 tests (live-s2.txt).
+  - Not recorded: pass3/p1-maws-browser-anchor.jsonl (E4d proved the live anchor resolution in the app, A-49; Decision Log 20);
+    no probe journal for S2(b) (it ran through the app).
+
+== A-47's retraction (Decision Log 23 and 36) ==
+
+  Recorded in live-s4.txt (case A-47, PASSED): with no MAWS window focused and the OS notification refused by the test-only
+  patch, the back session's Bash permission raised C5's fallback toast ("A47-marker.txt touch command needs you · Bash:
+  touch a47-marker.txt", "Open session"); session.answer delivered 1547 ms after the notice; the toast was gone 784 ms after
+  the answer (2331 ms after the notice), retracted by the answer, not by its own 6 s timeout. Shots
+  prerun-a47-toast-{light,dark}.png.
+
+== Survivor checks (Constraint 1: no process E11 started survives) ==
+
+  S8 (02:49:29Z, 02:54:48Z), S1 (03:20:18Z), S3 (9 recorded pids), S4 (8, 9 and 7 recorded pids; nothing on 17391 or 17393),
+  S2 (after each (a) run; (b) to (d) every recorded app, engine and terminal pid; 03:56:17Z), S5 (supervisors 528 and 11263,
+  engine 637; the probes' own), S6 (after each app launch and each terminal resume, both runs; 04:21:03Z), S7 (04:24:19Z):
+  `pgrep -fl maws-e11-` and `pgrep -fl maws-supervisor` empty after each, and each spec's own recorded-pid check found none
+  alive (each log's Post-sitting). M5: stale supervisors 0 (final-summary-06ca330d.txt). The only long-lived processes the
+  logs saw (the owner's claude bg-pty-host, Discord's crashpad) predate the sittings and are not E11's.
+
+== The owner file (A-15) and the scratch keys to clean ==
+
+  Every reading of every sitting was identical to the M0 baseline: 25 /tmp keys, shasum
+  42a98859ccfdc08994dca565482aa00ba0254ca8 (S2(a) also the whole projects set, 129 keys, nothing added or removed). The
+  pairs are in owner-file-check.txt.
+  Scratch keys the owner may clean: none. E11 added no project key to ~/.claude.json; the 25 /tmp keys predate E11 (the
+  authoring baseline, evidence/p1-e2/owner-file-check.txt; the 25th, /private/tmp/cua-accept, is the owner's) and are left
+  as they were.
+
+== Not run ==
+
+  No sitting is `not run`: S1 to S8 all ran within their caps with no relay outage. S4 case 6 was skipped by design (A-49).
+  Items 3, 4 and 11 have no E11 sitting by design (Design §5's table): their halves beyond the gates are steps E, A/B and H.

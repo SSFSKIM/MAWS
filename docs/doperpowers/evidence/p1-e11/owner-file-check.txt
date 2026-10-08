@@ -12,6 +12,7 @@ Install: the worktree's node_modules is a symlink to the main checkout's (brief:
 
 S8 (2026-10-08, E1's live sitting re-run, two attempts, docs/doperpowers/evidence/p1-e11/live-s8.txt):
   before 02:44:12Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  between attempts 1 and 2 02:48:11Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; live-s8.txt)
   after  02:49:29Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no scratch key appeared or vanished; no other key added)
 S8 attempt 3 (2026-10-08, after the harness fix round 53fa5981):
   before 02:53:03Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
@@ -40,3 +41,14 @@ S6 (2026-10-08, twenty resumes of one scratch session, ten terminal and ten app,
 S7 (2026-10-08, E8's plugins live run re-run; live-s7.txt):
   before 04:22:02Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after  04:24:19Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; no key added or removed)
+
+Consolidated (Task 6.6, 2026-10-08, from live-s1.txt to live-s8.txt; no new reading taken):
+  Pairs in this file: the M0 baseline, then S8 (attempts 1 and 2, with the reading between them), S8 attempt 3, S1, S3, S4,
+  S2, S5, S6, S7: every sitting of the child, each with its before and after readings, every one 25 keys and shasum
+  42a98859ccfdc08994dca565482aa00ba0254ca8. The readings each spec took inside a sitting (after every session, after every
+  app close, before and after every terminal case; Decision Log 35's scratch-scoped delta) are in the sitting's own log
+  and read identical throughout: S8 five in attempt 3 and one per session in attempts 1 and 2; S1 three; S3 four; S4 per
+  case for 5, 7 and A-47; S2 (a) the whole projects set after runs 1 and 2, (b) to (d) per case, session and app close;
+  S5 per run and the probes' ownerFileDelta; S6 per launch and resume in both runs and around 8t; S7 the pair above.
+  Verdict: no /tmp key appeared or vanished at any reading, no other key was added or removed. Scratch keys left for the
+  owner to clean: none (the 25 keys are the authoring baseline; /private/tmp/cua-accept is the owner's).
