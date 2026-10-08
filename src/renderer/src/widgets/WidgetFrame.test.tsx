@@ -7,12 +7,12 @@ import { WidgetFrame } from './WidgetFrame';
 
 afterEach(cleanup);
 const ID = 'app-1' as AppSessionId;
-const foot = { readWith: 'get_hooks_listing', editedWhere: 'Hooks are edited in `settings` and plugins' };
 
 describe('WidgetFrame', () => {
-  it('shows the head, the body when ready, and the foot naming the read and what is edited elsewhere', () => {
+  // E11's sitting (owner-notes 00-consolidated-plan §2.2): no provenance foot; what a change writes is said in its sheet.
+  it('shows the head and the body when ready, and no foot', () => {
     render(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="ready" error={null} close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
@@ -20,26 +20,25 @@ describe('WidgetFrame', () => {
     expect(frame.querySelector('h3')?.textContent).toBe('Hooks');
     expect(screen.getByText('/hooks')).toBeTruthy();
     expect(screen.getByText('the body')).toBeTruthy();
-    const footer = frame.querySelector('footer')!;
-    expect(footer.textContent).toBe('Read with get_hooks_listing · Hooks are edited in settings and plugins');
-    expect(footer.querySelectorAll('code')).toHaveLength(2);
+    expect(frame.querySelector('footer')).toBeNull();
+    expect(frame.textContent).not.toContain('Read with');
   });
 
   it('shows the loading line, the error, and C7’s not-running sentence in place of the body', () => {
     const { rerender } = render(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="loading" error={null} close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="loading" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
     expect(screen.getByText('Reading…')).toBeTruthy();
     rerender(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="error" error="get_hooks_listing refused" close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="error" error="get_hooks_listing refused" close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
     expect(screen.getByRole('alert').textContent).toBe('get_hooks_listing refused');
     rerender(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="not_running" error={null} close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="not_running" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
@@ -49,7 +48,7 @@ describe('WidgetFrame', () => {
 
   it('keeps the body of a ready read and says, in one line above it, that a later read failed', () => {
     render(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="ready" error="The engine did not answer · showing the last value it reported" close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error="The engine did not answer · showing the last value it reported" close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
@@ -63,7 +62,7 @@ describe('WidgetFrame', () => {
     const focusEditor = vi.fn();
     const off = registerFocusTarget(ID, { focusEditor, focusFrame: () => {}, insertText: () => {} });
     render(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="ready" error={null} close={close}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error={null} close={close}>
         <button type="button">inside</button>
       </WidgetFrame>,
     );

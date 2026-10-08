@@ -5,7 +5,7 @@ import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetContextUsageResponse } from '@shared/wire/control';
 import { openComposerWidget } from '../stores/composer';
-import { COMPACT, CONTEXT, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { COMPACT, CONTEXT, SHARED, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, num, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -94,7 +94,7 @@ export function ContextWidget({ appSessionId, close }: { appSessionId: AppSessio
     openComposerWidget(appSessionId, 'compact', '');
   };
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.context} command="context" foot={WIDGET_FOOT.context} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.context} command="context" state={read.state} error={read.error} close={close}>
       {read.data && (
         <>
           <ContextBody view={present(read.data)} />

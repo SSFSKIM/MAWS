@@ -5,7 +5,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../stores/sessions';
-import { WIDGET_FOOT, WIDGET_TITLE } from '../widgets/copy';
+import { WIDGET_TITLE } from '../widgets/copy';
 import { WidgetFrame } from '../widgets/WidgetFrame';
 import { askSideQuestion } from './btw';
 import { SIDE_COPY } from './copy';
@@ -28,7 +28,7 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.btw} command="btw" foot={WIDGET_FOOT.btw} state="ready" error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.btw} command="btw" state="ready" error={null} close={close}>
       <div className="flex flex-col gap-2">
         {!ready && (
           <p role="status" className="m-0 text-ui-sm text-fg-muted">

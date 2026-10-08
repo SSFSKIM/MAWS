@@ -5,7 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
-import { AGENTS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { AGENTS, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -33,7 +33,7 @@ export function AgentsWidget({ appSessionId, close }: { appSessionId: AppSession
   const catalog = useSessionCatalog(appSessionId);
   const launched = useSessions((s) => s.engine.has(appSessionId));
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.agents} command="agents" foot={WIDGET_FOOT.agents} state={launched || catalog.revision > 0 ? 'ready' : 'not_running'} error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.agents} command="agents" state={launched || catalog.revision > 0 ? 'ready' : 'not_running'} error={null} close={close}>
       <AgentsBody agents={present(catalog)} appSessionId={appSessionId} close={close} />
     </WidgetFrame>
   );

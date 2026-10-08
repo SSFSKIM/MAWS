@@ -106,16 +106,16 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(invoked('marketplaces.list')).toEqual([{ cwd }]);
   });
 
-  it('Reload mods shows Working… from the receipt, then the reload summarised', async () => {
+  it('Reload plugins shows Working… from the receipt, then the reload summarised', async () => {
     backend.holdOperations(true);
     await ready();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
     await waitFor(() => expect(screen.getByText('Working…')).toBeTruthy());
     expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Reload mods' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Reload plugins' })).toHaveProperty('disabled', true);
     act(() => void backend.settleOperations());
     await waitFor(() => expect(screen.getByText('Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors')).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Reload mods' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Reload plugins' })).toHaveProperty('disabled', false);
   });
 
   it('Reload skills runs reload_skills and says how many skills the engine now offers', async () => {
@@ -131,7 +131,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('shows a failed reload in red in its words with the list as it was, and a late success corrects it to Applied after all', async () => {
     backend.scriptOutcome('session.reloadPlugins', () => ({ ok: false, error: { code: 'timeout', message: 'reload_plugins unanswered after 60 s', engineCode: null } }));
     await ready();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
     await waitFor(() => expect(screen.getByText('reload_plugins unanswered after 60 s · timeout').className).toContain('text-danger'));
     expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     act(() => backend.emitOperation({ appSessionId: ID, opId: 'op-1', command: 'session.reloadPlugins', late: true, outcome: { ok: true, value: { commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 } } }));
@@ -143,7 +143,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
       throw new WidgetBackendError({ code: 'timeout', message: 'the host did not answer' });
     });
     await ready();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
     await waitFor(() => expect(screen.getByText('The engine did not answer · showing the last value it reported')).toBeTruthy());
   });
 
@@ -153,7 +153,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     expect(screen.getByText('The session is not running · the plugins it last reported')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Reload mods' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', false);
   });
 
@@ -388,7 +388,6 @@ describe('plugins widget: review fixes', () => {
   it('while plugins.env is pending the sheet says Resolving the engine… and cannot be confirmed', async () => {
     backend.script('plugins.env', () => new Promise(() => {})); // never answers
     await ready();
-    expect(document.querySelector('footer')!.textContent).not.toContain('<config home>');
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
     expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy();
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull(); // no command against a guessed binary
@@ -417,7 +416,6 @@ describe('plugins widget: review fixes', () => {
     backend.script('plugins.env', () => (installedEngine ? { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL } : { binary: null, binaryError: REFUSAL, configHome: HOME, globalConfig: GLOBAL }));
     await ready();
     await waitFor(() => expect(invoked('plugins.env')).toHaveLength(1));
-    expect(document.querySelector('footer')!.textContent).not.toContain(HOME); // the foot names nothing it did not resolve
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL));
     expect(invoked('plugins.env')).toHaveLength(2); // the opening read it again
@@ -489,7 +487,7 @@ describe('plugins widget: whole-branch review fixes', () => {
     let holding = false;
     backend.script('plugins.env', () => (holding ? new Promise((resolve) => (held = resolve)) : { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
     await ready();
-    await waitFor(() => expect(document.querySelector('footer')!.textContent).toContain(HOME));
+    await waitFor(() => expect(invoked('plugins.env')).toHaveLength(1)); // the opening read answered
     const before = invoked('plugins.env').length;
     holding = true; // the next read waits
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));

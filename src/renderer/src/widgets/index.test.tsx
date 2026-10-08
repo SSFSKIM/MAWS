@@ -9,7 +9,6 @@ import { createWidgetBackend, type WidgetBackend } from '../../../../test/suppor
 import { registeredWidgetNames, slashWidget, WIDGET_COMMANDS } from '../composer/mentions/widgets';
 import { resetCatalogStore } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
-import { WIDGET_FOOT, type FramedWidgetName } from './copy';
 import { registerAllWidgets } from './index';
 
 const ROOT = join(__dirname, '../../../..');
@@ -34,7 +33,7 @@ describe('every widget renders its fixture response', () => {
     const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
     backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
     // E8: `/plugins` reads the engine's plugin CLI through the host, which the fixture backend does not stand in for;
-    // empty lists let its frame open (`plugins.env` unanswered: the foot names no path, as `WIDGET_FOOT.plugins`)
+    // empty lists let its frame open
     backend.script('plugins.list', () => ({ plugins: [] }));
     backend.script('marketplaces.list', () => ({ marketplaces: [] }));
     window.maws = backend.bridge();
@@ -56,7 +55,8 @@ describe('every widget renders its fixture response', () => {
     config: 'dialogExpiry',
     plugins: 'doperpowers',
     mcp: 'openaiDeveloperDocs',
-    sandbox: 'disabled · supported',
+    sandbox: 'Sandbox off',
+    'reload-plugins': 'Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors', // E11 §2.2: it reloads on opening
     hooks: 'echo MAWS_POSTHOOK',
     memory: 'Project instructions',
     skills: '/deep-research',
@@ -71,9 +71,10 @@ describe('every widget renders its fixture response', () => {
   };
 
   const SELECTOR = ['model', 'effort', 'fast'];
-  const FRAMED = NAMES.filter((name): name is FramedWidgetName => !SELECTOR.includes(name));
+  const FRAMED = NAMES.filter((name) => !SELECTOR.includes(name));
 
-  it.each(FRAMED)('%s opens with its body and its foot', async (name) => {
+  // E11's sitting (owner-notes 00-consolidated-plan §2.2): no frame carries a provenance foot.
+  it.each(FRAMED)('%s opens with its body and no foot', async (name) => {
     const widget = slashWidget(name)!;
     const Component = widget.component;
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -82,9 +83,9 @@ describe('every widget renders its fixture response', () => {
         <Component appSessionId={ID} args="" close={() => {}} />
       </QueryClientProvider>,
     );
-    const footer = container.querySelector('footer')!;
-    expect(footer.textContent).toContain(`Read with ${WIDGET_FOOT[name].readWith}`);
-    expect(footer.textContent).toContain(WIDGET_FOOT[name].editedWhere!.replaceAll('`', ''));
+    expect(container.querySelector('[data-widget]')).toBeTruthy();
+    expect(container.querySelector('footer')).toBeNull();
+    expect(container.textContent).not.toContain('Read with');
     if (SHOWS[name]) await waitFor(() => expect(screen.getAllByText((_, el) => el?.textContent?.includes(SHOWS[name]) === true && el.children.length === 0).length).toBeGreaterThan(0));
   });
 

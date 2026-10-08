@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSettingsResponse } from '@shared/wire/control';
 import { runAction } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
-import { CONFIG, PERMISSIONS, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { CONFIG, PERMISSIONS, SHARED, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -107,7 +107,7 @@ export function ConfigWidget({ appSessionId, close }: { appSessionId: AppSession
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
   const userFile = memory.data?.files.find((f) => f.kind === 'user')?.path;
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" foot={WIDGET_FOOT.config} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" state={read.state} error={read.error} close={close}>
       {read.data && <ConfigBody view={present(read.data)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} close={close} />}
     </WidgetFrame>
   );

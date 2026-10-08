@@ -15,7 +15,7 @@ import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
-import { REWIND, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { REWIND, WIDGET_TITLE } from './copy';
 import { WidgetFrame } from './WidgetFrame';
 
 type What = 'conversation' | 'files' | 'both';
@@ -67,7 +67,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rewind} command="rewind" foot={WIDGET_FOOT.rewind} state={status?.process === 'ready' ? 'ready' : 'not_running'} error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rewind} command="rewind" state={status?.process === 'ready' ? 'ready' : 'not_running'} error={null} close={close}>
       <div className="flex flex-col gap-3">
         {targets.length === 0 ? (
           <p className="m-0 text-fg-muted">{REWIND.none}</p>
@@ -108,6 +108,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
           })}
         </div>
         {!checkpointing && <p className="m-0 text-ui-sm text-fg-muted">{REWIND.noCheckpoints}</p>}
+        <p className="m-0 text-ui-sm text-fg-muted">{REWIND.consequence}</p>
         <div className="flex items-center justify-end gap-2">
           {why !== null && <span className="mr-auto text-ui-sm text-fg-muted">{why}</span>}
           <button

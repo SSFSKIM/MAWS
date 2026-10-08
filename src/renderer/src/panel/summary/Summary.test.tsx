@@ -317,7 +317,7 @@ describe('summary card', () => {
   });
 
   // E8 D-9: the section shows whenever the session loaded plugins, with their count and the two reloads
-  it('shows Plugins with the loaded count and Reload mods and Reload skills when the session loaded plugins and nothing pins a line, and not with neither', async () => {
+  it('shows Plugins with the loaded count and Reload plugins and Reload skills when the session loaded plugins and nothing pins a line, and not with neither', async () => {
     await mount();
     expect(screen.queryByRole('region', { name: 'Plugins' })).toBeNull(); // no plugin loaded, no line pinned
     const plugins = [{ name: 'e8-probe', path: '/tmp/home/plugins/cache/e8-scratch/e8-probe/0.1.0', source: 'e8-probe@e8-scratch', version: '0.1.0' }, { name: 'zeta', path: '/p/zeta', source: null, version: null }];
@@ -326,7 +326,7 @@ describe('summary card', () => {
     expect(within(card).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Environment', 'Plugins', 'Push state', 'Subagents', 'Background work', 'Sources']);
     expect(within(section('Plugins')).getByText('Plugins · 2 loaded')).toBeTruthy();
     const user = userEvent.setup();
-    await user.click(within(section('Plugins')).getByRole('button', { name: 'Reload mods' }));
+    await user.click(within(section('Plugins')).getByRole('button', { name: 'Reload plugins' }));
     expect(fake.invoked('session.reloadPlugins')).toEqual([{ appSessionId: A }]);
     expect(within(section('Plugins')).getByRole('status').textContent).toBe('Working…');
     act(() => fake.event('session.operation', { appSessionId: A, opId: 'op-1', command: 'session.reloadPlugins', late: false, outcome: { ok: true, value: { commands: [], agents: [], plugins: [{ name: 'e8-probe' }], error_count: 0 } } }));
@@ -338,7 +338,7 @@ describe('summary card', () => {
     // an exited session keeps its count and offers no reload
     act(() => useSessions.setState({ engine: new Map([[A, { ...engineStatus(A, { process: 'exited' }), plugins }]]) }));
     expect(within(section('Plugins')).getByText('Plugins · 2 loaded')).toBeTruthy();
-    expect(within(section('Plugins')).queryByRole('button', { name: 'Reload mods' })).toBeNull();
+    expect(within(section('Plugins')).queryByRole('button', { name: 'Reload plugins' })).toBeNull();
   });
 
   it('a registered tool’s summary component fills its section in place of the baseline', async () => {

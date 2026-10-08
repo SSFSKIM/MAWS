@@ -5,7 +5,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetWorkspaceDiffResponse } from '@shared/wire/control';
 import { panelHost, usePanelHost } from '../panel/host';
-import { DIFF, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { DIFF, WIDGET_TITLE } from './copy';
 import { Mono, num, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -81,7 +81,7 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
 export function DiffWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getWorkspaceDiff', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.diff} command="diff" foot={WIDGET_FOOT.diff} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.diff} command="diff" state={read.state} error={read.error} close={close}>
       {read.data && <DiffBody view={present(read.data)} appSessionId={appSessionId} close={close} />}
     </WidgetFrame>
   );

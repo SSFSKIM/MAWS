@@ -1,15 +1,15 @@
 // `/mcp` (C11 execution document, the widget table): `mcp_status`'s servers with their status, transport (`stdio ·
 // <command>` or `http · <url>`), scope and source, an error when one is reported, and their tools as a count with a
 // disclosure. It refetches when the session's MCP table in C3's status moves. Each server offers Reconnect (for this
-// session) and the enable switch, which the engine records for the project in ~/.claude.json (said beside the switch
-// and in the foot); both run as operations, and the switch's position after either outcome is the next read's.
+// session) and the enable switch, which the engine records for the project in ~/.claude.json (said beside the
+// switch); both run as operations, and the switch's position after either outcome is the next read's.
 import { useRef, useState } from 'react';
 import * as z from 'zod';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { useSessions } from '../stores/sessions';
-import { MCP, MCP_ACTIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
 import { Mono, parseEach, Row, Rows, TextButton } from './parts';
 import { MOVES_READS, useEngineRead, type EngineRead } from './read';
@@ -202,7 +202,7 @@ export function McpWidget({ appSessionId, close }: { appSessionId: AppSessionId;
   const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" foot={WIDGET_FOOT.mcp} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} close={close}>
       {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh }} />}
     </WidgetFrame>
   );

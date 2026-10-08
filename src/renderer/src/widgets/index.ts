@@ -16,6 +16,7 @@ import { MemoryWidget } from './MemoryWidget';
 import { modelSelector } from './ModelSelector';
 import { PermissionsWidget } from './PermissionsWidget';
 import { PluginsWidget } from './PluginsWidget';
+import { ReloadPluginsWidget } from './ReloadPluginsWidget'; // E11 §2.2
 import { RenameWidget } from './RenameWidget';
 import { ResumeWidget } from './ResumeWidget';
 import { RewindWidget } from './RewindWidget'; // W3 (B7)
@@ -48,6 +49,7 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   diff: DiffWidget,
   rewind: RewindWidget, // W3 (B7)
   btw: BtwWidget, // E3: registered here alone; its typed apply is `applyBtw` (TYPED_APPLY)
+  'reload-plugins': ReloadPluginsWidget, // E11 §2.2
 };
 
 // W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.

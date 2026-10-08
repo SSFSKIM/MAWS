@@ -3,7 +3,7 @@
 // terminal's `/status` prints, labels in the key column and unlabeled rows full width.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetStatusResponse } from '@shared/wire/control';
-import { WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { WIDGET_TITLE } from './copy';
 import { Group, KeyValues } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -31,7 +31,7 @@ export function StatusBody({ view }: { view: StatusView }) {
 export function StatusWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getStatus', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.status} command="status" foot={WIDGET_FOOT.status} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.status} command="status" state={read.state} error={read.error} close={close}>
       {read.data && <StatusBody view={present(read.data)} />}
     </WidgetFrame>
   );

@@ -1,5 +1,6 @@
-// Reload mods and Reload skills (E8 execution document, M2; parent G3): `reload_plugins` and `reload_skills` as C3's
-// session operations, from `/plugins` and the panel's Plugins section, with one operation line for whichever ran last:
+// Reload plugins and Reload skills (E8 execution document, M2; parent G3): `reload_plugins` and `reload_skills` as C3's
+// session operations, from `/plugins`, `/reload-plugins` (E11 §2.2) and the panel's Plugins section, with one operation
+// line for whichever ran last:
 // `Working…`, then `Reloaded · N commands · N agents · N plugins · N errors` or `Reloaded · N skills`, or the error in
 // the operation's words. A reload's answer also replaces the session's loaded plugins and its catalogue's commands and
 // agents (the host's `applyReload`), so the "Loaded in this session" list, the panel's count and the slash palette

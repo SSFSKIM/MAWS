@@ -183,7 +183,7 @@ async function openWidget(live: Pick<Live, 'page' | 'main'>, name: string): Prom
   await page.keyboard.press('Enter');
   const w = page.locator(`[data-widget="${name}"]`);
   await expect(w).toBeVisible();
-  if (!['model', 'effort', 'fast'].includes(name)) await expect(w.locator('footer')).toContainText('Read with'); // W3: the selector is a menu, with no foot
+  await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: no frame carries a provenance foot
   return w;
 }
 // A typed line `/name args`, which runs the widget's control with its argument (M3).
@@ -309,8 +309,8 @@ test('every widget opens with live engine data; controls take effect and are rea
       const w = await openWidget(live, 'plugins');
       const rev = async () => value(await invoke(page, 'session.catalog', { appSessionId: id as AppSessionId })).revision;
       const r0 = await rev();
-      // E8: the button is Reload mods, its line beside it (the widget's rows carry status lines of their own)
-      const reload = w.getByRole('button', { name: 'Reload mods' });
+      // E8: the button is Reload plugins, its line beside it (the widget's rows carry status lines of their own)
+      const reload = w.getByRole('button', { name: 'Reload plugins' });
       const line = reload.locator('xpath=following-sibling::*[@role="status"]');
       await reload.click();
       await expect(line).toContainText('Reloaded', { timeout: 60_000 });

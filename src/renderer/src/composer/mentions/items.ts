@@ -5,7 +5,8 @@
 // ones, run through `runAction`). One dispatch rule for every item: a registered widget opens for its name; otherwise a
 // catalogue command the engine can run headless is inserted as text; otherwise the item is listed and unavailable: an
 // engine command the engine runs only in its terminal (`terminalOnly`: /doctor, /color, /focus, /reload-plugins in
-// pass2/real-settings) reads Terminal only, and a declared widget no host registered reads Not available here (W2).
+// pass2/real-settings) reads Terminal only unless MAWS registers a widget for it (E11 §2.2: /reload-plugins), and a
+// declared widget no host registered reads Not available here (W2).
 // The `@` menu's non-file groups come from the catalogue too: agents insert an agent mention, skills their invocation.
 import { fuzzyScore } from '@shared/composer/fuzzy';
 import { ACTIONS, type ActionId } from '@shared/keymap/actions';
