@@ -346,8 +346,10 @@ class Session {
   }
 }
 
-// R6's order in a stop's task log (`Session.taskLog` lines): a snapshot that omits the task, then `task.updated` with
-// `killed`, then `task.notification` `stopped`.
+// A stop's task log (`Session.taskLog` lines): `task.updated` with `killed`, then `task.notification` `stopped`, and a
+// snapshot that omits the task. R6 recorded the snapshot first on 2.1.283; on 2.1.293 the engine's
+// `background_tasks_changed` follows the notification (E11 S2(a), the workflow stop's journal seq 708-710), so where the
+// snapshot falls is recorded, not asserted.
 function expectStopOrder(order: string[], taskId: string): void {
   const kinds = order.map((l) => l.split(' ')[1]);
   const snapshot = kinds.indexOf('tasks.snapshot');
@@ -355,7 +357,7 @@ function expectStopOrder(order: string[], taskId: string): void {
   const notification = kinds.indexOf('task.notification');
   expect(snapshot, `a tasks.snapshot in ${JSON.stringify(order)}`).toBeGreaterThanOrEqual(0);
   expect(order[snapshot], 'the snapshot omits the stopped task').not.toContain(taskId);
-  expect(snapshot).toBeLessThan(updated);
+  expect(updated, `a task.updated in ${JSON.stringify(order)}`).toBeGreaterThanOrEqual(0);
   expect(order[updated]).toContain('"status":"killed"');
   expect(updated).toBeLessThan(notification);
   expect(order[notification]).toMatch(/ stopped$/);
