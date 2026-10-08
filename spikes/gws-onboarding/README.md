@@ -91,6 +91,25 @@ With the quirks known, the agent's own GUI time measured here sums to under two 
 the rest is Google's re-check, done in seconds when the human is present. The draft skill
 is now written for that scene; a replay with the human present is the next test.
 
+## Route C: the skill as written, live, on a third fresh account (haegi236@gmail.com)
+
+12 minutes from the human's Chrome login to verified Drive, Gmail and Calendar calls,
+with the agent driving `gws auth setup --login` in tmux and crossing the console gap in
+Chrome. Human moments: the initial Chrome sign-in, one phone approval during the gcloud
+consent (number read from the page and relayed at once), one confirmation before the
+client was created. The gws consent itself needed no re-check. Agent-side timings: Cloud
+terms dialog 29 s, project create via the wizard 12 s after the terms, three APIs 20 s,
+consent screen plus test user plus client form 29 s, client create and JSON 7 s, ID and
+secret typed into the wizard 8 s, login consent 11 s. The wizard's scope picker pre-selects
+its Recommended template; Enter accepted it and the login requested the top-level drive,
+gmail.modify, calendar and cloud-platform scopes.
+
+Two things the live run corrected in the skill: the terms dialog's custom checkboxes do
+not expose `checked` to a role locator (the first pass toggled the pre-ticked box off);
+read `input[type=checkbox]` states instead. And a second account signed in through
+AddSession landed in the existing Chrome profile this time, so the profile-split is a
+possibility, not a rule.
+
 ## Recommendation for cloud-resident agents
 
 Do the account's one-time setup on the human's own machine (or once per account on any

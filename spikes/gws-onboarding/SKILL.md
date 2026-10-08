@@ -48,8 +48,13 @@ tmux send-keys -t gws -l "<text>"  # text prompts
    accept the Cloud terms first; the wizard's error names them. Open
    `console.cloud.google.com/?hl=en&authuser=<n>` in Chrome, take the first-run dialog
    (country; the terms box; in some countries a second box that appears after the
-   country is chosen; agree stays disabled until both are ticked), then retry.
+   country is chosen; agree stays disabled until all are ticked). Read the boxes as
+   `input[type=checkbox]` and click only the unchecked ones: the role locator reports
+   no state and a blind click untoggles the pre-ticked box. Then retry in the wizard
+   (Enter resubmits the same project id).
 3. **APIs.** Toggle what the account will use; "a" selects all (about 30 s to enable).
+   Validated live on 2026-10-07: 12 minutes on a fresh gmail.com account, one phone
+   approval, no password re-prompt (see README.md beside this file).
 4. **OAuth credentials.** The wizard prints manual steps and waits at "Enter OAuth
    Client ID". Its attempt to create the consent screen via
    `oauth2.googleapis.com/v1/projects/<id>/brands` answers 404 and is swallowed, so do
@@ -57,7 +62,8 @@ tmux send-keys -t gws -l "<text>"  # text prompts
    Secret from the downloaded JSON with `send-keys -l`, read out of the file on that
    machine inside the command and never printed. The prompt pre-fills from an existing
    `~/.config/gws/client_secret.json` if one is present.
-5. **Login.** `--login` continues into the consent; see the last section.
+5. **Login.** `--login` opens the scope picker (Enter accepts the Recommended template)
+   and then the consent; see the last section.
 
 ## The console gap, in Chrome
 
