@@ -1,0 +1,5 @@
+step e2e-requests
+command: pnpm e2e:requests
+head 06ca330d  ended 2026-10-08T01:28:58Z  load { 8.46 9.40 10.10 }  45s
+  11 passed (16.1s)
+exit 0

@@ -1,0 +1,5 @@
+step e2e-agents
+command: pnpm e2e:agents
+head 06ca330d  ended 2026-10-08T01:14:41Z  load { 9.83 9.94 11.81 }  121s
+  23 passed (1.5m)
+exit 0

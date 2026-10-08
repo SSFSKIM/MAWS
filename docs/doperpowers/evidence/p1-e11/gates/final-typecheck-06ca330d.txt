@@ -1,0 +1,4 @@
+step typecheck
+command: pnpm typecheck
+head 06ca330d  ended 2026-10-08T00:51:22Z  load { 9.61 10.63 12.89 }  50s
+exit 0

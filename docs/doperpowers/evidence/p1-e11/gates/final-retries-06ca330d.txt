@@ -1,0 +1,12 @@
+E11 M5 retries on the final head 06ca330d (Decision Log 24's rule: a timing-only failure re-run once alone, both results kept)
+The desktop was in use throughout (front app "Google Chrome" at the driver's start and at the c7 retry: the owner at the desktop).
+
+e2e:c7, driver run: 28 passed, 1 failed — e2e/requests.spec.ts:283 "the two declared dialogs answer with the pinned result
+  strings": after `auto.focus()` and `page.keyboard.press('Escape')` (requests.spec.ts:314-316) the c7-auto result list stayed
+  [['completed','continue']] for 5 s, the second answer ['completed','interrupt'] never arriving — the keyboard press lost
+  while another app held the desktop, the C7 keyboard row's own symptom (log /tmp/maws-review/e11-final-06ca330d/e2e-c7.log).
+e2e:c7, retried alone (load 13.73, front app Google Chrome): 29 passed (1.1m), exit 0.
+
+e2e:packaged, driver run: 50 passed, 1 failed — e2e/side.spec.ts:641 case 8 (both themes …) "the sheet closes once the thread
+  starts" (3.3 s), a single packaged-suite timing flake of the kind Decision Log 24 lists.
+e2e:packaged, retried (the whole suite; `-- <file>` does not filter; load 15.08): 51 passed (3.6m), exit 0.

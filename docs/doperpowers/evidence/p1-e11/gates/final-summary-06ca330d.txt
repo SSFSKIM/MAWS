@@ -1,0 +1,35 @@
+== final head 06ca330d 2026-10-08T00:50:32Z load { 9.80 10.72 13.06 } front "LSDisplayName"="Google Chrome"
+typecheck exit 0 50s 
+lint exit 0 31s 
+build-app exit 0 39s 
+test exit 0 182s  Test Files  708 passed | 1 skipped (709)       Tests  9859 passed | 1 skipped (9860) 
+test-probes exit 0 0s # pass 172 # fail 0 
+build exit 0 25s 
+e2e exit 0 209s   49 passed (3.5m) 
+e2e-transcript exit 0 289s   31 passed (3.1m) 
+e2e-terminal exit 0 152s   15 passed (2.0m) 
+e2e-panel exit 0 71s   23 passed (42.4s) 
+e2e-c7 exit 1 102s   28 passed (1.2m) 
+e2e-voice exit 0 59s   14 passed (26.5s) 
+e2e-code exit 0 118s   36 passed (1.5m) 
+e2e-agents exit 0 121s   23 passed (1.5m) 
+e2e-widgets exit 0 70s   24 passed (39.8s) 
+e2e-settings exit 0 48s   9 passed (17.1s) 
+e2e-c12 exit 0 39s   4 passed (11.2s) 
+e2e-tools exit 0 45s   8 passed (14.9s) 
+e2e-scm exit 0 62s   8 passed (34.4s) 
+e2e-side exit 0 59s   8 passed (30.4s) 
+e2e-deliverables exit 0 79s   10 passed (49.0s) 
+e2e-supervisor exit 0 162s   8 passed (2.2m) 
+e2e-browser exit 0 51s   8 passed (20.1s) 
+e2e-browser-comment exit 0 58s   13 passed (27.9s) 
+e2e-browser-import exit 0 59s   6 passed (28.3s) 
+e2e-browser-tools exit 0 79s   11 passed (48.6s) 
+e2e-requests exit 0 45s   11 passed (16.1s) 
+e2e-composer exit 0 81s   18 passed (50.3s) 
+verify-fuses exit 0 0s 
+e2e-packaged exit 1 286s   50 passed (4.7m) 
+e2e-supervisor-packaged exit 0 2s   1 passed (1.5s) 
+stale supervisors: 0
+== done 2026-10-08T01:35:07Z load { 16.28 14.02 12.12 }
+retries alone: e2e-c7 exit 0 29 passed (first 28/1: requests.spec:283 Escape lost, owner at desktop); e2e-packaged exit 0 51 passed (first 50/1: side.spec:641 timing)

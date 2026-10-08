@@ -1,0 +1,6 @@
+step e2e-voice
+command: pnpm e2e:voice
+head 06ca330d  ended 2026-10-08T01:10:42Z  load { 11.02 11.63 12.92 }  59s
+  1 skipped
+  14 passed (26.5s)
+exit 0

@@ -1,0 +1,4 @@
+step lint
+command: pnpm lint
+head 06ca330d  ended 2026-10-08T00:51:53Z  load { 14.84 11.73 13.21 }  31s
+exit 0

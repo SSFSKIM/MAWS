@@ -1,0 +1,4 @@
+step build
+command: pnpm build
+head 06ca330d  ended 2026-10-08T00:56:00Z  load { 11.42 13.66 13.90 }  25s
+exit 0

@@ -1,0 +1,5 @@
+step e2e-side
+command: pnpm e2e:side
+head 06ca330d  ended 2026-10-08T01:20:04Z  load { 6.36 8.15 10.39 }  59s
+  8 passed (30.4s)
+exit 0

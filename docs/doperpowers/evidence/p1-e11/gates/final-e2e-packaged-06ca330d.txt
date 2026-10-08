@@ -1,0 +1,9 @@
+step e2e-packaged
+command: pnpm e2e:packaged
+head 06ca330d  ended 2026-10-08T01:35:05Z  load { 17.09 14.14 12.15 }  286s
+    expect(locator).toHaveCount(expected) failed
+  1 failed
+  124 skipped
+  50 passed (4.7m)
+[ELIFECYCLE] Command failed with exit code 1.
+exit 1
