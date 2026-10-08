@@ -104,6 +104,9 @@ export interface TabStoreDeps {
   now?(): number;
   newTabId?(): string;
   schedule?(fn: () => void): void; // the next macrotask
+  // E13 (the in-app browser spec of 2026-10-08, Decision Log M2): a tab an agent drives through cua (under a debugger
+  // lease) is never a cap victim: suspending it would end the agent's attachment under it
+  driven?(tabId: string): boolean;
 }
 
 // A page's `window.open` child, adopted as a tab of its opener's session in its opener's partition (window-open.ts).
@@ -190,7 +193,7 @@ export class TabStore {
   }
 
   // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
-  // not the agent's or the human's (Design §2), nor one of `spared` (the tab being loaded; a page opening a tab, which
+  // not the agent's or the human's (Design §2), nor driven through cua (E13), nor one of `spared` (the tab being loaded; a page opening a tab, which
   // never suspends its own opener). The count cap here and the memory cap (memory.ts) share it.
   capVictim(...spared: TabEntry[]): TabEntry | undefined {
     const eligible = this.all().filter(
@@ -200,7 +203,8 @@ export class TabStore {
         entry.tab.placedIn === null &&
         !entry.tab.loading &&
         entry.tab.download?.state !== 'progressing' &&
-        entry.tab.control === 'idle',
+        entry.tab.control === 'idle' &&
+        this.deps.driven?.(entry.tab.tabId) !== true,
     );
     eligible.sort((a, b) => a.tab.lastShownAt.localeCompare(b.tab.lastShownAt) || a.tab.createdAt.localeCompare(b.tab.createdAt));
     return eligible[0];

@@ -31,7 +31,7 @@ import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { ViewManager } from '../view';
 import { TabControls } from './control';
 import { AgentCursor } from './cursor';
-import { PageDialogs } from './dialogs';
+import { PageDialogs, type PageDialogsDeps } from './dialogs';
 import { Drivers, type DriverState } from './driver';
 import { answerOfError, refusal } from './errors';
 import { BrowserHandlers, describeCall, reachedEntry, type AgentControl, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
@@ -253,8 +253,12 @@ export interface BrowserAgentDeps {
   userData: string; // main's own: browser_screenshot writes its file under the session's deliverables
   drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise
   // The in-app browser spec of 2026-10-08: the tabs cua's primitive server holds a lease on are parked like the tools'
-  // and refused to the tools (one automation owner per tab)
-  cua?: LeaseHolds;
+  // and refused to the tools (one automation owner per tab); M3: their dialogs take cua's held route (A-53)
+  cua?: LeaseHolds & { dialogs?: PageDialogsDeps['held'] };
+  // E13 M3: who drives each tab and the agent's cursor, shared with cua's server (startBrowser makes and disposes them);
+  // made here otherwise (tests)
+  control?: TabControls;
+  cursor?: AgentCursor;
 }
 
 export interface BrowserAgent {
@@ -265,10 +269,10 @@ export interface BrowserAgent {
 export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
   const { store, hosts, emit } = deps;
   const log = (line: string) => console.warn(`[browser] ${line}`);
-  const control = new TabControls({ store });
+  const control = deps.control ?? new TabControls({ store });
   const parking = new Parking({ store, views: deps.views, controls: control, leases: deps.cua });
-  const cursor = new AgentCursor({ store, controls: control });
-  const dialogs = new PageDialogs({ store, emit, log });
+  const cursor = deps.cursor ?? new AgentCursor({ store, controls: control });
+  const dialogs = new PageDialogs({ store, emit, log, held: deps.cua?.dialogs });
   const drivers =
     deps.drivers ??
     new Drivers({
@@ -373,7 +377,7 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     stop: async () => {
       for (const stop of stops.splice(0)) stop();
       requests.abortAll();
-      for (const part of [dialogs, cursor, parking, control]) part.dispose();
+      for (const part of [dialogs, parking, ...(deps.cursor ? [] : [cursor]), ...(deps.control ? [] : [control])]) part.dispose();
       await drivers.stop();
     },
   };

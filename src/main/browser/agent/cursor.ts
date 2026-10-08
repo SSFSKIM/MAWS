@@ -42,6 +42,12 @@ export class AgentCursor {
     this.send(entry, { kind: 'target', x, y, box });
   }
 
+  // The in-app browser spec of 2026-10-08 ("Cursor"): the vendor's moveMouse through cua's `cursor.move`, the pointer where
+  // the agent aims before a locator click.
+  move(entry: TabEntry, x: number, y: number): void {
+    this.send(entry, { kind: 'move', x, y });
+  }
+
   hide(entry: TabEntry): void {
     this.send(entry, { kind: 'hide' });
   }

@@ -29,8 +29,7 @@ describe('BrowserTab (E4a, the cross-child model)', () => {
   it('E13: carries an agent tab\'s badge, bounded, or null', () => {
     expect(BrowserTabSchema.parse({ ...TAB, agentBadge: 'agent' }).agentBadge).toBe('agent');
     expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: 'x'.repeat(41) }).success).toBe(false);
-    const { agentBadge: _dropped, ...without } = TAB;
-    expect(BrowserTabSchema.safeParse(without).success).toBe(false);
+    expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: undefined }).success).toBe(false);
   });
 
   it('accepts the Interfaces shape, the fields filled in', () => {

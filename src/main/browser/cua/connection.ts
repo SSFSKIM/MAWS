@@ -15,15 +15,24 @@
 // - Letting go of a lease (detach, the host's timeout detach, disconnect) first undoes every persistent toggle the
 //   connection switched on, so a shared attachment (MAWS's focus emulation) never keeps the agent's state.
 //
+// - (M3) What the person sees and keeps (presence.ts): an acting command passes the takeover gate before it is sent and
+//   makes the tab the agent's; the cursor follows `cursor.move`; letting go returns the tab to idle and hides the cursor.
+//   What the agent did is told to the windows (activity.ts); a tab created through the connection carries the panel's
+//   badge (its group's title, else "agent") until the connection lets it go; the agent's downloads are reported to the
+//   host as Chrome's would be.
+//
 // Secrets: params, page content and typed text never reach a log line; errors name methods and tab ids only.
 import type { Socket } from 'node:net';
 import type { AppSessionId } from '@shared/graph/ids';
+import { BROWSER_AGENT_BADGE_MAX_CHARS } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { DebuggerLease, TabDebugger } from '../debugger';
 import type { TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
-import { noteToggle, noToggles, methodNotAllowed, routeCommand, undoCommands, type AgentToggles } from './filter';
+import { clickLabel, commandActivity, LABEL_LOOKUP_MS, navigatedUrl, within, type ActivityFeed } from './activity';
+import { commandClass, noteToggle, noToggles, methodNotAllowed, routeCommand, undoCommands, type AgentToggles } from './filter';
 import { createPeer, frameDecoder, type Peer, type RpcHandler } from './framing';
+import type { AgentPresence } from './presence';
 
 export const PROTOCOL_VERSION = 1; // cua's src/chrome/extension.mjs PROTOCOL_VERSION
 export const PROFILE_NAME = 'MAWS';
@@ -31,6 +40,8 @@ export const MAX_FROM_HOST_BYTES = 1024 * 1024; // cua's MAX_TO_EXTENSION_BYTES
 export const MAX_TO_HOST_BYTES = 64 * 1024 * 1024; // cua's MAX_FROM_EXTENSION_BYTES
 export const DEFAULT_COMMAND_MS = 10_000; // the host's DEFAULT_CDP_TIMEOUT_MS, for a command that carries no deadline
 export const RESET_BOUND_MS = 1_000; // the undo of the agent's toggles never holds a release longer
+export const DEFAULT_GROUP_TITLE = 'cua'; // the host's name for a session's group until the agent names it
+export const AGENT_BADGE = 'agent'; // the panel's badge on an agent tab whose group has no name of its own
 
 export const ERRORS = {
   noTab: (tabId: unknown) => `No tab with id: ${String(tabId)}`,
@@ -46,12 +57,14 @@ export const ERRORS = {
 } as const;
 
 export interface ServerContext {
-  store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load'>;
+  store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update'>;
   claims: TabClaims<CuaConnection>;
   windows(): { id: number; focused: boolean }[];
   reaches(appSessionId: AppSessionId, tabSessionId: AppSessionId): boolean;
   version: string;
   log(line: string): void;
+  presence: AgentPresence | null; // M3: control, takeover and the cursor (null: the bare server's tests)
+  feed: ActivityFeed | null; // M3: what the agent did, to the windows
 }
 
 interface Child {
@@ -76,6 +89,12 @@ interface Leased {
 interface Held {
   tabId: string;
   cancel(why: string): void;
+  closesItsTab?: boolean; // the command closing its own tab: the tab's going never cancels it
+}
+
+interface Group {
+  id: number;
+  title: string;
 }
 
 type Record_ = { id: number; windowId: number; url: string; title: string; active: boolean; groupId: number; status: 'loading' | 'complete' };
@@ -94,7 +113,7 @@ export class CuaConnection {
   private nextId = 1;
   private readonly leases = new Map<string, Leased>();
   private readonly held = new Set<Held>();
-  private readonly groups = new Map<string, number>(); // group key → group id
+  private readonly groups = new Map<string, Group>(); // group key → its id and title
   private readonly groupOf = new Map<string, number>(); // MAWS tab id → group id
   private readonly sentState = new Map<string, string>(); // MAWS tab id → the last tabs.updated told
   private closed = false;
@@ -145,6 +164,20 @@ export class CuaConnection {
     if (id !== undefined) this.notify('tabs.removed', { tabId: id });
   }
 
+  // A download the agent started on a tab this connection leases (cua/downloads.ts), in Chrome's shape.
+  downloadCreated(download: { id: number; url: string; finalUrl: string; filename: string }): void {
+    this.notify('downloads.created', { ...download, state: 'in_progress' });
+  }
+
+  downloadChanged(change: { id: number; filename: string; state: 'complete' | 'interrupted'; error?: string }): void {
+    this.notify('downloads.changed', change);
+  }
+
+  // An activity on one of this connection's tabs, in its session's transcript.
+  tell(entry: TabEntry, activity: Parameters<ActivityFeed['tell']>[2]): void {
+    this.ctx.feed?.tell(this.appSessionId, entry.tab.tabId, activity);
+  }
+
   // A tab changed: a committed URL, a title or its loading state, told for tabs the host has seen.
   tabUpdated(entry: TabEntry): void {
     const id = this.idsOf.get(entry.tab.tabId);
@@ -160,7 +193,11 @@ export class CuaConnection {
   adopted(opener: TabEntry, child: TabEntry): void {
     if (this.closed || !this.leases.has(opener.tab.tabId) || this.idsOf.has(child.tab.tabId)) return;
     this.ctx.claims.reserve(child.tab.tabId, this);
-    this.notify('tabs.adopted', { openerTabId: this.idOf(opener.tab.tabId), tabId: this.idOf(child.tab.tabId), url: child.tab.url || 'about:blank' });
+    const group = this.groupOf.get(opener.tab.tabId);
+    if (group !== undefined) this.join(child.tab.tabId, group); // the opener's badge: the agent's page opened it
+    const url = child.tab.url || 'about:blank';
+    this.notify('tabs.adopted', { openerTabId: this.idOf(opener.tab.tabId), tabId: this.idOf(child.tab.tabId), url });
+    this.tell(child, { kind: 'tabOpened', url });
   }
 
   // ---- the primitives ------------------------------------------------------------------------------------------------
@@ -177,13 +214,14 @@ export class CuaConnection {
         return {};
       },
       'tabs.ungroup': ({ tabId }) => {
-        this.groupOf.delete(this.tab(tabId).tab.tabId);
+        const entry = this.tab(tabId);
+        if (this.groupOf.delete(entry.tab.tabId)) this.badge(entry.tab.tabId, null);
         return {};
       },
       // Electron's debugger has no "another extension's frame" refusal: nothing to sweep
       'tabs.guard': ({ tabId }) => (this.tab(tabId), {}),
       'tabs.unguard': ({ tabId }) => (this.tab(tabId), {}),
-      'group.title': () => ({}), // the panel's badge text is M3's
+      'group.title': ({ key, title }) => (this.retitle(key, title), {}),
       'windows.query': () => this.ctx.windows().map(({ id, focused }) => ({ id, focused, type: 'normal' })),
       // an agent tab always lives in its session's panel: the window that shows it is answered, none is created
       'windows.create': () => ({ id: this.windowId(null) }),
@@ -191,7 +229,13 @@ export class CuaConnection {
       'debugger.detach': (debuggee) => this.detach(debuggee),
       'debugger.sendCommand': (params) => this.sendCommand(params),
       'debugger.getTargets': () => this.inventory(),
-      'cursor.move': ({ tabId }) => (this.tab(tabId), {}), // the agent cursor is M3's
+      // the pointer where the agent aims, on a tab this connection leases (a cursor nobody's lease would hide is never drawn)
+      'cursor.move': ({ tabId, x, y }) => {
+        const entry = this.tab(tabId);
+        const leased = this.leases.get(entry.tab.tabId);
+        if (leased && !leased.closing && typeof x === 'number' && typeof y === 'number') this.ctx.presence?.cursorMove(entry, x, y);
+        return {};
+      },
       hostRefused: ({ code }) => void this.ctx.log(`cua's host refused MAWS on ${this.appSessionId}'s socket: ${String(code)}`),
     };
   }
@@ -201,12 +245,37 @@ export class CuaConnection {
     if (target !== 'about:blank' && !validateBrowserUrl(target).ok) fail(`Invalid url: only http and https pages open in MAWS`);
     const { tab } = this.ctx.store.open({ appSessionId: this.appSessionId, url: target, select: false });
     this.ctx.claims.reserve(tab.tabId, this);
-    const key = typeof (group as { key?: unknown } | undefined)?.key === 'string' ? (group as { key: string }).key : null;
-    if (key !== null) {
-      if (!this.groups.has(key)) this.groups.set(key, this.groups.size + 1);
-      this.groupOf.set(tab.tabId, this.groups.get(key)!);
-    }
-    return this.record(this.ctx.store.entry(tab.tabId)!);
+    const { key, title } = (typeof group === 'object' && group !== null ? group : {}) as { key?: unknown; title?: unknown };
+    if (typeof key === 'string') this.join(tab.tabId, this.groupFor(key, typeof title === 'string' ? title : null).id);
+    const entry = this.ctx.store.entry(tab.tabId)!;
+    this.tell(entry, { kind: 'tabOpened', url: target });
+    return this.record(entry);
+  }
+
+  // ---- groups and the panel's badge ----------------------------------------------------------------------------------
+
+  private groupFor(key: string, title: string | null): Group {
+    let group = this.groups.get(key);
+    if (!group) this.groups.set(key, (group = { id: this.groups.size + 1, title: title ?? DEFAULT_GROUP_TITLE }));
+    return group;
+  }
+
+  private join(tabId: string, groupId: number): void {
+    this.groupOf.set(tabId, groupId);
+    const group = [...this.groups.values()].find((candidate) => candidate.id === groupId);
+    this.badge(tabId, badgeText(group?.title ?? DEFAULT_GROUP_TITLE));
+  }
+
+  // `group.title`: the host names the session's group (the vendor's nameSession); every tab in it shows the name.
+  private retitle(key: unknown, title: unknown): void {
+    if (typeof key !== 'string' || typeof title !== 'string') return;
+    const group = this.groupFor(key, title);
+    group.title = title;
+    for (const [tabId, groupId] of this.groupOf) if (groupId === group.id) this.badge(tabId, badgeText(title));
+  }
+
+  private badge(tabId: string, agentBadge: string | null): void {
+    if (this.ctx.store.entry(tabId)?.tab.agentBadge !== agentBadge && this.ctx.store.entry(tabId)) this.ctx.store.update(tabId, { agentBadge });
   }
 
   private async attach(debuggee: Record<string, unknown>): Promise<unknown> {
@@ -275,17 +344,47 @@ export class CuaConnection {
         return fail(methodNotAllowed(method));
       case 'getTargets':
         return { targetInfos: this.inventory() };
-      case 'closeTarget':
-        return this.closeTarget(commandParams.targetId);
+      case 'closeTarget': {
+        const closing = this.closingTarget(commandParams.targetId);
+        return this.hold(closing, deadline, true, async (self) => this.closePage(closing, self));
+      }
       case 'target':
         this.checkTarget(leased, method, commandParams);
         break;
       case 'pass':
-        if (method === 'Page.close') return this.closePage(leased);
+        if (method === 'Page.close') {
+          this.ownedPage(leased);
+          return this.hold(leased, deadline, true, async (self) => this.closePage(leased, self));
+        }
     }
-    if (session === '') noteToggle(leased.toggles, method, commandParams);
     const sent = method === 'Target.attachToTarget' ? { ...commandParams, flatten: true } : commandParams;
-    return this.hold(leased, method, sent, session, deadline);
+    return this.hold(leased, deadline, commandClass(method) === 'acting', () => {
+      if (session === '') noteToggle(leased.toggles, method, commandParams);
+      this.observe(leased, method, commandParams, session);
+      return leased.dbg.send(method, sent, session || undefined);
+    });
+  }
+
+  // What a command the agent sends on the page's own session did, for the windows: a press is told once its node is
+  // named (looked up through this lease, before the press reaches the page), typed characters as a count.
+  private observe(leased: Leased, method: string, params: Record<string, unknown>, session: string): void {
+    if (session !== '' || !this.ctx.feed) return;
+    const activity = commandActivity(method, params);
+    if (!activity) return;
+    const { entry, dbg } = leased;
+    switch (activity.kind) {
+      case 'typed':
+        return this.ctx.feed.typed(this.appSessionId, entry.tab.tabId, activity.chars);
+      case 'press': {
+        const { x, y } = activity;
+        const node = dbg.send('DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y), includeUserAgentShadowDOM: false, ignorePointerEventsNone: true });
+        node.catch(() => {});
+        const label = within(clickLabel((m, p) => dbg.send(m, p), node), LABEL_LOOKUP_MS);
+        return this.tell(entry, label.then((named) => ({ kind: 'clicked' as const, x, y, label: named })));
+      }
+      default:
+        return this.tell(entry, activity);
+    }
   }
 
   // The debuggee's lease and the CDP session the command goes to ('' for the page's own).
@@ -314,44 +413,67 @@ export class CuaConnection {
     if (method === 'Target.getTargetInfo' && targetId !== undefined && !known(targetId)) fail(ERRORS.noTarget);
   }
 
-  // One command, held until its reply; cancelled at its deadline or by its tab or the connection going.
-  private hold(leased: Leased, method: string, params: Record<string, unknown>, session: string, deadline: number): Promise<unknown> {
+  // One command, held until its reply; cancelled at its deadline or by its tab or the connection going. An acting command
+  // first passes the takeover gate (presence.ts), which may hold it while the person has the tab and refuse it at the
+  // bound; it is sent only once the gate opens and nothing cancelled it meanwhile.
+  // `run` is given the command's own hold, so the command that closes its tab is not cancelled by the tab's going.
+  private hold(leased: Leased, deadline: number, acting: boolean, run: (self: Held) => Promise<unknown>): Promise<unknown> {
+    const { entry } = leased;
+    const presence = acting ? this.ctx.presence : null;
     return new Promise((resolve, reject) => {
+      const gate = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+      const settle = (answer: () => void) => {
+        if (!this.held.delete(held)) return;
+        clearTimeout(timer);
+        answer();
+      };
       const held: Held = {
-        tabId: leased.entry.tab.tabId,
+        tabId: entry.tab.tabId,
         cancel: (why) => {
-          if (!this.held.delete(held)) return;
-          clearTimeout(timer);
-          reject(new PrimitiveError(ERRORS.cancelled(why)));
+          if (!this.held.has(held)) return;
+          settle(() => reject(new PrimitiveError(ERRORS.cancelled(why))));
+          gate.abort(new Error(why));
         },
       };
       this.held.add(held);
       timer = setTimeout(() => held.cancel('deadline'), deadline);
-      leased.dbg.send(method, params, session || undefined).then(
-        (result) => {
-          if (!this.held.delete(held)) return;
-          clearTimeout(timer);
-          resolve(result ?? {});
-        },
-        (error: unknown) => {
-          if (!this.held.delete(held)) return;
-          clearTimeout(timer);
-          reject(new PrimitiveError(error instanceof Error ? error.message : String(error)));
-        },
-      );
+      let marked = false;
+      const sent = (async () => {
+        if (presence) {
+          await presence.beforeActing(entry, deadline, gate.signal);
+          marked = true;
+        }
+        gate.signal.throwIfAborted(); // cancelled while it waited: never sent
+        return run(held);
+      })();
+      sent
+        .then(
+          (result) => settle(() => resolve(result ?? {})),
+          (error: unknown) => settle(() => reject(new PrimitiveError(error instanceof Error ? error.message : String(error)))),
+        )
+        .finally(() => {
+          if (marked) presence!.acted(entry);
+        });
     });
   }
 
-  // The vendor's tab.close() sends Target.closeTarget whenever it knows the target id.
-  private closeTarget(targetId: unknown): unknown {
+  // The vendor's tab.close() sends Target.closeTarget whenever it knows the target id: the leased page it names, which
+  // must be this connection's own (closing is acting: it waits out the person like any other action).
+  private closingTarget(targetId: unknown): Leased {
     const leased = [...this.leases.values()].find((candidate) => targetId === this.pageTargetId(candidate.entry) || targetId === syntheticTargetId(candidate.entry));
     if (!leased) return fail(ERRORS.noTarget);
-    return this.closePage(leased);
+    this.ownedPage(leased);
+    return leased;
   }
 
-  private closePage(leased: Leased): unknown {
-    if (this.ctx.claims.reservedTo(leased.entry.tab.tabId) !== this) return fail(ERRORS.notOwned);
+  private ownedPage(leased: Leased): void {
+    if (this.ctx.claims.reservedTo(leased.entry.tab.tabId) !== this) fail(ERRORS.notOwned);
+  }
+
+  private closePage(leased: Leased, self: Held): unknown {
+    this.ownedPage(leased);
+    self.closesItsTab = true;
     this.closeTab(leased.entry);
     return { success: true };
   }
@@ -363,6 +485,8 @@ export class CuaConnection {
     if (leased) this.unregister(leased);
     this.cancelHeld(entry.tab.tabId, 'tab closed');
     leased?.lease.release();
+    if (leased) this.ctx.presence?.released(entry);
+    this.tell(entry, { kind: 'tabClosed', url: liveUrl(entry) });
     if (this.ctx.store.entry(entry.tab.tabId) === entry) this.ctx.store.close(entry.tab.tabId);
   }
 
@@ -375,6 +499,7 @@ export class CuaConnection {
       const info = p.targetInfo;
       leased.children.set(p.sessionId, { targetId: info.targetId as string, type: String(info.type ?? 'other'), title: String(info.title ?? ''), url: String(info.url ?? '') });
     }
+    if (sessionId === '' && method === 'Page.frameNavigated') this.navigated(leased.entry, params);
     const tabId = this.idOf(leased.entry.tab.tabId);
     this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
     const child = sessionId ? leased.children.get(sessionId) : undefined;
@@ -386,10 +511,19 @@ export class CuaConnection {
     }
   }
 
+  // A committed navigation of the leased page, for the windows (not the person's own, while they hold the tab).
+  private navigated(entry: TabEntry, params: unknown): void {
+    const url = navigatedUrl(params);
+    if (url === null || url === 'about:blank' || entry.tab.control === 'human') return;
+    this.tell(entry, { kind: 'navigated', url, title: '' });
+  }
+
   // The attachment ended under the lease (the page closed, crashed or was suspended): the host hears target_closed and
   // re-attaches when it needs the tab again.
   private lost(leased: Leased): void {
     this.unregister(leased);
+    this.ctx.presence?.released(leased.entry);
+    this.ctx.feed?.flush(leased.entry.tab.tabId);
     this.cancelHeld(leased.entry.tab.tabId, 'tab detached');
     const id = this.idsOf.get(leased.entry.tab.tabId);
     for (const targetId of leased.byTarget) this.notify('debugger.detached', { debuggee: { targetId }, reason: 'target_closed' });
@@ -416,6 +550,8 @@ export class CuaConnection {
     if (this.leases.get(leased.entry.tab.tabId) !== leased) return; // the attachment ended meanwhile
     this.unregister(leased);
     leased.lease.release();
+    this.ctx.presence?.released(leased.entry);
+    this.ctx.feed?.flush(leased.entry.tab.tabId);
   }
 
   private unregister(leased: Leased): void {
@@ -427,7 +563,7 @@ export class CuaConnection {
   }
 
   private cancelHeld(tabId: string | null, why: string): void {
-    for (const held of [...this.held]) if (tabId === null || held.tabId === tabId) held.cancel(why);
+    for (const held of [...this.held]) if ((tabId === null || held.tabId === tabId) && !(held.closesItsTab && why === 'tab closed')) held.cancel(why);
   }
 
   private close(): void {
@@ -435,6 +571,7 @@ export class CuaConnection {
     this.closed = true;
     this.cancelHeld(null, 'disconnected');
     this.ctx.claims.dropReservations(this);
+    for (const tabId of this.groupOf.keys()) this.badge(tabId, null); // its tabs are the person's now
     const letting = [...this.leases.values()].map((leased) => this.letGo(leased, 'disconnected'));
     this.peer.close();
     void Promise.allSettled(letting).then(() => this.onClosed(this));
@@ -526,6 +663,13 @@ export class CuaConnection {
 }
 
 const syntheticTargetId = (entry: TabEntry) => `maws-page-${entry.tab.tabId}`;
+
+// The badge a group's tabs show: the name the agent gave its session, else "agent" (the host's default name means
+// nothing to the person).
+function badgeText(title: string): string {
+  const name = title.replace(/\s+/g, ' ').trim();
+  return name === '' || name === DEFAULT_GROUP_TITLE ? AGENT_BADGE : [...name].slice(0, BROWSER_AGENT_BADGE_MAX_CHARS).join('');
+}
 
 // The URL the page shows now (Chrome's tab.url), else the one the store kept.
 function liveUrl(entry: TabEntry): string {

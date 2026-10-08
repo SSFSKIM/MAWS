@@ -36,7 +36,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function harness({ listeners = 1 }: { listeners?: number } = {}) {
+function harness({ listeners = 1, leased = new Set<string>() }: { listeners?: number; leased?: Set<string> } = {}) {
   vi.useFakeTimers({ now: Date.parse('2026-10-07T09:00:00.000Z') });
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
@@ -53,22 +53,24 @@ function harness({ listeners = 1 }: { listeners?: number } = {}) {
     now: Date.now,
   });
   const lines: string[] = [];
-  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line) });
+  const heldCalls: { tabId: string; type: string; message: string; callback: Callback }[] = [];
+  const held = { holds: (tabId: string) => leased.has(tabId), hold: (entry: TabEntry, dialog: RunDialogInfo, callback: Callback) => void heldCalls.push({ tabId: entry.tab.tabId, type: dialog.dialogType, message: dialog.messageText, callback }) };
+  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line), held });
   const open = () => {
     const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId)!;
     return { entry, wc: contents.at(-1)! };
   };
   const place = (entry: TabEntry, placed = true) => store.update(entry.tab.tabId, { placedIn: placed ? { paneId: 'p1', surface: 'panel' } : null });
   const notices = () => emitted.filter((e) => e.name === 'browser.notice').map((e) => e.payload);
-  return { store, dialogs, open, place, notices, lines, contents };
+  return { store, dialogs, open, place, notices, lines, contents, leased, heldCalls };
 }
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 60)', () => {
-  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0 };
+describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 60; A-53)', () => {
+  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0, leased: false };
   it.each([
     ['an agent-held tab, placed or not', { ...base, control: 'agent' as const }, 'agent'],
     ['an agent-held unplaced tab', { ...base, control: 'agent' as const, placed: false }, 'agent'],
@@ -79,6 +81,8 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
     ['a placed ordinary tab after many dialogs (Electron\'s safeDialogs bounds it)', { ...base, recent: 9 }, 'native'],
     ['a placed adopted pop-up, its first two dialogs', { ...base, safeDialogs: false, recent: 1 }, 'native'],
     ['a placed adopted pop-up, its third within the window', { ...base, safeDialogs: false, recent: 2 }, 'bounded'],
+    ['A-53: a tab under a cua lease, whoever holds it, placed or not', { ...base, leased: true, control: 'human' as const }, 'held'],
+    ['A-53: a leased unplaced agent tab', { ...base, leased: true, control: 'agent' as const, placed: false }, 'held'],
   ])('alert and confirm: %s → %s', (_name, facts, route) => {
     expect(routeDialog({ ...facts, type: 'alert' })).toBe(route);
     expect(routeDialog({ ...facts, type: 'confirm' })).toBe(route);
@@ -86,9 +90,9 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
 
   it('a prompt is always Electron\'s (it answers at once and shows nothing), as is any other kind', () => {
     for (const control of ['idle', 'agent', 'human'] as const) {
-      for (const placed of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5 })).toBe('native');
+      for (const placed of [true, false]) for (const leased of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5, leased })).toBe('native');
     }
-    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0 })).toBe('native');
+    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0, leased: true })).toBe('native');
   });
 });
 
@@ -179,6 +183,30 @@ describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 
     h.store.close(entry.tab.tabId);
     await Promise.resolve();
     expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
+  });
+});
+
+describe('PageDialogs: a tab under a cua lease (A-53)', () => {
+  it('hands alert and confirm to the held route unanswered, never natively, whoever holds the tab; a prompt stays Electron\'s', () => {
+    const h = harness();
+    const { entry, wc } = h.open();
+    h.leased.add(entry.tab.tabId);
+    h.place(entry);
+    const alert = wc.dialog('alert', 'Saved.');
+    h.store.setControl(entry.tab.tabId, 'human');
+    const confirm = wc.dialog('confirm', 'Leave?');
+    expect(alert).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(wc.native).not.toHaveBeenCalled();
+    expect(h.heldCalls.map(({ tabId, type, message }) => ({ tabId, type, message }))).toEqual([
+      { tabId: entry.tab.tabId, type: 'alert', message: 'Saved.' },
+      { tabId: entry.tab.tabId, type: 'confirm', message: 'Leave?' },
+    ]);
+    h.heldCalls[0]!.callback(false, '');
+    expect(alert).toHaveBeenCalledWith(false, ''); // the held route answers with the page's own callback
+    wc.dialog('prompt');
+    expect(wc.native).toHaveBeenCalledTimes(1);
+    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]); // nothing for the old tools' results
   });
 });
 

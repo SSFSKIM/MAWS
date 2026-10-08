@@ -1,144 +1,38 @@
-import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WebContents, WebContentsView } from 'electron';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { connectFakeHost, type FakeHost } from '../../../../test/support/cua-fake-host';
-import { TabStore, type TabEntry } from '../tabs';
-import { startCuaBackend, type CuaBackend } from './index';
+import { connectFakeHost } from '../../../../test/support/cua-fake-host';
+import { TabStore } from '../tabs';
+import { startCuaBackend } from './index';
+import type { AppSessionId } from '@shared/graph/ids';
+import { A, B, FakeContents, fakeView, harness, S, takeDown, tracked } from './server.fake';
 
 // The primitive server (the in-app browser spec of 2026-10-08, M2): a real socket per app session, MAWS's real TabStore
 // and TabDebugger over fake views whose webContents.debugger records every command, and the fake host of
 // test/support/cua-fake-host.ts on the other end, as cua's host would be.
 
-const A = 'A' as AppSessionId;
-const B = 'B' as AppSessionId;
-const S = 'S' as AppSessionId; // a side thread of A: reaches A's tabs (P-24)
-
-class FakeCdp extends EventEmitter {
-  attached = false;
-  detachCalls = 0;
-  readonly sent: { method: string; params: unknown; sessionId: string | undefined }[] = [];
-  readonly hang = new Set<string>();
-  constructor(readonly frameId: string) {
-    super();
-  }
-  attach() {
-    if (this.attached) throw new Error('Debugger is already attached to the target');
-    this.attached = true;
-  }
-  detach() {
-    this.detachCalls++;
-    this.attached = false;
-  }
-  isAttached() {
-    return this.attached;
-  }
-  sendCommand(method: string, params?: unknown, sessionId?: string): Promise<unknown> {
-    if (!this.attached) return Promise.reject(new Error('No target available'));
-    if (method === 'Page.getFrameTree') return Promise.resolve({ frameTree: { frame: { id: this.frameId } } });
-    this.sent.push({ method, params, sessionId });
-    if (this.hang.has(method)) return new Promise(() => {});
-    return Promise.resolve({ echoed: method });
-  }
-  methods() {
-    return this.sent.map((c) => c.method);
-  }
-  event(method: string, params: unknown, sessionId = '') {
-    this.emit('message', {}, method, params, sessionId);
-  }
-}
-
-class FakeContents extends EventEmitter {
-  readonly debugger: FakeCdp;
-  url = '';
-  destroyed = false;
-  constructor(frameId: string) {
-    super();
-    this.debugger = new FakeCdp(frameId);
-  }
-  loadURL(url: string) {
-    this.url = url;
-    return Promise.resolve();
-  }
-  getURL() {
-    return this.url;
-  }
-  close() {
-    this.destroyed = true;
-  }
-  isDestroyed() {
-    return this.destroyed;
-  }
-  setWindowOpenHandler() {}
-}
-
-let frames = 0;
-const fakeView = (contents = new FakeContents(`FRAME-${++frames}`)) => ({ webContents: contents, setBounds() {}, setVisible() {}, getBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
-
-const roots: string[] = [];
-const backends: CuaBackend[] = [];
-const hosts: FakeHost[] = [];
-
-afterEach(async () => {
-  for (const host of hosts.splice(0)) await host.close();
-  for (const backend of backends.splice(0)) backend.dispose();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-function harness() {
-  const root = mkdtempSync('/tmp/mcua-');
-  roots.push(root);
-  const store = new TabStore({
-    emit: () => undefined,
-    createView: (_tab, adopted) => (adopted ? fakeView(adopted as unknown as FakeContents) : fakeView()) as unknown as WebContentsView,
-    resolvePartition: () => DEFAULT_PARTITION,
-    schedule: () => {},
-  });
-  const reaches = (appSessionId: AppSessionId, tabSession: AppSessionId) => tabSession === appSessionId || (appSessionId === S && tabSession === A);
-  const changes: string[] = [];
-  const backend = startCuaBackend({ store, windows: () => [{ id: 7, focused: true }], reaches, userData: root, version: '1.2.3', log: () => {} });
-  backend.onChange((tabId) => changes.push(tabId));
-  backends.push(backend);
-  const host = async (appSessionId: AppSessionId = A) => {
-    const connected = await connectFakeHost(backend.socketPathFor(appSessionId)!);
-    hosts.push(connected);
-    return connected;
-  };
-  const personTab = (appSessionId: AppSessionId = A, url = 'https://person.test/') => {
-    const { tab } = store.open({ appSessionId, url, select: true });
-    return store.entry(tab.tabId)!;
-  };
-  const cdp = (entry: TabEntry) => (entry.view!.webContents as unknown as FakeContents).debugger;
-  const idOf = async (h: FakeHost, entry: TabEntry) => {
-    const tabs = await h.request<{ id: number; url: string }[]>('tabs.query');
-    const found = tabs.find((t) => t.url === (entry.view!.webContents as unknown as FakeContents).url);
-    if (!found) throw new Error(`tab ${entry.tab.tabId} not listed`);
-    return found.id;
-  };
-  return { root, store, backend, host, personTab, cdp, idOf, changes };
-}
+afterEach(takeDown);
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe('the socket and the hello', () => {
   it('listens per app session at <userData>/browser/cua/<id>.sock in a 0700 directory swept of stale sockets, and says hello at once', async () => {
     const root = mkdtempSync('/tmp/mcua-');
-    roots.push(root);
+    tracked.roots.push(root);
     mkdirSync(join(root, 'browser', 'cua'), { recursive: true });
     writeFileSync(join(root, 'browser', 'cua', 'gone.sock'), '');
     const store = new TabStore({ emit: () => undefined, createView: () => fakeView() as unknown as WebContentsView, resolvePartition: () => DEFAULT_PARTITION, schedule: () => {} });
     const backend = startCuaBackend({ store, windows: () => [], reaches: (a, b) => a === b, userData: root, version: '1.2.3', log: () => {} });
-    backends.push(backend);
+    tracked.backends.push(backend);
     expect(existsSync(join(root, 'browser', 'cua', 'gone.sock'))).toBe(false);
     expect(statSync(join(root, 'browser', 'cua')).mode & 0o777).toBe(0o700);
     const path = backend.socketPathFor(A)!;
     expect(path).toBe(join(root, 'browser', 'cua', 'A.sock'));
     expect(backend.socketPathFor(A)).toBe(path); // one server per session
     const host = await connectFakeHost(path);
-    hosts.push(host);
+    tracked.hosts.push(host);
     expect(host.hello).toEqual({ extensionId: 'maws', extensionInstanceId: 'maws:A', version: '1.2.3', protocolVersion: 1, profileName: 'MAWS' });
     backend.dispose();
     await host.closed;

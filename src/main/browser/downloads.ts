@@ -4,9 +4,16 @@
 // notice). Each tab shows one download line at a time (a second replaces it), following the item to done, cancelled or
 // failed; Reveal in Finder shows the saved file. Under the e2e alone, `MAWS_E2E_SAVE_PATH` names the folder the file is
 // saved into without the dialog. A download from no tab of ours is cancelled.
-import { basename, join } from 'node:path';
+//
+// E13 (the in-app browser spec of 2026-10-08, "Downloads"): a download from a tab under a cua lease is the agent's,
+// saved without a dialog in the Downloads folder under its own name, " (2)", " (3)"… before its extension when the name
+// is taken there or by a download still in flight, and reported through `agent` (cua/downloads.ts: the host, the
+// windows, the deliverable). Its line and Reveal in Finder are a person's download's.
+import { existsSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
 import type { DownloadItem, Session, WebContents } from 'electron';
 import type { BrowserTab } from '@shared/browser/tab';
+import type { AgentDownloads } from './cua/downloads';
 import type { PreparePartition } from './partition';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 
@@ -20,12 +27,25 @@ export interface DownloadsDeps {
   downloadsDir(): string;
   saveDir: string | null; // e2eSaveDir(env)
   reveal(path: string): void; // Reveal in Finder (the seam's under the e2e)
+  agent?: AgentDownloads; // E13: the agent's downloads through cua
+  exists?(path: string): boolean; // E13: a file is in the folder (tests)
+}
+
+// E13: the first free path for `filename` in `dir`: the name itself, else Chrome's " (2)", " (3)"… before the extension.
+export function uniqueDownloadPath(dir: string, filename: string, taken: (path: string) => boolean): string {
+  const extension = filename.startsWith('.') && extname(filename.slice(1)) === '' ? '' : extname(filename);
+  const stem = filename.slice(0, filename.length - extension.length);
+  for (let n = 1; ; n++) {
+    const path = join(dir, n === 1 ? filename : `${stem} (${n})${extension}`);
+    if (!taken(path)) return path;
+  }
 }
 
 const DONE_STATES = { completed: 'done', cancelled: 'cancelled', interrupted: 'failed' } as const;
 
 export class Downloads {
   private readonly current = new WeakMap<TabEntry, DownloadItem>();
+  private readonly inFlight = new Set<string>(); // E13: the paths the agent's downloads are being saved to
 
   constructor(private readonly deps: DownloadsDeps) {}
 
@@ -42,7 +62,20 @@ export class Downloads {
     const filename = item.getFilename();
     if (!entry) return item.cancel();
     const { tabId, appSessionId } = entry.tab;
-    if (entry.tab.control === 'agent') {
+    // E13: the agent's, through cua: no dialog, the folder's next free name, reported as it goes
+    const agent = this.deps.agent?.owns(tabId) ? this.deps.agent : undefined;
+    if (agent) {
+      const exists = this.deps.exists ?? existsSync;
+      const path = uniqueDownloadPath(this.deps.saveDir ?? this.deps.downloadsDir(), filename, (candidate) => this.inFlight.has(candidate) || exists(candidate));
+      this.inFlight.add(path);
+      item.setSavePath(path);
+      const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [];
+      const ended = agent.started(entry, { url: chain[0] ?? item.getURL(), finalUrl: chain.at(-1) ?? item.getURL(), path });
+      item.once('done', (_event, state) => {
+        this.inFlight.delete(path);
+        ended({ state, path: item.getSavePath() || path, bytes: item.getReceivedBytes() });
+      });
+    } else if (entry.tab.control === 'agent') {
       item.cancel();
       emit('browser.download.refused', { tabId, url: item.getURL(), filename });
       // E4c start: told in main too, beside the IPC emission: the agent's call that started it answers downloadRefused
@@ -51,8 +84,10 @@ export class Downloads {
       emit('browser.notice', { appSessionId, tabId, kind: 'downloadRefusedAgent' });
       return;
     }
-    if (this.deps.saveDir !== null) item.setSavePath(join(this.deps.saveDir, filename));
-    else item.setSaveDialogOptions({ defaultPath: join(this.deps.downloadsDir(), filename) });
+    if (!agent) {
+      if (this.deps.saveDir !== null) item.setSavePath(join(this.deps.saveDir, filename));
+      else item.setSaveDialogOptions({ defaultPath: join(this.deps.downloadsDir(), filename) });
+    }
 
     this.current.set(entry, item);
     const line = (download: BrowserTab['download']) => {

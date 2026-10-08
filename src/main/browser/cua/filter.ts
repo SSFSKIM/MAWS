@@ -68,3 +68,21 @@ export function undoCommands(toggles: AgentToggles, { mawsFocusEmulation }: { ma
   if (toggles.focusEmulation && !mawsFocusEmulation) out.push(['Emulation.setFocusEmulationEnabled', { enabled: false }]);
   return out;
 }
+
+// The takeover gate's classes (the in-app browser spec of 2026-10-08, "Acting and reading commands"): the vendor acts
+// through more than `Input.*` (a select's option is an injected script, locators evaluate through `Runtime.*`), so a
+// command is *reading* only when listed here and *acting* otherwise, `Runtime.evaluate`, `Runtime.callFunctionOn` and
+// `Target.closeTarget` included. A paused request must proceed or the page stalls, so Fetch's continuations read.
+// Reading commands pass while the person holds the tab and never change who drives it.
+const READING = new Set([
+  'Page.captureScreenshot', 'Page.getFrameTree', 'Page.getNavigationHistory', 'Page.getLayoutMetrics',
+  'DOM.getDocument', 'DOM.describeNode', 'DOM.getBoxModel', 'DOM.getContentQuads', 'DOM.getNodeForLocation', 'DOM.resolveNode',
+  'Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo', 'Target.attachToTarget', 'Target.getTargets',
+  'Runtime.enable', 'Runtime.disable', 'Page.enable', 'Page.disable', 'Network.enable', 'Network.disable', 'Fetch.enable', 'Fetch.disable',
+  'Fetch.continueRequest', 'Fetch.continueResponse', 'Fetch.failRequest',
+  'Emulation.setFocusEmulationEnabled', 'Emulation.setDeviceMetricsOverride', 'Emulation.clearDeviceMetricsOverride',
+]);
+
+export function commandClass(method: string): 'acting' | 'reading' {
+  return READING.has(method) || method.startsWith('Accessibility.') ? 'reading' : 'acting';
+}

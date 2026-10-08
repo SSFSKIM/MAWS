@@ -17,7 +17,10 @@
 //     once two dialogs have ended within 5 s (sliding, reset by a committed navigation), further ones are dismissed as
 //     `safeDialogs` would, with one notice per run (Decision Log 60);
 //   - a `prompt` (or any other kind) is always Electron's: its renderer refuses `prompt()` before main sees it, and its
-//     listener answers one that arrives at once without showing anything.
+//     listener answers one that arrives at once without showing anything;
+//   - A-53 (the in-app browser spec of 2026-10-08): a tab under a cua lease, whoever holds it: `held`, handed unanswered
+//     to cua's held route (cua/dialogs.ts), which lets the vendor answer through CDP and answers the 30 s default through
+//     the callback.
 // The guard: the wrap is installed only over exactly one existing listener, Electron's own; otherwise the view is left
 // native and one line is logged, so an Electron that renames or multiplies the event fails the e2e's alert step loudly
 // rather than freezing. The event is Electron-internal on a version-pinned build (A-42; the tracker's re-verify row).
@@ -62,7 +65,7 @@ function safeDialogsOf(contents: WebContents): boolean {
   return preferences?.safeDialogs === true;
 }
 
-export type DialogRoute = 'native' | 'agent' | 'hidden' | 'bounded';
+export type DialogRoute = 'native' | 'agent' | 'hidden' | 'bounded' | 'held';
 
 export interface DialogFacts {
   type: string;
@@ -70,11 +73,13 @@ export interface DialogFacts {
   placed: boolean; // a pane places the tab
   safeDialogs: boolean; // Electron bounds the page's dialogs itself
   recent: number; // the page's dialogs that ended within DIALOG_BOUND_WINDOW_MS
+  leased: boolean; // A-53: a cua connection holds a debugger lease on the tab
 }
 
 // The routing table (A-42 conditions 1 to 3; Decision Log 60).
-export function routeDialog({ type, control, placed, safeDialogs, recent }: DialogFacts): DialogRoute {
+export function routeDialog({ type, control, placed, safeDialogs, recent, leased }: DialogFacts): DialogRoute {
   if (type !== 'alert' && type !== 'confirm') return 'native';
+  if (leased) return 'held';
   if (control === 'agent') return 'agent';
   if (!placed) return 'hidden';
   if (!safeDialogs && recent >= DIALOG_BOUND_AFTER) return 'bounded';
@@ -92,6 +97,8 @@ export interface PageDialogsDeps {
   emit: BrowserEmit;
   log(line: string): void;
   now?(): number;
+  // A-53: cua's held route for a tab under a lease (absent: no cua backend, no such tab)
+  held?: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
 }
 
 export class PageDialogs implements AgentDialogs {
@@ -158,7 +165,9 @@ export class PageDialogs implements AgentDialogs {
       placed: entry.tab.placedIn !== null,
       safeDialogs: safeDialogsOf(contents),
       recent: state.ended.length,
+      leased: this.deps.held?.holds(entry.tab.tabId) === true,
     });
+    if (route === 'held') return this.deps.held!.hold(entry, info, callback);
     if (route === 'native') {
       if (type === 'alert' || type === 'confirm') state.bounding = false;
       // the page's dialog counts from when the person closed it (a slow loop is a loop all the same)

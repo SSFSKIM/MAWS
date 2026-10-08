@@ -37,8 +37,11 @@ import { startCommentMode } from './comment';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { e2eTabIds, reachableSessions, startBrowserAgent } from './agent';
 // E4c end
-// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52)
+// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and M3's control and
+// cursor, shared by cua's server and the old tools (one automation owner per tab)
 import { startCuaBackend, type CuaBackend } from './cua';
+import { TabControls } from './agent/control';
+import { AgentCursor } from './agent/cursor';
 // E13 end
 
 export interface BrowserDeps {
@@ -102,6 +105,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     // E4c start: deterministic tab ids under MAWS_E2E=1 (E4c Design §13 (b); Decision Log 36)
     newTabId: e2eTabIds(env, restored.tabs),
     // E4c end
+    driven: (tabId) => cua.holds(tabId), // E13: the cap never suspends a tab an agent drives through cua
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
   const focusEmulation = focusEmulationMode(env);
@@ -118,7 +122,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const memory = new MemorySampler({ store, emit, metrics: () => app.getAppMetrics() });
 
   const seam = browserSeam(env);
-  const downloads = new Downloads({ store, emit, downloadsDir: () => app.getPath('downloads'), saveDir: e2eSaveDir(env), reveal: seam.reveal });
+  const downloads = new Downloads({
+    store, emit, downloadsDir: () => app.getPath('downloads'), saveDir: e2eSaveDir(env), reveal: seam.reveal,
+    // E13: a leased tab's download is the agent's (cua/downloads.ts); asked only once a page downloads, after start
+    agent: { owns: (tabId) => cua.downloads.owns(tabId), started: (entry, download) => cua.downloads.started(entry, download) },
+  });
   const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
   const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });
   const childPreferences = tabWebPreferences();
@@ -136,8 +144,20 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
+  // M3: who drives each tab and the agent's cursor, with the engine host's events (as the tools are); without them (E4a's
+  // own tests) control never moves
+  const controls = hosts ? new TabControls({ store }) : null;
+  const cursor = controls ? new AgentCursor({ store, controls }) : null;
   const cua = startCuaBackend({
     store,
+    ...(controls && cursor && { presence: { controls, cursor } }),
+    emit,
+    recordDownload: async (download) => {
+      if (!hosts) return;
+      const result = await hosts.dispatch('engine-host', 'maws.download.recorded', download);
+      if (!result.ok) throw new Error(result.error.message);
+      if ((result.value as { outcome?: string } | null)?.outcome === 'not_held') console.warn(`[browser] tab ${download.tabId}'s download was not recorded: no engine host holds ${download.appSessionId}`);
+    },
     windows: () =>
       BrowserWindow.getAllWindows()
         .filter((win) => !win.isDestroyed() && isAppWindow(win))
@@ -173,7 +193,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // E4d end
   // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
   const agent = hosts
-    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, views, userData, cua /* E13 */ })
+    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, views, userData, cua, control: controls ?? undefined, cursor: cursor ?? undefined /* E13 */ })
     : null;
   if (inspector && agent) inspector.agent = agent.seam;
   // E4c end
@@ -190,6 +210,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       void agent?.stop(); // E4c: nothing more is answered; every driver's connection closed
       stopCuaStatus?.(); // E13
       cua.dispose(); // E13: every socket closed and unlinked; each connection's leases let go
+      cursor?.dispose(); // E13
+      controls?.dispose(); // E13
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
       memory.stop();

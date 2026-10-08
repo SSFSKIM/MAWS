@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { methodNotAllowed, noteToggle, routeCommand, undoCommands, type AgentToggles } from './filter';
+import { commandClass, methodNotAllowed, noteToggle, routeCommand, undoCommands, type AgentToggles } from './filter';
 
 describe('the command filter (E4c bridge boundary, lifted; A-51)', () => {
   it('refuses the browser-wide domains and every Target method but the ones auto-attach and closing a tab need', () => {
@@ -46,5 +46,27 @@ describe('the agent state a lease leaves behind', () => {
     ]);
     expect(undoCommands(all, { mawsFocusEmulation: true }).map(([method]) => method)).not.toContain('Emulation.setFocusEmulationEnabled');
     expect(undoCommands(fresh(), { mawsFocusEmulation: false })).toEqual([]);
+  });
+});
+
+describe('acting and reading commands (the takeover gate\'s classes)', () => {
+  it('reads: the spec\'s list, conservatively; a paused request proceeding is reading too', () => {
+    for (const method of [
+      'Page.captureScreenshot', 'Page.getFrameTree', 'Page.getNavigationHistory', 'Page.getLayoutMetrics',
+      'DOM.getDocument', 'DOM.describeNode', 'DOM.getBoxModel', 'DOM.getContentQuads', 'DOM.getNodeForLocation', 'DOM.resolveNode',
+      'Accessibility.getFullAXTree', 'Accessibility.getPartialAXTree', 'Accessibility.enable',
+      'Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo', 'Target.attachToTarget', 'Target.getTargets',
+      'Runtime.enable', 'Runtime.disable', 'Page.enable', 'Page.disable', 'Network.enable', 'Network.disable', 'Fetch.enable', 'Fetch.disable',
+      'Fetch.continueRequest', 'Fetch.continueResponse', 'Fetch.failRequest',
+      'Emulation.setFocusEmulationEnabled', 'Emulation.setDeviceMetricsOverride', 'Emulation.clearDeviceMetricsOverride',
+    ]) expect(commandClass(method), method).toBe('reading');
+  });
+
+  it('acts: everything else, script evaluation and closing the tab included', () => {
+    for (const method of [
+      'Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText', 'Runtime.evaluate', 'Runtime.callFunctionOn',
+      'Page.navigate', 'Page.reload', 'Page.close', 'Target.closeTarget', 'DOM.setFileInputFiles', 'DOM.focus', 'DOM.scrollIntoViewIfNeeded',
+      'Page.setInterceptFileChooserDialog', 'Page.handleJavaScriptDialog', 'Fetch.fulfillRequest', 'Network.setCookie', 'Emulation.setTouchEmulationEnabled',
+    ]) expect(commandClass(method), method).toBe('acting');
   });
 });

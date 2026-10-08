@@ -8,25 +8,42 @@
 // Each connection is one cua host in its own process (connection.ts); what crosses connections, which tabs are reserved
 // or leased to whom, is `TabClaims`. The store's hooks reach every connection: a tab gone (`tabs.removed`), a tab changed
 // (`tabs.updated`), and a leased page's `window.open` adopted as a tab (`tabs.adopted`).
+//
+// M3 (what the person sees and keeps): with `presence`, control follows the lease and the takeover gate holds acting
+// commands while the person has the tab (presence.ts); with `emit`, what the agent did reaches the windows
+// (`browser.agent.activity`, activity.ts); `downloads` is the agent's route for E4a's downloads (downloads.ts), and
+// `dialogs` the `-run-dialog` wrap's held route for a leased tab (dialogs.ts).
 import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { TabEntry, TabStore } from '../tabs';
+import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
+import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
+import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
+import { ActivityFeed } from './activity';
 import { TabClaims } from './claims';
 import { CuaConnection } from './connection';
+import { HeldDialogs } from './dialogs';
+import { agentDownloads, type AgentDownloads } from './downloads';
+import { AgentPresence, type PresenceDeps } from './presence';
 
 // sockaddr_un's sun_path on macOS is 104 bytes, the terminating NUL included.
 export const MAX_SOCKET_PATH_BYTES = 103;
 
 export interface CuaBackendDeps {
-  store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
+  store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update' | 'setControl' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
   windows(): { id: number; focused: boolean }[]; // the app's windows, for windows.query and a tab's windowId
   reaches(appSessionId: AppSessionId, tabSessionId: AppSessionId): boolean; // P-24: itself, and a side thread its parent
   userData: string;
   version: string; // MAWS's app version, in the hello
   log?(line: string): void;
+  // M3: control's transitions, the takeover gate and the agent's cursor (absent: the bare server, no transitions)
+  presence?: Omit<PresenceDeps, 'store'>;
+  emit?: BrowserEmit; // M3: `browser.agent.activity` to the windows (absent: nothing told)
+  // M3: an agent's finished download to the session's engine host (`maws.download.recorded`), which records it once
+  recordDownload?(download: MawsDownloadRecorded): Promise<unknown>;
+  now?(): number;
 }
 
 export interface CuaBackend extends LeaseHolds {
@@ -36,6 +53,9 @@ export interface CuaBackend extends LeaseHolds {
   closeSession(appSessionId: AppSessionId): void;
   // The e2e seam's reading: per listening session, its connections, held commands and leased tabs.
   inspect(): Record<string, { path: string; connections: number; held: number; leased: string[] }>;
+  downloads: AgentDownloads; // M3: E4a's downloads ask whether a tab's download is the agent's, and report it
+  // M3: the `-run-dialog` wrap's held route: a leased tab's alert or confirm, answered by the vendor or the 30 s default
+  dialogs: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
   dispose(): void;
 }
 
@@ -55,7 +75,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const claims = new TabClaims<CuaConnection>();
   const sessions = new Map<AppSessionId, Listening>();
   const tooLong = new Set<AppSessionId>();
-  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log };
+  const feed = deps.emit ? new ActivityFeed({ emit: deps.emit, now: deps.now }) : null;
+  const presence = deps.presence ? new AgentPresence({ ...deps.presence, store: deps.store }) : null;
+  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed };
   const viewed = new WeakSet<TabEntry>();
   const everyConnection = () => [...sessions.values()].flatMap((listening) => [...listening.connections]);
 
@@ -83,6 +105,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
         if (deps.store.entry(entry.tab.tabId) === entry) return;
         claims.forget(entry.tab.tabId);
         for (const connection of everyConnection()) connection.tabRemoved(entry.tab.tabId);
+        feed?.forget(entry.tab.tabId);
       }),
     ),
     deps.store.onUpdated((entry) => {
@@ -97,6 +120,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       if (opener && holder) holder.adopted(opener, child);
     }),
   ];
+
+  const downloads = agentDownloads({ claims, recordDownload: deps.recordDownload, log });
+  const held = new HeldDialogs({ activity: (entry, activity) => claims.leasedTo(entry.tab.tabId)?.tell(entry, activity), log });
 
   return {
     socketPathFor(appSessionId) {
@@ -119,6 +145,8 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     },
     holds: (tabId) => claims.leasedTo(tabId) !== undefined,
     onChange: (listener) => claims.onChange(listener),
+    downloads,
+    dialogs: { holds: (tabId) => claims.leasedTo(tabId) !== undefined, hold: (entry, info, callback) => held.hold(entry, info, callback) },
     inspect: () =>
       Object.fromEntries(
         [...sessions].map(([appSessionId, listening]) => [
@@ -133,6 +161,8 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       ),
     dispose() {
       for (const stop of stops.splice(0)) stop();
+      feed?.dispose();
+      held.dispose();
       for (const listening of sessions.values()) close(listening);
       sessions.clear();
     },
