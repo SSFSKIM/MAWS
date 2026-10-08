@@ -401,6 +401,13 @@ export const ASK = {
   decideForMe: 'Decide for me',
 } as const;
 
+// The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
+// error, a withdrawn one its interrupt wording, every other its state's.
+export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; error: string | null; cancelReason: string | null }): string {
+  if (row.state === 'error') return row.error ?? '';
+  return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
+}
+
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
 // `<name> (<directory>)` for a repository, or the two non-answers.
 export function askAnswerCopy(answer: AskAnswer | undefined): string {

@@ -49,6 +49,17 @@ describe('serializeRows', () => {
     expect(markdown).toBe(['```\n! ls\na\nb\nexit 0\n```', '---\n*Context compacted · 100k → 20k tokens · auto*', '*Heads up*'].join('\n\n'));
   });
 
+  it('copies a withdrawn ask with its interrupt wording, an ask cancelled by the session ending with that (scale-review C scalpel-1#2)', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a1', 'mcp__maws__ask', { title: 'Setup', questions: [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }] }] });
+    b.emit('maws.ask.cancelled', { askId: 'a1', toolUseId: 'a1' as never, reason: 'withdrawn' });
+    b.toolUse('a2', 'mcp__maws__ask', { title: 'Later', questions: [{ id: 'q1', question: 'Which size?', modality: 'text' }] });
+    b.emit('maws.ask.cancelled', { askId: 'a2', toolUseId: 'a2' as never, reason: 'exit' });
+    const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'ask'));
+    expect(markdown).toBe(['**Setup** · Asked 1 question · Cancelled, the turn was interrupted', '**Later** · Asked 1 question · Cancelled, the session ended'].join('\n\n'));
+  });
+
   // E7: a listing as its counts (a pending one says so, an unparsed one its notes); a message's whole body under its
   // line when the line shows only its first; a hand-back's report under its line
   it('renders the listing, the messages between sessions and a hand-back (E7)', () => {

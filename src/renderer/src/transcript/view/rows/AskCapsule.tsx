@@ -4,7 +4,7 @@
 // Once answered it lists one line per question, "header (or question) → answer", as the question row does. It stays in
 // view when its turn folds (isPersistentRow).
 import type { AskQuestion } from '@shared/maws/tools';
-import { ASK, askAnswerCopy } from '../../model/copy';
+import { ASK, askAnswerCopy, askStateCopy } from '../../model/copy';
 import type { AskRowData, Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { QuestionIcon } from './icons';
@@ -34,7 +34,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
 export function AskCapsule({ row }: { row: AskRow }) {
   const actions = useActions();
   const appSessionId = useRowSession();
-  const chip = row.state === 'error' ? (row.error ?? '') : row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
+  const chip = askStateCopy(row);
   return (
     <section className="transcript-ask" aria-label={row.title ?? ASK.title} data-ask-id={row.askId} data-ask-state={row.state}>
       <div className="transcript-ask-top">
