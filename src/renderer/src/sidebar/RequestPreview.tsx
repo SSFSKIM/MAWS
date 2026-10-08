@@ -17,7 +17,7 @@ import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { isOpen } from '../attention/derive';
-import { needsYouAge } from './derive';
+import { itemAge } from './derive';
 import { displayTitle } from '../sessions/title';
 
 export const HEADINGS = ATTENTION_HEADINGS; // the one table C7's card reads too
@@ -67,7 +67,7 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
   const shown = request ? describe(request) : { title: item.summary, input: null };
   const foreign = record?.holder.kind === 'terminal' || record?.holder.kind === 'background_job';
   const canAnswer = placement === 'hover' && item.kind === 'permission' && isOpen(item) && !foreign && isReadOnlyRequest(request);
-  const where = [projectName, record ? displayTitle(record) : null, `waiting ${needsYouAge(item, now)}`].filter(Boolean).join(' · ');
+  const where = [projectName, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ');
 
   // The button a pointer pressed; a click counts only as the release of that press (`detail` > 0: a keyboard- or
   // script-synthesised click reports 0, and has no pointerdown before it).

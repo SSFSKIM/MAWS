@@ -40,4 +40,15 @@ describe('session glyphs', () => {
     expect(glyphFor(record('s'), digest('s'), [item('s', 'held_peer_message', at)]).label).toBe('Idle');
     expect(glyphFor(record('s'), digest('s'), [item('s', 'question', at, { state: 'confirmed' })]).label).toBe('Idle');
   });
+
+  // E11 F2b (plan 2.4; owner decision 1): out of Needs you once seen or dismissed, the session still says it ended with
+  // an error, and when, until its next turn; a working, failed or waiting session says that first
+  it('an error seen or dismissed leaves "Ended with an error" with its time', () => {
+    const now = Date.parse('2026-10-08T10:00:00Z');
+    const ended = item('s', 'error', '2026-09-24T10:00:00Z', { state: 'confirmed' });
+    expect(glyphFor(record('s'), digest('s'), [], ended, now)).toEqual({ char: '✕', tone: 'danger', label: 'Ended with an error 2 weeks ago', pulse: false });
+    expect(glyphFor(record('s'), digest('s', { phase: 'exited' }), [], { ...ended, state: 'retired' }, now).label).toBe('Ended with an error 2 weeks ago');
+    expect(glyphFor(record('s'), digest('s', { phase: 'working' }), [], ended, now).label).toBe('Working');
+    expect(glyphFor(record('s'), digest('s'), [item('s', 'question', at)], ended, now).label).toBe('Question');
+  });
 });

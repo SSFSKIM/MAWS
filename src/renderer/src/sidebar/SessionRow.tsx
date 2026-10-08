@@ -13,7 +13,7 @@ import { runSessionAction, sessionActionsFor, useSessionActionEnabled } from '..
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
-import { selectPendingOf, useAttention } from '../stores/attention';
+import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { lineageCaption, rowBranch, sessionAge } from './derive';
@@ -41,7 +41,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const now = useNow();
   const tree = useTree();
   const nodeId = sessionNodeId(id);
-  const glyph = glyphFor(record, digest ?? null, pending);
+  const ended = useAttention((s) => selectEndedWithErrorOf(s, id)); // E11 F2b
+  const glyph = glyphFor(record, digest ?? null, pending, ended, now);
   const selected = tree.selected === id;
   const title = displayTitle(record);
   const branch = rowBranch(record); // W9 (H2): a branch the record does not name is left out, never guessed as "detached"

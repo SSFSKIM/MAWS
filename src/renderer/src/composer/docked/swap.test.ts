@@ -65,4 +65,18 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     expect(swap.waiting).toBe(0);
     expect(swapOf([asked], new Map<AttentionId, SessionEvent | null>([[asked.id, ask]]))).toMatchObject({ item: null, notice: { id: asked.id }, waiting: 0 });
   });
+
+  // E11 F2b (plan 2.4): an error seen in its session (confirmed) keeps its notice there until it is dismissed (retired)
+  // or the next turn retires it; an error still open comes first
+  it('keeps a seen error as the notice, drops a dismissed one, and puts an open one first', () => {
+    const none = { request: { requestId: null, toolUseId: null, taskId: null, agentId: null } };
+    const seen = item(A, 'error', '2026-09-29T09:00:00.000Z', { ...none, id: 'a:error:1' as AttentionId, state: 'confirmed' });
+    const dismissed = item(A, 'error', '2026-09-29T08:00:00.000Z', { ...none, id: 'a:error:0' as AttentionId, state: 'retired' });
+    const fresh = item(A, 'error', '2026-09-29T10:00:00.000Z', { ...none, id: 'a:error:2' as AttentionId });
+    const requests = new Map<AttentionId, SessionEvent | null>();
+    expect(swapOf([seen, dismissed], requests).notice?.id).toBe(seen.id);
+    expect(swapOf([dismissed], requests).notice).toBeNull();
+    expect(swapOf([seen, fresh], requests).notice?.id).toBe(fresh.id);
+    expect(swapOf([item(A, 'question', '2026-09-29T09:00:00.000Z', { state: 'confirmed' })], requests).notice, 'only an error stays once seen').toBeNull();
+  });
 });

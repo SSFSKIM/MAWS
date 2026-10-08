@@ -11,7 +11,7 @@ import { useChordHint } from '../app/IconButton';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
-import { selectPendingOf, useAttention } from '../stores/attention';
+import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -58,10 +58,11 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
+  const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
   if (!record) return { title: unstarted.title, secondary: unstarted.project, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending), fileType: null };
+  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 
 function useTabLabel(tab: TabRef): TabLabel {

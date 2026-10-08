@@ -148,6 +148,20 @@ export function selectPendingOf(state: Pick<AttentionState, 'bySession'>, appSes
   return open;
 }
 
+// E11 F2b (plan 2.4; owner decision 1): the session's latest error that is seen or dismissed, out of Needs you, which
+// its glyph keeps saying ("Ended with an error <when>") until the next turn retires it; null when there is none.
+const endedCache = new WeakMap<AttentionItem[], AttentionItem | null>();
+export function selectEndedWithErrorOf(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): AttentionItem | null {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return null;
+  let ended = endedCache.get(items);
+  if (ended === undefined) {
+    const acknowledged = items.filter((item) => item.kind === 'error' && !isOpen(item));
+    endedCache.set(items, (ended = acknowledged.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null));
+  }
+  return ended;
+}
+
 // The Needs-you rows, recomputed only when either input's version moves, so a component gets the same array until
 // then. The memo is held per attention map (a store's own), so two stores never share an entry.
 type RecordsInput = { records: Map<AppSessionId, SessionRecord>; recordsVersion: number };

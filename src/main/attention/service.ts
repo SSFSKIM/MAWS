@@ -5,7 +5,9 @@
 // hard-failure terminal reason, SPEC 45.25.4's set) or a failed background task, `auto_mode_unavailable` from a tool
 // result denied that way, `interrupted` from an exit that lost approvals (the summary string is the contract), and
 // `held_peer_message` from the status's held messages. Error-like items retire when the session's next human turn
-// starts or the session is stopped; an archive (`session.forgotten`, or an archive exit) retires everything. Each change
+// starts (a prompt read back from disk included) or the session is stopped; an archive (`session.forgotten`, or an
+// archive exit) retires everything. E11 F2b: an error seen in its opened session or dismissed stays as the session's
+// "ended with an error" fact, out of Needs you (`attention.acknowledge`). Each change
 // is persisted through the AttentionStore (a failed write is owed and retried, never taken as saved)
 // and emitted whole as `attention.changed`; `attention.list` and `attention.request` are answered here, the latter by
 // asking the engine host for the item's originating request event (`session.pendingRequest`).
@@ -24,6 +26,37 @@ export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
 ]);
 const BROKER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'dialog', 'elicitation']);
 const RETIRED_BY_NEXT_TURN: ReadonlySet<AttentionItem['kind']> = new Set(['error', 'interrupted', 'auto_mode_unavailable']);
+
+// E11 F2b (plan 2.4): a failed turn in words. The result's subtype and terminal reason are the engine's codes; the
+// summary is what Needs you, the session's notice and a notification read. A limit says which limit stopped the turn;
+// anything else ended with an error, with the engine's first error (or a plain reading of a self-explanatory reason)
+// beside it.
+const STOPPED_AT: Readonly<Record<string, string>> = {
+  error_max_turns: 'Stopped at the turn limit',
+  max_turns: 'Stopped at the turn limit',
+  error_max_budget_usd: 'Stopped at the budget',
+  budget_exhausted: 'Stopped at the budget',
+};
+const REASON_WORDS: Readonly<Record<string, string>> = {
+  prompt_too_long: 'the conversation is too long for the model',
+  image_error: 'an image could not be read',
+};
+export function failedTurnSummary(result: string, terminalReason: string | null, firstError: string | undefined): string {
+  const stopped = STOPPED_AT[terminalReason ?? ''] ?? STOPPED_AT[result];
+  if (stopped) return stopped;
+  const detail = firstError ?? REASON_WORDS[terminalReason ?? ''];
+  return `The turn ended with an error${detail ? ` (${detail})` : ''}`;
+}
+// An item persisted before the words: "Turn failed: <code>[ (<first error>)]".
+const LEGACY_FAILED = /^Turn failed: (\S+)(?: \((.*)\))?$/;
+const inWords = (item: AttentionItem): AttentionItem => {
+  const legacy = item.kind === 'error' ? LEGACY_FAILED.exec(item.summary) : null;
+  return legacy ? { ...item, summary: failedTurnSummary(legacy[1]!, legacy[1]!, legacy[2]) } : item;
+};
+// A turn a person started: the live stream's own ('human') and a prompt read back from the transcript on disk, which
+// carries no origin (engine-host/fs/backfill.ts: meta records, interrupt markers and command output open no turn; peer
+// and task-notification turns say so).
+const humanTurn = (origin: string | null) => origin === 'human' || origin === null;
 
 const count = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`;
 // The contract (§4.6); E1: the blocking `maws` asks among the lost are named questions, the rest stay approvals.
@@ -144,12 +177,12 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const base = { sessionId: event.sessionId, createdAt: event.at };
       switch (event.kind) {
         case 'turn.started':
-          if (event.origin === 'human') retireDerived(state, RETIRED_BY_NEXT_TURN);
+          if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN);
           break;
         case 'turn.ended':
           // a user abort is not a failure: the wire marks every abort is_error: true (M6 review; pass3/plan-outcomes seq 510)
           if (event.isEchoReceipt || event.terminalReason?.startsWith('aborted_') || !(event.isError || HARD_FAILURE_REASONS.has(event.terminalReason ?? ''))) break;
-          derive(id, state, event.id, { ...base, kind: 'error', summary: `Turn failed: ${event.terminalReason ?? event.result}${event.errors[0] ? ` (${event.errors[0]})` : ''}` });
+          derive(id, state, event.id, { ...base, kind: 'error', summary: failedTurnSummary(event.result, event.terminalReason, event.errors[0]) });
           break;
         case 'task.notification':
           if (event.status === 'failed') derive(id, state, event.id, { ...base, kind: 'error', summary: `Background task failed: ${event.summary}`, request: { ...noRequest, taskId: event.taskId as TaskId } });
@@ -213,6 +246,17 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   const list = () => [...sessions.values()].flatMap(merged);
 
   deps.register('attention.list', () => list());
+  // E11 F2b (owner decision 1): seen in the opened session (confirmed: out of Needs you, its notice still shown there),
+  // or dismissed (retired). An error only, and never back: a dismissed item is not made seen again.
+  deps.register('attention.acknowledge', ({ appSessionId, attentionId, how }) => {
+    const state = sessions.get(appSessionId as AppSessionId);
+    const target = state?.derived.get(attentionId);
+    if (!state || target?.kind !== 'error') return;
+    const next = how === 'dismissed' ? 'retired' : 'confirmed';
+    if (target.state === next || target.state === 'retired') return;
+    state.derived.set(target.id, { ...target, state: next, stateChangedAt: new Date().toISOString() });
+    changed(appSessionId as AppSessionId, state);
+  });
   deps.register('attention.request', async ({ appSessionId, requestId }) => {
     const brokered = sessions.get(appSessionId as AppSessionId)?.broker.some((item) => item.request.requestId === (requestId as RequestId));
     if (!brokered) return { event: null };
@@ -229,8 +273,12 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     for (const [id, items] of loaded) {
       if (forgotten.has(id)) continue;
       const state = stateOf(id);
-      for (const item of items) {
-        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
+      for (const stored of items) {
+        const item = inWords(stored);
+        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind)) continue;
+        // a failure the transcript replayed before the load is the same occurrence: the stored acknowledgement stands
+        const live = state.derived.get(item.id);
+        if (live && !(live.state === 'pending' && item.state !== 'pending')) continue;
         restoredIds.add(item.id);
         state.derived.set(item.id, item);
       }

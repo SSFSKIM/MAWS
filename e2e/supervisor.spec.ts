@@ -465,8 +465,10 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(errorItem!.summary).toBe(`Background task failed: ${TASK_FAILED}`);
     // the request's item comes from the burst's broker items (host-held state re-listed at the connect)
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
-    const row = await showSession(second.page, id);
+    // read before the session is opened: E11 F2b (plan 2.4) takes an error seen in its opened session out of Needs you
+    const row = await rowOf(second.page, id);
     await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
+    await row.click();
     // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
     // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
     // `waiting`: that reading needs an engine `requires_action` state (a `session.state` event or the status's
