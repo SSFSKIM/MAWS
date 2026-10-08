@@ -14,9 +14,19 @@ import { a15DeltaText, compareA15 } from '../../test/support/owner-file';
 
 type Env = Record<string, string | undefined>;
 
-// ---- the cap ----------------------------------------------------------------------------------------------------------
+// ---- the caps ----------------------------------------------------------------------------------------------------------
 
-export const DEFAULT_CAP_USD = 1.2; // S3, S4 and S6's caps summed (Design §5: 0.50 + 0.40 + 0.30)
+// Each sitting's own cap (Design §5). The A-47 case is S4's: Decision Log 23 hands it to S4, whose one paid case leaves
+// room, while S3 already holds back its side thread's allocation and its side question's reservation.
+export const SITTING_CAP_USD = { s3: 0.5, s4: 0.4, s6: 0.3 } as const;
+export type Sitting = keyof typeof SITTING_CAP_USD;
+
+// The run's cap when MAWS_P1_LIVE_MAX_USD is unset: the three sittings' caps summed; each sitting stays within its own.
+export const DEFAULT_CAP_USD = 1.2;
+
+// The sitting each case's scratch directory (`<run root>/<case>`) spends for.
+export const CASE_SITTING = { s3: 's3', 's4-browser': 's4', 's4-oopif': 's4', a47: 's4', s6: 's6' } as const satisfies Record<string, Sitting>;
+export type CaseName = keyof typeof CASE_SITTING;
 
 // MAWS_P1_LIVE_MAX_USD, the run's cap in US$; a value that is not a positive amount stops the run before it spends.
 export function capUsd(env: Env = process.env): number {
@@ -27,11 +37,55 @@ export function capUsd(env: Env = process.env): number {
   return cap;
 }
 
-// What one more session may spend: the session's `maxBudgetUsd`, so no session can spend past the run's cap unseen.
-export const remainingUsd = (cap: number, spent: number): number => Math.max(0, Number((cap - spent).toFixed(4)));
+const usd4 = (usd: number): number => Number(usd.toFixed(4));
 
-// Why a case must not start (the run has spent its cap), or null.
-export const budgetRefusal = (cap: number, spent: number): string | null => (spent >= cap ? `not run (budget): US$${spent.toFixed(4)} spent of the US$${cap.toFixed(2)} cap` : null);
+// What a case spent that its journals' receipts do not show: a paid call with no receipt (a side question, a prompt
+// whose result never came) charged its reservation or allocation. The spec keeps charges on disk so a fresh worker
+// still counts them; a later charge under the same key replaces the earlier (a reservation settled once its receipt
+// came).
+export interface Charge {
+  key: string;
+  case: CaseName;
+  label: string;
+  usd: number;
+}
+
+export interface Spent {
+  sittings: Record<Sitting, number>;
+  run: number;
+}
+
+// Each sitting's spend: its cases' receipts (`receipts`, by case directory) plus their charges.
+export function spentBySitting(receipts: Partial<Record<CaseName, number>>, charges: readonly Charge[]): Spent {
+  const sittings: Record<Sitting, number> = { s3: 0, s4: 0, s6: 0 };
+  for (const [name, usd] of Object.entries(receipts) as [CaseName, number][]) sittings[CASE_SITTING[name]] += usd;
+  for (const charge of new Map(charges.map((c) => [c.key, c])).values()) sittings[CASE_SITTING[charge.case]] += charge.usd;
+  return { sittings, run: Object.values(sittings).reduce((sum, usd) => sum + usd, 0) };
+}
+
+export interface Budget {
+  sitting: Sitting;
+  sittingLeft: number; // below 0 once overspent
+  runLeft: number;
+  usd: number; // what the next paid call may spend: the smaller remainder, never below 0
+}
+
+export function budgetOf(sitting: Sitting, spent: Spent, runCap: number): Budget {
+  const sittingLeft = usd4(SITTING_CAP_USD[sitting] - spent.sittings[sitting]);
+  const runLeft = usd4(runCap - spent.run);
+  return { sitting, sittingLeft, runLeft, usd: Math.max(0, Math.min(sittingLeft, runLeft)) };
+}
+
+// Why a case must not start, or null: either remainder spent, or what is left not covering `need`, an amount the case
+// commits that no session flag bounds below the remainder (a side thread's allocation, a side question's reservation,
+// what a running session may still spend under the budget it launched with).
+export function budgetRefusal(budget: Budget, runCap: number = DEFAULT_CAP_USD, need?: { usd: number; for: string }): string | null {
+  const name = budget.sitting.toUpperCase();
+  if (budget.sittingLeft <= 0) return `not run (budget): ${name} has spent its US$${SITTING_CAP_USD[budget.sitting].toFixed(2)} cap`;
+  if (budget.runLeft <= 0) return `not run (budget): the run has spent its US$${runCap.toFixed(2)} cap`;
+  if (need !== undefined && budget.usd < need.usd) return `not run (budget): US$${budget.usd.toFixed(4)} left (${name} US$${budget.sittingLeft.toFixed(4)}, the run US$${budget.runLeft.toFixed(4)}) does not cover the US$${need.usd.toFixed(4)} for ${need.for}`;
+  return null;
+}
 
 // ---- where things go ----------------------------------------------------------------------------------------------------
 

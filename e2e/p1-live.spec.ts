@@ -17,10 +17,13 @@
 //                          retracted once the request is answered. The fallback is forced whatever the desktop allows:
 //                          the app's Notification.show() fails in its main process, as the unsigned build's does.
 //
-// The cap: MAWS_P1_LIVE_MAX_USD (default US$1.20, S3, S4 and S6's caps summed). The run's spend is read from every
-// journal under its scratch root before each case and each launch; a case does not start once the cap is spent
-// (`not run (budget)`), and every session the spec launches carries the remainder as its `--max-budget-usd` (side
-// threads, forks of their parent, take none: owner question Q12; a row Resume takes none either, and S6's run no turn).
+// The caps: each sitting its own (Design §5: S3 US$0.50, S4 US$0.40 with the A-47 case inside it, S6 US$0.30) and the
+// run MAWS_P1_LIVE_MAX_USD (default US$1.20, the three summed). A sitting's spend is its cases' journal receipts (every
+// journal under their scratch directories, read before each case and each launch) plus the charges no receipt shows
+// (`charges.jsonl` under the run's root, below); the next paid call may spend the smaller of the sitting's and the run's
+// remainders, a case does not start once either is spent (`not run (budget)`), and every session the spec launches
+// carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
+// no turn).
 // Scratch: one root per run, /private/tmp/maws-e11-p1live-<stamp> (the runner's pid, or MAWS_P1_LIVE_STAMP), one
 // directory per case under it holding `claude-config/` (`settings.json` `{}`, a `.claude.json` trusting the case's
 // repository), `repo/` (a git repository) and `user-data/` (the app's profile; journals under engine-host/journal/),
@@ -59,7 +62,7 @@ import { journalSpend } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, viewerOf, type Scene } from './support/maws-tools';
 import { OOPIF_FIELD, startOopifPage } from './support/oopif-page';
-import { a15Line, a15Reading, budgetRefusal, capUsd, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, remainingUsd, runRoot, siteOf, sittingLog, type A15Reading } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, colourDistance, DEFAULT_CAP_USD, dominantColour, initPluginsOf, installedEngine, liveOutDir, runRoot, siteOf, sittingLog, SITTING_CAP_USD, spentBySitting, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -108,19 +111,31 @@ const PROMPTS = {
 
 // ---- the run: spend, relay, engine ------------------------------------------------------------------------------------
 
-// What the run has spent: every journal of every case's profile under the run's root (a resumed process restores its
-// session's cost, so summing journals can only over-count, the safe side of a cap).
-function runSpent(): number {
-  if (!existsSync(ROOT)) return 0;
-  return readdirSync(ROOT)
-    .map((name) => join(ROOT, name, 'user-data'))
-    .filter((dir) => existsSync(dir))
-    .reduce((sum, dir) => sum + journalSpend(dir).usd, 0);
-}
+// The charges no receipt shows, appended as they are made (support/p1-live.ts, Charge).
+const CHARGES = join(ROOT, 'charges.jsonl');
+const charges = (): Charge[] => (existsSync(CHARGES) ? readFileSync(CHARGES, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Charge) : []);
 
-// The case refused (skipped, the reason in its log) when the run has spent its cap.
-function refuseOverCap(note: (line: string) => void, what: string): void {
-  const refusal = budgetRefusal(CAP, runSpent());
+// What each sitting and the run have spent: every journal of every case's profile under the run's root (a resumed or
+// forked process may restore its session's cost, so summing journals can only over-count, the safe side of a cap),
+// plus the charges.
+function spent() {
+  const receipts: Partial<Record<CaseName, number>> = {};
+  for (const name of Object.keys(CASE_SITTING) as CaseName[]) {
+    const dir = join(ROOT, name, 'user-data');
+    if (existsSync(dir)) receipts[name] = journalSpend(dir).usd;
+  }
+  return spentBySitting(receipts, charges());
+}
+const budgetFor = (sitting: Sitting): Budget => budgetOf(sitting, spent(), CAP);
+const spendLine = (sitting: Sitting): string => {
+  const now = spent();
+  return `${sitting.toUpperCase()} US$${now.sittings[sitting].toFixed(4)} of US$${SITTING_CAP_USD[sitting].toFixed(2)}, the run US$${now.run.toFixed(4)} of US$${CAP.toFixed(2)}`;
+};
+
+// The case refused (skipped, the reason in its log) once its sitting or the run has spent its cap, or when what is left
+// does not cover `need`.
+function refuseOverCap(note: (line: string) => void, what: string, sitting: Sitting, need?: { usd: number; for: string }): void {
+  const refusal = budgetRefusal(budgetFor(sitting), CAP, need);
   if (refusal === null) return;
   note(`${what}: ${refusal}`);
   test.skip(true, refusal);
@@ -147,6 +162,7 @@ const theEngine = () => (engine ??= installedEngine());
 // ---- a case's scratch and its app ---------------------------------------------------------------------------------------
 
 interface CaseScratch {
+  sitting: Sitting; // the sitting whose cap the case spends
   root: string;
   config: string;
   repo: string;
@@ -156,7 +172,7 @@ interface CaseScratch {
 
 // `ROOT/<name>`: the config home, a trusted git repository (`seed` writes into it before the commit), the profile, and
 // one seeded transcript per title, so the sidebar lists a session to launch under for each (E1's and E4d's recipe).
-function caseScratch(name: string, titles: string[], seed: (repo: string) => void = () => {}): CaseScratch {
+function caseScratch(name: CaseName, titles: string[], seed: (repo: string) => void = () => {}): CaseScratch {
   mkdirSync(ROOT, { recursive: true });
   const root = join(realpathSync(ROOT), name);
   const config = join(root, 'claude-config');
@@ -172,7 +188,7 @@ function caseScratch(name: string, titles: string[], seed: (repo: string) => voi
   git('init', '-q');
   git('add', '-A');
   git('commit', '-qm', 'seed');
-  return { root, config, repo, userData, engineIds: seedTranscripts(config, repo, titles) };
+  return { sitting: CASE_SITTING[name], root, config, repo, userData, engineIds: seedTranscripts(config, repo, titles) };
 }
 
 interface Live {
@@ -240,20 +256,23 @@ function sessionRows(live: Live, id: string): JournalRow[] {
 const outUsers = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 
 // A session launched under the record `id` as the app launches (C7's X6 fields; Haiku, default mode, the gateway),
-// fresh or resuming `resume` in place, with the run's remaining cap as its budget; waits for `ready`.
+// fresh or resuming `resume` in place, with what its sitting and the run leave (the smaller) as its budget; waits for
+// `ready`.
 async function launchSession(live: Live, label: string, id: AppSessionId, opts: { resume?: string } = {}): Promise<void> {
-  const remaining = remainingUsd(CAP, runSpent());
-  if (remaining <= 0) {
-    live.note(`${label}: not run (budget): the cap is spent`);
-    test.skip(true, 'not run (budget)');
+  const budget = budgetFor(live.sc.sitting);
+  const refusal = budgetRefusal(budget, CAP);
+  if (refusal !== null) {
+    live.note(`${label}: ${refusal}`);
+    test.skip(true, refusal);
   }
+  const remaining = budget.usd;
   const spec = { ...launchDefaults(id, live.sc.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: remaining, ...(opts.resume ? { resume: { sessionId: opts.resume as SessionId, fork: false } } : {}) };
   expect(value(await invoke(live.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
   live.started.push({ label, id });
   await expect.poll(async () => (await statusOf(live, id)).process, { timeout: 120_000 }).toBe('ready');
   const status = await statusOf(live, id);
   if (status.pid !== null) live.pids.add(status.pid);
-  live.note(`${label} ${id}: launched on Haiku, default mode, maxBudgetUsd ${remaining.toFixed(4)} (the cap's remainder)${opts.resume ? `, resuming ${opts.resume} in place` : ''}; pid ${status.pid}`);
+  live.note(`${label} ${id}: launched on Haiku, default mode, maxBudgetUsd ${remaining.toFixed(4)} (the smaller of what ${live.sc.sitting.toUpperCase()} and the run leave)${opts.resume ? `, resuming ${opts.resume} in place` : ''}; pid ${status.pid}`);
 }
 
 // The prompt put into the shown session's composer and sent; `typed` keys it in as a person would (a slash command
@@ -342,7 +361,7 @@ function descendants(pid: number): number[] {
 async function closeLive(live: Live): Promise<void> {
   try {
     for (const { label, id } of [...live.started].reverse()) await stopSession(live, label, id).catch((error: unknown) => live.note(`  ${label} ${id}: could not be stopped: ${String(error)}`));
-    live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; the run US$${runSpent().toFixed(4)} of US$${CAP.toFixed(2)}`);
+    live.note(`spend: the case's profile ${journalSpend(live.sc.userData).usd.toFixed(4)}; ${spendLine(live.sc.sitting)}`);
     for (const pid of descendants(live.maws.app.process().pid!)) live.pids.add(pid); // the app's helpers and hosts
   } finally {
     await live.maws.cleanup();
@@ -378,7 +397,7 @@ async function shoot(live: Live, item: string, surface: string, opts: { keepToas
 function opening(note: (line: string) => void, what: string, sc: CaseScratch, a15: A15Reading): void {
   const { bin, version } = theEngine();
   note(`==== ${what}, ${new Date().toISOString()}; run root ${ROOT}`);
-  note(`engine: ${bin.replace(homedir(), '~')} (${version}), unmodified, through ClaudeUsage's relay ${RELAY_URL}, Haiku, default permission mode; the run's cap US$${CAP.toFixed(2)}, spent so far US$${runSpent().toFixed(4)}`);
+  note(`engine: ${bin.replace(homedir(), '~')} (${version}), unmodified, through ClaudeUsage's relay ${RELAY_URL}, Haiku, default permission mode; spent so far ${spendLine(sc.sitting)}`);
   note(`scratch: ${sc.root} (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)`);
   note(a15Line('before the case', a15, a15, [ROOT]));
 }
@@ -393,7 +412,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test.beforeAll(async () => {
     await relayGate(note, 'S3');
-    refuseOverCap(note, 'S3');
+    refuseOverCap(note, 'S3', 's3');
     const sc = caseScratch('s3', ['E11 S3: the parent'], (repo) => {
       writeFileSync(join(repo, 'page-v1.html'), artifactPage(V1.rgb, 1));
       writeFileSync(join(repo, 'page-v2.html'), artifactPage(V2.rgb, 2));
@@ -413,7 +432,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('1 artifacts: create, main’s real capture whose PNG shows the page’s colour, update; the row, the Deliverables tool, v2 and its switch, the record', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 1');
+    refuseOverCap(note, 'S3 case 1', 's3');
     const allowed: string[] = [];
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     await sendFromComposer(l, parent, PROMPTS.artifact);
@@ -483,7 +502,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('2 a comment picked on the artifact goes to a Side thread, which answers in the Side pane and sums itself up in the parent; the parent’s turns unchanged', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 2');
+    refuseOverCap(note, 'S3 case 2', 's3');
     test.skip(artifact === null, 'case 1 recorded no artifact');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
@@ -528,7 +547,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 3');
+    refuseOverCap(note, 'S3 case 3', 's3');
     test.skip(artifact === null, 'case 1 recorded no artifact');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const allowed: string[] = [];
@@ -565,7 +584,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 4');
+    refuseOverCap(note, 'S3 case 4', 's3');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
@@ -594,7 +613,7 @@ test.describe('S4: the browser (item 7)', () => {
 
   test('5 E4c’s recording prompt against the real browser: the seven rows, the reference, the screenshot record, the agent’s cursor, the Browser tool opened once', async () => {
     await relayGate(note, 'S4 case 5');
-    refuseOverCap(note, 'S4 case 5');
+    refuseOverCap(note, 'S4 case 5', 's4');
     const sc = caseScratch('s4-browser', ['E11 S4: the browser']);
     const a15 = a15Reading();
     opening(note, 'S4 case 5', sc, a15);
@@ -726,7 +745,7 @@ function captureStall(dir: string, pid: number): void {
 test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 s to first output; a stall recorded with its capture', async () => {
   const note = sittingLog(OUT, 's6');
   await relayGate(note, 'S6 case 8');
-  refuseOverCap(note, 'S6 case 8');
+  refuseOverCap(note, 'S6 case 8', 's6');
   const sc = caseScratch('s6', ['E11 S6: the resumed session']);
   const a15 = a15Reading();
   opening(note, 'S6 case 8', sc, a15);
@@ -746,7 +765,7 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
 
   const results: { i: number; ok: boolean; readyMs: number | null; firstOutputMs: number | null; noOutput: boolean; launches: number; process: string | null }[] = [];
   for (let i = 1; i <= 10; i++) {
-    const refusal = budgetRefusal(CAP, runSpent());
+    const refusal = budgetRefusal(budgetFor('s6'), CAP);
     if (refusal !== null) {
       note(`resume ${i}: ${refusal}`);
       break;
@@ -792,7 +811,7 @@ test('S6 8: ten row Resumes in the app, each in a fresh launch, each bounded 30 
     }
   }
   const stalls = results.filter((r) => !r.ok);
-  note(`S6 case 8: ${results.length} resumes, ${stalls.length} stalls${stalls.length > 0 ? ` (${stalls.map((r) => r.i).join(', ')})` : ''}; the run's spend US$${runSpent().toFixed(4)}`);
+  note(`S6 case 8: ${results.length} resumes, ${stalls.length} stalls${stalls.length > 0 ? ` (${stalls.map((r) => r.i).join(', ')})` : ''}; spend ${spendLine('s6')}`);
   for (const r of results) expect.soft(r.ok, `resume ${r.i} reached first output within ${FIRST_OUTPUT_MS / 1000} s with no no_output`).toBe(true);
   expect(results).toHaveLength(10);
 });
@@ -805,7 +824,7 @@ const FORCED_REFUSAL = 'refused by e2e/p1-live.spec.ts (A-47): the fallback forc
 test('A-47: a permission request on a session not in front raises the fallback toast with no window focused; answering it retracts the toast', async () => {
   const note = sittingLog(OUT, 'a47');
   await relayGate(note, 'A-47');
-  refuseOverCap(note, 'A-47');
+  refuseOverCap(note, 'A-47', 's4');
   const sc = caseScratch('a47', ['E11 A-47: in front', 'E11 A-47: in the back']);
   const a15 = a15Reading();
   opening(note, 'A-47 (Decision Log 23)', sc, a15);

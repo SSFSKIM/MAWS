@@ -1,27 +1,56 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1;
-// e2e/support/p1-live.ts and e2e/support/oopif-page.ts): the cap, the A-15 log line, the screenshot's dominant colour,
+// e2e/support/p1-live.ts and e2e/support/oopif-page.ts): the caps, the A-15 log line, the screenshot's dominant colour,
 // the site of a URL, the init plugin list, and the OOPIF page. Spawns no engine and reads no owner file.
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, budgetRefusal, capUsd, dominantColour, initPluginsOf, liveOutDir, remainingUsd, siteOf } from '../../e2e/support/p1-live';
+import { a15Line, budgetOf, budgetRefusal, capUsd, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
-describe('the cap', () => {
-  it('reads MAWS_P1_LIVE_MAX_USD, US$1.20 when unset, and refuses a value that is not a positive amount', () => {
+const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
+
+describe('the caps', () => {
+  it('holds each sitting to its own cap (Design §5) and the run to MAWS_P1_LIVE_MAX_USD, their sum when unset', () => {
+    expect(SITTING_CAP_USD).toEqual({ s3: 0.5, s4: 0.4, s6: 0.3 });
+    expect(DEFAULT_CAP_USD).toBeCloseTo(0.5 + 0.4 + 0.3, 10);
     expect(capUsd({})).toBe(1.2);
     expect(capUsd({ MAWS_P1_LIVE_MAX_USD: '0.5' })).toBe(0.5);
     expect(() => capUsd({ MAWS_P1_LIVE_MAX_USD: 'lots' })).toThrow(/MAWS_P1_LIVE_MAX_USD/);
     expect(() => capUsd({ MAWS_P1_LIVE_MAX_USD: '0' })).toThrow(/MAWS_P1_LIVE_MAX_USD/);
   });
 
-  it('gives each session the remainder, and refuses a case once the run has spent the cap', () => {
-    expect(remainingUsd(1.2, 0.35)).toBe(0.85);
-    expect(remainingUsd(1.2, 1.5)).toBe(0);
-    expect(budgetRefusal(1.2, 0.3)).toBeNull();
-    expect(budgetRefusal(1.2, 1.2)).toBe('not run (budget): US$1.2000 spent of the US$1.20 cap');
+  it('adds each case’s receipts and charges to its sitting (A-47 is S4’s), a later charge under a key replacing the earlier', () => {
+    const charges: Charge[] = [
+      { key: 'fork', case: 's3', label: 'the side thread, reserved', usd: 0.08 },
+      { key: 'btw', case: 's3', label: 'the side question', usd: 0.05 },
+      { key: 'fork', case: 's3', label: 'the side thread, settled', usd: 0.01 },
+    ];
+    const spent = spentBySitting({ s3: 0.1, 's4-browser': 0.05, a47: 0.02, 's4-oopif': 0, s6: 0 }, charges);
+    expect(spent.sittings.s3).toBeCloseTo(0.16, 10);
+    expect(spent.sittings.s4).toBeCloseTo(0.07, 10);
+    expect(spent.sittings.s6).toBe(0);
+    expect(spent.run).toBeCloseTo(0.23, 10);
   });
 
+  it('allocates the smaller of the sitting’s and the run’s remainders', () => {
+    const spent = { sittings: { s3: 0.16, s4: 0.07, s6: 0 }, run: 0.23 };
+    expect(budgetOf('s3', spent, 1.2)).toEqual({ sitting: 's3', sittingLeft: 0.34, runLeft: 0.97, usd: 0.34 });
+    expect(budgetOf('s3', spent, 0.3)).toEqual({ sitting: 's3', sittingLeft: 0.34, runLeft: 0.07, usd: 0.07 });
+    expect(budgetOf('s6', { sittings: { s3: 0, s4: 0, s6: 0.35 }, run: 0.35 }, 1.2).usd).toBe(0);
+  });
+
+  it('refuses a case once either remainder is spent, or when what is left does not cover what the case reserves', () => {
+    const budget = (sittingLeft: number, runLeft: number) => ({ sitting: 's3' as const, sittingLeft, runLeft, usd: Math.max(0, Math.min(sittingLeft, runLeft)) });
+    expect(budgetRefusal(budget(0.34, 0.97))).toBeNull();
+    expect(budgetRefusal(budget(0, 0.97))).toBe('not run (budget): S3 has spent its US$0.50 cap');
+    expect(budgetRefusal(budget(-0.01, 0.97))).toBe('not run (budget): S3 has spent its US$0.50 cap');
+    expect(budgetRefusal(budget(0.34, 0), 1.2)).toBe('not run (budget): the run has spent its US$1.20 cap');
+    expect(budgetRefusal(budget(0.34, 0.97), 1.2, { usd: 0.08, for: 'the side thread' })).toBeNull();
+    expect(budgetRefusal(budget(0.07, 0.97), 1.2, { usd: 0.08, for: 'the side thread' })).toBe('not run (budget): US$0.0700 left (S3 US$0.0700, the run US$0.9700) does not cover the US$0.0800 for the side thread');
+  });
+});
+
+describe('where the logs go', () => {
   it('writes its logs where MAWS_P1_LIVE_OUT names, a directory under /tmp otherwise', () => {
     expect(liveOutDir({})).toBe('/tmp/maws-e11-p1-live');
     expect(liveOutDir({ MAWS_P1_LIVE_OUT: '/tmp/elsewhere' })).toBe('/tmp/elsewhere');
@@ -119,7 +148,6 @@ describe('the site of a URL', () => {
 });
 
 describe('the init plugin list', () => {
-  const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
   it('is the first engine system/init frame’s, with each plugin’s path, or null before one', () => {
     const plugins = [{ name: 'mine', source: 'mine@market', path: '/tmp/x' }];
     expect(initPluginsOf([row(1, 'out', { type: 'user' })])).toBeNull();
