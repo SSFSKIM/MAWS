@@ -85,30 +85,6 @@
     "turnId": "turn:7f94e6e0-bdb4-463d-9bba-1a070f8dc25e"
   },
   {
-    "at": "2026-09-28T09:56:27.293Z",
-    "id": "local:0a2d5af0-c0fb-4a4d-8802-595d6a08c02f",
-    "kind": "local_command",
-    "messageUuid": "0a2d5af0-c0fb-4a4d-8802-595d6a08c02f",
-    "text": "Set model to `haiku (claude-haiku-4-5-20251001)`",
-    "turnId": null
-  },
-  {
-    "at": "2026-09-28T09:56:27.295Z",
-    "id": "local:63b9d40f-b7d7-4d8f-8422-1ba37c52acef",
-    "kind": "local_command",
-    "messageUuid": "63b9d40f-b7d7-4d8f-8422-1ba37c52acef",
-    "text": "Set model to `opus (claude-opus-5-5)`",
-    "turnId": null
-  },
-  {
-    "at": "2026-09-28T09:56:27.345Z",
-    "id": "local:8b4d433e-da4a-47ed-a3a7-009c3e64efe9",
-    "kind": "local_command",
-    "messageUuid": "8b4d433e-da4a-47ed-a3a7-009c3e64efe9",
-    "text": "Set model to `sonnet (claude-sonnet-5)`",
-    "turnId": null
-  },
-  {
     "at": "2026-09-28T09:56:27.890Z",
     "attempt": null,
     "id": "error:replay:journal:68:0",

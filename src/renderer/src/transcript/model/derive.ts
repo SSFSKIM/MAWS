@@ -25,7 +25,7 @@ import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUnd
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
-import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
+import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
@@ -1321,12 +1321,13 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
   }
 }
 
-// The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it).
+// The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it). An
+// echo that only confirms a setting change draws nothing (E11 §2.3).
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
   const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
   if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
   const text = stripAnsi(localCommandOutput(content) ?? content).trim();
-  if (!text) return null;
+  if (!text || confirmsSettingChange(text)) return null;
   return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
 }
 

@@ -139,6 +139,28 @@ export function localCommandOutput(content: string | ContentBlock[]): string | n
 
 export const isLocalCommand = (origin: string | null, content: string | ContentBlock[]) => origin === 'local-command' || localCommandOutput(content) !== null;
 
+// E11's sitting (owner-notes 00-consolidated-plan §2.3; narrows W1): a local-command echo that only confirms a setting
+// change draws nothing, since its chip already shows the change. Matched on whole lines in the engine's own words
+// (2.1.293's `/model`, `/fast`, `/effort`, `/output-style`, `/plan`, `/theme` and `/color` messages, as the binary
+// writes them, and the `Set model to` echoes recorded on 2.1.283), so a confirmation carrying anything more (a save that
+// failed, an override still in force, a note about new sessions) keeps its card; informative outputs (`/cost`,
+// `/status`, `/context`, `/help`) never match. The text is the echo with its tags and colours stripped.
+const SCOPE = String.raw`(?: for this session only| and saved as your default for new sessions)?`;
+const FAST = String.raw`(?: · (?:Fast mode ON|Fast mode OFF|Draws from usage credits))*`;
+const SETTING_CONFIRMATIONS: readonly RegExp[] = [
+  new RegExp(String.raw`^(?:Set model to|Kept model as) \`[^\`]+\`${SCOPE}(?: with \S+ effort)?${FAST}$`),
+  /^Fast mode (?:ON|OFF)(?: · Draws from usage credits)?$/,
+  /^(?:\S+ )?Kept Fast mode (?:ON|OFF)$/u, // led by the fast-mode glyph
+  /^Set effort level to \S+(?: \((?:this session only|saved as your default for new sessions)\))?: [^·(]+(?: · Ultracode off)?$/,
+  /^Effort level set to auto(?: \((?:this session only|saved as your default for new sessions)\))?(?: · Ultracode off)?$/,
+  /^Output style set to [^\n]+$/,
+  /^Enabled plan mode$/,
+  /^Theme set to \S+$/,
+  /^Session color (?:set to: \S+|reset to default)$/,
+];
+
+export const confirmsSettingChange = (text: string): boolean => SETTING_CONFIRMATIONS.some((pattern) => pattern.test(text));
+
 // The engine's own marker for an interrupted request (C3 tags it `origin: 'interrupt-marker'`): no row and no turn; the
 // divider's stopped state already says it.
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
