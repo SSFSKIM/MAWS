@@ -15,22 +15,25 @@ Draft, not yet replayed by a fresh agent. Written from two runs on 2026-10-07 (U
 VM, cua over a relay, a brand-new gmail.com account, gws 0.22.5); timings and quirks are in
 README.md beside this file.
 
-## Division of labour
+## The scene
 
-The human: logs the account into Chrome before you start, and later types the password
-and approves 2-step verification when Google re-challenges during consent. Everything
-else is yours. Say up front that these two hand-offs will come, so the human stays near
-the screen.
+The human and the agent share one screen: a terminal and the Chrome profile that holds
+the account. The spine is the stock wizard, `gws auth setup` run interactively by the
+human (it needs gcloud); the agent fills the gaps the wizard cannot cross, in the
+browser, while the human watches, and asks for the human's hands only at the moments
+Google demands them, pointing at the field on screen. Target: under ten minutes
+end to end, with the human never searching the console themselves.
 
-For repeat deployments this whole skill is overkill: a Desktop-app client is not per
-machine. Copy an existing client_secret.json into `~/.config/gws/` and only the consent
-step remains; `gws auth export --unmasked` on an authenticated machine removes even that.
-Use this skill for the first account, not the fleet.
+For repeat deployments none of this is needed: a Desktop-app client is per account, not
+per machine. Copy an existing client_secret.json into `~/.config/gws/` and only the
+consent step remains; `gws auth export --unmasked` on an authenticated machine removes
+even that. This skill is for the first account.
 
 ## Before touching the console
 
 - gws installed and `gws auth status` showing `client_config_exists: false`. Prebuilt
   binaries exist for linux x86_64 and aarch64 under GitHub Releases; verify the sha256.
+- gcloud installed (the tarball installs in under a minute).
 - A cua Chrome profile bound to the profile that holds the account. Signing a second
   Google account into Chrome through accounts.google.com/AddSession can create a new
   Chrome profile directory for it; the old profile's window closes, its extension host
@@ -42,30 +45,38 @@ Use this skill for the first account, not the fleet.
   openid, email, profile); pass `--scopes` explicitly to get exactly what you intend.
   Unverified apps and gmail.com accounts are capped near 25 scopes.
 
-## Project and APIs: use gcloud, not the console
+## The wizard as the spine, the agent in the gaps
 
-Install the gcloud CLI (the linux-arm or x86_64 tarball installs in under a minute), run
-`gcloud auth login` in the background with DISPLAY set and drive its consent in the
-account's Chrome profile (Google's own client: no unverified-app warning, and no password
-re-prompt in the test run), then:
+The human runs `gws auth setup --login` in the terminal. In order, with who acts:
 
-```sh
-gcloud projects create <id> --name=<id>
-gws auth setup --project <id>     # non-interactive: enables every Workspace API, ~30 s
-```
-
-`gws auth setup` then exits 3 with manual instructions; that is expected. Its REST call
-to create the consent screen answers 404 and is swallowed, it never touches test users,
-and OAuth client creation was removed from it, so everything below is still yours. A
-brand-new account must accept the Cloud terms in the console once before
-`gcloud projects create` works (the error names the terms); open
-`console.cloud.google.com` and take the first-run dialog described in step 1.
+1. gcloud check, then `gcloud auth login`: the wizard opens the consent in Chrome. The
+   agent drives it (account chooser, Google Cloud SDK consent, Allow). Google's own
+   client: no unverified-app warning, and no password re-prompt in the test run.
+2. Project: the human picks "Create new project" or an existing one in the TUI. A
+   brand-new account must accept the Cloud terms once before project creation works;
+   the wizard's error names the terms. The agent opens `console.cloud.google.com`
+   in Chrome and takes the first-run dialog (country, the terms checkbox, in some
+   countries a second confirmation checkbox that appears after the country is chosen;
+   the agree button stays disabled until both are ticked), then the human retries.
+3. APIs: the human toggles the ones they want in the TUI ("a" selects all). Non-TTY
+   runs enable all 15; both take about 30 s.
+4. OAuth credentials: the wizard tries to create the consent screen through
+   `oauth2.googleapis.com/v1/projects/<id>/brands`, which answers 404 and is swallowed,
+   never adds a test user, and cannot create a client (removed when the IAP admin API
+   was deprecated). It pauses asking for a Client ID and Secret. This is the agent's
+   part, in Chrome, while the terminal waits: consent screen, test user, Desktop
+   client (steps 4 to 6 below). Then the human pastes the ID and secret into the
+   wizard, or the agent moves the downloaded JSON to `~/.config/gws/client_secret.json`
+   and the human answers the prompt with it.
+5. `--login` continues into `gws auth login`: the agent drives the consent (below),
+   and the human types the password and approves the phone prompt the moment the
+   agent says the field is on screen.
 
 ## The console, in order
 
 Append `?hl=en&authuser=0` (or the account's index) to every URL: the console renders in
 the account's locale, and English makes text matchers stable. Steps 2 and 3 are the
-fallback when gcloud is unavailable.
+fallback when neither the wizard nor gcloud is available.
 
 1. `console.cloud.google.com/` on a never-used account shows a first-run dialog:
    country, the terms checkbox, and in some countries a second confirmation checkbox
@@ -120,8 +131,8 @@ count on it opening a browser (xdg-open opened nothing on the test VM). Open the
 your tab in the account's profile and handle, in this order: the account chooser (its
 heading is localized; click the row containing the email), a password re-prompt and a
 phone 2-step prompt (Google asks even though Chrome is signed in; the phone prompt's
-number expires in about a minute, so ask the human only when it is on screen and keep
-the message short), the "hasn't verified this app" warning (Continue, or Advanced → go to app), an
+number expires in about a minute, so say "password here" or "approve 77 on your phone"
+the moment the screen shows it, and nothing else), the "hasn't verified this app" warning (Continue, or Advanced → go to app), an
 intermediate Continue, and the consent page (tick Select all, Continue).
 
 The redirect to `http://localhost:<port>` renders as ERR_BLOCKED_BY_CLIENT in the

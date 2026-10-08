@@ -79,6 +79,18 @@ and the first half becomes deterministic, which matters more than the minutes.
 - Signing a second Google account into Chrome via AddSession created a new Chrome
   profile; the cua profile binding went stale and a new key had to be added and bound.
 
+## What the owner's framing changes
+
+The measured slowness was mostly unattended waiting: the human was away during the
+password and phone prompts, one prompt expired, and the cua session idled out twice.
+In the intended scene the human and the agent share the screen: the stock interactive
+`gws auth setup --login` is the spine (the human picks the project and APIs in its TUI),
+the agent fills the wizard's gaps in Chrome (terms, consent screen, test user, client,
+consents) and asks for hands only when a password or phone prompt is already on screen.
+With the quirks known, the agent's own GUI time measured here sums to under two minutes;
+the rest is Google's re-check, done in seconds when the human is present. The draft skill
+is now written for that scene; a replay with the human present is the next test.
+
 ## Recommendation for cloud-resident agents
 
 Do the account's one-time setup on the human's own machine (or once per account on any
