@@ -105,6 +105,24 @@ describe('the agent\'s activity, told to the windows', () => {
     ]);
     expect(new Set(h.activities().map((a) => `${a.appSessionId}/${a.tabId}`))).toEqual(new Set([`A/${t.entry.tab.tabId}`]));
     expect(JSON.stringify(h.emitted)).not.toContain('hunter2'); // typed text never leaves main
+    // kept for the app's life, as told: what a window lists when the session's transcript mounts
+    expect(h.backend.activities('A' as never)).toEqual(h.activities());
+    expect(h.backend.activities('B' as never)).toEqual([]);
+  });
+
+  it('a navigation while the person holds the tab is theirs, not reported: human, or idle and touched within 3 s', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    const navigate = (url: string) => t.cdp.event('Page.frameNavigated', { frame: { id: t.cdp.frameId, url, loaderId: 'L' } });
+    h.store.setControl(t.entry.tab.tabId, 'human');
+    navigate('https://person.test/human');
+    h.store.setControl(t.entry.tab.tabId, 'idle');
+    t.entry.input.emit({ kind: 'mouse', source: 'human', at: Date.now() }); // the agent-idle timer lapsed; the person clicks a link
+    navigate('https://person.test/idle-touched');
+    t.entry.input.lastHumanAt = Date.now() - 3_100;
+    navigate('https://shop.test/agent-timer'); // idle, nobody near: the agent's own page work
+    await settle();
+    expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'navigated')).toEqual([{ kind: 'navigated', url: 'https://shop.test/agent-timer', title: '' }]);
   });
 
   it('a click whose node cannot be named in time is told with no label', async () => {

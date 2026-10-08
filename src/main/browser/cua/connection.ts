@@ -26,6 +26,7 @@ import type { Socket } from 'node:net';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_AGENT_BADGE_MAX_CHARS } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
+import { personHolds } from '../agent/control';
 import type { DebuggerLease, TabDebugger } from '../debugger';
 import type { TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
@@ -513,10 +514,11 @@ export class CuaConnection {
     }
   }
 
-  // A committed navigation of the leased page, for the windows (not the person's own, while they hold the tab).
+  // A committed navigation of the leased page, for the windows; not the person's own: while control's `personHolds` is
+  // true (the tab is `human`, or they touched it within the hand-back window), as the takeover gate decides.
   private navigated(entry: TabEntry, params: unknown): void {
     const url = navigatedUrl(params);
-    if (url === null || url === 'about:blank' || entry.tab.control === 'human') return;
+    if (url === null || url === 'about:blank' || personHolds(entry, Date.now())) return;
     this.tell(entry, { kind: 'navigated', url, title: '' });
   }
 

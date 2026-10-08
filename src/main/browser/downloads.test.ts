@@ -179,15 +179,15 @@ describe('an agent\'s download through cua (E13: the in-app browser spec of 2026
     expect(h.downloads.reveal(h.entry.tab.tabId)).toEqual({ revealed: true });
   });
 
-  it('never overwrites: a name taken in the folder, or by a download still in flight, gets " (2)", " (3)" before its extension', () => {
+  it('never overwrites: a name taken in the folder, or by a download still in flight, gets Chrome\'s " (1)", " (2)" before its extension', () => {
     const { agent, starts } = agentRoute();
     const h = harness(null, agent);
     h.taken.add('/Users/owner/Downloads/cua-report.pdf');
     h.start(new FakeItem('cua-report.pdf'));
     h.start(new FakeItem('cua-report.pdf'));
-    expect(starts.map((s) => (s as { path: string }).path)).toEqual(['/Users/owner/Downloads/cua-report (2).pdf', '/Users/owner/Downloads/cua-report (3).pdf']);
-    expect(uniqueDownloadPath('/d', 'archive.tar.gz', (p) => p === '/d/archive.tar.gz')).toBe('/d/archive.tar (2).gz');
-    expect(uniqueDownloadPath('/d', 'README', (p) => p === '/d/README')).toBe('/d/README (2)');
+    expect(starts.map((s) => (s as { path: string }).path)).toEqual(['/Users/owner/Downloads/cua-report (1).pdf', '/Users/owner/Downloads/cua-report (2).pdf']);
+    expect(uniqueDownloadPath('/d', 'archive.tar.gz', (p) => p === '/d/archive.tar.gz')).toBe('/d/archive.tar (1).gz');
+    expect(uniqueDownloadPath('/d', 'README', (p) => p === '/d/README')).toBe('/d/README (1)');
     expect(uniqueDownloadPath('/d', '.env', () => false)).toBe('/d/.env');
   });
 

@@ -166,6 +166,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     userData,
     version: app.getVersion(),
   });
+  // the session's agent activity kept for the app's life, which a transcript lists when it mounts (M3 fix wave)
+  register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
     if (status.process !== 'exited' && knownSession(index, appSessionId)) cua.socketPathFor(appSessionId); // never a trust bootstrap's id
   });

@@ -16,6 +16,7 @@
 import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { join } from 'node:path';
+import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
@@ -56,6 +57,8 @@ export interface CuaBackend extends LeaseHolds {
   downloads: AgentDownloads; // M3: E4a's downloads ask whether a tab's download is the agent's, and report it
   // M3: the `-run-dialog` wrap's held route: a leased tab's alert or confirm, answered by the vendor or the 30 s default
   dialogs: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
+  // M3 fix wave: the session's agent activity kept for the app's life, oldest first (`browser.agent.activities.list`)
+  activities(appSessionId: AppSessionId): BrowserAgentActivity[];
   dispose(): void;
 }
 
@@ -138,6 +141,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       return path;
     },
     closeSession(appSessionId) {
+      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it
       const listening = sessions.get(appSessionId);
       if (!listening) return;
       sessions.delete(appSessionId);
@@ -147,6 +151,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     onChange: (listener) => claims.onChange(listener),
     downloads,
     dialogs: { holds: (tabId) => claims.leasedTo(tabId) !== undefined, hold: (entry, info, callback) => held.hold(entry, info, callback) },
+    activities: (appSessionId) => feed?.list(appSessionId) ?? [],
     inspect: () =>
       Object.fromEntries(
         [...sessions].map(([appSessionId, listening]) => [

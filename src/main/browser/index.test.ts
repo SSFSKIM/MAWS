@@ -192,6 +192,13 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(listeners.size).toBe(0);
   });
 
+  it('E13: registers browser.agent.activities.list, answering the session\'s kept agent activity (none yet)', () => {
+    const handlers = new Map<string, (input: unknown) => unknown>();
+    const browser = start(fakeIndex([A]).index, { register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never });
+    expect(handlers.get('browser.agent.activities.list')!({ appSessionId: A })).toEqual({ activities: [] });
+    browser.stop();
+  });
+
   it('one profiles accessor serves both a new tab\'s partition and browser.profiles.list (Decision Log 40)', () => {
     const profiles = vi.fn(() => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }]);
     const handlers = new Map<string, (input: unknown) => unknown>();

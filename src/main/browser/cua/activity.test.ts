@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { BROWSER_ACTIVITIES_KEPT } from '@shared/browser/activity';
 import { ACTIVITY_MAX_PER_SECOND, ActivityFeed, clickLabel, commandActivity, navigatedUrl, TYPED_COALESCE_MS, within } from './activity';
 
 const A = 'A' as AppSessionId;
@@ -98,6 +99,28 @@ describe('the windows\' feed', () => {
     name({ kind: 'clicked', x: 1, y: 2, label: 'input' });
     await drain();
     expect(kinds()).toEqual([{ kind: 'clicked', x: 1, y: 2, label: 'input' }, { kind: 'typed', chars: 4 }, { kind: 'key', key: 'Enter' }]);
+  });
+
+  it(`keeps each session's last ${BROWSER_ACTIVITIES_KEPT} activities as told, oldest first, for the list a window asks on mount`, async () => {
+    const { activity, tick } = feed();
+    const B = 'B' as AppSessionId;
+    for (let i = 0; i < BROWSER_ACTIVITIES_KEPT + 5; i++) {
+      activity.tell(A, `b_${String(i % 7).padStart(12, '0')}`, { kind: 'key', key: `F${i}` });
+      tick(100); // under the rate bound
+      await drain();
+    }
+    activity.tell(B, T, { kind: 'screenshot' });
+    await drain();
+    const kept = activity.list(A);
+    expect(kept).toHaveLength(BROWSER_ACTIVITIES_KEPT);
+    expect(kept[0]!.activity).toEqual({ kind: 'key', key: 'F5' });
+    expect(kept.at(-1)!.activity).toEqual({ kind: 'key', key: `F${BROWSER_ACTIVITIES_KEPT + 4}` });
+    expect(activity.list(B).map((a) => a.activity)).toEqual([{ kind: 'screenshot' }]);
+    expect(activity.list('C' as AppSessionId)).toEqual([]);
+    activity.list(B).pop(); // a copy: the caller cannot change what is kept
+    expect(activity.list(B)).toHaveLength(1);
+    activity.forgetSession(B);
+    expect(activity.list(B)).toEqual([]);
   });
 
   it(`tells at most ${ACTIVITY_MAX_PER_SECOND} activities per tab per second`, async () => {

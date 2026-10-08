@@ -9,9 +9,11 @@
 //   - typed characters as a count, coalesced per TYPED_COALESCE_MS, and a named key (Enter, Tab, …) on its own;
 //   - a screenshot, a download's end, a dialog's answer, a tab opened or closed.
 // Typed text never leaves main. At most ACTIVITY_MAX_PER_SECOND activities per tab reach the windows (mouse moves are
-// never activities, so a storm of them costs nothing; a burst beyond the bound is dropped).
+// never activities, so a storm of them costs nothing; a burst beyond the bound is dropped). What was told is kept per
+// session, the last BROWSER_ACTIVITIES_KEPT for the app's life, for `browser.agent.activities.list`: a window lists them
+// when a session's transcript mounts, so a reload or a second window shows the rows again.
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_ACTIVITY_KEY_MAX_CHARS, BROWSER_ACTIVITY_LABEL_MAX_CHARS, type BrowserActivity } from '@shared/browser/activity';
+import { BROWSER_ACTIVITIES_KEPT, BROWSER_ACTIVITY_KEY_MAX_CHARS, BROWSER_ACTIVITY_LABEL_MAX_CHARS, type BrowserActivity, type BrowserAgentActivity } from '@shared/browser/activity';
 import type { BrowserEmit } from '../tabs';
 
 export const ACTIVITY_MAX_PER_SECOND = 20;
@@ -111,11 +113,12 @@ export interface ActivityFeedDeps {
 
 // The windows' feed, per tab: activities told in the order they happened (a click waits for its label, and what follows
 // waits for the click), typed characters coalesced, each stamped when main saw it, at most ACTIVITY_MAX_PER_SECOND per
-// second.
+// second; each session's last BROWSER_ACTIVITIES_KEPT kept as told.
 export class ActivityFeed {
   private readonly typing = new Map<string, Typing>(); // by MAWS tab id
   private readonly chains = new Map<string, Promise<void>>(); // by MAWS tab id: the last activity still to be told
   private readonly recent = new Map<string, number[]>(); // by MAWS tab id: when its last activities were told
+  private readonly kept = new Map<AppSessionId, BrowserAgentActivity[]>(); // by session: what was told, oldest first
   private readonly now: () => number;
 
   constructor(private readonly deps: ActivityFeedDeps) {
@@ -150,6 +153,16 @@ export class ActivityFeed {
     }
   }
 
+  // The session's activities as told, oldest first (a copy).
+  list(appSessionId: AppSessionId): BrowserAgentActivity[] {
+    return [...(this.kept.get(appSessionId) ?? [])];
+  }
+
+  // The session was removed: nothing of it is kept.
+  forgetSession(appSessionId: AppSessionId): void {
+    this.kept.delete(appSessionId);
+  }
+
   // The tab is gone: nothing more is coalesced or counted for it.
   forget(tabId: string): void {
     this.flush(tabId);
@@ -180,6 +193,11 @@ export class ActivityFeed {
     if (recent.length >= ACTIVITY_MAX_PER_SECOND) return;
     recent.push(now);
     this.recent.set(tabId, recent);
-    this.deps.emit('browser.agent.activity', { appSessionId, tabId, at: new Date(at).toISOString(), activity });
+    const told: BrowserAgentActivity = { appSessionId, tabId, at: new Date(at).toISOString(), activity };
+    const kept = this.kept.get(appSessionId) ?? [];
+    kept.push(told);
+    if (kept.length > BROWSER_ACTIVITIES_KEPT) kept.splice(0, kept.length - BROWSER_ACTIVITIES_KEPT);
+    this.kept.set(appSessionId, kept);
+    this.deps.emit('browser.agent.activity', told);
   }
 }

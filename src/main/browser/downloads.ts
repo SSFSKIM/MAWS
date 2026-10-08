@@ -6,7 +6,7 @@
 // saved into without the dialog. A download from no tab of ours is cancelled.
 //
 // E13 (the in-app browser spec of 2026-10-08, "Downloads"): a download from a tab under a cua lease is the agent's,
-// saved without a dialog in the Downloads folder under its own name, " (2)", " (3)"… before its extension when the name
+// saved without a dialog in the Downloads folder under its own name, " (1)", " (2)"… before its extension when the name
 // is taken there or by a download still in flight, and reported through `agent` (cua/downloads.ts: the host, the
 // windows, the deliverable). Its line and Reveal in Finder are a person's download's.
 import { existsSync } from 'node:fs';
@@ -31,12 +31,13 @@ export interface DownloadsDeps {
   exists?(path: string): boolean; // E13: a file is in the folder (tests)
 }
 
-// E13: the first free path for `filename` in `dir`: the name itself, else Chrome's " (2)", " (3)"… before the extension.
+// E13: the first free path for `filename` in `dir`: the name itself, else Chrome's macOS " (1)", " (2)"… before the
+// extension.
 export function uniqueDownloadPath(dir: string, filename: string, taken: (path: string) => boolean): string {
   const extension = filename.startsWith('.') && extname(filename.slice(1)) === '' ? '' : extname(filename);
   const stem = filename.slice(0, filename.length - extension.length);
-  for (let n = 1; ; n++) {
-    const path = join(dir, n === 1 ? filename : `${stem} (${n})${extension}`);
+  for (let n = 0; ; n++) {
+    const path = join(dir, n === 0 ? filename : `${stem} (${n})${extension}`);
     if (!taken(path)) return path;
   }
 }

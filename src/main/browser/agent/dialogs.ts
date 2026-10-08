@@ -18,9 +18,10 @@
 //     `safeDialogs` would, with one notice per run (Decision Log 60);
 //   - a `prompt` (or any other kind) is always Electron's: its renderer refuses `prompt()` before main sees it, and its
 //     listener answers one that arrives at once without showing anything;
-//   - A-53 (the in-app browser spec of 2026-10-08): a tab under a cua lease, whoever holds it: `held`, handed unanswered
-//     to cua's held route (cua/dialogs.ts), which lets the vendor answer through CDP and answers the 30 s default through
-//     the callback.
+//   - A-53 (the in-app browser spec of 2026-10-08, M3 review): a tab under a cua lease that the agent holds (control
+//     `agent`, or `idle` with `personHolds` false: the agent's own deferred page work): `held`, handed unanswered to cua's
+//     held route (cua/dialogs.ts), which lets the vendor answer through CDP and answers the 30 s default through the
+//     callback. A leased tab the person holds (`human`, or touched within the hand-back window) keeps the rows above.
 // The guard: the wrap is installed only over exactly one existing listener, Electron's own; otherwise the view is left
 // native and one line is logged, so an Electron that renames or multiplies the event fails the e2e's alert step loudly
 // rather than freezing. The event is Electron-internal on a version-pinned build (A-42; the tracker's re-verify row).
@@ -29,6 +30,7 @@ import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BRO
 import type { BrowserControl } from '@shared/browser/tab';
 import type { BrowserDialog } from '@shared/maws/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
+import { personHolds } from './control';
 import type { AgentDialogs } from './handlers';
 
 export const RUN_DIALOG_EVENT = '-run-dialog';
@@ -74,12 +76,13 @@ export interface DialogFacts {
   safeDialogs: boolean; // Electron bounds the page's dialogs itself
   recent: number; // the page's dialogs that ended within DIALOG_BOUND_WINDOW_MS
   leased: boolean; // A-53: a cua connection holds a debugger lease on the tab
+  personHolds: boolean; // control's `personHolds`: the tab is `human`, or the person touched it within the hand-back window
 }
 
 // The routing table (A-42 conditions 1 to 3; Decision Log 60).
-export function routeDialog({ type, control, placed, safeDialogs, recent, leased }: DialogFacts): DialogRoute {
+export function routeDialog({ type, control, placed, safeDialogs, recent, leased, personHolds }: DialogFacts): DialogRoute {
   if (type !== 'alert' && type !== 'confirm') return 'native';
-  if (leased) return 'held';
+  if (leased && (control === 'agent' || (control === 'idle' && !personHolds))) return 'held';
   if (control === 'agent') return 'agent';
   if (!placed) return 'hidden';
   if (!safeDialogs && recent >= DIALOG_BOUND_AFTER) return 'bounded';
@@ -166,6 +169,7 @@ export class PageDialogs implements AgentDialogs {
       safeDialogs: safeDialogsOf(contents),
       recent: state.ended.length,
       leased: this.deps.held?.holds(entry.tab.tabId) === true,
+      personHolds: personHolds(entry, now),
     });
     if (route === 'held') return this.deps.held!.hold(entry, info, callback);
     if (route === 'native') {

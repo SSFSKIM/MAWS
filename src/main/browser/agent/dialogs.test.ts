@@ -70,7 +70,7 @@ afterEach(() => {
 });
 
 describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 60; A-53)', () => {
-  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0, leased: false };
+  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0, leased: false, personHolds: false };
   it.each([
     ['an agent-held tab, placed or not', { ...base, control: 'agent' as const }, 'agent'],
     ['an agent-held unplaced tab', { ...base, control: 'agent' as const, placed: false }, 'agent'],
@@ -81,8 +81,12 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
     ['a placed ordinary tab after many dialogs (Electron\'s safeDialogs bounds it)', { ...base, recent: 9 }, 'native'],
     ['a placed adopted pop-up, its first two dialogs', { ...base, safeDialogs: false, recent: 1 }, 'native'],
     ['a placed adopted pop-up, its third within the window', { ...base, safeDialogs: false, recent: 2 }, 'bounded'],
-    ['A-53: a tab under a cua lease, whoever holds it, placed or not', { ...base, leased: true, control: 'human' as const }, 'held'],
+    ['A-53: a leased tab the agent drives, placed or not', { ...base, leased: true, control: 'agent' as const }, 'held'],
     ['A-53: a leased unplaced agent tab', { ...base, leased: true, control: 'agent' as const, placed: false }, 'held'],
+    ['A-53: a leased idle tab nobody touched (the agent\'s deferred page work)', { ...base, leased: true }, 'held'],
+    ['A-53: a leased placed tab the person holds keeps its native dialog', { ...base, leased: true, control: 'human' as const, personHolds: true }, 'native'],
+    ['A-53: a leased placed idle tab the person touched within 3 s keeps its native dialog', { ...base, leased: true, personHolds: true }, 'native'],
+    ['A-53: a leased never-placed tab the person holds gets the hidden defaults', { ...base, leased: true, control: 'human' as const, personHolds: true, placed: false }, 'hidden'],
   ])('alert and confirm: %s → %s', (_name, facts, route) => {
     expect(routeDialog({ ...facts, type: 'alert' })).toBe(route);
     expect(routeDialog({ ...facts, type: 'confirm' })).toBe(route);
@@ -90,9 +94,9 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
 
   it('a prompt is always Electron\'s (it answers at once and shows nothing), as is any other kind', () => {
     for (const control of ['idle', 'agent', 'human'] as const) {
-      for (const placed of [true, false]) for (const leased of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5, leased })).toBe('native');
+      for (const placed of [true, false]) for (const leased of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5, leased, personHolds: false })).toBe('native');
     }
-    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0, leased: true })).toBe('native');
+    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0, leased: true, personHolds: false })).toBe('native');
   });
 });
 
@@ -187,13 +191,13 @@ describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 
 });
 
 describe('PageDialogs: a tab under a cua lease (A-53)', () => {
-  it('hands alert and confirm to the held route unanswered, never natively, whoever holds the tab; a prompt stays Electron\'s', () => {
+  it('hands the agent\'s alert and confirm to the held route unanswered, never natively; a prompt stays Electron\'s', () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.leased.add(entry.tab.tabId);
     h.place(entry);
-    const alert = wc.dialog('alert', 'Saved.');
-    h.store.setControl(entry.tab.tabId, 'human');
+    const alert = wc.dialog('alert', 'Saved.'); // idle, nobody touched it: the agent's deferred page work
+    h.store.setControl(entry.tab.tabId, 'agent');
     const confirm = wc.dialog('confirm', 'Leave?');
     expect(alert).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
@@ -207,6 +211,21 @@ describe('PageDialogs: a tab under a cua lease (A-53)', () => {
     wc.dialog('prompt');
     expect(wc.native).toHaveBeenCalledTimes(1);
     expect(h.dialogs.take(entry.tab.tabId)).toEqual([]); // nothing for the old tools' results
+  });
+
+  it('a leased tab the person holds (human, or touched within 3 s) keeps A-42\'s human rows: the placed tab\'s native box', () => {
+    const h = harness();
+    const { entry, wc } = h.open();
+    h.leased.add(entry.tab.tabId);
+    h.place(entry);
+    h.store.setControl(entry.tab.tabId, 'human');
+    wc.dialog('confirm', 'Leave?');
+    expect(wc.native).toHaveBeenCalledTimes(1);
+    h.store.setControl(entry.tab.tabId, 'idle');
+    entry.input.emit({ kind: 'mouse', source: 'human', at: Date.now() });
+    wc.dialog('alert', 'Typed into');
+    expect(wc.native).toHaveBeenCalledTimes(2);
+    expect(h.heldCalls).toEqual([]);
   });
 });
 
