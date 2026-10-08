@@ -4,220 +4,290 @@ Each row: step | surface or check | pass/fail/note | what was seen | screenshot 
   filled; write `n/a (<why>)` for a surface not reachable at the sitting. Every fail or note is routed at M8
   (a fix, a tracker row tagged taste or with these words as evidence, or a P-n question).
 
-Date of the sitting:
-Sessions (one or two, with times):
-Engine version the owner sits with (`claude --version`; the pre-run sittings ran 2.1.293):
-The build: master at commit:
-The build's codesign -dv identity (Authority line):
-The build's TeamIdentifier:
-Chrome profile chosen for step D:
+Filled 2026-10-08 by E11's executor at M7.2 from the sitting's record (E11 Decision Log 41), not by the owner, in this
+  order of authority: (1) docs/doperpowers/evidence/p1-e11/owner-notes/joint-sitting-notes-2026-10-08.txt ("the joint
+  notes": the fork session 1044c16c that ran this script with the owner, driving the GUI through cua_repl at the owner's
+  explicit request, which superseded the script's owner-hands-only rule for this sitting); (2) owner-notes/
+  00-consolidated-plan.txt ("the plan"; §1 to §5); (3) the reports owner-notes/A-archive-removed-at.txt to
+  H-needs-you-errors.txt; (4) owner-notes/owner-vault-note-2026-10-05.txt. Owner words are quoted verbatim.
+Verdicts: pass (the notes' evidence, with its stated limits), note, fail, `owner: not run` (the step was not performed),
+  `owner: unsigned build` (the step needs the development-signed build the sitting did not have; not a product failure).
+  No row is marked passed beyond the joint notes' evidence; a pass with a limit names the limit.
+Routes (E11 Decision Log 42 to 46): F2a or F2b (M7.2's two fix waves, the item named), tracker (a docs/
+  tech-debt-tracker.md row dated 2026-10-08; `taste` or a design boundary), P-n (a product question to the architect),
+  P2 3.A to 3.D (the plan's §3 children, the next cut), 3.E (the browser items owned by the cua_repl session's ticket),
+  M7.3 (the tracker edit after the sitting), none (an evidence limit, nothing to fix).
+Screenshots: the fork's screenshots stayed in its tool results (the joint notes); the only ones copied into the
+  repository are the eight Korean IME captures under docs/doperpowers/evidence/p1-e11/owner-notes/terminal-ime/.
+
+Date of the sitting: 2026-10-08
+Sessions (one or two, with times): one joint session (owner with the fork session 1044c16c through cua_repl) on the
+  process started 02:24:19 PDT; the owner's §4 decisions answered 02:55 PDT (the plan); end time not recorded.
+Engine version the owner sits with (`claude --version`; the pre-run sittings ran 2.1.293): 2.1.294 (seen in the UI and
+  confirmed by `claude --version`, 02:50 PDT; differs from prerun.txt's 2.1.293; see pre.7)
+The build: master at commit: 5dcddd70; dist/mac-arm64/MAWS.app bundle built 02:05 PDT (app.asar mtime 02:05:53 PDT);
+  the sitting's process pid 80813 started 02:24:19 PDT, newer than the bundle. Earlier screenshots (the old process,
+  pid 44903, started 2026-10-04 18:41 PDT: the plan's images 5 to 9 and 12) are superseded. The exact source-to-bundle
+  hash was not verified (the joint notes).
+The build's codesign -dv identity (Authority line): not development-signed: Identifier=Electron, no Authority line
+The build's TeamIdentifier: not set
+Chrome profile chosen for step D: Minhyeok
 
 step | surface or check | pass/fail/note | what was seen | screenshot path
 
 == Before ==
-pre.1 | the development-signed build; codesign -dv (identity in the header) |  |  | 
-pre.2 | the relay answers /api/hello 200 |  |  | 
-pre.3 | Codex desktop and Claude Desktop open and signed in |  |  | 
-pre.4 | a Chrome profile chosen for step D (name it in the header) |  |  | 
-pre.5 | scratch keys to clean: none (prerun.txt) |  |  | 
-pre.6 | a terminal claude running for the Overview |  |  | 
-pre.7 | claude --version (in the header) |  |  | 
+pre.1 | the development-signed build; codesign -dv (identity in the header) | owner: unsigned build | The running app is /Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app; codesign reports Identifier=Electron, TeamIdentifier=not set, no Authority line: "Not an Apple Development-signed build. No rebuild or restart performed." Rows that depend on the signed build (A8.1, A8.3's refusal, E1 to E5) read `owner: unsigned build`, not product failures. | —
+pre.2 | the relay answers /api/hello 200 | pass | Relay /api/hello returned 200. | —
+pre.3 | Codex desktop and Claude Desktop open and signed in | owner: not run | Step B's reference comparison was not held (the joint notes: "B reference-app taste review and light/dark comparison remain owner's judgment"); nothing records the reference apps open. | —
+pre.4 | a Chrome profile chosen for step D (name it in the header) | pass | The owner chose Minhyeok and started the import themselves ("Importing from Minhyeok…", extensions 6 of 16); the agent chose no profile. | —
+pre.5 | scratch keys to clean: none (prerun.txt) | note | Nothing to clean by prerun.txt and owner-file-check.txt (E11 added no key); the sitting's record does not mention ~/.claude.json. Route: none. | —
+pre.6 | a terminal claude running for the Overview | owner: not run | No terminal `claude` is recorded; J4's second session was the fork's controller session, not a terminal peer. | —
+pre.7 | claude --version (in the header) | note | 2.1.294, seen in the UI and confirmed independently with `claude --version`; E11's live evidence and pre-run used 2.1.293. The UI's banner compares against the stale pin 2.1.283 ("Claude Code 2.1.294 is newer than the version MAWS was verified against (2.1.283); some events were not understood", the plan 2.8). Route: F2a (2.8, TESTED_ENGINE_VERSION to 2.1.293 on E11's evidence). | —
 
 == A. First looks ==
-A1.1 | E1 the Question sheet from a blocking ask; main view not switched |  |  | 
-A1.2 | E1 the capsule pending and answered; View answers |  |  | 
-A1.3 | E1 the delivery row: Open externally, Reveal |  |  | 
-A2.1 | E2 viewer kinds (PDF, HTML, image, video, audio, markdown), panel and main tab |  |  | 
-A2.2 | E2 artifact versions |  |  | 
-A2.3 | E2 the artifact console |  |  | 
-A2.4 | E2 Open as file |  |  | 
-A2.5 | E2 a web link in delivered HTML: blocked page until Reload (A-34) |  |  | 
-A3.1 | E3 the comment composer's screenshot chip (Q4) |  |  | 
-A3.2 | E3 nested side threads under their parent |  |  | 
-A3.3 | E3 /btw inside a thread answers inline |  |  | 
-A3.4 | E3 the first launch after the upgrade (how long) |  |  | 
-A4.1 | E5 Changed on disk |  |  | 
-A4.2 | E5 inline conflict-marker blocks (P-19) |  |  | 
-A4.3 | E5 the close sheet |  |  | 
-A4.4 | E5 the quit question names unsaved files |  |  | 
-A5.1 | E6 hooks by default, Skip hooks box |  |  | 
-A5.2 | E6 the discard sheet names every file |  |  | 
-A5.3 | E6 the push sheet re-points a branch tracking origin/main |  |  | 
-A5.4 | E6 the empty PR body default |  |  | 
-A6.1 | E7 compact workflow cards, per-phase tables in the widget |  |  | 
-A6.2 | E7 the widget stacking under 520 px |  |  | 
-A6.3 | E7 scheduled rows: Expired <date>, the locale mix (Q2) |  |  | 
-A6.4 | E7 the Tasks panel read-only (P-20) |  |  | 
-A7.1 | E8 the removal sheet announces a superset of files |  |  | 
-A7.2 | E8 another project's installation row read-only |  |  | 
-A7.3 | E8 the engine's "Restart to apply changes" after MAWS reloaded |  |  | 
-A8.1 | E9 the mic button toggles (P-18) |  |  | 
-A8.2 | E9 the hold action unbound until bound in Settings › Keyboard |  |  | 
-A8.3 | E9 Settings › Voice's language list |  |  | 
-A9.1 | E10 the lost-terminal line, no Restart action |  |  | 
-A9.2 | E10 the supervisor as "MAWS" in Activity Monitor |  |  | 
-A9.3 | E10 Settings › Engine › Background supervisor (idle time, quit default, Stop all) |  |  | 
-A9.4 | E10 Diagnostics' supervisor row |  |  | 
-A9.5 | E10 the idle-release mark "Stopped at HH:MM while idle · Send resumes it" |  |  | 
-A10.1 | E4a the chrome and its error pages |  |  | 
-A10.2 | E4a the partition pill |  |  | 
-A10.3 | E4a the clipboard carve-out (Copy after a click) |  |  | 
-A10.4 | E4a Google as the search default |  |  | 
-A10.5 | E4a the 12-tab and 2 GiB caps' suspension |  |  | 
-A10.6 | E4a beforeunload never blocking |  |  | 
-A10.7 | E4a Session info's "Browser tabs" row |  |  | 
-A10.8 | E4a the address field: typed address first, then history |  |  | 
-A10.9 | E4a re-selecting the Browser tool takes the view back from a main tab |  |  | 
-A10.10 | E4a clipboard and window.open count key or mouse activation, not scrolls |  |  | 
-A11.1 | E4c reads proceed while the owner holds the page |  |  | 
-A11.2 | E4c the Browser tool opens at most once per busy stretch |  |  | 
-A11.3 | E4c the 10 s agent → idle decay |  |  | 
-A11.4 | E4c the fixed cursor colours |  |  | 
-A11.5 | E4c a browser-only turn: no divider, rows in view when folded (Q9) |  |  | 
-A11.6 | E4c queued time counts against the 30 s deadline (Q10) |  |  | 
-A11.7 | E4c a side thread's driver retired when its parent exits (Q10) |  |  | 
-A12.1 | E4d comment on an element, the thread's agent clicks it in the same tab |  |  | 
-A12.2 | E4d the row heading "Clicked #<id>" for a css-only act (Q8) |  |  | 
-A12.3 | E4d typed values never in an anchor's name (Q7) |  |  | 
-A12.4 | E4d the hover badge's hint over small elements |  |  | 
-A12.5 | E4d a right-click Comment at 125 % zoom |  |  | 
-A12.6 | E4d a drag picks an area named by the smallest containing element (P-25) |  |  | 
-A13 | E4b owner items: recorded in D3, D4 and D9 (write "see D") |  |  | 
-A14.1 | P-21 tabs belong to the session |  |  | 
-A14.2 | P-21 agent-opened tabs stay open at turn end |  |  | 
-A14.3 | P-21 per-extension toggles, wallets off |  |  | 
+A1.1 | E1 the Question sheet from a blocking ask; main view not switched | pass | Pending capsule "Waiting for you"; attention item "Question" in Needs you; the questions shown in the right panel without replacing the transcript. Background arrival (follow-up): a 20 s delayed ask let the fork switch to the "MAWS editor UI test" session first; Needs you gained a Question for the Note comment session without changing the selected session or opening its sheet; selecting the item showed "Background arrival check"; answered Alpha; QUESTION_BACKGROUND_DONE, session Idle; no Stop/Resume. | —
+A1.2 | E1 the capsule pending and answered; View answers | pass | The owner submitted answers; capsule "Answered"; attention item cleared; View answers reopened read-only text without editable controls or Submit; the agent's reply matches the answer values. Continuation: the first run shows the owner stopping after 4m22s, switching haiku to fable, then "continue", so it does not establish continuation; the follow-up one-choice blocking ask answered Alpha returned QUESTION_CONTINUED Alpha without stop or resume ("A1 automatic continuation follow-up PASS"). That result "was hidden in mod's to-human report view and visible after full transcript". Route: tracker (taste, the mod report view hiding a plain result after an answered question; plan §3.C, P2). | —
+A1.3 | E1 the delivery row: Open externally, Reveal | note | Delivered /tmp/e11-a13.BLWgHx/hello.txt; the row shows Open externally and Reveal in Finder. Reveal opened Finder's e11-a13.BLWgHx with hello.txt selected (pass). Open externally launched TextEdit, "but only its Open dialog was observed, not a hello.txt document. External open remains unverified." The message first queued behind an owner interruption; Resume brought the working state and the delivery completed. Route: none (evidence limit). | —
+A2.1 | E2 viewer kinds (PDF, HTML, image, video, audio, markdown), panel and main tab | pass (functional) · note (taste) | HTML, PDF, PNG, MP4, WAV and Markdown each opened in the panel and in a main tab; video played to 0:02 and audio to 0:01 in both (actual sound not judged); Markdown's rendered/source switch works, source read-only. Owner taste, verbatim: "로딩하는건 좋은데 사이즈가 adjustment가 너무 부족한것 같다는 의견" ("loading is fine, but size adjustment is far too lacking"); the owner's screenshot shows a tiny image and video in large viewers. "Functional loading pass is NOT a visual-quality pass." Route: tracker (taste, the deliverables viewer's fit, zoom and size adjustment). | the owner's screenshot (no path in the record)
+A2.2 | E2 artifact versions | pass | Artifact demo v2 rendered ("Demo artifact — version 2", Increment, Count: 0, Note field, example.com link); the version menu lists v1 and v2 latest; the owner: "switched, commented, all works". | —
+A2.3 | E2 the artifact console | pass | A newly registered console-check artifact in a scratch session shows a "1" console error chip; opened, it lists the warning at line 10 OWNER_TEST_WARNING and the error at line 11 OWNER_TEST_ERROR. Ordinary console.log is not captured (source lookup); the earlier sample had no errors or warnings, hence no chip. | —
+A2.4 | E2 Open as file | pass | sample.md re-delivered under its owning scratch-project session shows Open as file; the click selects the file editor tab and Source gives an editable text area. The earlier delivery from outside the project root correctly omitted the button. No file changed. | —
+A2.5 | E2 a web link in delivered HTML: blocked page until Reload (A-34) | pass | The artifact's example.com link navigated to chrome-error://chromewebdata/ with blank white contents; Reload restored artifact v2 and its controls. Main-tab interactivity: Increment changed Count 0 to 1. | —
+A3.1 | E3 the comment composer's screenshot chip (Q4) | note | Browser comment composer: a Screenshot chip with dimensions and Remove screenshot, no thumbnail. The artifact comment's composer showed no chip in its capture ("artifact-specific screenshot chip not observed (browser chip verified)"; E11's Deferred list keeps "a screenshot on the `artifact-element` anchor" out of E2, which matches). Q4 owner-decided (step I): a small screenshot thumbnail replaces the chip; the current chip is not accepted. Route: F2b (Q4's screenshot thumbnail in the comment composer). | —
+A3.2 | E3 nested side threads under their parent | pass · note | A second comment opened from inside the first comment fork on the rounded artifact's Increment button: the nested thread completed, its summary appears inside the Note comment parent, and the Side pane lists it under that parent. Note: "side-thread summary renders raw ANSI escape fragments around 'to human' visibly; screenshot captured". Route: F2a (the ANSI leak in a side-thread completion summary). | the fork's capture (no path in the record)
+A3.3 | E3 /btw inside a thread answers inline | pass | /btw submitted in the first comment fork answers in the Side pane without adding a normal message to that thread's transcript. | —
+A3.4 | E3 the first launch after the upgrade (how long) | owner: not run | Not timed at the 02:24:19 relaunch; "First-launch timing cannot be reconstructed." | —
+A4.1 | E5 Changed on disk | pass · note (setup) | Opened hello.txt through Files; an unsaved HELLO LOCAL plus an external HELLO DISK on disk raised "Changed on disk" with Reload / Keep mine / Compare. Setup note: in the added project /private/tmp/e11-a13.BLWgHx a new, unstarted chat's Files pane showed "Could not list: unknown app session: c6bb8a7b-7b58-44c4-a0fa-01314e461f36" until a one-word READY session started (Start without trusting chosen). Route: F2a (the Files pane's "unknown app session" in an unstarted chat). | —
+A4.2 | E5 inline conflict-marker blocks (P-19) | note | Save opened an inline red/green comparison, "Changed on disk since you opened it", with per-hunk Keep mine and Take theirs; "No Accept both or literal conflict markers observed." Per-hunk Keep mine caused no visible change in this case; the top bar's Keep mine cleared the conflict state. The script's clause as worded is not passed (the joint notes: "Do not mark exact script clause as passed"). Route: F2a (the A4.2 wording in owner-script.txt and this row; product unchanged). | —
+A4.3 | E5 the close sheet | pass | Close during the comparison kept the tab open; after the top bar's Keep mine, closing the dirty file opened "Save changes to hello.txt?" with Don't save / Cancel / Save; Save closed the tab; disk holds HELLO LOCAL. | —
+A4.4 | E5 the quit question names unsaved files | owner: not run | "quit/unsaved-files question would disrupt concurrent sitting; needs owner-controlled quit." | —
+A5.1 | E6 hooks by default, Skip hooks box | owner: not run | Source-control steps need an agreed throwaway branch and real credentialed actions; not performed (A5 and H). | —
+A5.2 | E6 the discard sheet names every file | owner: not run | Not performed (as A5.1). | —
+A5.3 | E6 the push sheet re-points a branch tracking origin/main | owner: not run | Not performed (as A5.1). | —
+A5.4 | E6 the empty PR body default | owner: not run | Not performed (as A5.1). | —
+A6.1 | E7 compact workflow cards, per-phase tables in the widget | pass | The minimal owner-a6-echo workflow wf_c63262ae-b1b drew a compact finished card in the transcript; clicking it opened the Background work widget: Echo phase 2/2, ALPHA and BETA agent rows with model, state, time and token columns. Workload note: BETA misread the parent request and reported "Workflow unavailable" (cause unverified; not a MAWS UI defect; no rerun). Route: none. | —
+A6.2 | E7 the widget stacking under 520 px | pass | Panel resized from 640 to 395 px by the divider: the phases stacked above the table; restored to 640. | —
+A6.3 | E7 scheduled rows: Expired <date>, the locale mix (Q2) | note | Not seen: no scheduled rows existed ("scheduled expired durable jobs not seen"). Q2 stays open. Route: P-n (Q2 left open). | —
+A6.4 | E7 the Tasks panel read-only (P-20) | pass | show_pane('tasks') opens Tasks; the read-only empty state reads "The engine is not creating task lists in this session" (not the literal `No tasks`). | —
+A7.1 | E8 the removal sheet announces a superset of files | owner: not run | Marketplace removal not exercised; plugin changes withheld because the owner's live plugin configuration is shared. | —
+A7.2 | E8 another project's installation row read-only | pass · note | The Plugins sheet shows other projects' installations read-only with "manage it from a session there", no per-row change controls; no plugin change made. Note (report E, the owner's follow-up the same morning): "the current E8 widget is still severely unreadable; Claude Desktop is the best example and MAWS should use its interface as-is" (INSTALLED 132, repeated plugin ids across projects, long absolute paths, "unknown" versions, the provenance footer). Route: F2a (2.2, footers, sandbox copy, Reload plugins) and P2 3.B (the extensions library). | —
+A7.3 | E8 the engine's "Restart to apply changes" after MAWS reloaded | owner: not run | Not exercised (no plugin update made). | —
+A8.1 | E9 the mic button toggles (P-18) | owner: unsigned build | Voice capture and its permissions need the development-signed build and the owner's microphone actions. | —
+A8.2 | E9 the hold action unbound until bound in Settings › Keyboard | pass | "Hold to dictate" is Unbound in Keyboard and in Voice. | —
+A8.3 | E9 Settings › Voice's language list | note | The language menu lists on-device locales, current System ko-KR (pass for the list); the refusal of a language without a model was not attempted on the unsigned build (`owner: unsigned build` for that half). No setting changed. Route: none. | —
+A9.1 | E10 the lost-terminal line, no Restart action | owner: not run | Needs a controlled relaunch (lifecycle sitting, deferred by the owner). | —
+A9.2 | E10 the supervisor as "MAWS" in Activity Monitor | pass | Activity Monitor filtered on MAWS lists the app (pid 80813) and the supervisor (pid 81243), both as MAWS; Activity Monitor quit afterwards, nothing stopped. | —
+A9.3 | E10 Settings › Engine › Background supervisor (idle time, quit default, Stop all) | pass | Inspection: idle 10 min, "Keep sessions running" selected, Stop all present; the destructive action not exercised. | —
+A9.4 | E10 Diagnostics' supervisor row | pass | The dot aligned with the first line, green; detached pid 81243, build matches, no unexpected exit; no restart or stop. | —
+A9.5 | E10 the idle-release mark "Stopped at HH:MM while idle · Send resumes it" | owner: not run | Not seen; it needs MAWS closed past the idle time (lifecycle sitting, deferred). | —
+A10.1 | E4a the chrome and its error pages | pass | A reserved .invalid hostname shows the renderer's "This site can't be reached", ERR_NAME_NOT_RESOLVED, Reload; Back restores the prior page. | —
+A10.2 | E4a the partition pill | pass | The chrome shows the Default partition pill (the Minhyeok pill after the import, D6). | —
+A10.3 | E4a the clipboard carve-out (Copy after a click) | pass | A local page's Copy test text button reports "Copy succeeded"; ⌘V into its Paste here field yields MAWS-CLIPBOARD-TEST. | —
+A10.4 | E4a Google as the search default | pass | Inspection: Settings › Browser's search field is editable with Google https://www.google.com/search?q=%s; Default profile selected, new windows "In MAWS"; no setting changed. | —
+A10.5 | E4a the 12-tab and 2 GiB caps' suspension | owner: not run | Not run: exercising the app-global memory and 12-tab caps could evict other active sessions' pages. | —
+A10.6 | E4a beforeunload never blocking | pass | A local beforeunload handler armed; clicking a navigation link reached ?next=1 without a blocking dialog. | —
+A10.7 | E4a Session info's "Browser tabs" row | pass | Session info › Engine shows Browser tabs "5 loaded · 468 MB · outside the engine budget"; the count is app-wide loaded pages (source lookup). | —
+A10.8 | E4a the address field: typed address first, then history | pass | The typed search/address suggestion appears before the Example Domain history entry. cua's typeText dropped initial characters on one attempt (not attributed to the product). | —
+A10.9 | E4a re-selecting the Browser tool takes the view back from a main tab | pass · note | With the page in a main tab, switching the panel to Tasks then Browser takes it back to the panel; main shows "Shown in another pane". Nuance: clicking the already-selected Browser alone does not take it back (recorded, not classified as a failure). Route: P-n (whether a click on the selected Browser tool should reclaim; not routed by Decision Log 43 to 45). | —
+A10.10 | E4a clipboard and window.open count key or mouse activation, not scrolls | note | A window.open button produced a separate local browser tab ?popup=1 (mouse activation counted); the scroll-only and keyboard-activation negative cases were not covered. Route: none (evidence limit). | —
+A11.1 | E4c reads proceed while the owner holds the page | owner: not run | Read-while-held not isolated. | —
+A11.2 | E4c the Browser tool opens at most once per busy stretch | owner: not run | Busy-stretch open-once not isolated. | —
+A11.3 | E4c the 10 s agent → idle decay | owner: not run | Not observed. | —
+A11.4 | E4c the fixed cursor colours | owner: not run | Cursor colours not isolated. | —
+A11.5 | E4c a browser-only turn: no divider, rows in view when folded (Q9) | owner: not run | Not observed; Q9 open. | —
+A11.6 | E4c queued time counts against the 30 s deadline (Q10) | owner: not run | Needs deliberate long-running manipulation; not run; Q10 open. | —
+A11.7 | E4c a side thread's driver retired when its parent exits (Q10) | owner: not run | Needs lifecycle manipulation; not run; Q10 open. | —
+A12.1 | E4d comment on an element, the thread's agent clicks it in the same tab | pass | A browser comment thread clicked the anchored Increment once in the existing tab b_95a13b9a6c6e; the page's Count changed 0 to 1; the action row reads 'Clicked button "Increment"'. | —
+A12.2 | E4d the row heading "Clicked #<id>" for a css-only act (Q8) | owner: not run | A css-only act was not forced; the anchored click's row showed role and name ('Clicked button "Increment"'). Q8 open. | —
+A12.3 | E4d typed values never in an anchor's name (Q7) | note | The Note textbox held the harmless PRIVATE-TEST-ONLY; right-click Comment's heading was textbox "Note", selector #note, without the typed value (pass for the textbox); the row/ancestor anchor case was not exercised. Q7 open. Route: none (evidence limit). | —
+A12.4 | E4d the hover badge's hint over small elements | owner: not run | Not separately exercised. | —
+A12.5 | E4d a right-click Comment at 125 % zoom | pass | At a visibly confirmed 125 % zoom, right-click Increment gave "Comment on button Increment", selector #inc, a screenshot chip; no offset to the adjacent field; zoom reset to 100 % after. Route: M7.3 (row 157 closes on this pass, Decision Log 46). | —
+A12.6 | E4d a drag picks an area named by the smallest containing element (P-25) | pass | A drag across text and a button inside a fixture region produced "Comment on div", #region, Screenshot 426×100; cancelled without sending. | —
+A13 | E4b owner items: recorded in D3, D4 and D9 (write "see D") | see D | D3 and D4 were run by the owner alone and not recorded item by item; D9 not run. | —
+A14.1 | P-21 tabs belong to the session | owner: not run | Cross-session tab isolation not negatively tested. | —
+A14.2 | P-21 agent-opened tabs stay open at turn end | pass | An agent-opened browser tab remains after the turn completed. | —
+A14.3 | P-21 per-extension toggles, wallets off | pass | After the import, Settings lists 16 extensions with per-extension toggles; MetaMask Off (wallet); Google Translate toggled off and on (D5, D8). | —
 
 == B. The panel and reference taste sitting (C8-S) ==
-B1 | Session info (light and dark; the reference surface it falls short of, if any) |  |  | 
-B2 | Review (light and dark; the reference surface it falls short of, if any) |  |  | 
-B3 | Files (light and dark; the reference surface it falls short of, if any) |  |  | 
-B4 | Terminal (light and dark; the reference surface it falls short of, if any) |  |  | 
-B5 | Subagents (light and dark; the reference surface it falls short of, if any) |  |  | 
-B6 | Background work (light and dark; the reference surface it falls short of, if any) |  |  | 
-B7 | Log (light and dark; the reference surface it falls short of, if any) |  |  | 
-B8 | Tasks (light and dark; the reference surface it falls short of, if any) |  |  | 
-B9 | Source control (light and dark; the reference surface it falls short of, if any) |  |  | 
-B10 | Side (light and dark; the reference surface it falls short of, if any) |  |  | 
-B11 | Deliverables (light and dark; the reference surface it falls short of, if any) |  |  | 
-B12 | Browser (light and dark; the reference surface it falls short of, if any) |  |  | 
-B13 | the Question sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
-B14 | the ask capsule row (light and dark; the reference surface it falls short of, if any) |  |  | 
-B15 | the delivery row (light and dark; the reference surface it falls short of, if any) |  |  | 
-B16 | the artifact row (light and dark; the reference surface it falls short of, if any) |  |  | 
-B17 | the side-thread summary row (light and dark; the reference surface it falls short of, if any) |  |  | 
-B18 | the peer row (light and dark; the reference surface it falls short of, if any) |  |  | 
-B19 | the browser-action rows (light and dark; the reference surface it falls short of, if any) |  |  | 
-B20 | the side pane with a thread (light and dark; the reference surface it falls short of, if any) |  |  | 
-B21 | the side pane with a side question (light and dark; the reference surface it falls short of, if any) |  |  | 
-B22 | the comment composer (light and dark; the reference surface it falls short of, if any) |  |  | 
-B23 | the workflow widget (light and dark; the reference surface it falls short of, if any) |  |  | 
-B24 | the topology tree (light and dark; the reference surface it falls short of, if any) |  |  | 
-B25 | the plugins widget and its sheets (light and dark; the reference surface it falls short of, if any) |  |  | 
-B26 | Settings › Voice (light and dark; the reference surface it falls short of, if any) |  |  | 
-B27 | Settings › Engine (light and dark; the reference surface it falls short of, if any) |  |  | 
-B28 | Settings › Browser (light and dark; the reference surface it falls short of, if any) |  |  | 
-B29 | the Diagnostics row and the supervisor banners (light and dark; the reference surface it falls short of, if any) |  |  | 
-B30 | the browser chrome (light and dark; the reference surface it falls short of, if any) |  |  | 
-B31 | an error page (light and dark; the reference surface it falls short of, if any) |  |  | 
-B32 | the import consent sheet and report (light and dark; the reference surface it falls short of, if any) |  |  | 
-B33 | "You have the page · Hand back" (light and dark; the reference surface it falls short of, if any) |  |  | 
-B34 | the comment-mode overlay (light and dark; the reference surface it falls short of, if any) |  |  | 
-B35 | the editor bar (light and dark; the reference surface it falls short of, if any) |  |  | 
-B36 | the merge view (light and dark; the reference surface it falls short of, if any) |  |  | 
-B37 | the SCM panel (light and dark; the reference surface it falls short of, if any) |  |  | 
-B38 | the discard sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
-B39 | the push sheet (light and dark; the reference surface it falls short of, if any) |  |  | 
-B40 | the PR state row (light and dark; the reference surface it falls short of, if any) |  |  | 
+B1 | Session info (light and dark; the reference surface it falls short of, if any) | owner: not run | The light/dark reference comparison was not held ("B taste is not passed by functional tests"). | —
+B2 | Review (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B3 | Files (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1 (functional: A4.1's unstarted-chat error). | —
+B4 | Terminal (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B5 | Subagents (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1 (functional: an ordinary Haiku test agent appeared under Done 1 with its finished row, OWNER_TEST_AGENT_OK; nested topology not generated). | —
+B6 | Background work (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B7 | Log (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B8 | Tasks (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B9 | Source control (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B10 | Side (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B11 | Deliverables (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the owner's sizing note is A2.1's. | —
+B12 | Browser (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B13 | the Question sheet (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B14 | the ask capsule row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B15 | the delivery row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B16 | the artifact row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B17 | the side-thread summary row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the ANSI leak is A3.2's. | —
+B18 | the peer row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B19 | the browser-action rows (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B20 | the side pane with a thread (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B21 | the side pane with a side question (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B22 | the comment composer (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; Q4's thumbnail is A3.1's. | —
+B23 | the workflow widget (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B24 | the topology tree (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B25 | the plugins widget and its sheets (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the owner's "severely unreadable" is A7.2's (P2 3.B). | —
+B26 | Settings › Voice (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B27 | Settings › Engine (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B28 | Settings › Browser (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the owner's note on profile settings opening in the main tab is D6's. | —
+B29 | the Diagnostics row and the supervisor banners (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B30 | the browser chrome (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the owner's bookmarks and extensions bar requirement is D6's (3.E). | —
+B31 | an error page (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B32 | the import consent sheet and report (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B33 | "You have the page · Hand back" (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1; the banner was not seen at F1. | —
+B34 | the comment-mode overlay (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B35 | the editor bar (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B36 | the merge view (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B37 | the SCM panel (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B38 | the discard sheet (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B39 | the push sheet (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
+B40 | the PR state row (light and dark; the reference surface it falls short of, if any) | owner: not run | As B1. | —
 
 == C. The native terminal hands (C9) ==
-C1 | Korean IME in a Terminal tab |  |  | 
-C2 | Korean IME in the composer |  |  | 
-C3 | Korean IME in an editor tab |  |  | 
-C4 | ⌘-click a terminal URL: where it opens |  |  | 
-C5 | pmset sleepnow, wake: terminal reattached, turn streaming or explained, supervisor connected |  |  | 
-C6 | any resume that stalled (write none if none did) |  |  | 
+C1 | Korean IME in a Terminal tab | note | Under `cat`: the owner typed Korean and reported Backspace removes some characters then stops; clicking again then Backspace leaves two spaces; entering ㄴ and Enter gives residual jamo and display anomalies; the last capture shows ^C and the zsh prompt (cat stopped by the owner). "Current evidence does not isolate MAWS IME handling from canonical PTY erase/echo and wide-character display" (normal cat echo duplication and immutable output after Enter are not bugs). Plain zsh (follow-up): 한 then Backspace without Enter, the owner: "하가 됨" (composing-jamo erase works). "Full terminal IME clause not blanket-passed from this single comparison." Route: tracker (boundary: the `cat` Korean Backspace residue, a canonical-echo observation, unclassified; owner P2). | docs/doperpowers/evidence/p1-e11/owner-notes/terminal-ime/terminal-ime-23.png to terminal-ime-30.png
+C2 | Korean IME in the composer | note | The owner's screenshot shows "한국어?" composed correctly in the composer; the GUI confirms the same draft; not sent. Backspace-jamo and Enter not separately reported. Route: none (evidence limit). | the owner's screenshot (no path in the record)
+C3 | Korean IME in an editor tab | pass (composition only) | The owner: "한글 조합 됨", "입력완료"; the GUI later showed "한글 안녕하세요" in sample.md. Backspace-jamo and Enter not separately reported. | —
+C4 | ⌘-click a terminal URL: where it opens | note | Opens externally, in Chrome: the owner, "cmd+click 시 외부 크롬브라우저에서 열림", on https://example.com printed in a MAWS Terminal. Recorded destination, not a failure. Route: none. | —
+C5 | pmset sleepnow, wake: terminal reattached, turn streaming or explained, supervisor connected | owner: not run | Deferred by the owner: "지금 실행중인 세션들이 있어 지금 잠자기는 곤란. 일단 다음것부터" (sessions were running). The prepared workloads (a Terminal `printf START; sleep 300; printf DONE`, an agent's 30-tick foreground Bash) ended naturally; "This is NOT sleep/wake evidence." | —
+C6 | any resume that stalled (write none if none did) | note | None recorded: the sitting's record names no stall; the one Resume used (A1.3, after an owner interruption) reached the working state and completed. No relaunch reattach was exercised (C5 and G not run). Route: M7.3 (the C3 stall row stays open with a note: step G not run; S6 and step C clean; Decision Log 46). | —
 
 == D. The Chrome profile import ==
-D1 | quit Chrome (or not): the hint |  |  | 
-D2 | the picker: every profile by its Chrome name, the last-used preselected |  |  | 
-D3 | the consent: pages, cookies, passwords off, the signed-in line, extensions, wallets chipped, Chrome-disabled unchecked |  |  | 
-D4 | the Keychain dialog for Chrome Safe Storage: Allow; it appeared once |  |  | 
-D5 | the report: cookies, history, the extensions split, wallet off, "New tabs browse as <name>" |  |  | 
-D6 | a Browser tab: the pill, signed in, history suggestions |  |  | 
-D7 | an agent turn: browser_tabs lists the tab, browser_navigate works |  |  | 
-D8 | Settings: an extension toggled off and on |  |  | 
-D9 | Remove imported profile with a tab open; relaunch: the partition folder gone; extensions at boot (Q11) |  |  | 
-D10 | no cookie value, URL path or password in Console.app |  |  | 
-D11 | the takeover: "You have the page", the agent resumes after 3 s idle or Hand back |  |  | 
+D1 | quit Chrome (or not): the hint | note | Not recorded: the owner ran the import alone while the agent stood off ("Let owner finish their in-progress import; do not interfere"). Route: none (evidence limit). | —
+D2 | the picker: every profile by its Chrome name, the last-used preselected | note | Not recorded (as D1); the profile chosen was Minhyeok. Route: none (evidence limit). | —
+D3 | the consent: pages, cookies, passwords off, the signed-in line, extensions, wallets chipped, Chrome-disabled unchecked | note | Not recorded (as D1): the consent sheet, the wallet chips (A13's seed list, Binance Wallet) and a Chrome-disabled extension arriving unchecked were not observed by the agent and not reported by the owner. Route: none (evidence limit). | —
+D4 | the Keychain dialog for Chrome Safe Storage: Allow; it appeared once | note | The owner: "일단 import랑 키체인 전부 했다. 근데 브라우저 내부에서 아직 제대로 로드되는지는 모르겠음" (import and Keychain both done; not yet sure it loads properly in the browser). "dialog count/Allow vs Always Allow not independently confirmed." Route: none (evidence limit; no deviation reported). | —
+D5 | the report: cookies, history, the extensions split, wallet off, "New tabs browse as <name>" | note | Settings (observed): active profile Minhyeok; 4,384 cookies, 17,555 history entries, 16 extensions; 1,023 skipped: 483 expired, 377 hidden pages, 163 pages MAWS cannot open; MetaMask Off (wallet); several extensions report background failures on unsupported chrome APIs, others running, stopped or no background ("import report data, not proof of full extension compatibility"). The "New tabs browse as <name>" line not recorded. Route: none (evidence limit; the background failures are D8's row). | —
+D6 | a Browser tab: the pill, signed in, history suggestions | pass (pill; GitHub signed in) · note | A new Browser tab shows the Minhyeok pill; https://github.com completed loading with the owner's Dashboard and user-navigation menu and avatar (no credential typed, no private repository opened); "confirms imported login worked for GitHub only, not all cookies/sites/extensions"; history suggestions on the imported profile not recorded. Owner taste, verbatim: "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive. either setting opens as a floating widget or a tab on sidebar" → route: P-n (the profile settings' placement: a floating widget or a sidebar tab; the owner has not chosen). Owner requirement, verbatim: "프로필 임포트는 됐지만, 뭔가 크롬의 사용자 경험과 다르다. 그 이유는 크롬처럼 위의 바가 없다. 북마크바, 익스텐션바 등등. 그걸 만들어야한다" (the import worked but it is not Chrome's experience: no bars on top, the bookmarks bar, the extensions bar; they must be built), and (the plan §4b) "are we importing bookmarks too? if not, we should" → route: 3.E (the cua_repl session's ticket: bookmarks import and bar, extensions bar, avatar, profile settings outside the main tab). | —
+D7 | an agent turn: browser_tabs lists the tab, browser_navigate works | pass (local test page) | With the imported profile active, the F chat's browser opened, snapshotted and filled the OOPIF test tab under the Minhyeok pill. browser_navigate on a signed-in site and D11's takeover are not inferred from it. | —
+D8 | Settings: an extension toggled off and on | pass (toggle only) · note | Google Translate Off then On; the owner: "완료함"; post-check On selected, status "Loaded / background failed: chrome.contextMenus.onClicked is not available in MAWS". "Toggle pass only, not functional extension pass." Route: tracker (boundary: E4b's Electron gap, the extension loads and does not work). | —
+D9 | Remove imported profile with a tab open; relaunch: the partition folder gone; extensions at boot (Q11) | owner: not run | Destructive (imported-profile removal and relaunch); left to the owner. Q11 open. | —
+D10 | no cookie value, URL path or password in Console.app | owner: not run | Console.app not checked. | —
+D11 | the takeover: "You have the page", the agent resumes after 3 s idle or Hand back | owner: not run | The signed-in-site takeover was not run ("Signed-in-site action takeover D11 is separate and not inferred"); F1 covers the OOPIF half. | —
 
 == E. Voice ==
-E1 | the Microphone dialog with MAWS's reason, then Speech Recognition |  |  | 
-E2 | "hello world" greyed, settling on the second click |  |  | 
-E3 | Settings › Voice: both permissions, the language (ko-KR) |  |  | 
-E4 | English (United States) dictation lands English |  |  | 
-E5 | denied in System Settings: the denial notice opens the right pane |  |  | 
+E1 | the Microphone dialog with MAWS's reason, then Speech Recognition | owner: unsigned build | Needs the development-signed build and the owner's microphone actions. | —
+E2 | "hello world" greyed, settling on the second click | owner: unsigned build | As E1. | —
+E3 | Settings › Voice: both permissions, the language (ko-KR) | owner: unsigned build | As E1 for the permissions; the language list showed System ko-KR (A8.3). | —
+E4 | English (United States) dictation lands English | owner: unsigned build | As E1. | —
+E5 | denied in System Settings: the denial notice opens the right pane | owner: unsigned build | As E1. | —
 
 == F. The OOPIF human key ==
-F1 | one key into the OOPIF field while the agent holds the tab: attributed (waiting) or not (ran through) |  |  | 
+F1 | one key into the OOPIF field while the agent holds the tab: attributed (waiting) or not (ran through) | note | Attributed (waiting): the test agent's report shows 10 sequential fills succeeding, agent-7 waitedFor human, waitedMs 3114; the MAWS action row reads "Filled textbox Note 3.1s · waited 3.1s for you". The "You have the page · Hand back" banner was not observed; the owner: "안떴었던듯" (I think it did not appear). The final textbox value read through accessibility is xagent-10, not agent-10; the timing of the owner's key against the last fill is unknown, so no overwrite fault is inferred; the capture showed a blank iframe interior. Server stopped after. Route: F2b (the takeover banner re-checked, fixed only if its trigger is wrong). | —
 
 == G. Keep-quit on the owner's profile ==
-G1 | ⌘Q mid-turn: the default button "Quit and keep sessions running" |  |  | 
-G2 | "MAWS" in Activity Monitor through the quit |  |  | 
-G3 | relaunch: the session listed live and still streaming |  |  | 
-G4 | any resume that stalled (write none if none did) |  |  | 
+G1 | ⌘Q mid-turn: the default button "Quit and keep sessions running" | owner: not run | Lifecycle steps deferred by the owner (sessions running); no quit or restart. | —
+G2 | "MAWS" in Activity Monitor through the quit | owner: not run | As G1 (the supervisor's MAWS name seen without a quit at A9.2). | —
+G3 | relaunch: the session listed live and still streaming | owner: not run | As G1. | —
+G4 | any resume that stalled (write none if none did) | owner: not run | As G1. | —
 
 == H. Push and PR ==
-H1 | a commit from the panel runs the repository's hooks |  |  | 
-H2 | Push to origin through the owner's helper; the Output shows progress |  |  | 
-H3 | Open PR: a draft PR (closed after) |  |  | 
-H4 | the push-state row shows the PR and its checks |  |  | 
-H5 | the throwaway branch deleted |  |  | 
+H1 | a commit from the panel runs the repository's hooks | owner: not run | Real Git hooks, push and draft PR in an agreed isolated branch are owner-only; not performed. | —
+H2 | Push to origin through the owner's helper; the Output shows progress | owner: not run | As H1. | —
+H3 | Open PR: a draft PR (closed after) | owner: not run | As H1. | —
+H4 | the push-state row shows the PR and its checks | owner: not run | As H1. | —
+H5 | the throwaway branch deleted | owner: not run | As H1. | —
 
 == J. Plugins, /btw, tasks and peers ==
-J1 | plugins: marketplace, install, disable, enable, Reload mods; /plugins reflects each |  |  | 
-J2 | /btw in a real session: the side pane answers, main untouched |  |  | 
-J3 | show_pane "tasks": the read-only checklist or No tasks |  |  | 
-J4 | a peer SendMessage answered from the row's Reply |  |  | 
+J1 | plugins: marketplace, install, disable, enable, Reload mods; /plugins reflects each | owner: not run | Installation, toggle and reload withheld because the owner's live plugin configuration is shared. | —
+J2 | /btw in a real session: the side pane answers, main untouched | pass | As A3.3: /btw in the first comment fork answered in the Side pane without adding a normal message to the transcript. | —
+J3 | show_pane "tasks": the read-only checklist or No tasks | pass | As A6.4: Tasks opens read-only with "The engine is not creating task lists in this session". | —
+J4 | a peer SendMessage answered from the row's Reply | pass | The fork's controller sent PEER_INBOUND_CHECK to a MAWS comment session; MAWS rendered the @maws-5d peer row with Reply; PEER_REPLY_CHECK entered in the row's Reply composer and sent ("Asked session to reply"); the reply arrived back in the controller; the peer row reads "replied with SendMessage" and the outgoing row "Sent". The second session was the controller, not pre.6's terminal. | —
 
 == I. After: the owner questions (E11 Decision Log; owner-script.txt step I) ==
 Q1 (C10·C3) The catalogue key's environment approximation: final (the row closes), or hunt a mismatch case?
-  answer:
+  answer: owner: not run
 Q2 (E7) Dates in scheduled rows: the app's display locale beside the engine's English, or English throughout?
-  answer:
+  answer: owner: not run (no scheduled rows were seen, A6.3)
 Q3 (C10, C4) Separate-git-dir checkouts and their linked worktrees out of scope for the worktree service?
-  answer:
+  answer: owner: not run
 Q4 (E3·E2) The comment composer's screenshot as a chip: keep, or a thumbnail in P2?
-  answer:
+  answer: a thumbnail. Owner-decided through AskUserQuestion, choosing "작은 이미지 미리보기" (a small image preview) over
+    the current Screenshot/dimensions text chip: the comment composer shows a small screenshot thumbnail so the selected
+    area can be checked before sending; the current chip is not accepted. Route: F2b (now, not P2; Decision Log 43).
 Q5 (E10) One idle time for both the row release and the supervisor's exit: keep?
-  answer:
+  answer: owner: not run
 Q6 Which taste notes are fixed now and which go to P2 (each note's step id with now or P2)?
-  answer:
+  answer: owner: not run as asked. The sitting's taste notes are routed by Decision Log 43 and 45: A2.1 (viewer
+    sizing) tracker, taste; A1.2 (the mod report view) tracker, taste, P2 (plan §3.C); D6 (profile settings placement)
+    P-n; D6 (browser bars) 3.E; A7.2 (plugins library) F2a 2.2 now and P2 3.B; A3.1 (thumbnail) F2b now.
 Q7 (E4d, A-45) Typed form values never enter an anchor's name: keep privacy over label richness?
-  answer:
+  answer: owner: not run
 Q8 (E4d, A-49) "Clicked #increment": should the result carry the matched element's role and name?
-  answer:
+  answer: owner: not run
 Q9 (E4c, A-48) A browser-only turn has no divider and its rows stay in view when the turn folds: keep?
-  answer:
+  answer: owner: not run
 Q10 (E4c, A-48) Queued time counts against the 30 s deadline; a thread's driver retires when its parent exits: acceptable?
-  answer:
+  answer: owner: not run
 Q11 (E4b, A-46) The active imported profile's extensions load eagerly at every boot: keep, or lazy?
-  answer:
+  answer: owner: not run
 Q12 (E3·E4d) Side threads carry no --max-budget-usd: give threads a cap?
-  answer:
+  answer: owner: not run
 
 E4's open owner items, keep or overturn each (A-35, P-23, A-36, A-37):
-  the clipboard carve-out (A-35):
-  Google as the default search (A-35):
-  the 12-tab and 2 GiB caps (A-35):
-  beforeunload never blocking (A-35):
-  automatic activation after import (P-23):
-  the wallet seed list (A-36):
-  reads proceed while the human holds the page (A-37):
-  the Browser tool's open-once rule (A-37, A-48):
-  the 10 s agent → idle decay (A-37):
-  the fixed cursor colours (A-37):
+  the clipboard carve-out (A-35): owner: not run (works as built, A10.3)
+  Google as the default search (A-35): owner: not run (as built, A10.4)
+  the 12-tab and 2 GiB caps (A-35): owner: not run
+  beforeunload never blocking (A-35): owner: not run (as built, A10.6)
+  automatic activation after import (P-23): owner: not run (a new tab took the Minhyeok pill, D6)
+  the wallet seed list (A-36): owner: not run (MetaMask Off, D5)
+  reads proceed while the human holds the page (A-37): owner: not run
+  the Browser tool's open-once rule (A-37, A-48): owner: not run
+  the 10 s agent → idle decay (A-37): owner: not run
+  the fixed cursor colours (A-37): owner: not run
+
+The owner's decisions of the plan §4 (answered 2026-10-08 02:55 PDT; binding for wave F2b and the P2 cut), recorded
+  against the irritations below they answer:
+  1. Error cards clear when the notice is viewed in the opened session, plus an explicit Dismiss; the session row keeps
+     an "ended with an error" badge with the time (owner: yes). Answers N2.4.
+  2. Opening a session replaces the current main tab, whatever it shows; the right-click "Open in new tab" is the
+     explicit new-tab gesture (⌘-click and middle-click as shortcuts); pins and unsaved work stay visibly. Owner: "when
+     opening a session, it currently opens in a new tab; instead replace the current tab; the user can right-click to
+     open a certain session in a new tab". Answers N1.F1 and N2.5.
+  3. To-human: a choice click sends at once as the next prompt through the queue; free text in a Reply field on the
+     question card, never the composer. Answers N3.C (P2).
+  4. Sessions: an engine starts on the owner's first action that needs it; saved facts show at once; a terminal-held
+     session stays read-only with an explicit Take over. Answers N3.A (P2).
+  (5. Extensions Browse from the engine's configured sources only; sandbox toggles deferred; resume scope the current
+     project with All projects one click away: the architect's picks, stated to the owner, reversible. N3.B, N3.D.)
 
 Irritations across the new surfaces (each becomes a tracker row or a P2 line):
+step | observation | pass/fail/note | what was seen, the owner's words where given | route
+N1.A | archive dialog "no such column: removed_at" | note | Fixed on master at ff2b3a7d (merged 8e6f5cbc; the repair adds the column on open for user_version 3, 4 and 5) per report A; not re-run on the current build at the sitting (the screenshot was the old process). | F2a (table-driven archive regressions for v3, v4 and v5 histories, report A's recommendation 2; Decision Log 42)
+N1.B | "Response retracted · transcript_branch" after every tool call; six empty retractions after an interrupt | note | Fixed on master at 14fc1bff, ed1f3230, 3b2985e4 and 26a7d6d3 (FX5, FX6, FX8, 2026-10-04) per report B; not re-run on the current build at the sitting (the screenshots were the old process). | none (fixed); the verification report B proposes is not part of the script
+N1.E | plugin and marketplace management | note | Fixed on master at 0eb56c11 (E8's merge: install, per-scope enable, update, uninstall, marketplaces, Available, reload after a mutation) per report E; not re-run on the current build at the sitting beyond A7.2's read-only row. The owner (vault note): "Over a much poorer UI design and we need a more organized richer UI"; "just simply need better UI design"; "should also show marketplaces". | F2a (2.2) and P2 3.B
+N1.F1 | a sidebar session click opens a new tab | note | The plain-click replacement is fixed on master at 0a972995 (W12, I2) per report F; not re-run on the current build at the sitting. What remains is the exception list (every clean non-session tab forces a new tab). | F2b (2.5; owner decision 2)
+N2.1 | typing "/" moves the whole page | note | The owner (vault note): "some wierd UI bug when typed '/' -- the whole page goes down" (report D: document scrolling under the palette). | F2b (2.1, the slash palette and @ popup with a geometry e2e)
+N2.2 | provenance footers and jargon; no /reload-plugins | note | The owner (vault note): "drop all the "read with get_sandbox_... whatever" Because users don't want to know how the application read it ... Same for "Read with system/init .." for /plugins"; "also why do we not have /reload-plugin? is it automatic for us?" | F2a (2.2: footers removed, "Sandbox on/off" copy, a Reload plugins action)
+N2.3 | setting-change echoes in the transcript | note | /model's local-command echo ("Set model to `fable (…)`") renders as a "Command output" card while the model chip already shows the change (the plan's image 15). | F2a (2.3)
+N2.4 | Needs you error cards never age out | note | "Needs you: error", "Turn failed: error_during_execution", "waiting 2w" on stale cards (report H). | F2b (2.4; owner decision 1)
+N2.5 | session click opens a new tab | note | As N1.F1. | F2b (2.5; owner decision 2)
+N2.6 | raw tags in previews | note | A Needs you card's answer preview is only "<to-human>"; another begins "<to-human><essential>Decisive: …" (report H). | F2b (2.6, the owner-aware preview helper; closes the 2026-10-01 raw-tag tracker row)
+N2.7 | the launch trap | note | The 02:05 rebuild did not reach the screen until the 02:24:19 relaunch: a second launch exits silently under the profile lock while the old process lives (the plan's provenance paragraph). | F2a (2.7, the second instance focuses the running one and names an older build; the build identity in Diagnostics)
+N2.8 | the engine banner against 2.1.283 | note | As pre.7. | F2a (2.8)
+N4b.1 | ANSI in a side-thread completion summary | note | As A3.2. | F2a
+N4b.2 | Files pane "unknown app session" in an unstarted chat | note | As A4.1. | F2a
+N4b.3 | A4.2's wording | note | As A4.2. | F2a (script and row; product unchanged)
+N4b.4 | a comment fork cannot update the original artifact | note | The comment fork edited a temporary page.html, failed artifact_update demo with "no artifact "demo" in this session", then created a fresh rounded-field artifact v1; the original artifact's history was not extended by the fork (A2.2/A3 comment flow). | tracker (boundary: per-session artifact registries; owner P2)
+N4b.5 | Google Translate's background fails on chrome.contextMenus | note | As D8. | tracker (boundary, E4b's Electron gap)
+N4b.6 | `cat` Korean Backspace residue | note | As C1. | tracker (boundary, unclassified; owner P2)
+N4b.7 | the takeover banner at F1 | note | As F1. | F2b (re-check the trigger)
+N4b.8 | the mod report view hides a plain result after an answered question | note | As A1.2. | tracker (taste; plan §3.C, P2)
+N4b.9 | deliverables viewer sizing | note | As A2.1. | tracker (taste)
+N4b.10 | profile settings open in the main tab | note | As D6. | P-n (floating widget or sidebar tab)
+N4b.11 | Chrome's top bars, bookmarks import, the agent browser route | note | As D6; and the owner's planning directive (not a build authorization): "다음 웨이브에서는 plugin cua_repl로 조작 가능한 in app browser 형탤를 쓰는것이 목적이라고 해두도록 (아직 빌드수준은 아님, 계획)", then "대체하는게 결정이다. cua_repl이 인앱 브라우저를 바로 사용하는것" (replacement decided: cua_repl drives the in-app browser directly, replacing the MAWS browser_* tool route). | 3.E (the cua_repl session's ticket)
+N4b.12 | model choice copy under auto mode | note | Choosing Haiku read "Cannot hold auto mode · runs in Manual", then "This session will use Accept edits instead", while the composer kept showing Auto. "Needs separate diagnosis, not a confirmed enforcement failure." | P-n (not routed by Decision Log 43 to 45; for the architect)
+N4b.13 | Files opens PDF and MP4 outside MAWS | note | Opening sample.pdf or sample.mp4 through the Files editor route shows "files open outside MAWS" and Open externally, whereas Deliverables renders them internally. "Record as observable difference, not classified defect." | P-n (not routed by Decision Log 43 to 45; for the architect)
+N3.A | "That session is not running" | note | The owner (vault note): "Some sessions keep reporting That session is not running.But in Claude code CLI, even if you just started the session, you should be able to see /plugins, /sandbox, and more. This is definitely the deficiency in our side." | P2 3.A (owner decision 4)
+N3.B | plugins, skills and sandbox library | note | As N1.E and A7.2 (report E). | P2 3.B (owner decision 5)
+N3.C | to-human as default application behaviour | note | The owner (report G): "integrate to-human mods into our app. let it be default plugins. agent 'sends' message to human (via to-human tag, signal important parts via essential and insights tag, ask async question via need-input) these are default application behavior from now". | P2 3.C (owner decision 3)
+N3.D | /resume | note | The owner (vault note): "This work and this is like Claude CLI, but we can definitely do as great as claude code desktops' implementation". | P2 3.D (owner decision 5's resume scope)
 
-The P-3 measure: what, if anything, still sends the owner to a terminal:
-
+The P-3 measure: what, if anything, still sends the owner to a terminal: owner: not run (the joint notes: "the P-3
+  terminal-dependence judgment remain owner decisions"; N3.A is the nearest owner statement).
