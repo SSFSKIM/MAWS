@@ -22,7 +22,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { buildEnvironment, RELAY_URL } from '../../src/engine-host/launch';
 import { liveSpec, redactJournal } from './support/live';
 import { LiveHost } from './support/live-host';
-import { a15, answerWhileRunning, closeSession, exportTranscript, liveCase, openGate, readJournal, scratchRepo, type GateResult, type LiveGate } from './support/harness';
+import { a15, answerWhileRunning, checkA15, closeSession, exportTranscript, liveCase, openGate, readJournal, scratchRepo, type GateResult, type LiveGate } from './support/harness';
 import { withoutClaudeVariables } from '../support/claude-env';
 
 const TURN_MS = 300_000; // the machine is heavily loaded: generous waits, and a case that only timed out is re-run
@@ -230,7 +230,7 @@ describe('the maws tool server, live (E1 M2)', () => {
     const line = `G1 terminal half: ${g.bin} ${args.slice(0, -1).join(' ')} <prompt>: exit ${code}; system/init.tools ${init?.tools.length ?? 'absent'} tools, mcp__maws__* ${JSON.stringify(maws)}; mcp_servers ${JSON.stringify((init?.mcp_servers ?? []).map((m) => m.name))}; result ${result?.subtype} ${JSON.stringify(result?.result)}`;
     writeFileSync(join(g.userData, 'exports', 'terminal-resume.txt'), `${line}\n`);
     console.log(`   ${line}`);
-    expect(a15(), 'the A-15 delta after the terminal resume').toEqual(g.a15Before);
+    checkA15(g, a15(), (line) => console.log(`   ${line}`));
     expect(code).toBe(0);
     expect(init).toBeDefined();
     expect(maws).toEqual([]);
