@@ -93,6 +93,7 @@ describe('the agent\'s activity, told to the windows', () => {
     // the press's node is asked before the press reaches the page
     const methods = t.cdp.methods();
     expect(methods.indexOf('DOM.getNodeForLocation')).toBeLessThan(methods.indexOf('Input.dispatchMouseEvent'));
+    expect(t.cdp.sent.find((c) => c.method === 'DOM.getNodeForLocation')!.params).toMatchObject({ x: 100, y: 80, ignorePointerEventsNone: false }); // the cursor's overlay is never the node
     expect(h.activities().map((a) => a.activity)).toEqual([
       { kind: 'tabOpened', url: 'about:blank' },
       { kind: 'navigated', url: 'https://shop.test/cart', title: '' },

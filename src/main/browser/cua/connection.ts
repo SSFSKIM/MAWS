@@ -366,7 +366,9 @@ export class CuaConnection {
   }
 
   // What a command the agent sends on the page's own session did, for the windows: a press is told once its node is
-  // named (looked up through this lease, before the press reaches the page), typed characters as a count.
+  // named (looked up through this lease, before the press reaches the page, hit-testing as the press does: an element
+  // with pointer-events none, the agent cursor's own overlay among them, is not what it clicked), typed characters as a
+  // count.
   private observe(leased: Leased, method: string, params: Record<string, unknown>, session: string): void {
     if (session !== '' || !this.ctx.feed) return;
     const activity = commandActivity(method, params);
@@ -377,7 +379,7 @@ export class CuaConnection {
         return this.ctx.feed.typed(this.appSessionId, entry.tab.tabId, activity.chars);
       case 'press': {
         const { x, y } = activity;
-        const node = dbg.send('DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y), includeUserAgentShadowDOM: false, ignorePointerEventsNone: true });
+        const node = dbg.send('DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y), includeUserAgentShadowDOM: false, ignorePointerEventsNone: false });
         node.catch(() => {});
         const label = within(clickLabel((m, p) => dbg.send(m, p), node), LABEL_LOOKUP_MS);
         return this.tell(entry, label.then((named) => ({ kind: 'clicked' as const, x, y, label: named })));

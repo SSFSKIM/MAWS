@@ -8,7 +8,9 @@
 // M3's case: takeover and the cursor through a lease (acceptance 8 and 9 through the seam's `sendInput`, `control` and
 // `cursorMessages`): the agent's cursor drawn for `cursor.move` and hidden when the lease goes; the person's click takes
 // the page, an acting command in the same second is refused within 2 s while a reading one passes, and 3 s after the
-// person's last input the same command goes through.
+// person's last input the same command goes through. Along the way the window hears what the agent did
+// (`browser.agent.activity`, acceptance 10's main half): the tab opened, the navigation, a click labelled from the real
+// page's node, typing as a count only.
 // Runs under `pnpm e2e:browser-cua` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); the launch passes
 // MAWS_HARNESS=0 (the product app) and MAWS_E2E_QUIET=1, over a profile under /tmp (a Unix socket path is short).
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -182,6 +184,13 @@ test('takeover and the cursor through a lease: cursor.move draws, the person\'s 
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
+    // what the window hears of the agent's activity, as the transcript's store does
+    await maws.page.evaluate(() => {
+      const w = window as unknown as { __acts: unknown[]; maws: { on(name: string, listener: (payload: unknown) => void): () => void } };
+      w.__acts = [];
+      w.maws.on('browser.agent.activity', (payload) => void w.__acts.push(payload));
+    });
+    const heard = () => maws.page.evaluate(() => (window as unknown as { __acts: { appSessionId: string; activity: Record<string, unknown> }[] }).__acts);
     host = await connectFakeHost((await app.socketPathFor(A))!);
     const created = await host.request<{ id: number }>('tabs.create', { url: 'about:blank', group: { key: 's', title: 'cua' } });
     await host.request('debugger.attach', { tabId: created.id });
@@ -221,6 +230,18 @@ test('takeover and the cursor through a lease: cursor.move draws, the person\'s 
     expect(await send('Runtime.evaluate', click, { timeoutMs: 3_000 })).toMatchObject({ result: { value: 1 } });
     expect(await evaluate(send, `document.querySelector('#state').textContent`)).toBe('agent');
     expect(await app.control(tab)).toBe('agent');
+
+    // the window heard it all, in order, typed text as a count only
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 100, y: 80, button: 'left', clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 100, y: 80, button: 'left', clickCount: 1 });
+    await send('Input.insertText', { text: 'secret-e2e-typed' });
+    await expect.poll(async () => (await heard()).map((a) => a.activity.kind), { timeout: 5_000 }).toEqual(['tabOpened', 'navigated', 'screenshot', 'clicked', 'typed']);
+    const acts = await heard();
+    expect(acts.every((a) => a.appSessionId === A)).toBe(true);
+    expect(acts[1]!.activity).toMatchObject({ kind: 'navigated', url: pages.url('/') });
+    expect(acts[3]!.activity).toEqual({ kind: 'clicked', x: 100, y: 80, label: 'button Go' });
+    expect(acts[4]!.activity).toEqual({ kind: 'typed', chars: 16 });
+    expect(JSON.stringify(acts)).not.toContain('secret-e2e-typed');
 
     // letting go: the tab idle and the cursor hidden
     const before = await app.cursorMessages(tab);
