@@ -84,24 +84,53 @@ test('pass2 routing: user settings env routes an unrouted process; empty flag-se
 // C8c start: pass-3 fixtures (C2's R4 workspace-diff and worktree captures, C3's live captures). Integrity for every
 // file, as pass 2 checks it; the typed get_workspace_diff shapes are C3's (src/engine-host/conformance/fixtures.test.ts).
 const dir3=new URL('./fixtures/pass3/',import.meta.url);
-for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/'+file+' is ordered NDJSON with correlated replies, provenance and no secrets',()=>{
- const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+// A pass-3 journal's rows checked in order (seqs from either base with no gap, known directions, every response closing
+// a pending request or echoing one byte for byte, no parse or scenario error); answers the requests left open.
+function pass3Open(rows){
  // the probe numbers rows from 1, C3's live relay captures from 0 (their provenance row); either base, then no gap
  // and the engine echoes a host's can_use_tool answer back on its stdout (C3's plan-outcomes): an `in` response that
  // repeats, byte for byte, the `out` response which already closed its request is an echo, not an orphan
- const rows=text.trim().split('\n').map(JSON.parse);assert.ok([0,1].includes(rows[0].seq));let seq=rows[0].seq-1;const pending=new Set();const answered=new Map();
+ // and (E11, Decision Log 5, below) a `tools/call` is closed by its MCP client's `notifications/cancelled`
+ assert.ok([0,1].includes(rows[0].seq));let seq=rows[0].seq-1;const pending=new Set();const answered=new Map();const calls=new Map();
  for(const row of rows){assert.equal(row.seq,++seq);assert.ok(['in','out','meta','stderr'].includes(row.direction));const f=row.frame;
   if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
+  const mcp=f.type==='control_request'&&row.direction==='in'&&f.request?.subtype==='mcp_message'?f.request:null;
+  if(mcp?.message?.method==='tools/call')calls.set(mcp.server_name+':'+JSON.stringify(mcp.message.id),'in:'+f.request_id);
+  if(mcp?.message?.method==='notifications/cancelled')pending.delete(calls.get(mcp.server_name+':'+JSON.stringify(mcp.message.params?.requestId)));
   if(f.type==='control_response'){const key=(row.direction==='in'?'out':'in')+':'+f.response.request_id;
    if(pending.delete(key))answered.set(row.direction+':'+f.response.request_id,JSON.stringify(f));
    else assert.equal(answered.get((row.direction==='in'?'out':'in')+':'+f.response.request_id),JSON.stringify(f),'response has pending request '+key);}
   assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
+ return pending;
+}
+for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/'+file+' is ordered NDJSON with correlated replies, provenance and no secrets',()=>{
+ const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);const pending=pass3Open(rows);
  // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …); a P1 child (E0a, E8, …) names the P1
  // composite spec too, as `spec` or as `document` (docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin)
  const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^(C\d+[a-z]?|E\d+[a-z]?)$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);if(/^E/.test(prov.child))assert.match(prov.spec??prov.document,/^docs\/doperpowers\/plans\/.*\.md$/);
  assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
 });
 // C8c end
+// E11 (2026-10-07; docs/doperpowers/plans/2026-10-06-e11-finish.md, Decision Log 5): a `tools/call` the engine's MCP
+// client abandons is never answered (src/engine-host/tool-server/server.ts: the host writes nothing for a withdrawn
+// call), so the client's own `notifications/cancelled` naming its JSON-RPC id (matched as sent: 5 and "5" differ) closes
+// that request, on the same server. Without it a recording of an interrupted blocking ask could not be admitted. A small
+// synthetic journal: the cancelled call closes; a notification naming another id, the id as a string, or another
+// server's call leaves the call open.
+const mcpIn=(seq,requestId,server,message)=>({seq,direction:'in',at:'',frame:{type:'control_request',request_id:requestId,request:{subtype:'mcp_message',server_name:server,message}}});
+const mcpOut=(seq,requestId,response)=>({seq,direction:'out',at:'',frame:{type:'control_response',response:{subtype:'success',request_id:requestId,response:{mcp_response:response}}}});
+const cancelledAsk=cancelId=>[
+ mcpIn(1,'r1','maws',{jsonrpc:'2.0',id:5,method:'tools/call',params:{name:'ask',arguments:{}}}),
+ mcpIn(2,'r2','maws',{jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId:cancelId,reason:'interrupted'}}),
+ mcpOut(3,'r2',{jsonrpc:'2.0',result:{},id:0}),
+];
+test('pass3 integrity: a tools/call closed by the client-sent notifications/cancelled naming its id counts as closed',()=>{
+ assert.deepEqual([...pass3Open(cancelledAsk(5))],[]);
+ assert.deepEqual([...pass3Open(cancelledAsk('5'))],['in:r1']);
+ assert.deepEqual([...pass3Open(cancelledAsk(6))],['in:r1']);
+ const otherServer=cancelledAsk(5);otherServer[1].frame.request.server_name='other';assert.deepEqual([...pass3Open(otherServer)],['in:r1']);
+});
 // C8b start: the three pass-3 agent-work probes (docs/doperpowers/plans/2026-09-28-c8b-agent-work-tools.md, R1, R5, R6).
 const load3=n=>readFileSync(new URL(n+'.jsonl',dir3),'utf8').trim().split('\n').map(JSON.parse);
 const notes=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
