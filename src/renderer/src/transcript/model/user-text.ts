@@ -153,7 +153,7 @@ const SETTING_CONFIRMATIONS: readonly RegExp[] = [
   new RegExp(String.raw`^(?:Set model to|Kept model as) \`[^\`]+\`${SCOPE}(?: with \S+ effort)?${FAST}$`),
   /^Fast mode (?:ON|OFF)(?: · Draws from usage credits)?$/,
   /^(?:\S+ )?Kept Fast mode (?:ON|OFF)$/u, // led by the fast-mode glyph
-  /^Set effort level to \S+(?: \((?:this session only|saved as your default for new sessions)\))?: [^·(]+(?: · Ultracode off)?$/,
+  /^Set effort level to \S+(?: \((?:this session only|saved as your default for new sessions)\))?: [^·(]+(?: \(on supported models\))?(?: · Ultracode off)?$/, // the level's description: xhigh's ends "(on supported models)"
   /^Effort level set to auto(?: \((?:this session only|saved as your default for new sessions)\))?(?: · Ultracode off)?$/,
   /^Output style set to [^\n]+$/,
   /^Enabled plan mode$/,

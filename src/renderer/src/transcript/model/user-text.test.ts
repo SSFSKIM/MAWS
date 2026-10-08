@@ -148,6 +148,13 @@ describe('setting-change confirmations', () => {
     max: 'Maximum capability with deepest reasoning. May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.',
   };
 
+  it("accepts every effort level's confirmation in 2.1.293's words, with or without Ultracode off", () => {
+    for (const [level, description] of Object.entries(effort)) {
+      expect(confirmsSettingChange(`Set effort level to ${level} (this session only): ${description}`), level).toBe(true);
+      expect(confirmsSettingChange(`Set effort level to ${level} (saved as your default for new sessions): ${description} · Ultracode off`), level).toBe(true);
+    }
+  });
+
   it('rejects an effort confirmation carrying anything more', () => {
     expect(confirmsSettingChange(`Set effort level to high (this session only): ${effort.high} · burns fastest — medium handles most tasks`)).toBe(false);
     expect(confirmsSettingChange(`Set effort level to xhigh (this session only): ${effort.xhigh} (applied locally — this remote transport can’t change the remote session’s settings)`)).toBe(false);

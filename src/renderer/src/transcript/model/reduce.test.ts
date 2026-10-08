@@ -544,6 +544,7 @@ describe('turn boundaries', () => {
       'Fast mode OFF',
       '\u001b[33m↯\u001b[0m Kept Fast mode ON',
       'Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation',
+      'Set effort level to xhigh (this session only): Deeper reasoning than high, just below maximum (on supported models)',
       'Effort level set to auto',
       'Output style set to Explanatory',
       'Enabled plan mode',
