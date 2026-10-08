@@ -191,3 +191,18 @@ S2 probe output (final run):
 ==== Verdicts ====
 S1: PROMOTE — with the wrap only holding Electron's callback, CDP's own Page.javascriptDialogOpening / handleJavaScriptDialog / javascriptDialogClosed work for alert and confirm on placed and never-placed views with no native box and no main freeze; first answer wins, a later single callback call is an inert no-op (even with a newer dialog open), a second call of the same callback throws a catchable "One-time callback was called more than once", and dropping/GC'ing it (before or after CDP answers) is harmless.
 S2: PROMOTE — Page.setInterceptFileChooserDialog, Page.fileChooserOpened and DOM.setFileInputFiles pass through webContents.debugger unchanged (placed and never-placed views); the only caveats are input delivery (focus emulation needed on hidden pages; send mouseMoved before press on never-placed views), not interception.
+
+==== M2 live proof (2026-10-08) ====
+MAWS built from this branch (pnpm e2e:browser-cua's harness build, out/main/index.js) run by
+`node spikes/cua-backend/serve-dev.mjs /tmp/mh13-live2 live-A live-B` (own userData, MAWS_E2E=1, MAWS_E2E_QUIET=1), cua
+from the cua worktree at 602391b (M1 plus the harness's viewport fix):
+  CUA_BROWSER_BACKENDS=/tmp/mh13-live2/browser/cua/live-A.sock CUA_HOME=/tmp/cua-h13 \
+    node scripts/accept/maws-features.mjs --report … --other /tmp/mh13-live2/browser/cua/live-B.sock
+  {"profiles":"PASS","createTab":"PASS","locator":"PASS","viewport":"PASS","popup":"PASS","download":"SKIP","alert":"SKIP",
+   "confirm":"SKIP","chooser":"SKIP","cleanup":"PASS","isolation":"PASS"}
+The full report is m2-live-maws-features.json beside this file. After the run MAWS's seam read
+{"live-A":{"connections":0,"held":0,"leased":[]},"live-B":{"connections":0,"held":0,"leased":[]}}.
+Relaunch (acceptance 13's MAWS half, no engine): a `cua serve` polling profiles_list every 0.5 s read maws ready, then
+not ready 12 s after MAWS was stopped (socket files unlinked), then ready again 2.6 s after MAWS was relaunched over the
+same userData (the same path, live-A.sock).
+The vendor's tab.screenshot() answers JPEG on this route (FF D8 FF E0), so the harness's viewport step now reads JPEG too.
