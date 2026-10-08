@@ -206,3 +206,26 @@ Relaunch (acceptance 13's MAWS half, no engine): a `cua serve` polling profiles_
 not ready 12 s after MAWS was stopped (socket files unlinked), then ready again 2.6 s after MAWS was relaunched over the
 same userData (the same path, live-A.sock).
 The vendor's tab.screenshot() answers JPEG on this route (FF D8 FF E0), so the harness's viewport step now reads JPEG too.
+
+==== M3 live proof (2026-10-08) ====
+MAWS built from this branch (`pnpm build`, out/main/index.js) run by the Electron binary itself, no Playwright driver:
+  node_modules/.bin/electron spikes/cua-backend/serve-plain.cjs /tmp/mh13-m3 live-A live-B
+cua from the cua worktree (M1 plus M3's harness steps):
+  CUA_BROWSER_BACKENDS=/tmp/mh13-m3/browser/cua/live-A.sock CUA_HOME=/tmp/cua-h13 \
+    node scripts/accept/maws-features.mjs --report … --other /tmp/mh13-m3/browser/cua/live-B.sock
+  {"profiles":"PASS","createTab":"PASS","locator":"PASS","viewport":"PASS","popup":"PASS","download":"PASS","alert":"PASS",
+   "confirm":"PASS","chooser":"PASS","cleanup":"PASS","isolation":"PASS"}
+The full report is m3-live-maws-features.json beside this file. download: download.path() under ~/Downloads, sha256
+a3030829…6ec5 (the fixture's), 7729 bytes, no save dialog, the file removed by the harness afterwards (its birth time
+and bytes proved it was the run's); alert: getJsDialog() type alert, dismiss() → #state after-alert; confirm: dismiss()
+→ confirm:false; chooser: setFiles([a 1234-byte file]) → #picked cua-upload.txt:1234. MAWS logged that the download was
+not recorded as a deliverable: no engine host holds the synthetic session live-A (the recording needs a real session).
+The 30 s default, live on the same build over the socket (no vendor): a confirm left unanswered opened at 1.6 s and
+closed at 31.6 s with result false (Page.javascriptDialogClosed from Chromium), the page reading confirm:false.
+
+Surprise: the first M3 run used serve-dev.mjs (Playwright's Electron driver) and failed alert and confirm with "no
+JavaScript dialog within 5 s": Playwright's own CDP client attaches to every page of the app it launches and dismisses
+a dialog that has no listener of its own, so the dialog closed 1 ms after it opened with nothing in MAWS answering it
+(the held callback was never called; the wrap, its route and the lease were all in place). S1 ran on the bare Electron
+binary and never saw it. The e2e harness (Playwright) cannot observe the held route for the same reason; the dialog
+pins are unit tests (src/main/browser/cua/dialogs.test.ts, agent/dialogs.test.ts) plus this live run.

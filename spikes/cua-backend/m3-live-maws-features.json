@@ -1,0 +1,152 @@
+{
+ "summary": {
+  "profiles": "PASS",
+  "createTab": "PASS",
+  "locator": "PASS",
+  "viewport": "PASS",
+  "popup": "PASS",
+  "download": "PASS",
+  "alert": "PASS",
+  "confirm": "PASS",
+  "chooser": "PASS",
+  "cleanup": "PASS",
+  "isolation": "PASS"
+ },
+ "status": "PASS",
+ "backends": [
+  "/tmp/mh13-m3/browser/cua/live-A.sock"
+ ],
+ "other": "/tmp/mh13-m3/browser/cua/live-B.sock",
+ "details": {
+  "profiles": {
+   "status": "ok",
+   "profiles": [
+    {
+     "key": "maws",
+     "ready": true,
+     "extensionInstanceId": "maws:live-A"
+    }
+   ]
+  },
+  "createTab": {
+   "instance": "maws:live-A",
+   "profileName": "MAWS",
+   "tabId": "1",
+   "markerMatches": true
+  },
+  "locator": {
+   "state": "submitted:x"
+  },
+  "viewport": {
+   "during": {
+    "format": "jpeg",
+    "width": 800,
+    "height": 600
+   },
+   "after": {
+    "format": "jpeg",
+    "width": 1280,
+    "height": 800
+   }
+  },
+  "popup": {
+   "added": [
+    {
+     "id": "2",
+     "url": "http://127.0.0.1:57852/popup"
+    }
+   ]
+  },
+  "download": {
+   "basename": "cua-report.pdf",
+   "directory": "Downloads",
+   "size": 7729,
+   "sha256": "a3030829e7251330d53ac0d0a803039b8f82f6fa53d294b66e76d8fe3d8c6ec5",
+   "sha256Match": true,
+   "createdByFixture": true,
+   "inDownloads": true,
+   "elapsedMs": 274,
+   "removed": {
+    "deleted": true
+   }
+  },
+  "alert": {
+   "type": "alert",
+   "closed": true,
+   "state": "after-alert",
+   "clearedPreviousType": null
+  },
+  "confirm": {
+   "type": "confirm",
+   "closed": true,
+   "state": "confirm:false",
+   "clearedPreviousType": null
+  },
+  "chooser": {
+   "picked": "cua-upload.txt:1234",
+   "expected": "cua-upload.txt:1234"
+  },
+  "cleanup": {
+   "createdListed": false,
+   "popupListed": false
+  },
+  "isolation": {
+   "ours": {
+    "mawsInstances": [
+     "maws:live-A"
+    ],
+    "otherSelected": false,
+    "otherError": "The Chrome instance is unavailable."
+   },
+   "theirs": {
+    "mawsInstances": [
+     "maws:live-B"
+    ],
+    "otherSelected": false,
+    "otherError": "The Chrome instance is unavailable."
+   }
+  },
+  "serve": {
+   "code": 0,
+   "signal": null
+  },
+  "serveOther": {
+   "code": 0,
+   "signal": null
+  }
+ },
+ "elicitations": [
+  {
+   "method": "elicitation/create",
+   "kind": "origin-access",
+   "mode": "form",
+   "ownOrigin": true,
+   "answered": "accept (session)",
+   "reason": "the probe origin",
+   "text": "Allow Browser use to access <url>"
+  },
+  {
+   "method": "elicitation/create",
+   "kind": "file-transfer",
+   "mode": "form",
+   "ownOrigin": true,
+   "answered": "accept (session)",
+   "reason": "file transfer with the served page",
+   "text": "Allow download from <url>"
+  },
+  {
+   "method": "elicitation/create",
+   "kind": "file-transfer",
+   "mode": "form",
+   "ownOrigin": true,
+   "answered": "accept (session)",
+   "reason": "file transfer with the served page",
+   "text": "Allow upload to <url>"
+  }
+ ],
+ "pageRequests": {
+  "total": 3,
+  "served": 3,
+  "refused": 0
+ }
+}
