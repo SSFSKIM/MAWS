@@ -196,6 +196,12 @@ Owner requirements and taste, verbatim where given:
   `synced`, nested folders; plain JSON, no key), with its own consent row and re-sync, rendered as the bookmarks
   bar; the extensions bar shows each loaded extension's action with its popup and options page (E4b deferred
   "per-extension site access, popups and options pages"); the profile avatar from `Local State` on the tab pill.
+  Planning directive (owner, during step F, not a build authorization): "다음 웨이브에서는 plugin cua_repl로 조작
+  가능한 in app browser 형태를 쓰는것이 목적이라고 해두도록 (아직 빌드수준은 아님, 계획)": the next wave's goal is an
+  in-app browser that the cua plugin's cua_repl can drive. Today the sitting agent drives MAWS's browser through the
+  MAWS MCP tools (browser_tabs, browser_snapshot, browser_act) while the outer GUI assistant uses cua_repl
+  separately. Replacement versus integration of the two routes is undecided and is a grill question for the P2
+  cut, not a choice to make here.
 - Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
   either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
   tab; floating widget or sidebar tab, the owner has not chosen.
@@ -211,6 +217,10 @@ Functional findings for M7.2:
   created in the fork): recorded as the artifact registry's per-session boundary, to be classified (design
   boundary with copy, or a tracker row).
 - The engine banner compares against 2.1.283 (2.8 above); the sitting's engine is 2.1.294.
+- Step F: the human-wait path works (the action row shows "waited 3.1 s for you"), but the takeover banner
+  apparently did not appear ("안떴었던듯"); uncertain, not a pass; the executor re-checks the banner's trigger.
+- Terminal C1 under `cat`: residual jamo and spacing artifacts after Backspace; in plain zsh the composing-jamo
+  erase works, so this is a canonical-echo rendering observation, unclassified, with screenshots preserved.
 Passed in the fork's pass (details in its notes): A1 read-only reopen and Finder reveal, A2 media rendering for
 HTML, PDF, PNG, MP4, WAV and Markdown, A4 editor changed-on-disk, save comparison and close guard, A9.2 supervisor
 identity, A12.1 anchored browser comment, A12.5 right-click at 125 %, nested thread listing and /btw in a comment
