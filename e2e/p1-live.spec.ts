@@ -501,7 +501,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
     const pane = l.panel.locator(`[data-side-thread-view="${child}"]`);
     await expect(pane, 'the Side pane opens on the thread').toBeVisible({ timeout: 60_000 });
-    await expect(pane.locator('header'), 'the anchor at the thread’s head').toContainText(anchor!.label);
+    await expect(pane.locator('header').first(), 'the anchor at the thread’s head').toContainText(anchor!.label);
     await expect(pane.locator('[data-chip="anchor"]').first()).toHaveAttribute('data-anchor-kind', 'artifact-element');
 
     const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
@@ -841,8 +841,18 @@ test('A-47: a permission request on a session not in front raises the fallback t
     expect(answer).toEqual({ outcome: 'delivered' });
     // retracted, not timed out: gone inside the toast's own 6 s (TOAST_DURATION_MS), or still shown past it until the answer
     expect(goneAt - notifiedAt < 6_000 || answeredAt - notifiedAt >= 6_000, 'gone by the answer, not by the toast’s own timeout').toBe(true);
-    await expect.poll(async () => idleNow(live, back), { timeout: TURN_MS }).toBe(true);
-    note('A-47: PASS');
+    // to its end, any further permission it asks answered the same way (nobody sees its card)
+    const answered = new Set([requested!.requestId]);
+    await expect
+      .poll(async () => {
+        for (const ask of ofKind(await events(live, back), 'permission.requested').filter((e) => !answered.has(e.requestId))) {
+          answered.add(ask.requestId);
+          value(await invoke(live.page, 'session.answer', { appSessionId: back, requestId: ask.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+        }
+        return idleNow(live, back);
+      }, { timeout: TURN_MS })
+      .toBe(true);
+    note(`A-47: PASS (${answered.size} permission request(s) answered)`);
   } finally {
     await closeLive(live);
   }
