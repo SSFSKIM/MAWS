@@ -9,7 +9,8 @@
 // (`live-sitting.txt`) and the screenshots in both themes (`e1-<surface>-<theme>.png`) into the directory
 // MAWS_E1_LIVE_OUT names (E11 W-E: a re-run records into its own directory, E1's committed evidence untouched),
 // docs/doperpowers/evidence/p1-e1/ when it is unset.
-// It spends money; run on purpose only, after a build:
+// It spends money, within the sitting's cap MAWS_E1_LIVE_MAX_USD (US$0.20 when unset; each session launches with what
+// is left of it); run on purpose only, after a build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -27,6 +28,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { assertConfigHomeSafe } from '../test/live/support/live';
 import { ownerPlugins } from '../test/support/claude-env';
+import { a15DeltaText, compareA15 } from '../test/support/owner-file';
 import { journal, mainResults, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -51,14 +53,32 @@ const PROMPTS = {
 
 // ---- the owner file (A-15), the engine, the evidence ------------------------------------------------------------------
 
-// The standing rule's check, verbatim: the owner's ~/.claude.json `projects` keys under /tmp, read only; its sha1 is
-// what `| shasum` prints.
-function a15(): { keys: number; digest: string } {
-  const script = `import json;d=json.load(open('${homedir()}/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))`;
-  const out = execFileSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' });
-  const keys = out.trim() === '[]' ? 0 : out.split("', '").length;
-  return { keys, digest: createHash('sha1').update(out).digest('hex') };
+// The standing rule's check: the owner's ~/.claude.json `projects` keys under /tmp, read only; the digest is the sha1
+// `| shasum` prints for the rule's own command (its first line), the keys come back as JSON (the second).
+interface A15Reading {
+  keys: string[];
+  digest: string;
 }
+function a15(): A15Reading {
+  const script = `import json;d=json.load(open('${homedir()}/.claude.json'));k=sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp'));print(k);print(json.dumps(k))`;
+  const [repr, keys] = execFileSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' }).split('\n');
+  return { keys: JSON.parse(keys!) as string[], digest: createHash('sha1').update(`${repr}\n`).digest('hex') };
+}
+
+// One A-15 reading against the first (Decision Log 35): a key under the sitting's own scratch appearing or vanishing is a
+// breach; another owner session's key is recorded and passes.
+function checkA15(label: string, before: A15Reading, after: A15Reading, ours: readonly string[]): string {
+  const delta = compareA15(before.keys, after.keys, ours);
+  const line = `A-15 ${label}: ${after.keys.length} keys, sha1 ${after.digest} (${a15DeltaText(delta)})`;
+  note(line);
+  expect(delta.breach, `the A-15 delta ${label}: no project of the sitting's scratch in the owner file`).toEqual([]);
+  return line;
+}
+
+// The sitting's cap (E11 Design §5): every session launches with what is left of it as its --max-budget-usd.
+const CAP_USD = Number(process.env.MAWS_E1_LIVE_MAX_USD ?? '0.2');
+const costs: { label: string; costUsd: number }[] = []; // booked per session at its end
+const remainingUsd = () => CAP_USD - costs.reduce((sum, c) => sum + c.costUsd, 0);
 
 // The installed engine (the installer's link, resolved), as a fresh install of MAWS finds it.
 function installedEngine(): { bin: string; version: string } {
@@ -132,7 +152,10 @@ async function begin(s: Sitting, label: string, id: string, prompt: string): Pro
   await (await sidebarRow(s.page, { appSessionId: id })).click();
   await s.page.mouse.move(700, 20);
   await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
-  const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: 0.5 };
+  const maxBudgetUsd = Number(remainingUsd().toFixed(4));
+  expect(maxBudgetUsd, `${label}: the sitting's cap US$${CAP_USD} has room left`).toBeGreaterThan(0);
+  const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd };
+  note(`  ${label}: launched with maxBudgetUsd ${maxBudgetUsd} (the cap less the sitting's spend so far)`);
   expect(value(await invoke(s.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
   // booked as soon as the host holds it (its journal is named at the reservation), so a launch that fails before the
   // prompt is still stopped and booked by the sitting's `finally`
@@ -179,7 +202,7 @@ const idleNow = async (s: Sitting, id: string) => {
 const mainTurnsEnded = (events: SessionEvent[]) => ofKind(events, 'turn.ended').filter((e) => e.parentToolUseId === null && !e.isEchoReceipt);
 
 // The session stopped (the process exits), the A-15 delta checked, the journal kept under the scratch root and booked.
-async function end(s: Sitting, session: Session, before: { digest: string }, costs: { label: string; costUsd: number }[]): Promise<void> {
+async function end(s: Sitting, session: Session, before: A15Reading): Promise<void> {
   session.ended = true;
   const stopped = value(await invoke(s.page, 'session.stop', { appSessionId: session.id as never, reason: 'stop' }));
   await expect.poll(async () => (await statusOf(s, session.id)).process, { timeout: 30_000 }).toBe('exited');
@@ -189,10 +212,13 @@ async function end(s: Sitting, session: Session, before: { digest: string }, cos
   const rows = journal(session.journalPath);
   const costUsd = processCost(rows);
   costs.push({ label: session.label, costUsd });
-  const after = a15();
-  note(`  ${session.label}: appSessionId ${session.id}; journal ${join(kept, session.journalPath.split('/').at(-1)!)}; main results ${mainResults(rows).length}; total_cost_usd ${costUsd.toFixed(4)}; permissions allowed once through the card: ${JSON.stringify(session.allowed)}; stopped ${JSON.stringify(stopped)}; A-15 after: ${after.keys} keys, sha1 ${after.digest} (${after.digest === before.digest ? 'identical' : 'CHANGED'})`);
-  expect(after.digest, 'the A-15 delta: no scratch project in the owner file').toBe(before.digest);
+  note(`  ${session.label}: appSessionId ${session.id}; journal ${join(kept, session.journalPath.split('/').at(-1)!)}; main results ${mainResults(rows).length}; total_cost_usd ${costUsd.toFixed(4)}; permissions allowed once through the card: ${JSON.stringify(session.allowed)}; stopped ${JSON.stringify(stopped)}`);
+  checkA15(`after ${session.label}`, before, a15(), ours(s));
 }
+
+// The sitting's own scratch, for the A-15 delta: the root holding the config home and the repository, and the app's
+// userData.
+const ours = (s: Sitting) => [s.scratch.root, s.maws.userData];
 
 // `e1-<surface>-<theme>.png` beside the evidence text, in both themes (a toast over the panel's bottom edge, where the
 // sheet's Submit bar sits, is cleared first).
@@ -218,13 +244,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
   const sc = scratch(['E1 sitting: send_file', 'E1 sitting: blocking ask', 'E1 sitting: async ask', 'E1 sitting: show_pane']);
   const openLog = join(sc.root, 'open.txt');
   note(`E1 live sitting (M5), ${new Date().toISOString()}`);
-  note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through ClaudeUsage's relay ${RELAY_URL} (GET /api/hello 200), Haiku, default permission mode, maxBudgetUsd 0.5 per session`);
+  note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through ClaudeUsage's relay ${RELAY_URL} (GET /api/hello 200), Haiku, default permission mode, the sitting's cap US$${CAP_USD} (MAWS_E1_LIVE_MAX_USD), each session launched with what is left of it as maxBudgetUsd`);
   note(`app: the product build (out/main/index.js, MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config} (settings.json {}, .claude.json trusting ${sc.repo}); MAWS_E2E_OPEN_LOG seam for the delivery row's buttons`);
-  note(`A-15 before the first launch: ${before.keys} keys, sha1 ${before.digest}`);
-  const costs: { label: string; costUsd: number }[] = [];
+  note(`A-15 before the first launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
   let sitting: Sitting | null = null;
-  let afterRun: { keys: number; digest: string }; // the A-15 read once the app closed
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: openLog } });
   try {
     const { page } = maws;
@@ -268,7 +292,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await shoot(s, 'delivery');
       const reply = mainTurnsEnded(events).at(-1)?.resultText ?? null;
       note(`G2: maws.delivery.file ${JSON.stringify(delivered!.deliverables.map((d) => ({ id: d.id, name: d.name })))} caption "the greeting"; record ${record.id as string}.json kind file; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ${JSON.stringify(readFileSync(openLog, 'utf8').trim().split('\n').map((l) => l.replace(sc.root, '<scratch>')))}; reply ${JSON.stringify(reply)}`);
-      await end(s, session, before, costs);
+      await end(s, session, before);
     });
 
     await test.step('2 a blocking ask: the capsule, the sheet with five modalities, the attention item, Submit, the reply', async () => {
@@ -341,7 +365,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       note(`G3: Submit wrote ${JSON.stringify(answered!.answers.map((a) => [a.id, a.status, a.value ?? null, a.otherText ?? null]).map((a) => JSON.stringify(a).replace(sc.root, '<scratch>')))}; the attention item left Needs you; the capsule reads "Answered"; View answers reopened it read-only; reply ${JSON.stringify(reply.replace(sc.root, '<scratch>'))}`);
       expect(reply).toMatch(/Blue/);
       expect(reply).toMatch(/SKIPPED/i);
-      await end(s, session, before, costs);
+      await end(s, session, before);
     });
 
     await test.step('3 an async ask: acknowledged at once, answered while the foreground command runs, folded into the turn', async () => {
@@ -384,7 +408,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       expect.soft(duringBash, 'the answer went from the sheet while Bash ran').toBe(true);
       expect(replies.some((r) => /ANSWER:\s*Yes/i.test(r))).toBe(true);
       expect.soft(folded, 'the answer folded into the running turn').toBe(true);
-      await end(s, session, before, costs);
+      await end(s, session, before);
     });
 
     // E2 landed the Deliverables tool after E1's sitting, so the deliverable pane exists and target "none" names no record
@@ -400,26 +424,28 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ })).toHaveAttribute('aria-selected', 'true');
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
       if ((await divider.getAttribute('aria-expanded')) === 'false') await divider.click();
-      await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
-      await expect(s.pane.getByText('Could not open pane: no deliverable "none" in this session')).toBeVisible();
-      await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
+      // the cells' own labels, since the model's reply may quote the same words (a live run's read "opened Terminal panel")
+      const cell = (text: string | RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
+      await expect(cell(/^Opened Terminal$/)).toBeVisible();
+      await expect(cell(/^Could not open pane: no deliverable "none" in this session$/)).toBeVisible();
+      await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible();
       await shoot(s, 'pane');
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
       note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no deliverable "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
-      await end(s, session, before, costs);
+      await end(s, session, before);
     });
   } finally {
     for (const session of sitting === null ? [] : begun.filter((b) => !b.ended)) {
       note(`  ${session.label}: the step failed; the session is stopped and booked here`);
-      await end(sitting!, session, before, costs).catch((error: unknown) => note(`  ${session.label}: could not be stopped or booked: ${String(error)}`));
+      await end(sitting!, session, before).catch((error: unknown) => note(`  ${session.label}: could not be stopped or booked: ${String(error)}`));
     }
     const total = costs.reduce((sum, c) => sum + c.costUsd, 0);
-    note(`spend: ${costs.map((c) => `${c.label} ${c.costUsd.toFixed(4)}`).join('; ')}; total US$${total.toFixed(4)}`);
+    note(`spend: ${costs.map((c) => `${c.label} ${c.costUsd.toFixed(4)}`).join('; ')}; total US$${total.toFixed(4)} (cap US$${CAP_USD})`);
     await maws.cleanup();
-    afterRun = a15();
-    note(`the app closed (every engine process it launched was stopped first; cleanup closes the app or fails); A-15 after the run: ${afterRun.keys} keys, sha1 ${afterRun.digest} (${afterRun.digest === before.digest ? 'identical' : 'CHANGED'})`);
+    note('the app closed (every engine process it launched was stopped first; cleanup closes the app or fails)');
     note(`scratch kept for inspection: ${sc.root} (journals under journals/)`);
   }
-  expect(afterRun.digest, 'the A-15 delta after the run: no scratch project in the owner file').toBe(before.digest);
+  // after the finally, so a failed step's own error is the one reported
+  checkA15('after the run', before, a15(), [sc.root, maws.userData]);
   expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(4);
 });
