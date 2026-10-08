@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { summary, tempDir } from '../../../test/support/index-fixture';
+import { preAmendmentIndex, summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
 import { Index } from './index';
 import { MIGRATIONS, REPAIRS } from './migrations';
@@ -191,25 +191,11 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
         db.close();
       }
     };
-    // v1 as first released (before `removed_at`), then v2 and v3, at user_version 3: the owner's database.
-    const preAmendment = (path: string, rows: { appId: string; sessionId: string; archived: number }[] = []) => {
-      const v1 = MIGRATIONS[0].sql.replace('summary TEXT, removed_at TEXT,', 'summary TEXT,');
-      expect(v1).not.toBe(MIGRATIONS[0].sql);
-      const raw = new DatabaseSync(path);
-      raw.exec(v1);
-      raw.exec(MIGRATIONS[1].sql);
-      raw.exec(MIGRATIONS[2].sql);
-      raw.exec('PRAGMA user_version = 3');
-      const insert = raw.prepare("INSERT INTO sessions (app_id, engine_session_id, directory, archived, created_at, updated_at) VALUES (?, ?, '/w', ?, 't', 't')");
-      for (const row of rows) insert.run(row.appId, row.sessionId, row.archived);
-      raw.close();
-    };
-
     it('a pre-amendment database at user_version 3 gains sessions.removed_at on open, and discovery updates its existing records', () => {
       const path = join(dir.path, 'index.sqlite');
       const live = summary();
       const ownerArchived = summary();
-      preAmendment(path, [
+      preAmendmentIndex(path, [
         { appId: 'live', sessionId: live.sessionId, archived: 0 },
         { appId: 'owner-archived', sessionId: ownerArchived.sessionId, archived: 1 },
       ]);
@@ -234,6 +220,45 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       expect(index.sessions.upsertFromSummary(live).record).toMatchObject({ appId: 'live', archived: false });
     });
 
+    // The owner's archive sheet failed with `no such column: removed_at` (E11's sitting; owner-notes report A): the
+    // archive writes the removal mark, so every history that applied v1 before the amendment must be repaired before it
+    // runs, whether migrations are pending (3, 4) or not (5, the current version).
+    describe.each([3, 4, 5])('an archive on a pre-amendment database carried to user_version %i', (version) => {
+      const removedAt = (path: string, appId: string) => {
+        const db = new DatabaseSync(path, { readOnly: true });
+        try {
+          return db.prepare('SELECT archived, removed_at FROM sessions WHERE app_id = ?').get(appId);
+        } finally {
+          db.close();
+        }
+      };
+
+      it('archives, clears the removal mark, survives a reopen and the next discovery', () => {
+        const path = join(dir.path, 'index.sqlite');
+        const live = summary();
+        preAmendmentIndex(path, [{ appId: 'live', sessionId: live.sessionId, archived: 0 }], version);
+        expect(sessionColumns(path).map(([name]) => name)).not.toContain('removed_at');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const index = open(path);
+        expect(index.applied).toEqual(MIGRATIONS.filter((m) => m.version > version).map((m) => m.version));
+        expect(warn).toHaveBeenCalledTimes(1); // the repair ran, with or without a pending migration
+        const appId = 'live' as AppSessionId;
+        expect(index.sessions.update(appId, { archived: true })).toMatchObject({ appId, archived: true });
+        expect(removedAt(path, appId)).toEqual({ archived: 1, removed_at: null });
+        index.close();
+        opened.pop();
+
+        const again = open(path);
+        expect(again.applied).toEqual([]);
+        expect(warn).toHaveBeenCalledTimes(1); // nothing left to repair
+        expect(again.sessions.get(appId)).toMatchObject({ archived: true });
+        // the owner's archive is not the removal's: discovery seeing the transcript again leaves it archived
+        expect(again.sessions.upsertFromSummary({ ...live, lastRecordAt: '2026-10-08T09:00:00.000Z' }).record).toMatchObject({ appId, archived: true });
+        expect(again.sessions.update(appId, { archived: false })).toMatchObject({ archived: false });
+      });
+    });
+
     it('a fresh database, created with the column, is unchanged by the repair on this open or the next', () => {
       const path = join(dir.path, 'index.sqlite');
       const reference = join(dir.path, 'reference.sqlite');
@@ -252,7 +277,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
 
     it('the repair is idempotent: a second open of the repaired database adds nothing and logs nothing', () => {
       const path = join(dir.path, 'index.sqlite');
-      preAmendment(path);
+      preAmendmentIndex(path);
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       open(path).close();
       opened.pop();
@@ -269,7 +294,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     // transaction, so a pending entry that fails leaves the database as found.
     it('runs before the pending migrations, inside their transaction', () => {
       const path = join(dir.path, 'index.sqlite');
-      preAmendment(path);
+      preAmendmentIndex(path);
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       const next = MIGRATIONS[MIGRATIONS.length - 1].version + 1; // past every released entry (E4a took 5)
       const pending = MIGRATIONS.filter((m) => m.version > 3).map((m) => m.version);

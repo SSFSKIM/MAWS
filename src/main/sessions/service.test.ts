@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
-import { sessionIdFor, summary } from '../../../test/support/index-fixture';
+import { preAmendmentIndex, sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
@@ -740,6 +740,25 @@ describe('session service', () => {
       expect(h.host.disk.stores.has(released.appId)).toBe(true);
     });
     // C12 end
+
+    // E11's sitting (owner-notes report A): the archive sheet answered `no such column: removed_at` on an index whose v1
+    // predates the column. The app's one index, repaired at open, is the one session.archive writes through, whatever
+    // version the history reached.
+    it.each([3, 4, 5])('archives a record of a pre-amendment index carried to user_version %i', async (version) => {
+      h.dispose();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      h = await new SessionHarness({ seedIndex: (path) => preAmendmentIndex(path, [{ appId: 'old', sessionId: SID, archived: 0 }], version) }).start();
+      try {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('sessions.removed_at'));
+        const appId = 'old' as AppSessionId;
+        expect(await h.service.archive(appId)).toEqual({ archived: true });
+        expect(h.index.sessions.get(appId)).toMatchObject({ archived: true });
+        await h.restart();
+        expect(h.index.sessions.get(appId)).toMatchObject({ archived: true });
+      } finally {
+        warn.mockRestore();
+      }
+    });
 
     it('onlyIfIdle archives an idle session and skips, never stops, one that resumed after the snapshot', async () => {
       h.trustDirectory(h.work);
