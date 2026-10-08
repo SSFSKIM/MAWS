@@ -103,11 +103,21 @@ export const NO_PROJECT_OF: ProjectOf = () => null;
 // I2: an unstarted tab a replace would take the place of is not replaced: the session opens beside it, then the tab
 // passes C10's close guard (it asks only about a non-empty draft) and goes with its intent, or stays when declined
 // (`openSession`). The action runtime, which owns the guards, registers this (`registerShellActions`); unregistered,
-// every unpinned session tab is replaced alike.
+// every unpinned tab is replaced alike.
 export interface ReplaceGuard {
   unstarted(appSessionId: AppSessionId): boolean;
   discard(tab: TabRef): Promise<boolean>;
+  // E11 F2b (plan 2.5; owner decision 2): what replacing the shown tab would cost (`ReplaceVerdict`), asked of every
+  // unpinned tab a replace would take the place of; `announce` tells the owner why a tab stayed or where its work went.
+  // A blank unstarted chat answers null and goes the way above.
+  verdict?(tab: TabRef): ReplaceVerdict;
+  announce?(tab: TabRef, verdict: NonNullable<ReplaceVerdict>): void;
 }
+
+// null: nothing is lost, the tab gives its place (a blank unstarted chat: discarded, as above). `keep`: it stays open
+// and the session opens beside it (an unsaved or saving file, a launch in flight), `keep` saying why. `aside`: it leaves
+// the strip with its work kept to come back to (an unstarted chat's draft, with its intent; ⌘⇧T reopens it).
+export type ReplaceVerdict = { keep: string } | { aside: string } | null;
 
 let replaceGuard: ReplaceGuard | null = null;
 
@@ -247,15 +257,39 @@ export function createLayoutStore() {
         // call then asks the draft's close guard (only about a non-empty draft) and drops the draft when it may go, so
         // the session ends up in its place with no ⌘⇧T entry; declined, both stay. The same check runs again when an
         // early change is replayed over the hydrated tabs, where a draft it meets is kept and never asked about.
+        // E11 F2b (plan 2.5): any other unpinned tab gives its place unless the guard's verdict keeps it (an unsaved file,
+        // a launch in flight: the session opens beside it, and the owner is told why) or sets it aside (an unstarted
+        // chat's draft: replaced, its intent and draft kept for ⌘⇧T, and the owner told).
         const guard = replaceGuard;
-        const draftInTheWay = (m: LayoutMain): Extract<TabRef, { kind: 'session' }> | null => {
-          if (opts.split || opts.how === 'tab' || guard === null || model.isOpen(m, `session:${appSessionId}`)) return null;
+        const inTheWay = (m: LayoutMain): TabRef | null => {
+          if (opts.split || opts.how === 'tab' || model.isOpen(m, `session:${appSessionId}`)) return null;
           const to = setOfSession(appSessionId);
           const shown = model.activeTab(to === undefined ? m : model.switchSet(m, to));
-          return shown?.kind === 'session' && !shown.pinned && guard.unstarted(shown.appSessionId) ? shown : null;
+          return shown !== null && !shown.pinned ? shown : null;
         };
+        const verdictOf = (tab: TabRef | null): ReplaceVerdict => (tab === null ? null : (guard?.verdict?.(tab) ?? null));
+        const draftInTheWay = (m: LayoutMain): Extract<TabRef, { kind: 'session' }> | null => {
+          const shown = inTheWay(m);
+          return shown?.kind === 'session' && guard !== null && guard.unstarted(shown.appSessionId) && verdictOf(shown) === null ? shown : null;
+        };
+        const kept = (m: LayoutMain) => {
+          if (draftInTheWay(m) !== null) return true;
+          const reason = verdictOf(inTheWay(m));
+          return reason !== null && 'keep' in reason;
+        };
+        const shown = inTheWay(get().main);
+        const verdict = verdictOf(shown);
         const draft = draftInTheWay(get().main);
-        main((m) => model.openSession(m, appSessionId, { ...opts, how: draftInTheWay(m) ? 'tab' : opts.how, set: setOfSession(appSessionId) }));
+        // Replayed over the hydrated tabs (the first call is the live one), only a session tab is replaced, as before E11:
+        // a restored file, Settings or Diagnostics the person never saw stays, and the session opens beside it.
+        let replayed = false;
+        main((m) => {
+          const restored = replayed ? inTheWay(m) : null;
+          const beside = kept(m) || (restored !== null && restored.kind !== 'session');
+          replayed = true;
+          return model.openSession(m, appSessionId, { ...opts, how: beside ? 'tab' : opts.how, set: setOfSession(appSessionId) });
+        });
+        if (shown !== null && verdict !== null) guard?.announce?.(shown, verdict);
         if (draft === null || guard === null) return;
         // A draft that started while its guard decided (its record arrived) is a live session now: its tabs, history and
         // panel stay.

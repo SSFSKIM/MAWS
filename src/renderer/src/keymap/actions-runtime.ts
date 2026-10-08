@@ -4,11 +4,12 @@
 // handler renders disabled everywhere: in the page through `useActionEnabled`, in the application menu through the
 // enabled set the dispatcher reports to main.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { NO_PROJECT, type LayoutMain, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { markFocusOnMount } from '../stores/composer';
-import { useLayout } from '../stores/layout';
+import { useLayout, type ReplaceVerdict } from '../stores/layout';
+import { toast } from '../stores/notices';
 import { NEW_CHAT } from '../sessions/title';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { focusPaneElement } from '../main/pane-dom';
@@ -130,6 +131,29 @@ export async function discardForReplace(ref: TabRef): Promise<boolean> {
   if (ref.kind !== 'session' || !(await guardAllows(ref))) return false;
   useSessions.getState().dropUnstarted(ref.appSessionId);
   return true;
+}
+
+// E11 F2b (plan 2.5; owner decision 2): what replacing a tab would cost, per kind (the layout store's
+// `ReplaceGuard.verdict`), answered at once and without asking: E5's editor keeps an unsaved or saving file, C10 keeps a
+// launch in flight and sets an unstarted chat's draft aside. A kind with none registered is replaced.
+export type ReplaceVerdictOf = (ref: TabRef) => ReplaceVerdict;
+const replaceVerdicts = createHandlerRegistry<TabRef['kind'], [TabRef]>('replace verdict');
+export const registerReplaceVerdict = (kind: TabRef['kind'], verdict: ReplaceVerdictOf): (() => void) => replaceVerdicts.register(kind, verdict);
+export const replaceVerdict = (ref: TabRef): ReplaceVerdict => (replaceVerdicts.get(ref.kind) as ReplaceVerdictOf | undefined)?.(ref) ?? null;
+
+// Says why a tab stayed, or where its work went (with the way back).
+export function announceReplace(ref: TabRef, verdict: NonNullable<ReplaceVerdict>): void {
+  if ('keep' in verdict) {
+    toast({ level: 'info', text: `${verdict.keep}, so it stays open`, actions: [], dismissible: true });
+    return;
+  }
+  const reopen = () => {
+    const { id: _id, pinned: _pinned, ...target } = ref;
+    void _id;
+    void _pinned;
+    useLayout.getState().openTab(target as TabTarget);
+  };
+  toast({ level: 'info', text: verdict.aside, actions: [{ label: 'Reopen', run: reopen }], dismissible: true });
 }
 
 // ---- unstarted titles ---------------------------------------------------------------------------------------------------

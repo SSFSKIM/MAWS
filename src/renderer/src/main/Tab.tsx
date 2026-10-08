@@ -7,7 +7,7 @@ import { ContextMenu } from 'radix-ui';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
-import { useChordHint } from '../app/IconButton';
+import { PinIcon, useChordHint } from '../app/IconButton';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
@@ -90,6 +90,9 @@ function useTabLabel(tab: TabRef): TabLabel {
   }
 }
 
+// E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
+export const PINNED_HINT = 'Pinned: stays open when you open another session';
+
 export interface TabProps {
   tab: TabRef;
   pane: 0 | 1;
@@ -135,7 +138,12 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
     >
       {label.glyph && <GlyphMark glyph={label.glyph} />}
       {label.fileType && <span className="font-mono text-info">{label.fileType}</span>}
-      {tab.pinned && <span aria-label="Pinned" role="img" className="size-1 shrink-0 rounded-full bg-fg-muted" />}
+      {/* E11 F2b (plan 2.5): a pin you can see, saying what it does */}
+      {tab.pinned && (
+        <span aria-label="Pinned" role="img" title={PINNED_HINT} className="inline-flex shrink-0 text-fg-muted">
+          <PinIcon className="size-[11px]" />
+        </span>
+      )}
       {dirty && <DirtyMark />}{/* E5 */}
       <span className="truncate">{label.title}</span>
       {label.secondary && <small className="shrink-0 text-fg-muted">{label.secondary}</small>}

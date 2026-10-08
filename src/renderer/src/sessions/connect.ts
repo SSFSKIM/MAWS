@@ -13,7 +13,7 @@ import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { registerReleasedResume } from '../composer/resume-seam'; // C12
 import { ipc } from '../ipc/client';
-import { NEW_CHAT, registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
+import { NEW_CHAT, registerCloseGuard, registerReplaceVerdict, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -24,7 +24,7 @@ import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
-import { beforeCloseUnstarted, resumeSession } from './setup-actions'; // C12: resumeSession
+import { beforeCloseUnstarted, resumeSession, unstartedReplaceVerdict } from './setup-actions'; // C12: resumeSession; E11 F2b: unstartedReplaceVerdict
 import { connectSetup, useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
 
@@ -89,6 +89,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
     offs.push(
       registerSessionCreator((projectId, location) => createUnstartedSession(projectId, client, location ?? null)),
       registerCloseGuard('session', (ref) => (ref.kind === 'session' ? beforeCloseUnstarted(ref.appSessionId).then((r) => r === 'closed') : Promise.resolve(true))),
+      registerReplaceVerdict('session', (ref) => (ref.kind === 'session' ? unstartedReplaceVerdict(ref.appSessionId) : null)), // E11 F2b
       registerUnstartedTitle(unstartedTitle),
       watchUnstartedTitles(), // New chat: a project chosen in the row renames the tab
       registerSessionActions(),

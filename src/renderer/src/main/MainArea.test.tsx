@@ -15,6 +15,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { PINNED_HINT } from './Tab';
 import { TAB_DRAG_TYPE } from './TabStrip';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -126,6 +127,23 @@ describe('tab strip reorders, closes, reopens', () => {
     fireEvent(sidebarRow('Workstation north star'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
     expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Sidebar interaction pass · MAWS', 'Workstation north star · MAWS', 'Charter + research · MAWS']);
     expect(selected()).toBe('Workstation north star · MAWS');
+  });
+
+  // E11 F2b (plan 2.5; owner decision 2): whatever the main tab shows, a click puts the session in its place; a pin, which
+  // the tab shows as a pin saying what it does, keeps it.
+  it('a sidebar click replaces Settings too; a pinned tab shows its pin with its meaning and stays', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    expect(tabNames()).toEqual(['Settings']);
+    await user.click(sidebarRow('Fix sidebar drag'));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS']);
+    act(() => useLayout.getState().togglePinned('session:' + idOf('Fix sidebar drag')));
+    const pin = within(tab('Fix sidebar drag · MAWS')).getByRole('img', { name: 'Pinned' });
+    expect(pin.getAttribute('title')).toBe(PINNED_HINT);
+    expect(pin.querySelector('svg')).not.toBeNull();
+    await user.click(sidebarRow('Charter + research'));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Charter + research · MAWS']);
   });
 
   it('shows the session glyph on its tab and the project as its secondary text', () => {

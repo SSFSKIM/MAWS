@@ -132,6 +132,59 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
   }
 });
 
+// E11 F2b (plan 2.5; owner decision 2): opening a session replaces the main tab whatever it shows (Settings,
+// Diagnostics), the replaced one back on ⌘⇧T; a pinned tab shows a pin saying what it does and stays; the session's
+// right-click menu "Open in new tab" is the explicit way to a tab of its own, ⌘-click its shortcut.
+test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; Open in new tab adds one', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { app, page } = maws;
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    const strip = 'Open tabs';
+    const labels = () => tabLabels(page, strip);
+    const tabNamed = (name: string) => page.getByRole('tablist', { name: strip }).getByRole('tab', { name });
+    const CHARTER_ROW = 'Charter + research';
+    await (await sidebarRow(page, NORTH)).click();
+    await expect.poll(labels).toEqual([`${NORTH} · MAWS`]);
+
+    // Settings gives its place to the session clicked
+    await menu(app, 'settings.open');
+    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, 'Settings']);
+    await (await sidebarRow(page, FIX)).click();
+    await expect.poll(labels, { message: 'Settings gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`]);
+
+    // the session's right-click menu: Open in new tab keeps what is shown (Diagnostics here) and adds a tab
+    await menu(app, 'diagnostics.open');
+    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics']);
+    await (await sidebarRow(page, SIP)).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Open in new tab' }).click();
+    await expect.poll(labels, { message: 'Open in new tab added one' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics', `${SIP} · MAWS`]);
+
+    // a plain click on Diagnostics' place replaces it; ⌘⇧T brings it back
+    await tabNamed('Diagnostics').click();
+    await (await sidebarRow(page, CHARTER_ROW)).click();
+    await expect.poll(labels, { message: 'Diagnostics gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`, `${SIP} · MAWS`]);
+    await menu(app, 'tab.reopen');
+    await expect.poll(labels, { message: '⌘⇧T brings Diagnostics back' }).toContain('Diagnostics');
+
+    // pinned: the pin shows, says what it does, and keeps its tab; the session opens after it
+    await tabNamed(`${CHARTER_ROW} · MAWS`).click({ button: 'middle' }); // a middle-click closes it
+    await expect.poll(labels).not.toContain(`${CHARTER_ROW} · MAWS`);
+    await tabNamed(`${FIX} · MAWS`).click();
+    await tabNamed(`${FIX} · MAWS`).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Pin tab' }).click();
+    const pin = tabNamed(`${FIX} · MAWS`).getByRole('img', { name: 'Pinned' });
+    await expect(pin).toBeVisible();
+    await expect(pin).toHaveAttribute('title', 'Pinned: stays open when you open another session');
+    await (await sidebarRow(page, CHARTER_ROW)).click();
+    await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([`${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`]));
+    await expect.poll(() => selectedTab(page, strip)).toBe(`${CHARTER_ROW} · MAWS`);
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 // E11 F2b (plan 2.1): a started session's composer, docked at the pane's foot, in a window too short for the palette's
 // 384px cap above it: the palette opens above the editor, capped by the room there, and moves nothing
 // (support/palette-geometry.ts; sessions.spec.ts runs the same over an unstarted New chat's centred composer).

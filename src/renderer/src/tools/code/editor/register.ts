@@ -8,8 +8,8 @@
 // pane's active tab when it is a file tab and does nothing otherwise. E11: `file.commentLine` (Comment on this line)
 // opens the comment composer for that tab's cursor line, likewise.
 import type { TabRef } from '@shared/ipc/schema/layout';
-import { registerAction, registerCloseGuard } from '../../../keymap/actions-runtime';
-import { useLayout } from '../../../stores/layout';
+import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../../../keymap/actions-runtime';
+import { useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
 import { activeTab } from '../../../stores/layout-model';
 import { useViewer } from '../viewer/viewer-store';
@@ -41,7 +41,21 @@ function commentOnFocusedLine(): void {
   if (tab?.kind === 'file') commentOnCursorLine(tab.id);
 }
 
+// E11 F2b (plan 2.5): opening a session in this file tab's place keeps the tab while it holds unsaved changes or a save
+// is on its way, and says so; a clean file gives its place.
+export function fileReplaceVerdict(ref: TabRef): ReplaceVerdict {
+  const entry = ref.kind === 'file' ? useViewer.getState().entries.get(ref.id) : undefined;
+  if (entry?.saving) return { keep: `${basename(entry.path)} is being saved` };
+  if (entry?.dirty) return { keep: `${basename(entry.path)} has unsaved changes` };
+  return null;
+}
+
 export function registerEditor(): () => void {
-  const offs = [registerCloseGuard('file', guardFileClose), registerAction('file.save', saveFocusedFile), registerAction('file.commentLine', commentOnFocusedLine)];
+  const offs = [
+    registerCloseGuard('file', guardFileClose),
+    registerReplaceVerdict('file', fileReplaceVerdict), // E11 F2b
+    registerAction('file.save', saveFocusedFile),
+    registerAction('file.commentLine', commentOnFocusedLine),
+  ];
   return () => offs.forEach((off) => off());
 }

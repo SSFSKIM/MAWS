@@ -12,7 +12,7 @@ import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
-import { beforeCloseUnstarted } from './setup-actions';
+import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
@@ -316,6 +316,25 @@ describe('close guard', () => {
     expect(notice?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
     act(() => notice!.actions[0]!.run());
     expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+  });
+});
+
+// E11 F2b (plan 2.5): what opening another session in the unstarted tab's place costs, answered without asking
+describe('replace verdict', () => {
+  it('a blank chat is replaced (null), a draft or a held first message is set aside, a start in flight keeps the tab, a started session is not its business', () => {
+    withMain();
+    putIntent(intent());
+    expect(unstartedReplaceVerdict(ID)).toBeNull();
+    putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+    expect(unstartedReplaceVerdict(ID)).toEqual({ aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' });
+    expect(useDialogs.getState().open, 'nothing asked').toBeNull();
+    putIntent(intent({ message: MESSAGE }));
+    expect(unstartedReplaceVerdict(ID)).toMatchObject({ aside: expect.any(String) });
+    useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null });
+    expect(unstartedReplaceVerdict(ID)).toEqual({ keep: 'The new chat is starting' });
+    const other = '22222222-2222-4222-8222-222222222222' as AppSessionId;
+    useSessions.setState({ records: new Map([[other, record(other)]]) });
+    expect(unstartedReplaceVerdict(other)).toBeNull();
   });
 });
 

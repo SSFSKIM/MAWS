@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dropSession, focusPane, fromV1, moveTab, openSession, openTab, refile, reopenClosed, repairMain,
   replaceActive, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
@@ -209,15 +209,33 @@ describe('replacing the active session', () => {
     expect(m.closedTabs).toEqual([]);
   });
 
-  it('a pinned tab, a tab of another kind or an empty pane is left alone: the session opens after the active tab', () => {
+  it('a pinned tab or an empty pane is left alone: the session opens after the active tab', () => {
     const pinned = togglePinned(abc(), 'session:c');
     expect(ids(replaceActive(pinned, 'x' as AppSessionId))).toEqual([['session:c', 'session:x', 'session:a', 'session:b']]);
-    const settings = openTab(abc(), { kind: 'settings', section: null });
-    expect(ids(replaceActive(settings, 'x' as AppSessionId))).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'session:x']]);
-    const file = openTab(abc(), { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId });
-    expect(ids(replaceActive(file, 'x' as AppSessionId))[0]).toContain('file:/r/a.ts');
     expect(ids(replaceActive(base, 'x' as AppSessionId))).toEqual([['session:x']]);
     expect(replaceActive(pinned, 'x' as AppSessionId).closedTabs).toEqual([]);
+    const pinnedFile = togglePinned(openTab(abc(), { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId }), 'file:/r/a.ts');
+    expect(ids(replaceActive(pinnedFile, 'x' as AppSessionId))[0]).toEqual(expect.arrayContaining(['file:/r/a.ts', 'session:x']));
+  });
+
+  // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the main tab whatever it shows; what must not be
+  // lost (an unsaved file, a launch in flight) is the store's to keep out of this (`layout.ts` openSession)
+  it('an unpinned tab of any kind gives its place to the session, remembered for ⌘⇧T', () => {
+    const kinds: TabTarget[] = [
+      { kind: 'settings', section: null },
+      { kind: 'diagnostics' },
+      { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId },
+      { kind: 'diff', appSessionId: 'a' as AppSessionId, ref: 'HEAD' },
+      { kind: 'agent', appSessionId: 'a' as AppSessionId, agentId: 'ag-1' as AgentId },
+    ];
+    for (const target of kinds) {
+      const shown = openTab(abc(), target);
+      const old = active(shown)[0]!;
+      const m = replaceActive(shown, 'x' as AppSessionId);
+      expect(ids(m), target.kind).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
+      expect(active(m)).toEqual(['session:x']);
+      expect(m.closedTabs.map((t) => t.id)).toEqual([old]);
+    }
   });
 
   it('replaces in the focused pane of a split, leaving the other pane alone', () => {
