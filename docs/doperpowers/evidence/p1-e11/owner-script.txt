@@ -1,0 +1,270 @@
+E11 — the owner's one sitting (P-14): the ordered checklist (Task 7.1)
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §6 (finalised here from its draft) and §1 (the three gaps).
+Spec: docs/doperpowers/plans/2026-10-05-p1-extension.md §2 (the items), §7 (the A-entries and P-n cited below as [A-n]).
+Charter: docs/charter.md §19 (lines cited as [§19:<line>]).
+
+Who runs it: the owner, on their own Mac, with their own hands and profile. No agent runs any step of this script; the
+  agents' half is done and recorded in prerun.txt (§2 items 1 to 12 observed under scratch config homes on engine 2.1.293).
+Where results go: owner-results.txt, one row per step and sub-step (pass, fail or note; what was seen; a screenshot path if
+  useful). The architect records them at M8. A taste note becomes a tracker row tagged `taste` (or a fix now if it is a
+  one-file change the owner wants); a functional failure becomes a fix or a tracker row with the owner's words as
+  evidence; a product call becomes a P-n question.
+Time: about two and a half hours; may be split into two sessions on the same day (B is its own hour).
+Ids used below: the sub-step ids (A1.1, B12, D4 …) are the row ids in owner-results.txt.
+
+== Before (untimed, about 15 minutes) ==
+
+pre.1 The development-signed packaged build, in the MAWS checkout on master after the architect's merge of E11's branch:
+        MAWS_SIGN_IDENTITY="Apple Development: …" pnpm build:app        (the identity is the owner's)
+        codesign -dv --verbose=2 dist/mac-arm64/MAWS.app 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier)'
+      Record the Authority line (the identity) and TeamIdentifier in owner-results.txt's header. E9's TCC grants
+      (microphone, speech recognition) attach to the signed MAWS.app, not Electron.app, so every step below runs in this
+      app (open dist/mac-arm64/MAWS.app), never under `pnpm dev` [A-40; E11 Decision Log 10].
+pre.2 The relay (ClaudeUsage) running as the owner uses it daily: `curl -s -o /dev/null -w '%{http_code}\n'
+      http://127.0.0.1:8641/api/hello` prints 200.
+pre.3 Codex desktop and Claude Desktop installed, signed in and open on a comparable screen (for step B; P0's attempt
+      failed because no agent could open them).
+pre.4 A Chrome profile chosen by the owner for step D (not necessarily Default); the choice is the owner's alone, no agent
+      read any Chrome profile.
+pre.5 Scratch keys to clean in ~/.claude.json: none. Every A-15 reading of E11's eight sittings equalled the baseline (25
+      /tmp keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8; owner-file-check.txt); E11 added no key.
+pre.6 A terminal `claude` running in a project, kept open through the sitting (the Overview shows it as an interactive
+      peer; step J4 messages it).
+pre.7 The engine version: `claude --version`. The sittings ran on 2.1.293 (prerun.txt); record what the owner sits with
+      in owner-results.txt's header, and note it if it differs.
+
+== A. First looks the children left for the owner (about 25 minutes) ==
+Open each surface once in a real session and record pass or a note. The bracket after each line is the decision that left
+it to the owner.
+
+A1 E1, the maws tools. Prompt (the pre-run's S8 wording): "Use the maws ask tool (blocking) to ask me five questions, with
+   these ids and modalities: q1 choice single with options Red, Green, Blue ("Which colour?"); q2 choice multi with options
+   Mon, Tue, Wed ("Which days?"); q3 text ("What should the title be?"); q4 folder ("Which folder holds the assets?"); q5
+   repository ("Which repository is this for?"). Then reply with one line per question: id, then the answer or SKIPPED or
+   DECIDE."
+  A1.1 The Question sheet opened by the blocking ask: an attention item in Needs you, the main view not switched (from
+       another session, the sheet waits until that session is selected) [A-25, the architect's rulings].
+  A1.2 The capsule's pending and answered states; View answers reopens read-only [A-25].
+  A1.3 Ask: "Write hello.txt containing HELLO and deliver it to me with the maws send_file tool." The delivery row's Open
+       externally and Reveal in Finder [A-25 `files.reveal`; A-27 the reading of "Open externally and Reveal always"].
+A2 E2, deliverables. Ask the agent to deliver, with mcp__maws__send_file, one call each, a PDF, an image, a short video, an
+   audio file and a markdown file from a project, then to make an artifact: "Write page.html (any small page), then call
+   mcp__maws__artifact_create with id "demo" and html_path "page.html", then edit the page and call
+   mcp__maws__artifact_update with id "demo"; do it yourself, never through an agent."
+  A2.1 The viewer kinds (PDF, HTML, image, video, audio, markdown) in the panel and in a main tab [A-27; A-2].
+  A2.2 The artifact's versions (the version switch) [A-27].
+  A2.3 The artifact console [A-27; A-34 console attribution].
+  A2.4 "Open as file" from the read-only viewer into the editable tab [A-27].
+  A2.5 A web link inside delivered HTML shows Chromium's blocked page until Reload (accepted) [A-34].
+A3 E3, side threads and /btw.
+  A3.1 Comment on an element of the artifact (Comment, pick): the comment composer's screenshot is a chip, not a thumbnail
+       (Q4) [A-30 "the screenshot chip stands until E2's reader serves a thumbnail"; A-26].
+  A3.2 A comment from inside a side thread opens a nested side thread listed under its parent [A-30].
+  A3.3 `/btw <question>` typed inside a side thread answers inline under it [A-30].
+  A3.4 The first launch after the upgrade: A-30 accepted about 10 s once on the owner's transcripts; W-B batched the index
+       sync (d2ac6741: main busy 8,403 ms before, 757 to 935 ms after on a copy of the owner's index). Record how long the
+       first launch of this build took [A-30; E11 Surprises (M1)].
+A4 E5, the editor. Open a file in a MAWS tab, edit it, and change the same file from a terminal meanwhile.
+  A4.1 The "Changed on disk" notice [§19:998].
+  A4.2 Save: the conflict as inline conflict-marker blocks with Accept mine, theirs or both [P-19; A-23].
+  A4.3 Close a dirty tab: the close sheet; a merge-view tab is kept and never saved by it [§19:998; A-23].
+  A4.4 ⌘Q with an unsaved edit: the quit question names the unsaved files [P-19; §19:995].
+A5 E6, source control (may be observed during step H instead).
+  A5.1 Hooks run by default, with a per-commit Skip hooks box [A-28].
+  A5.2 The discard sheet names every file [A-28].
+  A5.3 The push sheet says it re-points a branch that still tracks origin/main [A-28].
+  A5.4 Open PR's body defaults to empty [A-28].
+A6 E7, orchestration.
+  A6.1 A Workflow run's compact card in the transcript, the per-phase tables in the panel widget [A-24].
+  A6.2 The widget stacking below 520 px of panel width [A-32].
+  A6.3 Scheduled rows (if a session has CronCreate jobs): an expired durable job reads `Expired <date>`; the dates' locale
+       beside the engine's English (Q2) [A-32]. If no session has scheduled rows, note "not seen".
+  A6.4 The Tasks panel read-only (or `No tasks`) [P-20].
+A7 E8, plugins (may be observed during J1).
+  A7.1 A marketplace's removal sheet announces a superset of the files it touches [spec §9 E8 status, "Residue the
+       architect accepts as built"].
+  A7.2 Another project's installation row is read-only [spec §9 E8 status].
+  A7.3 After an update MAWS already reloaded, the engine's own "Restart to apply changes" line still shows [spec §14,
+       2026-10-06 E8].
+A8 E9, voice (the dialogs themselves are step E).
+  A8.1 The mic button toggles: a click starts, a second click stops [P-18; §19:994].
+  A8.2 The hold action is unbound until bound in Settings › Keyboard [P-18; §19:994].
+  A8.3 Settings › Voice's language list (on-device locales; a language without a model is refused with a pointer to System
+       Settings) [P-18; §19:994].
+A9 E10, the supervisor.
+  A9.1 After a relaunch, a restored panel Terminal shows the lost-terminal line with no Restart action [A-38; §19:1021].
+  A9.2 The supervisor appears as "MAWS" in Activity Monitor [§19:1021].
+  A9.3 Settings › Engine › Background supervisor: the idle time, the quit default (P-22), Stop all [§19:1021; A-29].
+  A9.4 Diagnostics' supervisor row (its dot aligned with the first line since W-C) [A-38].
+  A9.5 The idle-release mark "Stopped at HH:MM while idle · Send resumes it" (seen only after a row was released while
+       MAWS was closed past the idle time; note "not seen" otherwise) [A-38; A-29 ruling (1)].
+A10 E4a, the browser view.
+  A10.1 The chrome and its error pages (renderer-drawn) [A-35].
+  A10.2 The partition pill [A-31 "the chrome shows the partition in use"].
+  A10.3 The clipboard carve-out: Copy works on a site after a click [A-35 precision (a)].
+  A10.4 Google as the editable search default [A-35].
+  A10.5 The 12-tab and 2 GiB caps suspend the least recent tab, never close it [A-35].
+  A10.6 `beforeunload` never blocks [A-35].
+  A10.7 Session info's "Browser tabs" row [A-35 precision (b)].
+  A10.8 The address field lists the typed address first, then history (Chrome's and Codex's order) [A-41].
+  A10.9 Re-selecting the Browser tool takes the view back from a main tab showing the same tab [A-41].
+  A10.10 The clipboard carve-out and `window.open` count key or mouse activation, not scrolls [A-41].
+  (E4a's M0 ran on screen and closed A-33's open condition, so the visibility5.mjs / visibility2.mjs check is not needed
+  [A-41].)
+A11 E4c, the browser tools (ask the agent to browse a page with the mcp__maws__browser_* tools).
+  A11.1 Reads proceed while the owner holds the page [A-37].
+  A11.2 The Browser tool opens at most once per busy stretch [A-48, refining A-37's once per session].
+  A11.3 Control decays agent → idle 10 s after the agent's last action [A-37].
+  A11.4 The agent's cursor in its fixed colours [A-37].
+  A11.5 A browser-only turn has no divider and its rows stay in view when the turn folds (Q9) [A-48].
+  A11.6 Time a request waits queued behind a working head counts against its 30 s deadline (Q10) [A-48].
+  A11.7 A side thread's browser driver retires when its parent exits (Q10) [A-48].
+A12 E4d, comment mode (any public page with a harmless button, in a Browser tab).
+  A12.1 Comment on the button, Side thread, ask the thread's agent to click it: watch it click in the same tab (the
+        sitting item E4d's M5 left standing) [A-49; P-24].
+  A12.2 The row's heading reads "Clicked #<id>" for a css-only act (Q8; a taste point) [A-49; tracker row, E4c · E4d].
+  A12.3 Type into a form field, then comment on its row: the anchor's name never carries the typed value (`row`, not
+        `row “PIN …”`; Q7) [A-45].
+  A12.4 The hover badge's hint over small elements [A-45].
+  A12.5 A right-click Comment at 125 % zoom (⌘+ to 125 %): the pick lands on the element under the pointer [A-45].
+  A12.6 A drag picks an area named by the smallest element containing it [P-25].
+A13 E4b's owner items, observed in step D [A-46; A-36]: the wallet seed list (14 ids; Binance Wallet caught by the name
+    heuristic) in D3; a Chrome-disabled extension arriving unchecked in D3; the Keychain dialog appearing once in D4; the
+    active profile's extensions loading at every boot (Q11) after D9's relaunch. Record these as rows D3, D4, D9.
+A14 P-21, tabs and extensions.
+  A14.1 Tabs belong to the session: the agent sees and drives only its session's tabs; a main tab may show any [P-21].
+  A14.2 Tabs the agent opened stay open at turn end [P-21].
+  A14.3 Imported extensions have per-extension toggles, wallets off by default (observed after D5) [P-21].
+
+== B. The panel and reference taste sitting (C8-S; 60 to 75 minutes) ==
+Light, then dark, beside Codex desktop and Claude Desktop open on a comparable screen. For each surface record pass or a
+note: anything invented, off, or inconsistent with the token system, naming the reference surface it falls short of.
+
+P0's right-panel tools: B1 Session info · B2 Review · B3 Files · B4 Terminal · B5 Subagents · B6 Background work · B7 Log
+P1's panel tools: B8 Tasks · B9 Source control · B10 Side · B11 Deliverables · B12 Browser
+B13 The Question sheet
+Transcript rows: B14 the ask capsule · B15 the delivery row · B16 the artifact row · B17 the side-thread summary row ·
+  B18 the peer row · B19 the browser-action rows
+B20 The side pane with a thread · B21 the side pane with a side question (/btw)
+B22 The comment composer
+B23 The workflow widget · B24 the topology tree
+B25 The plugins widget and its sheets
+B26 Settings › Voice · B27 Settings › Engine · B28 Settings › Browser
+B29 The Diagnostics row and the supervisor banners
+B30 The browser chrome · B31 an error page · B32 the import consent sheet and report (from step D) · B33 "You have the
+  page · Hand back" · B34 the comment-mode overlay
+B35 The editor bar · B36 the merge view
+B37 The SCM panel · B38 the discard sheet · B39 the push sheet · B40 the PR state row
+
+== C. The native terminal hands (C9; about 10 minutes) ==
+C1 Korean IME (2-set) composition in a Terminal tab: composed syllables appear once, backspace removes a jamo, Enter commits.
+C2 The same in the composer.
+C3 The same in an editor tab (CodeMirror, P1's new IME surface).
+C4 ⌘-click a URL printed in the terminal; record where it opens (externally, or in MAWS's browser).
+C5 Sleep and wake: a terminal running `sleep 300` and a live turn streaming under the detached supervisor, then
+   `pmset sleepnow`; wake after a minute. The terminal reattaches; the turn is still streaming or its row says what
+   happened; Diagnostics' supervisor row still reads connected.
+C6 Note any resume that stalls (a session row's Resume or a relaunch's reattach with no output for 30 s, or a row reading
+   that the engine produced no output). Write "none" if none did: the C3 resume-stall tracker row closes at E11's 7.3
+   only if no resume stalled here, in step G, or in S6's twenty (none did there, live-s6.txt).
+
+== D. The Chrome profile import (E4b's G2; about 10 minutes) ==
+E4b's checklist, verbatim (E4b `:243`; the profile is the one chosen in pre.4, so read "Default" as that profile and its
+counts as E0b's for Default, a guide only):
+D1 "quit Chrome (or not: the hint shows either way);"
+D2 "Settings › Browser › Import a Chrome profile…: the picker lists every profile of
+   `~/Library/Application Support/Google/Chrome` by its Chrome name, the last-used one preselected (E0b: 10 profiles,
+   every one named);"
+D3 "Continue on the Default profile: the consent shows about 17,554 pages and about 5,112 cookies (about 1,005
+   partitioned), Saved passwords disabled, the line saying new tabs and agents' tabs will be signed in as the profile, 20
+   extensions with MetaMask chipped as a wallet, and any extension Chrome shows as disabled (chrome://extensions) arriving
+   **unchecked** (the `disable_reasons` reading of Design §9; if a Chrome-disabled extension arrives checked, record it:
+   the Preferences key has moved and the fixture must follow);"
+D4 "Import: macOS asks for `security`'s access to "Chrome Safe Storage"; click **Allow** (not Always Allow); the dialog
+   appears once;"
+D5 "the report: cookies in the thousands with a handful skipped and reasons, 17,000-odd history entries, 20 extensions with
+   roughly E0b's split (13 backgrounds running, 7 failed on an absent `chrome.*`, one MV2 with no background), MetaMask
+   off; "New tabs browse as <name>";"
+D6 "a Browser tab: the pill names the profile; GitHub (or any site signed in in Chrome) shows the owner signed in; the
+   address bar suggests Chrome's history;"
+D7 "an agent turn in that session: `browser_tabs` lists the tab and `browser_navigate` works as before (E4c);"
+D8 "Settings: toggle an extension off and on;"
+D9 "Remove imported profile with a tab open: the tab closes, the pill reads Default, the partition folder is gone;
+   relaunch: `Partitions/maws-chrome-default/` gone;"
+D10 "Console.app or `pnpm dev`'s terminal shows no cookie value, URL path or password from the import."
+"The owner reports deviations to the architect; a deviation in (4) (no dialog, or a dialog twice) is the first thing to
+record." Do D11 before D9's removal:
+D11 The takeover (§2 item 7): with the imported profile active, ask the agent to drive a tab the owner is signed into
+    (several mcp__maws__browser_act steps); click into the page mid-action: the chrome shows "You have the page"; the agent
+    resumes after 3 s idle or Hand back.
+
+== E. Voice (E9's item 6; about 5 minutes; in the signed packaged app) ==
+E1 The first mic click raises the Microphone dialog with MAWS's reason, then the Speech Recognition dialog.
+E2 After allowing: "hello world" shows greyed words that settle on the second click.
+E3 Settings › Voice shows both permissions authorised and the language (ko-KR by default).
+E4 Choose English (United States) and dictate English: English lands.
+E5 Deny in System Settings and click the mic again: the denial notice, whose button opens the right pane.
+
+== F. The OOPIF human key (E4c's item left to E11; about 3 minutes) ==
+F1 From the MAWS checkout, start `node --experimental-strip-types --no-warnings e2e/support/oopif-page.ts` (Ctrl-C stops
+   it), open http://127.0.0.1:17393/oopif.html, which frames http://localhost:17393/field.html in a separate renderer
+   process; the field is the textbox "Note" (name="note") inside the iframe; with the agent holding the tab, type one key
+   into it.
+   To have the agent holding the tab (an action in flight), ask in a session: "Use the MAWS browser tools yourself, never
+   through an agent. Call mcp__maws__browser_tabs with action "open" and url "http://127.0.0.1:17393/oopif.html", take a
+   mcp__maws__browser_snapshot of that tab, then call mcp__maws__browser_act with action "fill" on the Note field inside
+   the frame ten times, one call at a time, with the values agent-1, agent-2, … agent-10." Type the key while the fills
+   run. (S4 case 7 confirmed the page: the frame out of process, processId 8 against the page's 7; live-s4.txt.)
+   Record whether the key was attributed (the chrome shows "You have the page · Hand back" and the agent's pending action
+   waits) or not (the action ran through). This is the half no e2e route can produce (E4c `:322`). Stop the server after.
+
+== G. Keep-quit on the owner's profile (E10's G1 manual sitting; about 5 minutes) ==
+G1 With a turn in flight in a real project, ⌘Q: the question's default button is "Quit and keep sessions running" (the
+   owner's setting keeps running; with "Stop them" set, Return stops them, P-22). Choose it.
+G2 Activity Monitor shows "MAWS" (the supervisor) through the quit.
+G3 Relaunch: the session is listed live and still streaming.
+G4 Note any resume that stalls (as C6). Write "none" if none did.
+
+== H. Push and PR with the owner's credentials (E6's item 5; about 7 minutes) ==
+In this repository's checkout (trusted), on a throwaway branch:
+H1 A commit from the panel runs the repository's hooks.
+H2 Push to `origin` authenticates through the owner's helper; the Output shows git's progress.
+H3 Open PR creates a draft PR (the owner closes it after).
+H4 The push-state row shows the PR with its checks.
+H5 The branch is deleted after (remote and local).
+
+== J. Plugins, /btw, tasks and peers (§2 items 2, 10 and 12; about 10 minutes) ==
+In a real session:
+J1 Settings or `/plugins`: add the owner's own marketplace (or a folder marketplace), install one plugin, disable and
+   enable it, Reload mods from the panel; the running session's `/plugins` reflects each step (item 2).
+J2 `/btw <a question>`: the answer in the side pane, the main transcript as it was (item 10).
+J3 Ask: "Open the Tasks pane with the maws show_pane tool, pane "tasks"." The read-only checklist, or `No tasks` (P-20).
+J4 From a second session (or the terminal `claude` of pre.6), send a SendMessage to the first; answer it from the row's
+   Reply composer (item 12).
+
+== I. After (untimed) ==
+Decide the owner questions (E11 Decision Log, "Questions for the owner"); answers go in owner-results.txt:
+  Q1 (C10·C3) Is the catalogue key's environment approximation final (the row then closes), or should a mismatch case be
+     hunted?
+  Q2 (E7) Dates in scheduled rows: the app's display locale beside the engine's English, or English throughout?
+  Q3 (C10, C4) Are separate-git-dir checkouts and their linked worktrees out of scope for the worktree service (two rows
+     close)?
+  Q4 (E3·E2) The comment composer's screenshot as a chip: keep, or a thumbnail in P2?
+  Q5 (E10) One idle time for both the row release and the supervisor's exit: keep?
+  Q6 Which taste notes are fixed now and which go to P2 (mark each note of steps A and B)?
+  Q7 (E4d, A-45) Typed form values never enter an anchor's name (`row` rather than `row “PIN …”`): keep privacy over label
+     richness?
+  Q8 (E4d, A-49; tracker) A css-only act's row reads "Clicked #increment": should the result carry the matched element's
+     role and name so the row reads "Clicked button “Increment”"?
+  Q9 (E4c, A-48) A browser-only turn has no divider and its rows stay in view when the turn folds: keep?
+  Q10 (E4c, A-48) Time a request waits queued behind a working head counts against its 30 s deadline, and a side thread's
+      browser driver retires when its parent exits: acceptable?
+  Q11 (E4b, A-46) The active imported profile's extensions load eagerly at every boot (the first page held until they
+      settle): keep, or lazy?
+  Q12 (E3·E4d, tracker) Side threads carry no `--max-budget-usd` (a fork takes none from its parent): give threads a cap?
+Plus the E4 children's open owner items as A-35 to A-37 ruled them, overturnable (keep or overturn each): the clipboard
+  carve-out, Google as the default, the caps, `beforeunload` never blocking (A-35); automatic activation after import
+  (P-23) and the wallet seed list (A-36); reads while the human holds the page, the Browser tool's open-once rule, the
+  10 s decay, the fixed cursor colours (A-37).
+Name any irritation across the new surfaces (each becomes a tracker row or a P2 line, never silent), and the P-3 measure:
+  what, if anything, still sends the owner to a terminal.
