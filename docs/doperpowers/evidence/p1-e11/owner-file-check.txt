@@ -19,3 +19,10 @@ S8 attempt 3 (2026-10-08, after the harness fix round 53fa5981):
 S1 (2026-10-08, the interrupt during a blocking maws ask; one attempt):
   before 03:12:57Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after  03:20:18Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the harness's scratch-scoped delta read identical before the launch, after attempt 1 and after the sitting)
+S3 (2026-10-08, deliverables, a side thread, Send to main and /btw through the app; docs/doperpowers/evidence/p1-e11/live-s3.txt):
+  before 03:22:38Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  03:24:44Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's scratch-scoped delta read identical at every reading)
+S4 with the A-47 case (2026-10-08, the browser under a live engine, the OOPIF page, the fallback toast's retraction; live-s4.txt):
+  before 03:24:44Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after  03:25:55Z: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; the spec's delta identical at every reading of cases 5, 7 and A-47;
+    again identical at 03:27:51Z after the scratch root was removed)

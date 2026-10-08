@@ -1,0 +1,122 @@
+E11 M6 sitting S4: the browser under a live engine (item 7's agent half) and the A-47 retraction case, e2e/p1-live.spec.ts
+cases 5, 6 (skipped), 7 and A-47
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S4 and §8, Task 6.3, Decision Log 9, 20, 23 and 36; cap
+  US$0.40 (the spec's S4 cap; the A-47 case is S4's) under the run total MAWS_P1_LIVE_MAX_USD=0.90 shared with S3 (one run
+  root, MAWS_P1_LIVE_STAMP=20261008T032238Z); the run had US$0.4202 on its ledger from S3 (live-s3.txt) when S4 began.
+Worktree head at start and throughout: c1f0e01a. No harness fix (Decision Log 30's round unused across S3 and S4).
+Verdict: PASSED on the first run: 3 passed, 1 skipped (case 6, by design). No MAWS behavioural finding.
+
+Pre-sitting (2026-10-08T03:24:44Z, right after S3's post-sitting readings)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  load: 10.96 15.20 17.10; the slot: "eligible: load 12.09 after 0s", "slot slot.1 acquired at 20:24:48 load { 12.09 15.36 17.14 }"
+  survivors before: none (pgrep -fl maws-e11-, maws-supervisor, oopif-page, browser-tools-server empty); ports 17391 (E4c's
+    server) and 17393 (the OOPIF page) free
+  engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through the relay; Haiku, default permission mode
+  scratch: /private/tmp/maws-e11-p1live-20261008T032238Z/{s4-browser,s4-oopif,a47}/{claude-config,repo,user-data}
+
+Command (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  03:24:48Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=0.90
+    MAWS_P1_LIVE_STAMP=20261008T032238Z MAWS_P1_LIVE_OUT=/tmp/maws-e11-s3s4-20261008T032238Z/out MAWS_E11_SHOTS=1
+    pnpm e2e:p1-live -g "S4:|A-47"
+    -> the harness build, then "Running 4 tests using 1 worker", "1 skipped, 3 passed (22.4s)", exit 0 at 03:25:44Z
+
+Per case (what was asserted, the result)
+  5 E4c's recording prompt verbatim against the real browser (main real, no stand-in) on E4c's server 127.0.0.1:17391: PASS.
+    The seven maws.browser.action pairs in order on one tab b_000000000001, none failed: browser_tabs open, browser_snapshot,
+    browser_act fill, fill, click, browser_snapshot, browser_screenshot; each tool allowed once through the docked card;
+    seven browser_action rows in the transcript; reply "MAWS-7731 image" (the reference); the screenshot's record kind
+    screenshot, title "E4c order received", sourceUrl http://127.0.0.1:17391/done.html?name=Ada+Lovelace&email=ada%40example.test;
+    maws-agent-cursor seen in the form's page during the turn (cursor messages to the tab 9; browser.agent.acting notices
+    4); the Browser tool opened once in the panel. Session 75913608-ceed-41eb-855b-e4c01980d542.
+  6 skipped, citing E4d's M5: the live anchor resolution was proved in the app by E4d (A-49;
+    docs/doperpowers/evidence/p1-e4d/live-proof.txt), Decision Log 9 and 20.
+  7 the OOPIF page of the owner's step F, no engine turn, no spend: PASS.
+    URL http://127.0.0.1:17393/oopif.html (site http://127.0.0.1), framing http://localhost:17393/field.html (site
+    http://localhost). The field: textbox "Note" (name="note"), snapshot ref f1e5 under "- iframe [ref=e4]:", indented
+    beneath it; Chromium holds the frame at its URL with the field visible; out of process: main frame processId 7, the
+    field's frame processId 8. Served for the owner by `node --experimental-strip-types --no-warnings
+    e2e/support/oopif-page.ts` (Ctrl-C stops it). The whole snapshot is in the harness log below.
+  A-47 (Decision Log 23 and 36): PASS. Two seeded sessions, "E11 A-47: in front" shown; notifications on (approvals); the
+    OS notification refused in the app's main process (the test-only Notification.show patch), so the notifier took its
+    fallback; no MAWS window focused at the request. The back session 9ba632b0-a209-41d3-b0a2-d7a514336692 asked Bash
+    (permission f5baf311-72fa-4422-a5cb-892fa4adc65a); attention.notified delivery "fallback" at 03:25:40.493Z; the toast
+    shown: "A47-marker.txt touch command needs you · Bash: touch a47-marker.txt" with "Open session" (shot
+    prerun-a47-toast-*); still shown before the answer; session.answer {"outcome":"delivered"} 1547 ms after the notice;
+    the toast gone 784 ms after the answer, 2331 ms after the notice: retracted by the answer, not by its own 6 s timeout.
+    The back session not the shown tab (shown tab session:ccb20fab-bb42-4614-868c-f196bbdce7c0); one permission in all.
+  Init plugin list (case 5's otmkwosy.jsonl, A-47's jynauraj.jsonl): cc-plugin-agents-md@builtin,
+    cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin: built-ins only, none of the owner's. Case 7 ran no
+    engine. Model: every result's modelUsage claude-haiku-5-5.
+
+Spend (read from the journals)
+  case 5: result seq 274, total_cost_usd 0.00380968 (9 turns); A-47: result seq 69, 0.001320225; case 7: no journal
+  S4 receipts US$0.0051 of US$0.40; both launch reservations (0.40 and 0.3962, each the smaller of S4's and the run's
+    remainder) settled to their receipts. The harness's ledger: S4 US$0.0051, the run US$0.4253 of US$0.90 (S3's
+    over-count included, live-s3.txt).
+
+Shots (both themes): prerun-7-browser-rows-{light,dark}.png, prerun-a47-toast-{light,dark}.png (the toast kept on).
+
+Post-sitting (2026-10-08T03:25:55Z)
+  A-15 after: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8; the harness's delta identical at every reading of
+    the three cases (before, after each session, after each app closed). Verdict: identical.
+  survivors: case 5 recorded 8 pids, case 7 9, A-47 7: none alive, none naming its case root, no maws-supervisor; after the
+    run pgrep -fl maws-e11-, maws-supervisor, oopif-page, browser-tools-server empty; nothing listening on 17391 or 17393.
+  sibling evidence: none modified; nothing to restore.
+  scratch: /private/tmp/maws-e11-p1live-20261008T032238Z (S3's and S4's) removed after the logs and figures were taken (no
+    finding needs it); the log directory /tmp/maws-e11-s3s4-20261008T032238Z removed with it.
+
+For the owner's script (step F): open http://127.0.0.1:17393/oopif.html after starting
+  `node --experimental-strip-types --no-warnings e2e/support/oopif-page.ts` from the repository; the human key goes into the
+  field labelled "Note" (name="note") inside the frame from http://localhost:17393/field.html; stop the server with Ctrl-C.
+
+---- the harness logs (MAWS_P1_LIVE_OUT/live-s4.txt, then live-a47.txt), verbatim ----
+==== S4 case 5, 2026-10-08T03:25:22.824Z; run root /private/tmp/maws-e11-p1live-20261008T032238Z
+engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S4 US$0.0000 of US$0.40, the run US$0.4202 of US$0.90
+scratch: /private/tmp/maws-e11-p1live-20261008T032238Z/s4-browser (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  charged US$0.4000 to S4 for the launch budget of browser (counted beyond 75913608-ceed-41eb-855b-e4c01980d542's receipts) [s4-browser:launch:75913608-ceed-41eb-855b-e4c01980d542]; S4 US$0.4000 of US$0.40, the run US$0.8202 of US$0.90
+browser 75913608-ceed-41eb-855b-e4c01980d542: launched on Haiku, default mode, maxBudgetUsd 0.4000 (the smaller of what S4 and the run leave); pid 99117
+case 5: maws.browser.action [["browser_tabs","open","b_000000000001",null],["browser_snapshot","snapshot","b_000000000001",null],["browser_act","fill","b_000000000001",null],["browser_act","fill","b_000000000001",null],["browser_act","click","b_000000000001",null],["browser_snapshot","snapshot","b_000000000001",null],["browser_screenshot","screenshot","b_000000000001",null]]; permissions allowed once ["mcp__maws__browser_tabs","mcp__maws__browser_snapshot","mcp__maws__browser_act","mcp__maws__browser_act","mcp__maws__browser_act","mcp__maws__browser_snapshot","mcp__maws__browser_screenshot"]; reply "MAWS-7731 image"; the screenshot's record {"id":"072dd392-8aa6-4d00-8408-6dc66503671e","appSessionId":"75913608-ceed-41eb-855b-e4c01980d542","kind":"screenshot","path":"/private/tmp/maws-e11-p1live-20261008T032238Z/s4-browser/user-data/deliverables/75913608-ceed-41eb-855b-e4c01980d542/screenshots/072dd392-8aa6-4d00-8408-6dc66503671e.png","title":"E4c order received","versions":[{"path":"/private/tmp/maws-e11-p1live-20261008T032238Z/s4-browser/user-data/deliverables/75913608-ceed-41eb-855b-e4c01980d542/screenshots/072dd392-8aa6-4d00-8408-6dc66503671e.png","at":"2026-10-08T03:25:33.280Z","toolUseId":"toolu_01BdwJooPzsZoCZkskpuE56u"}],"toolUseId":"toolu_01BdwJooPzsZoCZkskpuE56u","createdAt":"2026-10-08T03:25:33.280Z","sourceUrl":"http://127.0.0.1:17391/done.html?name=Ada+Lovelace&email=ada%40example.test"}; maws-agent-cursor seen in the form's page: true, cursor messages to the tab 9; browser.agent.acting notices 4; Browser tools in the panel 1
+case 5: PASS
+  browser 75913608-ceed-41eb-855b-e4c01980d542 stopped; spend 0.0038 for the case's profile so far; journals /private/tmp/maws-e11-p1live-20261008T032238Z/s4-browser/user-data/engine-host/journal/75913608-ceed-41eb-855b-e4c01980d542
+  browser init plugins (otmkwosy.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after browser: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+survivor check: none of 8 recorded pids (98525, 99117, 98602, 98605, 98621, 98678, 98679, 99930) and no process naming /private/tmp/maws-e11-p1live-20261008T032238Z/s4-browser; maws-supervisor processes: none
+  charged US$0.0000 to S4 for the launch budget of browser, settled to its receipts (US$0.0038) (counted beyond 75913608-ceed-41eb-855b-e4c01980d542's receipts) [s4-browser:launch:75913608-ceed-41eb-855b-e4c01980d542]; S4 US$0.0038 of US$0.40, the run US$0.4240 of US$0.90
+spend: the case's profile 0.0038; S4 US$0.0038 of US$0.40, the run US$0.4240 of US$0.90
+case 6: skipped: E4d M5 proved the live anchor resolution in the app (A-49; docs/doperpowers/evidence/p1-e4d/live-proof.txt), Decision Log 9 and 20
+==== S4 case 7 (no engine turn, no spend), 2026-10-08T03:25:35.973Z; run root /private/tmp/maws-e11-p1live-20261008T032238Z
+engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S4 US$0.0038 of US$0.40, the run US$0.4240 of US$0.90
+scratch: /private/tmp/maws-e11-p1live-20261008T032238Z/s4-oopif (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+case 7: page http://127.0.0.1:17393/oopif.html (site http://127.0.0.1) frames http://localhost:17393/field.html (site http://localhost); the field: textbox "Note" (name="note") at ref f1e5, under the snapshot's iframe line "- iframe [ref=e4]:"; Chromium's frames [{"url":"http://127.0.0.1:17393/oopif.html","processId":7},{"url":"http://localhost:17393/field.html","processId":8}]; out of process: true
+case 7: the snapshot:
+- main [ref=e2]:
+  - heading "A field in a cross-site frame" [level=1] [ref=e3]
+  - iframe [ref=e4]:
+    - paragraph [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - text: Note
+        - textbox "Note" [ref=f1e5]
+case 7: PASS: the owner's step F page is http://127.0.0.1:17393/oopif.html, the field "Note" in the frame from http://localhost:17393/field.html; served by `node --experimental-strip-types --no-warnings e2e/support/oopif-page.ts`
+  A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+survivor check: none of 9 recorded pids (2089, 2117, 2118, 2122, 2131, 2132, 2359, 2366, 2392) and no process naming /private/tmp/maws-e11-p1live-20261008T032238Z/s4-oopif; maws-supervisor processes: none
+spend: the case's profile 0.0000; S4 US$0.0038 of US$0.40, the run US$0.4240 of US$0.90
+==== A-47 (Decision Log 23), 2026-10-08T03:25:38.000Z; run root /private/tmp/maws-e11-p1live-20261008T032238Z
+engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S4 US$0.0038 of US$0.40, the run US$0.4240 of US$0.90
+scratch: /private/tmp/maws-e11-p1live-20261008T032238Z/a47 (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+A-47: the OS notification refused in the app's main process (refused by e2e/p1-live.spec.ts (A-47): the fallback forced), so the notifier takes its fallback
+  charged US$0.3962 to S4 for the launch budget of in the back (counted beyond 9ba632b0-a209-41d3-b0a2-d7a514336692's receipts) [a47:launch:9ba632b0-a209-41d3-b0a2-d7a514336692]; S4 US$0.4000 of US$0.40, the run US$0.8202 of US$0.90
+in the back 9ba632b0-a209-41d3-b0a2-d7a514336692: launched on Haiku, default mode, maxBudgetUsd 0.3962 (the smaller of what S4 and the run leave); pid 2692
+A-47: window focused at the request: none; the main view's tab "session:ccb20fab-bb42-4614-868c-f196bbdce7c0" (the back session not in front); permission.requested Bash f5baf311-72fa-4422-a5cb-892fa4adc65a; attention.notified delivery fallback at 2026-10-08T03:25:40.493Z; the toast "A47-marker.txt touch command needs you · Bash: touch a47-marker.txtOpen session×"; session.answer {"outcome":"delivered"} 1547 ms after the notice; the toast gone 784 ms after the answer (2331 ms after the notice; the toast's own timeout is 6 s)
+A-47: PASS (1 permission request(s) answered)
+  in the back 9ba632b0-a209-41d3-b0a2-d7a514336692 stopped; spend 0.0013 for the case's profile so far; journals /private/tmp/maws-e11-p1live-20261008T032238Z/a47/user-data/engine-host/journal/9ba632b0-a209-41d3-b0a2-d7a514336692
+  in the back init plugins (jynauraj.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after in the back: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+survivor check: none of 7 recorded pids (2521, 2692, 2604, 2607, 2617, 2622, 2623) and no process naming /private/tmp/maws-e11-p1live-20261008T032238Z/a47; maws-supervisor processes: none
+  charged US$0.0000 to S4 for the launch budget of in the back, settled to its receipts (US$0.0013) (counted beyond 9ba632b0-a209-41d3-b0a2-d7a514336692's receipts) [a47:launch:9ba632b0-a209-41d3-b0a2-d7a514336692]; S4 US$0.0051 of US$0.40, the run US$0.4253 of US$0.90
+spend: the case's profile 0.0013; S4 US$0.0051 of US$0.40, the run US$0.4253 of US$0.90

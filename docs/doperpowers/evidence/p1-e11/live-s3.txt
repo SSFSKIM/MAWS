@@ -1,0 +1,116 @@
+E11 M6 sitting S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10; the first live
+end-to-end run of E2 and E3), e2e/p1-live.spec.ts cases 1 to 4
+Plan: docs/doperpowers/plans/2026-10-06-e11-finish.md, Design §5 S3 and §8, Task 6.3; cap US$0.50 (the spec's own S3 cap)
+  under a run total MAWS_P1_LIVE_MAX_USD=0.90 shared with S4 (one run root, MAWS_P1_LIVE_STAMP); child spend before S3
+  US$0.0242 (S8 0.0213, S1 0.0029).
+Worktree head at start and throughout: c1f0e01a (branch worktree-agent-ac1b5d6ccf4ac2092). No harness fix (Decision Log 30's
+  round unused).
+Verdict: PASSED on the first run: 4 passed, every hard and soft assertion (the model's colour word, the `next` priority,
+  STEER_SEEN, the /btw colour word included). No MAWS behavioural finding.
+
+Pre-sitting (2026-10-08T03:22:38Z)
+  relay: GET http://127.0.0.1:8641/api/hello -> 200; the spec's own relay gate passed without a retry
+  A-15 before: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (the 2026-10-07 baseline)
+  load: 7.72 17.37 18.08; the slot: "eligible: load 7.88 after 0s", "slot slot.1 acquired at 20:22:48 load { 7.88 17.08 17.96 }"
+  survivors before: none (pgrep -fl maws-e11-, pgrep -fl maws-supervisor empty); ports 17391 and 17393 free
+  engine: ~/.local/bin/claude -> ~/.local/share/claude/versions/2.1.293 ("2.1.293 (Claude Code)"), unmodified, through the relay
+  run root (the harness's scratch): /private/tmp/maws-e11-p1live-20261008T032238Z/s3/{claude-config,repo,user-data};
+    logs MAWS_P1_LIVE_OUT=/tmp/maws-e11-s3s4-20261008T032238Z/out (the harness log below is its live-s3.txt, verbatim)
+
+Command (worktree as cwd, pnpm_config_verify_deps_before_run=false)
+  03:22:48Z /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=0.90
+    MAWS_P1_LIVE_STAMP=20261008T032238Z MAWS_P1_LIVE_OUT=/tmp/maws-e11-s3s4-20261008T032238Z/out MAWS_E11_SHOTS=1
+    pnpm e2e:p1-live -g "S3:"
+    -> the harness build (MAWS_HARNESS=1 electron-vite build), then "Running 4 tests using 1 worker", "4 passed (46.2s)",
+       exit 0 at 03:24:07Z
+
+Per case (what was asserted, the result)
+  1 artifact_create, artifact_screenshot, artifact_update on "p1-page", in that order, each allowed once through the card:
+    PASS. Main's real capture answered the engine: the image block decodes to a PNG 1280 x 800 (12,832 bytes) whose
+    dominant colour is rgb(211, 47, 47) over 99.2% of its pixels, distance 0 from the page's v1 background rgb(211, 47, 47)
+    (bound: 24 per channel over > 50%). The model's colour word: reply "COLOUR: red" (the prompt never named the colour).
+    The record bad8b1c7-2007-454b-9d4e-b9d93e584665 (kind artifact, two copied versions byte-equal to the pages the test
+    wrote), the rows "Artifact P1 page · v1" and "Updated artifact P1 page · v2", the Deliverables tool listing it, the
+    viewer on v2 with [v1, v2 · latest], v2's frame drawn rgb(21, 101, 192).
+  2 the #title pick through the viewer's Comment + pick overlay, Side thread (default), comment "Reply with exactly one
+    word, ANCHORED, and use no tool.": PASS. Thread 7546d2ef-75cf-4a31-a1af-d844a63f211f, lineage side-thread / comment /
+    artifact-element #title, label "P1 page v2 › h1#title “P1 live page, version 2”" at the Side pane's head with the anchor
+    chip; the side thread's reply "ANCHORED" in the Side pane and in the parent's summary row ("Side thread on … finished:
+    ANCHORED", state finished); no permission asked. The parent's turn count unchanged 1 -> 1, its written prompts 1 -> 1.
+    The fork (no --max-budget-usd, Q12) receipted US$0.0003 against its US$0.08 allocation: no overspend.
+  3 the parent running `sleep 25; echo SLEPT`; a second #title pick sent with Send to main ("Send to main · Sends at the
+    next step"), comment "When you reply, add the word STEER_SEEN at the end.": PASS. The written prompt carries the
+    comment with priority "next"; the anchored bubble with its chip in the parent's transcript; sent 28 s before the turn
+    ended; reply "The command printed `SLEPT`. I've noted your comment on the v2 heading and haven't changed anything for
+    it. STEER_SEEN".
+  4 `/btw In one word: what was the background colour of the artifact’s first version?` typed in the parent's composer:
+    PASS. One side_question control with that question (journal seq 254), answered by control_response "Red" (seq 256);
+    the Side pane's answered exchange "…Red"; the parent's turns 2 -> 2 and written prompts 3 -> 3 unchanged.
+  Init plugin list (both launches: parent ldnrolxq.jsonl, side thread kbj4kafl.jsonl): cc-plugin-agents-md@builtin,
+    cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin: the engine's built-ins only, none of the owner's.
+  Model: launch spec 'haiku', every result's modelUsage claude-haiku-5-5.
+
+Spend (read from the journals; total_cost_usd is cumulative per process, journalCost)
+  parent 11746e0e-3d7f-4610-9abe-a38068841f1c: results seq 170 US$0.0037743 (case 1), seq 246 US$0.00445831 (cases 1 and 3)
+  side thread 7546d2ef-75cf-4a31-a1af-d844a63f211f: seq 65 US$0.000288185
+  receipts US$0.0047. The /btw side question has no receipt (a control response, no result frame): charged its
+    reservation US$0.05. S3's spend for the child's ledger: US$0.0547 at most (US$0.0047 receipted + the US$0.05 reservation).
+  The harness's own ledger reads S3 US$0.4202: it kept the parent's whole launch reservation (US$0.37) because "a prompt went
+    unreceipted". None did: case 3's steer (priority next) joined the running turn, so the parent wrote three prompts and
+    received two results, and the second result's cumulative cost covers the steered turn. A harness over-count on the
+    safe side, not money spent (see Discoveries). It left S4's budget at S4's own cap (run 0.90 - 0.4202 > 0.40), so it
+    changed nothing in this run.
+  charges.jsonl (the run root's): s3:launch reserved 0.37; s3-fork 0.08, then settled 0; s3-btw 0.05; s3:launch kept 0.37.
+
+Shots (MAWS_E11_SHOTS=1, docs/doperpowers/evidence/p1-e11/, both themes): prerun-5-artifact-row-{light,dark}.png,
+  prerun-5-viewer-{light,dark}.png, prerun-6-side-thread-{light,dark}.png, prerun-6-send-to-main-{light,dark}.png,
+  prerun-10-btw-{light,dark}.png. MAWS_E2E_QUIET=1 (the slot) did not spoil them (read by eye: opaque, both themes).
+
+Post-sitting (2026-10-08T03:24:44Z)
+  A-15 after: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8; the harness's scratch-scoped delta read identical at
+    every one of its readings (before, after the side thread, after the parent, after the app closed). Verdict: identical.
+  survivors: the harness recorded 9 pids (app, engines, helpers), none alive, no process naming the case root, no
+    maws-supervisor; pgrep -fl maws-e11- and maws-supervisor empty after the run.
+  sibling evidence: none modified (porcelain status over docs/doperpowers/evidence showed only p1-e11's new shots);
+    nothing to restore; p1-e11 not restored.
+  scratch: the run root was kept for S4 (shared spend) and removed after S4 (live-s4.txt).
+
+Discoveries
+  - The spec's launch settlement (settledReservation over sessionRows) treats a session with more written prompts than
+    results as unreceipted and keeps its whole launch budget; a Send-to-main steer (priority next) is absorbed into the
+    running turn and gets no result of its own, so S3's parent always reads "kept whole". Over-conservative and harmless
+    under these caps; a tracker candidate for the controller (a `next` prompt written mid-turn is covered by that turn's
+    result).
+  - Haiku turns cost far below the design's estimates: all of S3's receipted work (an artifact turn with a screenshot, a
+    fork, a Bash turn with a steer) came to under half a cent.
+
+---- the harness log (MAWS_P1_LIVE_OUT/live-s3.txt), verbatim ----
+==== S3, 2026-10-08T03:23:21.631Z; run root /private/tmp/maws-e11-p1live-20261008T032238Z
+engine: ~/.local/share/claude/versions/2.1.293 (2.1.293), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S3 US$0.0000 of US$0.50, the run US$0.0000 of US$0.90
+scratch: /private/tmp/maws-e11-p1live-20261008T032238Z/s3 (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+A-15 before the case: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  charged US$0.3700 to S3 for the launch budget of parent (counted beyond 11746e0e-3d7f-4610-9abe-a38068841f1c's receipts) [s3:launch:11746e0e-3d7f-4610-9abe-a38068841f1c]; S3 US$0.3700 of US$0.50, the run US$0.3700 of US$0.90
+parent 11746e0e-3d7f-4610-9abe-a38068841f1c: launched on Haiku, default mode, maxBudgetUsd 0.3700 (the smaller of what S3 and the run leave, less US$0.1300 held back for the side thread’s allocation and the side question’s reservation), resuming 226e9515-e8b5-4b91-8e78-781525d0b0f0 in place; pid 72890
+case 1: maws artifact calls [["artifact_create",{"id":"p1-page","title":"P1 page","html_path":"page-v1.html"}],["artifact_screenshot",{"id":"p1-page"}],["artifact_update",{"id":"p1-page","html_path":"page-v2.html"}]]; permissions allowed once through the card ["mcp__maws__artifact_create","mcp__maws__artifact_screenshot","mcp__maws__artifact_update"]
+case 1: the screenshot's PNG 1280 × 800, 12832 bytes, dominant rgb(211, 47, 47) over 99.2% (the page's v1 background rgb(211, 47, 47), distance 0); the result {"status":"captured","id":"p1-page","deliverableId":"bad8b1c7-2007-454b-9d4e-b9d93e584665","title":"P1 page","version":1,"width":1280,"height":800,"bytes":12832,"consoleErrors":[]}; reply "COLOUR: red"
+case 1: PASS: record bad8b1c7-2007-454b-9d4e-b9d93e584665 (2 versions under /private/tmp/maws-e11-p1live-20261008T032238Z/s3/user-data/deliverables/11746e0e-3d7f-4610-9abe-a38068841f1c); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Deliverables tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour
+  charged US$0.0800 to S3 for the side thread’s allocation (reserved until its journal settles it) [s3-fork]; S3 US$0.4500 of US$0.50, the run US$0.4500 of US$0.90
+case 2: thread 7546d2ef-75cf-4a31-a1af-d844a63f211f (lineage {"kind":"side-thread","openedBy":"comment","anchor":{"kind":"artifact-element","locator":"#title","label":"P1 page v2 › h1#title “P1 live page, version 2”"}}); its reply "ANCHORED"; permissions allowed in the Side pane []; the parent's row "Side thread on P1 page v2 › h1#title “P1 live page, version 2” finished: ANCHOREDOpen"; the parent's turns 1 → 1, its written prompts 1 → 1; no --max-budget-usd on the fork (Q12): bounded by the test's US$0.08 allocation
+  side thread 7546d2ef-75cf-4a31-a1af-d844a63f211f stopped; spend 0.0041 for the case's profile so far; journals /private/tmp/maws-e11-p1live-20261008T032238Z/s3/user-data/engine-host/journal/7546d2ef-75cf-4a31-a1af-d844a63f211f
+  side thread init plugins (kbj4kafl.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after side thread: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  charged US$0.0000 to S3 for the side thread beyond its receipts (its journal shows US$0.0003, counted there) [s3-fork]; S3 US$0.3703 of US$0.50, the run US$0.3703 of US$0.90
+case 2: PASS
+case 3: the parent may spend up to US$0.3662 more under its launch budget US$0.3700 (reserved); S3 US$0.3703 of US$0.50, the run US$0.3703 of US$0.90
+case 3: the sheet's Send to main caption "Send to mainSends at the next step"; sent 28 s before the turn ended; the written prompt priority "next"; permissions allowed []; reply "The command printed `SLEPT`. I've noted your comment on the v2 heading and haven't changed anything for it. STEER_SEEN"
+case 3: PASS
+  charged US$0.0500 to S3 for the /btw side question (reserved: answered with no result frame) [s3-btw]; S3 US$0.4202 of US$0.50, the run US$0.4202 of US$0.90
+case 4: side_question controls written 1; the Side pane's exchange "In one word: what was the background colour of the artifact’s first version?Red"; the parent's turns 2 → 2, written prompts 3 → 3
+case 4: PASS
+  parent 11746e0e-3d7f-4610-9abe-a38068841f1c stopped; spend 0.0047 for the case's profile so far; journals /private/tmp/maws-e11-p1live-20261008T032238Z/s3/user-data/engine-host/journal/11746e0e-3d7f-4610-9abe-a38068841f1c
+  parent init plugins (ldnrolxq.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after parent: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  A-15 after the app closed: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+survivor check: none of 9 recorded pids (72604, 72890, 74733, 72669, 72672, 72728, 72795, 72796, 74644) and no process naming /private/tmp/maws-e11-p1live-20261008T032238Z/s3; maws-supervisor processes: none
+  charged US$0.3700 to S3 for the launch budget of parent, kept whole: a prompt went unreceipted (its receipts US$0.0045) (counted beyond 11746e0e-3d7f-4610-9abe-a38068841f1c's receipts) [s3:launch:11746e0e-3d7f-4610-9abe-a38068841f1c]; S3 US$0.4202 of US$0.50, the run US$0.4202 of US$0.90
+spend: the case's profile 0.0047; S3 US$0.4202 of US$0.50, the run US$0.4202 of US$0.90
