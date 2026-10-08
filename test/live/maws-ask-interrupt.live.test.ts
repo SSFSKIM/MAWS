@@ -12,7 +12,10 @@
 // `p1-maws-ask-interrupt` (journal and engine transcript, provenance child E11, this document, the P1 spec's pin), the
 // others as `p1-maws-ask-interrupt-attempt<n>` for the record; if none does, the negative stands in the log with the
 // journals and the engine version (the unit proof in session-maws.test.ts stands; a tracker row follows). Each attempt's
-// `--max-budget-usd` is what the sitting's US$0.15 cap leaves (LiveLedger.assertUnderCap() before each). The owner's
+// `--max-budget-usd` is what the sitting's US$0.15 cap leaves divided by the attempts still to run (attemptBudget), so
+// the three fit; an attempt is charged its receipt (`total_cost_usd`) when a result followed its prompt, else its whole
+// `--max-budget-usd` (chargeOf: an interrupted or failed turn may spend with no result frame, and an absent receipt
+// never gives money back), and the next attempt runs only while the cap is not spent. The owner's
 // ~/.claude.json is only read (the A-15 reading before the first launch and after every attempt: a key under the run's
 // own scratch, `gate.scratch`, appearing or vanishing fails in closeSession; another owner session's is recorded). The log is
 // `live-s1.txt` under MAWS_P1_LIVE_OUT (default /tmp/maws-e11-p1-live); the exports land under the run's
@@ -22,8 +25,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, a15Reading, liveOutDir, sittingLog, type A15Reading } from '../../e2e/support/p1-live';
-import { LiveLedger, liveSpec } from './support/live';
+import { a15Line, a15Reading, attemptBudget, chargeOf, liveOutDir, sittingLog, type A15Reading } from '../../e2e/support/p1-live';
+import { liveSpec } from './support/live';
 import { LiveHost } from './support/live-host';
 import { answerWhileRunning, closeSession, liveCase, openGate, readJournal, scratchRepo, type GateResult, type LiveGate } from './support/harness';
 
@@ -82,7 +85,10 @@ function judge(rows: JournalRow[], events: SessionEvent[], answered: { outcome: 
 
 let gate: GateResult;
 const note = sittingLog(liveOutDir(), 's1');
-const ledger = new LiveLedger(CAP_USD);
+// Each attempt's charge, kept from before its launch (its whole budget) until its journal settles it.
+const charges = new Map<number, { usd: number; detail: string }>();
+const spentUsd = () => [...charges.values()].reduce((sum, c) => sum + c.usd, 0);
+const spendSummary = () => `S1 spend US$${spentUsd().toFixed(4)} of US$${CAP_USD.toFixed(2)} (${[...charges].map(([n, c]) => `attempt ${n} US$${c.usd.toFixed(4)} ${c.detail}`).join('; ') || 'no attempt'})`;
 let a15First: A15Reading | null = null;
 
 beforeAll(async () => {
@@ -96,15 +102,15 @@ beforeAll(async () => {
 
 afterAll(() => {
   if ('skip' in gate) return;
-  note(ledger.summary());
+  note(spendSummary());
   if (a15First !== null) note(a15Line('after the sitting', a15First, a15Reading(), gate.scratch));
 });
 
 // One attempt: a fresh session, the prompt, the interrupt at its moment, the checks; exported, costed and its A-15
 // reading checked by the shared harness's closeSession whatever happens. Answers whether every expectation held.
 async function attempt(g: LiveGate, n: number, moment: (typeof MOMENTS)[number], exported: { done: boolean }): Promise<boolean> {
-  ledger.assertUnderCap();
-  const remaining = Number((CAP_USD - ledger.total).toFixed(4));
+  const remaining = attemptBudget(CAP_USD, spentUsd(), MOMENTS.length - n + 1);
+  charges.set(n, { usd: remaining, detail: 'reserved (its whole budget) until its journal settles it' });
   const host = new LiveHost({ userData: g.userData, configHome: g.home, binary: null });
   const repo = scratchRepo(g, 'e11-s1');
   const spec = liveSpec(repo, { model: 'haiku', permissionMode: 'default', subagentModel: null, maxBudgetUsd: remaining });
@@ -113,7 +119,7 @@ async function attempt(g: LiveGate, n: number, moment: (typeof MOMENTS)[number],
   let journalPath = '';
   let met = false;
   let stopAnswering = () => {};
-  note(`attempt ${n} (${moment.what}): ${id}, maxBudgetUsd ${remaining.toFixed(4)}`);
+  note(`attempt ${n} (${moment.what}): ${id}, maxBudgetUsd ${remaining.toFixed(4)} (what the cap leaves over the ${MOMENTS.length - n + 1} attempt(s) still to run)`);
   try {
     const { status } = await host.launch(spec, 120_000);
     journalPath = status.journalPath;
@@ -146,9 +152,11 @@ async function attempt(g: LiveGate, n: number, moment: (typeof MOMENTS)[number],
     const scenario = met && !exported.done ? SCENARIO : `${SCENARIO}-attempt${n}`;
     const provenance = { charter: 'docs/charter.md', child: 'E11', pin: PIN, document: DOCUMENT };
     await closeSession(host, g, { appSessionId: id, journalPath, scenario, provenance, transcript: { name: `${scenario}-transcript`, engineSessionId: spec.sessionId! } }, (line) => note(`  ${line}`));
-    if (journalPath) ledger.add(`attempt ${n}`, journalPath, readJournal(journalPath));
+    // its receipt, or its whole budget when no result followed its prompt (or no journal was written)
+    const cost = journalPath ? chargeOf(readJournal(journalPath), remaining) : { usd: remaining, receipted: 0, settled: false };
+    charges.set(n, cost.settled ? { usd: cost.usd, detail: 'its receipt' } : { usd: cost.usd, detail: `no receipt after its prompt${journalPath ? '' : ' (no journal path: the launch failed)'}, so its whole maxBudgetUsd ${remaining.toFixed(4)} (receipted ${cost.receipted.toFixed(4)})` });
     if (met) exported.done = true;
-    note(`  attempt ${n}: ${met ? 'every expectation met' : 'not met'}; ${ledger.summary()}; ${a15Line(`after attempt ${n}`, a15First!, a15Reading(), g.scratch)}`);
+    note(`  attempt ${n}: ${met ? 'every expectation met' : 'not met'}; ${spendSummary()}; ${a15Line(`after attempt ${n}`, a15First!, a15Reading(), g.scratch)}`);
   }
   return met;
 }
@@ -159,8 +167,8 @@ describe('an interrupt during a blocking maws ask, live (E11 S1)', () => {
     const exported = { done: false };
     let met: number | null = null;
     for (const [k, moment] of MOMENTS.entries()) {
-      if (ledger.total >= CAP_USD) {
-        note(`attempt ${k + 1}: not run (budget): ${ledger.summary()}`);
+      if (spentUsd() >= CAP_USD) {
+        note(`attempt ${k + 1}: not run (budget): ${spendSummary()}`);
         break;
       }
       if (await attempt(g, k + 1, moment, exported)) {

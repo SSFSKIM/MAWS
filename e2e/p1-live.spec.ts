@@ -24,6 +24,12 @@
 // remainders, a case does not start once either is spent (`not run (budget)`), and every session the spec launches
 // carries that amount, less what the case holds back, as its `--max-budget-usd` (a row Resume takes none, and S6's run
 // no turn).
+// A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
+// response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
+// the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
+// 22,700 tokens (the cache reads of the main calls beside it); S3's parent at case 4 holds more (case 1's artifact turn
+// with its screenshot, case 3's Bash turn, the maws tools), about 30,000 to 35,000 tokens, which at Haiku 4.5's
+// cache-write rate (US$1.25 per million) costs US$0.038 to 0.044 even with no cache hit, plus a short answer.
 // Scratch: one root per run, /private/tmp/maws-e11-p1live-<stamp> (the runner's pid, or MAWS_P1_LIVE_STAMP), one
 // directory per case under it holding `claude-config/` (`settings.json` `{}`, a `.claude.json` trusting the case's
 // repository), `repo/` (a git repository) and `user-data/` (the app's profile; journals under engine-host/journal/),
@@ -38,7 +44,7 @@
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
 // (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -76,6 +82,7 @@ const ROOT = runRoot();
 const SHOTS = process.env.MAWS_E11_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e11') : null;
 const TURN_MS = 300_000;
 const FIRST_OUTPUT_MS = 30_000; // the engine host's bound (src/engine-host/session.ts, `no_output`)
+const BTW_RESERVATION_USD = 0.05; // case 4's side question, charged since no receipt shows it (the header)
 
 // The pages of case 1, in two colours the prompt never names (E2's recording proved its capture the same way).
 const V1 = { rgb: [211, 47, 47], word: /red|crimson|scarlet/i } as const;
@@ -114,6 +121,11 @@ const PROMPTS = {
 // The charges no receipt shows, appended as they are made (support/p1-live.ts, Charge).
 const CHARGES = join(ROOT, 'charges.jsonl');
 const charges = (): Charge[] => (existsSync(CHARGES) ? readFileSync(CHARGES, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Charge) : []);
+function charge(note: (line: string) => void, c: Charge): void {
+  mkdirSync(ROOT, { recursive: true });
+  appendFileSync(CHARGES, `${JSON.stringify(c)}\n`);
+  note(`  charged US$${c.usd.toFixed(4)} to ${CASE_SITTING[c.case].toUpperCase()} for ${c.label} [${c.key}]; ${spendLine(CASE_SITTING[c.case])}`);
+}
 
 // What each sitting and the run have spent: every journal of every case's profile under the run's root (a resumed or
 // forked process may restore its session's cost, so summing journals can only over-count, the safe side of a cap),
@@ -584,9 +596,11 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 4', 's3');
+    refuseOverCap(note, 'S3 case 4', 's3', { usd: BTW_RESERVATION_USD, for: 'the side question’s reservation' });
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
+    // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
+    charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
     const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });

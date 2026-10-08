@@ -4,10 +4,12 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
-import { a15Line, budgetOf, budgetRefusal, capUsd, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
+import { a15Line, attemptBudget, budgetOf, budgetRefusal, capUsd, chargeOf, DEFAULT_CAP_USD, dominantColour, initPluginsOf, liveOutDir, siteOf, SITTING_CAP_USD, spentBySitting, type Charge } from '../../e2e/support/p1-live';
 import { startOopifPage } from '../../e2e/support/oopif-page';
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '', frame });
+const prompt = (seq: number) => row(seq, 'out', { type: 'user', message: { role: 'user', content: 'hi' } });
+const result = (seq: number, usd: number) => row(seq, 'in', { type: 'result', subtype: 'success', parent_tool_use_id: null, num_turns: 1, total_cost_usd: usd });
 
 describe('the caps', () => {
   it('holds each sitting to its own cap (Design §5) and the run to MAWS_P1_LIVE_MAX_USD, their sum when unset', () => {
@@ -47,6 +49,31 @@ describe('the caps', () => {
     expect(budgetRefusal(budget(0.34, 0), 1.2)).toBe('not run (budget): the run has spent its US$1.20 cap');
     expect(budgetRefusal(budget(0.34, 0.97), 1.2, { usd: 0.08, for: 'the side thread' })).toBeNull();
     expect(budgetRefusal(budget(0.07, 0.97), 1.2, { usd: 0.08, for: 'the side thread' })).toBe('not run (budget): US$0.0700 left (S3 US$0.0700, the run US$0.9700) does not cover the US$0.0800 for the side thread');
+  });
+});
+
+describe('a paid call’s charge', () => {
+  it('is its receipt when a result follows its last prompt', () => {
+    expect(chargeOf([prompt(1), result(2, 0.02)], 0.08)).toEqual({ usd: 0.02, receipted: 0.02, settled: true });
+    expect(chargeOf([prompt(1), result(2, 0.11)], 0.08)).toEqual({ usd: 0.11, receipted: 0.11, settled: true });
+    expect(chargeOf([], 0.05)).toEqual({ usd: 0, receipted: 0, settled: true }); // nothing asked, nothing spent
+  });
+
+  it('is never less than its whole allocation when a prompt or a side question went unreceipted', () => {
+    expect(chargeOf([prompt(1)], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
+    expect(chargeOf([prompt(1), result(2, 0.02), prompt(3)], 0.08)).toEqual({ usd: 0.08, receipted: 0.02, settled: false });
+    expect(chargeOf([prompt(1), result(2, 0.09), prompt(3)], 0.08)).toEqual({ usd: 0.09, receipted: 0.09, settled: false });
+    const sideQuestion = row(3, 'out', { type: 'control_request', request_id: 'r', request: { subtype: 'side_question', question: 'q' } });
+    expect(chargeOf([prompt(1), result(2, 0.02), sideQuestion], 0.05).settled).toBe(false);
+    // a subagent's result is no receipt for the main conversation's prompt
+    expect(chargeOf([prompt(1), row(2, 'in', { type: 'result', parent_tool_use_id: 'toolu_1', total_cost_usd: 0.01 })], 0.05).usd).toBe(0.05);
+  });
+
+  it('gives each S1 attempt what is left divided by the attempts still to run, so three fit the cap', () => {
+    expect(attemptBudget(0.15, 0, 3)).toBe(0.05);
+    expect(attemptBudget(0.15, 0.02, 2)).toBe(0.065);
+    expect(attemptBudget(0.15, 0.1, 1)).toBe(0.05);
+    expect(attemptBudget(0.15, 0.16, 1)).toBe(0);
   });
 });
 

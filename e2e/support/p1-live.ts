@@ -1,6 +1,7 @@
 // The pure parts of E11's app-level live sittings (docs/doperpowers/plans/2026-10-06-e11-finish.md, Task 6.1; Design §5
-// S3, S4, S6 and A-47 through e2e/p1-live.spec.ts, S1 through test/live/maws-ask-interrupt.live.test.ts): the run's cap and
-// what each session may still spend, where the logs go, the scratch root every case of one run shares, the A-15
+// S3, S4, S6 and A-47 through e2e/p1-live.spec.ts, S1 through test/live/maws-ask-interrupt.live.test.ts): each sitting's
+// cap and the run's, what each sitting has spent and what the next paid call may spend, a paid call's charge when no
+// receipt shows it, the case's end that runs every step, S6's stall reading, where the logs go, the scratch root every case of one run shares, the A-15
 // reading in the standing rule's exact form and its log line, the screenshot's dominant colour, the site of a URL and
 // the engine's init plugin list. Free of Playwright, so test/support/p1-live.test.ts runs it under vitest.
 import { createHash } from 'node:crypto';
@@ -10,6 +11,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import type { JournalRow } from '@shared/wire/journal';
+import { journalCost } from '../../test/live/support/live';
 import { a15DeltaText, compareA15 } from '../../test/support/owner-file';
 
 type Env = Record<string, string | undefined>;
@@ -86,6 +88,30 @@ export function budgetRefusal(budget: Budget, runCap: number = DEFAULT_CAP_USD, 
   if (need !== undefined && budget.usd < need.usd) return `not run (budget): US$${budget.usd.toFixed(4)} left (${name} US$${budget.sittingLeft.toFixed(4)}, the run US$${budget.runLeft.toFixed(4)}) does not cover the US$${need.usd.toFixed(4)} for ${need.for}`;
   return null;
 }
+
+// ---- receipts ---------------------------------------------------------------------------------------------------------
+
+const isMainResult = (row: JournalRow): boolean => {
+  const frame = row.frame as { type?: unknown; parent_tool_use_id?: unknown } | null;
+  return row.direction === 'in' && frame?.type === 'result' && (frame.parent_tool_use_id ?? null) === null;
+};
+// What MAWS writes that the engine spends on: a prompt, or a side question (`/btw`, answered with no result frame).
+const isPaidRequest = (row: JournalRow): boolean => {
+  const frame = row.frame as { type?: unknown; request?: { subtype?: unknown } } | null;
+  return row.direction === 'out' && (frame?.type === 'user' || (frame?.type === 'control_request' && frame.request?.subtype === 'side_question'));
+};
+
+// What a session's paid calls cost, from its journal rows in order: its receipts (the main lane's `total_cost_usd`,
+// journalCost) when a result came after its last prompt or side question (`settled`); otherwise at least its whole
+// `allocationUsd`, since an absent receipt must never give money back (an interrupted or failed turn, a stopped one).
+export function chargeOf(rows: readonly JournalRow[], allocationUsd: number): { usd: number; receipted: number; settled: boolean } {
+  const receipted = usd4(journalCost([...rows]).costUsd);
+  const settled = rows.findLastIndex(isPaidRequest) < rows.findLastIndex(isMainResult) || !rows.some(isPaidRequest);
+  return { usd: settled ? receipted : Math.max(receipted, allocationUsd), receipted, settled };
+}
+
+// One S1 attempt's `maxBudgetUsd`: what the sitting's cap leaves, shared by the attempts still to run, so the three fit.
+export const attemptBudget = (capUsd: number, spentUsd: number, attemptsLeft: number): number => usd4(Math.max(0, capUsd - spentUsd) / attemptsLeft);
 
 // ---- where things go ----------------------------------------------------------------------------------------------------
 
