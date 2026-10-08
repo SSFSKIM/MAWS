@@ -1,7 +1,8 @@
 import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
-import type { AttentionId } from '@shared/graph/ids';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AttentionId, RequestId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
@@ -10,6 +11,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 import { connectAttention } from './navigation';
 
 const nine = scenarioFile('nine-sessions');
@@ -25,7 +27,14 @@ beforeEach(() => {
   fake = fakeClient({ 'attention.pendingNavigate': { navigate: null } });
   disconnect = connectAttention(fake.client);
 });
-afterEach(() => disconnect());
+afterEach(() => {
+  disconnect();
+  resetAskSheets();
+});
+
+// A blocking `maws` ask's originating event (what the Question sheet's store follows and `attention.request` answers).
+const askOpened = (requestId: string): SessionEvent =>
+  ({ id: `ev-${requestId}`, sessionId: 'eng', at: '2026-09-28T10:00:00Z', seq: 1, agentId: null, parentToolUseId: null, kind: 'maws.ask.opened', askId: `ask-${requestId}`, toolUseId: null, requestId, blocking: true, title: 'Setup', context: null, questions: [] }) as unknown as SessionEvent;
 
 describe('⌘⇧J (attention.next)', () => {
   it('opens the oldest Needs-you session’s tab in the focused pane, then the next one from there', () => {
@@ -116,8 +125,9 @@ describe('the fallback toast', () => {
   // surface is the panel's Question sheet, which E1 opens for the shown session (a file tab of it counts)
   it('counts the panel: a maximized one hides the session tab’s card; an open one shows the shown session’s Question sheet', () => {
     const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
-    const question: AttentionItem = { ...fix, id: 'att-ask' as AttentionId, kind: 'question' };
+    const question: AttentionItem = { ...fix, id: 'att-ask' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-ask' as RequestId } };
     act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, question] }));
+    applyAskEvents(fix.appSessionId, [askOpened('req-ask')]); // a maws ask: the Question sheet's store holds it
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
     useLayout.getState().openSession(fix.appSessionId);
@@ -136,6 +146,23 @@ describe('the fallback toast', () => {
     useLayout.getState().setPanel({ collapsed: true });
     notify(question); // a collapsed panel shows no sheet
     expect(toasted()).toEqual([`attention:${fix.id}`, `attention:${question.id}`]);
+  });
+
+  // scale-review C scalpel-3#1: only a `maws` ask is on the panel's Question sheet; the engine's AskUserQuestion is a
+  // `question` item too, but its card docks in the session's own composer, so the open panel does not show it
+  it('an engine AskUserQuestion is not on the panel: a file tab of its session in front still toasts; a maws ask read as one does not', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const engineAsk: AttentionItem = { ...fix, id: 'att-auq' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-auq' as RequestId } };
+    const mawsAsk: AttentionItem = { ...fix, id: 'att-maws' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-maws' as RequestId } };
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, engineAsk, mawsAsk] }));
+    useAttention.setState({ requests: new Map([[engineAsk.id, { ...askOpened('req-auq'), kind: 'question.requested' } as unknown as SessionEvent], [mawsAsk.id, askOpened('req-maws')]]) });
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().setPanel({ maximized: false, collapsed: false });
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
+    notify(engineAsk);
+    notify(mawsAsk); // its originating event read as `maws.ask.opened`, as swapOf reads it
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${engineAsk.id}`]);
   });
 
   // E11 (W-C; E10's crash screenshot; A-47): the toast names an item; once that item is no longer open (answered,

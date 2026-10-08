@@ -16,6 +16,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { askSheet } from '../tools/maws/ask/store';
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
 
@@ -41,13 +42,24 @@ function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
 // docked card (C7); a toast would only cover the panel's action bar. A file tab of the session does not count (the
 // docked card is in the session's own pane), and neither does a pane under a maximized panel (visibility.ts's rule).
 // W-C review m1: an ask's surface is the panel's Question sheet, which E1 opens whenever the session is the shown one
-// (a file tab of it counting), so for a `question` item the open panel showing that session is on screen too.
-function requestOnScreen(appSessionId: AppSessionId, kind: AttentionItem['kind'] | undefined): boolean {
+// (a file tab of it counting), so for a `maws` ask the open panel showing that session is on screen too. Scale-review C
+// scalpel-3#1: only a `maws` ask; the engine's AskUserQuestion is a `question` item as well, but its card docks in the
+// session's own composer (swap.ts), so the panel does not show it.
+function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undefined): boolean {
   const { main, regions } = useLayout.getState();
   const panelOpen = !regions.panel.collapsed;
   const inFront = currentSet(main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
   if (inFront && !(regions.panel.maximized && panelOpen)) return true;
-  return kind === 'question' && panelOpen && shownSession(main) === appSessionId;
+  return item !== undefined && isMawsAsk(item) && panelOpen && shownSession(main) === appSessionId;
+}
+
+// A `maws` ask's item: its originating event read as `maws.ask.opened` (swapOf's test), or, not read yet, an ask the
+// Question sheet's store holds under its request id (the store follows every live `maws.ask.*` batch).
+function isMawsAsk(item: AttentionItem): boolean {
+  if (item.kind !== 'question') return false;
+  const request = useAttention.getState().requests.get(item.id);
+  if (request !== undefined && request !== null) return request.kind === 'maws.ask.opened';
+  return [...askSheet(item.appSessionId).getState().asks.values()].some((ask) => ask.requestId === item.request.requestId);
 }
 
 // The session's latest list holds the item: the buffer of an outstanding attention snapshot first, else the store's.
@@ -66,7 +78,7 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
   if (delivery !== 'fallback') return;
   const id = appSessionId as AppSessionId;
   const item = itemOf(id, attentionId as AttentionId);
-  if (requestOnScreen(id, item?.kind)) return;
+  if (requestOnScreen(id, item)) return;
   if (item && !isOpen(item)) return; // settled before its notice arrived
   const record = useSessions.getState().records.get(id);
   const title = record ? displayTitle(record) : 'A session';
