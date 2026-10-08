@@ -99,7 +99,7 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
-export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.browser.answer': 'immediate', 'maws.browser.waiting': 'immediate' /* E4c */ };
+export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.browser.answer': 'immediate', 'maws.browser.waiting': 'immediate' /* E4c */, 'maws.download.recorded': 'bounded' /* E13 */ };
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
@@ -742,6 +742,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handleMaws('maws.browser.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerBrowser(requestId as RequestId, result) ?? 'not_pending' }));
   handleMaws('maws.browser.waiting', async ({ appSessionId, requestId, waiting }) => ({ outcome: table.get(appSessionId as AppSessionId)?.browserWaiting(requestId as RequestId, waiting) ?? 'not_pending' }));
   // E4c end
+  // E13: an agent's finished download, recorded once per path by the session that holds it
+  handleMaws('maws.download.recorded', async (download) => {
+    const session = table.get(download.appSessionId as AppSessionId);
+    return { outcome: session ? await session.recordDownload({ ...download, appSessionId: download.appSessionId as AppSessionId }) : 'not_held' };
+  });
   // E1 end
 
   // E3 start: the side-question log's commands. The log lives as long as the session's process does here (an exited

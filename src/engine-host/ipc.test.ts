@@ -1024,6 +1024,30 @@ describe('side questions (E3 M1)', () => {
 });
 // E3 end
 // E2 start: the store's announcements and the capture bridge through the launcher's own store (E2 Design §2 and §7)
+describe('maws.download.recorded (E13: an agent\'s download through cua)', () => {
+  it('records a finished download as a file deliverable of the session that holds it, once per path, and announces it; not_held elsewhere', async () => {
+    const file = join(userData, 'cua-report.pdf');
+    writeFileSync(file, '%PDF-1.4');
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    const download = { appSessionId: id, tabId: 'b_0123456789ab', path: file, filename: 'cua-report.pdf', url: 'http://127.0.0.1:5000/report.pdf', bytes: 8 };
+    expect(MAWS_DEADLINE_SHAPES['maws.download.recorded']).toBe('bounded');
+    expect(await host.call('maws.download.recorded', { ...download, appSessionId: 'app-none' })).toEqual({ outcome: 'not_held' });
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(await host.call('maws.download.recorded', download)).toEqual({ outcome: 'recorded' });
+    expect(await host.call('maws.download.recorded', download)).toEqual({ outcome: 'duplicate' });
+    await until(() => host.emitted.some((e) => e.name === 'deliverables.changed'), 'the store announcement');
+    const changed = host.emitted.filter((e) => e.name === 'deliverables.changed').map((e) => e.payload as { appSessionId: string; id: string; change: string });
+    expect(changed).toEqual([{ appSessionId: id, id: expect.any(String), change: 'created' }]);
+    const record = JSON.parse(readFileSync(join(userData, 'deliverables', id, `${changed[0]!.id}.json`), 'utf8'));
+    expect(record).toMatchObject({ kind: 'file', path: file, title: 'cua-report.pdf', sourceUrl: download.url });
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
+
 describe('deliverables.changed and the capture bridge (E2 M1)', () => {
   it("relays the launcher's store writes as deliverables.changed and a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {
     const page = join(userData, 'dashboard.html');

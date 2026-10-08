@@ -44,7 +44,7 @@ import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
 // E1 start (E11: the wiring in session-maws.ts)
-import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { BrowserWaitReason } from '@shared/maws/browser';
 import type { AskAnswer } from '@shared/maws/tools';
@@ -386,6 +386,11 @@ export class EngineSession {
 
   browserWaiting(requestId: RequestId, waiting: BrowserWaitReason | null): 'delivered' | 'not_pending' {
     return this.maws.browserWaiting(requestId, waiting);
+  }
+
+  // E13: an agent's finished download through cua, as a file deliverable once per path
+  recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
+    return this.maws.recordDownload(download);
   }
 
   asks(): PendingAsk[] {

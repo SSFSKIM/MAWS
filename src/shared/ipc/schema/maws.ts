@@ -15,6 +15,7 @@ import { ToolUseIdSchema } from '../../graph/ids';
 import { BrowserTabIdSchema } from '../../browser/tab';
 import { BROWSER_ERROR_MAX_CHARS, BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../../maws/browser';
 // E4c end
+import { AbsolutePathSchema } from './settings'; // E13
 
 export const MawsPaneShowSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
@@ -99,6 +100,21 @@ export const MawsBrowserAnswerResultSchema = z.discriminatedUnion('ok', [
 export type MawsBrowserAnswerResult = z.infer<typeof MawsBrowserAnswerResultSchema>;
 // E4c end
 
+// E13 start (the in-app browser spec of 2026-10-08 in the cua repository, "Downloads"): a file an agent downloaded through
+// cua finished in ~/Downloads; main asks the session's engine host to record it as a file deliverable, once per path. The
+// host writes through its DeliverableWriter (which announces the change) and answers `duplicate` for a path it recorded
+// already, `not_held` for a session it does not hold. `url` is where the file came from; `bytes` its size on disk.
+export const MawsDownloadRecordedSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  tabId: BrowserTabIdSchema,
+  path: AbsolutePathSchema,
+  filename: z.string().min(1),
+  url: z.string(),
+  bytes: z.number().int().min(0),
+});
+export type MawsDownloadRecorded = z.infer<typeof MawsDownloadRecordedSchema>;
+// E13 end
+
 export const commands = {
   // The session's pending asks (none for a session this host does not hold).
   'maws.asks.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ asks: z.array(PendingAskSchema) }), owner: 'engine-host' },
@@ -135,6 +151,8 @@ export const commands = {
     owner: 'engine-host',
   },
   // E4c end
+  // E13: main's report of an agent's finished download (once per path)
+  'maws.download.recorded': { input: MawsDownloadRecordedSchema, output: z.strictObject({ outcome: z.enum(['recorded', 'duplicate', 'not_held']) }), owner: 'engine-host' },
 } as const satisfies Record<`maws.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

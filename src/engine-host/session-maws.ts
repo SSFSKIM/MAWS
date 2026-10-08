@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestId, SessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
 import type { BrowserWaitReason } from '@shared/maws/browser';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import type { AskAnswer, AskResult } from '@shared/maws/tools';
 import type { ControlRequestFrame } from '@shared/wire/frames';
+import { recordDownload } from './deliverables/downloads'; // E13
 import { MemoryDeliverableStore, type DeliverableChange, type DeliverableWriter, type OnDeliverableWritten } from './deliverables/store';
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue } from './queue';
@@ -70,6 +71,7 @@ export class SessionMaws {
   private readonly browser: BrowserBridge; // E4c: the bridge the browser tools ask main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
+  private readonly deliverables: DeliverableWriter; // E1: the tools' writer; E13: an agent's downloads recorded through it too
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
@@ -90,9 +92,10 @@ export class SessionMaws {
         host.touch();
       },
     });
+    this.deliverables = host.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce });
     this.toolServer = new MawsToolServer({
       tools: mawsTools({
-        deliverables: host.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce }), bridge: this.panes, capture: this.captures /* E2 */,
+        deliverables: this.deliverables, bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
         browser: this.browser, userData: host.userData ?? tmpdir() /* E4c */,
       }),
@@ -147,6 +150,17 @@ export class SessionMaws {
     return this.browser.waiting(requestId, waiting);
   }
   // E4c end
+
+  // E13: an agent's download through cua finished (`maws.download.recorded`): a file deliverable, once per path; a write
+  // that fails is logged and leaves the saved file as it is.
+  async recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
+    try {
+      return await recordDownload(this.deliverables, download);
+    } catch (error) {
+      this.host.log(`could not record the download of tab ${download.tabId} as a deliverable: ${(error as Error).message}`);
+      throw error;
+    }
+  }
 
   // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
   asks(): PendingAsk[] {

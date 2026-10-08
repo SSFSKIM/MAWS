@@ -864,7 +864,7 @@ describe('ipc schema validates both directions', () => {
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
     it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.browser.answer', 'maws.browser.waiting' /* E4c */]);
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.browser.answer', 'maws.browser.waiting' /* E4c */, 'maws.download.recorded' /* E13 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
       expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.browser.request', 'maws.browser.cancel', 'maws.browser.progress' /* E4c */]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
@@ -1395,6 +1395,13 @@ describe('ipc schema validates both directions', () => {
       for (const waiting of ['human', 'cover', null]) expect(validateCommandInput('maws.browser.waiting', { appSessionId: 'a', requestId: 'r1', waiting }).ok, String(waiting)).toBe(true);
       expect(validateCommandInput('maws.browser.waiting', { appSessionId: 'a', requestId: 'r1', waiting: 'sheet' }).ok).toBe(false);
       expect(validateCommandOutput('maws.browser.waiting', { outcome: 'delivered' }).ok).toBe(true);
+      // E13: an agent's finished download through cua
+      const download = { appSessionId: 'a', tabId: TAB_ID, path: '/Users/x/Downloads/r.pdf', filename: 'r.pdf', url: 'http://127.0.0.1:1/r.pdf', bytes: 10 };
+      expect(commands['maws.download.recorded'].owner).toBe('engine-host');
+      expect(validateCommandInput('maws.download.recorded', download).ok).toBe(true);
+      expect(validateCommandInput('maws.download.recorded', { ...download, path: 'r.pdf' }).ok).toBe(false);
+      expect(validateCommandInput('maws.download.recorded', { ...download, bytes: -1 }).ok).toBe(false);
+      for (const outcome of ['recorded', 'duplicate', 'not_held']) expect(validateCommandOutput('maws.download.recorded', { outcome }).ok).toBe(true);
     });
 
     it('validates the waiting line\'s progress and the acting tab', () => {
