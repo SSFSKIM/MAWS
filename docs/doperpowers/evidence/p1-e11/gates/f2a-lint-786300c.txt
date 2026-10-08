@@ -1,0 +1,7 @@
+Command: pnpm lint (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== lint head 786300c4 start 2026-10-08T17:15:18Z load { 12.98 15.12 19.92 }
+== lint exit 0 end 2026-10-08T17:15:47Z
+--- summary lines
+(no counts printed; exit code below)
+--- exit code: 0

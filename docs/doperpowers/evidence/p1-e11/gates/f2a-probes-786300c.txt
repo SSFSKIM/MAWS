@@ -1,0 +1,9 @@
+Command: pnpm test:probes (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== probes head 786300c4 start 2026-10-08T17:15:47Z load { 10.71 14.36 19.48 }
+== probes exit 0 end 2026-10-08T17:15:47Z
+--- summary lines
+# pass 176
+# fail 0
+# skipped 0
+--- exit code: 0

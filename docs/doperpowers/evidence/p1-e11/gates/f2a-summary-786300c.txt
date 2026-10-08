@@ -1,0 +1,19 @@
+E11 M7.2 F2a gates, final head 786300c4
+typecheck exit 0 head 786300c4 
+lint exit 0 head 786300c4 
+probes exit 0 head 786300c4 # pass 176 # fail 0 # skipped 0
+units exit 0 head 786300c4 Test Files  713 passed | 1 skipped (714) Tests  9923 passed | 1 skipped (9924)
+build exit 0 head 786300c4 
+e2e exit 0 head 786300c4 140 skipped 49 passed (3.6m)
+e2e-widgets exit 0 head 786300c4 24 passed (38.8s)
+e2e-settings exit 0 head 786300c4 9 passed (17.9s)
+e2e-transcript exit 0 head 786300c4 31 passed (4.8m)
+e2e-side exit 0 head 786300c4 8 passed (28.6s)
+e2e-panel exit 0 head 786300c4 23 passed (39.6s)
+e2e-code exit 0 head 786300c4 36 passed (1.4m)
+e2e-c7 exit 0 head 786300c4 29 passed (1.1m)
+e2e-supervisor exit 0 head 786300c4 8 passed (2.2m)
+
+Earlier round on d9022663 (before the follow-ups 87ce6a84, 331a2d3f, 786300c4): units exit 1, 7 failed in 3 files
+(main-wiring and lifecycle suites lacked the build-stamp globals; binary-info pinned TESTED to the fixtures pin); fixed and
+re-run above. Survivors after the run: none of this run (pgrep -fl maws-supervisor shows only the owner app pid 81243).

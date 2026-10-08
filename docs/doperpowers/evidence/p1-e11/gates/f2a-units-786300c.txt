@@ -1,0 +1,8 @@
+Command: pnpm test --maxWorkers=4 (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== unit head 786300c4 start 2026-10-08T17:15:47Z load { 10.71 14.36 19.48 }
+== unit exit 0 end 2026-10-08T17:19:19Z
+--- summary lines
+Test Files  713 passed | 1 skipped (714)
+Tests  9923 passed | 1 skipped (9924)
+--- exit code: 0

@@ -1,0 +1,8 @@
+Command: pnpm e2e:transcript (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== e2e:transcript head 786300c4 start 2026-10-08T16:59:43Z load { 16.91 21.82 18.99 }
+== e2e:transcript exit 0 end 2026-10-08T17:05:04Z
+--- summary lines
+31 passed (4.8m)
+restore: 0 sibling evidence changes left
+--- exit code: 0
