@@ -697,6 +697,46 @@ describe('a record’s trust card and its continuation', () => {
     expect(useNotices.getState().notices).toEqual([]);
   });
 
+  // M1's round-4 review: a late answer of a dismissed card's acquisition docks nothing and says nothing
+  it.each([
+    ['relay_unreachable', { status: 'relay_unreachable', appSessionId: ID, health: health() }],
+    ['needs_trust', { status: 'needs_trust', appSessionId: ID, trust: trustState() }],
+    ['missing_directory', { status: 'missing_directory', appSessionId: ID, directory: '/gone' }],
+    ['failed', { status: 'failed', appSessionId: ID, message: 'the model is not available', resources: { worktree: null, record: 'kept', transcript: 'kept' } }],
+  ])('a card cancelled while its acquisition is out: a late %s docks no card and says nothing', async (_kind, outcome) => {
+    withMain({ 'engine.relayHealth': () => health({ ok: true, status: 200, error: null }) });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+      render(<Docked />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await act(() => fake.reply('session.acquire', outcome));
+      await waitFor(() => expect(isContinuing(ID)).toBe(false));
+      expect(useSetup.getState().cards.has(ID)).toBe(false);
+      expect(useNotices.getState().notices).toEqual([]);
+      await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // no recreated card, so no poll resumes the wait
+      expect(fake.invoked('session.acquire')).toHaveLength(1);
+      expect(fake.invoked('session.send')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a host error on a dismissed card’s acquisition says nothing either', async () => {
+    withMain();
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.fail('session.acquire', 'main is gone'));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(useNotices.getState().notices).toEqual([]);
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+  });
+
   it('a relay card cancelled while its Run direct acquires sends nothing either', async () => {
     withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
     act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));

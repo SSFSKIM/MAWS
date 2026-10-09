@@ -127,8 +127,10 @@ export async function continueSetup(appSessionId: AppSessionId, options: StartOp
 // undocks the card and says why. A card a surface docked without a message only starts the session.
 // One continuation per card at a time: a second (a manual Continue racing the relay card's poll, a double press) does
 // nothing while the first holds the session's claim, which only it releases, once its message is accepted or refused.
-// The card may be dismissed (Cancel) while the acquisition runs: the session still starts, as the gesture asked, but the
-// continuation sends nothing and leaves the draft alone; it goes on only while its card is still the one docked.
+// The card may be dismissed (Cancel) or replaced while the continuation runs: the session may still start, as the
+// gesture asked, but every side effect after the first await (a card docked again, a refusal's toast and undock, the
+// send, the clear, the final undock) happens only while its card is still the one docked; the claim alone is released
+// whatever happened.
 async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
   const release = useSetup.getState().claimContinuation(appSessionId);
   if (release === null) return { ok: false, error: 'This session is already continuing' };
@@ -136,13 +138,15 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
   const current = () => useSetup.getState().cards.get(appSessionId) === card;
   const dismissed: HookResult = { ok: false, error: 'The card was dismissed' };
   const refuse = (words: string): HookResult => {
-    if (current()) useSetup.getState().undock(appSessionId); // never another card docked since
+    if (!current()) return dismissed; // the owner already took the card away: nothing to undock or say
+    useSetup.getState().undock(appSessionId);
     toast({ id: startNoticeId(appSessionId), level: 'danger', text: words, actions: [], dismissible: true });
     return { ok: false, error: words };
   };
   try {
-    const outcome = await acquireSession(appSessionId, docked === null ? 'resume' : 'send', { ...options, ...(docked !== null && { dockMessage: docked }) });
-    if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { ok: true }; // a card again, docked by the acquisition
+    const outcome = await acquireSession(appSessionId, docked === null ? 'resume' : 'send', { ...options, ...(docked !== null && { dockMessage: docked }), current });
+    // a card again, docked by the acquisition only while this one was still current
+    if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return useSetup.getState().cards.has(appSessionId) ? { ok: true } : dismissed;
     if (outcome.status !== 'ready') return refuse(acquisitionWords(outcome) ?? 'The session could not start');
     if (!current()) return dismissed; // the session started; its dismissed card's message is not sent
     if (docked !== null) {

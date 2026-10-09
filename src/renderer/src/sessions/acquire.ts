@@ -18,14 +18,16 @@ import { useSetup } from './store';
 export const TRUST_FIRST = 'Trust this folder in the session to continue';
 export const RELAY_FIRST = 'The relay is unreachable · the session offers Run direct';
 
-export type AcquireOptions = StartOptions & { dockMessage?: FirstMessage };
+// `current`: whether the caller still wants the card the answer may dock (a card's continuation whose card the owner
+// dismissed meanwhile docks nothing); absent, it always does.
+export type AcquireOptions = StartOptions & { dockMessage?: FirstMessage; current?: () => boolean };
 
 // Throws when the command itself fails (main or the host unreachable), as the send seam does, so a caller's Retry applies.
 export async function acquireSession(appSessionId: AppSessionId, reason: AcquireReason, options: AcquireOptions = {}, client: MawsBridge = ipc): Promise<AcquireOutcome> {
-  const { dockMessage, ...start } = options;
+  const { dockMessage, current, ...start } = options;
   const result = await client.invoke('session.acquire', { appSessionId, reason, ...(Object.keys(start).length > 0 && { options: start }) });
   if (!result.ok) throw new Error(result.error.message);
-  dockFor(appSessionId, result.value, dockMessage ?? null);
+  if (current?.() ?? true) dockFor(appSessionId, result.value, dockMessage ?? null);
   return result.value;
 }
 
