@@ -14,7 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage } from '@shared/graph/session';
 import { tabId } from '@shared/ipc/schema/layout';
 import { deliverableUrl } from '@shared/maws/deliverable';
-import { item, record } from '../../../../../test/support/builders';
+import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
 import { registerMessageReturn, returnMessage } from '../../sessions/message-return';
@@ -237,6 +237,17 @@ describe('Reply through the human send seam', () => {
     await waitFor(() => expect(replyField().value).toBe(''));
     expect(card()!.querySelector('[role="alert"]')).toBeNull();
     expect(seam).toHaveBeenCalledTimes(3);
+  });
+
+  it('a refusal while the thread’s engine exited without a budget release also offers the Side pane, where Resume is', async () => {
+    await ready();
+    act(() => useSessions.setState({ engine: new Map(useSessions.getState().engine).set(child, status(child, { process: 'exited' } as never)) }));
+    seam.mockResolvedValueOnce({ disposition: 'refused', reason: 'The session has ended' });
+    await userEvent.type(replyField(), 'Again{Enter}');
+    const alert = await waitFor(() => within(card()!).getByRole('alert'));
+    await userEvent.click(within(alert).getByRole('button', { name: 'Open in Side pane' }));
+    expect(sidePaneOf(useSidePane.getState(), PARENT).view).toEqual({ kind: 'thread', childAppSessionId: child });
+    expect(useCommentCard.getState().open).toBeNull();
   });
 
   it('queued: the host queue’s held bubble at the thread’s tail, replaced by the user row once the host submits it', async () => {
