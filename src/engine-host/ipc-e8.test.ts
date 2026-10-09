@@ -290,7 +290,7 @@ esac
     const host = engineHost();
     const { manifests } = await host.call('plugins.manifest', { cwd: project, items: [P] });
     expect(manifests[0]).toMatchObject({ state: 'read', marketplaceVersion: '1.1.0' });
-    expect(calls()).toEqual(['plugin list --json', 'plugin marketplace list --json']);
+    expect(calls().sort()).toEqual(['plugin list --json', 'plugin marketplace list --json']); // the two run together
   });
 });
 // P2-B end
