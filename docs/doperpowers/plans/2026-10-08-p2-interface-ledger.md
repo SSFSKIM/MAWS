@@ -10,6 +10,10 @@ Purpose: P2-A, P2-C, P2-D and P2-E1 run at once and each extends X2; A and C bot
 |---|---|---|---|
 | `session.acquire {appSessionId, reason: 'send' \| 'chip' \| 'read' \| 'side' \| 'peer' \| 'resubmit'}` → the start-outcome shape (`StartOutcomeSchema`), joining an in-flight start (X16); or `session.start` extended with a `join` flag, the child's choice recorded here before B, C or D codes against it; added to `LAUNCHES` in `renderer/src/app/supervisor-notices.ts` | P2-A | B (Loaded now), C (answers on an exited session), the chips and widgets | reserved 2026-10-08 |
 | `session.observedFacts {appSessionId}` → X17's snapshot or `null`; a main-owned snapshot read beside `session.digests` | P2-A | B, D | reserved 2026-10-08 |
+| `sendHumanPrompt(appSessionId, content, {origin: 'composer' \| 'answer' \| 'reply' \| 'comment' \| 'peer'}) → {disposition: 'sent' \| 'steered' \| 'started' \| 'refused', messageUuid?, reason?}` in `src/renderer/src/composer/submit/send-human-prompt.ts` (X22, a renderer seam, not IPC): `session.steer {priority:'next'}` while a turn runs, `session.send` when idle; A adds `started` | P2-0 (A extends) | the composer, C (answers), E1 (card Reply, Send to main) | reserved 2026-10-08 |
+| `availability` (X16's field) on the renderer's session read-model row, derived in main | P2-A | B, C, D | reserved 2026-10-08 |
+| `mods.list` → X20 rows | P2-C | B | reserved 2026-10-08 |
+| `plugins.manifest {id, scope, projectPath?}` → `{name, description?, author?, icon?, components: {commands, skills, agents, hooks, mcpServers}}`, read by the host from the installed manifest and directories, no plugin code executed, secrets redacted | P2-B | — | reserved 2026-10-08 |
 | `session.recentTurns {appSessionId, limit}` → the last N turns' rows for a preview, read from the live host or from disk, no engine launched, no read-state change (name provisional; D may instead give `session.events` bounds, recorded here) | P2-D | — | reserved 2026-10-08 |
 | `attention.acknowledge` widened to the kinds `async_input` and `essential_unread` (Mark read); `mods.*` settings commands only if the settings namespace does not already cover them | P2-C | the sidebar, Needs you | reserved 2026-10-08 |
 | `browser.comment.picked` gains an additive `position?: {x, y}` in pane viewport pixels (X21's pin) | P2-E2 | — | reserved 2026-10-08; coordinated with the cua session's #90 names in `schema/browser.ts` (append-only blocks, dated) |
@@ -26,11 +30,12 @@ Purpose: P2-A, P2-C, P2-D and P2-E1 run at once and each extends X2; A and C bot
 | Addition | Owner | State |
 |---|---|---|
 | `LaunchSpec.appendSystemPrompt?: {text, source: 'maws-contract', version}` (or the resolved field name the child records), emitted once as `--append-system-prompt`; `extraSettings.env.MAWS_NATIVE_TO_HUMAN=<version>` when the native lane is on; both resolved in `main/sessions/launch-mapping.ts` for cold start, resume and fork | P2-C | reserved 2026-10-08 |
-| The host sidecar: `StateFileSchema` gains an optional `observed?: X17` key (or `version: 2` with a reader for 1), never a strict change that moves a file aside | P2-A | reserved 2026-10-08 |
+| Observed facts (X17): a separate per-session file beside the state file (`observed.json`, host-owned); no key in `StateFileSchema` or the stored `LaunchSpecSchema` | P2-A | reserved 2026-10-08 (revised after review 1) |
+| `StateFileSchema` and the stored `LaunchSpecSchema` tolerate unknown keys (forward compatibility, a unit test pins it); no new key is written in P2 before this reader is in the owner's running build; C's `{contractSource, contractVersion}` waits on it | P2-0 | reserved 2026-10-08 |
 
 ## 4. X15 — version numbers
 
-Allocated in the P1 ledger's §4 table (`docs/doperpowers/plans/2026-10-05-p1-interface-ledger.md`), the repository's single allocation table, in landing order and after cua board #90's settings 12, index 7 and `profiles.json` 2 (taken 2026-10-08 at 5bd2cd57). Intentions, not numbers:
+Allocated in the P1 ledger's §4 table (`docs/doperpowers/plans/2026-10-05-p1-interface-ledger.md`), the repository's single allocation table, in landing order and after cua board #90's settings 12, index 7 and `profiles.json` 2 (taken 2026-10-08 at 5bd2cd57). Reservations are slots in landing order, not numbers: migrations are positional and each settings schema derives from the next, so the first child to land takes the next contiguous number and the others renumber at rebase (nothing released is edited); #90's 12 and 7 are slots on the same rule. Intentions, not numbers:
 
 | Child | Settings | Index | Other |
 |---|---|---|---|
@@ -44,12 +49,14 @@ Allocated in the P1 ledger's §4 table (`docs/doperpowers/plans/2026-10-05-p1-in
 | Name | Owner | Consumers | State |
 |---|---|---|---|
 | `openCommentComposer(anchor, {appSessionId, placement?})` with `placement: {kind: 'card', host: 'deliverable' \| 'browser', rect?: {x, y, width, height}} \| {kind: 'sheet'}`; `CommentCard` in `src/renderer/src/side/`; `artifactElementAnchor` keeps the pick's `rect` | P2-E1 | P2-E2, the deliverables viewer, the browser comment connect | reserved 2026-10-08 |
-| X9: `artifact_update` and `artifact_list` from a side thread resolve the parent session's artifacts (lineage `kind: 'side-thread'`); X12 versions so written belong to the parent's record | P2-E1 | — | reserved 2026-10-08 (spec Decision Log 9, flagged for the owner) |
+| X9: `artifact_update` and `artifact_list` from a side thread resolve the parent session's artifacts (lineage `kind: 'side-thread'`); X12 versions so written belong to the parent's record | P2-E1 | — | reserved 2026-10-08, conditional on the owner's answer to spec Decision Log 9 at approval |
+| Thread rows inside the card draw the owner channel through the local presenter whatever the attachment state (a `presentation: 'local'` option on the transcript list, or the equivalent the child records) until C's X18 module lands | P2-E1 | P2-C replaces it | reserved 2026-10-08 |
 
 ## 6. Shared files and landing order
 
-Files more than one P2 child touches: `src/shared/ipc/names/session.ts` and `schema/session.ts` (A, C, D: append-only blocks, dated), `src/shared/graph/enums.ts` (C), `src/shared/settings/defaults.ts` and `src/shared/ipc/schema/settings.ts` (B, C: one version each, in landing order), `src/main/sessions/launch-mapping.ts` (A for `browserBackend`'s reuse, C for the prompt and the variable), `src/renderer/src/widgets/PluginsWidget.tsx` (B rebuilds it; C adds the built-in section: whichever lands second adapts), `src/renderer/src/transcript/surface/Rows.tsx` (C), `src/renderer/src/side/*` (E1), `src/shared/ipc/schema/browser.ts` (E2 beside the cua session's #90). Rule as in P1: appended blocks only; an exception is one dated line here.
+Files more than one P2 child touches: `src/shared/ipc/names/session.ts` and `schema/session.ts` (A, C, D: append-only blocks, dated), `src/shared/graph/enums.ts` (C), `src/shared/settings/defaults.ts` and `src/shared/ipc/schema/settings.ts` (B, C: one version each, in landing order), `src/main/sessions/launch-mapping.ts` (A for `browserBackend`'s reuse, C for the prompt and the variable), `src/renderer/src/composer/Composer.tsx` and `composer/editor/submit.ts` (P2-0 extracts the seam first; A extends it; C and E1 call it), `src/renderer/src/widgets/PluginsWidget.tsx`, `SkillsWidget.tsx` and `SandboxWidget.tsx` (B owns them; A edits none, delivering through `widgets/read.ts` and `WidgetFrame.tsx`; C adds the built-in section: whichever of B and C lands second adapts), `src/renderer/src/transcript/surface/Rows.tsx` (C), `src/renderer/src/side/*` (E1), `src/shared/ipc/schema/browser.ts` (E2 beside the cua session's #90). Rule as in P1: appended blocks only; an exception is one dated line here.
 
 ## 7. Record
 
 - 2026-10-08: opened with the composite spec; reservations above; no child dispatched (the owner's approval pending).
+- 2026-10-08 (review 1): rows added for the seam (P2-0, X22), `availability`, `mods.list`, `plugins.manifest`, the forced local presenter and the observed-facts file; the slot rule stated in §4; the sidecar's tolerant reader assigned to P2-0; E1's artifact-scope row made conditional on the owner's answer.

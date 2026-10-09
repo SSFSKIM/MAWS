@@ -1,0 +1,66 @@
+ADVERSARIAL REVIEW 1 — P2 composite spec (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md) and its interface ledger, at master a2899355. Read-only; nothing run.
+
+1. BLOCKING — §4.3 "the send path" is binding but has no owner, no ledger name, and misstates the code.
+   Evidence: busy sends are `session.steer {priority:'next'}`, not `session.send` (composer/editor/submit.ts:51-53; submit-state.ts:89). Steer-vs-send is decided inside Composer.tsx:275-280 from that Composer's own status, queue and `released`. C's choice/Reply and E1's card Reply and Send to main render where no Composer for that session is mounted, so each child must re-derive the decision. A changes the same decision (submit-state.ts, "Send continues any eligible record"). The spec says "A's acquisition makes that path continue", but no shared path exists to change. E1 has no edge to A, although its thread or parent may be budget-released. The owner's decision 3 says "through the queue"; W10's `next` steer folds into the running turn at the next tool boundary, so "queued" and "delivered" have no defined signal.
+   Smallest fix: reserve one renderer seam in ledger §1 (e.g. `sendHumanPrompt(appSessionId, content) → {disposition, messageUuid}`, extracted from Composer.tsx) with one owner (C, its first consumer). Define "delivered" as the replayed user uuid. A puts acquisition inside the seam. Add "E1 conditional-on A.G1". Say whether an answer steers or waits for the turn to end, and fix the IPC wording.
+
+2. BLOCKING — X15: C (and B, if it migrates) cannot land before cua #90, which is a hidden external edge on a wave-1 child.
+   Evidence: index migrations are positional ("version N is the N-th entry", main/index/migrations.ts:2). Each settings version's schema derives from the next one by omission (shared/settings/defaults.ts:33-44). P1 ledger §4: "renumbers … so migrations stay contiguous". #90 reserved settings 12 and index 7 but has not started (cua-wt-90 spec §Progress: every box unchecked; MAWS-wt-90 sits at 5bd2cd57). C needs settings 13 and index 8 (spec §6 X15), so it can land only after #90. §7 calls C "dispatchable at approval" and gives E2 alone the #90 edge. §8 contemplates #90 slipping past F only for E2. If #90 slips, C, a required child, is stuck.
+   Smallest fix: agree with the cua session now that reservations are slots, not numbers. Whoever lands first takes the next contiguous number and the other renumbers at rebase (nothing is released yet, so no released entry is edited). Record this in both ledgers. Otherwise declare "C after #90" with a slip rule.
+
+3. SHOULD-FIX — §2 item 1 contradicts A.G3 and the owner's decision 4. A.G3 and A.G5 contradict each other.
+   Evidence: §2.1: "choosing a model applies at the next start and shows as pending". A.G3 and §4.1: a chip change acquires. Owner decision 4 (consolidated plan :178): "an engine starts on the owner's first action that needs it (Send, a chip change, a fresh read)". §8 then lets U1's verdict switch chips to a pending choice, which overturns a binding owner decision with no route back to the owner. A.G3 says "every useEngineRead widget initiate[s] work", while G5 says "mounted widgets … never re-wake". Panel tools persist per session (D-10): Session info, the panel's Plugins summary and the context ring mount on session switch.
+   Smallest fix: reword §2.1 to the acquire policy. A U1 verdict that changes any trigger goes to the owner. Define the triggers as explicit gestures (a command opening a widget, a chip interaction, Refresh); panel tools, summaries and the ring never acquire. Add to U1: does a no-prompt resume write to the JSONL or run SessionStart hooks? (Inference: it would bump the recency of terminal sessions and run the owner's hooks on a mere /plugins.)
+
+4. SHOULD-FIX — X17 in the host sidecar, and C's LaunchSpec field, are unsafe across builds; §4.2 also over-binds the storage.
+   Evidence: `StateFileSchema = z.strictObject({version: z.literal(1), …})` (file-session-state-store.ts:18). `LaunchSpecSchema` is strict too and is stored in that file (launch-spec.ts:11). Any unknown key makes an older reader move the file aside with its queue and grants (:136-143). So the spec's "optional key … never a strict shape change that moves a file aside" holds forward only. The owner runs development and packaged builds; userData is shared unless MAWS_USER_DATA is set (main/index.ts:119) — an inference about the owner's setup. Only A needs to know where the facts live; B and D need only the read.
+   Smallest fix: bind the read (`session.observedFacts`) and make storage advisory. Keep facts in a separate per-session file. Store only `{source, version}` of the contract in the stored LaunchSpec. If the sidecar must change, first ship a reader that tolerates unknown keys.
+
+5. SHOULD-FIX — A and B both own /plugins, /skills and /sandbox, with no declared edge.
+   Evidence: A.G2 puts "Loaded last time / Loaded now" into /plugins. A.G3 retrofits every useEngineRead consumer, Skills and Sandbox among them (report A-D item 5; files list :59 names PluginsWidget.tsx and plugins/reload.tsx). B.G1-G7 rebuild those widgets. Ledger §6 lists PluginsWidget.tsx for B and C only, and A's edges are "soft". A also hides two state owners: X16 (main's lifecycle and join races) and X17 (host persistence and freshness). These land independently, and B and D need only X17.
+   Smallest fix: B owns the composition. A delivers its behaviour through `useEngineRead` and the X17 read only; its /plugins gate is proved on whichever widget is on master. Add the file to ledger §6 with a named adapter. Consider splitting A into X16 and X17 slices so B and D wait only on the latter.
+
+6. SHOULD-FIX — the ledger does not reserve names that siblings will code against.
+   Evidence: the ledger's own rule: "A name not in this ledger is not yet shared." Missing: X16's `availability` field and the read model it lives on (binds B, C, D); X20's registry read (B.G8: "rows come from X20"); B's manifest read (B Contracts: "named in the ledger"); X18's presentation module and question-identity type (consumed by E1); X19. §10's "names reserved for A, C, D and E1" leaves out B entirely.
+   Smallest fix: add the rows before approval.
+
+7. SHOULD-FIX — the plugin's release version is the wrong compatibility signal for the doperpowers style.
+   Evidence: report B-C #37: the style has "name, description, keep-coding-instructions only … The only version is the plugin's, 7.141.2". If MAWS pins plugin versions, every doperpowers release reads as incompatible, the contract is appended on top of the style, and §2 item 3's "no doubled instructions" fails. If MAWS accepts ranges, grammar drift goes unseen. The check is also only after the fact: `system/init` arrives after the first user frame (p1-side-thread-live-resume.jsonl, seq 10), so a wrong guess costs a turn. Naming `doperpowers:to-human` in X18 also hard-codes an owner plugin into the general base (D-5).
+   Smallest fix: the same doperpowers PR declares a contract version (a style front-matter key or a plugin.json field). MAWS recognises "a style declaring MAWS to-human contract n", not a plugin name and release.
+
+8. SHOULD-FIX — §4.5 binds the `extraSettings.env` seam before U2, and a negative U2 has no fallback.
+   Evidence: report B-C: "Unverified: that `$.env.get` inside the function-hook worker sees values that `--settings` env sets (E13 proves only subprocess inheritance)".
+   Smallest fix: grade the seam advisory. Have U2 test the constructed launch environment (X6 allowlist) as the fallback, and name it.
+
+9. SHOULD-FIX — the scope of attention derivation is undefined, which invites floods and unanswerable items.
+   Evidence: C.G6 persists items "across … terminal import" and says "no replay of old history on first upgrade". The owner has thousands of discovered sessions in which the doperpowers style has written marks. A session first indexed after the upgrade has no defined "history" boundary. A terminal-held session is read-only (D-12, owner decision 4), so its question cannot be answered, yet it would notify while the owner is typing in that terminal.
+   Smallest fix: watermark items by the mark's message time against the time the lane was enabled, never by discovery time. Foreign-held sessions are presented but not notified, and their card offers Take over.
+
+10. SHOULD-FIX — parent acceptance is the sum of the child gates and leaves the coupled seams untested.
+   Evidence: §1 says the cut has two coupled seams (§4.3, §4.4). No §2 item answers a question or replies in a comment card on a session whose engine has exited (A×C, A×E1). None shows a thread's to-human marks inside the card (C×E1).
+   Smallest fix: add these three observations to items 3 and 5.
+
+11. SHOULD-FIX — if E1 lands before C, the card shows raw tags on the owner's machine.
+   Evidence: Rows.tsx:47 `attached ? null : assistantPresentation(text)`. Threads are forks of sessions with the style active, and the compact card does not mount engine-surface sites. That last point is an inference from report E §3's thread view built from TranscriptList. E1's edge to C is "advisory".
+   Smallest fix: E1 draws card rows through the existing local Presenter whatever the attachment state, until C's module lands. Record this as a soft edge with that interim.
+
+12. SHOULD-FIX — Decision Log 9 decides an owner question and lacks charter work.
+   Evidence: tracker row 97: "Closes when (owner P2) the owner decides between a family-shared registry … and the fork's artifact card naming the original". The owner's note: "NO change in backend, just UI/UX". Charter X12: "a comment's side thread cannot update its parent's artifact (a design boundary)". E1.G4 and §2.5 assume the answer is yes. E1 amends X9, X10 and X12 but, unlike A, B and C, has no "Charter work at landing" line. The decision also leaves open: the parent and a thread updating one artifact concurrently; a thread of a thread; `/btw`.
+   Smallest fix: put DL 9 to the owner as an explicit question in the approval request. Keep G4 separable so that a "no" leaves E1 whole. Add E1's charter line. State the concurrency and nesting rules.
+
+13. MINOR — E1.G5 is an unrelated rider, and its sequencing rationale is false.
+   Evidence: only HTML artifacts are commentable (deliverables/Viewer.tsx:160). G5 fits images and video (tracker row 95), so "sequenced before G2's rect mapping" and "follows the viewer's scale" couple things that never meet.
+   Smallest fix: move G5 to F's fix bins or a brief of its own, and drop the sequencing.
+
+14. MINOR — D's preview pane needs a larger dialog, but X19 names no consumer.
+   Evidence: the widget host is 560 px (report B-C #13), and D.G4 adds a preview pane.
+   Smallest fix: name D as an X19 consumer, or let D size its own host explicitly.
+
+15. MINOR — D-21 is scheduled for C's landing, yet C codes against it from day one.
+   Evidence: CLAUDE.md: a child "records a dated Decision Log entry in the charter rather than diverging".
+   Smallest fix: record D-21 at approval; the owner already blessed it in plan 3.C.
+
+16. MINOR — §2 item 5's browser half is not marked conditional, although Decision Log 7 lets P2 close without E2. The owner's "week of daily use" in §2 belongs to no milestone in F.
+
+VERDICT
+Not yet ready for the owner. The cut's shape holds: the five surfaces map to the owner's complaints, E is split for the right reason, the decisions match the owner's record, and §3's code claims check out against the reports and the tree, except §4.3's IPC wording. The contracts, though, are thinner than the parallel wave they must carry. Fix two things before approval. First, the one seam the spec itself calls coupled (§4.3) has no owner, no name and the wrong mechanism; give it one owner and a ledger name. Second, C silently waits on #90's version slots; settle the slot-renumbering rule with the cua session. Also fix §2 item 1 so it no longer contradicts the owner's decision 4, add the missing ledger rows (findings 5 and 6), and put Decision Log 9 to the owner as a question rather than a flagged pick. The remaining should-fix items can be closed in the children's execution documents if §4 marks them as owed there.
