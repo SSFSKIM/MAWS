@@ -476,6 +476,24 @@ describe('navigation: commands (browser.tabs.navigate, zoom, find, dismiss, devt
     expect(h.wc(id).loadURL).toHaveBeenCalledWith('https://a.test/');
   });
 
+  // cua board #98: the person's Reload from the chrome on a tab an agent leased was told to the transcript as the agent's
+  it('every command is the person\'s: it stamps the tab\'s input seam as their input, never as an activation', () => {
+    const h = harness();
+    const id = h.open();
+    const { input } = h.entry(id);
+    const heard: unknown[] = [];
+    input.on((emission) => heard.push(emission));
+    h.tick(5);
+    expect(h.navigator.navigate(id, 'reload')).toBe(true);
+    expect(heard).toEqual([{ kind: 'chrome', source: 'human', at: 1_000_005, activation: false }]);
+    expect(input).toMatchObject({ lastHumanAt: 1_000_005, lastHumanActivationAt: null, lastActivationAt: null });
+    h.tick(5);
+    h.navigator.navigate(id, { url: 'https://b.test/', typed: true });
+    h.navigator.navigate(id, 'back');
+    expect(heard).toHaveLength(3);
+    expect(input.lastHumanAt).toBe(1_000_010);
+  });
+
   it('an empty tab has nothing to reload; an address loads it', () => {
     const h = harness();
     const id = h.open(null);

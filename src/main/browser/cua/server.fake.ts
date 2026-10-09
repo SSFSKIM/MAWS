@@ -70,6 +70,7 @@ export class FakeContents extends EventEmitter {
   getURL() {
     return this.url;
   }
+  reload() {} // the person's Reload (navigation.ts), whose commit a case raises as the page's event
   close() {
     this.destroyed = true;
   }

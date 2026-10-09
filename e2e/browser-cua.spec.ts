@@ -16,6 +16,8 @@
 // The final fix wave's case (the owner's decision; P1 A-54, amended): the Browser panel follows the agent again. In a
 // window that shows a seeded session, a lease's reading commands open nothing, its first acting command opens the
 // session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection.
+// cua board #98's case: on a leased idle tab the person's own navigations are theirs, never an agent row: ⌘R in the page
+// (through the page's input hook) and the chrome's Reload over IPC (through none, which the Navigator now stamps).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -310,5 +312,53 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
     await host?.close();
     await pages.close();
     rmSync(scratch.root, { recursive: true, force: true });
+  }
+});
+
+test('the person\'s own navigations of a leased idle tab are theirs: ⌘R in the page and Reload from the window make no agent row', async () => {
+  const userData = mkdtempSync('/tmp/mcua-e2e-');
+  const pages = await startPages();
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  let host: FakeHost | null = null;
+  try {
+    const app = seam(maws);
+    await maws.page.evaluate(() => {
+      const w = window as unknown as { __acts: unknown[]; maws: { on(name: string, listener: (payload: unknown) => void): () => void } };
+      w.__acts = [];
+      w.maws.on('browser.agent.activity', (payload) => void w.__acts.push(payload));
+    });
+    const kinds = () => maws.page.evaluate(() => (window as unknown as { __acts: { activity: { kind: string } }[] }).__acts.map((a) => a.activity.kind));
+    host = await connectFakeHost((await app.socketPathFor(A))!);
+    // the page loaded before the lease and read only through it: the tab stays idle, as at the owner's sitting
+    const created = await host.request<{ id: number }>('tabs.create', { url: pages.url('/'), group: { key: 's', title: 'cua' } });
+    await host.request('debugger.attach', { tabId: created.id });
+    const tab = (await app.inspect())[A]!.leased[0]!;
+    const send = cdp(host, created.id);
+    await send('Page.enable');
+    await host.waitFor('tabs.updated', (p) => p.tabId === created.id && p.status === 'complete' && String(p.url).startsWith(pages.origin));
+    expect(await app.control(tab)).toBe('idle');
+    const committed = () => host!.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.frameNavigated').length;
+
+    // ⌘R pressed in the page, as the OS delivers it (keys.ts takes the chord and reloads)
+    let before = committed();
+    expect(await app.sendInput(tab, { type: 'keyDown', keyCode: 'R', modifiers: ['meta'] })).toBe(true);
+    expect(await app.sendInput(tab, { type: 'keyUp', keyCode: 'R', modifiers: ['meta'] })).toBe(true);
+    await expect.poll(committed).toBeGreaterThan(before);
+    await maws.page.waitForTimeout(300);
+    expect(await kinds()).toEqual(['tabOpened']);
+
+    // past the hand-back window, the chrome's Reload (`browser.tabs.navigate` from the window)
+    await maws.page.waitForTimeout(3_200);
+    before = committed();
+    expect(await maws.page.evaluate((id) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('browser.tabs.navigate', { tabId: id, to: 'reload' }), tab)).toMatchObject({ ok: true, value: { accepted: true } });
+    await expect.poll(committed).toBeGreaterThan(before);
+    await maws.page.waitForTimeout(300);
+    expect(await kinds()).toEqual(['tabOpened']);
+    expect(await app.control(tab)).toBe('idle');
+  } finally {
+    await host?.close();
+    await maws.cleanup();
+    await pages.close();
+    rmSync(userData, { recursive: true, force: true });
   }
 });
