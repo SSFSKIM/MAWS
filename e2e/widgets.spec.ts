@@ -1344,7 +1344,7 @@ test.describe('plugin management (E8)', () => {
     await expect(page.getByRole('menuitemradio')).toHaveText(['All sources', 'From Anthropic & Partners', 'claude-community', 'cua', 'designer', 'doperpowers', 'ptc-tool'].map((name) => new RegExp(`${name}$`)));
     await page.getByRole('menuitemradio', { name: 'claude-community' }).click();
     await expect(browseOf(w).locator('[data-browse-card]')).toHaveCount(1);
-    await expect(cardOf(w, 'eli5@claude-community')).toHaveAttribute('data-section', 'claude-community');
+    await expect(cardOf(w, 'eli5@claude-community')).toHaveAttribute('data-section', 'marketplace:claude-community');
     await w.getByRole('button', { name: 'Filter' }).click();
     await page.getByRole('menuitemradio', { name: 'All sources' }).click();
     await expect(browseOf(w).locator('[data-browse-card]').first()).toHaveAttribute('data-browse-card', d('pr-review-toolkit'));

@@ -12,7 +12,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { AvailablePlugin } from '@shared/ipc/schema/plugins';
 import { LIBRARY as L } from '../copy';
-import type { BrowseCard as Card, BrowseViewResult } from './browse';
+import { sectionKey, type BrowseCard as Card, type BrowseSection, type BrowseViewResult } from './browse';
 import { AVAILABLE_PREFIX, BrowseCard } from './BrowseCard';
 import { sourceWords } from './LibraryHeader';
 import { useLibraryStore } from './library-store';
@@ -26,13 +26,14 @@ const HEADING_HEIGHT = 36;
 const ROW_HEIGHT = 124; // a card row's first guess; rows are measured as drawn
 const GAP = 'gap-3';
 
-type Line = { kind: 'heading'; key: string; section: string; count: number } | { kind: 'cards'; key: string; cards: Card[] };
+type Line = { kind: 'heading'; key: string; section: BrowseSection; count: number } | { kind: 'cards'; key: string; cards: Card[] };
 
 function linesOf(sections: BrowseViewResult['sections'], columns: number): Line[] {
   const lines: Line[] = [];
   for (const { section, cards } of sections) {
-    lines.push({ kind: 'heading', key: `h:${section}`, section, count: cards.length });
-    for (let at = 0; at < cards.length; at += columns) lines.push({ kind: 'cards', key: `c:${section}:${at}`, cards: cards.slice(at, at + columns) });
+    const key = sectionKey(section);
+    lines.push({ kind: 'heading', key: `h:${key}`, section, count: cards.length });
+    for (let at = 0; at < cards.length; at += columns) lines.push({ kind: 'cards', key: `c:${key}:${at}`, cards: cards.slice(at, at + columns) });
   }
   return lines;
 }
@@ -183,7 +184,7 @@ function Grid({ sections, hidden, onOpen }: { sections: BrowseViewResult['sectio
           return (
             <div key={item.key} data-index={item.index} ref={virtualizer.measureElement} className="absolute inset-x-0 top-0" style={{ transform: `translateY(${item.start}px)` }}>
               {line.kind === 'heading' ? (
-                <section aria-label={sourceWords(line.section)} data-browse-section={line.section}>
+                <section aria-label={sourceWords(line.section)} data-browse-section={sectionKey(line.section)}>
                   <GroupHeading label={sourceWords(line.section)} count={line.count} />
                 </section>
               ) : (

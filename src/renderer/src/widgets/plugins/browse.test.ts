@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { AvailablePlugin, InstalledPlugin } from '@shared/ipc/schema/plugins';
-import { browseCards, browseView, installCountWords, type BrowseCard } from './browse';
+import { browseCards, browseView, installCountWords, type BrowseCard, type BrowseSection } from './browse';
 import { identitiesOf } from './library';
 
 const DIRECTORY = 'anthropic-plugin-directory';
@@ -29,12 +29,14 @@ const inst = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin 
 };
 const identities = (installed: InstalledPlugin[], markets: Marketplace[]) => identitiesOf(installed, markets, new Map(), null);
 const byId = (cards: readonly BrowseCard[]) => new Map(cards.map((c) => [c.pluginId, c]));
+const ANTHROPIC: BrowseSection = { kind: 'anthropic' };
+const marketSection = (name: string): BrowseSection => ({ kind: 'marketplace', name });
 
 describe('Browse: the fold', () => {
   it('folds a directory entry and the official entry of the same repository and path into one card, the directory’s, with the official count', () => {
     const cards = browseCards([listed('frontend-design'), offer('frontend-design@claude-plugins-official', { installCount: 1_290_640 })], [], [OFFICIAL]);
     expect(cards).toHaveLength(1);
-    expect(cards[0]).toMatchObject({ pluginId: `frontend-design@${DIRECTORY}`, marketplace: DIRECTORY, section: 'anthropic', alsoListedIn: ['claude-plugins-official'], installCount: 1_290_640, installed: null });
+    expect(cards[0]).toMatchObject({ pluginId: `frontend-design@${DIRECTORY}`, marketplace: DIRECTORY, section: ANTHROPIC, alsoListedIn: ['claude-plugins-official'], installCount: 1_290_640, installed: null });
     expect(cards[0].inventoryFrom).toBe('frontend-design@claude-plugins-official'); // the official entry's files sit in its clone
   });
 
@@ -82,7 +84,7 @@ describe('Browse: the installed join', () => {
     expect(cards.has('mine@skills-dir')).toBe(false);
     expect(cards.has('gone@removed-market')).toBe(false);
     // an installed card carries no count (the engine's listing leaves it out, and none is borrowed) and its own version
-    expect(cards.get('code-review@claude-plugins-official')).toMatchObject({ installCount: null, version: '1.0.0', section: 'anthropic', marketplace: 'claude-plugins-official' });
+    expect(cards.get('code-review@claude-plugins-official')).toMatchObject({ installCount: null, version: '1.0.0', section: ANTHROPIC, marketplace: 'claude-plugins-official' });
   });
 
   it('a directory plugin installed stays one card; the directory duplicate the engine hides for an installed official plugin stays hidden', () => {
@@ -90,7 +92,7 @@ describe('Browse: the installed join', () => {
     const cards = browseCards([listed('other')], identities([inst('frontend-design@claude-plugins-official')], [OFFICIAL]), [OFFICIAL]);
     expect(cards.map((c) => c.pluginId).sort()).toEqual([`frontend-design@claude-plugins-official`, `other@${DIRECTORY}`]);
     const installedDirectory = browseCards([], identities([inst(`x@${DIRECTORY}`)], []), []);
-    expect(installedDirectory).toEqual([expect.objectContaining({ pluginId: `x@${DIRECTORY}`, section: 'anthropic', installed: expect.objectContaining({ where: 'here' }) })]);
+    expect(installedDirectory).toEqual([expect.objectContaining({ pluginId: `x@${DIRECTORY}`, section: ANTHROPIC, installed: expect.objectContaining({ where: 'here' }) })]);
   });
 
   it('an offered id that is also installed is one card, marked by its installations (never by a name alone)', () => {
@@ -119,6 +121,25 @@ describe('Browse: counts', () => {
     expect(cards.get('counted@claude-plugins-official')!.installCount).toBe(12);
     expect(cards.get('none@claude-plugins-official')!.installCount).toBeNull();
   });
+
+  it('a zero is no count: never shown, a fold of 0 and a number takes the number, 0 and 0 have none', () => {
+    const cards = byId(
+      browseCards(
+        [listed('a', undefined, { installCount: 0 }), offer('a@claude-plugins-official', { installCount: 42 }), listed('b', undefined, { installCount: 0 }), offer('b@claude-plugins-official', { installCount: 0 }), offer('zero@claude-plugins-official', { installCount: 0 })],
+        [],
+        [OFFICIAL],
+      ),
+    );
+    expect(cards.get(`a@${DIRECTORY}`)!.installCount).toBe(42);
+    expect(cards.get(`b@${DIRECTORY}`)!.installCount).toBeNull();
+    expect(cards.get('zero@claude-plugins-official')!.installCount).toBeNull();
+  });
+
+  it('Most popular is not offered when 0 is the only count supplied', () => {
+    const view = browseView(browseCards([offer('zero@claude-plugins-official', { installCount: 0 }), listed('other')], [], [OFFICIAL]), { search: '', sort: 'popular', status: { installed: true, notInstalled: true }, source: null });
+    expect(view.hasCounts).toBe(false);
+    expect(view.sort).toBe('name');
+  });
 });
 
 describe('Browse: sections and the view', () => {
@@ -134,21 +155,22 @@ describe('Browse: sections and the view', () => {
     [OFFICIAL, ACME, LOCAL],
   );
   const VIEW = { search: '', sort: null, status: { installed: true, notInstalled: true }, source: null } as const;
-  const shape = (view: ReturnType<typeof browseView>) => view.sections.map((s) => [s.section, s.cards.map((c) => c.pluginId)]);
+  const label = (section: BrowseSection) => (section.kind === 'anthropic' ? 'Anthropic & Partners' : section.name);
+  const shape = (view: ReturnType<typeof browseView>) => view.sections.map((s) => [label(s.section), s.cards.map((c) => c.pluginId)]);
 
   it('Anthropic & Partners first, then each other marketplace by name; Most popular by default when a card has a count', () => {
     const view = browseView(CARDS, VIEW);
     expect(view.sort).toBe('popular');
     expect(view.hasCounts).toBe(true);
     expect(shape(view)).toEqual([
-      ['anthropic', ['beta@claude-plugins-official', 'alpha@claude-plugins-official', `zeta@${DIRECTORY}`]],
+      ['Anthropic & Partners', ['beta@claude-plugins-official', 'alpha@claude-plugins-official', `zeta@${DIRECTORY}`]],
       ['acme', ['far@acme', 'tools@acme']],
       ['e8-scratch', ['kept@e8-scratch', 'probe@e8-scratch']],
     ]);
   });
 
   it('Name orders by the display name; Most popular falls back to Name when no card has a count', () => {
-    expect(shape(browseView(CARDS, { ...VIEW, sort: 'name' }))[0]).toEqual(['anthropic', ['alpha@claude-plugins-official', 'beta@claude-plugins-official', `zeta@${DIRECTORY}`]]);
+    expect(shape(browseView(CARDS, { ...VIEW, sort: 'name' }))[0]).toEqual(['Anthropic & Partners', ['alpha@claude-plugins-official', 'beta@claude-plugins-official', `zeta@${DIRECTORY}`]]);
     const uncounted = browseView(CARDS.filter((c) => c.installCount === null), { ...VIEW, sort: 'popular' });
     expect(uncounted.hasCounts).toBe(false);
     expect(uncounted.sort).toBe('name');
@@ -157,14 +179,28 @@ describe('Browse: sections and the view', () => {
   it('filters by status, source and search (name, id, description), dropping empty sections', () => {
     expect(shape(browseView(CARDS, { ...VIEW, status: { installed: true, notInstalled: false } }))).toEqual([['e8-scratch', ['kept@e8-scratch']]]); // installed in other projects is not installed here
     expect(shape(browseView(CARDS, { ...VIEW, status: { installed: false, notInstalled: true } })).flatMap(([, ids]) => ids)).not.toContain('kept@e8-scratch');
-    expect(shape(browseView(CARDS, { ...VIEW, source: 'acme' }))).toEqual([['acme', ['far@acme', 'tools@acme']]]);
-    expect(shape(browseView(CARDS, { ...VIEW, source: 'anthropic', search: 'ZET' }))).toEqual([['anthropic', [`zeta@${DIRECTORY}`]]]);
+    expect(shape(browseView(CARDS, { ...VIEW, source: marketSection('acme') }))).toEqual([['acme', ['far@acme', 'tools@acme']]]);
+    expect(shape(browseView(CARDS, { ...VIEW, source: ANTHROPIC, search: 'ZET' }))).toEqual([['Anthropic & Partners', [`zeta@${DIRECTORY}`]]]);
     expect(shape(browseView(CARDS, { ...VIEW, search: 'acme’s' }))).toEqual([['acme', ['tools@acme']]]);
     expect(shape(browseView(CARDS, { ...VIEW, search: 'probe@e8' }))).toEqual([['e8-scratch', ['probe@e8-scratch']]]);
     expect(browseView(CARDS, { ...VIEW, search: 'nothing like it' }).sections).toEqual([]);
   });
 
+  it('a third-party marketplace named anthropic is its own section and Source, never Anthropic & Partners', () => {
+    const impostor = market('anthropic', 'github', 'someone/anthropic');
+    const cards = browseCards([offer('x@anthropic'), offer('alpha@claude-plugins-official', { installCount: 10 }), listed('zeta')], [], [OFFICIAL, impostor]);
+    expect(byId(cards).get('x@anthropic')!.section).toEqual(marketSection('anthropic'));
+    const view = browseView(cards, VIEW);
+    expect(view.sources).toEqual([ANTHROPIC, marketSection('anthropic')]);
+    expect(view.sections.map((s) => [s.section, s.cards.map((c) => c.pluginId)])).toEqual([
+      [ANTHROPIC, ['alpha@claude-plugins-official', `zeta@${DIRECTORY}`]],
+      [marketSection('anthropic'), ['x@anthropic']],
+    ]);
+    expect(browseView(cards, { ...VIEW, source: marketSection('anthropic') }).sections.flatMap((s) => s.cards.map((c) => c.pluginId))).toEqual(['x@anthropic']);
+    expect(browseView(cards, { ...VIEW, source: ANTHROPIC }).sections.flatMap((s) => s.cards.map((c) => c.pluginId))).toEqual(['alpha@claude-plugins-official', `zeta@${DIRECTORY}`]);
+  });
+
   it('lists the sources the filter offers in section order', () => {
-    expect(browseView(CARDS, VIEW).sources).toEqual(['anthropic', 'acme', 'e8-scratch']);
+    expect(browseView(CARDS, VIEW).sources).toEqual([ANTHROPIC, marketSection('acme'), marketSection('e8-scratch')]);
   });
 });

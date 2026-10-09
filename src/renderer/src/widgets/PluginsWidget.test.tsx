@@ -288,7 +288,7 @@ describe('plugins widget: management', () => {
     await toBrowse();
     expect(invoked('plugins.available')).toEqual([{ cwd }]);
     // sections: Anthropic & Partners first, then each other marketplace; the installed e8-probe joined back in, Installed
-    expect([...section('browse').querySelectorAll('[data-browse-section]')].map((s) => s.getAttribute('data-browse-section'))).toEqual(['anthropic', 'e8-scratch']);
+    expect([...section('browse').querySelectorAll('[data-browse-section]')].map((s) => s.getAttribute('data-browse-section'))).toEqual(['anthropic', 'marketplace:e8-scratch']);
     expect(card('review@anthropic-plugin-directory').getAttribute('data-section')).toBe('anthropic');
     expect(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' })).toBeTruthy();
     expect(within(card('e8-other@e8-scratch')).getByText('from e8-scratch')).toBeTruthy();
@@ -933,6 +933,17 @@ describe('plugins widget: the detail', () => {
     expect(document.activeElement).toBe(view('e8-probe@e8-scratch'));
   });
 
+  it('the switch, clicked on My items while its detail shows, returns to the list', async () => {
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    expect(detail()).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
+    expect(detail()).toBeNull();
+    expect(section('my-items').closest('.hidden')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'My items' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('searchbox', { name: 'Search plugins' })).toBeTruthy();
+  });
+
   it('loaded now when the session’s list has it', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), plugins: [{ name: 'e8-probe', path: '/cfg/e8-probe', source: 'e8-probe@e8-scratch', version: '0.1.0' }] }]]) });
     mount();
@@ -1199,6 +1210,56 @@ describe('plugins widget: Browse', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
     expect(document.querySelector('[data-plugin-detail]')).toBeNull();
     expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('a zero install count is never shown, and Most popular is not offered when 0 is the only count', async () => {
+    backend.script('plugins.available', () => ({ plugins: [offered('zero', 0), directory('alpha')] }));
+    await ready();
+    await toBrowse();
+    expect(card('zero@claude-plugins-official').querySelector('[data-install-count]')).toBeNull();
+    expect(card('zero@claude-plugins-official').textContent).not.toContain('0 installs');
+    fireEvent.click(within(card('zero@claude-plugins-official')).getByRole('button', { name: 'View Zero' }));
+    expect(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByText('from claude-plugins-official · 1.2.0')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
+    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent)).toEqual(['●Name']);
+  });
+
+  it('a third-party marketplace named anthropic is its own section and Source, apart from Anthropic & Partners', async () => {
+    backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'anthropic', source: 'github', locator: 'someone/anthropic', installLocation: '/tmp/e8-scratch/claude-config/plugins/marketplaces/anthropic' }, official] }));
+    backend.script('plugins.available', () => ({ plugins: [offered('code-simplifier', 3_448), { pluginId: 'x@anthropic', name: 'x', marketplaceName: 'anthropic', description: 'Not Anthropic’s', version: null, source: './plugins/x', installCount: null }] }));
+    installed = [plugin('e8-probe@e8-scratch')];
+    await ready();
+    await toBrowse();
+    const headings = () => [...section('browse').querySelectorAll('[data-browse-section]')].map((h) => h.getAttribute('aria-label'));
+    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
+    expect(headings()).toEqual(['From Anthropic & Partners', 'anthropic']);
+    expect(card('x@anthropic').getAttribute('data-section')).not.toBe(card('code-simplifier@claude-plugins-official').getAttribute('data-section'));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
+    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent!.replace('●', ''))).toEqual(['All sources', 'From Anthropic & Partners', 'anthropic']);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'anthropic' }));
+    expect(ids()).toEqual(['x@anthropic']);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' }); // a radio's choice closes the menu
+    expect(screen.getByRole('menuitemradio', { name: 'anthropic' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('menuitemradio', { name: 'From Anthropic & Partners' }).getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'From Anthropic & Partners' }));
+    expect(ids()).toEqual(['code-simplifier@claude-plugins-official']);
+  });
+
+  it('the switch, clicked on the view shown, returns from its detail to its list: Browse’s card detail and an installed card’s', async () => {
+    await ready();
+    await toBrowse();
+    fireEvent.click(within(card('dir-only@anthropic-plugin-directory')).getByRole('button', { name: 'View Dir only' }));
+    expect(document.querySelector('[data-browse-detail]')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
+    expect(document.querySelector('[data-browse-detail]')).toBeNull();
+    expect(section('browse').className).not.toContain('hidden');
+    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
+    expect(document.querySelector('[data-plugin-detail]')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
+    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
+    expect(section('browse').className).not.toContain('hidden');
   });
 
   it('every open starts on My items with no catalogue read, whatever the last open showed', async () => {

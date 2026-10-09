@@ -10,7 +10,7 @@ import { DropdownMenu, ToggleGroup } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { IconButton, SearchIcon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L } from '../copy';
-import type { BrowseChoices, BrowseSort } from './browse';
+import { sectionKey, type BrowseChoices, type BrowseSection, type BrowseSort } from './browse';
 import { FilterIcon } from './icons';
 import type { LibraryFilter, LibrarySort } from './library';
 import { useLibraryStore } from './library-store';
@@ -33,7 +33,8 @@ export function LibrarySwitch({ tab, onChange }: { tab: LibraryTab; onChange(tab
       type="single"
       aria-label={L.library}
       value={tab}
-      onValueChange={(next) => next !== '' && onChange(next as LibraryTab)} // a click on the current view keeps it
+      // a click on the view shown emits '' (Radix's single group unpressing it): that view, kept and returned to its list
+      onValueChange={(next) => onChange(next === '' ? tab : (next as LibraryTab))}
       className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-bg-active p-0.5"
     >
       <ToggleGroup.Item value="myItems" className={item}>
@@ -129,11 +130,11 @@ export function PluginsToolbar({ add }: { add: ReactNode }) {
 }
 
 // A source's name in the filter: Anthropic's section by its heading, a marketplace by its own name.
-export const sourceWords = (source: string): string => (source === 'anthropic' ? L.group.anthropic : source);
+export const sourceWords = (source: BrowseSection): string => (source.kind === 'anthropic' ? L.group.anthropic : source.name);
 
-const ALL_SOURCES = '\u0000all'; // the radio value of All sources (no marketplace name can be it)
+const ALL_SOURCES = '\u0000all'; // the radio value of All sources (no section key can be it)
 
-export function BrowseToolbar({ sources, hasCounts, sort, add }: { sources: readonly string[]; hasCounts: boolean; sort: BrowseSort; add: ReactNode }) {
+export function BrowseToolbar({ sources, hasCounts, sort, add }: { sources: readonly BrowseSection[]; hasCounts: boolean; sort: BrowseSort; add: ReactNode }) {
   const { search, status, source } = useLibraryStore((s) => s.browse);
   // Desktop's Status: both checked by default, and the last checked one cannot be unchecked
   const toggle = (which: keyof BrowseChoices['status']) => {
@@ -141,6 +142,7 @@ export function BrowseToolbar({ sources, hasCounts, sort, add }: { sources: read
     if (next.installed || next.notInstalled) setBrowse({ status: next });
   };
   const sorts: readonly BrowseSort[] = hasCounts ? ['popular', 'name'] : ['name'];
+  const byKey = new Map(sources.map((s) => [sectionKey(s), s]));
   return (
     <span className="flex min-w-0 items-center gap-1">
       <SearchField value={search} onChange={(next) => setBrowse({ search: next })} />
@@ -164,7 +166,15 @@ export function BrowseToolbar({ sources, hasCounts, sort, add }: { sources: read
         ))}
         <DropdownMenu.Separator className="my-1 h-px bg-border" />
         <DropdownMenu.Label className={LABEL}>{L.source}</DropdownMenu.Label>
-        <Radios value={source ?? ALL_SOURCES} values={[ALL_SOURCES, ...sources]} words={(v) => (v === ALL_SOURCES ? L.allSources : sourceWords(v))} onChange={(next) => setBrowse({ source: next === ALL_SOURCES ? null : next })} />
+        <Radios
+          value={source === null ? ALL_SOURCES : sectionKey(source)}
+          values={[ALL_SOURCES, ...byKey.keys()]}
+          words={(v) => {
+            const section = byKey.get(v);
+            return section ? sourceWords(section) : L.allSources;
+          }}
+          onChange={(next) => setBrowse({ source: byKey.get(next) ?? null })}
+        />
       </Menu>
       <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={sorts} words={L.browseSort} isDefault={sort === (hasCounts ? 'popular' : 'name')} onChange={(next) => setBrowse({ sort: next })} />
       {add}

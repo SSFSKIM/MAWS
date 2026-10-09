@@ -272,7 +272,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   };
 
   try {
-    scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_BIN} (${ENGINE_VERSION}) · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
+    scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_VERSION} · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
     scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, Browse\'s catalogue read). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     let id = '';

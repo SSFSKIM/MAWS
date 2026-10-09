@@ -7,7 +7,7 @@
 // detail (an installed one's My items detail); Install keeps its own click. A change's operation line sits on the card
 // it was asked from, keyed by the card's install target (E8's `available:<id>`), so the card that turns installed keeps it.
 import { LIBRARY as L } from '../copy';
-import { installCountWords, titleOf, type BrowseCard as Card } from './browse';
+import { installCountWords, sectionKey, titleOf, type BrowseCard as Card } from './browse';
 import { PluginGlyph } from './icons';
 import { OperationLine, useManage } from './manage';
 import { requestFor } from './present';
@@ -43,7 +43,7 @@ export function BrowseCard({ card, onOpen }: { card: Card; onOpen(card: Card): v
     <li
       data-browse-card={card.pluginId}
       data-installed={card.installed?.where ?? 'no'}
-      data-section={card.section}
+      data-section={sectionKey(card.section)}
       className="relative flex h-full min-w-0 flex-col gap-2 rounded-lg border border-border bg-bg p-3 hover:border-border-strong"
       onClick={(event) => {
         if (!(event.target instanceof Element && event.target.closest('button:not([data-card-open])'))) onOpen(card);

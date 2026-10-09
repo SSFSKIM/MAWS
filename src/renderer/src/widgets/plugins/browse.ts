@@ -6,19 +6,26 @@
 // keeping the larger count (no key, no fold; a third party never folds). And `--available` leaves out every id installed
 // anywhere, so Browse adds a card for each installed identity of a listed source, "Installed" when it is installed for
 // the user or here, "Installed in other projects" when only other projects have it; the directory twin the engine hides
-// for an installed plugin stays hidden. A count is the CLI's number or none, never derived, summed or shown as 0. Pure:
-// the components and the tests read these.
+// for an installed plugin stays hidden. A count is the CLI's positive number or none (a 0 is none), never derived,
+// summed or shown as 0. Pure: the components and the tests read these.
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { AvailablePlugin, InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { isAnthropicDefaultMarketplace, sourceKey } from '@shared/plugins/source-key';
 import { BUILT_IN_DIRECTORY, displayNameOf, groupOfMarketplace, isPseudo, versionWords, type PluginIdentity } from './library';
+
+// A card's section: Anthropic's (the built-in directory and the default Anthropic marketplace) or a marketplace's own.
+// A kind, not a name, so a third-party marketplace that calls itself `anthropic` stays its own section and Source.
+export type BrowseSection = { kind: 'anthropic' } | { kind: 'marketplace'; name: string };
+// One string per section, never shared by two (the Source filter's radio value, React keys, `data-section`).
+export const sectionKey = (section: BrowseSection): string => (section.kind === 'anthropic' ? 'anthropic' : `marketplace:${section.name}`);
+const ANTHROPIC_SECTION: BrowseSection = { kind: 'anthropic' };
 
 export interface BrowseCard {
   pluginId: string; // the id an install names: the directory's when folded, as the engine's terminal installs it
   name: string; // the plugin's name (the card draws Desktop's display name of it)
   description: string | null;
   marketplace: string;
-  section: 'anthropic' | string; // "From Anthropic & Partners", else the marketplace's own section
+  section: BrowseSection; // "From Anthropic & Partners", else the marketplace's own section
   alsoListedIn: string[]; // the Anthropic marketplace a folded directory card also stands for
   installCount: number | null;
   version: string | null;
@@ -26,17 +33,17 @@ export interface BrowseCard {
   inventoryFrom: string | null; // the offered id whose files sit in its marketplace's clone (What's inside), if any
 }
 
-const ANTHROPIC = 'anthropic';
-
 // An installation only another project has (a project or local one neither here nor covering here).
 const elsewhere = (p: InstalledPlugin): boolean => (p.scope === 'project' || p.scope === 'local') && !p.here && !p.coversHere && !isPseudo(p);
 const installedOf = (identity: PluginIdentity): BrowseCard['installed'] => ({ identity, where: identity.installations.every(elsewhere) ? 'otherProjects' : 'here' });
 
+// A count is the CLI's positive number; a 0 (or anything not above it) is no count, so none is ever shown as 0 (§5.8).
+const countOf = (n: number | null): number | null => (n !== null && n > 0 ? n : null);
 const larger = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b));
 
 export function browseCards(available: readonly AvailablePlugin[], identities: readonly PluginIdentity[], marketplaces: readonly Marketplace[]): BrowseCard[] {
   const markets = new Map(marketplaces.map((m) => [m.name, m]));
-  const sectionOf = (marketplace: string) => (groupOfMarketplace(marketplace, marketplaces) === 'anthropic' ? ANTHROPIC : marketplace);
+  const sectionOf = (marketplace: string): BrowseSection => (groupOfMarketplace(marketplace, marketplaces) === 'anthropic' ? ANTHROPIC_SECTION : { kind: 'marketplace', name: marketplace });
   // an offer's files sit in its marketplace's clone when its source is a path inside it (§5.5)
   const onDisk = (offer: AvailablePlugin): boolean => typeof offer.source === 'string' && markets.has(offer.marketplaceName);
   const installedById = new Map(identities.map((i) => [i.id, i]));
@@ -75,7 +82,7 @@ export function browseCards(available: readonly AvailablePlugin[], identities: r
       marketplace: offer.marketplaceName,
       section: sectionOf(offer.marketplaceName),
       alsoListedIn: twin ? [twin.marketplaceName] : [],
-      installCount: larger(offer.installCount, twin?.installCount ?? null),
+      installCount: larger(countOf(offer.installCount), countOf(twin?.installCount ?? null)),
       version: versionWords(offer.version ?? twin?.version ?? null),
       installed: identity ? installedOf(identity) : null,
       inventoryFrom: onDisk(offer) ? offer.pluginId : twin && onDisk(twin) ? twin.pluginId : null,
@@ -118,7 +125,7 @@ export interface BrowseChoices {
   search: string;
   sort: BrowseSort | null; // null: Most popular when a card has a count, else Name
   status: { installed: boolean; notInstalled: boolean }; // Desktop's Status: at least one stays checked
-  source: string | null; // a section; null: All sources
+  source: BrowseSection | null; // a section; null: All sources
 }
 
 export const titleOf = (card: BrowseCard): string => displayNameOf(card.name, card.installed?.identity.manifest ?? null);
@@ -133,8 +140,8 @@ const matches = (card: BrowseCard, needle: string) => needle === '' || [titleOf(
 // The sections as drawn: "From Anthropic & Partners" first, then each other marketplace by name, each in the view's
 // order; Most popular is offered only when some card has a count (Desktop's rule), and falls back to Name otherwise.
 export interface BrowseViewResult {
-  sections: { section: string; cards: BrowseCard[] }[];
-  sources: string[]; // every section, in order: what the Source filter offers
+  sections: { section: BrowseSection; cards: BrowseCard[] }[];
+  sources: BrowseSection[]; // every section, in order: what the Source filter offers
   sort: BrowseSort; // the order applied
   hasCounts: boolean; // whether Most popular is offered
 }
@@ -142,10 +149,13 @@ export interface BrowseViewResult {
 export function browseView(cards: readonly BrowseCard[], view: BrowseChoices): BrowseViewResult {
   const hasCounts = cards.some((c) => c.installCount !== null);
   const sort: BrowseSort = view.sort === 'name' || !hasCounts ? 'name' : 'popular';
-  const sources = [...new Set(cards.map((c) => c.section))].sort((a, b) => (a === ANTHROPIC ? -1 : b === ANTHROPIC ? 1 : a.localeCompare(b, 'en')));
+  const sources = [...new Map(cards.map((c) => [sectionKey(c.section), c.section])).values()].sort((a, b) =>
+    a.kind === 'anthropic' ? -1 : b.kind === 'anthropic' ? 1 : a.name.localeCompare(b.name, 'en'),
+  );
   const needle = view.search.trim().toLowerCase();
-  const shown = cards.filter((c) => (isInstalledHere(c) ? view.status.installed : view.status.notInstalled) && (view.source === null || c.section === view.source) && matches(c, needle));
+  const source = view.source === null ? null : sectionKey(view.source);
+  const shown = cards.filter((c) => (isInstalledHere(c) ? view.status.installed : view.status.notInstalled) && (source === null || sectionKey(c.section) === source) && matches(c, needle));
   const order = sort === 'popular' ? byCount : byTitle;
-  const sections = sources.map((section) => ({ section, cards: shown.filter((c) => c.section === section).sort(order) })).filter((s) => s.cards.length > 0);
+  const sections = sources.map((section) => ({ section, cards: shown.filter((c) => sectionKey(c.section) === sectionKey(section)).sort(order) })).filter((s) => s.cards.length > 0);
   return { sections, sources, sort, hasCounts };
 }
