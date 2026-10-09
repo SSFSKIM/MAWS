@@ -58,6 +58,8 @@ interface Manifest {
   host_permissions?: string[];
   background?: unknown;
   content_scripts: { matches: string[] }[];
+  action?: unknown; // cua #90
+  options_ui?: unknown;
 }
 const manifestOf = (dir: string) => json<Manifest>(join(dir, 'manifest.json'));
 
@@ -235,7 +237,9 @@ describe('buildChromeUserData', () => {
     expect(manifest.permissions).toEqual(source.permissions);
     expect(manifest.background).toEqual({ service_worker: 'sw.js' });
     expect(manifest.name).toBe(probe.name);
-    for (const file of ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html']) {
+    expect(manifest.action).toEqual({ default_title: 'MAWS probe', default_popup: 'popup.html' }); // cua #90
+    expect(manifest.options_ui).toEqual({ page: 'options.html' });
+    for (const file of ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html', 'popup.html', 'popup.js', 'options.html', 'options.js']) {
       expect(readFileSync(join(probe.dir, file), 'utf8')).toBe(readFileSync(join(PROBE_SOURCE, file), 'utf8'));
     }
   });
@@ -277,6 +281,8 @@ describe('buildChromeUserData', () => {
     const values = [...person.cookies.entries, ...work.cookies.entries].map((entry) => entry.value);
     const paths = [...person.history.entries, ...work.history.entries].map((entry) => new URL(entry.url).pathname.slice(1));
     const titles = [...person.history.entries, ...work.history.entries].map((entry) => entry.title);
+    const bookmarkPaths = Object.values(person.bookmarks!.urls).flatMap((url) => (url.startsWith('http') ? [new URL(url).pathname.split('/').at(-1)!] : [])); // cua #90
+    paths.push(...bookmarkPaths);
     for (const sentinel of [...values, ...paths, ...titles]) {
       expect(sentinel.startsWith(SENTINEL_PREFIX)).toBe(true);
       expect(sentinel.length).toBeGreaterThanOrEqual(30);
@@ -291,6 +297,41 @@ describe('buildChromeUserData', () => {
   it('pads nothing without slowCopy', () => {
     expect(existsSync(join(fixture.extensions.workProbe.dir, 'padding.bin'))).toBe(false);
   });
+
+  // cua #90 start
+  it("writes Default's Bookmarks as Chrome does: the three roots, A, B, a bookmarklet, F with F1, F2 and G (G1), N01 to N40, and O1", () => {
+    type Node = { type: string; name: string; id: string; guid: string; date_added: string; url?: string; children?: Node[] };
+    const file = json<{ version: number; checksum: string; roots: Record<string, Node> }>(join(fixture.dir, 'Default', 'Bookmarks'));
+    expect(file.version).toBe(1);
+    expect(Object.keys(file.roots)).toEqual(['bookmark_bar', 'other', 'synced']);
+    const names = (node: Node): unknown => (node.children ? [node.name, node.children.map(names)] : node.name);
+    const bar = file.roots.bookmark_bar!;
+    expect(bar.children!.slice(0, 4).map(names)).toEqual(['A', 'B', 'Bookmarklet', ['F', ['F1', 'F2', ['G', ['G1']]]]]);
+    expect(bar.children!.slice(4).map(names)).toEqual(Array.from({ length: 40 }, (_, k) => `N${String(k + 1).padStart(2, '0')}`));
+    expect(names(file.roots.other!)).toEqual(['Other bookmarks', ['O1']]);
+    expect(names(file.roots.synced!)).toEqual(['Mobile bookmarks', []]);
+    expect(bar.children![2]!.url).toMatch(/^javascript:/);
+    expect(BigInt(bar.children![0]!.date_added)).toBeGreaterThan(11644473600n * 1000000n);
+    expect(Object.keys(fixture.profiles.Default.bookmarks!.urls)).toHaveLength(47);
+    expect(fixture.profiles['Profile 1'].bookmarks).toBeNull();
+    expect(existsSync(join(fixture.dir, 'Profile 1', 'Bookmarks'))).toBe(false);
+  });
+
+  it("names Default's 64×64 PNG profile picture in Local State, and Work has none", () => {
+    const state = json<LocalState>(join(fixture.dir, 'Local State'));
+    expect(state.profile.info_cache.Default!.gaia_picture_file_name).toBe('Google Profile Picture.png');
+    const png = readFileSync(join(fixture.dir, 'Default', 'Google Profile Picture.png'));
+    expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([64, 64]);
+    expect(fixture.profiles.Default.picture).toBe(join(fixture.dir, 'Default', 'Google Profile Picture.png'));
+    expect(state.profile.info_cache['Profile 1']!.gaia_picture_file_name).toBeUndefined();
+  });
+
+  it('points the bookmark URLs at a given origin', () => {
+    const other = buildChromeUserData(scratch(), { bookmarksOrigin: 'http://127.0.0.1:4321' });
+    expect(other.profiles.Default.bookmarks!.urls.A).toMatch(/^http:\/\/127\.0\.0\.1:4321\/bookmark\/A\//);
+  });
+  // cua #90 end
 });
 
 describe('buildChromeUserData options', () => {

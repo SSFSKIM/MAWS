@@ -61,6 +61,7 @@ export interface LayoutState {
   // W12: tabs whose session's project changed move to its set (the shell calls it when records or intents change).
   refileTabs(): void;
   closeTab(id: string): void;
+  retargetTab(id: string, target: TabTarget): void; // cua #90: `model.retargetTab`
   reopenClosed(): void;
   moveTab(id: string, toPane: Pane, index: number): void;
   reorderTab(id: string, index: number): void;
@@ -311,6 +312,7 @@ export function createLayoutStore() {
         if (found) closedAt.set(id, found.index);
         main((m) => model.closeTab(m, id));
       },
+      retargetTab: (id, target) => main((m) => model.retargetTab(m, id, target)), // cua #90
       reopenClosed() {
         const last = get().main.closedTabs.at(-1);
         if (!last) return;

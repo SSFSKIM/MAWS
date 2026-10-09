@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V11 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -328,7 +328,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -363,7 +363,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -594,7 +594,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V11, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V12, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1156,11 +1156,11 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */,
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */,
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
-      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.')) /* E4b: its block is pinned below */).toEqual([
+      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90: their blocks are pinned below */).toEqual([
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
@@ -1168,7 +1168,7 @@ describe('ipc schema validates both directions', () => {
         'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
-      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
+      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90 */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
         'browser.agent.acting', // E4c, restored by E13 (P1 A-54)
@@ -1217,9 +1217,15 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-browser', query: 'wiki' }).ok).toBe(true);
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-chrome-Profile 1', query: '' }).ok).toBe(true);
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-capture', query: 'wiki' }).ok).toBe(false);
-      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null, kind: 'history' }] }).ok).toBe(true); // cua #90: `kind`
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(false);
       expect(validateCommandInput('browser.profiles.list', undefined).ok).toBe(true);
-      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(true);
+      // cua #90: the account's names and the avatar, a PNG data URL or an initial
+      const item = { profileDir: 'Default', name: 'Work', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'picture', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' } };
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [item, { ...item, gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(false);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ ...item, avatar: { kind: 'picture', dataUrl: 'https://a.test/x.png' } }] }).ok).toBe(false);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ ...item, avatar: { kind: 'picture', dataUrl: `data:image/png;base64,${'A'.repeat(400_000)}` } }] }).ok).toBe(false);
     });
 
     it('takes a placement as an integer rect of at least one pixel, or null, from a named pane', () => {
@@ -1296,6 +1302,7 @@ describe('ipc schema validates both directions', () => {
     const record = {
       profileDir: 'Default', name: 'Person 1', partition: 'persist:maws-chrome-Default', importedAt: '2026-10-06T10:00:05.000Z',
       storageDirName: 'maws-chrome-default', userDataDir: '/tmp/chrome', extensions: [PROBE_EXTENSION], report: DONE_REPORT,
+      bookmarks: null, gaiaName: null, userName: null, avatar: { kind: 'initials' }, // cua #90: profiles.json version 2
     };
     const ID = '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c';
     const EXT = 'cddgipniephaglaopjjeihjehogcpggh';
@@ -1307,11 +1314,11 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1329,7 +1336,7 @@ describe('ipc schema validates both directions', () => {
         expect(validateCommandInput('browser.import.remove', { profileDir }).ok, profileDir).toBe(false);
         expect(validateCommandInput('browser.import.setExtension', { profileDir, extensionId: EXT, enabled: true }).ok, profileDir).toBe(false);
       }
-      const start = { inspectionId: ID, categories: { history: true, cookies: true, extensions: true }, extensionIds: [EXT], allowUnverifiedExtensions: true };
+      const start = { inspectionId: ID, categories: { history: true, cookies: true, extensions: true, bookmarks: true /* cua #90 */ }, extensionIds: [EXT], allowUnverifiedExtensions: true };
       expect(validateCommandInput('browser.import.start', start).ok).toBe(true);
       expect(validateCommandInput('browser.import.setExtension', { profileDir: 'Default', extensionId: EXT, enabled: false }).ok).toBe(true);
       for (const extensionId of ['probe', EXT.toUpperCase(), `${EXT}a`, '../ddgipniephaglaopjjeihjehogcpggh', 'zddgipniephaglaopjjeihjehogcpggh']) {
@@ -1353,7 +1360,7 @@ describe('ipc schema validates both directions', () => {
         id: EXT, name: 'Probe', version: '1.0', manifestVersion: 3, background: 'service_worker', contentScripts: 1, unsupportedPermissions: ['cookies'],
         wallet: false, chromeState: 'enabled', sizeBytes: 10, error: null,
       };
-      const inspection = { inspectionId: ID, profile, chromeRunning: true, history: { rows: 6 }, cookies: { rows: 5, partitioned: 1, storeVersion: 24 }, extensions: [candidate] };
+      const inspection = { inspectionId: ID, profile, chromeRunning: true, history: { rows: 6 }, cookies: { rows: 5, partitioned: 1, storeVersion: 24 }, extensions: [candidate], bookmarks: { count: 46 } /* cua #90 */ };
       expect(validateCommandOutput('browser.import.inspect', inspection).ok).toBe(true);
       expect(validateCommandOutput('browser.import.inspect', { ...inspection, history: { error: 'History couldn’t be read' }, cookies: { error: 'Cookies couldn’t be read' } }).ok).toBe(true);
       expect(validateCommandOutput('browser.import.inspect', { ...inspection, cookies: { rows: 5 } }).ok).toBe(false);
@@ -1392,6 +1399,96 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4b end
+  // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC")
+  describe('cua #90 entries', () => {
+    const tree = {
+      bar: { kind: 'folder', id: 1, name: 'Bookmarks bar', children: [{ kind: 'url', id: 2, name: 'A', url: 'https://a.example/', addedAt: 1 }, { kind: 'folder', id: 3, name: 'F', children: [] }] },
+      other: { kind: 'folder', id: 4, name: 'Other bookmarks', children: [] },
+      mobile: { kind: 'folder', id: 5, name: 'Mobile bookmarks', children: [] },
+    };
+
+    it('appends browser.bookmarks.tree, .sync and .changed after E13’s entries, main-owned, every name bridged', () => {
+      expect(Object.keys(browser.commands).slice(-10, -5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
+      expect(Object.keys(browser.events).slice(-4, -3)).toEqual(['browser.bookmarks.changed']);
+      for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons'] as const) expect(commands[name].owner).toBe('main');
+      expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
+      expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
+    });
+
+    it('validates the tree: three folder roots, only http(s) URLs, no extra key', () => {
+      expect(validateCommandInput('browser.bookmarks.tree', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.tree', { partition: 'persist:maws-capture' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree }).ok).toBe(true);
+      const withUrl = (url: string) => ({ tree: { ...tree, bar: { ...tree.bar, children: [{ kind: 'url', id: 2, name: 'A', url, addedAt: null }] } } });
+      for (const url of ['javascript:alert(1)', 'file:///etc/hosts', 'chrome://settings/', 'https://a b/']) expect(validateCommandOutput('browser.bookmarks.tree', withUrl(url)).ok, url).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree: { ...tree, bar: { ...tree.bar, extra: 1 } } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree: { bar: tree.bar, other: tree.other } }).ok).toBe(false);
+    });
+
+    it('validates the sync, the suggestion’s kind, the inspection’s count, the new phase and category, and the event', () => {
+      expect(validateCommandInput('browser.bookmarks.sync', { profileDir: 'Default' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.sync', { profileDir: '../Default' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.sync', { syncedAt: '2026-10-08T12:00:00.000Z', count: 46 }).ok).toBe(true);
+      for (const error of ['missing', 'unreadable', 'indexUnavailable', 'refused']) expect(validateCommandOutput('browser.bookmarks.sync', { error }).ok, error).toBe(true);
+      expect(validateCommandOutput('browser.bookmarks.sync', { error: 'refused', reason: 'an import is running' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: 'A', kind: 'bookmark' }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: 'A', kind: 'folder' }] }).ok).toBe(false);
+      expect(validateEventPayload('browser.import.progress', { importId: '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c', phase: 'bookmarks', done: 0, total: 1 }).ok).toBe(true);
+      expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default', tree }).ok).toBe(false);
+    });
+
+    // M1b: the bar's commands name their tab; a node id is an index row's (from 1); ⇧⌘B reaches the chrome
+    it('validates the bar\'s open, menu and favicons, and the chrome\'s toggleBookmarksBar', () => {
+      const tabId = 'b_000000000001';
+      expect(validateCommandInput('browser.bookmarks.open', { tabId, nodeId: 4, how: 'current' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.open', { tabId, nodeId: 4, how: 'newTab' }).ok).toBe(true);
+      for (const bad of [{ tabId, nodeId: 0, how: 'current' }, { tabId, nodeId: 1.5, how: 'current' }, { tabId, nodeId: 4, how: 'window' }, { nodeId: 4, how: 'current' }, { tabId, nodeId: 4, how: 'current', url: 'https://a.b/' }]) {
+        expect(validateCommandInput('browser.bookmarks.open', bad).ok, JSON.stringify(bad)).toBe(false);
+      }
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'folder', nodeId: 4 }, anchor: { x: 10, y: 64 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: 0 }, anchor: { x: 0, y: 0 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: -1 }, anchor: { x: 0, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'folder', hiddenFrom: 3 }, anchor: { x: 0, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: 3 }, anchor: { x: 0.5, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.favicons', { partition: 'persist:maws-chrome-Default', origins: ['https://a.b'] }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.favicons', { partition: 'persist:maws-chrome-Default', origins: Array.from({ length: 501 }, () => 'https://a.b') }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.favicons', { icons: { 'https://a.b': 'data:image/png;base64,QQ==' } }).ok).toBe(true);
+      expect(validateEventPayload('browser.chrome.command', { tabId, command: 'toggleBookmarksBar' }).ok).toBe(true);
+    });
+
+    // M3: the extensions action bar
+    it('appends browser.extensions.* after the bookmarks, main-owned, every name bridged', () => {
+      const names = ['browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle'] as const;
+      expect(Object.keys(browser.commands).slice(-5)).toEqual([...names]);
+      expect(Object.keys(browser.events).slice(-3)).toEqual(['browser.extensions.actions.changed', 'browser.extensions.popup', 'browser.extensions.reveal']);
+      for (const name of names) expect(commands[name].owner).toBe('main');
+    });
+
+    it('validates the actions, the tab-scoped commands, the events and the notices', () => {
+      const tabId = 'b_000000000001';
+      const extensionId = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+      const action = { extensionId, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true };
+      const anchor = { x: 600, y: 36, width: 24, height: 24 };
+      expect(validateCommandOutput('browser.extensions.actions', { actions: [action, { ...action, icon: 'data:image/png;base64,QQ==' }] }).ok).toBe(true);
+      for (const bad of [{ ...action, icon: 'https://x.test/icon.png' }, { ...action, extensionId: 'x' }, { ...action, popupUrl: 'chrome-extension://x/' }]) {
+        expect(validateCommandOutput('browser.extensions.actions', { actions: [bad] }).ok, JSON.stringify(bad)).toBe(false);
+      }
+      expect(validateCommandInput('browser.extensions.action.click', { tabId, extensionId, anchor }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.action.click', { tabId, extensionId, anchor: { ...anchor, x: 0.5 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.click', { extensionId, anchor }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.options', { tabId, extensionId }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.action.options', { tabId, extensionId, url: `chrome-extension://${extensionId}/options.html` }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.menu', { tabId, extensionId, anchor: { x: 1, y: 2 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.puzzle', { tabId, anchor }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.actions.changed', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.popup', { tabId, extensionId: null }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.reveal', { tabId, show: { kind: 'settings' } }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab: {} } }).ok).toBe(false);
+      for (const kind of ['extensionPopupFailed', 'extensionPageClosed']) expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: null, kind, name: 'MAWS probe' }).ok, kind).toBe(true);
+    });
+  });
+  // cua #90 end
   // E4c start: what stays of E4c's IPC once the browser tools left the `maws` server (P1 A-54): no `maws.browser.*` bridge;
   // `browser.agent.acting`, restored for cua's leases (A-54, amended); E13's download record and agent activity
   describe('E4c entries', () => {

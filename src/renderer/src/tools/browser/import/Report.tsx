@@ -42,7 +42,7 @@ function Stopped({ report }: { report: ImportReport }) {
 
 function Finished({ report }: { report: ImportReport }) {
   const active = useSettings((s) => s.state?.settings.browser.profile === report.profileDir);
-  const { cookies, history, extensions } = report;
+  const { cookies, history, extensions, bookmarks } = report;
   const keychain = cookies ? IMPORT_COPY.keychainLine(cookies, report.outcome) : null;
   return (
     <>
@@ -57,6 +57,11 @@ function Finished({ report }: { report: ImportReport }) {
       {history?.error != null && (
         <p title={history.error} className="m-0 text-ui-sm text-danger">
           {IMPORT_COPY.historyError(history.error)}
+        </p>
+      )}
+      {bookmarks?.error != null && (
+        <p title={bookmarks.error} className="m-0 text-ui-sm text-danger">
+          {IMPORT_COPY.bookmarksError(bookmarks.error)}
         </p>
       )}
       {cookies !== null && cookies.partitioned.imported > 0 && (

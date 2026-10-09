@@ -237,6 +237,10 @@ export const BROWSER = {
   links: 'Links that open a new window',
   linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
   linksNote: 'In MAWS, such a link opens as a new tab of the same session.',
+  // cua #90: settings 12's switch
+  bookmarksBar: 'Bookmarks bar',
+  bookmarksBarLabel: 'Show the bookmarks bar',
+  bookmarksBarNote: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.',
   // E4b start: the imported Chrome profiles (E4b execution document, Design §11; Decision Log 35)
   chromeProfile: 'Chrome profile',
   import: 'Import a Chrome profile…',
@@ -249,6 +253,8 @@ export const BROWSER = {
   remove: 'Remove imported profile',
   extensions: 'Extensions',
   walletOff: 'Wallet extensions start off',
+  // cua #90: what an extension's popup cannot do in MAWS's browser (its spec's S1: `chrome.tabs.query` never answers the page)
+  popupLimit: 'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
   toggles: [
     { value: 'on', label: 'On' },
     { value: 'off', label: 'Off' },

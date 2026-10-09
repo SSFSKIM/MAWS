@@ -12,6 +12,10 @@ export const commands = [
   'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
   // E4b end
   'browser.agent.activities.list', // E13
+  // cua #90 start
+  'browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons',
+  'browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle',
+  // cua #90 end
 ] as const;
 
 export const events = [
@@ -24,4 +28,7 @@ export const events = [
   // E4b end
   'browser.agent.acting', // E4c (removed with the browser tools, restored by E13 for cua's leases: P1 A-54)
   'browser.agent.activity', // E13
+  // cua #90 start
+  'browser.bookmarks.changed', 'browser.extensions.actions.changed', 'browser.extensions.popup', 'browser.extensions.reveal',
+  // cua #90 end
 ] as const;

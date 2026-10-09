@@ -85,9 +85,11 @@ describe('the import shapes (E4b Interfaces)', () => {
   });
 
   it('takes the categories, the phases and the Keychain outcomes as closed sets', () => {
-    expect(ImportCategoriesSchema.parse({ history: true, cookies: false, extensions: true })).toEqual({ history: true, cookies: false, extensions: true });
-    expect(ImportCategoriesSchema.safeParse({ history: true, cookies: false, extensions: true, passwords: false }).success).toBe(false);
-    expect(ImportPhaseSchema.options).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'extensions', 'cleaning']);
+    const categories = { history: true, cookies: false, extensions: true, bookmarks: true }; // cua #90: bookmarks
+    expect(ImportCategoriesSchema.parse(categories)).toEqual(categories);
+    expect(ImportCategoriesSchema.safeParse({ ...categories, passwords: false }).success).toBe(false);
+    expect(ImportCategoriesSchema.safeParse({ history: true, cookies: false, extensions: true }).success).toBe(false);
+    expect(ImportPhaseSchema.options).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
     expect(KeychainOutcomeSchema.options).toEqual(['allowed', 'denied', 'missing', 'timeout', 'wrongKey', 'skipped']);
   });
 

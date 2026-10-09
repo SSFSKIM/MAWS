@@ -11,7 +11,8 @@ import { profilePartition } from '@shared/browser/tab';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
 import { inspectExtensions, type InspectedExtension } from './chrome/extensions';
 import { TabStore } from '../tabs';
-import { describeBackgroundError, ExtensionsLoader, FIRST_LOAD_HOLD_MS, holdFirstLoad, SETTLE_MS } from './extensions-loader';
+import { describeBackgroundError, ExtensionsLoader, FIRST_LOAD_HOLD_MS, holdFirstLoad, SETTLE_MS, type ExtensionsLoaderDeps } from './extensions-loader';
+import { ImportedProfiles } from './profiles';
 import { ImportRefused, type ChosenExtension } from './service';
 
 // How the fake session's loaded extension behaves, by Chrome's directory id.
@@ -94,6 +95,13 @@ function memoryProfiles(records: ImportedProfile[] = []) {
       const at = store.records.findIndex((candidate) => candidate.profileDir === record.profileDir);
       store.records = at === -1 ? [...store.records, record] : store.records.map((candidate, i) => (i === at ? record : candidate));
     }),
+    // cua #90: ImportedProfiles.update's contract over the same records, writing through `put`
+    update: vi.fn(async (profileDir: string, change: (record: ImportedProfile) => ImportedProfile | null) => {
+      const current = store.get(profileDir);
+      const next = current ? change(current) : null;
+      if (next) await store.put(next);
+      return next;
+    }),
   };
   return store;
 }
@@ -121,7 +129,7 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       const found = inspected.find((extension) => extension.candidate.id === fixture.extensions[name].id)!;
       return { candidate: found.candidate, versionDir: found.versionDir! };
     });
-  const loader = (profiles = memoryProfiles(), extra: { changed?: () => void } = {}) =>
+  const loader = (profiles: ExtensionsLoaderDeps['profiles'] = memoryProfiles(), extra: { changed?: () => void } = {}) =>
     new ExtensionsLoader({ userData, profiles, env: {}, wait, now: () => Date.parse('2026-10-07T00:00:00Z'), ...extra });
   const run = (target: ExtensionsLoader, ses: Session, extensions: ChosenExtension[], signal = new AbortController().signal) =>
     target.importExtensions({ ses, partition: PARTITION, partitionFolder, stagingDir, extensions, signal, progress: () => {} });
@@ -288,7 +296,11 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       storageDirName: 'maws-chrome-default',
       userDataDir: fixture.dir,
       extensions,
-      report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+      report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [], bookmarks: null },
+      bookmarks: null, // cua #90: profiles.json version 2
+      gaiaName: null,
+      userName: null,
+      avatar: { kind: 'initials' },
     });
     // An import of probe, fails and wallet, as the import phase leaves it.
     async function imported(behaviours: Record<string, Behaviour> = {}) {
@@ -317,6 +329,25 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       expect(target.loading(PARTITION)).toBeNull();
     });
 
+    // cua #90: the bookmarks sync writes the same record at the same boot; each writer changes only its own field
+    it('writes its statuses over the record as it stands when the write runs, keeping a bookmarks state another writer put meanwhile', async () => {
+      const { probe } = fixture.extensions;
+      const profiles = ImportedProfiles.open(userData);
+      await profiles.put(await imported());
+      const synced = { consentedAt: '2026-10-06T00:00:00.000Z', syncedAt: '2026-10-07T00:00:00.000Z', count: 46, error: null, errorAt: null };
+      let bookmarksWrite: Promise<unknown> = Promise.resolve();
+      wait.mockImplementationOnce(async () => {
+        bookmarksWrite = profiles.update('Default', (r) => ({ ...r, bookmarks: synced })); // in flight when the settle ends
+      });
+      const target = loader(profiles);
+      target.onPartitionPrepared(fakeSession({ [probe.id]: { background: 'running' } }), PARTITION);
+      await target.idle(PARTITION);
+      await bookmarksWrite;
+      expect(profiles.get('Default')!.bookmarks).toEqual(synced);
+      expect(profiles.get('Default')!.extensions.find((extension) => extension.id === probe.id)).toMatchObject({ status: 'loaded', background: 'running' });
+      expect(ImportedProfiles.open(userData).get('Default')!.bookmarks).toEqual(synced);
+    });
+
     it('loads nothing for a partition no record names, and never throws into the partition\'s preparation', async () => {
       const ses = fakeSession();
       const target = loader();
@@ -324,7 +355,7 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       expect(target.loading(profilePartition('Profile 1'))).toBeNull();
       const broken = new ExtensionsLoader({
         userData,
-        profiles: { list: () => { throw new Error('boom'); }, get: () => null, put: vi.fn() },
+        profiles: { list: () => { throw new Error('boom'); }, get: () => null, update: vi.fn() },
         env: {},
         wait,
       });
@@ -390,7 +421,8 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       const profiles = memoryProfiles([
         {
           profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: [{ ...extension, unsupportedPermissions: [] }],
-          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [], bookmarks: null },
+          bookmarks: null, gaiaName: null, userName: null, avatar: { kind: 'initials' }, // cua #90
         },
       ]);
       return { ses, profiles, settle: () => settle() };
@@ -455,7 +487,8 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       profiles.records = [
         {
           profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: records,
-          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: records },
+          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: records, bookmarks: null },
+          bookmarks: null, gaiaName: null, userName: null, avatar: { kind: 'initials' }, // cua #90
         },
       ];
       wait.mockClear();
@@ -584,7 +617,8 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
     async function imported(): Promise<ImportedProfile> {
       return {
         profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: [],
-        report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+        report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [], bookmarks: null },
+          bookmarks: null, gaiaName: null, userName: null, avatar: { kind: 'initials' }, // cua #90
       };
     }
   });

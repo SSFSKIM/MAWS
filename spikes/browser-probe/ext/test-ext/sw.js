@@ -69,5 +69,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
+// cua #90 (from its S1 spike): an answerer for the popup's chrome.runtime.connect
+chrome.runtime.onConnect.addListener((port) => {
+  port.onMessage.addListener((msg) => port.postMessage({ pong: msg && msg.ping, from: 'service-worker', via: 'port' }));
+});
+
 chrome.runtime.onInstalled.addListener(() => run('onInstalled'));
 run('startup');

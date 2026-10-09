@@ -42,6 +42,15 @@ import {
 import { ImportedProfileSchema } from '../../browser/profiles';
 import { AbsolutePathSchema } from './settings';
 // E4b end
+// cua #90 start
+import { BOOKMARK_FAVICON_ORIGINS_MAX, BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
+import { BrowserProfileListItemSchema } from '../../browser/profiles';
+import { ExtensionActionSchema } from '../../browser/extensions';
+
+const BookmarkNodeIdSchema = z.number().int().min(1); // an index row's id (the empty tree's roots, 0, are never acted on)
+// A control's box in CSS px of the window's content area, rounded by the renderer: where a popup or a menu anchors.
+const ControlRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int().min(0), height: z.number().int().min(0) });
+// cua #90 end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
 // which a typed or agent-given string loses through that check's `url`. A refinement over the shared rule rather than
@@ -59,7 +68,8 @@ const TabOnly = z.strictObject({ tabId: BrowserTabIdSchema });
 export const BrowserTabsChangedSchema = z.strictObject({ appSessionId: AppSessionIdSchema, tabs: z.array(BrowserTabSchema), selected: BrowserTabIdSchema.nullable() });
 export type BrowserTabsChanged = z.infer<typeof BrowserTabsChangedSchema>;
 
-export const BrowserChromeCommandSchema = z.strictObject({ tabId: BrowserTabIdSchema, command: z.enum(['focusAddress', 'openFind', 'closeFind']) });
+// cua #90: `toggleBookmarksBar`, ⌘⇧B pressed inside the page (the chrome flips `browser.bookmarksBar`)
+export const BrowserChromeCommandSchema = z.strictObject({ tabId: BrowserTabIdSchema, command: z.enum(['focusAddress', 'openFind', 'closeFind', 'toggleBookmarksBar']) });
 export type BrowserChromeCommand = z.infer<typeof BrowserChromeCommandSchema>;
 
 // A transient chrome notice (4 s), never an app toast (E4a Design §3 and Decision Log 28). `refusedScheme` is a page's
@@ -73,6 +83,9 @@ export const BrowserNoticeSchema = z.strictObject({
     // tells the person when they select the tab (A-42)
     'dialogAnswered',
     // E4c end
+    // cua #90 (in place): an extension's popup that failed to load or crashed, closed; an extension's options tab closed
+    // because the extension was unloaded (turned off, or its profile removed). `name`: the extension's.
+    'extensionPopupFailed', 'extensionPageClosed',
   ]),
   name: z.string().optional(),
   count: z.number().int().min(0).optional(),
@@ -112,6 +125,7 @@ export const BrowserImportInspectionSchema = z.strictObject({
   history: z.union([z.strictObject({ rows: ImportCountSchema }), StoreErrorSchema]),
   cookies: z.union([z.strictObject({ rows: ImportCountSchema, partitioned: ImportCountSchema, storeVersion: z.number().int() }), StoreErrorSchema]),
   extensions: z.array(ExtensionCandidateSchema),
+  bookmarks: z.strictObject({ count: ImportCountSchema }).nullable(), // cua #90: the URL bookmarks found; null when no file could be read
 });
 export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
 // E4b end
@@ -182,12 +196,15 @@ export const commands = {
   'browser.control.handBack': { input: TabOnly, output: z.void(), owner: 'main' },
   'browser.history.suggest': {
     input: z.strictObject({ partition: BrowserPartitionSchema, query: z.string() }),
-    output: z.strictObject({ suggestions: z.array(z.strictObject({ url: z.string(), title: z.string().nullable() })).max(BROWSER_SUGGESTIONS_MAX) }),
+    // cua #90: `kind`, a bookmark of the partition (at most 3, first) or a history row
+    output: z.strictObject({
+      suggestions: z.array(z.strictObject({ url: z.string(), title: z.string().nullable(), kind: z.enum(['history', 'bookmark']) })).max(BROWSER_SUGGESTIONS_MAX),
+    }),
     owner: 'main',
   },
   'browser.profiles.list': {
     input: z.void(),
-    output: z.strictObject({ profiles: z.array(z.strictObject({ profileDir: z.string(), name: z.string() })) }),
+    output: z.strictObject({ profiles: z.array(BrowserProfileListItemSchema) }), // cua #90: the names and the avatar
     owner: 'main',
   },
   // E4d start
@@ -246,6 +263,60 @@ export const commands = {
     owner: 'main',
   },
   // E13 end
+  // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC"). `tree` answers the rows the
+  // index holds for the partition (empty roots when none, or when the index is read-only); `sync` re-reads the profile's
+  // `Bookmarks` file now and answers what it wrote, or why it wrote nothing (`refused`: an import or a removal is
+  // running, or the profile has no consented bookmarks; `reason` says which).
+  'browser.bookmarks.tree': { input: z.strictObject({ partition: BrowserPartitionSchema }), output: z.strictObject({ tree: BookmarkTreeSchema }), owner: 'main' },
+  'browser.bookmarks.sync': {
+    input: z.strictObject({ profileDir: ChromeProfileDirSchema }),
+    output: z.union([
+      z.strictObject({ syncedAt: z.iso.datetime(), count: ImportCountSchema }),
+      z.strictObject({ error: z.union([BookmarkSyncErrorSchema, z.literal('refused')]), reason: ImportTextSchema.optional() }),
+    ]),
+    owner: 'main',
+  },
+  // The bar's commands name the tab they came from: main reads the partition and the session from it, so a node id is
+  // looked up in that tab's partition only (a node of another partition is unknown) and every page opens in that
+  // tab's session. `open`: a chip's click (`current`, as a link the person clicked) or ⌘-click and middle-click
+  // (`newTab`, unselected). `menu`: a folder's native menu, or the » menu of the chips from `hiddenFrom` on and the
+  // other roots, popped at `anchor` (CSS px of the window's content area) on the sender's window; the chosen item acts in
+  // main. `favicons`: the icons the partition's favicon cache already holds for these page origins (no fetch).
+  'browser.bookmarks.open': { input: z.strictObject({ tabId: BrowserTabIdSchema, nodeId: BookmarkNodeIdSchema, how: z.enum(['current', 'newTab']) }), output: z.void(), owner: 'main' },
+  'browser.bookmarks.menu': {
+    input: z.strictObject({
+      tabId: BrowserTabIdSchema,
+      request: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('folder'), nodeId: BookmarkNodeIdSchema }),
+        z.strictObject({ kind: z.literal('overflow'), hiddenFrom: z.number().int().min(0) }),
+      ]),
+      anchor: z.strictObject({ x: z.number().int(), y: z.number().int() }),
+    }),
+    output: z.void(),
+    owner: 'main',
+  },
+  'browser.bookmarks.favicons': {
+    input: z.strictObject({ partition: BrowserPartitionSchema, origins: z.array(z.string().max(2048)).max(BOOKMARK_FAVICON_ORIGINS_MAX) }),
+    output: z.strictObject({ icons: z.record(z.string(), z.string()) }),
+    owner: 'main',
+  },
+  // The extensions action bar (Interfaces "Extensions"): `actions` lists the partition's loaded extensions as actions,
+  // in Settings' order. The tab-scoped commands name the tab they came from, from which main reads the partition, the
+  // session and the window, and an extension of another partition is unknown. `action.click` opens the action's popup
+  // under `anchor` (a second click on the same action closes it); `action.options` opens its options page as a new
+  // selected tab of the tab's session; `action.menu` pops the action's native context menu (its name, Options, Manage
+  // extensions…) at `anchor`; `puzzle` pops the folded bar's native menu under the puzzle button (`anchor`), whose
+  // actions anchor their popup there.
+  'browser.extensions.actions': { input: z.strictObject({ partition: BrowserPartitionSchema }), output: z.strictObject({ actions: z.array(ExtensionActionSchema) }), owner: 'main' },
+  'browser.extensions.action.click': { input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema, anchor: ControlRectSchema }), output: z.void(), owner: 'main' },
+  'browser.extensions.action.options': { input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema }), output: z.void(), owner: 'main' },
+  'browser.extensions.action.menu': {
+    input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema, anchor: z.strictObject({ x: z.number().int(), y: z.number().int() }) }),
+    output: z.void(),
+    owner: 'main',
+  },
+  'browser.extensions.puzzle': { input: z.strictObject({ tabId: BrowserTabIdSchema, anchor: ControlRectSchema }), output: z.void(), owner: 'main' },
+  // cua #90 end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -277,4 +348,23 @@ export const events = {
   // per second per tab; the windows attach each to the session's cua_repl `js` call
   'browser.agent.activity': BrowserAgentActivitySchema,
   // E13 end
+  // cua #90 start: a partition's bookmark rows were replaced (an import or a sync); a bar of that partition re-reads its tree
+  'browser.bookmarks.changed': z.strictObject({ partition: BrowserPartitionSchema }),
+  // the partition's actions changed (an extension loaded or unloaded): its bars read the list again
+  'browser.extensions.actions.changed': z.strictObject({ partition: BrowserPartitionSchema }),
+  // the popup open over the tab's window, for that tab's action button (pressed while its popup shows); null: none
+  'browser.extensions.popup': z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema.nullable() }),
+  // a menu's choice (in main) the chrome showing `tabId` carries on: show the options tab main opened (a main tab moves
+  // to it; the panel shows the session's selected tab already), or open Settings › Browser (Manage extensions…); or
+  // `replacement`: the options tab `tabId` left its extension's pages and closed, `tab` opened in its place (a main tab
+  // showing it shows `tab` instead, in place)
+  'browser.extensions.reveal': z.strictObject({
+    tabId: BrowserTabIdSchema,
+    show: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('tab'), tab: BrowserTabSchema }),
+      z.strictObject({ kind: z.literal('settings') }),
+      z.strictObject({ kind: z.literal('replacement'), tab: BrowserTabSchema }),
+    ]),
+  }),
+  // cua #90 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

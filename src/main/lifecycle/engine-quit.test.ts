@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { engineQuitDeps } from './engine-quit';
 
 // The engine host's half of the quit guard (E10 execution document, §Design 5).
 describe('the engine host at quit', () => {
-  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V11, ...extra });
+  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V12, ...extra });
   const hostsIn = (transport: 'utility' | 'detached') => ({ stopAllForQuit: vi.fn<(graceMs: number) => Promise<void>>(async () => {}), facts: vi.fn(() => ({ transport })) });
 
   it('stops every session through the quit’s stop-all with the 5 s grace, in either mode', async () => {

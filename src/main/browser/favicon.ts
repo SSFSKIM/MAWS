@@ -6,6 +6,10 @@
 // read by signature; a body that is not one of the six formats is no icon, whatever its content type says. Definitive
 // answers, misses included, are cached per (partition, icon URL), least recently used first out; a failure that may
 // pass (a throw, the deadline, a 5xx) is tried again next time.
+//
+// cua #90: the icon a lookup answers for a page is also kept by the page's origin (per partition, the last
+// FAVICON_CACHE_MAX origins), so the bookmarks bar can show the icon of a site the partition has shown, never fetching
+// one for a bookmark that was never visited (a bar of a hundred bookmarks must not fire a hundred requests at open).
 
 export const FAVICON_MAX_BYTES = 64 * 1024;
 export const FAVICON_FETCH_MS = 5000;
@@ -39,19 +43,39 @@ export type FetchInPartition = (partition: string, url: string, init: { signal: 
 
 export class Favicons {
   private readonly cache = new Map<string, string | null>();
+  private readonly byOrigin = new Map<string, string>(); // cua #90: `<partition>\n<origin>` → the icon its page last showed
 
   constructor(
     private readonly fetchIn: FetchInPartition,
     private readonly deadlineMs = FAVICON_FETCH_MS,
   ) {}
 
-  // The first candidate that is an image, as a data: URL; null when none is.
-  async resolve(partition: string, urls: readonly string[]): Promise<string | null> {
+  // The first candidate that is an image, as a data: URL; null when none is. `page`: the page the icons are for, whose
+  // origin then keeps the answer (cua #90).
+  async resolve(partition: string, urls: readonly string[], page: string | null = null): Promise<string | null> {
+    let icon: string | null = null;
     for (const url of urls) {
-      const icon = await this.cached(partition, url);
-      if (icon !== null) return icon;
+      icon = await this.cached(partition, url);
+      if (icon !== null) break;
     }
-    return null;
+    const origin = page === null ? null : originOf(page);
+    if (origin !== null) {
+      const key = `${partition}\n${origin}`;
+      this.byOrigin.delete(key);
+      if (icon !== null) this.byOrigin.set(key, icon);
+      while (this.byOrigin.size > FAVICON_CACHE_MAX) this.byOrigin.delete(this.byOrigin.keys().next().value!);
+    }
+    return icon;
+  }
+
+  // cua #90: the icons the partition's pages last showed for these origins (an origin with none is left out).
+  forOrigins(partition: string, origins: readonly string[]): Record<string, string> {
+    const icons: Record<string, string> = {};
+    for (const origin of origins) {
+      const icon = this.byOrigin.get(`${partition}\n${origin}`);
+      if (icon !== undefined) icons[origin] = icon;
+    }
+    return icons;
   }
 
   private async cached(partition: string, url: string): Promise<string | null> {
@@ -89,6 +113,16 @@ export class Favicons {
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+// An http(s) page's origin, or null (cua #90).
+export function originOf(url: string): string | null {
+  try {
+    const { protocol, origin } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:' ? origin : null;
+  } catch {
+    return null;
   }
 }
 

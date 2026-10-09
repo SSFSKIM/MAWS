@@ -1,9 +1,10 @@
 // "Remove imported profile" (E4b Design §12; Decision Log 18): everything an import brought, gone from MAWS, in order.
 // First the profile is withdrawn from the profiles new tabs may browse as, so a tab opened while the steps run browses
 // with the default profile instead of landing in the partition being emptied; then (1) the profile's tabs closed
-// through E4a's store, each page's destruction awaited; (2) its extensions unloaded; (3) the partition's storage, cache
+// through E4a's store, each page's destruction awaited (cua board #90: its extensions' popups and options tabs first,
+// each options tab told to its session); (2) its extensions unloaded; (3) the partition's storage, cache
 // and auth cache cleared and the cookie store flushed; (4) the partition folder (the extensions' files) deleted; (5) its
-// history rows counted and deleted; (6) the record dropped. A step that fails is logged and the next one runs: the
+// history rows counted and deleted, and (cua board #90) its bookmark rows deleted; (6) the record dropped. A step that fails is logged and the next one runs: the
 // record is dropped whatever else failed, and the boot sweep removes anything an unlisted profile left (its storage
 // directory, which Electron cannot delete while the session lives, among them). Refused while any import runs; Chrome
 // is never touched.
@@ -11,6 +12,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { WebContents } from 'electron';
 import { partitionDirName } from '@shared/browser/profiles';
+import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
 import type { BrowserHistoryStore } from '../../index/browser-history';
 import type { Partitions } from '../partition';
 import type { TabStore } from '../tabs';
@@ -29,6 +31,8 @@ export interface RemoveDeps {
   partitions: Pick<Partitions, 'session'>;
   extensions: Pick<ExtensionsLoader, 'unloadForRemoval' | 'removalDone'>;
   history: Pick<BrowserHistoryStore, 'countPartition' | 'removePartition'>;
+  bookmarks: Pick<BrowserBookmarksStore, 'removePartition'>; // cua #90
+  closingExtensionPages?(partition: string): void; // cua #90: the extension popups and options tabs of the partition
   profiles: Pick<ImportedProfiles, 'get' | 'withdraw' | 'remove'>;
 }
 
@@ -56,6 +60,7 @@ export async function removeImportedProfile(deps: RemoveDeps, profileDir: string
   const release = deps.profiles.withdraw(profileDir);
   try {
     await step('tabs', async () => {
+      deps.closingExtensionPages?.(partition); // cua #90: closed with a notice before the rest go silently
       const closing = deps.store.all().filter((entry) => entry.tab.partition === partition);
       tabs = closing.length;
       const destroyed = closing.map((entry) => (entry.view ? pageDestroyed(entry.view.webContents) : Promise.resolve()));
@@ -81,6 +86,7 @@ export async function removeImportedProfile(deps: RemoveDeps, profileDir: string
       historyRows = deps.history.countPartition(partition);
       deps.history.removePartition(partition);
     });
+    await step('bookmarks', () => deps.bookmarks.removePartition(partition)); // cua #90
     await deps.profiles.remove(profileDir);
   } finally {
     release();

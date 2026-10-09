@@ -8,28 +8,34 @@
 // - Search engine: the address field's search template, written on Enter or blur only when it is an http(s) address
 //   with %s (the schema refuses anything else; a refusal is said in words and the field goes back).
 // - Links that open a new window: a new tab of the session, or the system browser (Decision Log 11).
+// - cua #90: Bookmarks bar, next to the profile: settings 12's switch, which ⌘⇧B in the browser flips too.
 import type { Settings } from '@shared/ipc/schema';
 import { isSearchUrlTemplate } from '@shared/browser/url';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { BROWSER } from './copy';
-import { INPUT, Segment, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { INPUT, Segment, Setting, Switch, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 // E4b start
 import { BrowserImport } from './BrowserImport';
 // E4b end
 
 const DEFAULT_PROFILE = ''; // the select's value for `profile: null`
-const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V11.browser.searchUrl;
+const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V12.browser.searchUrl;
 const LINK_TARGETS = (['in-app', 'external'] as const).map((value) => ({ value, label: BROWSER.linkTargets[value] }));
 
 export function BrowserSection({ settings }: { settings: Settings }) {
-  const { profile, searchUrl, linkTarget } = settings.browser;
+  const { profile, searchUrl, linkTarget, bookmarksBar } = settings.browser;
   return (
     <>
       <Setting label={BROWSER.profile} note={BROWSER.profileNote}>
         <ProfileSelect profile={profile} />
       </Setting>
+      {/* cua #90 start */}
+      <Setting label={BROWSER.bookmarksBar} note={BROWSER.bookmarksBarNote}>
+        <Switch checked={bookmarksBar === 'shown'} label={BROWSER.bookmarksBarLabel} onChange={(next) => void writeSettings({ browser: { bookmarksBar: next ? 'shown' : 'hidden' } })} />
+      </Setting>
+      {/* cua #90 end */}
       <Setting label={BROWSER.search} note={BROWSER.searchNote}>
         <SearchField searchUrl={searchUrl} />
       </Setting>

@@ -124,6 +124,27 @@ CREATE TABLE browser_activity (id INTEGER PRIMARY KEY, app_session_id TEXT NOT N
 CREATE INDEX browser_activity_session ON browser_activity(app_session_id, id);
 `,
   },
+  {
+    version: 7,
+    // cua board #90 (P1 ledger §4, taken 2026-10-08): an imported Chrome profile's bookmarks, a read-only mirror of its
+    // `Bookmarks` file, one row per node keyed per partition and replaced whole at every sync. The three roots have no
+    // parent; `(partition, parent_id, position)` serves the tree, `(partition, url)` the address field's suggestions.
+    sql: `
+CREATE TABLE browser_bookmarks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  partition TEXT NOT NULL,
+  parent_id INTEGER,            -- NULL for the three roots
+  root TEXT NOT NULL CHECK (root IN ('bar','other','mobile')),
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('url','folder')),
+  name TEXT NOT NULL,
+  url TEXT,                     -- NULL for folders
+  added_at_ms INTEGER
+);
+CREATE INDEX browser_bookmarks_tree ON browser_bookmarks (partition, parent_id, position);
+CREATE INDEX browser_bookmarks_url ON browser_bookmarks (partition, url);
+`,
+  },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

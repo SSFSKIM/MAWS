@@ -7,7 +7,7 @@ import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
 import type { EventName, EventPayload, MawsBridge, Settings } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { DONE_REPORT } from '../../../../test/support/import-reports';
 import { settingsBridge, type SettingsBridge } from './settings-bridge';
 
@@ -57,6 +57,7 @@ export const INSPECTION: BrowserImportInspection = {
     candidate({ id: WALLET_ID, name: 'Probe Wallet', background: 'none', wallet: true }),
     candidate({ id: DISABLED_ID, name: 'Disabled in Chrome', chromeState: 'disabled' }),
   ],
+  bookmarks: { count: 46 }, // cua #90
 };
 
 export const DONE = DONE_REPORT;
@@ -70,6 +71,10 @@ export const RECORD: ImportedProfile = {
   userDataDir: CHROME,
   extensions: DONE.extensions,
   report: DONE,
+  bookmarks: null, // cua #90: profiles.json version 2
+  gaiaName: null,
+  userName: null,
+  avatar: { kind: 'initials' },
 };
 
 export interface ImportBridge extends SettingsBridge {
@@ -78,7 +83,7 @@ export interface ImportBridge extends SettingsBridge {
 
 // Main's answers for the import's commands, each replaceable by a case; events reach the listeners only when they pass
 // the event's schema, as the real client checks them.
-export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V11): ImportBridge {
+export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V12): ImportBridge {
   const b = settingsBridge(initial);
   Object.assign(b.answers, {
     'browser.import.list': () => ({ profiles: [], fileBroken: false, running: null }),

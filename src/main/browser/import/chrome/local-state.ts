@@ -1,6 +1,7 @@
 // The profile picker's source (E4b Design §2): `<userDataDir>/Local State`'s `profile.info_cache` and `profile.last_used`,
 // parsed in place (Chrome rewrites the file atomically) under a size cap, one of the enumerated read-only JSON reads.
-// Of each profile only `name`, `gaia_name` and `user_name` are read. A profile directory is admitted only when it is a
+// Of each profile only `name`, `gaia_name` and `user_name` are read (cua board #90: and `gaia_picture_file_name`, for the
+// import's avatar alone, never in the picker's answer). A profile directory is admitted only when it is a
 // key of `info_cache`, matches Chrome's pattern, and its real directory stays under the user data directory.
 // `SingletonLock` (the symlink Chrome holds while it runs) is a hint, never a block (Decision Log 14).
 import { constants } from 'node:fs';
@@ -44,9 +45,9 @@ export async function readChromeProfiles(userDataDir: string, isImported: (profi
   const parsed = parseLocalState(read.text);
   if (parsed === null) return answer(true, [], 'invalid', chromeRunning);
   const profiles: ChromeProfile[] = [];
-  for (const entry of parsed.profiles) {
-    if (!(await admitted(root, userDataDir, entry.profileDir))) continue;
-    profiles.push({ ...entry, lastUsed: entry.profileDir === parsed.lastUsed, imported: isImported(entry.profileDir) });
+  for (const { profileDir, name, gaiaName, userName } of parsed.profiles) {
+    if (!(await admitted(root, userDataDir, profileDir))) continue;
+    profiles.push({ profileDir, name, gaiaName, userName, lastUsed: profileDir === parsed.lastUsed, imported: isImported(profileDir) });
   }
   return answer(true, profiles, null, chromeRunning);
 }
@@ -63,7 +64,17 @@ export async function resolveChromeProfile(
   return profile ? { profile, path: join(userDataDir, profileDir) } : null;
 }
 
-type LocalStateProfile = Omit<ChromeProfile, 'lastUsed' | 'imported'>;
+// cua #90: the profile's Google profile picture as `Local State` names it, a plain file name in its profile directory, or
+// null when it has none (Work in the fixture; any profile not signed in) or Local State cannot be read. The caller
+// re-applies the admission and reads the file `O_NOFOLLOW` (avatar.ts).
+export async function readChromePictureName(userDataDir: string, profileDir: string): Promise<string | null> {
+  if (!CHROME_PROFILE_DIR.test(profileDir) || !isAbsolute(userDataDir)) return null;
+  const read = await readCapped(join(userDataDir, 'Local State'));
+  if (typeof read === 'string') return null;
+  return parseLocalState(read.text)?.profiles.find((entry) => entry.profileDir === profileDir)?.picture ?? null;
+}
+
+type LocalStateProfile = Omit<ChromeProfile, 'lastUsed' | 'imported'> & { picture: string | null };
 
 function parseLocalState(text: string): { profiles: LocalStateProfile[]; lastUsed: string | null } | null {
   let data: unknown;
@@ -79,15 +90,20 @@ function parseLocalState(text: string): { profiles: LocalStateProfile[]; lastUse
   for (const [profileDir, value] of Object.entries(cache)) {
     const info = objectOr(value);
     if (!info || !CHROME_PROFILE_DIR.test(profileDir)) continue;
-    profiles.push({ profileDir, name: name(info.name) ?? profileDir, gaiaName: name(info.gaia_name), userName: name(info.user_name) });
+    profiles.push({ profileDir, name: name(info.name) ?? profileDir, gaiaName: name(info.gaia_name), userName: name(info.user_name), picture: fileName(info.gaia_picture_file_name) });
   }
   return { profiles, lastUsed: typeof profile.last_used === 'string' ? profile.last_used : null };
 }
 
 const objectOr = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 const name = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value.slice(0, IMPORT_NAME_MAX) : null);
+// cua #90: one path segment, whole (a name cut short would name another file), or nothing
+const fileName = (value: unknown): string | null =>
+  typeof value === 'string' && value.length <= 255 && value !== '.' && value !== '..' && !/[/\\\0]/.test(value) && value !== '' ? value : null;
 
-async function realDirectory(path: string): Promise<string | null> {
+// cua #90: exported, with `admitted`, for the bookmarks read (chrome/bookmarks.ts), which re-applies the admission at
+// every read since a profile directory replaced by a symlink after the import must not be followed.
+export async function realDirectory(path: string): Promise<string | null> {
   try {
     const real = await realpath(path);
     return (await stat(real)).isDirectory() ? real : null;
@@ -96,7 +112,7 @@ async function realDirectory(path: string): Promise<string | null> {
   }
 }
 
-async function admitted(root: string, userDataDir: string, profileDir: string): Promise<boolean> {
+export async function admitted(root: string, userDataDir: string, profileDir: string): Promise<boolean> {
   const real = await realDirectory(join(userDataDir, profileDir));
   return real !== null && real.startsWith(root + sep);
 }

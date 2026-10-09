@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionServiceDeps } from './context';
 import { intentFor } from '../../../test/support/session-host';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 
 const state = vi.hoisted(() => ({
@@ -64,7 +64,7 @@ describe('main setup-intent and shell-environment wiring', () => {
   beforeEach(async () => {
     vi.resetModules();
     state.handlers.clear();
-    state.settings = SETTINGS_DEFAULTS_V11; // E4a
+    state.settings = SETTINGS_DEFAULTS_V12; // E4a
     state.root = mkdtempSync(join(tmpdir(), 'maws-main-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
@@ -144,9 +144,9 @@ describe('main setup-intent and shell-environment wiring', () => {
   // E4a: the browser reads settings 11's browser section from the service at each use, so a change reaches the next tab
   // opened and the next new-window link without a restart
   it('hands the browser the live browser settings, read at each call', () => {
-    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V11.browser);
-    const browser = { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external' } as const;
-    state.settings = { ...SETTINGS_DEFAULTS_V11, browser };
+    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V12.browser);
+    const browser = { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' } as const; // cua #90: bookmarksBar
+    state.settings = { ...SETTINGS_DEFAULTS_V12, browser };
     expect(state.browserSettings!()).toEqual(browser);
   });
 });

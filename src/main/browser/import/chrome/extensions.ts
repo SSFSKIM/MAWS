@@ -4,10 +4,10 @@
 // description resolved through `_locales` as Electron resolves them; the permissions Electron lacks; wallets (P-21);
 // Chrome's own enabled state from `Secure Preferences` then `Preferences` (Decision Log 9). A tree holding a symlink is
 // refused, and no file is read through a symlink.
-import { constants } from 'node:fs';
-import { lstat, open, readdir } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ELECTRON_ABSENT_PERMISSIONS, EXTENSION_ID, IMPORT_NAME_MAX, isWalletExtension, type ExtensionCandidate } from '@shared/browser/import';
+import { readCappedNoFollow } from './read-capped';
 
 const MANIFEST_MAX_BYTES = 1024 * 1024;
 const MESSAGES_MAX_BYTES = 1024 * 1024;
@@ -187,19 +187,11 @@ const objectOr = (value: unknown): Record<string, unknown> | null => (value !== 
 
 // A JSON file read without following a symlink and under a cap; anything else (absent, too large, not JSON) is null.
 async function readJson(file: string, maxBytes: number): Promise<unknown> {
-  let handle;
+  const read = await readCappedNoFollow(file, maxBytes);
+  if (typeof read === 'string') return null;
   try {
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); // a FIFO never blocks; isFile refuses it
+    return JSON.parse(read.text);
   } catch {
     return null;
-  }
-  try {
-    const info = await handle.stat();
-    if (!info.isFile() || info.size > maxBytes) return null;
-    return JSON.parse(await handle.readFile('utf8'));
-  } catch {
-    return null;
-  } finally {
-    await handle.close();
   }
 }

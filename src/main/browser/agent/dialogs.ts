@@ -13,6 +13,9 @@
 //   - no pane places the tab and the agent does not hold it (never placed, or released; the person's): answered with the
 //     same defaults and held, at most ten, until a pane next places the tab, when one `browser.notice` `dialogAnswered`
 //     names the last of them (A-42 condition 3: "this tab" is then the shown one);
+//     cua board #90: a tab whose view is in the hidden staging window for its cover's still (view.ts) counts as unplaced
+//     meanwhile, so the staging window, which would own Electron's box, never shows or takes the focus; it is told once
+//     it is out again;
 //   - a placed tab the person holds (`idle`, `human`): Electron's own dialog, exactly as E4a landed it, except on a page
 //     Electron does not bound itself (its `safeDialogs` off, which on 44.4.5 is an adopted `window.open` pop-up): there,
 //     once two dialogs have ended within 5 s (sliding, reset by a committed navigation), further ones are dismissed as
@@ -101,6 +104,7 @@ export interface PageDialogsDeps {
   now?(): number;
   // A-53: cua's held route for a tab under a lease (absent: no cua backend, no such tab)
   held?: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
+  staged?(entry: TabEntry): boolean; // cua #90: the view is in the staging window for its still (ViewManager.staging)
 }
 
 export class PageDialogs {
@@ -151,7 +155,7 @@ export class PageDialogs {
     const route = routeDialog({
       type,
       control: entry.tab.control,
-      placed: entry.tab.placedIn !== null,
+      placed: entry.tab.placedIn !== null && this.deps.staged?.(entry) !== true,
       safeDialogs: safeDialogsOf(contents),
       recent: state.ended.length,
       leased: this.deps.held?.holds(entry.tab.tabId) === true,
@@ -188,7 +192,7 @@ export class PageDialogs {
   // A pane places the tab: the dialogs answered while nobody could see it are told, once.
   private shown(entry: TabEntry): void {
     const state = this.states.get(entry);
-    if (!state || state.held.length === 0 || entry.tab.placedIn === null) return;
+    if (!state || state.held.length === 0 || entry.tab.placedIn === null || this.deps.staged?.(entry) === true) return;
     const last = state.held.at(-1)!;
     const count = state.held.length;
     state.held = [];

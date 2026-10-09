@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildChromeUserData, type ChromeUserData } from '../../../../../test/support/chrome-profile';
-import { defaultChromeUserDataDir, LOCAL_STATE_MAX_BYTES, readChromeProfiles, resolveChromeProfile } from './local-state';
+import { defaultChromeUserDataDir, LOCAL_STATE_MAX_BYTES, readChromePictureName, readChromeProfiles, resolveChromeProfile } from './local-state';
 
 let root: string;
 let fixture: ChromeUserData;
@@ -109,6 +109,33 @@ describe('resolveChromeProfile (the inspection’s re-validation)', () => {
     for (const profileDir of ['Profile 9', '../Default', 'Default/..', ''])
       expect(await resolveChromeProfile(fixture.dir, profileDir), profileDir).toBeNull();
     expect(await resolveChromeProfile(join(root, 'nowhere'), 'Default')).toBeNull();
+  });
+});
+
+// cua #90: the Google profile picture's file name, for the import's avatar; never part of the picker's answer
+describe('readChromePictureName', () => {
+  it('answers the fixture’s picture for Default and none for Work, which has no gaia_picture_file_name', async () => {
+    expect(await readChromePictureName(fixture.dir, 'Default')).toBe('Google Profile Picture.png');
+    expect(await readChromePictureName(fixture.dir, 'Profile 1')).toBeNull();
+  });
+
+  it('answers null for an absent, empty, non-string or path-like name, never a path out of the profile directory', async () => {
+    const names: unknown[] = [undefined, '', 42, null, { file: 'x.png' }, '../Local State', 'a/b.png', 'a\\b.png', '.', '..', 'x\0.png', 'p'.repeat(256)];
+    const info_cache = Object.fromEntries(names.map((name, k) => [`Profile ${k + 1}`, { name: `P${k}`, gaia_picture_file_name: name }]));
+    const dir = userData({ profile: { info_cache } }, names.map((_, k) => `Profile ${k + 1}`));
+    for (let k = 0; k < names.length; k++) expect(await readChromePictureName(dir, `Profile ${k + 1}`), String(names[k])).toBeNull();
+  });
+
+  it('answers null for a profile Local State does not name, a malformed key, and an unreadable or missing Local State', async () => {
+    expect(await readChromePictureName(fixture.dir, 'Profile 9')).toBeNull();
+    expect(await readChromePictureName(fixture.dir, '../Default')).toBeNull();
+    expect(await readChromePictureName(userData('not json'), 'Default')).toBeNull();
+    expect(await readChromePictureName(join(root, 'nowhere'), 'Default')).toBeNull();
+  });
+
+  it('keeps the picker’s answer as it was: the picture’s name is not a field of a listed profile', async () => {
+    const { profiles } = await readChromeProfiles(fixture.dir);
+    expect(Object.keys(profiles[0]!)).toEqual(['profileDir', 'name', 'gaiaName', 'userName', 'lastUsed', 'imported']);
   });
 });
 

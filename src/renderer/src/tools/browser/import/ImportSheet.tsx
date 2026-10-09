@@ -10,7 +10,7 @@ import { Sheet } from '../../../sessions/Sheet';
 import { SECONDARY } from '../../../sessions/ui';
 import { Consent } from './Consent';
 import { IMPORT_COPY } from './copy';
-import { ProfilePicker } from './ProfilePicker';
+import { ProfilePicker, type PickerPreselect } from './ProfilePicker';
 import { Progress } from './Progress';
 import { Report } from './Report';
 import { browserImport, discard, reportShown, useBrowserImport, type ImportStage } from './store';
@@ -33,7 +33,8 @@ function titleOf(stage: ImportStage): string {
   }
 }
 
-export function ImportSheet({ onClose }: { onClose(): void }) {
+// `preselect` (cua #90): a re-import's picker, on the removed profile's folder with it chosen.
+export function ImportSheet({ onClose, preselect }: { onClose(): void; preselect?: PickerPreselect }) {
   const stage = useBrowserImport((s) => s.stage);
   const busy = useBrowserImport((s) => s.busy);
   useEffect(
@@ -53,7 +54,7 @@ export function ImportSheet({ onClose }: { onClose(): void }) {
   };
   return (
     <Sheet title={titleOf(stage)} width={WIDTH} onClose={close} data-browser-import={stage.kind}>
-      {stage.kind === 'pick' && <ProfilePicker />}
+      {stage.kind === 'pick' && <ProfilePicker preselect={preselect} />}
       {stage.kind === 'consent' && <Consent key={stage.inspection.inspectionId} inspection={stage.inspection} />}
       {stage.kind === 'running' && <Progress progress={stage.progress} cancelling={stage.cancelling} />}
       {stage.kind === 'report' && <Report report={stage.report} onClose={close} />}

@@ -3,7 +3,7 @@
 // row through the import view's debugger only and verified, the unverified count, a wrong key, the Keychain outcomes,
 // cancel and failure rolling back whole with no record, the staging deleted on every exit, and the refusals at start.
 // The Electron session, the import view, the Keychain and the extensions phase are fakes; the index is a real one.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,6 +14,8 @@ import { ImportReportSchema } from '@shared/browser/import';
 import { summaryWords } from '@shared/browser/import-summary';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
 import { Index } from '../../index/index';
+import type { AvatarImage } from './avatar';
+import { readChromeBookmarks } from './chrome/bookmarks';
 import { deriveKey } from './chrome/crypto';
 import type { NetworkSetCookieParams } from './chrome/cookies';
 import type { ImportView } from './chips-import';
@@ -139,6 +141,7 @@ describe('BrowserImportService', () => {
       env: {},
       partitions: { session: vi.fn(() => session.session) },
       history: index.browserHistory,
+      bookmarks: index.browserBookmarks, // cua #90
       profiles,
       emit: (name, payload) => {
         const event = { name, payload } as Emitted;
@@ -154,7 +157,7 @@ describe('BrowserImportService', () => {
   }
 
   const extensionIds = () => [fixture.extensions.probe.id, fixture.extensions.fails.id, fixture.extensions.wallet.id];
-  const ALL = { history: true, cookies: true, extensions: true };
+  const ALL = { history: true, cookies: true, extensions: true, bookmarks: true };
 
   async function importAll(svc: BrowserImportService, over: { categories?: typeof ALL; extensionIds?: string[]; profileDir?: string } = {}) {
     const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: over.profileDir ?? 'Default' });
@@ -224,7 +227,7 @@ describe('BrowserImportService', () => {
     const svc = service();
     const { importId, report } = await importAll(svc);
 
-    expect(phases()).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'extensions', 'cleaning']);
+    expect(phases()).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
     expect(ImportReportSchema.parse(report)).toEqual(report);
     expect(report).toMatchObject({
       profileDir: 'Default', name: 'Person 1', partition: PARTITION, outcome: 'done', failure: null,
@@ -234,7 +237,7 @@ describe('BrowserImportService', () => {
     expect(report.cookies!.skipped).toEqual({ wrongKey: 0, corruptRow: 0, expired: 0, sameSiteNoneInsecure: 1, rejected: 0, notVerified: 0, cancelled: 0 });
     expect(report.extensions!.map((e) => [e.name, e.status])).toEqual(expect.arrayContaining([['Probe Wallet', 'off']]));
     expect(summaryWords(report)).toBe(
-      "4 cookies, 4 history entries, 3 extensions · 3 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open",
+      "4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported",
     );
     expect(new Date(report.finishedAt).toISOString()).toBe(report.finishedAt);
 
@@ -253,7 +256,7 @@ describe('BrowserImportService', () => {
     expect(stagingLeft()).toEqual([]);
     expect(profiles.get('Default')).toMatchObject({ profileDir: 'Default', name: 'Person 1', partition: PARTITION, storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, report });
     expect(profiles.get('Default')!.extensions).toEqual(report.extensions);
-    expect(emitted.filter((e) => e.name !== 'browser.import.progress').map((e) => e.name)).toEqual(['browser.import.changed', 'browser.import.finished']);
+    expect(emitted.filter((e) => e.name !== 'browser.import.progress').map((e) => e.name)).toEqual(['browser.bookmarks.changed', 'browser.import.changed', 'browser.import.finished']);
     expect(emitted.at(-1)!.payload).toEqual({ importId, report });
     expect(svc.running()).toBeNull();
   });
@@ -283,7 +286,7 @@ describe('BrowserImportService', () => {
     expect(view.createImportView).not.toHaveBeenCalled();
     expect(keys[0]!.every((byte) => byte === 0)).toBe(true);
     expect(report.outcome).toBe('done');
-    expect(summaryWords(report)).toMatch(/^0 cookies, 4 history entries, 3 extensions · 7 skipped: 5 could not be decrypted/);
+    expect(summaryWords(report)).toMatch(/^0 cookies, 4 history entries, 46 bookmarks, 3 extensions · 8 skipped: 5 could not be decrypted/);
   });
 
   it.each([
@@ -370,7 +373,7 @@ describe('BrowserImportService', () => {
     const svc = service();
     const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
     writeFileSync(join(userData, 'browser', 'import', inspection.inspectionId, 'Cookies'), 'not a database');
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(report).toMatchObject({ outcome: 'done', history: null, extensions: null, cookies: { imported: 0, keychain: 'skipped', error: 'SQLITE_NOTADB' } });
     expect(keychain).not.toHaveBeenCalled();
@@ -427,7 +430,7 @@ describe('BrowserImportService', () => {
     const db = new DatabaseSync(join(userData, 'browser', 'import', inspection.inspectionId, 'Cookies'));
     db.exec('DELETE FROM cookies');
     db.close();
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(keychain).not.toHaveBeenCalled();
     expect(report).toMatchObject({ outcome: 'done', cookies: { imported: 0, keychain: 'skipped', error: null } });
@@ -476,7 +479,7 @@ describe('BrowserImportService', () => {
       if (event.payload.phase === 'history' && event.payload.done === 500) svc.cancel(svc.running()!.importId);
     };
     const inspection = await svc.inspect({ userDataDir: big.dir, profileDir: 'Default' });
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: true, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: true, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(report.outcome).toBe('cancelled');
     expect(importRows).toHaveBeenCalledTimes(1);
@@ -485,10 +488,156 @@ describe('BrowserImportService', () => {
     expect(historyOf()).toEqual([]);
   });
 
+  // cua #90 start: the fourth category
+  describe('bookmarks', () => {
+    const barNames = () => index.browserBookmarks.tree(PARTITION).bar.children.map((node) => node.name);
+
+    it('the inspection counts the URL bookmarks the import would keep, and answers null for a profile with no file', async () => {
+      const svc = service();
+      expect((await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' })).bookmarks).toEqual({ count: 46 });
+      expect((await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Profile 1' })).bookmarks).toBeNull();
+    });
+
+    it('the phase writes the rows and the report, and the record carries the mirror’s state and the account names', async () => {
+      const { report } = await importAll(service());
+      expect(report.bookmarks).toEqual({ imported: 46, skipped: 1, error: null });
+      expect(barNames().slice(0, 4)).toEqual(['A', 'B', 'F', 'N01']);
+      expect(index.browserBookmarks.tree(PARTITION).other.children.map((node) => node.name)).toEqual(['O1']);
+      const record = profiles.get('Default')!;
+      expect(record.bookmarks).toEqual({ consentedAt: report.startedAt, syncedAt: expect.any(String), count: 46, error: null, errorAt: null });
+      expect(record).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'initials' } });
+      expect(emitted.find((e) => e.name === 'browser.bookmarks.changed')!.payload).toEqual({ partition: PARTITION });
+    });
+
+    it('unchecked: no phase, no rows, and the record’s bookmarks null', async () => {
+      const { report } = await importAll(service(), { categories: { ...ALL, bookmarks: false } });
+      expect(report.bookmarks).toBeNull();
+      expect(phases()).not.toContain('bookmarks');
+      expect(barNames()).toEqual([]);
+      expect(profiles.get('Default')!.bookmarks).toBeNull();
+    });
+
+    it('is a category on its own', async () => {
+      const { report } = await importAll(service(), { categories: { history: false, cookies: false, extensions: false, bookmarks: true }, extensionIds: [] });
+      expect(report).toMatchObject({ outcome: 'done', history: null, cookies: null, extensions: null, bookmarks: { imported: 46 } });
+      expect(keychain).not.toHaveBeenCalled();
+    });
+
+    it('a file gone by the run is the category’s error; the consent stands on the record for the next sync', async () => {
+      const readBookmarks = vi.fn(readChromeBookmarks);
+      const svc = service({ readBookmarks });
+      const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
+      readBookmarks.mockResolvedValueOnce({ ok: false, error: 'missing' });
+      const report = await svc.start({ inspectionId: inspection.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true }).finished;
+      expect(report).toMatchObject({ outcome: 'done', bookmarks: { imported: 0, skipped: 0, error: 'missing' } });
+      expect(profiles.get('Default')!.bookmarks).toEqual({ consentedAt: report.startedAt, syncedAt: null, count: 0, error: 'missing', errorAt: expect.any(String) });
+      expect(summaryWords(report)).toContain('0 bookmarks');
+    });
+
+    it('an index that refuses the rows is the category’s error, the rest imported', async () => {
+      const bookmarks = { replace: () => { throw Object.assign(new Error('the index is unavailable'), { code: 'indexUnavailable' }); }, removePartition: () => {} };
+      const { report } = await importAll(service({ bookmarks }));
+      expect(report).toMatchObject({ outcome: 'done', history: { imported: 4 }, bookmarks: { imported: 0, skipped: 1, error: 'indexUnavailable' } });
+      expect(profiles.get('Default')!.bookmarks).toMatchObject({ syncedAt: null, error: 'indexUnavailable' });
+    });
+
+    it('a run cancelled after the phase rolls the rows back with the history', async () => {
+      extensions = fakeExtensions(session.loaded, { waitForAbortAfter: 1 });
+      const svc = service();
+      onEmit = (event) => {
+        if (event.payload.phase === 'extensions' && event.payload.done === 1) svc.cancel(svc.running()!.importId);
+      };
+      const { report } = await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
+      expect(report).toMatchObject({ outcome: 'cancelled', bookmarks: { imported: 46 } });
+      expect(barNames()).toEqual([]);
+      expect(index.browserBookmarks.tree(PARTITION).other.children).toEqual([]);
+      expect(profiles.get('Default')).toBeNull();
+    });
+
+    // the profile's avatar: the Google picture as a 64 px PNG beside the partition, else the initial; never a failure
+    describe('avatar', () => {
+      const avatarFile = () => join(userData, 'browser', 'maws-chrome-Default', 'avatar.png');
+      const decoded: Buffer[] = [];
+      const image = (side: number): AvatarImage => ({
+        isEmpty: () => side === 0,
+        getSize: () => ({ width: side, height: side }),
+        crop: () => image(side),
+        resize: ({ width }) => image(width),
+        toPNG: () => Buffer.from(`avatar ${side}`),
+      });
+      const decodeImage = (bytes: Buffer) => {
+        decoded.push(bytes);
+        return image(bytes.subarray(1, 4).toString('ascii') === 'PNG' ? 64 : 0);
+      };
+      beforeEach(() => void (decoded.length = 0));
+      // every line the import logs, through the logger's own e2e mirror
+      const logFile = () => join(userData, 'import-log.txt');
+      const env = () => ({ MAWS_E2E: '1', MAWS_E2E_IMPORT_LOG: logFile() });
+      const logged = () => (existsSync(logFile()) ? readFileSync(logFile(), 'utf8').split('\n').filter(Boolean) : []);
+
+      it('writes the picture Local State names as avatar.png in the partition folder, and the record says picture', async () => {
+        const { report } = await importAll(service({ decodeImage, env: env() }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(report.outcome).toBe('done');
+        expect(decoded.map((bytes) => bytes.equals(readFileSync(fixture.profiles.Default.picture!)))).toEqual([true]);
+        expect(readFileSync(avatarFile(), 'utf8')).toBe('avatar 64');
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'picture' });
+      });
+
+      it('a profile with no picture is drawn by its initial and has no file', async () => {
+        await importAll(service({ decodeImage, env: env() }), { profileDir: 'Profile 1', categories: { ...ALL, bookmarks: false, extensions: false }, extensionIds: [] });
+        expect(decoded).toEqual([]);
+        expect(profiles.get('Profile 1')!.avatar).toEqual({ kind: 'initials' });
+        expect(existsSync(join(userData, 'browser', 'maws-chrome-Profile 1', 'avatar.png'))).toBe(false);
+      });
+
+      it.each([
+        ['missing', { ok: false, error: 'missing' } as const, null],
+        ['over the cap', { ok: false, error: 'tooLarge' } as const, 'error avatar tooLarge'],
+        ['a symlink', { ok: false, error: 'unreadable' } as const, 'error avatar unreadable'],
+        ['bytes that are no image', { ok: true, bytes: Buffer.from('not an image') } as const, 'error avatar undecodable'],
+      ])('a picture %s leaves the initial, the import done, and logs at most its code', async (_case, read, line) => {
+        const { report } = await importAll(service({ decodeImage, readPicture: async () => read, env: env() }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(report.outcome).toBe('done');
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'initials' });
+        expect(existsSync(avatarFile())).toBe(false);
+        expect(logged().filter((text) => text.includes('avatar'))).toEqual(line === null ? [] : [`[browser-import] ${line}`]);
+      });
+
+      it('without an image decoder (no Electron) nothing is read and the initial stands', async () => {
+        const readPicture = vi.fn();
+        await importAll(service({ readPicture }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(readPicture).not.toHaveBeenCalled();
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'initials' });
+      });
+
+      it('a run cancelled after copying removes avatar.png with the partition folder', async () => {
+        extensions = fakeExtensions(session.loaded, { waitForAbortAfter: 1 });
+        const svc = service({ decodeImage, env: env() });
+        onEmit = (event) => {
+          if (event.payload.phase === 'extensions' && event.payload.done === 1) {
+            expect(existsSync(avatarFile())).toBe(true);
+            svc.cancel(svc.running()!.importId);
+          }
+        };
+        const { report } = await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
+        expect(report.outcome).toBe('cancelled');
+        expect(existsSync(avatarFile())).toBe(false);
+      });
+
+      it('the Chrome account’s names reach the record only: never the report, its summary or a log line', async () => {
+        const { report } = await importAll(service({ decodeImage, env: env() }));
+        expect(profiles.get('Default')).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test' });
+        const surfaces = [JSON.stringify(report), summaryWords(report), ...logged(), ...emitted.filter((e) => e.name !== 'browser.import.changed').map((e) => JSON.stringify(e.payload))];
+        for (const text of surfaces) expect(text).not.toMatch(/Probe Owner|probe@example\.test/);
+      });
+    });
+  });
+  // cua #90 end
+
   describe('start refuses', () => {
     it.each([
       ['extensions without the unverified-files acknowledgement', { allowUnverifiedExtensions: false }, 'unverified'],
-      ['no category', { categories: { history: false, cookies: false, extensions: false } }, 'noCategory'],
+      ['no category', { categories: { history: false, cookies: false, extensions: false, bookmarks: false } }, 'noCategory'],
       ['an extension the inspection did not find', { extensionIds: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] }, 'unknownExtension'],
       ['an inspection that is not the standing one', { inspectionId: '00000000-0000-4000-8000-000000000000' }, 'unknownInspection'],
     ] as const)('%s', async (_, over, reason) => {

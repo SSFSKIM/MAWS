@@ -1,5 +1,5 @@
 // Every sentence the Chrome profile import sheet shows (E4b execution document, Design §3, §10, §12 and §18): its
-// titles per state, the picker, the four category rows, the Keychain line, the progress labels, the report and the
+// titles per state, the picker, the five category rows (Bookmarks since cua board #90), the Keychain line, the progress labels, the report and the
 // removal sheet. The report's summary line is `summaryWords` (src/shared/browser/import-summary.ts), its one English
 // home. The Cookies row names the Keychain dialog's Allow button and no other (E0b S1e).
 import type { CookieSkipReason, ExtensionCandidate, HistorySkipReason, ImportedExtension, ImportPhase, ImportReport, KeychainOutcome } from '@shared/browser/import';
@@ -10,7 +10,7 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${count(n)
 export const importDate = (iso: string): string => new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
 // The categories' names, and the two Chrome stores the inspection stages as the rows and the report name them.
-const CATEGORIES = { history: 'History', cookies: 'Cookies', extensions: 'Extensions' } as const;
+const CATEGORIES = { history: 'History', cookies: 'Cookies', extensions: 'Extensions', bookmarks: 'Bookmarks' /* cua #90 */ } as const;
 type Store = 'history' | 'cookies';
 
 // A Chrome store the inspection or the run could not read, by main's code (`missing`, `symlink`, an errno, an SQLite
@@ -36,6 +36,7 @@ const PHASES: Record<ImportPhase, string> = {
   keychain: 'Waiting for the Keychain… choose Allow in the macOS dialog',
   cookies: 'Importing cookies…',
   verifying: 'Confirming partitioned cookies…',
+  bookmarks: 'Importing bookmarks…', // cua #90
   extensions: 'Importing extensions…',
   cleaning: 'Cleaning up…',
 };
@@ -47,6 +48,14 @@ const KEYCHAIN: Record<Exclude<KeychainOutcome, 'allowed' | 'skipped'>, string> 
   timeout: 'The Keychain did not answer in time; cookies were not imported',
   wrongKey: 'The Safe Storage password did not match this profile; no cookie was imported',
 };
+
+// cua #90: the report's bookmarks error (`missing`, `unreadable`, `indexUnavailable`). The file is read in place, and read
+// again each time the profile's partition opens, so a file gone or unreadable now is not the end of it.
+function bookmarksError(code: string): string {
+  if (code === 'indexUnavailable') return "MAWS's index is read-only right now, so bookmarks couldn't be imported.";
+  const what = code === 'missing' ? 'was gone by the time of the import' : "couldn't be read";
+  return `Chrome's Bookmarks file ${what}, so no bookmarks were imported. MAWS reads it again each time this profile opens.`;
+}
 
 // Why a run could not continue (`ImportReport.failure`, Decision Log 38).
 const FAILURES: Record<string, string> = {
@@ -99,6 +108,9 @@ export const IMPORT_COPY = {
   cookiesAgents: (name: string) => `New browser tabs, including the ones agents open through MAWS's browser tools, will be signed in as ${name} wherever Chrome was.`,
   passwords: 'Saved passwords — a credential store comes later',
   extensions: (n: number) => (n === 0 ? 'No extensions in this profile.' : `${plural(n, 'extension')}. Copied into MAWS and loaded in this profile's tabs.`),
+  // cua #90: a read-only mirror, read where Chrome keeps it
+  bookmarks: (n: number) => `${plural(n, 'bookmark')}. Shown in a bar under the address field and in its suggestions, and read again from Chrome each time this profile opens. Nothing is written to Chrome.`,
+  noBookmarks: 'No bookmarks file',
   storeError,
   categories: CATEGORIES,
   importExtension: (name: string) => `Import ${name}`,
@@ -127,6 +139,7 @@ export const IMPORT_COPY = {
   partitionedLine: (set: number, verified: number) => `${plural(set, 'partitioned cookie')} set, ${count(verified)} confirmed in the partition`,
   keychainLine,
   historyError,
+  bookmarksError, // cua #90
   extensionsHeading: 'Extensions',
   extensionStatus,
   unsupportedHeading: "Permissions MAWS doesn't support",

@@ -16,11 +16,18 @@
 // A run that ends `done` makes its profile the active one (Decision Log 7): the `finished` handler writes
 // `browser.profile` through `writeSettings` in every window that hears it (the write is idempotent). A removal writes
 // `browser.profile: null` when the setting named the removed profile (Design §12).
+//
+// cua board #90: `reimport`, the profile popover's Re-import this profile… run at app level (ProfileSheets.tsx), so the
+// popover closing and the removal closing the profile's tabs, the popover's own included, never cut it: the removal's
+// sheet, then the import sheet at the picker on the profile's Chrome folder with the profile chosen. Its done import
+// makes the profile active again through the rule above. `syncBookmarks` is the popover's and Settings' Sync bookmarks
+// now.
 import type { QueryClient } from '@tanstack/react-query';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { ImportCategories, ImportPhase, ImportReport, ImportedExtension } from '@shared/browser/import';
 import type { ImportedProfile } from '@shared/browser/profiles';
+import type { CommandOutput } from '@shared/ipc/schema';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
@@ -28,6 +35,7 @@ import { queryClient } from '../../../ipc/query';
 import { writeSettings } from '../../../settings-tab/parts';
 import { banner, toast } from '../../../stores/notices';
 import { useSettings } from '../../../stores/settings';
+import { BROWSER_COPY } from '../copy';
 import { IMPORT_COPY } from './copy';
 
 export const PROFILES_FILE_BROKEN_BANNER = 'browser-import-profiles-file-broken';
@@ -51,9 +59,17 @@ export interface BrowserImportState {
   listed: boolean; // this connection's records came from main (a list answer or a change)
   records: ImportedProfile[];
   unseen: ImportReport | null;
+  reimport: Reimport | null; // cua #90
 }
 
-const initial = (): BrowserImportState => ({ stage: { kind: 'pick' }, busy: false, listed: false, records: [], unseen: null });
+// cua #90: a re-import under way, its removal's sheet then its import's; the record as it stood at the start (the
+// removal's sheet counts from it, and the picker opens on its Chrome folder once the removal dropped it)
+export interface Reimport {
+  record: ImportedProfile;
+  step: 'remove' | 'import';
+}
+
+const initial = (): BrowserImportState => ({ stage: { kind: 'pick' }, busy: false, listed: false, records: [], unseen: null, reimport: null });
 
 export const browserImport = createStore<BrowserImportState>()(initial);
 export const useBrowserImport = <T>(selector: (state: BrowserImportState) => T): T => useStore(browserImport, selector);
@@ -91,8 +107,13 @@ export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryCli
     client.on('browser.import.changed', ({ profiles }) => {
       set({ records: profiles, listed: true });
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.profiles.list'] });
+      void queries.invalidateQueries({ queryKey: ['maws', 'browser.extensions.actions'] }); // cua #90: names and order follow the records
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.import.profiles'] }); // the picker's "Imported" marks
     }),
+    // cua #90: a partition's bookmark rows were replaced (an import, a sync): its bars read the tree again
+    client.on('browser.bookmarks.changed', ({ partition }) => void queries.invalidateQueries({ queryKey: ['maws', 'browser.bookmarks.tree', { partition }] })),
+    // cua #90: an extension of the partition loaded or unloaded: its action bars read the list again
+    client.on('browser.extensions.actions.changed', ({ partition }) => void queries.invalidateQueries({ queryKey: ['maws', 'browser.extensions.actions', { partition }] })),
   ];
   void list(client);
   return () => offs.forEach((off) => off());
@@ -221,6 +242,45 @@ export async function removeProfile(profileDir: string, client: MawsBridge = ipc
   if (useSettings.getState().state?.settings.browser.profile === profileDir) await writeSettings({ browser: { profile: null } }, client);
   return null;
 }
+
+// cua #90 start: the profile popover's actions (Settings › Browser's Sync bookmarks now too)
+
+// Main re-reads the profile's `Bookmarks` now; a failure is said in a toast (the popover's line follows the record).
+export async function syncBookmarks(profileDir: string, client: MawsBridge = ipc): Promise<CommandOutput<'browser.bookmarks.sync'> | null> {
+  const result = await client.invoke('browser.bookmarks.sync', { profileDir });
+  const failed = (why: string) => toast({ level: 'warning', text: BROWSER_COPY.profile.syncFailed(why), actions: [], dismissible: true });
+  if (!result.ok) {
+    failed(result.error.message);
+    return null;
+  }
+  const answer = result.value;
+  if ('error' in answer) {
+    if (answer.error === 'refused') failed(answer.reason ?? 'refused');
+    else failed(answer.error === 'indexUnavailable' ? BROWSER_COPY.profile.indexUnavailable : BROWSER_COPY.profile.unreadableShort);
+  }
+  return answer;
+}
+
+// Re-import this profile…: the removal's sheet first (ProfileSheets.tsx). Nothing starts while an import runs (a
+// removal would be refused) or for a profile with no record.
+export function startReimport(profileDir: string): void {
+  const record = browserImport.getState().records.find((r) => r.profileDir === profileDir);
+  if (!record || stage().kind === 'running') return;
+  set({ reimport: { record, step: 'remove' } });
+}
+
+// The removal done: the import sheet, at the picker.
+export function reimportRemoved(client: MawsBridge = ipc): void {
+  const current = browserImport.getState().reimport;
+  if (!current) return;
+  openImport(client);
+  set({ reimport: { ...current, step: 'import' } });
+}
+
+export function endReimport(): void {
+  set({ reimport: null });
+}
+// cua #90 end
 
 // Tests.
 export function resetBrowserImport(): void {

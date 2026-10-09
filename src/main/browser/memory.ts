@@ -6,7 +6,8 @@
 //
 // The same sample enforces the soft cap: while the loaded tabs' renderers together exceed BROWSER_TABS_MEMORY_MAX_MIB,
 // the least recently shown eligible tab (the count cap's own rule, `TabStore.capVictim`: unplaced, idle, not loading, not
-// downloading) is suspended and its session told, one notice per suspension. A notice from this cap carries no `count`,
+// downloading) is suspended (cua #90: an internal tab closed, `TabStore.evict`) and its session told, one notice per
+// suspension. A notice from this cap carries no `count`,
 // which is how the chrome tells it from the count cap's. With nothing eligible, nothing is suspended; nothing is ever
 // force-closed. Two tabs that share a renderer are one process: counted once.
 import type { ProcessMetric } from 'electron';
@@ -17,7 +18,7 @@ export const MEMORY_SAMPLE_MS = 15_000;
 const MEMORY_MAX_KIB = BROWSER_TABS_MEMORY_MAX_MIB * 1024;
 
 export interface MemorySamplerDeps {
-  store: Pick<TabStore, 'all' | 'update' | 'suspend' | 'capVictim' | 'onViewCreated'>;
+  store: Pick<TabStore, 'all' | 'update' | 'evict' | 'capVictim' | 'onViewCreated'>;
   emit: BrowserEmit;
   metrics(): { pid: ProcessMetric['pid']; memory: { workingSetSize: number } }[]; // app.getAppMetrics; KiB
 }
@@ -76,8 +77,9 @@ export class MemorySampler {
       if (!victim) return;
       const { tabId, appSessionId } = victim.tab;
       sampled.delete(victim);
-      store.suspend(tabId);
-      emit('browser.notice', { appSessionId, tabId, kind: 'tabsCap' });
+      // cua #90: an internal tab is closed instead, and its session told without the tab that is gone
+      const closed = store.evict(tabId) === 'closed';
+      emit('browser.notice', { appSessionId, tabId: closed ? null : tabId, kind: 'tabsCap' });
     }
   }
 }

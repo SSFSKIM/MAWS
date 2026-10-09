@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { useLayout } from '../../../stores/layout';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { installFakeMain, ok, type Handler } from '../../../test-support/code';
@@ -23,7 +23,7 @@ import { Chrome, type ChromeProps } from './Chrome';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
-const SEARCH = SETTINGS_DEFAULTS_V11.browser.searchUrl;
+const SEARCH = SETTINGS_DEFAULTS_V12.browser.searchUrl;
 
 let main: ReturnType<typeof installFakeMain>;
 let disconnect: () => void;
@@ -48,8 +48,8 @@ beforeEach(() => {
         return ok({ zoom: 1 });
       case 'browser.tabs.open':
         return ok({ tab: browserTab(T2, A, { url: '' }), reused: false });
-      case 'browser.profiles.list':
-        return ok({ profiles: [{ profileDir: 'Profile1', name: 'Work' }] });
+      case 'browser.profiles.list': // cua #90: with the account's names and the avatar
+        return ok({ profiles: [{ profileDir: 'Profile1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] });
       case 'browser.tabs.revealDownload':
         return ok({ revealed: true });
       default:
@@ -85,8 +85,9 @@ describe('the control slot', () => {
 });
 
 describe('the partition pill', () => {
-  it('names the default profile, or the imported one as listed, and opens Settings › Browser', async () => {
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
+  // cua #90: the click opens the profile popover over the chrome; the main area keeps its tabs (no Settings tab)
+  it('names the default profile, or the imported one as listed with its initial, and opens the profile popover, the main area unchanged', async () => {
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
     const pill = () => document.querySelector<HTMLButtonElement>('[data-browser-partition]')!;
     const { rerender } = show({ tab: tab() });
     expect([pill().textContent, pill().title]).toEqual(['Default', 'Browsing as Default']);
@@ -97,9 +98,15 @@ describe('the partition pill', () => {
       </QueryClientProvider>,
     );
     expect(pill().textContent).toBe('Profile1'); // its directory until the list answers
-    await vi.waitFor(() => expect([pill().textContent, pill().title]).toEqual(['Work', 'Browsing as Work']));
+    await vi.waitFor(() => expect([pill().textContent, pill().title]).toEqual(['WWork', 'Browsing as Work'])); // the initial, then the name
+    const before = useLayout.getState().main;
     fireEvent.click(pill());
-    expect(openTab).toHaveBeenCalledWith({ kind: 'settings', section: 'browser' });
+    const popover = await screen.findByRole('dialog', { name: 'Profile: Work' });
+    expect(popover.dataset.profilePopover).toBe('profile');
+    expect(openTab).not.toHaveBeenCalled();
+    expect(useLayout.getState().main).toBe(before);
+    fireEvent.keyDown(popover, { key: 'Escape' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
 
@@ -168,7 +175,7 @@ describe('the address field', () => {
 
   it('typing lists the typed address, then the partition’s history; the arrows move; Enter runs the row as typed', async () => {
     const user = userEvent.setup();
-    suggest = () => ok({ suggestions: [{ url: 'https://wikipedia.org/wiki/A', title: 'A' }] });
+    suggest = () => ok({ suggestions: [{ url: 'https://wikipedia.org/wiki/A', title: 'A', kind: 'history' }] });
     show({ tab: tab() });
     await user.click(field());
     await user.keyboard('wikipedia.org');
@@ -188,9 +195,27 @@ describe('the address field', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  // cua #90: an imported profile's bookmarks, first after the typed address, each with the bookmark star
+  it('lists the partition’s bookmarks above its history, each with the bookmark glyph, and runs one like any row', async () => {
+    const user = userEvent.setup();
+    suggest = () =>
+      ok({ suggestions: [{ url: 'https://b.test/F1', title: 'F1', kind: 'bookmark' }, { url: 'https://h.test/f1', title: 'f1 history', kind: 'history' }] });
+    show({ tab: tab() });
+    await user.click(field());
+    await user.keyboard('f1');
+    await wait(80);
+    const options = screen.getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([BROWSER_COPY.searchFor('f1'), 'F1https://b.test/F1', 'f1 historyhttps://h.test/f1']);
+    expect(options.map((option) => option.querySelector('[data-suggestion-bookmark]') !== null)).toEqual([false, true, false]);
+    expect(within(options[1]!).getByRole('img', { name: BROWSER_COPY.bookmarks.suggestion })).toBeTruthy();
+    await user.keyboard('{ArrowDown}{Enter}');
+    await wait(0);
+    expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T1, to: { url: 'https://b.test/F1', typed: true } }]);
+  });
+
   it('Enter with no arrow goes to the typed address as main’s check parses it, and a click runs a row', async () => {
     const user = userEvent.setup();
-    suggest = () => ok({ suggestions: [{ url: 'https://b.test/x', title: null }] });
+    suggest = () => ok({ suggestions: [{ url: 'https://b.test/x', title: null, kind: 'history' }] });
     show({ tab: tab() });
     await user.click(field());
     await user.keyboard('localhost:3000{Enter}');
@@ -215,8 +240,8 @@ describe('the address field', () => {
     await user.keyboard('b');
     await wait(80);
     expect(answers).toHaveLength(2);
-    await act(async () => answers[1]!(ok({ suggestions: [{ url: 'https://new.test/', title: 'new' }] })));
-    await act(async () => answers[0]!(ok({ suggestions: [{ url: 'https://old.test/', title: 'old' }] })));
+    await act(async () => answers[1]!(ok({ suggestions: [{ url: 'https://new.test/', title: 'new', kind: 'history' }] })));
+    await act(async () => answers[0]!(ok({ suggestions: [{ url: 'https://old.test/', title: 'old', kind: 'history' }] })));
     const options = screen.getAllByRole('option').map((option) => option.textContent);
     expect(options.some((text) => text?.includes('new.test'))).toBe(true);
     expect(options.some((text) => text?.includes('old.test'))).toBe(false);

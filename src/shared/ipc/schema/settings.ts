@@ -90,12 +90,14 @@ export const BrowserSettingsSchema = z.strictObject({
   profile: z.string().min(1).max(200).nullable(),
   searchUrl: z.string().max(2048).refine(isSearchUrlTemplate, { message: 'not an http or https URL with %s' }),
   linkTarget: z.enum(['in-app', 'external']),
+  // cua #90: version 12, whether an imported profile's tabs show its bookmarks bar (⌘⇧B in the browser, Settings › Browser)
+  bookmarksBar: z.enum(['shown', 'hidden']),
 });
 export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
 // E4a end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(11), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser)
+  version: z.literal(12), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

@@ -38,7 +38,18 @@ export const DONE_REPORT = {
     keychain: 'allowed', error: null,
   },
   extensions: [PROBE_EXTENSION, FAILS_EXTENSION, WALLET_EXTENSION],
+  bookmarks: null, // cua #90: E4b's reports had no bookmarks block; BOOKMARKS_REPORT has one
 } satisfies ImportReport;
+
+// cua #90 start: the import with Bookmarks chosen, over the fixture's `Bookmarks` file (46 URLs kept, a javascript: one
+// skipped); and E4b's report as profiles.json version 1 held it, before the bookmarks block existed.
+export const BOOKMARKS_REPORT = { ...DONE_REPORT, bookmarks: { imported: 46, skipped: 1, error: null } } satisfies ImportReport;
+export const V1_REPORT = withoutBookmarks(DONE_REPORT);
+function withoutBookmarks({ bookmarks, ...report }: typeof DONE_REPORT) {
+  void bookmarks;
+  return report;
+}
+// cua #90 end
 
 // Acceptance case 2: the wrong Safe Storage password; every encrypted row fails, nothing is set.
 export const WRONG_KEY_REPORT = {

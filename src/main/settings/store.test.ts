@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { DEFAULT_SETTINGS, openSettingsStore, resolveTheme } from './store';
 
 let dir: string;
@@ -15,15 +15,21 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V11, theme });
+const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V12, theme });
 // W7: a file an earlier version wrote has no budget switch; W13: and, before version 8, the engine's pin
 const PIN = { pinnedVersion: '2.1.283' };
-const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V11.engine;
+const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V12.engine;
 void _switch;
 const ENGINE_BEFORE_V7 = { ...ENGINE_V8_LESS_SWITCH, ...PIN };
+// cua #90: nor, before version 12, the bookmarks bar's switch
+const before12 = (theme: string) => {
+  const { bookmarksBar: _bar, ...browser } = v3(theme).browser;
+  void _bar;
+  return { ...v3(theme), browser, version: 11 };
+};
 // E4a: nor, before version 11, a browser section
 const before11 = (theme: string) => {
-  const { browser: _b, ...rest } = v3(theme);
+  const { browser: _b, ...rest } = before12(theme);
   void _b;
   return { ...rest, version: 10 };
 };
@@ -39,7 +45,7 @@ const before9 = (theme: string) => {
   void _v;
   return { ...rest, version: 8 };
 };
-const before8 = (theme: string) => ({ ...before9(theme), version: 7, engine: { ...SETTINGS_DEFAULTS_V11.engine, ...PIN } });
+const before8 = (theme: string) => ({ ...before9(theme), version: 7, engine: { ...SETTINGS_DEFAULTS_V12.engine, ...PIN } });
 const before7 = (theme: string) => ({ ...before9(theme), engine: ENGINE_BEFORE_V7 });
 // W3: nor, before version 6, a permissions section
 const before6 = (theme: string) => {
@@ -111,7 +117,7 @@ describe('settings store', () => {
   it.each([
     ['unparseable JSON', '{"version":3,'],
     ['an unknown theme', JSON.stringify({ ...v3('sepia') })],
-    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 12 })], // C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11
+    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 13 })], // C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12
     ['a version 2 file with a version 3 section', JSON.stringify({ version: 2, theme: 'dark', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 90 } })],
     ['an unknown key', JSON.stringify({ ...v3('dark'), font: 'x' })],
     ['a version 1 file that is not valid version 1', '{"version":1,"theme":"sepia"}'],
@@ -155,9 +161,9 @@ describe('settings store', () => {
     const store = openSettingsStore(file);
     store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
     expect(openSettingsStore(file).settings).toEqual({
-      ...SETTINGS_DEFAULTS_V11,
+      ...SETTINGS_DEFAULTS_V12,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V11.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V12.notifications.kinds },
     });
   });
 
@@ -175,16 +181,16 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, readFileSync(join(FIXTURES, 'v1.json')));
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
     expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 11$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 12$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12
   });
 
   it("migrates C5's version 2 file keeping its keymap override and notification policy, and rewrites it once", () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v2.json')));
-    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V11.notifications.kinds } };
+    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V12.notifications.kinds } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 11$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 12$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12
     log.mockClear();
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
@@ -197,10 +203,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     void _m;
     void _s;
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' }, appearance: { monoFont: null } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V11.engine, subagentModel: 'haiku' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V12.engine, subagentModel: 'haiku' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 12$/));
   });
   // C12 end
 
@@ -211,7 +217,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const migrated = { ...v3('dark'), appearance: { monoFont: 'Hack', transcriptWidth: 768 } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 12$/));
   });
   // W2 end
 
@@ -221,7 +227,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 5 }));
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(v3('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 5 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 5 to 12$/));
   });
   // W3 end
 
@@ -230,10 +236,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v6 = { ...before7('dark'), version: 6, engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 } };
     writeFileSync(file, JSON.stringify(v6));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V11.engine, memoryBudgetMiB: 6144 } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V12.engine, memoryBudgetMiB: 6144 } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 12$/));
   });
   // W7 end
 
@@ -242,10 +248,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v7 = before8('dark');
     writeFileSync(file, JSON.stringify({ ...v7, engine: { ...v7.engine, binaryPath: '/opt/claude', pinnedVersion: '2.1.290' } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V11.engine, binaryPath: '/opt/claude' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V12.engine, binaryPath: '/opt/claude' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 12$/));
   });
   // W13 end
 
@@ -257,7 +263,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const migrated = { ...v3('dark'), keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, voice: { locale: null } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 8 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 8 to 12$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ voice: { locale: 'en-US' } }).voice).toEqual({ locale: 'en-US' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, voice: { locale: 'en-US' } });
@@ -274,7 +280,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.supervisor).toEqual({ idleExitMinutes: 10, keepRunningDefault: true });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 9 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 9 to 12$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ supervisor: { idleExitMinutes: null } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
@@ -289,15 +295,27 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, JSON.stringify(v10));
     const migrated = { ...v3('dark'), supervisor: { idleExitMinutes: 30, keepRunningDefault: false }, voice: { locale: 'en-GB' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(migrated.browser).toEqual({ profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' });
+    expect(migrated.browser).toEqual({ profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 10 to 11$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 10 to 12$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ browser: { linkTarget: 'external' } }).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, browser: { ...migrated.browser, linkTarget: 'external' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E4a end
+
+  // cua #90 start: E4a's version 11 file gains the bookmarks bar's switch, shown, and is rewritten once
+  it('migrates a version 11 file to version 12 with the bookmarks bar shown, keeping every other value, rewrites it once and logs one line', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const v11 = before12('dark');
+    writeFileSync(file, JSON.stringify({ ...v11, browser: { ...v11.browser, linkTarget: 'external' } }));
+    const migrated = { ...v3('dark'), browser: { ...v3('dark').browser, linkTarget: 'external' } };
+    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 11 to 12$/));
+  });
+  // cua #90 end
 
   it('never rewrites a file that is already version 11, nor writes defaults into it', () => { // C12: version 4; W2: version 5; W3: version 6; W7: version 7; W13: version 8; E9: version 9; E10: version 10; E4a: version 11
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});

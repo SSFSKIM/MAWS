@@ -21,6 +21,7 @@ describe('formatImportLog', () => {
       [{ kind: 'keychain', outcome: 'allowed' }, '[browser-import] keychain allowed'],
       [{ kind: 'extension', id: 'a'.repeat(32), status: 'loaded', background: 'failed' }, `[browser-import] extension ${'a'.repeat(32)} loaded background=failed`],
       [{ kind: 'error', where: 'staging', code: 'EBUSY', message: 'copy failed' }, '[browser-import] error staging EBUSY: copy failed'],
+      [{ kind: 'popupRefused', id: 'a'.repeat(32), reason: 'scheme', scheme: 'chrome-extension:' }, `[browser-import] popup ${'a'.repeat(32)} refused scheme scheme=chrome-extension:`], // cua #90
     ];
     for (const [event, line] of lines) expect(formatImportLog(event)).toBe(line);
   });
@@ -31,6 +32,7 @@ describe('formatImportLog', () => {
       { kind: 'extension', id: SECRET, status: 'loaded' },
       { kind: 'error', where: `x ${SECRET}`, code: `E ${SECRET}`, message: `failed https://example.test/${SECRET}?value=${SECRET}` },
       { kind: 'phase', importId: SECRET, phase: 'history', done: 1, total: 2 },
+      { kind: 'popupRefused', id: SECRET, reason: `scheme ${SECRET}` as 'scheme', scheme: `https://example.test/${SECRET}` }, // cua #90
     ];
     for (const event of events) {
       const line = formatImportLog(event);

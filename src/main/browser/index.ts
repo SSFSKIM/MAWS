@@ -18,7 +18,7 @@ import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
 import { browserInspector } from './inspect';
 import { attachInputSeams } from './input';
-import { attachKeys } from './keys';
+import { attachKeys, canShowBookmarksBar } from './keys';
 import { MemorySampler } from './memory';
 import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
@@ -43,13 +43,19 @@ import { startCuaBackend, type CuaBackend } from './cua';
 import { TabControls } from './agent/control';
 import { AgentCursor } from './agent/cursor';
 // E13 end
+// cua #90 start: the bookmarks bar's commands and native menus
+import { BookmarkBar, openAllConfirmation } from './bookmarks/bar';
+import { NativeMenus } from './bookmarks/menu';
+import { ProfileAvatars } from './profile-avatars';
+import { startExtensionUi, type ExtensionUi } from './extensions';
+// cua #90 end
 
 export interface BrowserDeps {
   userData: string;
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity'>;
+  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity' | 'browserBookmarks' /* cua #90 */>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
@@ -71,6 +77,7 @@ export interface Browser {
   // tab's is, and its per-boot extension loading registered as a preparer
   partitions: Partitions;
   // E4b end
+  extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
 export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
@@ -109,13 +116,14 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
   const focusEmulation = focusEmulationMode(env);
+  const windowOf = (sender: Electron.WebContents) => {
+    const win = BrowserWindow.fromWebContents(sender);
+    return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
+  };
   const views = new ViewManager({
     store,
     emit,
-    windowOf: (sender) => {
-      const win = BrowserWindow.fromWebContents(sender);
-      return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
-    },
+    windowOf,
     focusEmulation,
     setFocusEmulation,
   });
@@ -135,12 +143,22 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     guardPage(entry);
     attachWindowOpen(entry, { store, linkTarget: () => settings().linkTarget, seam, childPreferences });
     attachContextMenu(entry, { store, navigator, openExternal: seam.openExternal });
-    attachKeys(entry, { store, navigator, emit });
+    attachKeys(entry, { store, navigator, emit, bookmarksBar: (partition) => canShowBookmarksBar(profiles(), partition) /* cua #90 */ });
     attachInputSeams(entry);
     if (focusEmulation === 'on') attachFocusEmulation(entry, (tab) => views.focusEmulationWanted(tab));
   });
 
-  registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
+  // cua #90 start: the bookmarks bar's menus (recorded for the e2e's seam under MAWS_E2E=1) and its commands
+  const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1' });
+  const confirmOpenAll = openAllConfirmation(env);
+  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: index.browserBookmarks, menus, confirmOpenAll });
+  // cua #90 end
+  registerBrowserHandlers({
+    store, views, navigator, downloads, history: index.browserHistory, profiles, register,
+    bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
+  });
+  // cua #90: the extensions action bar (its list, popups, options tabs and menus)
+  const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
@@ -191,6 +209,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   if (inspector) inspector.cua = cua; // E13: the e2e's fake host reads the socket and the leases
+  if (inspector) inspector.menu = { ...menus.seam, openAllAsked: () => confirmOpenAll.asked() }; // cua #90: the native menus
+  if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
   const commentMode = startCommentMode({ store, emit, register, userData, env });
@@ -206,9 +226,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     views,
     cua, // E13
     partitions, // E4b
+    extensions: extensionUi, // cua #90
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       commentMode.stop(); // E4d
+      extensionUi.stop(); // cua #90: every popup closed
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       presence?.dispose(); // E4c
       stopCuaStatus?.(); // E13

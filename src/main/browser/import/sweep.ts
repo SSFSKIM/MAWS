@@ -4,7 +4,8 @@
 //   2. every `<userData>/browser/maws-chrome-*/` folder that is no listed record's `partitionDirName`;
 //   3. every `<userData>/Partitions/maws-chrome-*/` directory that is no listed record's `storageDirName` (the name
 //      recorded from `ses.storagePath`, never derived from `profileDir`: Chromium lower-cases and escapes it);
-//   4. every `browser_history` row of a `persist:maws-chrome-` partition no record lists.
+//   4. every `browser_history` row of a `persist:maws-chrome-` partition no record lists;
+//   5. (cua board #90) every `browser_bookmarks` row of a partition no record lists (only imported profiles have any).
 // Synchronous, so nothing can open a partition while it runs; a removal that fails is logged and skipped, never thrown,
 // because a sweep must not stop the app from starting. Names compare case-insensitively (APFS is), so a listed
 // profile's directory is never taken for an unlisted one. E11: skipped whole while profiles.json is a newer MAWS's
@@ -14,6 +15,7 @@ import { join } from 'node:path';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import { partitionDirName } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
+import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
 import type { BrowserHistoryStore } from '../../index/browser-history';
 import { importLog } from './log';
 
@@ -24,18 +26,21 @@ export interface SweepResult {
   partitionFolders: number;
   storageDirs: number;
   historyRows: number;
+  bookmarkRows: number; // cua #90
 }
 
 export function sweepBrowserImports({
   userData,
   profiles,
   history,
+  bookmarks,
 }: {
   userData: string;
   profiles: { list(): readonly ImportedProfile[]; readOnly?: boolean };
   history: Pick<BrowserHistoryStore, 'removeImportedExcept'>;
+  bookmarks: Pick<BrowserBookmarksStore, 'removeExcept'>; // cua #90
 }): SweepResult {
-  if (profiles.readOnly === true) return { staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 }; // E11
+  if (profiles.readOnly === true) return { staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0, bookmarkRows: 0 }; // E11
   const records = profiles.list();
   const folders = new Set(records.map((record) => partitionDirName(record.partition).toLowerCase()));
   const storage = new Set(records.map((record) => record.storageDirName.toLowerCase()));
@@ -44,6 +49,7 @@ export function sweepBrowserImports({
     partitionFolders: removeEntries(join(userData, 'browser'), (name, isDirectory) => isDirectory && unlisted(name, folders)),
     storageDirs: removeEntries(join(userData, 'Partitions'), (name, isDirectory) => isDirectory && unlisted(name, storage)),
     historyRows: removeHistory(history, records),
+    bookmarkRows: removeRows('bookmarks', () => bookmarks.removeExcept(records.map((record) => record.partition))), // cua #90
   };
 }
 
@@ -70,10 +76,15 @@ function removeEntries(dir: string, chosen: (name: string, isDirectory: boolean)
 }
 
 function removeHistory(history: Pick<BrowserHistoryStore, 'removeImportedExcept'>, records: readonly ImportedProfile[]): number {
+  return removeRows('history', () => history.removeImportedExcept(profilePartition(''), records.map((record) => record.partition)));
+}
+
+// An index sweep step: its count, or 0 with the failure logged (never thrown: the app must start).
+function removeRows(what: 'history' | 'bookmarks', remove: () => number): number {
   try {
-    return history.removeImportedExcept(profilePartition(''), records.map((record) => record.partition));
+    return remove();
   } catch (error) {
-    importLog({ kind: 'error', where: 'sweep', code: String((error as NodeJS.ErrnoException).code ?? 'history') });
+    importLog({ kind: 'error', where: 'sweep', code: String((error as NodeJS.ErrnoException).code ?? what) });
     return 0;
   }
 }

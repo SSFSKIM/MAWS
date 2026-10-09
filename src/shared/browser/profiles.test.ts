@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DONE_REPORT, FAILS_EXTENSION, PROBE_EXTENSION, WALLET_EXTENSION } from '../../../test/support/import-reports';
-import { ImportedProfileSchema, ImportedProfilesFileSchema, partitionDirName } from './profiles';
+import { BOOKMARKS_REPORT, DONE_REPORT, FAILS_EXTENSION, PROBE_EXTENSION, V1_REPORT, WALLET_EXTENSION } from '../../../test/support/import-reports';
+import { ImportedProfileSchema, ImportedProfilesFileSchema, ImportedProfilesFileV1Schema, ImportedProfileV1Schema, partitionDirName, upgradeProfileV1 } from './profiles';
 import { DEFAULT_PARTITION, profilePartition } from './tab';
 
 const RECORD = {
@@ -12,6 +12,10 @@ const RECORD = {
   userDataDir: '/tmp/chrome-user-data',
   extensions: [PROBE_EXTENSION, FAILS_EXTENSION, WALLET_EXTENSION],
   report: DONE_REPORT,
+  bookmarks: null, // cua #90: version 2's fields
+  gaiaName: null,
+  userName: null,
+  avatar: { kind: 'initials' },
 };
 
 describe('the imported profile record (profiles.json, E4b Interfaces)', () => {
@@ -44,13 +48,41 @@ describe('the imported profile record (profiles.json, E4b Interfaces)', () => {
     expect(ImportedProfileSchema.safeParse({ ...RECORD, profileDir: '../Default', partition: profilePartition('../Default') }).success).toBe(false);
   });
 
-  it('holds a version 1 file of records, one per profile directory', () => {
-    expect(ImportedProfilesFileSchema.parse({ version: 1, profiles: [] })).toEqual({ version: 1, profiles: [] });
-    expect(ImportedProfilesFileSchema.safeParse({ version: 1, profiles: [RECORD] }).success).toBe(true);
-    expect(ImportedProfilesFileSchema.safeParse({ version: 2, profiles: [] }).success).toBe(false);
-    expect(ImportedProfilesFileSchema.safeParse({ version: 1, profiles: [], extra: true }).success).toBe(false);
-    expect(ImportedProfilesFileSchema.safeParse({ version: 1, profiles: [RECORD, RECORD] }).success).toBe(false);
+  it('holds a version 2 file of records, one per profile directory (cua #90)', () => {
+    expect(ImportedProfilesFileSchema.parse({ version: 2, profiles: [] })).toEqual({ version: 2, profiles: [] });
+    expect(ImportedProfilesFileSchema.safeParse({ version: 2, profiles: [RECORD] }).success).toBe(true);
+    expect(ImportedProfilesFileSchema.safeParse({ version: 1, profiles: [] }).success).toBe(false);
+    expect(ImportedProfilesFileSchema.safeParse({ version: 2, profiles: [], extra: true }).success).toBe(false);
+    expect(ImportedProfilesFileSchema.safeParse({ version: 2, profiles: [RECORD, RECORD] }).success).toBe(false);
   });
+
+  // cua #90 start
+  const V1_RECORD = { ...Object.fromEntries(Object.entries(RECORD).filter(([key]) => !['bookmarks', 'gaiaName', 'userName', 'avatar'].includes(key))), report: V1_REPORT };
+
+  it('keeps version 1 whole: its record and file parse as E4b wrote them, and a version-2 field or report block is refused there', () => {
+    expect(ImportedProfilesFileV1Schema.safeParse({ version: 1, profiles: [V1_RECORD] }).success).toBe(true);
+    expect(ImportedProfileV1Schema.safeParse({ ...V1_RECORD, bookmarks: null }).success).toBe(false);
+    expect(ImportedProfileV1Schema.safeParse({ ...V1_RECORD, report: DONE_REPORT }).success).toBe(false);
+    expect(ImportedProfilesFileV1Schema.safeParse({ version: 2, profiles: [] }).success).toBe(false);
+  });
+
+  it('upgrades a version-1 record to version 2: no bookmarks, no account names, the initial, report.bookmarks null', () => {
+    const upgraded = upgradeProfileV1(ImportedProfileV1Schema.parse(V1_RECORD));
+    expect(upgraded).toEqual(RECORD);
+    expect(ImportedProfileSchema.parse(upgraded)).toEqual(RECORD);
+  });
+
+  it('takes version 2’s fields: the mirror’s state, the account names and the avatar, each closed', () => {
+    const bookmarks = { consentedAt: '2026-10-08T09:00:00.000Z', syncedAt: null, count: 0, error: 'missing', errorAt: '2026-10-08T09:00:00.000Z' };
+    const full = { ...RECORD, report: BOOKMARKS_REPORT, bookmarks, gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'picture' } };
+    expect(ImportedProfileSchema.safeParse(full).success).toBe(true);
+    expect(ImportedProfileSchema.safeParse({ ...full, bookmarks: { ...bookmarks, error: 'gone' } }).success).toBe(false);
+    expect(ImportedProfileSchema.safeParse({ ...full, bookmarks: { ...bookmarks, path: '/x' } }).success).toBe(false);
+    expect(ImportedProfileSchema.safeParse({ ...full, avatar: { kind: 'picture', dataUrl: 'data:' } }).success).toBe(false);
+    expect(ImportedProfileSchema.safeParse({ ...full, avatar: { kind: 'stock' } }).success).toBe(false);
+    expect(ImportedProfileSchema.safeParse({ ...full, avatar: undefined }).success).toBe(false);
+  });
+  // cua #90 end
 });
 
 describe('partitionDirName (Decision Log 15)', () => {

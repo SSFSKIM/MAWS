@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { browserTab, T1, T2 } from '../test-support/browser';
@@ -26,7 +26,7 @@ const row = (name: string) => within(profile()).getByRole('group', { name });
 const dialog = () => screen.getByRole('dialog');
 
 function renderBlock(answers: ImportBridge['answers'] = {}, profileSetting: string | null = null) {
-  b = importBridge({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, profile: profileSetting } });
+  b = importBridge({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, profile: profileSetting } });
   Object.assign(b.answers, answers);
   window.maws = b.bridge;
   const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -155,6 +155,22 @@ describe('an imported profile', () => {
     fireEvent.click(await within(await screen.findByRole('region', { name: 'Person 1' })).findByRole('button', { name: 'Show report' }));
     expect(dialog().dataset.browserImport).toBe('report');
     expect(within(dialog()).getByText('Imported from Person 1')).toBeTruthy();
+  });
+
+  // cua #90: beside Show report, for a profile whose bookmarks were imported
+  it('Sync bookmarks now asks main for the profile, with the last sync’s time beside it; none without bookmarks', async () => {
+    const syncedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const consented = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt, count: 46, error: null, errorAt: null } };
+    renderBlock({ 'browser.import.list': () => ({ profiles: [consented], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt, count: 46 }) });
+    const region = await screen.findByRole('region', { name: 'Person 1' });
+    expect(within(region).getByText('마지막 동기화 2 hours ago')).toBeTruthy();
+    fireEvent.click(within(region).getByRole('button', { name: 'Sync bookmarks now' }));
+    await vi.waitFor(() => expect(calls('browser.bookmarks.sync')).toEqual([{ profileDir: 'Default' }]));
+    cleanup();
+    disconnect();
+    resetBrowserImport();
+    renderBlock(withRecord);
+    expect(within(await screen.findByRole('region', { name: 'Person 1' })).queryByRole('button', { name: 'Sync bookmarks now' })).toBeNull();
   });
 });
 

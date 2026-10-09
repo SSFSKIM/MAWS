@@ -16,9 +16,21 @@ import { BrowserPartitionSchema, DEFAULT_PARTITION, profilePartition } from '@sh
 
 // Loose: E4b owns the file and records more per profile (its storage directory, the source user-data directory, the
 // extensions, the import report); E4a reads only these keys and must not refuse E4b's.
-export const BrowserProfileSchema = z.looseObject({ profileDir: z.string().min(1), name: z.string(), partition: BrowserPartitionSchema, importedAt: z.string() });
+export const BrowserProfileSchema = z.looseObject({
+  profileDir: z.string().min(1),
+  name: z.string(),
+  partition: BrowserPartitionSchema,
+  importedAt: z.string(),
+  bookmarks: z.looseObject({}).nullable().optional(), // cua #90: the bookmarks consent (version 2; absent in version 1)
+  // cua #90: the Chrome account's names and how the avatar is drawn, for `browser.profiles.list` (version 2)
+  gaiaName: z.string().nullable().optional(),
+  userName: z.string().nullable().optional(),
+  avatar: z.looseObject({ kind: z.string() }).optional(),
+  // cua #90: the profile's extensions in Settings' order, for the action bar's list (always present in E4b's records)
+  extensions: z.array(z.looseObject({ id: z.string(), name: z.string(), chromeId: z.string().nullable().optional() })).optional(),
+});
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
-const ProfilesFileSchema = z.looseObject({ version: z.literal(1), profiles: z.array(BrowserProfileSchema) });
+const ProfilesFileSchema = z.looseObject({ version: z.union([z.literal(1), z.literal(2) /* cua #90: profiles.json version 2 */]), profiles: z.array(BrowserProfileSchema) });
 
 // Chromium's own user agent: the platform and the Chrome version stay truthful; `Electron/<v>` and `maws/<v>` go.
 export function chromeUserAgent(userAgent: string): string {
