@@ -128,7 +128,7 @@ describe('main answers the record side of session.* from the index', () => {
     registerIndexHandlers(index);
     installRouter({ appUrl: APP_URL });
     expect(index.readOnly).toBe(true);
-    const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (5)' } };
+    const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (6)' } };
     const appSessionId = randomUUID();
     expect(await invoke('session.list', {})).toEqual(unavailable);
     expect(await invoke('session.get', { appSessionId })).toEqual(unavailable);

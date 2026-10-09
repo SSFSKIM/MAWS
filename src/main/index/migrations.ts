@@ -113,6 +113,17 @@ CREATE INDEX browser_history_recent ON browser_history(partition, last_visit_ms 
 `,
   },
   // E4a end
+  {
+    version: 6,
+    // cua board #93: the agent's browser activity (src/shared/browser/activity.ts), so the rows a transcript shows under
+    // an agent's cua_repl `js` call survive an app restart. One row per activity main told the windows, in the order it
+    // told them (`id`), the session's last BROWSER_ACTIVITIES_KEPT kept; a row goes with its session's record.
+    sql: `
+CREATE TABLE browser_activity (id INTEGER PRIMARY KEY, app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE,
+  tab_id TEXT NOT NULL, at TEXT NOT NULL, activity TEXT NOT NULL);
+CREATE INDEX browser_activity_session ON browser_activity(app_session_id, id);
+`,
+  },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

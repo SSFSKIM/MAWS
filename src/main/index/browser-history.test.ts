@@ -38,7 +38,7 @@ describe('BrowserHistoryStore', () => {
   });
 
   it('migration 5 creates the table keyed by (partition, url), its source checked, with the recency index', () => {
-    expect(index.applied.at(-1)).toBe(5);
+    expect(index.applied).toContain(5);
     const columns = raw<{ name: string; type: string; notnull: number; pk: number }>('PRAGMA table_info(browser_history)').map((c) => [c.name, c.type, c.notnull, c.pk]);
     expect(columns).toEqual([
       ['partition', 'TEXT', 1, 1], ['url', 'TEXT', 1, 2], ['title', 'TEXT', 0, 0], ['visit_count', 'INTEGER', 1, 0],
