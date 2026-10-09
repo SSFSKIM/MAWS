@@ -16,7 +16,8 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION, FIXTURE_ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
+import { compareVersions } from '../../src/engine-host/engine-compat'; // cua board #94
 import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
 import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
 import { releaseHolder } from '../../src/main/sessions/take-over'; // W7: "Take over here", over this host
@@ -1059,7 +1060,12 @@ describe('engine host live', () => {
     // a queue-operation enqueue and a `remove` for reason absorbed_mid_turn
     const steerUuid = outFrames(readJournal(journalPath)).find((r) => r.frame.type === 'user' && r.frame.priority === 'next')!.frame.uuid;
     const queued = records.filter((r) => r.attachment?.type === 'queued_command');
-    expect(queued.map((r) => r.attachment)).toEqual([{ type: 'queued_command', prompt: 'Reply NEXT_OK', source_uuid: steerUuid, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: expect.any(String), humanTurn: true }]);
+    // cua board #94: the live run takes the newest installed engine once the fixtures' 2.1.283 is gone (test/support/
+    // engine-pin). 2.1.283 writes no `delivery_id`; from 2.1.287 on (read in its bundle, unchanged on 2.1.295) the
+    // attachment always carries one, a fresh id assigned when the command is first attached. The case takes either
+    // engine, and holds each to its own form.
+    const deliveryId = (compareVersions(ENGINE_VERSION, FIXTURE_ENGINE_VERSION) ?? 0) > 0 ? expect.any(String) : undefined;
+    expect(queued.map((r) => r.attachment)).toEqual([{ type: 'queued_command', prompt: 'Reply NEXT_OK', source_uuid: steerUuid, delivery_id: deliveryId, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: expect.any(String), humanTurn: true }]);
     expect(records.filter((r) => r.uuid === steerUuid)).toEqual([]);
     const parent = records.find((r) => r.uuid === queued[0]!.parentUuid);
     expect(parent?.type).toBe('user');
