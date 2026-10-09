@@ -70,6 +70,7 @@ export const QUERY_COMMANDS = [
   'browser.import.profiles',
   'browser.import.list',
   // E4b end
+  'browser.bookmarks.tree', // cua #90: the bookmarks bar's tree
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

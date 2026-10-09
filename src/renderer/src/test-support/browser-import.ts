@@ -57,6 +57,7 @@ export const INSPECTION: BrowserImportInspection = {
     candidate({ id: WALLET_ID, name: 'Probe Wallet', background: 'none', wallet: true }),
     candidate({ id: DISABLED_ID, name: 'Disabled in Chrome', chromeState: 'disabled' }),
   ],
+  bookmarks: { count: 46 }, // cua #90
 };
 
 export const DONE = DONE_REPORT;
@@ -70,6 +71,10 @@ export const RECORD: ImportedProfile = {
   userDataDir: CHROME,
   extensions: DONE.extensions,
   report: DONE,
+  bookmarks: null, // cua #90: profiles.json version 2
+  gaiaName: null,
+  userName: null,
+  avatar: { kind: 'initials' },
 };
 
 export interface ImportBridge extends SettingsBridge {

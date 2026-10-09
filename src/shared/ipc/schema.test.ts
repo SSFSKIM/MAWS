@@ -1160,7 +1160,7 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
-      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.')) /* E4b: its block is pinned below */).toEqual([
+      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.')) /* E4b, cua #90: their blocks are pinned below */).toEqual([
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
@@ -1168,7 +1168,7 @@ describe('ipc schema validates both directions', () => {
         'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
-      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
+      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.')) /* E4b, cua #90 */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
         'browser.agent.acting', // E4c, restored by E13 (P1 A-54)
@@ -1217,7 +1217,8 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-browser', query: 'wiki' }).ok).toBe(true);
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-chrome-Profile 1', query: '' }).ok).toBe(true);
       expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-capture', query: 'wiki' }).ok).toBe(false);
-      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null, kind: 'history' }] }).ok).toBe(true); // cua #90: `kind`
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(false);
       expect(validateCommandInput('browser.profiles.list', undefined).ok).toBe(true);
       expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(true);
     });
@@ -1296,6 +1297,7 @@ describe('ipc schema validates both directions', () => {
     const record = {
       profileDir: 'Default', name: 'Person 1', partition: 'persist:maws-chrome-Default', importedAt: '2026-10-06T10:00:05.000Z',
       storageDirName: 'maws-chrome-default', userDataDir: '/tmp/chrome', extensions: [PROBE_EXTENSION], report: DONE_REPORT,
+      bookmarks: null, gaiaName: null, userName: null, avatar: { kind: 'initials' }, // cua #90: profiles.json version 2
     };
     const ID = '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c';
     const EXT = 'cddgipniephaglaopjjeihjehogcpggh';
@@ -1307,11 +1309,11 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') /* cua #90 */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */ && !name.startsWith('browser.bookmarks.') /* cua #90 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1329,7 +1331,7 @@ describe('ipc schema validates both directions', () => {
         expect(validateCommandInput('browser.import.remove', { profileDir }).ok, profileDir).toBe(false);
         expect(validateCommandInput('browser.import.setExtension', { profileDir, extensionId: EXT, enabled: true }).ok, profileDir).toBe(false);
       }
-      const start = { inspectionId: ID, categories: { history: true, cookies: true, extensions: true }, extensionIds: [EXT], allowUnverifiedExtensions: true };
+      const start = { inspectionId: ID, categories: { history: true, cookies: true, extensions: true, bookmarks: true /* cua #90 */ }, extensionIds: [EXT], allowUnverifiedExtensions: true };
       expect(validateCommandInput('browser.import.start', start).ok).toBe(true);
       expect(validateCommandInput('browser.import.setExtension', { profileDir: 'Default', extensionId: EXT, enabled: false }).ok).toBe(true);
       for (const extensionId of ['probe', EXT.toUpperCase(), `${EXT}a`, '../ddgipniephaglaopjjeihjehogcpggh', 'zddgipniephaglaopjjeihjehogcpggh']) {
@@ -1353,7 +1355,7 @@ describe('ipc schema validates both directions', () => {
         id: EXT, name: 'Probe', version: '1.0', manifestVersion: 3, background: 'service_worker', contentScripts: 1, unsupportedPermissions: ['cookies'],
         wallet: false, chromeState: 'enabled', sizeBytes: 10, error: null,
       };
-      const inspection = { inspectionId: ID, profile, chromeRunning: true, history: { rows: 6 }, cookies: { rows: 5, partitioned: 1, storeVersion: 24 }, extensions: [candidate] };
+      const inspection = { inspectionId: ID, profile, chromeRunning: true, history: { rows: 6 }, cookies: { rows: 5, partitioned: 1, storeVersion: 24 }, extensions: [candidate], bookmarks: { count: 46 } /* cua #90 */ };
       expect(validateCommandOutput('browser.import.inspect', inspection).ok).toBe(true);
       expect(validateCommandOutput('browser.import.inspect', { ...inspection, history: { error: 'History couldn’t be read' }, cookies: { error: 'Cookies couldn’t be read' } }).ok).toBe(true);
       expect(validateCommandOutput('browser.import.inspect', { ...inspection, cookies: { rows: 5 } }).ok).toBe(false);
@@ -1392,6 +1394,46 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4b end
+  // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC")
+  describe('cua #90 entries', () => {
+    const tree = {
+      bar: { kind: 'folder', id: 1, name: 'Bookmarks bar', children: [{ kind: 'url', id: 2, name: 'A', url: 'https://a.example/', addedAt: 1 }, { kind: 'folder', id: 3, name: 'F', children: [] }] },
+      other: { kind: 'folder', id: 4, name: 'Other bookmarks', children: [] },
+      mobile: { kind: 'folder', id: 5, name: 'Mobile bookmarks', children: [] },
+    };
+
+    it('appends browser.bookmarks.tree, .sync and .changed after E13’s entries, main-owned, every name bridged', () => {
+      expect(Object.keys(browser.commands).slice(-2)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync']);
+      expect(Object.keys(browser.events).slice(-1)).toEqual(['browser.bookmarks.changed']);
+      for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync'] as const) expect(commands[name].owner).toBe('main');
+      expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
+      expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
+    });
+
+    it('validates the tree: three folder roots, only http(s) URLs, no extra key', () => {
+      expect(validateCommandInput('browser.bookmarks.tree', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.tree', { partition: 'persist:maws-capture' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree }).ok).toBe(true);
+      const withUrl = (url: string) => ({ tree: { ...tree, bar: { ...tree.bar, children: [{ kind: 'url', id: 2, name: 'A', url, addedAt: null }] } } });
+      for (const url of ['javascript:alert(1)', 'file:///etc/hosts', 'chrome://settings/', 'https://a b/']) expect(validateCommandOutput('browser.bookmarks.tree', withUrl(url)).ok, url).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree: { ...tree, bar: { ...tree.bar, extra: 1 } } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.tree', { tree: { bar: tree.bar, other: tree.other } }).ok).toBe(false);
+    });
+
+    it('validates the sync, the suggestion’s kind, the inspection’s count, the new phase and category, and the event', () => {
+      expect(validateCommandInput('browser.bookmarks.sync', { profileDir: 'Default' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.sync', { profileDir: '../Default' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.sync', { syncedAt: '2026-10-08T12:00:00.000Z', count: 46 }).ok).toBe(true);
+      for (const error of ['missing', 'unreadable', 'indexUnavailable', 'refused']) expect(validateCommandOutput('browser.bookmarks.sync', { error }).ok, error).toBe(true);
+      expect(validateCommandOutput('browser.bookmarks.sync', { error: 'refused', reason: 'an import is running' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: 'A', kind: 'bookmark' }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: 'A', kind: 'folder' }] }).ok).toBe(false);
+      expect(validateEventPayload('browser.import.progress', { importId: '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c', phase: 'bookmarks', done: 0, total: 1 }).ok).toBe(true);
+      expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default', tree }).ok).toBe(false);
+    });
+  });
+  // cua #90 end
   // E4c start: what stays of E4c's IPC once the browser tools left the `maws` server (P1 A-54): no `maws.browser.*` bridge;
   // `browser.agent.acting`, restored for cua's leases (A-54, amended); E13's download record and agent activity
   describe('E4c entries', () => {

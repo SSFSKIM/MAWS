@@ -4,6 +4,8 @@
 // store), then `startBrowserImport` with E4a's handle. It builds the extensions loader, the import service and the
 // removal, registers `browser.import.*`, hooks the per-boot extension loading into E4a's partition preparation, holds
 // the first page of a partition whose extensions are still loading, and loads the active profile's extensions at boot.
+// cua board #90: it also runs the bookmarks mirror (bookmarks/sync.ts) beside the extensions' boot load, and registers
+// `browser.bookmarks.*`.
 // Under MAWS_E2E=1 it exposes `globalThis.__maws_browser_import`. `stop` (at will-quit) cancels a running import as far
 // as can be done synchronously and deletes every staging directory.
 import { BrowserWindow, dialog } from 'electron';
@@ -12,6 +14,8 @@ import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import { openDialogFor } from '../../files/e2e-pick';
 import type { Index } from '../../index/index';
 import type { registerMainHandler } from '../../ipc/router';
+import { registerBookmarkHandlers } from '../bookmarks/register';
+import { BookmarkSync } from '../bookmarks/sync';
 import type { Partitions } from '../partition';
 import type { BrowserEmit, TabStore } from '../tabs';
 import { createImportView } from './chips-import';
@@ -26,7 +30,8 @@ import { BrowserImportService } from './service';
 export { ImportedProfiles } from './profiles';
 export { sweepBrowserImports } from './sweep';
 
-// The e2e's view of the import (Acceptance G1): the run under way, and a profile's record as main holds it.
+// The e2e's view of the import (Acceptance G1): the run under way, and a profile's record as main holds it (cua #90: but
+// for the Chrome account's names, which it answers null).
 export interface BrowserImportInspector {
   importing(): string | null; // the running import's id
   record(profileDir: string): ImportedProfile | null;
@@ -39,7 +44,7 @@ declare global {
 export interface BrowserImportDeps {
   userData: string;
   settings(): Pick<BrowserSettings, 'profile'>; // the active profile, whose extensions load at boot
-  index: Pick<Index, 'browserHistory'>;
+  index: Pick<Index, 'browserHistory' | 'browserBookmarks' /* cua #90 */>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv;
@@ -73,16 +78,36 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
     keychain: (signal) => readSafeStorageKey({ env, signal }),
     createImportView,
     extensions: extensions.importExtensions,
+    bookmarks: index.browserBookmarks, // cua #90
+  });
+  // cua #90: a removal under way refuses a bookmarks sync, as an import does
+  let removals = 0;
+  const bookmarks = new BookmarkSync({
+    profiles,
+    store: index.browserBookmarks,
+    busy: () => (service.running() !== null ? 'importing' : removals > 0 ? 'removing' : null),
+    emit,
+    env,
   });
   registerBrowserImportHandlers({
     service,
     profiles,
     extensions,
-    remove: (profileDir) =>
-      removeImportedProfile(
-        { userData, env, importing: () => service.running(), store: browser.store, partitions: browser.partitions, extensions, history: index.browserHistory, profiles },
-        profileDir,
-      ),
+    remove: async (profileDir) => {
+      removals++;
+      try {
+        return await removeImportedProfile(
+          {
+            userData, env, importing: () => service.running(), store: browser.store, partitions: browser.partitions, extensions, history: index.browserHistory,
+            bookmarks: index.browserBookmarks, // cua #90
+            profiles,
+          },
+          profileDir,
+        );
+      } finally {
+        removals--;
+      }
+    },
     chooseDirectory,
     emit,
     env,
@@ -94,6 +119,10 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
   // FIRST_LOAD_HOLD_MS (the boot race; the loader's header says what that does and does not guarantee).
   const onPartitionPrepared = (ses: Electron.Session, partition: string) => extensions.onPartitionPrepared(ses, partition);
   const unregister = browser.partitions.registerPreparer(onPartitionPrepared);
+  // cua #90: the bookmarks mirror re-reads a profile's `Bookmarks` when its partition is prepared (the active profile's
+  // just below, at boot), registered before that so the boot preparation runs it
+  const unregisterBookmarks = browser.partitions.registerPreparer((ses, partition) => bookmarks.onPartitionPrepared(ses, partition));
+  registerBookmarkHandlers({ store: index.browserBookmarks, sync: bookmarks, env, register });
   const stopHold = browser.store.onViewCreated((entry) => extensions.holdNewView(entry));
   // The active profile's partition is prepared now, so its extensions are loaded and their content scripts settled well
   // before the first tab opens; any other imported profile loads when a tab first needs its partition.
@@ -106,7 +135,16 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
   }
 
   const inspector: BrowserImportInspector | null =
-    env.MAWS_E2E === '1' ? { importing: () => service.running()?.importId ?? null, record: (profileDir) => profiles.get(profileDir) } : null;
+    env.MAWS_E2E === '1'
+      ? {
+          importing: () => service.running()?.importId ?? null,
+          // cua #90: the Chrome account's names are the popover's and the picker's only, never the e2e seam's
+          record: (profileDir) => {
+            const record = profiles.get(profileDir);
+            return record && { ...record, gaiaName: null, userName: null };
+          },
+        }
+      : null;
   if (inspector) globalThis.__maws_browser_import = inspector;
 
   return {
@@ -114,6 +152,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
     stop: () => {
       if (inspector && globalThis.__maws_browser_import === inspector) delete globalThis.__maws_browser_import;
       unregister();
+      unregisterBookmarks(); // cua #90
       stopHold();
       service.stop();
     },

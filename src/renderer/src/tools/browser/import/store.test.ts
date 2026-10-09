@@ -28,7 +28,7 @@ async function toConsent() {
   await inspect(CHROME, 'Default');
   expect(stage().kind).toBe('consent');
 }
-const CHOICE = { categories: { history: true, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false };
+const CHOICE = { categories: { history: true, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false };
 
 beforeEach(() => {
   b = importBridge();

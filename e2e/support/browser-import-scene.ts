@@ -147,6 +147,7 @@ export interface ImportChoices {
   history?: boolean; // each category as the consent offers it when absent
   cookies?: boolean;
   extensions?: boolean;
+  bookmarks?: boolean; // cua #90
   cancelDuring?: 'extensions'; // press Cancel once main reports this phase
   atConsent?: (sheet: Locator) => Promise<void>; // runs in the consent state before Import
 }
@@ -158,9 +159,10 @@ export async function importThrough(s: ImportScene, choices: ImportChoices = {})
   if (choices.profileDir !== undefined) await sheet.locator(`[data-chrome-profile="${choices.profileDir}"]`).getByRole('radio').check();
   await sheet.getByRole('button', { name: 'Continue' }).click();
   await expect(sheet).toHaveAttribute('data-browser-import', 'consent');
-  for (const category of ['history', 'cookies', 'extensions'] as const) {
+  for (const category of ['history', 'cookies', 'extensions', 'bookmarks'] as const) {
     const wanted = choices[category];
-    if (wanted !== undefined) await sheet.getByRole('checkbox', { name: { history: 'History', cookies: 'Cookies', extensions: 'Extensions' }[category], exact: true }).setChecked(wanted);
+    const name = { history: 'History', cookies: 'Cookies', extensions: 'Extensions', bookmarks: 'Bookmarks' /* cua #90 */ }[category];
+    if (wanted !== undefined) await sheet.getByRole('checkbox', { name, exact: true }).setChecked(wanted);
   }
   const acknowledgement = sheet.getByRole('checkbox', { name: /^MAWS can't verify these extensions/ });
   if (await acknowledgement.count()) await acknowledgement.check();
@@ -222,7 +224,7 @@ export async function recordOf(s: ImportScene, profileDir: string): Promise<Impo
   );
 }
 
-export async function suggest(s: ImportScene, partition: string, query: string): Promise<{ url: string; title: string | null }[]> {
+export async function suggest(s: ImportScene, partition: string, query: string): Promise<{ url: string; title: string | null; kind: 'history' | 'bookmark' }[]> {
   return value(await invoke(s.page, 'browser.history.suggest', { partition, query })).suggestions;
 }
 

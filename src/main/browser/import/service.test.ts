@@ -14,6 +14,7 @@ import { ImportReportSchema } from '@shared/browser/import';
 import { summaryWords } from '@shared/browser/import-summary';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
 import { Index } from '../../index/index';
+import { readChromeBookmarks } from './chrome/bookmarks';
 import { deriveKey } from './chrome/crypto';
 import type { NetworkSetCookieParams } from './chrome/cookies';
 import type { ImportView } from './chips-import';
@@ -139,6 +140,7 @@ describe('BrowserImportService', () => {
       env: {},
       partitions: { session: vi.fn(() => session.session) },
       history: index.browserHistory,
+      bookmarks: index.browserBookmarks, // cua #90
       profiles,
       emit: (name, payload) => {
         const event = { name, payload } as Emitted;
@@ -154,7 +156,7 @@ describe('BrowserImportService', () => {
   }
 
   const extensionIds = () => [fixture.extensions.probe.id, fixture.extensions.fails.id, fixture.extensions.wallet.id];
-  const ALL = { history: true, cookies: true, extensions: true };
+  const ALL = { history: true, cookies: true, extensions: true, bookmarks: true };
 
   async function importAll(svc: BrowserImportService, over: { categories?: typeof ALL; extensionIds?: string[]; profileDir?: string } = {}) {
     const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: over.profileDir ?? 'Default' });
@@ -224,7 +226,7 @@ describe('BrowserImportService', () => {
     const svc = service();
     const { importId, report } = await importAll(svc);
 
-    expect(phases()).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'extensions', 'cleaning']);
+    expect(phases()).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
     expect(ImportReportSchema.parse(report)).toEqual(report);
     expect(report).toMatchObject({
       profileDir: 'Default', name: 'Person 1', partition: PARTITION, outcome: 'done', failure: null,
@@ -234,7 +236,7 @@ describe('BrowserImportService', () => {
     expect(report.cookies!.skipped).toEqual({ wrongKey: 0, corruptRow: 0, expired: 0, sameSiteNoneInsecure: 1, rejected: 0, notVerified: 0, cancelled: 0 });
     expect(report.extensions!.map((e) => [e.name, e.status])).toEqual(expect.arrayContaining([['Probe Wallet', 'off']]));
     expect(summaryWords(report)).toBe(
-      "4 cookies, 4 history entries, 3 extensions · 3 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open",
+      "4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported",
     );
     expect(new Date(report.finishedAt).toISOString()).toBe(report.finishedAt);
 
@@ -253,7 +255,7 @@ describe('BrowserImportService', () => {
     expect(stagingLeft()).toEqual([]);
     expect(profiles.get('Default')).toMatchObject({ profileDir: 'Default', name: 'Person 1', partition: PARTITION, storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, report });
     expect(profiles.get('Default')!.extensions).toEqual(report.extensions);
-    expect(emitted.filter((e) => e.name !== 'browser.import.progress').map((e) => e.name)).toEqual(['browser.import.changed', 'browser.import.finished']);
+    expect(emitted.filter((e) => e.name !== 'browser.import.progress').map((e) => e.name)).toEqual(['browser.bookmarks.changed', 'browser.import.changed', 'browser.import.finished']);
     expect(emitted.at(-1)!.payload).toEqual({ importId, report });
     expect(svc.running()).toBeNull();
   });
@@ -283,7 +285,7 @@ describe('BrowserImportService', () => {
     expect(view.createImportView).not.toHaveBeenCalled();
     expect(keys[0]!.every((byte) => byte === 0)).toBe(true);
     expect(report.outcome).toBe('done');
-    expect(summaryWords(report)).toMatch(/^0 cookies, 4 history entries, 3 extensions · 7 skipped: 5 could not be decrypted/);
+    expect(summaryWords(report)).toMatch(/^0 cookies, 4 history entries, 46 bookmarks, 3 extensions · 8 skipped: 5 could not be decrypted/);
   });
 
   it.each([
@@ -370,7 +372,7 @@ describe('BrowserImportService', () => {
     const svc = service();
     const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
     writeFileSync(join(userData, 'browser', 'import', inspection.inspectionId, 'Cookies'), 'not a database');
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(report).toMatchObject({ outcome: 'done', history: null, extensions: null, cookies: { imported: 0, keychain: 'skipped', error: 'SQLITE_NOTADB' } });
     expect(keychain).not.toHaveBeenCalled();
@@ -427,7 +429,7 @@ describe('BrowserImportService', () => {
     const db = new DatabaseSync(join(userData, 'browser', 'import', inspection.inspectionId, 'Cookies'));
     db.exec('DELETE FROM cookies');
     db.close();
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: false, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(keychain).not.toHaveBeenCalled();
     expect(report).toMatchObject({ outcome: 'done', cookies: { imported: 0, keychain: 'skipped', error: null } });
@@ -476,7 +478,7 @@ describe('BrowserImportService', () => {
       if (event.payload.phase === 'history' && event.payload.done === 500) svc.cancel(svc.running()!.importId);
     };
     const inspection = await svc.inspect({ userDataDir: big.dir, profileDir: 'Default' });
-    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: true, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false });
+    const { finished } = svc.start({ inspectionId: inspection.inspectionId, categories: { history: true, cookies: true, extensions: false, bookmarks: false }, extensionIds: [], allowUnverifiedExtensions: false });
     const report = await finished;
     expect(report.outcome).toBe('cancelled');
     expect(importRows).toHaveBeenCalledTimes(1);
@@ -485,10 +487,78 @@ describe('BrowserImportService', () => {
     expect(historyOf()).toEqual([]);
   });
 
+  // cua #90 start: the fourth category
+  describe('bookmarks', () => {
+    const barNames = () => index.browserBookmarks.tree(PARTITION).bar.children.map((node) => node.name);
+
+    it('the inspection counts the URL bookmarks the import would keep, and answers null for a profile with no file', async () => {
+      const svc = service();
+      expect((await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' })).bookmarks).toEqual({ count: 46 });
+      expect((await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Profile 1' })).bookmarks).toBeNull();
+    });
+
+    it('the phase writes the rows and the report, and the record carries the mirror’s state and the account names', async () => {
+      const { report } = await importAll(service());
+      expect(report.bookmarks).toEqual({ imported: 46, skipped: 1, error: null });
+      expect(barNames().slice(0, 4)).toEqual(['A', 'B', 'F', 'N01']);
+      expect(index.browserBookmarks.tree(PARTITION).other.children.map((node) => node.name)).toEqual(['O1']);
+      const record = profiles.get('Default')!;
+      expect(record.bookmarks).toEqual({ consentedAt: report.startedAt, syncedAt: expect.any(String), count: 46, error: null, errorAt: null });
+      expect(record).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'initials' } });
+      expect(emitted.find((e) => e.name === 'browser.bookmarks.changed')!.payload).toEqual({ partition: PARTITION });
+    });
+
+    it('unchecked: no phase, no rows, and the record’s bookmarks null', async () => {
+      const { report } = await importAll(service(), { categories: { ...ALL, bookmarks: false } });
+      expect(report.bookmarks).toBeNull();
+      expect(phases()).not.toContain('bookmarks');
+      expect(barNames()).toEqual([]);
+      expect(profiles.get('Default')!.bookmarks).toBeNull();
+    });
+
+    it('is a category on its own', async () => {
+      const { report } = await importAll(service(), { categories: { history: false, cookies: false, extensions: false, bookmarks: true }, extensionIds: [] });
+      expect(report).toMatchObject({ outcome: 'done', history: null, cookies: null, extensions: null, bookmarks: { imported: 46 } });
+      expect(keychain).not.toHaveBeenCalled();
+    });
+
+    it('a file gone by the run is the category’s error; the consent stands on the record for the next sync', async () => {
+      const readBookmarks = vi.fn(readChromeBookmarks);
+      const svc = service({ readBookmarks });
+      const inspection = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Default' });
+      readBookmarks.mockResolvedValueOnce({ ok: false, error: 'missing' });
+      const report = await svc.start({ inspectionId: inspection.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true }).finished;
+      expect(report).toMatchObject({ outcome: 'done', bookmarks: { imported: 0, skipped: 0, error: 'missing' } });
+      expect(profiles.get('Default')!.bookmarks).toEqual({ consentedAt: report.startedAt, syncedAt: null, count: 0, error: 'missing', errorAt: expect.any(String) });
+      expect(summaryWords(report)).toContain('0 bookmarks');
+    });
+
+    it('an index that refuses the rows is the category’s error, the rest imported', async () => {
+      const bookmarks = { replace: () => { throw Object.assign(new Error('the index is unavailable'), { code: 'indexUnavailable' }); }, removePartition: () => {} };
+      const { report } = await importAll(service({ bookmarks }));
+      expect(report).toMatchObject({ outcome: 'done', history: { imported: 4 }, bookmarks: { imported: 0, skipped: 1, error: 'indexUnavailable' } });
+      expect(profiles.get('Default')!.bookmarks).toMatchObject({ syncedAt: null, error: 'indexUnavailable' });
+    });
+
+    it('a run cancelled after the phase rolls the rows back with the history', async () => {
+      extensions = fakeExtensions(session.loaded, { waitForAbortAfter: 1 });
+      const svc = service();
+      onEmit = (event) => {
+        if (event.payload.phase === 'extensions' && event.payload.done === 1) svc.cancel(svc.running()!.importId);
+      };
+      const { report } = await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
+      expect(report).toMatchObject({ outcome: 'cancelled', bookmarks: { imported: 46 } });
+      expect(barNames()).toEqual([]);
+      expect(index.browserBookmarks.tree(PARTITION).other.children).toEqual([]);
+      expect(profiles.get('Default')).toBeNull();
+    });
+  });
+  // cua #90 end
+
   describe('start refuses', () => {
     it.each([
       ['extensions without the unverified-files acknowledgement', { allowUnverifiedExtensions: false }, 'unverified'],
-      ['no category', { categories: { history: false, cookies: false, extensions: false } }, 'noCategory'],
+      ['no category', { categories: { history: false, cookies: false, extensions: false, bookmarks: false } }, 'noCategory'],
       ['an extension the inspection did not find', { extensionIds: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] }, 'unknownExtension'],
       ['an inspection that is not the standing one', { inspectionId: '00000000-0000-4000-8000-000000000000' }, 'unknownInspection'],
     ] as const)('%s', async (_, over, reason) => {

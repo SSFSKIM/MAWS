@@ -168,7 +168,7 @@ describe('the address field', () => {
 
   it('typing lists the typed address, then the partition’s history; the arrows move; Enter runs the row as typed', async () => {
     const user = userEvent.setup();
-    suggest = () => ok({ suggestions: [{ url: 'https://wikipedia.org/wiki/A', title: 'A' }] });
+    suggest = () => ok({ suggestions: [{ url: 'https://wikipedia.org/wiki/A', title: 'A', kind: 'history' }] });
     show({ tab: tab() });
     await user.click(field());
     await user.keyboard('wikipedia.org');
@@ -190,7 +190,7 @@ describe('the address field', () => {
 
   it('Enter with no arrow goes to the typed address as main’s check parses it, and a click runs a row', async () => {
     const user = userEvent.setup();
-    suggest = () => ok({ suggestions: [{ url: 'https://b.test/x', title: null }] });
+    suggest = () => ok({ suggestions: [{ url: 'https://b.test/x', title: null, kind: 'history' }] });
     show({ tab: tab() });
     await user.click(field());
     await user.keyboard('localhost:3000{Enter}');
@@ -215,8 +215,8 @@ describe('the address field', () => {
     await user.keyboard('b');
     await wait(80);
     expect(answers).toHaveLength(2);
-    await act(async () => answers[1]!(ok({ suggestions: [{ url: 'https://new.test/', title: 'new' }] })));
-    await act(async () => answers[0]!(ok({ suggestions: [{ url: 'https://old.test/', title: 'old' }] })));
+    await act(async () => answers[1]!(ok({ suggestions: [{ url: 'https://new.test/', title: 'new', kind: 'history' }] })));
+    await act(async () => answers[0]!(ok({ suggestions: [{ url: 'https://old.test/', title: 'old', kind: 'history' }] })));
     const options = screen.getAllByRole('option').map((option) => option.textContent);
     expect(options.some((text) => text?.includes('new.test'))).toBe(true);
     expect(options.some((text) => text?.includes('old.test'))).toBe(false);

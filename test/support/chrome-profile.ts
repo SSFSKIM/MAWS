@@ -5,10 +5,13 @@
 // extensions whose directory names are the ids their manifest keys derive, as Chrome's are. Every cookie value, history
 // path and history title is a long unique sentinel, returned with the passwords so the e2e can assert that none of them
 // reaches a log. No password store is built (Decision Log 6).
-import { createCipheriv, createHash, generateKeyPairSync, pbkdf2Sync, randomBytes } from 'node:crypto';
+// cua board #90: Default also has a `Bookmarks` file (`writeChromeBookmarks`; its URLs' paths are sentinels too) and
+// a 64×64 PNG as its Google profile picture, named by `Local State`'s `gaia_picture_file_name`.
+import { createCipheriv, createHash, generateKeyPairSync, pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, copyFileSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { deflateSync } from 'node:zlib';
 
 export const SENTINEL_PREFIX = 'e4b-sentinel-';
 export const SLOW_COPY_BYTES = 64 * 1024 * 1024; // the Work profile's probe copy, padded so its copy can be cancelled into
@@ -77,10 +80,21 @@ export interface FixtureExtension {
   dir: string; // the version directory, <profile>/Extensions/<id>/<version>_0
 }
 
+// cua #90: a bookmark node as the fixture writes it; a URL node's `url` is absolute, any scheme.
+export type FixtureBookmark = { name: string; url: string } | { name: string; children: FixtureBookmark[] };
+export interface FixtureBookmarks {
+  bar: FixtureBookmark[];
+  other: FixtureBookmark[];
+  synced: FixtureBookmark[];
+}
+
 export interface FixtureProfile {
   profileDir: string;
   name: string;
   dir: string;
+  // cua #90: the `Bookmarks` file as written, and each URL bookmark's URL by name; null when the profile has none
+  bookmarks: { file: string; roots: FixtureBookmarks; urls: Record<string, string> } | null;
+  picture: string | null; // cua #90: the Google profile picture's path
   history: { file: string; rows: number; entries: FixtureHistoryEntry[] };
   cookies: { file: string; rows: number; partitioned: number; storeVersion: 24; entries: FixtureCookie[] };
   extensions: string[]; // ids, in Extensions/
@@ -100,6 +114,7 @@ export interface ChromeUserData {
 
 export interface ChromeUserDataOptions {
   host?: string; // the host the cookie rows, the history rows and the probe's host permissions name (default 127.0.0.1)
+  bookmarksOrigin?: string; // cua #90: the origin Default's bookmark URLs name (default http://<host>)
   slowCopy?: boolean; // pad the Work profile's probe copy with SLOW_COPY_BYTES of zeros
 }
 
@@ -110,7 +125,7 @@ export function chromeExtensionId(bytes: Uint8Array): string {
   return hex.replace(/[0-9a-f]/g, (digit) => String.fromCharCode(97 + parseInt(digit, 16)));
 }
 
-export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy = false }: ChromeUserDataOptions = {}): ChromeUserData {
+export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy = false, bookmarksOrigin = `http://${host}` }: ChromeUserDataOptions = {}): ChromeUserData {
   mkdirSync(dir, { recursive: true });
   if (readdirSync(dir).length > 0) throw new Error(`${dir} is not empty; the Chrome fixture is built only into a fresh directory`);
   const sentinels: string[] = [];
@@ -131,7 +146,10 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
   writeJson(join(dir, 'Local State'), {
     profile: {
       info_cache: {
-        Default: { name: 'Person 1', gaia_name: 'Probe Owner', user_name: 'probe@example.test', avatar_icon: 'chrome://theme/IDR_PROFILE_AVATAR_26', is_using_default_name: true },
+        Default: {
+          name: 'Person 1', gaia_name: 'Probe Owner', user_name: 'probe@example.test', avatar_icon: 'chrome://theme/IDR_PROFILE_AVATAR_26', is_using_default_name: true,
+          gaia_picture_file_name: GAIA_PICTURE, // cua #90
+        },
         'Profile 1': { name: 'Work', gaia_name: '', user_name: '', avatar_icon: 'chrome://theme/IDR_PROFILE_AVATAR_4', is_using_default_name: false },
       },
       last_used: 'Default',
@@ -175,6 +193,22 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
   ];
   sentinels.push(password, wrongPassword);
 
+  // cua #90: Default's bookmarks (the spec's Acceptance): bar A, B, a bookmarklet the import skips, folder F (F1, F2 and
+  // folder G with G1), then N01 to N40 so the bar overflows; O1 under Other bookmarks; Mobile bookmarks empty. 46 URLs
+  // kept, 1 skipped.
+  const mark = (name: string): FixtureBookmark => ({ name, url: `${bookmarksOrigin}/bookmark/${name}/${sentinel('path')}` });
+  const personBookmarks: FixtureBookmarks = {
+    bar: [
+      mark('A'),
+      mark('B'),
+      { name: 'Bookmarklet', url: 'javascript:void(document.title)' },
+      { name: 'F', children: [mark('F1'), mark('F2'), { name: 'G', children: [mark('G1')] }] },
+      ...Array.from({ length: 40 }, (_, k) => mark(`N${String(k + 1).padStart(2, '0')}`)),
+    ],
+    other: [mark('O1')],
+    synced: [],
+  };
+
   const person: FixtureProfile = {
     profileDir: 'Default',
     name: 'Person 1',
@@ -182,6 +216,8 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
     history: writeHistory(join(personDir, 'History'), personHistory),
     cookies: writeCookies(join(personDir, 'Cookies'), personCookies, key, now),
     extensions: [],
+    bookmarks: writeChromeBookmarks(join(personDir, 'Bookmarks'), personBookmarks, now), // cua #90
+    picture: writePng(join(personDir, GAIA_PICTURE), 64), // cua #90
   };
   const work: FixtureProfile = {
     profileDir: 'Profile 1',
@@ -190,6 +226,8 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
     history: writeHistory(join(workDir, 'History'), workHistory),
     cookies: writeCookies(join(workDir, 'Network', 'Cookies'), workCookies, key, now),
     extensions: [],
+    bookmarks: null, // cua #90: no Bookmarks file, no picture
+    picture: null,
   };
 
   const probe = installExtension(personDir, (manifestKey) => probeManifest(host, manifestKey), probeFiles);
@@ -246,6 +284,66 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
     sentinels,
   };
 }
+
+// cua #90 start
+const GAIA_PICTURE = 'Google Profile Picture.png'; // current Chrome's name for it
+
+// A `Bookmarks` file as Chrome writes it (public JSON: `{ checksum, roots: { bookmark_bar, other, synced }, version }`,
+// each node with Chrome's `id`, `guid` and `date_added` in microseconds since 1601). Rewrites the file whole, as Chrome
+// does through a temporary file; the e2e calls it again to edit the profile's bookmarks between syncs.
+export function writeChromeBookmarks(file: string, roots: FixtureBookmarks, nowMs = Date.now()): NonNullable<FixtureProfile['bookmarks']> {
+  let id = 0;
+  const urls: Record<string, string> = {};
+  const added = String(msToChromeTime(nowMs));
+  const node = (bookmark: FixtureBookmark): Record<string, unknown> => {
+    const common = { date_added: added, date_last_used: '0', guid: randomUUID(), id: String(++id), name: bookmark.name };
+    if ('url' in bookmark) {
+      urls[bookmark.name] = bookmark.url;
+      return { ...common, type: 'url', url: bookmark.url };
+    }
+    return { ...common, children: bookmark.children.map(node), date_modified: added, type: 'folder' };
+  };
+  const root = (name: string, children: FixtureBookmark[]) => node({ name, children });
+  const json = {
+    checksum: createHash('md5').update(String(nowMs)).digest('hex'), // MAWS never checks it
+    roots: { bookmark_bar: root('Bookmarks bar', roots.bar), other: root('Other bookmarks', roots.other), synced: root('Mobile bookmarks', roots.synced) },
+    version: 1,
+  };
+  writeJson(file, json);
+  return { file, roots, urls };
+}
+
+// A square opaque PNG of `size` pixels (8-bit RGB, one colour), written without an image library.
+function writePng(file: string, size: number): string {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header.writeUInt8(8, 8); // bit depth
+  header.writeUInt8(2, 9); // truecolour
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3, 0x5a)]); // filter 0, then RGB
+  const pixels = Buffer.concat(Array.from({ length: size }, () => row));
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]));
+  return file;
+}
+
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+// cua #90 end
 
 function writeHistory(file: string, entries: FixtureHistoryEntry[]): FixtureProfile['history'] {
   mkdirSync(dirname(file), { recursive: true });

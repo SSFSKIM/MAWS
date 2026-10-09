@@ -3,7 +3,7 @@
 // with the default profile instead of landing in the partition being emptied; then (1) the profile's tabs closed
 // through E4a's store, each page's destruction awaited; (2) its extensions unloaded; (3) the partition's storage, cache
 // and auth cache cleared and the cookie store flushed; (4) the partition folder (the extensions' files) deleted; (5) its
-// history rows counted and deleted; (6) the record dropped. A step that fails is logged and the next one runs: the
+// history rows counted and deleted, and (cua board #90) its bookmark rows deleted; (6) the record dropped. A step that fails is logged and the next one runs: the
 // record is dropped whatever else failed, and the boot sweep removes anything an unlisted profile left (its storage
 // directory, which Electron cannot delete while the session lives, among them). Refused while any import runs; Chrome
 // is never touched.
@@ -11,6 +11,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { WebContents } from 'electron';
 import { partitionDirName } from '@shared/browser/profiles';
+import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
 import type { BrowserHistoryStore } from '../../index/browser-history';
 import type { Partitions } from '../partition';
 import type { TabStore } from '../tabs';
@@ -29,6 +30,7 @@ export interface RemoveDeps {
   partitions: Pick<Partitions, 'session'>;
   extensions: Pick<ExtensionsLoader, 'unloadForRemoval' | 'removalDone'>;
   history: Pick<BrowserHistoryStore, 'countPartition' | 'removePartition'>;
+  bookmarks: Pick<BrowserBookmarksStore, 'removePartition'>; // cua #90
   profiles: Pick<ImportedProfiles, 'get' | 'withdraw' | 'remove'>;
 }
 
@@ -81,6 +83,7 @@ export async function removeImportedProfile(deps: RemoveDeps, profileDir: string
       historyRows = deps.history.countPartition(partition);
       deps.history.removePartition(partition);
     });
+    await step('bookmarks', () => deps.bookmarks.removePartition(partition)); // cua #90
     await deps.profiles.remove(profileDir);
   } finally {
     release();

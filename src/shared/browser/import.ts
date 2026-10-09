@@ -86,10 +86,11 @@ export const ExtensionCandidateSchema = z.strictObject({
 });
 export type ExtensionCandidate = z.infer<typeof ExtensionCandidateSchema>;
 
-export const ImportCategoriesSchema = z.strictObject({ history: z.boolean(), cookies: z.boolean(), extensions: z.boolean() });
+export const ImportCategoriesSchema = z.strictObject({ history: z.boolean(), cookies: z.boolean(), extensions: z.boolean(), bookmarks: z.boolean() /* cua #90 */ });
 export type ImportCategories = z.infer<typeof ImportCategoriesSchema>;
 
-export const ImportPhaseSchema = z.enum(['copying', 'history', 'keychain', 'cookies', 'verifying', 'extensions', 'cleaning']);
+// cua #90: `bookmarks` after `verifying` (the cookies phase emits `verifying` from inside its own step) and before `extensions`.
+export const ImportPhaseSchema = z.enum(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
 export type ImportPhase = z.infer<typeof ImportPhaseSchema>;
 
 // `wrongKey`: the Keychain answered, and every attempted decrypt failed (Design §7); `skipped`: cookies were chosen but
@@ -130,31 +131,38 @@ const countsBy = <const R extends readonly [string, ...string[]]>(reasons: R) =>
 // did not choose it. Cookies count each row once: `imported` is the plain rows set, `partitioned.imported` the
 // partitioned rows set, of which `partitioned.verified` were confirmed in the partition; a set partitioned row not
 // confirmed is also `skipped.notVerified`, so the summary's set count is `imported + partitioned.verified`.
-export const ImportReportSchema = z
-  .strictObject({
-    profileDir: ChromeProfileDirSchema,
-    name: ImportNameSchema,
-    partition: BrowserPartitionSchema,
-    startedAt: InstantSchema,
-    finishedAt: InstantSchema,
-    outcome: z.enum(['done', 'cancelled', 'failed']),
-    failure: ImportTextSchema.nullable(), // why a `failed` run could not continue
-    history: z
-      .strictObject({ imported: ImportCountSchema, skipped: countsBy(HISTORY_SKIP_REASONS), hosts: hostsBy(HISTORY_SKIP_REASONS), error: ImportTextSchema.nullable() })
-      .nullable(),
-    cookies: z
-      .strictObject({
-        imported: ImportCountSchema,
-        partitioned: z
-          .strictObject({ imported: ImportCountSchema, verified: ImportCountSchema })
-          .refine((rows) => rows.verified <= rows.imported, { message: 'more partitioned cookies verified than set', path: ['verified'] }),
-        skipped: countsBy(COOKIE_SKIP_REASONS),
-        hosts: hostsBy(COOKIE_SKIP_REASONS),
-        keychain: KeychainOutcomeSchema,
-        error: ImportTextSchema.nullable(),
-      })
-      .nullable(),
-    extensions: z.array(ImportedExtensionSchema).nullable(),
-  })
-  .refine(isOwnPartition, OWN_PARTITION);
+// cua #90: the fields of profiles.json version 1's report, kept whole for its upgrade (src/shared/browser/profiles.ts);
+// version 2's report adds the bookmarks block.
+const IMPORT_REPORT_V1_FIELDS = {
+  profileDir: ChromeProfileDirSchema,
+  name: ImportNameSchema,
+  partition: BrowserPartitionSchema,
+  startedAt: InstantSchema,
+  finishedAt: InstantSchema,
+  outcome: z.enum(['done', 'cancelled', 'failed']),
+  failure: ImportTextSchema.nullable(), // why a `failed` run could not continue
+  history: z
+    .strictObject({ imported: ImportCountSchema, skipped: countsBy(HISTORY_SKIP_REASONS), hosts: hostsBy(HISTORY_SKIP_REASONS), error: ImportTextSchema.nullable() })
+    .nullable(),
+  cookies: z
+    .strictObject({
+      imported: ImportCountSchema,
+      partitioned: z
+        .strictObject({ imported: ImportCountSchema, verified: ImportCountSchema })
+        .refine((rows) => rows.verified <= rows.imported, { message: 'more partitioned cookies verified than set', path: ['verified'] }),
+      skipped: countsBy(COOKIE_SKIP_REASONS),
+      hosts: hostsBy(COOKIE_SKIP_REASONS),
+      keychain: KeychainOutcomeSchema,
+      error: ImportTextSchema.nullable(),
+    })
+    .nullable(),
+  extensions: z.array(ImportedExtensionSchema).nullable(),
+};
+export const ImportReportV1Schema = z.strictObject(IMPORT_REPORT_V1_FIELDS).refine(isOwnPartition, OWN_PARTITION);
+// cua #90 start: the bookmarks block. `imported` counts the URL bookmarks written (folders are not counted), `skipped`
+// the URL nodes left out (a scheme other than http(s), or past BOOKMARKS_MAX); `error` as history's block carries it
+// (`missing`, `unreadable`, `indexUnavailable`).
+export const ImportBookmarksReportSchema = z.strictObject({ imported: ImportCountSchema, skipped: ImportCountSchema, error: ImportTextSchema.nullable() });
+export const ImportReportSchema = z.strictObject({ ...IMPORT_REPORT_V1_FIELDS, bookmarks: ImportBookmarksReportSchema.nullable() }).refine(isOwnPartition, OWN_PARTITION);
+// cua #90 end
 export type ImportReport = z.infer<typeof ImportReportSchema>;

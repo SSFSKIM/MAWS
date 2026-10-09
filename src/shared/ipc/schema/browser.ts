@@ -42,6 +42,9 @@ import {
 import { ImportedProfileSchema } from '../../browser/profiles';
 import { AbsolutePathSchema } from './settings';
 // E4b end
+// cua #90 start
+import { BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
+// cua #90 end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
 // which a typed or agent-given string loses through that check's `url`. A refinement over the shared rule rather than
@@ -112,6 +115,7 @@ export const BrowserImportInspectionSchema = z.strictObject({
   history: z.union([z.strictObject({ rows: ImportCountSchema }), StoreErrorSchema]),
   cookies: z.union([z.strictObject({ rows: ImportCountSchema, partitioned: ImportCountSchema, storeVersion: z.number().int() }), StoreErrorSchema]),
   extensions: z.array(ExtensionCandidateSchema),
+  bookmarks: z.strictObject({ count: ImportCountSchema }).nullable(), // cua #90: the URL bookmarks found; null when no file could be read
 });
 export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
 // E4b end
@@ -182,7 +186,10 @@ export const commands = {
   'browser.control.handBack': { input: TabOnly, output: z.void(), owner: 'main' },
   'browser.history.suggest': {
     input: z.strictObject({ partition: BrowserPartitionSchema, query: z.string() }),
-    output: z.strictObject({ suggestions: z.array(z.strictObject({ url: z.string(), title: z.string().nullable() })).max(BROWSER_SUGGESTIONS_MAX) }),
+    // cua #90: `kind`, a bookmark of the partition (at most 3, first) or a history row
+    output: z.strictObject({
+      suggestions: z.array(z.strictObject({ url: z.string(), title: z.string().nullable(), kind: z.enum(['history', 'bookmark']) })).max(BROWSER_SUGGESTIONS_MAX),
+    }),
     owner: 'main',
   },
   'browser.profiles.list': {
@@ -246,6 +253,20 @@ export const commands = {
     owner: 'main',
   },
   // E13 end
+  // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC"). `tree` answers the rows the
+  // index holds for the partition (empty roots when none, or when the index is read-only); `sync` re-reads the profile's
+  // `Bookmarks` file now and answers what it wrote, or why it wrote nothing (`refused`: an import or a removal is
+  // running, or the profile has no consented bookmarks; `reason` says which).
+  'browser.bookmarks.tree': { input: z.strictObject({ partition: BrowserPartitionSchema }), output: z.strictObject({ tree: BookmarkTreeSchema }), owner: 'main' },
+  'browser.bookmarks.sync': {
+    input: z.strictObject({ profileDir: ChromeProfileDirSchema }),
+    output: z.union([
+      z.strictObject({ syncedAt: z.iso.datetime(), count: ImportCountSchema }),
+      z.strictObject({ error: z.union([BookmarkSyncErrorSchema, z.literal('refused')]), reason: ImportTextSchema.optional() }),
+    ]),
+    owner: 'main',
+  },
+  // cua #90 end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -277,4 +298,7 @@ export const events = {
   // per second per tab; the windows attach each to the session's cua_repl `js` call
   'browser.agent.activity': BrowserAgentActivitySchema,
   // E13 end
+  // cua #90 start: a partition's bookmark rows were replaced (an import or a sync); a bar of that partition re-reads its tree
+  'browser.bookmarks.changed': z.strictObject({ partition: BrowserPartitionSchema }),
+  // cua #90 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

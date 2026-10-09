@@ -18,7 +18,7 @@ import { BrowserPartitionSchema, DEFAULT_PARTITION, profilePartition } from '@sh
 // extensions, the import report); E4a reads only these keys and must not refuse E4b's.
 export const BrowserProfileSchema = z.looseObject({ profileDir: z.string().min(1), name: z.string(), partition: BrowserPartitionSchema, importedAt: z.string() });
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
-const ProfilesFileSchema = z.looseObject({ version: z.literal(1), profiles: z.array(BrowserProfileSchema) });
+const ProfilesFileSchema = z.looseObject({ version: z.union([z.literal(1), z.literal(2) /* cua #90: profiles.json version 2 */]), profiles: z.array(BrowserProfileSchema) });
 
 // Chromium's own user agent: the platform and the Chrome version stay truthful; `Electron/<v>` and `maws/<v>` go.
 export function chromeUserAgent(userAgent: string): string {

@@ -1,6 +1,7 @@
 // The import report's summary line (E4b Design §10), the one place its English lives: the import sheet's report and
 // Settings › Browser's records both show it (`IMPORT_COPY.summary` reuses it). "N cookies, M history entries,
-// K extensions · J skipped: reasons", a category the owner did not choose left out, the reasons in the report's order.
+// B bookmarks, K extensions · J skipped: reasons", a category the owner did not choose left out, the reasons in the
+// report's order (cua board #90 added the bookmarks).
 import type { CookieSkipReason, HistorySkipReason, ImportedExtension, ImportReport } from './import';
 import { COOKIE_SKIP_REASONS, HISTORY_SKIP_REASONS } from './import';
 
@@ -31,7 +32,7 @@ const EXTENSION_SKIPS = {
 export function summaryWords(report: ImportReport): string {
   const imported: string[] = [];
   const skipped: [number, string][] = [];
-  const { cookies, history, extensions } = report;
+  const { cookies, history, extensions, bookmarks } = report;
   if (cookies) {
     imported.push(plural(cookies.imported + cookies.partitioned.verified, 'cookie'));
     for (const reason of COOKIE_SKIP_REASONS) skipped.push([cookies.skipped[reason], COOKIE_REASONS[reason](cookies.skipped[reason])]);
@@ -39,6 +40,11 @@ export function summaryWords(report: ImportReport): string {
   if (history) {
     imported.push(plural(history.imported, 'history entry', 'history entries'));
     for (const reason of HISTORY_SKIP_REASONS) skipped.push([history.skipped[reason], HISTORY_REASONS[reason](history.skipped[reason])]);
+  }
+  // cua #90: the URL bookmarks written; the ones left out (not a web address, or past the cap) in one count
+  if (bookmarks) {
+    imported.push(plural(bookmarks.imported, 'bookmark'));
+    skipped.push([bookmarks.skipped, `${plural(bookmarks.skipped, 'bookmark')} not imported`]);
   }
   if (extensions) {
     imported.push(plural(extensions.filter((e) => e.status === 'loaded' || e.status === 'off').length, 'extension'));

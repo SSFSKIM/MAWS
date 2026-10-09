@@ -151,6 +151,7 @@ describe('consent', () => {
     expect(button('Import').disabled).toBe(false);
     fireEvent.click(box('History'));
     fireEvent.click(box('Cookies'));
+    fireEvent.click(box('Bookmarks')); // cua #90
     expect(button('Import').disabled).toBe(true); // nothing chosen
     fireEvent.click(box('Extensions'));
     expect(button('Import').disabled).toBe(true);
@@ -162,7 +163,7 @@ describe('consent', () => {
       expect(calls('browser.import.start')).toEqual([
         {
           inspectionId: INSPECTION_ID,
-          categories: { history: false, cookies: false, extensions: true },
+          categories: { history: false, cookies: false, extensions: true, bookmarks: false },
           extensionIds: [INSPECTION.extensions[0]!.id, WALLET_ID],
           allowUnverifiedExtensions: true,
         },
@@ -175,7 +176,7 @@ describe('consent', () => {
     for (const name of ['Import Probe', 'Import Fails', 'Import Probe Wallet']) fireEvent.click(box(name));
     fireEvent.click(button('Import'));
     await vi.waitFor(() =>
-      expect(calls('browser.import.start')).toEqual([{ inspectionId: INSPECTION_ID, categories: { history: true, cookies: true, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false }]),
+      expect(calls('browser.import.start')).toEqual([{ inspectionId: INSPECTION_ID, categories: { history: true, cookies: true, extensions: false, bookmarks: true }, extensionIds: [], allowUnverifiedExtensions: false }]),
     );
   });
 
@@ -197,6 +198,32 @@ describe('consent', () => {
     expect(within(sheet()).getByText('This profile has no Cookies file.')).toBeTruthy();
     expect([box('History').disabled, box('History').checked, box('Cookies').disabled, box('Cookies').checked]).toEqual([true, false, true, false]);
   });
+
+  // cua #90 start
+  it('lists Bookmarks between Cookies and Extensions with the count found, checked, and Bookmarks alone is enough to import', async () => {
+    await toConsent();
+    const categories = [...sheet().querySelectorAll('[data-category]')].map((row) => row.getAttribute('data-category'));
+    expect(categories).toEqual(['history', 'cookies', 'bookmarks', 'passwords', 'extensions']);
+    expect([box('Bookmarks').checked, box('Bookmarks').disabled]).toEqual([true, false]);
+    expect(within(sheet().querySelector('[data-category="bookmarks"]') as HTMLElement).getByText(/^46 bookmarks\./)).toBeTruthy();
+    for (const name of ['History', 'Cookies', 'Extensions']) fireEvent.click(box(name));
+    expect(button('Import').disabled).toBe(false);
+    fireEvent.click(button('Import'));
+    await vi.waitFor(() =>
+      expect(calls('browser.import.start')).toEqual([
+        { inspectionId: INSPECTION_ID, categories: { history: false, cookies: false, extensions: false, bookmarks: true }, extensionIds: [], allowUnverifiedExtensions: false },
+      ]),
+    );
+  });
+
+  it('a profile with no readable Bookmarks file disables the row and says so', async () => {
+    renderSheet({ 'browser.import.inspect': () => ({ ...INSPECTION, bookmarks: null }) });
+    await within(sheet()).findByRole('radio', { name: /Person 1/ });
+    fireEvent.click(button('Continue'));
+    await within(sheet()).findByText('No bookmarks file');
+    expect([box('Bookmarks').disabled, box('Bookmarks').checked]).toEqual([true, false]);
+  });
+  // cua #90 end
 });
 
 describe('running', () => {
@@ -322,6 +349,23 @@ describe('report', () => {
     showReport({ ...DONE, history: { ...DONE.history, imported: 0, error: 'indexUnavailable' } });
     renderSheet();
     expect(within(sheet()).getByTitle('indexUnavailable').textContent).toBe("MAWS's index is read-only right now, so history couldn't be imported.");
+  });
+
+  // cua #90
+  it('the bookmarks count joins the summary, and a bookmarks error is said in words with its code as the title', () => {
+    showReport({ ...DONE, bookmarks: { imported: 46, skipped: 1, error: null } });
+    renderSheet();
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toContain('46 bookmarks');
+    cleanup();
+    disconnect();
+    showReport({ ...DONE, bookmarks: { imported: 0, skipped: 0, error: 'missing' } });
+    renderSheet();
+    expect(within(sheet()).getByTitle('missing').textContent).toBe("Chrome's Bookmarks file was gone by the time of the import, so no bookmarks were imported. MAWS reads it again each time this profile opens.");
+    cleanup();
+    disconnect();
+    showReport({ ...DONE, bookmarks: { imported: 0, skipped: 1, error: 'indexUnavailable' } });
+    renderSheet();
+    expect(within(sheet()).getByTitle('indexUnavailable').textContent).toBe("MAWS's index is read-only right now, so bookmarks couldn't be imported.");
   });
 
   it('a failed run says why and that nothing was kept', () => {

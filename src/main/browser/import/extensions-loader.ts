@@ -31,7 +31,7 @@ export const FIRST_LOAD_HOLD_MS = 10_000; // a load that never settles holds a p
 
 export interface ExtensionsLoaderDeps {
   userData: string;
-  profiles: Pick<ImportedProfiles, 'get' | 'list' | 'put'>;
+  profiles: Pick<ImportedProfiles, 'get' | 'list' | 'update'>;
   env: NodeJS.ProcessEnv; // the logger's e2e mirror
   changed?: () => void; // a boot load wrote its statuses to a record
   wait?: (ms: number, signal?: AbortSignal) => Promise<void>; // the settle's clock
@@ -162,12 +162,23 @@ export class ExtensionsLoader {
         next = { ...extension, enabled: true };
       }
       // Read again after the settle: a removal may have begun, or dropped the record, meanwhile.
+      const unloadNext = () => {
+        if (ses && next.status === 'loaded' && ses.extensions.getExtension(next.id)) ses.extensions.removeExtension(next.id);
+      };
       const latest = this.deps.profiles.get(profileDir);
       if (!latest || this.removing.has(latest.partition)) {
-        if (ses && next.status === 'loaded' && ses.extensions.getExtension(next.id)) ses.extensions.removeExtension(next.id);
+        unloadNext();
         throw new ImportRefused('notImported');
       }
-      await this.deps.profiles.put({ ...latest, extensions: latest.extensions.map((candidate) => (candidate.id === extension.id ? next : candidate)) });
+      // cua #90: changed from the record as it stands when the write runs, so a bookmarks sync's write is never lost
+      const written = await this.deps.profiles.update(profileDir, (record) => ({
+        ...record,
+        extensions: record.extensions.map((candidate) => (candidate.id === extension.id ? next : candidate)),
+      }));
+      if (written === null) {
+        unloadNext(); // the record went in the write queue's turn before this one
+        throw new ImportRefused('notImported');
+      }
       return next;
     });
   }
@@ -206,18 +217,19 @@ export class ExtensionsLoader {
     if (!record || this.removing.has(partition)) return;
     const wanted = record.extensions.filter((extension) => loadable(extension) && !ses.extensions.getExtension(extension.id));
     const results = await this.loadAndSettle(ses, this.partitionFolder(partition), wanted, { loadsDone });
-    const current = this.deps.profiles.get(profileDir);
-    if (!current || results.size === 0) return;
+    if (results.size === 0) return;
     const byId = new Map([...results].map(([before, after]) => [before.id, after]));
-    const extensions = current.extensions.map((extension) => {
-      const after = byId.get(extension.id);
-      if (!after) return extension;
-      const { id, chromeId, status, error, background, backgroundError, checkedAt } = after;
-      return { ...extension, id, chromeId, status, error, background, backgroundError, checkedAt };
-    });
+    const withStatuses = (extensions: readonly ImportedExtension[]) =>
+      extensions.map((extension) => {
+        const after = byId.get(extension.id);
+        if (!after) return extension;
+        const { id, chromeId, status, error, background, backgroundError, checkedAt } = after;
+        return { ...extension, id, chromeId, status, error, background, backgroundError, checkedAt };
+      });
     try {
-      await this.deps.profiles.put({ ...current, extensions });
-      this.deps.changed?.();
+      // cua #90: over the record as it stands when the write runs (a bookmarks sync writes the same record at boot)
+      const written = await this.deps.profiles.update(profileDir, (current) => ({ ...current, extensions: withStatuses(current.extensions) }));
+      if (written) this.deps.changed?.();
     } catch (error) {
       this.log({ kind: 'error', where: 'extensions_record', code: errorCode(error) });
     }

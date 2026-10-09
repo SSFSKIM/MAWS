@@ -23,7 +23,11 @@ const record = (profileDir = 'Default'): ImportedProfile => ({
   storageDirName: `maws-chrome-${profileDir.toLowerCase()}`,
   userDataDir: '/chrome',
   extensions: [{ ...EXTENSION, id: 'a'.repeat(32) }, { ...EXTENSION, id: 'b'.repeat(32) }],
-  report: { profileDir, name: 'Person 1', partition: profilePartition(profileDir), startedAt: AT, finishedAt: AT, outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+  report: { profileDir, name: 'Person 1', partition: profilePartition(profileDir), startedAt: AT, finishedAt: AT, outcome: 'done', failure: null, history: null, cookies: null, extensions: [], bookmarks: null },
+  bookmarks: null, // cua #90: profiles.json version 2
+  gaiaName: null,
+  userName: null,
+  avatar: { kind: 'initials' },
 });
 
 describe('Remove imported profile (E4b Design §12)', () => {
@@ -77,6 +81,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
         countPartition: vi.fn(() => (steps.push('count'), 4)),
         removePartition: vi.fn(() => void steps.push('removePartition')),
       },
+      bookmarks: { removePartition: vi.fn((partition: string) => void steps.push(`remove bookmarks ${partition}`)) }, // cua #90
       browsable: () => state.records.filter((candidate) => !withdrawn.has(candidate.profileDir)),
       profiles: {
         get: (profileDir: string) => state.records.find((candidate) => candidate.profileDir === profileDir) ?? null,
@@ -92,7 +97,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
   });
   afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
-  it('closes the profile\'s tabs first, then unloads, clears, deletes, forgets the history and drops the record, in that order', async () => {
+  it('closes the profile\'s tabs first, then unloads, clears, deletes, forgets the history and the bookmarks and drops the record, in that order', async () => {
     const removed = await removeImportedProfile(deps, 'Default');
     expect(removed).toEqual({ tabs: 2, historyRows: 4, extensions: 2 });
     expect(steps).toEqual([
@@ -108,6 +113,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
       'flushStore',
       'count',
       'removePartition',
+      `remove bookmarks ${PARTITION}`, // cua #90
       'drop record',
       'removalDone',
     ]);

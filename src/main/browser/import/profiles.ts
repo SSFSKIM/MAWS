@@ -12,12 +12,19 @@
 // moved or written (`put` and `remove` reject), and `readOnly` tells the boot sweep to leave everything for that boot.
 import { mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ImportedProfileSchema, ImportedProfilesFileSchema, type ImportedProfile } from '@shared/browser/profiles';
+import {
+  ImportedProfileSchema,
+  ImportedProfilesFileSchema,
+  ImportedProfilesFileV1Schema,
+  PROFILES_FILE_VERSION,
+  upgradeProfileV1,
+  type ImportedProfile,
+} from '@shared/browser/profiles';
 import { atomicWriteFile } from '../../files/atomic-write';
 import { importLog } from './log';
 
 export const profilesFile = (userData: string) => join(userData, 'browser', 'profiles.json');
-const PROFILES_VERSION = 1; // E11: the file's version this build writes and reads
+const PROFILES_VERSION = PROFILES_FILE_VERSION; // E11: the file's version this build writes and reads (2 since cua #90; 1 is upgraded)
 
 export class ImportedProfiles {
   private writes: Promise<unknown> = Promise.resolve();
@@ -82,6 +89,22 @@ export class ImportedProfiles {
     });
   }
 
+  // cua #90: one record changed from its latest state, inside the write queue, so a change computed from an earlier read
+  // (a sync's bookmarks state, a boot load's statuses, a toggle) never overwrites another writer's field. `change` answers
+  // the new record, or null to write nothing; a record gone by then writes nothing. Answers the record written, or null.
+  async update(profileDir: string, change: (record: ImportedProfile) => ImportedProfile | null): Promise<ImportedProfile | null> {
+    let written: ImportedProfile | null = null;
+    await this.write((records) => {
+      const current = records.find((record) => record.profileDir === profileDir);
+      const next = current ? change(current) : null;
+      if (next === null) return null;
+      written = ImportedProfileSchema.parse(next);
+      if (written.profileDir !== profileDir) throw new Error('an update must keep the record’s profile directory');
+      return records.map((record) => (record === current ? written! : record));
+    });
+    return written;
+  }
+
   // Answers whether a record was there; writes only when one was.
   async remove(profileDir: string): Promise<boolean> {
     let removed = false;
@@ -120,6 +143,11 @@ function readProfilesFile(file: string): ImportedProfile[] | 'broken' | { newer:
     const json = JSON.parse(text) as unknown;
     const version = typeof json === 'object' && json !== null ? (json as { version?: unknown }).version : undefined;
     if (typeof version === 'number' && Number.isInteger(version) && version > PROFILES_VERSION) return { newer: version }; // E11
+    // cua #90: a version-1 file (E4b's) parses through its own schema and is upgraded in memory; the next write is version 2
+    if (version === 1) {
+      const v1 = ImportedProfilesFileV1Schema.safeParse(json);
+      return v1.success ? v1.data.profiles.map(upgradeProfileV1) : 'broken';
+    }
     const parsed = ImportedProfilesFileSchema.safeParse(json);
     return parsed.success ? parsed.data.profiles : 'broken';
   } catch {

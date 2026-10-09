@@ -49,7 +49,7 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity'>;
+  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity' | 'browserBookmarks' /* cua #90 */>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
@@ -140,7 +140,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     if (focusEmulation === 'on') attachFocusEmulation(entry, (tab) => views.focusEmulationWanted(tab));
   });
 
-  registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
+  registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, bookmarks: index.browserBookmarks /* cua #90 */, profiles, register });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record

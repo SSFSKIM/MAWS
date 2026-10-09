@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { emptyBookmarkTree } from '@shared/browser/bookmarks';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
 import { DONE_REPORT } from '../../../../test/support/import-reports';
@@ -32,6 +33,10 @@ const record = (profileDir: string, storageDirName: string): ImportedProfile => 
     userDataDir: '/tmp/chrome',
     extensions: [],
     report: { ...DONE_REPORT, profileDir, partition },
+    bookmarks: null, // cua #90: profiles.json version 2
+    gaiaName: null,
+    userName: null,
+    avatar: { kind: 'initials' },
   };
 };
 const make = (...parts: string[]) => {
@@ -51,7 +56,7 @@ describe('sweepBrowserImports', () => {
     make('browser', 'import', '0b6f5a5e-8a4c-4c1e-9d55-3b7e2f0a9c11', 'extensions', 'x');
     make('browser', 'import', '1c6f5a5e-8a4c-4c1e-9d55-3b7e2f0a9c11');
     file('browser', 'import', 'stray');
-    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [] }, history: index.browserHistory });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [] }, history: index.browserHistory, bookmarks: index.browserBookmarks });
     expect(names('browser', 'import')).toEqual([]);
     expect(result.staging).toBe(3);
   });
@@ -62,7 +67,7 @@ describe('sweepBrowserImports', () => {
     file('browser', 'tabs.json');
     file('browser', 'profiles.json');
     make('browser', 'crops');
-    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history: index.browserHistory });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history: index.browserHistory, bookmarks: index.browserBookmarks });
     expect(names('browser')).toEqual(['crops', 'maws-chrome-Profile 1', 'profiles.json', 'tabs.json']);
     expect(result.partitionFolders).toBe(1);
   });
@@ -73,7 +78,7 @@ describe('sweepBrowserImports', () => {
     make('Partitions', 'maws-browser', 'Cookies');
     make('Partitions', 'maws-capture');
     file('Partitions', 'maws-chrome-stray-file');
-    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history: index.browserHistory });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history: index.browserHistory, bookmarks: index.browserBookmarks });
     expect(names('Partitions')).toEqual(['maws-browser', 'maws-capture', 'maws-chrome-profile%201', 'maws-chrome-stray-file']);
     expect(result.storageDirs).toBe(1);
   });
@@ -81,7 +86,7 @@ describe('sweepBrowserImports', () => {
   it('keeps a listed Default whose storage directory Chromium lower-cased', () => {
     make('Partitions', 'maws-chrome-default', 'Cookies');
     make('browser', 'maws-chrome-Default', 'extensions');
-    sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Default', 'maws-chrome-default')] }, history: index.browserHistory });
+    sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Default', 'maws-chrome-default')] }, history: index.browserHistory, bookmarks: index.browserBookmarks });
     expect(existsSync(join(dir.path, 'Partitions', 'maws-chrome-default', 'Cookies', 'marker'))).toBe(true);
     expect(existsSync(join(dir.path, 'browser', 'maws-chrome-Default', 'extensions', 'marker'))).toBe(true);
   });
@@ -92,7 +97,7 @@ describe('sweepBrowserImports', () => {
     history.visit('persist:maws-chrome-Default', 'https://orphan.example/', at);
     history.visit('persist:maws-chrome-Profile 1', 'https://listed.example/', at);
     history.visit('persist:maws-browser', 'https://mine.example/', at);
-    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history, bookmarks: index.browserBookmarks });
     expect(result.historyRows).toBe(1);
     expect(history.suggest('persist:maws-chrome-Default', '')).toEqual([]);
     expect(history.suggest('persist:maws-chrome-Profile 1', '')).toHaveLength(1);
@@ -106,13 +111,24 @@ describe('sweepBrowserImports', () => {
     make('browser', 'maws-chrome-Profile 9');
     make('Partitions', 'maws-chrome-profile%209');
     index.browserHistory.visit(profilePartition('Profile 9'), 'https://a.test/', { typed: false, at: Date.parse('2026-10-06T10:00:00.000Z') });
-    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [], readOnly: true }, history: index.browserHistory });
-    expect(result).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 });
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [], readOnly: true }, history: index.browserHistory, bookmarks: index.browserBookmarks });
+    expect(result).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0, bookmarkRows: 0 });
     expect([names('browser', 'import'), names('browser'), names('Partitions')]).toEqual([['staging'], ['import', 'maws-chrome-Profile 9'], ['maws-chrome-profile%209']]);
     expect(index.browserHistory.countPartition(profilePartition('Profile 9'))).toBe(1);
   });
 
+  // cua #90
+  it('removes the bookmark rows of every partition no record lists, keeping a listed one’s', () => {
+    const tree = (name: string) => ({ ...emptyBookmarkTree(), bar: { kind: 'folder' as const, id: 1, name: 'Bookmarks bar', children: [{ kind: 'url' as const, id: 2, name, url: 'https://a.test/', addedAt: null }] } });
+    index.browserBookmarks.replace(profilePartition('Default'), tree('orphan'));
+    index.browserBookmarks.replace(profilePartition('Profile 1'), tree('listed'));
+    const result = sweepBrowserImports({ userData: dir.path, profiles: { list: () => [record('Profile 1', 'maws-chrome-profile%201')] }, history: index.browserHistory, bookmarks: index.browserBookmarks });
+    expect(result.bookmarkRows).toBe(4);
+    expect(index.browserBookmarks.tree(profilePartition('Default'))).toEqual(emptyBookmarkTree());
+    expect(index.browserBookmarks.suggest(profilePartition('Profile 1'), 'listed', 8)).toHaveLength(1);
+  });
+
   it('answers zeros on a fresh userData with nothing to sweep', () => {
-    expect(sweepBrowserImports({ userData: dir.path, profiles: { list: () => [] }, history: index.browserHistory })).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0 });
+    expect(sweepBrowserImports({ userData: dir.path, profiles: { list: () => [] }, history: index.browserHistory, bookmarks: index.browserBookmarks })).toEqual({ staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0, bookmarkRows: 0 });
   });
 });

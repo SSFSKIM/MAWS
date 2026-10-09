@@ -8,7 +8,7 @@ vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fro
 
 const { CommandFailure } = await import('../ipc/router');
 const { TabStore } = await import('./tabs');
-const { registerBrowserHandlers } = await import('./register');
+const { mergeSuggestions, registerBrowserHandlers } = await import('./register');
 const { ViewManager } = await import('./view');
 const { Navigator } = await import('./navigation');
 
@@ -27,6 +27,7 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const views = { place: vi.fn(), cover: vi.fn(async () => {}) };
   const navigator = { navigate: vi.fn(() => true), zoom: vi.fn<(tabId: string) => number>(() => 1.1), find: vi.fn(), dismiss: vi.fn(), devtools: vi.fn() };
   const history = { suggest: vi.fn(() => [{ url: 'https://a.test/', title: 'A' }]) };
+  const bookmarks = { suggest: vi.fn((): { url: string; title: string | null }[] => []) }; // cua #90
   const downloads = { reveal: vi.fn(() => ({ revealed: true })) };
   registerBrowserHandlers({
     store,
@@ -34,11 +35,12 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
     navigator,
     downloads,
     history,
+    bookmarks,
     profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
-  return { store, views, navigator, downloads, history, handlers, call };
+  return { store, views, navigator, downloads, history, bookmarks, handlers, call };
 }
 
 // What a handler threw, as the router's CommandFailure (undefined when it did not throw one).
@@ -105,6 +107,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       navigator,
       downloads: { reveal: vi.fn() },
       history: { suggest: vi.fn(() => []) },
+      bookmarks: { suggest: vi.fn(() => []) },
       profiles: () => [],
       register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
     });
@@ -125,7 +128,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
 
   it('suggests from the history, and nothing when the index fails', () => {
     const { call, history } = setup();
-    expect(call('browser.history.suggest', { partition: DEFAULT_PARTITION, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A' }] });
+    expect(call('browser.history.suggest', { partition: DEFAULT_PARTITION, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A', kind: 'history' }] });
     expect(history.suggest).toHaveBeenCalledWith(DEFAULT_PARTITION, 'a');
     history.suggest.mockImplementation(() => {
       throw new Error('index unavailable: busy');
@@ -137,6 +140,57 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       warned.mockRestore();
     }
   });
+
+  // cua #90 start: bookmarks beside history
+  it('suggests the partition’s bookmarks first (at most 3), then its history, and one failing store leaves the other', () => {
+    const { call, history, bookmarks } = setup();
+    const P = 'persist:maws-chrome-Default';
+    bookmarks.suggest.mockReturnValue([{ url: 'https://f1.test/', title: 'F1' }]);
+    expect(call('browser.history.suggest', { partition: P, query: 'f1' })).toEqual({
+      suggestions: [{ url: 'https://f1.test/', title: 'F1', kind: 'bookmark' }, { url: 'https://a.test/', title: 'A', kind: 'history' }],
+    });
+    expect(bookmarks.suggest).toHaveBeenCalledWith(P, 'f1', 3);
+    expect(history.suggest).toHaveBeenCalledWith(P, 'f1');
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      bookmarks.suggest.mockImplementation(() => {
+        throw new Error('index unavailable: busy');
+      });
+      expect(call('browser.history.suggest', { partition: P, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A', kind: 'history' }] });
+      bookmarks.suggest.mockReturnValue([{ url: 'https://f1.test/', title: 'F1' }]);
+      history.suggest.mockImplementation(() => {
+        throw new Error('index unavailable: busy');
+      });
+      expect(call('browser.history.suggest', { partition: P, query: 'f' })).toEqual({ suggestions: [{ url: 'https://f1.test/', title: 'F1', kind: 'bookmark' }] });
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  describe('mergeSuggestions', () => {
+    const rows = (prefix: string, n: number) => Array.from({ length: n }, (_, k) => ({ url: `https://${prefix}${k}.test/`, title: `${prefix}${k}` }));
+
+    it('puts at most 3 bookmarks above the history rows, 8 in all', () => {
+      const merged = mergeSuggestions(rows('b', 5), rows('h', 10));
+      expect(merged.map((row) => [row.kind, row.title])).toEqual([
+        ['bookmark', 'b0'], ['bookmark', 'b1'], ['bookmark', 'b2'],
+        ['history', 'h0'], ['history', 'h1'], ['history', 'h2'], ['history', 'h3'], ['history', 'h4'],
+      ]);
+    });
+
+    it('shows a bookmarked URL once, as the bookmark, and lets history fill the rows bookmarks leave', () => {
+      const history = [{ url: 'https://same.test/', title: 'Same page (history)' }, ...rows('h', 9)];
+      const merged = mergeSuggestions([{ url: 'https://same.test/', title: 'Same' }], history);
+      expect(merged).toHaveLength(8);
+      expect(merged.filter((row) => row.url === 'https://same.test/')).toEqual([{ url: 'https://same.test/', title: 'Same', kind: 'bookmark' }]);
+      expect(merged.slice(1).every((row) => row.kind === 'history')).toBe(true);
+    });
+
+    it('answers history alone when there are no bookmarks, unchanged but for its kind', () => {
+      expect(mergeSuggestions([], rows('h', 2))).toEqual(rows('h', 2).map((row) => ({ ...row, kind: 'history' })));
+    });
+  });
+  // cua #90 end
 
   it('hands placement and cover to the view manager with the sender, without waiting on the placeholders', () => {
     const { views, handlers } = setup();

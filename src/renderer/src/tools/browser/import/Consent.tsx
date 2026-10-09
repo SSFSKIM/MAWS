@@ -1,7 +1,7 @@
-// The sheet's consent state (E4b Design §3): what the profile holds, the four categories (Saved passwords disabled,
-// P-17), the line saying agents' tabs will be signed in as the profile (P-23; Decision Log 29), the extension list with
-// its facts, and the unverified-files acknowledgement, required while any extension is chosen. Import sends exactly what
-// is checked; extensions go only with the acknowledgement.
+// The sheet's consent state (E4b Design §3): what the profile holds, the five categories (Saved passwords disabled,
+// P-17; Bookmarks since cua board #90), the line saying agents' tabs will be signed in as the profile (P-23; Decision
+// Log 29), the extension list with its facts, and the unverified-files acknowledgement, required while any extension is
+// chosen. Import sends exactly what is checked; extensions go only with the acknowledgement.
 import { useState, type ReactNode } from 'react';
 import type { ExtensionCandidate } from '@shared/browser/import';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
@@ -17,16 +17,17 @@ const importable = (candidate: ExtensionCandidate) => candidate.error === null;
 const checkedByDefault = (candidate: ExtensionCandidate) => importable(candidate) && candidate.chromeState !== 'disabled'; // Decision Log 9
 
 export function Consent({ inspection }: { inspection: BrowserImportInspection }) {
-  const { profile, history, cookies, extensions, chromeRunning } = inspection;
+  const { profile, history, cookies, extensions, chromeRunning, bookmarks } = inspection;
   const busy = useBrowserImport((s) => s.busy);
   const [historyOn, setHistory] = useState('rows' in history);
   const [cookiesOn, setCookies] = useState('rows' in cookies && cookies.rows > 0); // nothing to decrypt: no Keychain to ask
   const [extensionsOn, setExtensions] = useState(extensions.some(importable));
+  const [bookmarksOn, setBookmarks] = useState(bookmarks !== null); // cua #90: checked when a file was found
   const [chosen, setChosen] = useState(() => new Set(extensions.filter(checkedByDefault).map((e) => e.id)));
   const [acknowledged, setAcknowledged] = useState(false);
   const extensionIds = extensionsOn ? extensions.filter((e) => importable(e) && chosen.has(e.id)).map((e) => e.id) : [];
   const withExtensions = extensionIds.length > 0;
-  const canSubmit = !busy && (historyOn || cookiesOn || withExtensions) && (!withExtensions || acknowledged);
+  const canSubmit = !busy && (historyOn || cookiesOn || bookmarksOn || withExtensions) && (!withExtensions || acknowledged);
   const toggle = (id: string, on: boolean) =>
     setChosen((current) => {
       const next = new Set(current);
@@ -40,7 +41,7 @@ export function Consent({ inspection }: { inspection: BrowserImportInspection })
       canSubmit={canSubmit}
       onSubmit={() =>
         void start({
-          categories: { history: historyOn, cookies: cookiesOn, extensions: withExtensions },
+          categories: { history: historyOn, cookies: cookiesOn, extensions: withExtensions, bookmarks: bookmarksOn },
           extensionIds,
           allowUnverifiedExtensions: withExtensions && acknowledged,
         })
@@ -77,6 +78,9 @@ export function Consent({ inspection }: { inspection: BrowserImportInspection })
           ) : (
             <StoreError store="cookies" code={cookies.error} />
           )}
+        </Category>
+        <Category name={IMPORT_COPY.categories.bookmarks} checked={bookmarksOn} onChange={setBookmarks} disabled={bookmarks === null} data-category="bookmarks">
+          {bookmarks === null ? IMPORT_COPY.noBookmarks : IMPORT_COPY.bookmarks(bookmarks.count)}
         </Category>
         <Category name={IMPORT_COPY.passwords} checked={false} onChange={() => {}} disabled data-category="passwords" />
         <Category

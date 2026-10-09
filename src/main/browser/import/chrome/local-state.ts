@@ -87,7 +87,9 @@ function parseLocalState(text: string): { profiles: LocalStateProfile[]; lastUse
 const objectOr = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 const name = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value.slice(0, IMPORT_NAME_MAX) : null);
 
-async function realDirectory(path: string): Promise<string | null> {
+// cua #90: exported, with `admitted`, for the bookmarks read (chrome/bookmarks.ts), which re-applies the admission at
+// every read since a profile directory replaced by a symlink after the import must not be followed.
+export async function realDirectory(path: string): Promise<string | null> {
   try {
     const real = await realpath(path);
     return (await stat(real)).isDirectory() ? real : null;
@@ -96,7 +98,7 @@ async function realDirectory(path: string): Promise<string | null> {
   }
 }
 
-async function admitted(root: string, userDataDir: string, profileDir: string): Promise<boolean> {
+export async function admitted(root: string, userDataDir: string, profileDir: string): Promise<boolean> {
   const real = await realDirectory(join(userDataDir, profileDir));
   return real !== null && real.startsWith(root + sep);
 }
