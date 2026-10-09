@@ -61,7 +61,9 @@ export interface OwnerMarkRow {
   answerOrigin: 'answer' | 'reply' | 'legacy' | null;
   answerMembers: AnswerMember[];
   answeredAt: string | null;
-  // its answers still on their way, oldest first: the newest decides `queued` or `unconfirmed` (Design §6)
+  // its answers, oldest first (Design §6, ./answers.ts `settleAnswers`): the delivered one, older ones still on their way
+  // or taken (each kept for its own members), and those on their way after it, the newest of which decides `queued` or
+  // `unconfirmed`
   answerAttempts: StoredAnswer[];
   readAt: string | null;
   stateChangedAt: string;
@@ -213,9 +215,14 @@ export class OwnerChannelStore {
     return row === null ? null : toMark(row);
   }
 
-  // Every question whose answer is still on its way (queued or unconfirmed), across sessions.
+  // Every question with an answer still on its way, across sessions: one the engine has not taken (no `deliveredAt`),
+  // whether the card reads it (queued, unconfirmed) or a newer answer was taken first (a delivered question).
   openAnswers(): OwnerMarkRow[] {
-    return this.db.all<MarkRow>("SELECT * FROM owner_channel_marks WHERE state IN ('queued', 'unconfirmed') ORDER BY at, rowid").map(toMark);
+    return this.db
+      .all<MarkRow>(
+        "SELECT * FROM owner_channel_marks WHERE state <> 'retired' AND EXISTS (SELECT 1 FROM json_each(answer_attempts) WHERE json_extract(value, '$.deliveredAt') IS NULL) ORDER BY at, rowid",
+      )
+      .map(toMark);
   }
 
   // The sessions holding any mark.

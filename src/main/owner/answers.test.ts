@@ -279,14 +279,19 @@ describe("a question's several answers (settleAnswers)", () => {
     return [fold({ ...seeded('uuid', first), text: 'Postgres' }, events), fold({ ...seeded('uuid', second), text: 'SQLite' }, events)];
   }
 
-  it('the newest the engine took is the answer, and older ones are dropped whether they arrived or not', async () => {
+  it('the newest the engine took is the answer; an older one is still kept, once taken or while a member may carry it, and goes once none can', async () => {
     const [older, newer] = await two((sim, first, second) => {
       sim.engine(second, 'started');
       sim.engine(first, 'started');
     });
-    expect(settleAnswers([older, newer])).toEqual({ delivered: newer, open: [], dead: [] });
+    expect(settleAnswers([older, newer])).toEqual({ delivered: newer, open: [], dead: [], kept: [older, newer] });
     const [waiting, taken] = await two((sim, _first, second) => sim.engine(second, 'started'));
-    expect(settleAnswers([waiting, taken])).toEqual({ delivered: taken, open: [], dead: [] });
+    expect(settleAnswers([waiting, taken])).toEqual({ delivered: taken, open: [], dead: [], kept: [waiting, taken] });
+    const [discarded, last] = await two((sim, first, second) => {
+      sim.engine(first, 'discarded');
+      sim.engine(second, 'started');
+    });
+    expect(settleAnswers([discarded, last])).toEqual({ delivered: last, open: [], dead: [], kept: [last] });
   });
 
   it('an older answer that arrived is the answer while a newer one is still on its way, and never carries the newer text', async () => {
@@ -294,10 +299,11 @@ describe("a question's several answers (settleAnswers)", () => {
     const settled = settleAnswers([older, newer]);
     expect(settled.delivered?.text).toBe('Postgres');
     expect(settled.open).toEqual([newer]);
+    expect(settled.kept).toEqual([older, newer]);
   });
 
   it('an answer no member carries any more is dead, and nothing arrived', async () => {
     const [older, newer] = await two((sim, first) => sim.engine(first, 'discarded'));
-    expect(settleAnswers([older, newer])).toEqual({ delivered: null, open: [newer], dead: [older] });
+    expect(settleAnswers([older, newer])).toEqual({ delivered: null, open: [newer], dead: [older], kept: [newer] });
   });
 });

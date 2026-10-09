@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
+import type { StoredAnswer } from './answers';
 import type { LaunchRecord, OwnerMarkRow } from './store';
 
 const launch = (over: Partial<LaunchRecord> = {}): LaunchRecord => ({
@@ -101,14 +102,21 @@ describe('OwnerChannelStore', () => {
     });
 
     it('M4: reads one mark by id, the open answers across sessions, and the sessions holding marks', () => {
+      const answer = (over: Partial<StoredAnswer> = {}): StoredAnswer => ({ text: 'Answering "Which backend?": Postgres', origin: 'answer', members: [{ kind: 'uuid', id: 'u-1', life: 'alive' }], unconfirmed: false, reportedAt: '2026-10-09T10:01:00.000Z', ...over });
+      const taken = answer({ members: [{ kind: 'uuid', id: 'u-0', life: 'alive' }], deliveredAt: '2026-10-09T10:01:30.000Z' });
       index.ownerChannel.putMark(mark());
-      index.ownerChannel.putMark(mark({ id: `${b}:m2:0:q0`, appSessionId: b, messageUuid: 'm2', state: 'unconfirmed', answerText: 'Answering "Which backend?": Postgres', answerOrigin: 'answer' }));
-      index.ownerChannel.putMark(mark({ id: `${b}:m3:0:q0`, appSessionId: b, messageUuid: 'm3', state: 'delivered', at: '2026-10-09T10:02:00.000Z' }));
+      index.ownerChannel.putMark(mark({ id: `${b}:m2:0:q0`, appSessionId: b, messageUuid: 'm2', state: 'unconfirmed', answerAttempts: [answer({ unconfirmed: true })] }));
+      // answered, with nothing on its way: not open
+      index.ownerChannel.putMark(mark({ id: `${b}:m3:0:q0`, appSessionId: b, messageUuid: 'm3', state: 'delivered', at: '2026-10-09T10:02:00.000Z', answerAttempts: [taken] }));
+      // answered by a newer answer while an older one is still on its way: open
+      index.ownerChannel.putMark(mark({ id: `${b}:m4:0:q0`, appSessionId: b, messageUuid: 'm4', state: 'delivered', at: '2026-10-09T10:03:00.000Z', answerAttempts: [answer(), taken] }));
+      // retired: never open
+      index.ownerChannel.putMark(mark({ id: `${b}:m5:0:q0`, appSessionId: b, messageUuid: 'm5', state: 'retired', at: '2026-10-09T10:04:00.000Z', answerAttempts: [answer()] }));
       expect(index.ownerChannel.mark(mark().id)).toEqual(mark());
       expect(index.ownerChannel.mark('nothing')).toBeNull();
-      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([`${b}:m2:0:q0`]);
-      index.ownerChannel.updateMark(mark().id, { state: 'queued' });
-      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([mark().id, `${b}:m2:0:q0`]);
+      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([`${b}:m2:0:q0`, `${b}:m4:0:q0`]);
+      index.ownerChannel.updateMark(mark().id, { state: 'queued', answerAttempts: [answer()] });
+      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([mark().id, `${b}:m2:0:q0`, `${b}:m4:0:q0`]);
       expect(index.ownerChannel.markedSessions()).toEqual([a, b].sort());
     });
 

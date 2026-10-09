@@ -7,7 +7,7 @@
 // for the host's outcome row (`hold`, `cancel`, `giveback`). A member added late is reconciled at once against the
 // lifecycle evidence already seen for it. Nothing here concludes from absence: the service's recovery read does, after
 // a fold of the journals, and an `unknown` member waits for the transcript's evidence. A question may have several
-// answers on their way (`settleAnswers`); each follows its own members.
+// answers (`settleAnswers`); each follows its own members.
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AnswerMember, AnswerOrigin } from '@shared/owner/state';
 
@@ -19,7 +19,7 @@ export type AnswerStatus = 'queued' | 'unconfirmed' | 'delivered' | 'unanswered'
 
 export interface Answer {
   text: string; // the prompt sent
-  origin: AnswerOrigin;
+  origin: AnswerOrigin | 'legacy'; // legacy: a prompt legacy recognition read as the answer (born delivered)
   members: AnswerMember[];
   // what no member can settle: a seam result without an identifier, or a recovery the journals and the transcript left
   // open; the answer reads `unconfirmed` until a member delivers it (or every member is known dead)
@@ -40,20 +40,25 @@ const UUID_LIFE: Partial<Record<TransitionAction, Life>> = {
   cancel: 'dead', abandon: 'dead', promote: 'alive',
 };
 
-// An answer as the table keeps it while it is on its way (one element of `owner_channel_marks.answer_attempts`).
+// An answer as the table keeps it (one element of `owner_channel_marks.answer_attempts`); `deliveredAt` once the engine
+// took it.
 export interface StoredAnswer {
   text: string;
-  origin: AnswerOrigin;
+  origin: Answer['origin'];
   members: AnswerMember[];
   unconfirmed: boolean;
   reportedAt: string;
+  deliveredAt?: string;
 }
 
 export function newAnswer(seed: StoredAnswer): Answer {
-  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set() };
+  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: seed.deliveredAt ?? null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set() };
 }
 
-export const storedOf = (answer: Answer): StoredAnswer => ({ text: answer.text, origin: answer.origin, members: answer.members, unconfirmed: answer.unconfirmed, reportedAt: answer.reportedAt });
+export const storedOf = (answer: Answer): StoredAnswer => ({
+  text: answer.text, origin: answer.origin, members: answer.members, unconfirmed: answer.unconfirmed, reportedAt: answer.reportedAt,
+  ...(answer.deliveredAt === null ? {} : { deliveredAt: answer.deliveredAt }),
+});
 
 export function statusOf(answer: Answer): AnswerStatus {
   if (answer.deliveredAt !== null) return 'delivered';
@@ -62,21 +67,26 @@ export function statusOf(answer: Answer): AnswerStatus {
   return open ? 'queued' : 'unanswered';
 }
 
+// Still on its way: a member may yet carry it, or nothing can tell (unconfirmed).
+export const onItsWay = (answer: Answer): boolean => statusOf(answer) === 'queued' || statusOf(answer) === 'unconfirmed';
+
 /**
- * One question's answers on their way, oldest first, sorted by what they came to. Each attempt keeps its own text and
- * members ("Answer again" sends a new one, as does a follow-up Reply), so one attempt's evidence settles that attempt
- * only. The newest attempt the engine took is the question's answer (`delivered`); an older attempt can no longer
- * change it, so it is dropped, delivered or not. An attempt no member carries any more is `dead` (its refusal, if any,
- * is the question's note). What is left is `open`, and the question's card reads the newest of them.
+ * One question's answers, oldest first, sorted by what they came to. Each keeps its own text and members ("Answer again"
+ * sends a new one, as does a follow-up Reply; legacy recognition adds one taken), so one answer's evidence settles that
+ * answer only. The newest the engine took is the question's answer (`delivered`). An older one can no longer change
+ * that, but it is still the question's: it is followed while a member may carry it, and kept for good once the engine
+ * took it, so a prompt that carried it is never read as another question's answer (Design §6, legacy recognition); one
+ * no member carries any more goes. After the delivered one, an answer no member carries any more is `dead` (its
+ * refusal, if any, is the question's note), and the rest are `open`: the question's card reads the newest of them.
+ * `kept` is what the question keeps, in order.
  */
-export function settleAnswers(attempts: readonly Answer[]): { delivered: Answer | null; open: Answer[]; dead: Answer[] } {
+export function settleAnswers(attempts: readonly Answer[]): { delivered: Answer | null; open: Answer[]; dead: Answer[]; kept: Answer[] } {
   const newest = attempts.findLastIndex((attempt) => statusOf(attempt) === 'delivered');
+  const delivered = newest < 0 ? null : attempts[newest]!;
+  const older = attempts.slice(0, Math.max(newest, 0)).filter((attempt) => statusOf(attempt) === 'delivered' || attempt.members.some((m) => m.life !== 'dead'));
   const later = attempts.slice(newest + 1);
-  return {
-    delivered: newest < 0 ? null : attempts[newest]!,
-    open: later.filter((attempt) => statusOf(attempt) !== 'unanswered'),
-    dead: later.filter((attempt) => statusOf(attempt) === 'unanswered'),
-  };
+  const open = later.filter((attempt) => statusOf(attempt) !== 'unanswered');
+  return { delivered, open, dead: later.filter((attempt) => statusOf(attempt) === 'unanswered'), kept: [...older, ...(delivered === null ? [] : [delivered]), ...open] };
 }
 
 const memberOf = (answer: Answer, kind: AnswerMember['kind'], id: string | null) => (id === null ? undefined : answer.members.find((m) => m.kind === kind && m.id === id));

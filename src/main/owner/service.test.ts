@@ -448,6 +448,24 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: messageUuid, life: 'dead' }, { kind: 'entry', id: held.queueId, life: 'alive' }]) });
   });
 
+  it('a withdrawal whose outcome a history that is not complete may have lost proves nothing: with no other evidence the answer reads unconfirmed', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    await t.restart();
+    t.sim.listening = false;
+    await t.sim.queue.cancelSteer(messageUuid); // cancelled while main was away
+    loseRows(t.sim, (row) => row.direction === 'meta' && row.frame.action === 'cancel'); // the journal kept the withdraw row, not the cancel
+    t.sim.historyComplete = false;
+    expect(t.sim.queue.state.entries).toEqual([]);
+    expect(t.sim.queue.state.steers ?? []).toEqual([]);
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q).state).toBe('unconfirmed');
+  });
+
   it('a saved entry removed with no row (no process held the queue) is still read from the transcript and otherwise unconfirmed', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
@@ -588,6 +606,65 @@ describe('legacy recognition (Design §6)', () => {
     t.report(asked, { disposition: 'sent', messageUuid: entry.messageUuid!, text });
     t.sim.engine(entry.messageUuid!, 'started');
     expect(t.question(asked)).toMatchObject({ state: 'delivered', answer: { origin: 'answer' } });
+    expect(t.question(other)).toEqual({ state: 'unanswered' });
+  });
+
+  it.each(['live', 'restart'] as const)('an answer a newer one superseded is still its question\'s: followed to its end, its prompt is never a legacy answer to another question (%s)', async (via) => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const other = t.ask('Which region?');
+    const old = answerText('Which backend?', `Postgres\n${answerText('Which region?', 'eu')}`);
+    const sqlite = answerText('Which backend?', 'SQLite');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(old, { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid, text: old });
+    await t.restart();
+    t.sim.listening = false;
+    let answer!: () => void;
+    t.sim.cancelGate = new Promise<void>((r) => (answer = r));
+    const holding = t.sim.queue.hold(messageUuid); // the hold row waits on the engine's answer
+    await flush();
+    loseRows(t.sim, (row) => (row.direction === 'meta' && row.frame.action === 'withdraw') || (row.direction === 'in' && row.frame.command_uuid === messageUuid));
+    t.sim.historyComplete = false;
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q).state).toBe('unconfirmed');
+    const retry = await t.sim.queue.send(sqlite); // Answer again
+    t.report(q, { disposition: 'queued', queueId: retry.entry.queueId, text: sqlite });
+    const newer = await t.sim.queue.promote(retry.entry.queueId, { priority: 'next' });
+    t.sim.engine(newer.messageUuid, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: sqlite } });
+    if (via === 'restart') {
+      await t.restart();
+      await t.service.hostStreaming();
+    }
+    answer();
+    const held = await holding; // the old steer comes back as a held entry, then goes out and is taken
+    const older = await t.sim.queue.promote(held.queueId, { priority: 'next' });
+    t.sim.engine(older.messageUuid, 'started');
+    expect(t.question(other)).toEqual({ state: 'unanswered' });
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: sqlite } }); // the newest taken answer stays the card's
+  });
+
+  it('a delivered answer a follow-up replaced keeps its prompt: read back from disk after a restart, it answers no other question', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const other = t.ask('Which region?');
+    const first = answerText('Which backend?', `Postgres\n${answerText('Which region?', 'eu')}`);
+    t.sim.holding = [];
+    const sent = await t.sim.queue.send(first);
+    const written = t.sim.holding.find((e) => e.kind === 'user.message')!;
+    t.sim.release();
+    t.report(q, { disposition: 'sent', messageUuid: sent.entry.messageUuid!, text: first });
+    t.sim.engine(sent.entry.messageUuid!, 'started');
+    await t.sim.turnEnded([sent.entry.messageUuid!]);
+    const followUp = await t.sim.queue.send(answerText('Which backend?', 'SQLite'));
+    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'sent', messageUuid: followUp.entry.messageUuid! });
+    t.sim.engine(followUp.entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'SQLite'), origin: 'reply' } });
+    await t.restart();
+    await t.service.hostStreaming();
+    t.service.onEvents(app, [{ ...written, seq: null } as SessionEvent]); // the transcript's record of the first answer
     expect(t.question(other)).toEqual({ state: 'unanswered' });
   });
 

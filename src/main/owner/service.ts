@@ -9,13 +9,15 @@
 //   (./answers.ts) through the host's `queue.transition` rows and the engine's `command.lifecycle`, from a ten-minute log
 //   of both for a report that arrives late. A member the transcript must settle (an exit's uncertain submission) is read
 //   from it. Each answer sent ("Answer again", a follow-up Reply) keeps its own text and members; the newest the engine
-//   took is the question's answer, kept in the table beside any answer still on its way. `ownerChannel.cancel`
-//   withdraws the question's queued entries and pending steers through the host.
+//   took is the question's answer, kept in the table beside any answer still on its way. An older answer stays the
+//   question's: followed to its end, and kept once taken, so its prompt is never read as another question's answer.
+//   `ownerChannel.cancel` withdraws the question's queued entries and pending steers through the host.
 // - Recovery. Main hears nothing while the host is away (an app closed or crashed, a reconnect): at start and at every
 //   reconnect, each session holding an answer on its way reads the host's prompt record (`session.promptHistory`) and
 //   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles, and no
-//   withdrawal on record explains, is read from the transcript, and what that cannot settle reads `unconfirmed`, never a
-//   guess. A read that fails leaves the session waiting, and is tried again after a backoff or at the next reconnect.
+//   withdrawal a complete record shows pending explains, is read from the transcript, and what that cannot settle reads
+//   `unconfirmed`, never a guess. A read that fails leaves the session waiting, and is tried again after a backoff or at
+//   the next reconnect.
 // - Legacy recognition. A human prompt the engine took that answers `Answering "<head>": …` settles the one question of
 //   the session with that head (an answer given in a terminal through the doperpowers mod, or one whose report never
 //   arrived), unless the prompt is itself a member of an answer.
@@ -33,7 +35,7 @@ import { TO_HUMAN_GRAMMAR_VERSION } from '@shared/owner/to-human-parser';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall } from '../sessions/context';
-import { applyEvent, newAnswer, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
+import { applyEvent, newAnswer, onItsWay, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';
 import { pendingOf } from './mods';
 import { blockMarksOf, ownerItemsOf } from './projection';
@@ -68,7 +70,8 @@ export interface OwnerChannelServiceDeps {
 
 interface SessionLive {
   log: { event: PromptEvent; at: number }[];
-  answers: Map<MarkId, Answer[]>; // per question, its answers on their way (queued or unconfirmed), oldest first
+  // per question with an answer on its way (queued or unconfirmed, superseded or not), all its answers, oldest first
+  answers: Map<MarkId, Answer[]>;
   failures: Map<MarkId, string>; // the last refused send of an unanswered question
   prompts: Map<MessageUuid, { text: string; at: string }>; // human prompts carrying an answer line, written and not yet taken
   userAt: Map<MessageUuid, string>; // when each human prompt was written or read back (a rewind's target)
@@ -102,7 +105,8 @@ export class OwnerChannelService {
   // each session holding one waits for its recovery read.
   start(opts: { streaming: boolean }): void {
     for (const row of this.deps.store.openAnswers()) {
-      if (row.answerAttempts.length > 0) this.liveOf(row.appSessionId).answers.set(row.id as MarkId, row.answerAttempts.map(newAnswer));
+      const answers = row.answerAttempts.map(newAnswer);
+      if (answers.some(onItsWay)) this.liveOf(row.appSessionId).answers.set(row.id as MarkId, answers);
     }
     for (const appSessionId of this.deps.store.markedSessions()) this.project(appSessionId, true);
     this.offRecords = this.deps.sessions.onChange((record) => this.recordChanged(record));
@@ -198,7 +202,7 @@ export class OwnerChannelService {
     // a new answer of its own: one sent before it (answered again while unconfirmed, or a delivered answer's follow-up)
     // keeps its own text and members, for its evidence to settle it alone
     const answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: this.now() });
-    live.answers.set(markId, [...(live.answers.get(markId) ?? []), answer]);
+    live.answers.set(markId, [...this.answersOf(live, row), answer]);
     if (!this.streaming) this.recovering.add(appSessionId);
     // the report reaches main after the seam answered: what happened since is in the log, replayed in order (a session
     // still waiting for its recovery read folds it there, after the history)
@@ -215,7 +219,7 @@ export class OwnerChannelService {
   async cancel(input: CommandInput<'ownerChannel.cancel'>): Promise<{ outcome: CancelOutcome }> {
     const appSessionId = input.appSessionId as AppSessionId;
     const markId = input.markId as MarkId;
-    const answers = (this.live.get(appSessionId)?.answers.get(markId) ?? []).filter((answer) => statusOf(answer) === 'queued' || statusOf(answer) === 'unconfirmed');
+    const answers = (this.live.get(appSessionId)?.answers.get(markId) ?? []).filter(onItsWay);
     if (answers.length === 0) return { outcome: 'not_queued' };
     const carried = answers.filter((answer) => answer.members.some((m) => m.life === 'alive'));
     const alive = carried.flatMap((answer) => answer.members.filter((m) => m.life === 'alive'));
@@ -282,6 +286,11 @@ export class OwnerChannelService {
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
+
+  // A question's answers: in memory while one is on its way, else as the table keeps them.
+  private answersOf(live: SessionLive, row: OwnerMarkRow): Answer[] {
+    return live.answers.get(row.id as MarkId) ?? row.answerAttempts.map(newAnswer);
+  }
 
   private liveOf(appSessionId: AppSessionId): SessionLive {
     let live = this.live.get(appSessionId);
@@ -400,7 +409,7 @@ export class OwnerChannelService {
 
   // Legacy recognition (Design §6): each answer line settles the one question of the session with its head, asked before
   // the prompt and still unanswered or unconfirmed; never two questions with one head, never a prompt that belongs to an
-  // answer (a question whose answer is on its way is neither unanswered nor unconfirmed).
+  // answer (on its way, superseded or taken). The prompt becomes the question's newest taken answer.
   private legacy(appSessionId: AppSessionId, uuid: MessageUuid, text: string, at: string): boolean {
     const live = this.liveOf(appSessionId);
     const marks = this.deps.store.marks(appSessionId);
@@ -412,18 +421,20 @@ export class OwnerChannelService {
       const asked = marks.filter((mark) => mark.kind === 'need-input' && mark.state !== 'retired' && mark.head === head && Date.parse(mark.at) <= Date.parse(at));
       if (asked.length !== 1 || (asked[0]!.state !== 'unanswered' && asked[0]!.state !== 'unconfirmed')) continue;
       const markId = asked[0]!.id as MarkId;
-      this.deps.store.updateMark(markId, { state: 'delivered', answerText: answerText(head, answer), answerOrigin: 'legacy', answerMembers: [], answeredAt: at, answerAttempts: [], stateChangedAt: this.now() });
-      live.answers.delete(markId);
+      const taken = newAnswer({ text: answerText(head, answer), origin: 'legacy', members: [{ kind: 'uuid', id: uuid, life: 'alive' }], unconfirmed: false, reportedAt: this.now(), deliveredAt: at });
+      live.answers.set(markId, [...this.answersOf(live, asked[0]!), taken]);
       live.failures.delete(markId);
+      this.persist(appSessionId, markId);
       settled = true;
     }
     return settled;
   }
 
   // Writes a question's answers to its mark (./answers.ts, `settleAnswers`): the newest the engine took becomes its
-  // delivered answer, the ones still on their way are kept beside it, and the newest of those is what the card reads.
-  // With none on its way the question reads its delivered answer (a follow-up that never arrived leaves it answered as it
-  // was), else unanswered. A member whose fate only the transcript can tell is read from it.
+  // delivered answer, the ones on their way after it are kept beside it, and the newest of those is what the card reads.
+  // With none after it the question reads its delivered answer (a follow-up that never arrived leaves it answered as it
+  // was), else unanswered. Older answers are kept as `settleAnswers` says; memory holds a question's answers only while
+  // one is on its way. A member whose fate only the transcript can tell is read from it.
   private persist(appSessionId: AppSessionId, markId: MarkId): void {
     const live = this.liveOf(appSessionId);
     const answers = live.answers.get(markId);
@@ -433,16 +444,17 @@ export class OwnerChannelService {
       live.answers.delete(markId);
       return;
     }
-    const { delivered, open, dead } = settleAnswers(answers);
-    const update: MarkUpdate = { answerAttempts: open.map(storedOf), stateChangedAt: this.now() };
+    const { delivered, open, dead, kept } = settleAnswers(answers);
+    const update: MarkUpdate = { answerAttempts: kept.map(storedOf), stateChangedAt: this.now() };
     if (delivered !== null) Object.assign(update, { answerText: delivered.text, answerOrigin: delivered.origin, answerMembers: delivered.members, answeredAt: delivered.deliveredAt });
     const shown = open.at(-1);
     update.state = shown !== undefined ? statusOf(shown) : delivered !== null || row.answerText !== null ? 'delivered' : 'unanswered';
     this.deps.store.updateMark(markId, update);
     if (update.state === 'unanswered') for (const answer of dead) if (answer.failed !== null) live.failures.set(markId, answer.failed.reason);
-    if (open.length === 0) live.answers.delete(markId);
-    else live.answers.set(markId, open);
-    for (const answer of open) this.evidence(appSessionId, markId, answer);
+    const followed = kept.filter(onItsWay);
+    if (followed.length === 0) live.answers.delete(markId);
+    else live.answers.set(markId, kept);
+    for (const answer of followed) this.evidence(appSessionId, markId, answer);
   }
 
   // Design §6: an `unknown` member (a submission an exit cut) is settled by the transcript: taken, delivered; not, dead.
@@ -492,21 +504,22 @@ export class OwnerChannelService {
 
   // The host's prompt record since the oldest answer on its way, then what the live stream brought meanwhile (an event
   // both carry is applied once, by its id); then the queue's snapshot, positively. An answer neither places, and no
-  // withdrawal on record explains, is read from the transcript and otherwise reads unconfirmed. Nothing is decided from
-  // absence unless every read succeeded.
+  // withdrawal a complete record shows pending explains, is read from the transcript and otherwise reads unconfirmed.
+  // Nothing is decided from absence unless every read succeeded.
   private async fold(appSessionId: AppSessionId, live: SessionLive): Promise<void> {
     const all = () => [...live.answers.values()].flat();
-    const since = new Date(Math.min(...all().map((answer) => Date.parse(answer.reportedAt))) - LOG_WINDOW_MS).toISOString();
+    const since = new Date(Math.min(...all().filter(onItsWay).map((answer) => Date.parse(answer.reportedAt))) - LOG_WINDOW_MS).toISOString();
     const history = await hostCall(this.deps.dispatch, 'session.promptHistory', { appSessionId, since });
     const queue = await hostCall(this.deps.dispatch, 'session.queue.list', { appSessionId });
     const events = [...history.events, ...live.log.map((entry) => entry.event)];
     events.forEach((event, i) => {
       for (const answer of all()) applyEvent(answer, event, () => events.slice(0, i));
     });
-    // an entry or a pending steer the snapshot shows is alive; a steer the record shows being withdrawn, with no outcome
-    // row yet, is on its way too: its outcome row (`hold`, `cancel`, `giveback`, or `abandon` at an exit) settles it
+    // an entry or a pending steer the snapshot shows is alive; a steer a complete record shows being withdrawn, with no
+    // outcome row yet, is on its way too: its outcome row (`hold`, `cancel`, `giveback`, or `abandon` at an exit) settles
+    // it. A record that is not complete may have lost that row, so there a withdrawal proves nothing.
     const shown = new Set<string>([...queue.entries.flatMap((e) => [e.queueId, ...(e.messageUuid === null ? [] : [e.messageUuid])]), ...(queue.steers ?? []).map((s) => s.messageUuid)]);
-    const withdrawals = new Set(events.flatMap((e) => (e.kind === 'queue.transition' && e.action === 'withdraw' && e.messageUuid !== null ? [e.messageUuid as string] : [])));
+    const withdrawals = new Set(history.complete ? events.flatMap((e) => (e.kind === 'queue.transition' && e.action === 'withdraw' && e.messageUuid !== null ? [e.messageUuid as string] : [])) : []);
     const placed = (member: AnswerMember) => shown.has(member.id) || (member.life === 'withdrawing' && withdrawals.has(member.id));
     const reads: Promise<() => void>[] = [];
     for (const answer of all()) {
@@ -585,8 +598,8 @@ function ownerMarkOf(mark: OwnerMarkRow, failure: string | undefined): OwnerMark
   switch (mark.state) {
     case 'queued':
     case 'unconfirmed': {
-      const shown = mark.answerAttempts.at(-1); // the newest answer on its way
-      question = { state: mark.state, text: shown?.text ?? '', origin: shown?.origin ?? 'answer', members: shown?.members ?? [] };
+      const shown = mark.answerAttempts.at(-1); // the newest answer, on its way (never a legacy one: it is born taken)
+      question = { state: mark.state, text: shown?.text ?? '', origin: shown?.origin === 'reply' ? 'reply' : 'answer', members: shown?.members ?? [] };
       break;
     }
     case 'delivered':
