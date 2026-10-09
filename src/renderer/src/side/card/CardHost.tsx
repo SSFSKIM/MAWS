@@ -6,8 +6,17 @@
 // bottom edge, P2-E2's browser pane). The host's unmounting closes its card (Back to the list, another record, the tab
 // closed, the panel switching session); the check waits a microtask so StrictMode's effect replay, which remounts at
 // once, does not.
+//
+// Re-pin (P2-E1 M3, D8): the host asks its frame where the card's element is now (`frame.locate`, by the anchor's
+// locator) when it shows a card, when the frame is replaced (`frame.key`: a version switch, a Reload, the thread's own
+// update) and when its box resizes (a reflow moves an element fixed to the frame's viewport); a rect re-pins the card,
+// null keeps it where it is (the top-right corner for a re-docked card, which has no rect). Only the latest ask's answer
+// counts. A re-docked thread card is claimed only once the Side pane has stopped drawing its thread: "Show in
+// deliverable" starts from that pane, and the card's own close rule (one place draws a session with an input) would
+// otherwise shut it the moment it showed beside a pane still drawing the thread.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
+import { hostedInSidePane, useSidePane } from '../store';
 import { CommentCard } from './CommentCard';
 import { dockCard, pinOf, placeCard } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
@@ -16,7 +25,7 @@ export interface CardFrame {
   scale: number;
   offset: { x: number; y: number };
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
-  locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle
+  locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
   showVersion?(version: number | null): void; // the host viewer's onVersion; null: the latest
 }
 
@@ -48,7 +57,9 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     return () => observer?.disconnect();
   }, []);
 
-  const claimable = open !== null && open.hostId === null && open.host === host && (open.claimMode === null || open.claimMode === mode) && accepts(open) ? open.serial : null;
+  const drawnInSidePane = useSidePane((s) => open !== null && open.phase.kind === 'thread' && hostedInSidePane(open.phase.child, s));
+  const claimable =
+    open !== null && open.hostId === null && open.host === host && (open.claimMode === null || open.claimMode === mode) && !drawnInSidePane && accepts(open) ? open.serial : null;
   useEffect(() => {
     if (claimable !== null) claimCard(claimable, hostId);
   }, [claimable, hostId]);
@@ -66,7 +77,8 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   }, [hostId]);
 
   const card = open?.hostId === hostId ? open : null;
-  const pin = card?.rect ? pinOf(card.rect, frame) : null;
+  const rect = useLocated(card, frame, box, layout);
+  const pin = rect ? pinOf(rect, frame) : null;
   const style = layout === 'docked' ? dockCard(box) : placeCard(box, pin);
   const dismiss = (serial: number) => {
     closeCard(serial);
@@ -77,4 +89,26 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
       {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
     </div>
   );
+}
+
+// The card's element as the frame last located it, else the card's own rect (the pick's; none for a re-dock). Asked
+// when the card shows, when the frame is replaced or its locate arrives (a viewer whose frame mounts after the card was
+// claimed), and when the host's box resizes; a null answer keeps what was. `locate` is one function per frame.
+function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: number; height: number }, layout: 'anchored' | 'docked'): CardRect | null {
+  const [located, setLocated] = useState<{ serial: number; rect: CardRect } | null>(null);
+  const serial = card?.serial ?? null;
+  const selector = card?.anchor.locator ?? null;
+  const { key, locate } = frame;
+  const { width, height } = box;
+  useEffect(() => {
+    if (serial === null || selector === null || layout === 'docked' || locate === undefined) return;
+    let latest = true;
+    void locate(selector).then((rect) => {
+      if (latest && rect !== null) setLocated({ serial, rect });
+    });
+    return () => {
+      latest = false;
+    };
+  }, [serial, selector, key, locate, width, height, layout]);
+  return located !== null && located.serial === serial ? located.rect : (card?.rect ?? null);
 }

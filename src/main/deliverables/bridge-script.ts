@@ -16,7 +16,12 @@
 // nested deeper gets its innermost twelve, unanchored); `label` is `<tag>#<id>`, `<tag>.<first class>` or `<tag>`; `text`
 // is the element's text with whitespace collapsed, cut at 200 characters (the app cuts it again for the label, and
 // treats every field as the page's: a page can post the same shapes itself). Nothing is written to the page's state
-// but the overlay, which leaves with picking. The capture window loads the page top-level, where there is no parent to
+// but the overlay, which leaves with picking.
+//
+// Re-pin (P2-E1 document, D8): `{ type: 'maws:locate', selector }` from the parent is answered with
+// `{ type: 'maws:located', selector, rect }`, the rect `getBoundingClientRect` of `document.querySelector(selector)`, or
+// null when the selector matches nothing or is invalid (a throwing selector is caught). A locate never starts picking
+// and leaves nothing in the page. The capture window loads the page top-level, where there is no parent to
 // listen to, so the script does nothing there.
 //
 // A plain string, not a stringified function: a bundler's helpers (esbuild's `__name`) would not exist in the page.
@@ -125,6 +130,18 @@ const SOURCE = String.raw`(function () {
     if (!data || typeof data !== 'object' || data.type !== 'maws:pick') return;
     if (data.on === true) picking = true;
     else if (data.on === false) stop();
+  });
+
+  window.addEventListener('message', function (event) {
+    if (event.source !== host) return;
+    var data = event.data;
+    if (!data || typeof data !== 'object' || data.type !== 'maws:locate' || typeof data.selector !== 'string') return;
+    var rect = null;
+    try {
+      var el = document.querySelector(data.selector);
+      if (el) { var r = el.getBoundingClientRect(); rect = { x: r.left, y: r.top, width: r.width, height: r.height }; }
+    } catch (error) { rect = null; }
+    post({ type: 'maws:located', selector: data.selector, rect: rect });
   });
 
   window.addEventListener('mousemove', function (event) {

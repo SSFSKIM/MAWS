@@ -66,6 +66,7 @@ export const SIDE_COPY = {
     openAsTab: 'Open as tab',
     shownInMain: 'Shown in the main area',
     goToTab: 'Go to tab',
+    showInDeliverable: 'Show in deliverable', // P2-E1: a thread on an artifact element, back in a card beside the element
     openFile: (label: string) => `Open ${label}`,
     questions: '/btw', // the question view's chip: the command that asks there (a promoted thread is titled "Side question")
     questionsTitle: 'Side questions',

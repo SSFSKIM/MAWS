@@ -7,6 +7,7 @@
 import * as z from 'zod';
 import { anchorField, type Anchor } from '@shared/anchor/anchor';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
+import type { CardRect } from '../../code/anchor/anchor';
 import { titleOf } from '../model';
 
 // What the app posts to the frame to start or end picking.
@@ -28,6 +29,30 @@ export type PickMessage = z.infer<typeof PickMessageSchema>;
 export const parsePickMessage = (data: unknown): PickMessage | null => {
   const parsed = PickMessageSchema.safeParse(data);
   return parsed.success ? parsed.data : null;
+};
+
+// P2-E1 (M3): re-pin (P2-E1 document, D8): the app asks the frame's page where the element a card is pinned to is now,
+// by its selector; the answer's rect is the page's to choose, like a pick's, so it is read for its four finite numbers
+// alone (the placement's clamps bound any value).
+export const locateMessage = (selector: string) => ({ type: 'maws:locate', selector }) as const;
+
+const LocatedMessageSchema = z.looseObject({
+  type: z.literal('maws:located'),
+  selector: z.string(),
+  rect: z.looseObject({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).nullable(),
+});
+
+export interface LocatedMessage {
+  type: 'maws:located';
+  selector: string;
+  rect: CardRect | null;
+}
+
+export const parseLocatedMessage = (data: unknown): LocatedMessage | null => {
+  const parsed = LocatedMessageSchema.safeParse(data);
+  if (!parsed.success) return null;
+  const { selector, rect } = parsed.data;
+  return { type: 'maws:located', selector, rect: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
 };
 
 const LABEL_MAX = 200; // X10's label cap

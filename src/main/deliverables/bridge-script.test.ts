@@ -170,6 +170,34 @@ describe('the bridge script (E2 Design §10)', () => {
     expect(overlay()).toBeNull();
   });
 
+  // P2-E1 (M3): re-pin (P2-E1 document, D8): the parent asks where an element is now, by its selector
+  it('answers maws:locate with the element’s rect, null for an absent or invalid selector; it never starts picking', () => {
+    page('<h1 id="hero">Title</h1><p>x</p>');
+    const hero = $('#hero') as unknown as { getBoundingClientRect(): unknown };
+    hero.getBoundingClientRect = () => ({ left: 4, top: 6, width: 300, height: 90, right: 304, bottom: 96, x: 4, y: 6 });
+    fromParent({ type: 'maws:locate', selector: '#hero' });
+    fromParent({ type: 'maws:locate', selector: '#gone' });
+    fromParent({ type: 'maws:locate', selector: 'h1[' }); // querySelector throws
+    expect(posted).toEqual([
+      { type: 'maws:located', selector: '#hero', rect: { x: 4, y: 6, width: 300, height: 90 }, origin: '*' },
+      { type: 'maws:located', selector: '#gone', rect: null, origin: '*' },
+      { type: 'maws:located', selector: 'h1[', rect: null, origin: '*' },
+    ]);
+    hover($('p'));
+    click($('p'));
+    expect(overlay()).toBeNull();
+    expect(posted).toHaveLength(3);
+  });
+
+  it('answers a locate from the parent alone, and only a string selector', () => {
+    page('<h1 id="hero">Title</h1>');
+    fromParent({ type: 'maws:locate', selector: '#hero' }, win);
+    fromParent({ type: 'maws:locate', selector: '#hero' }, null);
+    fromParent({ type: 'maws:locate', selector: 7 });
+    fromParent({ type: 'maws:locate' });
+    expect(posted).toEqual([]);
+  });
+
   it('does nothing in a top-level document (the capture window), where there is no parent', () => {
     Object.defineProperty(win, 'parent', { configurable: true, get: () => win });
     page('<p>x</p>');

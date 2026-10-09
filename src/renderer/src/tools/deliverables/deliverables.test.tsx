@@ -3,7 +3,7 @@
 // sandboxed, the PDF frame without a sandbox for a PDF alone, native media, the read-only file viewer), the missing and
 // gone states, the console chip and Reload, the summary section and the `deliverable` main tab.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { AnchorSchema, type Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
@@ -689,6 +689,45 @@ describe('the comment card in the viewer', () => {
     expect(cardIn(document.body)).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(useCommentCard.getState().open).toBeNull();
+  });
+
+  // P2-E1 (M3): re-pin through the frame's locate (D8)
+  it('a re-docked card is pinned where its frame’s page finds the element; a Reload and a version switch keep it and ask the new frame', async () => {
+    // happy-dom lays nothing out: the card's host measures this box
+    const sizes = (['clientWidth', 'clientHeight'] as const).map((key) => [key, Object.getOwnPropertyDescriptor(HTMLElement.prototype, key)!] as const);
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 800 });
+    onTestFinished(() => sizes.forEach(([key, descriptor]) => Object.defineProperty(HTMLElement.prototype, key, descriptor)));
+    const { handle } = await mount({ target: ART.id });
+    // the frame's page answers once loaded (happy-dom may have fired the load itself; a locate posts after it either way,
+    // and listens for its answer only from then)
+    const frameEl = () => document.querySelector<HTMLIFrameElement>('[data-deliverable-frame="html"]')!;
+    const loadAndAnswer = (rect: { x: number; y: number; width: number; height: number }) => {
+      const el = frameEl();
+      act(() => void el.dispatchEvent(new Event('load')));
+      post({ type: 'maws:located', selector: '#hero', rect }, el.contentWindow);
+    };
+    redock();
+    await settle();
+    expect(cardIn(document.body)).not.toBeNull();
+    loadAndAnswer({ x: 24, y: 0, width: 300, height: 90 });
+    await settle();
+    expect(cardIn(document.body)!.style).toMatchObject({ left: '24px', top: '94px' });
+    const serial = useCommentCard.getState().open!.serial;
+
+    fireEvent.click(button('Reload')!);
+    await settle();
+    loadAndAnswer({ x: 24, y: 40, width: 300, height: 90 });
+    await settle();
+    expect(cardIn(document.body)!.style).toMatchObject({ top: '134px' });
+
+    act(() => handle.setVersion(1));
+    await settle();
+    expect(viewer()!.dataset.version).toBe('1');
+    loadAndAnswer({ x: 24, y: 10, width: 300, height: 90 });
+    await settle();
+    expect(cardIn(document.body)!.style).toMatchObject({ top: '104px' });
+    expect(useCommentCard.getState().open?.serial).toBe(serial);
   });
 
   it('Close gives focus back to the viewer’s Comment button; leaving the viewer closes its card', async () => {

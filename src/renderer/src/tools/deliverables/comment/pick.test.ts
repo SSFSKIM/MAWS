@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { AnchorSchema } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
-import { artifactElementAnchor, parsePickMessage, type PickedMessage } from './pick';
+import { artifactElementAnchor, locateMessage, parseLocatedMessage, parsePickMessage, type PickedMessage } from './pick';
 
 const A = 'App-A' as AppSessionId;
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
@@ -26,6 +26,28 @@ describe('parsePickMessage', () => {
     expect(parsePickMessage({ type: 'maws:picked', selector: 'p' })).toBeNull();
     expect(parsePickMessage('maws:picked')).toBeNull();
     expect(parsePickMessage(null)).toBeNull();
+  });
+});
+
+// P2-E1 (M3): re-pin's two messages (P2-E1 document, D8)
+describe('locate', () => {
+  it('asks by selector, and reads the answer’s rect (its four numbers alone) or null', () => {
+    expect(locateMessage('#hero')).toEqual({ type: 'maws:locate', selector: '#hero' });
+    const rect = { x: 1.5, y: -2, width: 300, height: 90 };
+    expect(parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect: { ...rect, extra: 1 } })).toEqual({ type: 'maws:located', selector: '#hero', rect });
+    expect(parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect: null })).toEqual({ type: 'maws:located', selector: '#hero', rect: null });
+  });
+
+  it('refuses a malformed answer: a rect with a missing, non-numeric or non-finite field, no selector, another type', () => {
+    const answer = (rect: unknown, over: object = {}) => parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect, ...over });
+    expect(answer({ x: 1, y: 2, width: 3 })).toBeNull();
+    expect(answer({ x: '1', y: 2, width: 3, height: 4 })).toBeNull();
+    expect(answer({ x: Number.NaN, y: 2, width: 3, height: 4 })).toBeNull();
+    expect(answer({ x: Number.POSITIVE_INFINITY, y: 2, width: 3, height: 4 })).toBeNull();
+    expect(answer(undefined)).toBeNull();
+    expect(answer(null, { selector: 7 })).toBeNull();
+    expect(answer(null, { type: 'maws:locate' })).toBeNull();
+    expect(parseLocatedMessage('maws:located')).toBeNull();
   });
 });
 

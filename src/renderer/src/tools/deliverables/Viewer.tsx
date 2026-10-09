@@ -11,7 +11,8 @@
 // frame: a version switch or a Reload (a new frame) ends it, as do Escape in the app (where the keyboard stays while the
 // pointer is over the frame) and Escape in the frame, and a pick ends it (one pick per Comment). Since P2-E1 a pick
 // opens the comment card beside the element, in the card host the HTML body's container holds (P2-E1 document, D9),
-// rather than the sheet; the host is a sibling of the body, so a Reload's new frame keeps the card.
+// rather than the sheet; the host is a sibling of the body, so a Reload's new frame keeps the card, and the host re-pins
+// it through the frame's locate handle (D8).
 //
 // A frame is never re-pointed: its URL is fixed at creation and the frame is keyed by it and by Reload's count, so a
 // version switch and a Reload mount a new frame on a scheme URL and an unmount removes it, never routing a deliverable
@@ -32,7 +33,7 @@ import { mawsTranscriptActions } from '../maws/actions';
 import { artifactElementAnchor, type PickMessage } from './comment/pick';
 import { ConsoleChip } from './ConsoleChip';
 import { DELIVERABLES_COPY } from './copy';
-import { HtmlFrame } from './frames/HtmlFrame';
+import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { basename, bodyOf, latestVersion, titleOf, underSession, versionPath, type BodyKind } from './model';
@@ -187,7 +188,9 @@ function Shown({ record, shown, present, checked, reloads, mode, visible, onBack
   };
   const hostsCard = record.kind === 'artifact' && body === 'html';
   const accepts = (card: OpenCard) => card.target?.kind === 'deliverable' && card.target.appSessionId === record.appSessionId && card.target.deliverableId === record.id;
-  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frame, showVersion: onVersion }; // the frame fills the body
+  // the HTML frame's locate handle (M3, D8): one per mounted frame, so the host re-pins when a new frame's arrives
+  const [frameHandle, setFrameHandle] = useState<FrameHandle | null>(null);
+  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frame, locate: frameHandle?.locate, showVersion: onVersion }; // the frame fills the body
   // a dismissed card gives focus back to Comment, or to the frame when Comment is gone
   const restoreFocus = () => (commentButton.current ?? bodyBox.current?.querySelector('iframe'))?.focus({ preventScroll: true });
   // P2-E1 end
@@ -213,7 +216,7 @@ function Shown({ record, shown, present, checked, reloads, mode, visible, onBack
             {DELIVERABLES_COPY.missing(path)}
           </p>
         ) : (
-          <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} />
+          <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} onFrame={setFrameHandle} />
         )}
         {/* P2-E1 start (2026-10-09): the picking hint floats over the body rather than taking a header line, so ending a
             pick never resizes the frame under the rect it just reported (a card pinned to an element at the frame's
@@ -244,14 +247,25 @@ interface BodyProps {
   title: string;
   picking: boolean;
   onPick(message: PickMessage): void;
+  onFrame(handle: FrameHandle | null): void; // P2-E1: the HTML frame's locate handle
 }
 
-function Body({ record, shown, reloads, path, body, title, picking, onPick }: BodyProps) {
+function Body({ record, shown, reloads, path, body, title, picking, onPick, onFrame }: BodyProps) {
   const url = deliverableUrl(record.appSessionId, record.id, shown);
   switch (body) {
     case 'html':
       return (
-        <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} appSessionId={record.appSessionId} deliverableId={record.id} version={shown} picking={picking} onPick={onPick} />
+        <HtmlFrame
+          key={url}
+          url={url}
+          title={DELIVERABLES_COPY.frameTitle(title)}
+          appSessionId={record.appSessionId}
+          deliverableId={record.id}
+          version={shown}
+          picking={picking}
+          onPick={onPick}
+          onFrame={onFrame}
+        />
       );
     case 'pdf':
       return <PdfFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} />;
