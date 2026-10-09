@@ -9,7 +9,7 @@ import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { isAnthropicDefaultMarketplace } from '@shared/plugins/source-key';
 import { relativeAge } from '../../app/relative-age';
-import type { ObservedPlugin } from './loaded';
+import type { ObservedPlugin } from '@shared/engine/observed-facts';
 
 export type SourceGroup = 'here' | 'yours' | 'synced' | 'anthropic' | 'added';
 export const GROUP_ORDER: readonly SourceGroup[] = ['here', 'yours', 'synced', 'anthropic', 'added'];

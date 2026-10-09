@@ -9,14 +9,17 @@
 // filter, scroll and focus as they were; the head's controls and the loaded line belong to the list and leave with it.
 // An installed card opens the plugin's My items detail, whose Back returns to Browse. The two marketplace dialogs are
 // sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
-// sheet. The CLI needs no engine process, so a session that is not running still manages plugins: the frame's states
-// never stand in for the list, and A's session states reach `/plugins` only through the loaded line.
+// sheet. The CLI needs no engine process, so a session with no ready process still manages plugins: the frame's states
+// never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
+// only through the loaded line and the detail's "Loaded in this session".
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
+import { useAvailability } from '../sessions/availability';
+import { useLoadedPlugins } from '../sessions/observed';
 import { useSessions } from '../stores/sessions';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
 import { AddMarketplaceDialog } from './plugins/AddMarketplaceDialog';
@@ -28,7 +31,6 @@ import type { EngineResolution } from './plugins/ConfirmSheet';
 import { BrowseToolbar, LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
-import { useAvailability, useLoadedPlugins } from './plugins/loaded';
 import { LoadedLine } from './plugins/LoadedLine';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { ManageMarketplaces } from './plugins/ManageMarketplaces';
@@ -78,8 +80,8 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
 
   const plugins = installed.data?.plugins;
   const markets = marketplaces.data?.marketplaces;
-  // the plugins the session loaded, as last observed; none observed (no list, no time) is not "loaded none"
-  const loadedIds = useMemo(() => (loaded.freshness.kind === 'unknown' && loaded.plugins.length === 0 ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
+  // the plugins the session loaded, as last observed; none observed is not "loaded none"
+  const loadedIds = useMemo(() => (loaded.freshness.kind === 'unknown' ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
   // the manifest request derives from the listing held, never from the change event (§5.5)
   const requests = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], NO_VIEWS, null).map(({ representative }) => ({ ...installationRef(representative), lastUpdated: representative.lastUpdated })), [plugins, markets]);
   const manifests = usePluginManifests(cwd, requests);
@@ -146,7 +148,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const add = <AddMenu onOpen={setDialog} />;
   const toolbar = inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
   const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
-    <PluginDetail key={identity.id} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} refresh={null} listManifests={manifests} backTo={backTo} onBack={onBack} />
+    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} listManifests={manifests} backTo={backTo} onBack={onBack} />
   );
 
   return (
@@ -160,7 +162,6 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
                 appSessionId={appSessionId}
                 availability={availability}
                 loaded={loaded}
-                refresh={null}
                 reloads={ready ? reloads : null}
                 onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
               />

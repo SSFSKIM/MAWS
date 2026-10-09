@@ -8,8 +8,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
+import type { Availability } from '@shared/ipc/schema/session';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
 import { digest, record } from '../../../../test/support/builders';
@@ -236,25 +236,99 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     await waitFor(() => expect(screen.getByText('The engine did not answer · showing the last value it reported')).toBeTruthy());
   });
 
-  it('on an exited session starts nothing, offers no reload, lists the plugins it last reported, and still manages plugins through the CLI', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
+  // P2-A (its §5.5 to §5.7): the line reads A's observed facts and availability; Refresh is A's
+  const exited = (over: Parameters<typeof record>[1] = {}, availability: Availability = 'resumable') =>
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd, ...over })]]), digests: new Map([[ID, digest(ID, { availability })]]) });
+  const starts = () => backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command));
+
+  it('on an exited session starts nothing, offers no reload, lists the plugins it last reported as loaded last time, with Refresh, and still manages plugins through the CLI', async () => {
+    exited();
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    // E8's last-reported list (the architect's ruling, §5.6): the count with no freshness word, never a time invented
-    expect(loadedLine().textContent).toBe('11 plugins loaded in this session');
+    expect(loadedLine().getAttribute('data-loaded-freshness')).toBe('last');
+    expect(loadedLine().textContent).toMatch(/^11 plugins loaded in this session·Loaded last time, [^·]+Refresh$/);
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
+    expect(screen.queryByText(/not running/)).toBeNull();
     expect(menuItems('e8-probe@e8-scratch')).toEqual(['Turn off', 'Update', 'Uninstall…']);
     fireEvent.click(within(loadedLine()).getByRole('button', { name: '11 plugins loaded in this session' }));
     expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     // opening /plugins acquires nothing (A's G5): no acquisition, start or launch of any kind
-    expect(backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command))).toEqual([]);
+    expect(starts()).toEqual([]);
   });
 
-  it('a ready process whose status lists nothing yet (a start with no turn) says Not observed yet, in the line and the detail', async () => {
-    // the engine's list is empty until its first system/init: nothing was observed, so nothing reads as loaded now
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [] }]]) });
+  it('Refresh on an exited session acquires it for a read, then reloads its plugins: the line reads Loaded now', async () => {
+    exited();
+    backend.script('session.acquire', () => {
+      setTimeout(() => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) })), 0);
+      return new Promise((resolve) => setTimeout(() => resolve({ status: 'ready', appSessionId: ID, launched: true, joined: false }), 5));
+    });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
+    expect(loadedLine().textContent).toContain('Starting…');
+    await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
+    expect(invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    await waitFor(() => expect(loadedLine().textContent).toContain('Loaded now'));
+    expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
+  });
+
+  it('Refresh says a reload the host refused, and a reload that failed after the start, on the line', async () => {
+    const acquireReady = () =>
+      backend.script('session.acquire', () => {
+        act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+        return { status: 'ready', appSessionId: ID, launched: true, joined: false };
+      });
+    exited();
+    acquireReady();
+    const unscript = backend.script('session.reloadPlugins', () => {
+      throw new WidgetBackendError({ code: 'timeout', message: 'the host did not answer' });
+    });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(within(loadedLine()).getByRole('alert').textContent).toBe('The engine did not answer · showing the last value it reported'));
+    cleanup();
+    unscript();
+    exited();
+    acquireReady();
+    backend.scriptOutcome('session.reloadPlugins', () => ({ ok: false, error: { code: 'timeout', message: 'reload_plugins unanswered after 60 s', engineCode: null } }));
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(within(loadedLine()).getByRole('alert').textContent).toBe('reload_plugins unanswered after 60 s · timeout'));
+  });
+
+  it('an acquisition that cannot be asked at all (main or the host unreachable) says so on the line, and reloads nothing', async () => {
+    exited();
+    backend.script('session.acquire', () => {
+      throw new WidgetBackendError({ code: 'host_unavailable', message: 'the engine host is not running' });
+    });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(loadedLine().textContent).toContain('the engine host is not running'));
+    expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toEqual([]);
+  });
+
+  it('a session a terminal holds shows its last list read-only, the holder named and its actions in place of Refresh', async () => {
+    exited({ holder: { kind: 'terminal', pid: 4711 } }, 'foreign_held');
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(loadedLine().textContent).toContain('11 plugins loaded in this session');
+    expect(within(loadedLine()).getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(within(loadedLine()).getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(within(loadedLine()).getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(within(loadedLine()).queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(starts()).toEqual([]);
+  });
+
+  it('a ready process that has not reported its plugins yet (a start with no turn), with nothing observed before, says Not observed yet in the line and the detail', async () => {
+    // the engine reports no plugins until its first system/init: nothing was observed, so nothing reads as loaded now
+    backend.script('session.observedFacts', () => null);
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
     expect(loadedLine().textContent).toContain('Not observed yet');
     expect(loadedLine().textContent).not.toContain('loaded in this session');
     expect(loadedLine().textContent).not.toContain('Loaded now');
@@ -263,7 +337,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not observed yet');
   });
 
-  it('a ready process whose status lists only a problem still counts it, loaded now', async () => {
+  it('a ready process whose report lists only a problem still counts it, loaded now', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [] }]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
@@ -272,12 +346,15 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(loadedLine().textContent).toContain('1 problem');
   });
 
-  it('with no status for the session says Not observed yet, and still lists its plugins from its directory', async () => {
-    useSessions.setState({ records: new Map([[ID, { appId: ID, directory: cwd } as SessionRecord]]) });
+  it('a session MAWS has never run reads Not observed yet with Refresh, and still lists its plugins from its directory', async () => {
+    backend.script('session.observedFacts', () => null);
+    useSessions.setState({ records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    expect(loadedLine().textContent).toBe('Not observed yet');
-    expect(backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command))).toEqual([]);
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
+    expect(loadedLine().textContent).toBe('Not observed yetRefresh');
+    expect(screen.queryByText(/not running|loaded no plugins/)).toBeNull();
+    expect(starts()).toEqual([]);
   });
 
   it('says it could not load the plugins in the CLI’s words, with Retry reading them again', async () => {

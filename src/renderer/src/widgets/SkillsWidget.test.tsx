@@ -4,16 +4,18 @@
 // nothing, a row's detail, the catalogue's skills when the engine answers the dialog empty, and Desktop's failed state.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
+import { digest, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from './plugins/library-store';
+import { useReadLoads } from './read';
 import { SkillsWidget } from './SkillsWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -61,7 +63,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   resetComposerStore();
   delete (window as { maws?: MawsBridge }).maws;
@@ -231,12 +234,24 @@ describe('skills widget: states', () => {
     await waitFor(() => expect(screen.getByRole('region', { name: 'In this project' })).toBeTruthy());
   });
 
-  it('a session with no ready process reads nothing and says so (today’s frame; P2-A’s dormant state replaces it)', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
+  // P2-A's dormant state (§5.10; A §5.6) through the frame: opening reads and starts nothing; Load now acquires for a read
+  it('an exited session shows Not read yet with Load now and starts nothing until it is clicked; then the skills are read', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
+    backend.script('session.getSkillsDialog', () => DIALOG);
+    backend.script('session.acquire', () => {
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+      return { status: 'ready', appSessionId: ID, launched: true, joined: false };
+    });
     mount();
-    await waitFor(() => expect(document.querySelector('[data-widget="skills"] [data-widget-body]')!.textContent).not.toBe(''));
-    expect(backend.calls.filter((c) => c.subtype === 'get_skills_dialog')).toEqual([]);
-    expect(backend.calls.filter((c) => c.command === 'session.reloadSkills' || c.command === 'session.start')).toEqual([]);
+    await waitFor(() => expect(screen.getByText('Not read yet.')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy();
+    expect(backend.calls.filter((c) => c.command === 'session.getSkillsDialog')).toEqual([]);
+    expect(backend.calls.filter((c) => /^session\.(acquire|start|resume|launch|reloadSkills)/.test(c.command))).toEqual([]);
     expect(screen.getByRole('button', { name: 'Reload skills' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'In this project' })).toBeTruthy());
+    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    expect(screen.queryByText('Not read yet.')).toBeNull();
   });
+
 });

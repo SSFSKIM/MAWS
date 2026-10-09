@@ -498,7 +498,6 @@ export const LIBRARY = {
   loadedCount: (n: number) => `${n} plugin${n === 1 ? '' : 's'} loaded in this session`,
   problems: (n: number) => `${n} problem${n === 1 ? '' : 's'}`,
   refresh: 'Refresh',
-  starting: 'Starting…',
   missingDirectory: (directory: string) => `Directory not found: ${directory}`, // A's words for the state
   builtIntoClaudeCode: 'Built into Claude Code',
   loadedFromFolder: 'Loaded from a folder',

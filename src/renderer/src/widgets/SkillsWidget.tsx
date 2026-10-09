@@ -7,8 +7,9 @@
 // plugins to find a plugin's skill's plugin; an engine that answers the dialog empty leaves the catalogue's skills, in one
 // list. The list waits for the plugin list to answer (or fail) so no row moves under the pointer. Reload skills runs
 // `reload_skills` as an operation (`Reloaded · N skills`); the dialog read refetches on its completion, as `useEngineRead`
-// does on any `session.operation` naming the session. The frame's states are today's: a session with no ready process
-// reads nothing and says so (P2-A's dormant state, with Load now, reaches it through `WidgetFrame` when A lands).
+// does on any `session.operation` naming the session. A session with no ready process gets P2-A's states through
+// `WidgetFrame`: "Not read yet." with Load now (or the skills last read, dated, with Refresh), "Starting…", or why it
+// cannot start; opening `/skills` reads and starts nothing until Load now is clicked (A §5.6).
 import { useContext, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
@@ -19,7 +20,7 @@ import { LIBRARY as L, SKILLS_LIBRARY as S, WIDGET_TITLE } from './copy';
 import { operationLine, useOperation } from './operation';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
-import { useLoadedPlugins } from './plugins/loaded';
+import { useLoadedPlugins } from '../sessions/observed';
 import { usePluginManifests } from './plugins/manifests';
 import { usePluginsRead } from './plugins/read';
 import { lineFailed, skillsSummary } from './plugins/reload';
@@ -66,7 +67,7 @@ export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSession
   const toolbar = inDetail ? null : <SkillsToolbar plugins={plugin} canReload={ready} reloading={reload.state.phase === 'working'} onReload={() => void reload.run({})} />;
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={failed ? 'ready' : read.state} error={failed ? null : read.error} close={close} size="library" toolbar={toolbar}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={failed ? 'ready' : read.state} error={failed ? null : read.error} readAt={read.readAt} close={close} size="library" toolbar={toolbar}>
       {line !== null && (
         <p role="status" className={`m-0 px-2 pb-1 text-ui-sm ${lineFailed(reload.state) ? 'text-danger' : 'text-fg-muted'}`}>
           {line}

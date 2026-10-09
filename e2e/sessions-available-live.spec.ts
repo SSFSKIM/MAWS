@@ -242,7 +242,7 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
       await frame.getByRole('button', { name: 'Load now' }).click();
       await expect(frame.getByText('Starting…')).toBeVisible({ timeout: 10_000 });
       log('frame read: Starting…');
-      await expect(frame.getByText(`/${SKILL}`)).toBeVisible({ timeout: 120_000 });
+      await expect(frame.locator(`[data-skill-row="${SKILL}"]`)).toBeVisible({ timeout: 120_000 }); // P2-B's skills library row
       expect(spawns(skillsId).length, 'one more launch').toBe(before + 1);
       expect(userFrames(skillsId), 'no prompt to populate it').toHaveLength(0);
       const rows = await frame.locator('li').allInnerTexts();

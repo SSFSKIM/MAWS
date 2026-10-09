@@ -1,9 +1,9 @@
 // What Show › "Loaded in this session" adds to My items' rows (P2-B execution document §5.6): the plugin problems the
 // engine reported at the last init, and the loaded plugins that are no plugin of the list (the engine's own `@builtin`
-// ones, a folder's), each read-only with its credit. `present` reads A's loaded facts (the stand-in until A lands).
+// ones, a folder's), each read-only with its credit. `present` reads A's loaded facts (`useLoadedPlugins`).
 import { LIBRARY as L, PLUGINS } from '../copy';
 import type { loadedOnly } from './library';
-import type { LoadedPlugins } from './loaded';
+import type { LoadedPlugins } from '../../sessions/observed';
 import { GroupHeading, PluginTile } from './PluginRow';
 
 export interface PluginsView {

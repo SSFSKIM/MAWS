@@ -117,7 +117,7 @@ test.describe('sessions available on demand (P2-A)', () => {
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on opening the widget').toBe(false);
     await frame.getByRole('button', { name: 'Load now' }).click();
     await expect(frame.getByText('Starting…')).toBeVisible();
-    await expect(frame.getByText('/e8-probe:e8-hello')).toBeVisible({ timeout: 20_000 });
+    await expect(frame.locator('[data-skill-row="e8-probe:e8-hello"]')).toBeVisible({ timeout: 20_000 }); // P2-B's skills library row
     expect(spawns(maws, appId), 'one launch').toHaveLength(1);
     expect(spawns(maws, appId)[0]!.frame.args).toEqual(expect.arrayContaining(['--resume', SKILLS_SESSION]));
     expect(writtenUsers(maws, appId), 'no prompt sent to populate the widget').toEqual([]);

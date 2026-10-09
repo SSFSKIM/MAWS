@@ -11,16 +11,18 @@
 // and says where the plugin is managed.
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { Availability } from '@shared/ipc/schema/session';
 import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ChevronLeftIcon } from '../../app/IconButton';
 import { useNow } from '../../app/use-now';
+import { FRESHNESS } from '../../sessions/observed';
 import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
 import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, updateOffer } from './detail';
 import { MoreIcon, PluginGlyph } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
-import { FRESHNESS, type AcquireOutcome, type LoadedPlugins } from './loaded';
-import { useRefresh } from './LoadedLine';
+import { RefreshGesture, useRefresh, type SessionPlugins } from './LoadedLine';
 import { present } from './LoadedView';
 import { Gone, OperationLine, Switch, useManage } from './manage';
 import { usePluginManifests } from './manifests';
@@ -31,11 +33,12 @@ import { OtherProjects, ScopeChips } from './ScopeChips';
 import { InsideSummary, InsideTabs } from './WhatsInside';
 
 export interface PluginDetailProps {
+  appSessionId: AppSessionId;
+  availability: Availability | null; // A's `useAvailability`
   identity: PluginIdentity;
-  loaded: LoadedPlugins;
+  loaded: SessionPlugins; // A's `useLoadedPlugins`, its `refresh` the loaded line's
   loadedIds: ReadonlySet<string> | null; // the loaded list's ids; null when none was observed
   reloads: Reloads | null; // on a ready process
-  refresh: (() => Promise<AcquireOutcome>) | null; // A's `useLoadedPlugins().refresh`; null until A's M3
   listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
   backTo?: string; // the view Back returns to: My items, or Browse for an installed card opened there
   onBack(): void;
@@ -48,7 +51,7 @@ const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none 
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, listManifests, backTo = L.myItems, onBack }: PluginDetailProps) {
+export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, listManifests, backTo = L.myItems, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -172,7 +175,7 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, li
           <>
             {selected === OTHER_PROJECTS && <OtherProjects installations={others} />}
             {view?.description && <p className="m-0 text-ui text-fg [overflow-wrap:anywhere] whitespace-pre-line">{view.description}</p>}
-            <Facts identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} refresh={refresh} now={now} />
+            <Facts appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} now={now} />
             {installation.errors.length > 0 && (
               <ul className="m-0 list-none p-0 text-ui-sm text-danger">
                 {installation.errors.map((error, i) => (
@@ -229,12 +232,13 @@ const goneName = (key: string): string => {
 };
 
 // The two facts, never merged: "Enabled for this project" from the CLI, and "Loaded in this session" from the
-// session's loaded list with its freshness ("Loaded now", "Loaded last time, <relative>"; none when the list says no
-// time); a known list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload
-// plugins (ready) or Refresh; no list reads "Not observed yet". The last init's problems for this plugin beneath.
-function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number }) {
+// session's loaded list (A's observed facts) with its freshness ("Loaded now", "Loaded last time, <relative>"); a known
+// list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload plugins (ready)
+// or the loaded line's Refresh, with A's line for a session that cannot start; no list reads "Not observed yet". The
+// last init's problems for this plugin beneath.
+function Facts({ appSessionId, availability, identity, loaded, loadedIds, reloads, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number }) {
   const fact = loadedFactOf(identity.id, loaded, loadedIds);
-  const { pending, refusal, run } = useRefresh(refresh);
+  const refresh = useRefresh(loaded.refresh);
   const problems = present(loaded).problems.filter((p) => p.plugin === identity.name || p.plugin === identity.id);
   let loadedWords: string;
   if (fact.kind === 'unknown') loadedWords = FRESHNESS.notObserved;
@@ -248,24 +252,24 @@ function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<Plug
       <p data-plugin-fact="enabled" className="m-0 text-fg">
         {identity.enabledHere ? L.enabledHere : L.notEnabledHere}
       </p>
-      <p data-plugin-fact="loaded" className="m-0 flex flex-wrap items-baseline gap-x-2 text-fg">
+      <div data-plugin-fact="loaded" className="flex flex-wrap items-baseline gap-x-2 text-fg [&>[data-dormant-gesture]]:mb-0">
         <span>{loadedWords}</span>
-        {offerReload && pending && <span role="status" className="text-ui-sm text-fg-muted">{L.starting}</span>}
-        {offerReload && !pending && reloads && (
-          <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
-            {W.reloadMods}
-          </TextButton>
+        {offerReload && (
+          <RefreshGesture
+            appSessionId={appSessionId}
+            availability={availability}
+            refresh={refresh}
+            ready={reloads && (
+              <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
+                {W.reloadMods}
+              </TextButton>
+            )}
+          />
         )}
-        {offerReload && !pending && !reloads && refresh && <TextButton onClick={() => void run()}>{L.refresh}</TextButton>}
-      </p>
+      </div>
       {offerReload && reloads?.line && (
         <p role="status" className={`m-0 text-ui-sm ${reloads.failed ? 'text-danger' : 'text-fg-muted'}`}>
           {reloads.line}
-        </p>
-      )}
-      {refusal !== null && (
-        <p role="alert" className="m-0 text-ui-sm text-danger [overflow-wrap:anywhere]">
-          {refusal}
         </p>
       )}
       {problems.length > 0 && (

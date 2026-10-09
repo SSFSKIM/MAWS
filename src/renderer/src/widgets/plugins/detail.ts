@@ -7,7 +7,7 @@
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { LIBRARY as L } from '../copy';
 import { basename, isActionable, isHere, isPseudo, SKILLS_DIR, versionWords, type PluginIdentity } from './library';
-import type { Freshness, LoadedPlugins } from './loaded';
+import type { Freshness, LoadedPlugins } from '../../sessions/observed';
 import { installedKey } from './PluginRow';
 
 // ---- the scope chips ----------------------------------------------------------------------------------------------

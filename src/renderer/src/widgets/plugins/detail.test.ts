@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { chipLabel, chipsOf, insideItems, insideSummary, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, projectLabels, updateOffer } from './detail';
 import { identitiesOf } from './library';
-import type { LoadedPlugins } from './loaded';
+import type { LoadedPlugins } from '../../sessions/observed';
 
 const HERE = '/work/maws';
 const inst = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin => {

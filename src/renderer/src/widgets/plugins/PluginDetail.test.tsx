@@ -1,17 +1,25 @@
 // The detail on its own (P2-B execution document §5.7): the two facts that never merge, Refresh only from its click
-// (A's `useLoadedPlugins().refresh` is passed in, as A's M3 will pass it), What's inside's summary, tabs and states,
-// and the views M2's reader answers for its own fixture trees (an LSP plugin with no plugin.json; one whose MCP
-// servers, hooks and monitors carry secrets), rendered with none of their commands, values or URLs.
+// (A's `useLoadedPlugins().refresh` in shape, acquiring through A's `loadForRead` over a fake bridge), What's inside's
+// summary, tabs and states, and the views M2's reader answers for its own fixture trees (an LSP plugin with no
+// plugin.json; one whose MCP servers, hooks and monitors carry secrets), rendered with none of their commands, values
+// or URLs.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
+import type { AcquireOutcome } from '@shared/sessions/setup';
+import { digest, record } from '../../../../../test/support/builders';
 import { readManifestView } from '../../../../engine-host/plugins/manifest';
+import type { LoadedPlugins } from '../../sessions/observed';
+import { useSessions } from '../../stores/sessions';
+import { loadForRead, useReadLoads } from '../read';
 import { identitiesOf, installationRef, manifestKeyOf } from './library';
-import type { AcquireOutcome, LoadedPlugins } from './loaded';
+import type { SessionPlugins } from './LoadedLine';
 import { ManageProvider, type Manage } from './manage';
 import { PluginDetail, type PluginDetailProps } from './PluginDetail';
 
@@ -39,7 +47,16 @@ const viewOf = (p: InstalledPlugin, over: Partial<PluginManifestView> = {}): Plu
   ...over,
 });
 const identityOf = (p: InstalledPlugin, view: PluginManifestView | null) => identitiesOf([p], [], view ? new Map([[manifestKeyOf(installationRef(p)), view]]) : new Map(), null)[0];
-const loadedWith = (sources: string[], freshness: LoadedPlugins['freshness']): LoadedPlugins => ({ plugins: sources.map((source) => ({ name: source.split('@')[0], path: `/cfg/${source}`, source, version: null })), errors: [], warnings: [], freshness });
+const SESSION = 'app-detail' as AppSessionId;
+const NO_RELOAD: SessionPlugins['reload'] = { line: null, failed: false };
+const loadedWith = (sources: string[], freshness: LoadedPlugins['freshness'], refresh: SessionPlugins['refresh'] = () => loadForRead(SESSION)): SessionPlugins => ({
+  plugins: sources.map((source) => ({ name: source.split('@')[0], path: `/cfg/${source}`, source, version: null })),
+  errors: [],
+  warnings: [],
+  freshness,
+  refresh,
+  reload: NO_RELOAD,
+});
 
 const manage: Manage = { cwd: '/work/maws', ops: { entries: new Map(), run: async () => null, cancel: () => {} }, ask: vi.fn(), reloadMods: null };
 
@@ -47,7 +64,7 @@ function show(identity: PluginDetailProps['identity'], props: Partial<PluginDeta
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ManageProvider value={manage}>
-        <PluginDetail identity={identity} loaded={loadedWith([], { kind: 'unknown' })} loadedIds={null} reloads={null} refresh={null} listManifests={{ error: null, retry: () => {} }} onBack={() => {}} {...props} />
+        <PluginDetail appSessionId={SESSION} availability="resumable" identity={identity} loaded={loadedWith([], { kind: 'unknown' })} loadedIds={null} reloads={null} listManifests={{ error: null, retry: () => {} }} onBack={() => {}} {...props} />
       </ManageProvider>
     </QueryClientProvider>,
   );
@@ -55,7 +72,12 @@ function show(identity: PluginDetailProps['identity'], props: Partial<PluginDeta
 }
 const fact = (which: 'enabled' | 'loaded') => document.querySelector<HTMLElement>(`[data-plugin-fact="${which}"]`)!;
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  useSessions.setState({ records: new Map(), digests: new Map() });
+  useReadLoads.setState({ loads: new Map() });
+  delete (window as { maws?: MawsBridge }).maws;
+});
 
 describe('the detail: enabled for this project and loaded in this session', () => {
   it('two lines that never merge: not enabled, and loaded last time with its age', () => {
@@ -69,28 +91,40 @@ describe('the detail: enabled for this project and loaded in this session', () =
   it('enabled and absent from a known list on a dormant session: Refresh, called once from its click and never on mount', async () => {
     const p = inst(ID);
     let settle: (outcome: AcquireOutcome) => void = () => {};
-    const refresh = vi.fn(() => new Promise<AcquireOutcome>((resolve) => (settle = resolve)));
-    show(identityOf(p, viewOf(p)), { loaded: loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }), loadedIds: new Set(['other@x']), refresh });
+    const refresh = vi.fn(() => loadForRead(SESSION));
+    const invoke = vi.fn((name: string) => (name === 'session.acquire' ? new Promise((resolve) => (settle = (value) => resolve({ ok: true, value }))) : Promise.resolve({ ok: true, value: null })));
+    window.maws = { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as MawsBridge;
+    useSessions.setState({ records: new Map([[SESSION, record(SESSION)]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'resumable' })]]) });
+    show(identityOf(p, viewOf(p)), { loaded: loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }, refresh), loadedIds: new Set(['other@x']) });
     expect(fact('enabled').textContent).toBe('Enabled for this project');
     expect(within(fact('loaded')).getByText('Not loaded in this session')).toBeTruthy();
     expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Refresh' }));
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(within(fact('loaded')).getByRole('status').textContent).toBe('Starting…');
-    await act(async () => settle({ status: 'refused', appSessionId: 'x', reason: 'busy', message: 'The session is busy elsewhere' } as AcquireOutcome));
-    expect(screen.getByRole('alert').textContent).toBe('The session is busy elsewhere');
+    await act(async () => settle({ status: 'refused', appSessionId: SESSION, reason: 'busy', message: 'The session is busy elsewhere' } as AcquireOutcome));
+    await waitFor(() => expect(fact('loaded').textContent).toContain('The session is busy elsewhere'));
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a session a terminal holds offers the holder’s actions in place of Refresh', () => {
+    const p = inst(ID);
+    useSessions.setState({ records: new Map([[SESSION, record(SESSION, { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'foreign_held' })]]) });
+    show(identityOf(p, viewOf(p)), { availability: 'foreign_held', loaded: loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }), loadedIds: new Set(['other@x']) });
+    expect(within(fact('loaded')).getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(within(fact('loaded')).getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(within(fact('loaded')).queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 
   it('a ready session offers Reload plugins instead; a disabled plugin is offered neither; no list is Not observed yet', () => {
     const p = inst(ID);
     const reloadMods = vi.fn();
-    show(identityOf(p, viewOf(p)), { loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false } });
+    show(identityOf(p, viewOf(p)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false } });
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Reload plugins' }));
     expect(reloadMods).toHaveBeenCalledTimes(1);
     cleanup();
     const off = inst(ID, { enabled: false });
-    show(identityOf(off, viewOf(off)), { loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), refresh: vi.fn() });
+    show(identityOf(off, viewOf(off)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']) });
     expect(fact('loaded').textContent).toBe('Not loaded in this session');
     cleanup();
     show(identityOf(p, viewOf(p)));

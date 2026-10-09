@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { identitiesOf } from '../plugins/library';
-import type { ObservedPlugin } from '../plugins/loaded';
+import type { ObservedPlugin } from '@shared/engine/observed-facts';
 import { badgeOf, hasPluginSkills, labelOf, skillGroups, skillsView, type SkillGroup } from './skills';
 
 const HERE = '/work/proj';

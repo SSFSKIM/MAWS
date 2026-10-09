@@ -12,7 +12,7 @@ import type { GetSkillsDialogResponse } from '@shared/wire/control';
 import type { SessionCatalog } from '../../stores/catalog';
 import { parseEach } from '../parts';
 import { displayNameOf, GROUP_ORDER, SKILLS_DIR, type PluginIdentity, type SourceGroup } from '../plugins/library';
-import type { ObservedPlugin } from '../plugins/loaded';
+import type { ObservedPlugin } from '@shared/engine/observed-facts';
 
 export interface SkillRow {
   name: string; // the engine's name, which `/<name>` invokes (a plugin's qualified)

@@ -16,7 +16,7 @@ import { LIBRARY as L } from '../copy';
 import { BuiltInMods } from './BuiltInMods';
 import { isNarrowed, loadedOnly, loadedOnlyShown, myItems, problemsShown, type PluginIdentity } from './library';
 import { useLibraryStore } from './library-store';
-import type { LoadedPlugins } from './loaded';
+import type { LoadedPlugins } from '../../sessions/observed';
 import { LoadedBody, present } from './LoadedView';
 import { Gone, useManage } from './manage';
 import { GroupHeading, INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from './PluginRow';
