@@ -124,8 +124,9 @@ export function WidgetFrame({ appSessionId, title, command, state, error, readAt
           </button>
         </span>
       </header>
-      {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll */}
-      <div data-widget-body className={size === 'library' ? 'flex min-h-0 flex-1 flex-col pt-2' : 'max-h-[60vh] overflow-y-auto px-2 py-2'}>
+      {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn
+          above them, keeps the head's inset (2026-10-10) */}
+      <div data-widget-body className={size === 'library' ? 'flex min-h-0 flex-1 flex-col pt-2 [&>[data-dormant-gesture]]:px-2' : 'max-h-[60vh] overflow-y-auto px-2 py-2'}>
         {body}
       </div>
     </div>

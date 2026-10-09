@@ -107,6 +107,14 @@ describe('the detail: enabled for this project and loaded in this session', () =
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('a Refresh whose reload failed after the start says so under the fact', () => {
+    const p = inst(ID);
+    useSessions.setState({ records: new Map([[SESSION, record(SESSION)]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'resumable' })]]) });
+    const loaded = { ...loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }), reload: { line: 'reload_plugins unanswered after 60 s · timeout', failed: true } };
+    show(identityOf(p, viewOf(p)), { loaded, loadedIds: new Set(['other@x']) });
+    expect(screen.getByRole('alert').textContent).toBe('reload_plugins unanswered after 60 s · timeout');
+  });
+
   it('a session a terminal holds offers the holder’s actions in place of Refresh', () => {
     const p = inst(ID);
     useSessions.setState({ records: new Map([[SESSION, record(SESSION, { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'foreign_held' })]]) });

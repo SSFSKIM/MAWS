@@ -272,6 +272,11 @@ function Facts({ appSessionId, availability, identity, loaded, loadedIds, reload
           {reloads.line}
         </p>
       )}
+      {offerReload && !reloads?.line && loaded.reload.failed && (
+        <p role="alert" className="m-0 text-ui-sm text-danger [overflow-wrap:anywhere]">
+          {loaded.reload.line}
+        </p>
+      )}
       {problems.length > 0 && (
         <ul aria-label={L.problems(problems.length)} className="m-0 mt-1 list-none p-0 text-ui-sm">
           {problems.map((p, i) => (
