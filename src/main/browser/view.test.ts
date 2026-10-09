@@ -14,12 +14,14 @@ vi.mock('electron', () => ({
   BaseWindow: class {
     readonly children = new Set<unknown>();
     destroyed = false;
+    isDestroyed = () => this.destroyed;
     readonly contentView = {
       addChildView: (view: { calls: string[] }) => {
         view.calls.push('staged');
         this.children.add(view);
       },
       removeChildView: (view: { calls: string[] }) => {
+        if (this.destroyed) throw new TypeError('Object has been destroyed'); // Electron's, once the window closed
         view.calls.push('unstaged');
         this.children.delete(view);
       },
@@ -368,7 +370,10 @@ describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
     h.place(sender, tabId, 'p1', R, true);
     view.focused = true;
     const order: string[] = [];
-    w.webContents.focus.mockImplementation(() => void order.push('focus window'));
+    w.webContents.focus.mockImplementation(() => {
+      order.push('focus window');
+      view.focused = false; // the window's own page took it
+    });
     const setVisible = view.setVisible.bind(view);
     view.setVisible = (visible: boolean) => {
       order.push(`visible ${visible}`);
@@ -534,6 +539,66 @@ describe('the view manager: the cover\'s still (cua board #90)', () => {
     h.store.update(tabId, { title: 'again' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(view.calls.filter((c) => c === 'capture')).toHaveLength(1); // once per cover
+  });
+
+  it('a still from an earlier cover never hides the page a newer cover is still capturing', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    const answers: ((image: unknown) => void)[] = [];
+    view.capture = () => new Promise((resolve) => answers.push(resolve));
+    const first = h.manager.cover(true, sender); // a menu opens
+    await h.manager.cover(false, sender); // it closes
+    const second = h.manager.cover(true, sender); // as another opens
+    answers[0]!(fakeImage(10)); // the first cover's capture answers late
+    await first;
+    expect(view.visible).toBe(true); // still up: the second cover's still is not in the pane yet
+    expect(h.covered()).toEqual([]);
+    answers[1]!(fakeImage(10));
+    await second;
+    expect(h.covered()).toEqual([{ tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) }]);
+    expect(view.visible).toBe(false);
+  });
+
+  it('a page clicked while it stayed up for its capture gives the focus back to the window when it hides', async () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    let answer!: (image: unknown) => void;
+    view.capture = () => new Promise((resolve) => (answer = resolve));
+    const pending = h.manager.cover(true, sender);
+    expect(w.webContents.focus).not.toHaveBeenCalled(); // the page did not hold it at the cover
+    view.focused = true; // a click on the page, still on top during the capture
+    answer(fakeImage(10));
+    await pending;
+    expect(view.visible).toBe(false);
+    expect(w.webContents.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('a staged capture whose staging window closed meanwhile (the app quitting) settles without throwing', async () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId } = h.store.open({ appSessionId: A, url: 'https://late.test/', select: true }).tab;
+    const view = h.views.at(-1)!;
+    h.place(sender, tabId, 'p1', R, true);
+    await h.manager.cover(true, sender);
+    let captures = 0;
+    let answer!: (image: unknown) => void;
+    view.capture = () => (++captures === 1 ? Promise.resolve(fakeImage(10, true)) : new Promise((resolve) => (answer = resolve)));
+    stages.length = 0;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    h.store.navigationCommitted(tabId, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    h.store.update(tabId, { loading: false });
+    await vi.waitFor(() => expect(captures).toBe(2)); // in the staging window
+    stages[0]!.destroyed = true; // Electron closed it on quit
+    answer(fakeImage(10));
+    await vi.waitFor(() => expect(h.covered()).toHaveLength(1));
+    expect(warn).not.toHaveBeenCalled();
+    expect(w.children.has(view)).toBe(true);
+    expect(view.visible).toBe(false);
+    warn.mockRestore();
   });
 
   it('a page that never painted is captured in a hidden staging window, then put back in its window, hidden, at its rect', async () => {

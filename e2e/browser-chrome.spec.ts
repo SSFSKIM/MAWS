@@ -631,7 +631,7 @@ async function expectStill(pane: Locator): Promise<void> {
 }
 
 // Watches, frame by frame in the window and every 2 ms in main, for a moment when the tab's view is hidden and its pane
-// draws no still: answers those moments (ms since the watch began) when stopped.
+// has no decoded still: answers those moments (ms since the watch began) when stopped.
 async function watchHoles(s: ImportScene, tabId: string, pane: Locator): Promise<() => Promise<number[]>> {
   await s.maws.app.evaluate((_electron, id) => {
     const g = globalThis as unknown as { __holeMain: [number, boolean][]; __holeTimer: ReturnType<typeof setInterval>; __maws_browser: { tab(id: string): { visible: boolean } | null } };
@@ -643,7 +643,8 @@ async function watchHoles(s: ImportScene, tabId: string, pane: Locator): Promise
     w.__holeFrames = [];
     w.__holeOn = true;
     const frame = () => {
-      w.__holeFrames.push([Date.now(), element.querySelector('img') !== null]);
+      const img = element.querySelector('img');
+      w.__holeFrames.push([Date.now(), img !== null && img.complete && img.naturalWidth > 0]); // decoded, not just mounted
       if (w.__holeOn) requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

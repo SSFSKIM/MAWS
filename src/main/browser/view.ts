@@ -88,7 +88,7 @@ export class ViewManager {
   private readonly focusEmulated = new WeakMap<TabEntry, boolean>();
   // cua #90: the cover generation each tab's still was taken for, and the pages kept on screen while theirs is taken
   private readonly stills = new WeakMap<TabEntry, number>();
-  private readonly capturing = new WeakSet<TabEntry>();
+  private readonly capturing = new WeakMap<TabEntry, number>(); // the cover generation keeping each page up
   private readonly staged = new WeakSet<TabEntry>(); // in the staging window for its still: left alone meanwhile
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
@@ -147,12 +147,10 @@ export class ViewManager {
     const generation = this.nextGeneration(win);
     const showing = placed.filter((entry) => entry.visible);
     // any placed page holding the native focus gives it to the window's own page, so the layer takes the typing and Esc
-    // (a page that closed itself has a destroyed webContents until its tab is dropped, and holds nothing)
-    const focused = (entry: TabEntry) => entry.view !== null && !entry.view.webContents.isDestroyed() && entry.view.webContents.isFocused();
-    if (placed.some(focused)) win.webContents.focus();
+    if (placed.some(holdsFocus)) win.webContents.focus();
     this.coveredWindows.add(win.id);
     // cua #90: a page on screen stays up until its still is in the pane (`still`), so the pane never shows a hole
-    for (const entry of showing) this.capturing.add(entry);
+    for (const entry of showing) this.capturing.set(entry, generation);
     for (const entry of placed) this.apply(entry);
     await Promise.all(showing.map((entry) => this.still(entry, win, generation)));
   }
@@ -215,14 +213,24 @@ export class ViewManager {
       this.deps.store.entry(entry.tab.tabId) === entry &&
       entry.view === view &&
       entry.placement?.window === win; // not moved to another window meanwhile
+    const keptUp = () => this.capturing.get(entry) === generation; // a later cover's mark is that cover's own
     let placeholder = await placeholderOf(view);
-    if (placeholder === null && !this.capturing.has(entry) && current()) placeholder = await this.stagedCapture(entry, view);
+    if (placeholder === null && !keptUp() && current()) placeholder = await this.stagedCapture(entry, view);
     if (current()) this.deps.emit('browser.view.covered', { tabId: entry.tab.tabId, placeholder });
-    if (this.capturing.has(entry)) {
-      if (current() && placeholder !== null) await delay(STILL_SETTLE_MS);
-      this.capturing.delete(entry);
-      this.apply(entry);
-    }
+    if (!keptUp()) return;
+    if (current() && placeholder !== null) await delay(STILL_SETTLE_MS);
+    if (!keptUp()) return;
+    this.capturing.delete(entry);
+    // the page stayed on top meanwhile, so a click may have given it the native focus, which a hidden view keeps: the
+    // window's own page takes it back, so the layer gets the typing and Esc
+    if (current() && holdsFocus(entry) && !win.isDestroyed()) win.webContents.focus();
+    this.apply(entry);
+  }
+
+  // cua #90: whether the tab is in the staging window for its still, where nobody can see it (its page's dialogs are
+  // answered as an unplaced tab's are, agent/dialogs.ts)
+  staging(entry: TabEntry): boolean {
+    return this.staged.has(entry);
   }
 
   private async stagedCapture(entry: TabEntry, view: WebContentsView): Promise<string | null> {
@@ -243,7 +251,7 @@ export class ViewManager {
     } finally {
       this.staged.delete(entry);
       if (!view.webContents.isDestroyed()) {
-        stage.contentView.removeChildView(view);
+        if (!stage.isDestroyed()) stage.contentView.removeChildView(view); // closed already when the app quits
         view.setVisible(false);
         entry.visible = false;
         if (entry.view === view && entry.host && !entry.host.isDestroyed()) {
@@ -251,7 +259,7 @@ export class ViewManager {
           if (entry.placement) view.setBounds(entry.placement.rect);
         }
       }
-      stage.destroy();
+      if (!stage.isDestroyed()) stage.destroy();
       if (entry.view === view) this.apply(entry);
     }
     return placeholder;
@@ -262,11 +270,11 @@ export class ViewManager {
     const { view, placement } = entry;
     const covered = placement !== null && this.coveredWindows.has(placement.window.id);
     const here = view !== null && placement !== null && entry.host === placement.window && shown(entry);
-    const visible = here && (!covered || this.capturing.has(entry));
+    const visible = here && (!covered || this.capturing.get(entry) === this.coverGeneration.get(placement.window.id));
     if (here && covered && !visible && !entry.tab.loading) {
       // cua #90: shown under a cover with no still taken for it yet
       const generation = this.coverGeneration.get(placement.window.id) ?? 0;
-      if (this.stills.get(entry) !== generation) void this.still(entry, placement.window, generation);
+      if (this.stills.get(entry) !== generation) this.still(entry, placement.window, generation).catch((error: unknown) => console.warn('[browser] a covered page’s still failed:', error instanceof Error ? error.message : error));
     }
     if (!this.staged.has(entry)) {
       // cua #90: a view in the staging window keeps showing there; it is applied again once back in its window
@@ -352,6 +360,10 @@ export class ViewManager {
 }
 
 const withoutHash = (url: string) => url.split('#', 1)[0];
+
+// Whether a tab's page holds the native focus (a page that closed itself has a destroyed webContents until its tab is
+// dropped, and holds nothing).
+const holdsFocus = (entry: TabEntry) => entry.view !== null && !entry.view.webContents.isDestroyed() && entry.view.webContents.isFocused();
 
 // cua #90: how long a page on screen stays up after its still went to the pane: two frames for the pane to draw it.
 const STILL_SETTLE_MS = 34;

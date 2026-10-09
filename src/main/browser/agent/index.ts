@@ -62,7 +62,7 @@ declare module '../inspect' {
 export interface AgentPresenceDeps {
   store: TabStore;
   emit: BrowserEmit;
-  views: Pick<ViewManager, 'park'>; // E4a's view manager, for parking (visible.ts)
+  views: Pick<ViewManager, 'park' | 'staging'>; // E4a's view manager, for parking (visible.ts); cua #90: staged views
   controls: TabControls;
   cursor: AgentCursor;
   // the tabs cua's primitive server holds a lease on are parked; their dialogs take cua's held route (A-53)
@@ -78,7 +78,7 @@ export function startAgentPresence(deps: AgentPresenceDeps): AgentPresence {
   const { store, emit, controls, cursor } = deps;
   const log = (line: string) => console.warn(`[browser] ${line}`);
   const parking = new Parking({ store, views: deps.views, controls, leases: deps.cua });
-  const dialogs = new PageDialogs({ store, emit, log, held: deps.cua.dialogs });
+  const dialogs = new PageDialogs({ store, emit, log, held: deps.cua.dialogs, staged: (entry) => deps.views.staging(entry) /* cua #90 */ });
 
   const inputs = new WeakMap<TabEntry, InputEmission[]>();
   const stopInputs = store.onViewCreated((entry) => {
