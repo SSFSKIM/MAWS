@@ -107,8 +107,10 @@ for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/
  const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
  const rows=text.trim().split('\n').map(JSON.parse);const pending=pass3Open(rows);
  // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …); a P1 child (E0a, E8, …) names the P1
- // composite spec too, as `spec` or as `document` (docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin)
- const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^(C\d+[a-z]?|E\d+[a-z]?)$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);if(/^E/.test(prov.child))assert.match(prov.spec??prov.document,/^docs\/doperpowers\/plans\/.*\.md$/);
+ // composite spec too, as `spec` or as `document` (docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin);
+ // a P2 child (P2-0, P2-A … P2-F, P2-E1, P2-E2; 2026-10-08, docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U1, U2)
+ // names the P2 composite spec or its own execution document the same way
+ const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^(C\d+[a-z]?|E\d+[a-z]?|P2-(0|[A-F]\d?))$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);if(/^(E|P2-)/.test(prov.child))assert.match(prov.spec??prov.document,/^docs\/doperpowers\/plans\/.*\.md$/);
  // E11 S1 (2026-10-08, docs/doperpowers/plans/2026-10-06-e11-finish.md Task 6.2): as in pass 2, exit code 1 is the
  // engine's print-mode status when the last result was an error (p1-maws-ask-interrupt: the interrupted turn's
  // error_during_execution, then the host's stop); every request must still be closed
