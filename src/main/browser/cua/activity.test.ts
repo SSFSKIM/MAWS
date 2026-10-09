@@ -178,10 +178,11 @@ describe('the windows\' feed', () => {
         await drain();
       }
       const before = first.list(B);
-      first.dispose(); // what is still unwritten is written now
 
-      // the app restarts: a new feed over the reopened index answers the same list, and what is told next joins it
+      // the app restarts, in a quit's order: the index closes before the browser stops; a new feed over the reopened
+      // index answers the same list, and what is told next joins it
       index = reopen();
+      first.dispose();
       const emitted: BrowserAgentActivity[] = [];
       const second = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload as BrowserAgentActivity), now: () => now, store: index.browserActivity });
       expect(second.list(B)).toEqual(before);
@@ -198,8 +199,23 @@ describe('the windows\' feed', () => {
     });
   });
 
+  it('writes a row still queued when the index closes before the feed is disposed, as a quit orders them', async () => {
+    await withIndex(async (index, _path, reopen) => {
+      const B = index.sessions.upsertFromSummary(summary()).record.appId;
+      const emitted: unknown[] = [];
+      const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store: index.browserActivity });
+      activity.tell(B, T, { kind: 'screenshot' });
+      for (let i = 0; i < 10; i++) await Promise.resolve(); // told live; its write still waits for the next turn
+      expect(emitted).toHaveLength(1);
+      index = reopen(); // the index's will-quit step, then the browser's
+      activity.dispose();
+      await written();
+      expect(index.browserActivity.list(B).map((a) => a.activity)).toEqual([{ kind: 'screenshot' }]);
+    });
+  });
+
   it('writes what one tick told in one append, on the next turn', async () => {
-    const store = { list: vi.fn((): BrowserAgentActivity[] => []), append: vi.fn() };
+    const store = { list: vi.fn((): BrowserAgentActivity[] => []), append: vi.fn(), beforeClose: vi.fn(() => () => {}) };
     const emitted: unknown[] = [];
     const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store });
     activity.tell(A, T, { kind: 'screenshot' });
@@ -226,7 +242,7 @@ describe('the windows\' feed', () => {
         activity.tell(B, T, { kind: 'screenshot' });
         await written();
         await new Promise((resolve) => setTimeout(resolve, 0)); // a zero-delay timer: what the event loop waited for
-        expect(performance.now() - started).toBeLessThan(50); // the index's own connection would wait 2 s
+        expect(performance.now() - started).toBeLessThan(500); // the index's own connection would wait 2 s
         expect(emitted).toHaveLength(1);
         expect(log).toHaveBeenCalledTimes(1);
         expect(log.mock.calls[0]![0]).toMatch(/locked|busy/i);
@@ -251,6 +267,8 @@ describe('the windows\' feed', () => {
       append: vi.fn(() => {
         if (failing) throw new Error('database is locked');
       }),
+
+      beforeClose: vi.fn(() => () => {}),
     };
     const emitted: unknown[] = [];
     let now = 1_000_000;

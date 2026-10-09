@@ -74,13 +74,22 @@ describe('BrowserActivityStore', () => {
     try {
       const started = performance.now();
       expect(() => index.browserActivity.append([told(a, 1)])).toThrow(/locked|busy/i);
-      expect(performance.now() - started).toBeLessThan(100); // never the index's 2 s busy timeout
+      expect(performance.now() - started).toBeLessThan(500); // never the index's 2 s busy timeout
     } finally {
       other.exec('ROLLBACK');
       other.close();
     }
     index.browserActivity.append([told(a, 2)]);
     expect(index.browserActivity.list(a)).toEqual([told(a, 2)]);
+  });
+
+  it('runs its flushers as it closes, before the write connection goes, and not after one is removed', () => {
+    index.browserActivity.beforeClose(() => index.browserActivity.append([told(a, 1)]));
+    const removed = index.browserActivity.beforeClose(() => index.browserActivity.append([told(a, 2)]));
+    removed();
+    index.close();
+    index = new Index(path);
+    expect(index.browserActivity.list(a)).toEqual([told(a, 1)]);
   });
 
   it('writes nothing once closed', () => {

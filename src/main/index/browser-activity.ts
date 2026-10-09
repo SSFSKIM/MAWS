@@ -27,6 +27,7 @@ interface Writer {
 export class BrowserActivityStore {
   private writer: Writer | null = null; // opened on the first write
   private closed = false;
+  private readonly flushers = new Set<() => void>();
 
   constructor(
     private readonly db: Db,
@@ -65,8 +66,24 @@ export class BrowserActivityStore {
     }
   }
 
-  // The index is closing: the write connection with it.
+  // `flush` writes what its writer still holds; it runs when the index closes, before the write connection does. At a
+  // quit the index closes before the browser stops, so this is how a row told in the last tick is still written.
+  beforeClose(flush: () => void): () => void {
+    this.flushers.add(flush);
+    return () => this.flushers.delete(flush);
+  }
+
+  // The index is closing: what the writers still hold is written, then the write connection closes.
   close(): void {
+    if (this.closed) return;
+    for (const flush of this.flushers) {
+      try {
+        flush();
+      } catch (error) {
+        console.warn(`[index] the browser activity's last write failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    this.flushers.clear();
     this.closed = true;
     this.writer?.db.close();
     this.writer = null;

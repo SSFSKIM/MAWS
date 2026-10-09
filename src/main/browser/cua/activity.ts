@@ -15,8 +15,9 @@
 // transcript mounts, so a reload or a second window shows the rows again. Since cua board #93 they are also written to
 // the index (src/main/index/browser-activity.ts), and a session's are loaded from it on first use, so an app restart
 // shows them too. The store is never in the way of a live row: what a tick told is written in one transaction on the
-// next turn of the event loop, after the CDP handler that produced it returned, over a connection that fails at once
-// rather than wait for a lock; a failed read or write is logged, once, and its rows are kept live only.
+// next turn of the event loop (or as the index closes, which a quit does before the browser stops), after the CDP
+// handler that produced it returned, over a connection that fails at once rather than wait for a lock; a failed read or
+// write is logged, once, and its rows are kept live only.
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_ACTIVITIES_KEPT, BROWSER_ACTIVITY_KEY_MAX_CHARS, BROWSER_ACTIVITY_LABEL_MAX_CHARS, type BrowserActivity, type BrowserAgentActivity } from '@shared/browser/activity';
 import type { BrowserActivityStore } from '../../index/browser-activity';
@@ -126,7 +127,7 @@ export interface ActivityFeedDeps {
   emit: BrowserEmit;
   now?(): number;
   // cua board #93: where what was told outlives the app (absent: kept for the app's life only)
-  store?: Pick<BrowserActivityStore, 'list' | 'append'>;
+  store?: Pick<BrowserActivityStore, 'list' | 'append' | 'beforeClose'>;
   log?(line: string): void;
 }
 
@@ -142,10 +143,12 @@ export class ActivityFeed {
   private readonly log: (line: string) => void;
   private storeFailing = false; // the store's last read or write failed (logged once until one succeeds again)
   private unwritten: BrowserAgentActivity[] = []; // told this tick, written on the next (cua board #93)
+  private readonly stopFlushing: () => void;
 
   constructor(private readonly deps: ActivityFeedDeps) {
     this.now = deps.now ?? Date.now;
     this.log = deps.log ?? ((line) => console.warn(`[browser] ${line}`));
+    this.stopFlushing = deps.store?.beforeClose(() => this.write()) ?? (() => {}); // the index closes before the browser stops at a quit
   }
 
   // One activity (or one still being named: a click's label); what was typed before it on the tab is told first.
@@ -196,6 +199,7 @@ export class ActivityFeed {
     for (const { timer } of this.typing.values()) clearTimeout(timer);
     this.typing.clear();
     this.write();
+    this.stopFlushing();
   }
 
   // What was told since the last write, in one transaction (cua board #93).

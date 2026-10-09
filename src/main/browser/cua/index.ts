@@ -43,7 +43,7 @@ export interface CuaBackendDeps {
   // M3: control's transitions, the takeover gate and the agent's cursor (absent: the bare server, no transitions)
   presence?: Omit<PresenceDeps, 'store'>;
   emit?: BrowserEmit; // M3: `browser.agent.activity` (and, since the final fix wave, `browser.agent.acting`) to the windows (absent: nothing told)
-  activityStore?: Pick<BrowserActivityStore, 'list' | 'append'>; // cua board #93: the activity kept across restarts (absent: the app's life)
+  activityStore?: Pick<BrowserActivityStore, 'list' | 'append' | 'beforeClose'>; // cua board #93: the activity kept across restarts (absent: the app's life)
   // M3: an agent's finished download to the session's engine host (`maws.download.recorded`), which records it once
   recordDownload?(download: MawsDownloadRecorded): Promise<unknown>;
   now?(): number;
