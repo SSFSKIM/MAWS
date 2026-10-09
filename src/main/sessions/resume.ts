@@ -15,6 +15,7 @@ import { resumeLaunchSpec } from './launch-mapping';
 import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
+import { launchScopeOf } from './artifact-scope'; // P2-E1
 
 // C3 corrective: the host's code for an engine that wrote nothing before its first-output bound, and what the retry says
 const NO_OUTPUT = 'no_output';
@@ -64,9 +65,10 @@ export async function runResume(
     let spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings());
     let end: LaunchEnd;
     let previousLaunchId: string | null = null;
+    const scope = launchScopeOf(s.sessions, record.lineage); // P2-E1: a side thread's ancestors' artifacts, resolved at every resume
     for (;;) {
       watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? 15_000 : undefined);
-      const answer = await hostCall(s.dispatch, 'session.launch', { spec });
+      const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...scope });
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
       launched = true;

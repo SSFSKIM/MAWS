@@ -42,8 +42,11 @@ class CaptureFailure extends Error {}
 
 // One capture, start to finish: the version checked on disk, the window opened, loaded, settled, captured, encoded and
 // destroyed. Never rejects: every failure is an answer with its reason.
+// P2-E1: a side thread's capture of its ancestor's artifact names the record's session (`ownerAppSessionId`); the version
+// is read and rendered there, and the answer still goes to the requesting session.
 export async function captureArtifact(request: MawsArtifactCapture, { reader, env }: CaptureDeps): Promise<MawsArtifactCapturedResult> {
-  const { record, present } = await reader.get(request.appSessionId, request.deliverableId).catch(() => ({ record: null, present: [] as boolean[] }));
+  const owner = request.ownerAppSessionId ?? request.appSessionId;
+  const { record, present } = await reader.get(owner, request.deliverableId).catch(() => ({ record: null, present: [] as boolean[] }));
   if (!record) return { ok: false, error: `no deliverable ${request.deliverableId} in this session` };
   if (request.version > record.versions.length) return { ok: false, error: `version ${request.version} does not exist` };
   if (!present[request.version - 1]) return { ok: false, error: `version ${request.version} is not on disk any more` };
@@ -55,7 +58,7 @@ export async function captureArtifact(request: MawsArtifactCapture, { reader, en
       guard = setTimeout(() => reject(new CaptureFailure(`the page did not finish loading within ${CAPTURE_GUARD_MS / 1000} s`)), CAPTURE_GUARD_MS);
     });
     const consoleErrors: string[] = [];
-    const image = await Promise.race([render(win, deliverableUrl(request.appSessionId, request.deliverableId, request.version), consoleErrors), timedOut]);
+    const image = await Promise.race([render(win, deliverableUrl(owner, request.deliverableId, request.version), consoleErrors), timedOut]);
     const encoded = encodeCapture(image);
     return 'error' in encoded ? { ok: false, error: encoded.error } : { ok: true, png: encoded.png.toString('base64'), width: encoded.width, height: encoded.height, consoleErrors };
   } catch (error) {
