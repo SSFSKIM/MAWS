@@ -18,6 +18,7 @@ import { AgentListRow } from './AgentList'; // E7
 import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
+import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
 import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -59,6 +60,7 @@ function body(row: Row) {
     case 'artifact': return <ArtifactRowView row={row} />; // E2
     case 'browser_action': return <BrowserActionRow row={row} />; // E4c
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
+    case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
   }
 }
 

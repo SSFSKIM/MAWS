@@ -33,6 +33,7 @@ import { peerMessageCopy } from './copy'; // E7
 import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type BrowserCallSummary, type BrowserToolName } from '@shared/maws/browser';
 import type { ContentBlock } from '@shared/graph/events';
 import { denialDisposition } from './classify';
+import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
 // E4c end
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -124,7 +125,8 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
-  || isPersistentMessage(row); // E7
+  || isPersistentMessage(row) // E7
+  || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -753,7 +755,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     else ordered.push(item);
   });
 
-  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => row.kind === 'assistant_text' && ui?.assistantInk.has(row.id) ? { ...row, forHuman: true } : row);
+  // P2-C (2026-10-09): while the owner channel's lane is on, a text with a mark is addressed to the human as an inked
+  // drawing is, so it stays in view when the work folds (the report module draws it; Rows.tsx)
+  const forHuman = (row: Extract<Row, { kind: 'assistant_text' }>) => ui?.assistantInk.has(row.id) || (ui?.ownerLane === true && marksOfText(row.markdown, row.live).marked);
+  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row);
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);

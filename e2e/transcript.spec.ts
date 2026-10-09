@@ -823,7 +823,8 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
 // from the sites R2 recorded on the installed 2.1.287 (pass3/mods-surface-*) replayed through the replay transport into
 // the product app's session tab. The replay answers the surface's renders from the fixture by site and instance; the
 // person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
-// so C4 indexes a record the sidebar shows; no engine runs.
+// so C4 indexes a record the sidebar shows; no engine runs. P2-C (2026-10-09): these record P1's drawing of the owner's
+// mod, so the owner channel's lane is switched off first (with it on, MAWS draws the marks itself: the M5 case below).
 type SurfaceSeed = (base: { repo: string; engineId: string }) => Record<string, unknown>[];
 async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']>; userData: string }) => Promise<void>, seed?: SurfaceSeed, beforeLaunch?: (pane: ReturnType<Page['locator']>) => Promise<void>, attached = true) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
@@ -843,6 +844,7 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
   try {
     const { page } = maws;
+    value(await invoke(page, 'settings.set', { mods: { toHuman: { enabled: false } } })); // P2-C: P1's drawing
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
     await (await sidebarRow(page, { appSessionId: id })).click();
@@ -1125,6 +1127,114 @@ test('M1 marked commentary is visible at full contrast before and after folding 
   });
 });
 
+
+// P2-C M5 (2026-10-09; the P2-C document, Design §7 and §8, acceptance G3 and G5's presentation): with the owner
+// channel's lane on (the default), a replayed turn whose reply carries the four marks nested as U2 S13 recorded them,
+// after one Bash call and one unmarked sentence (test/fixtures/engine/p2c-report-marks.jsonl), reads as the report:
+// the prompt, one "Working record" row, the cards. The record opens to the ordinary divider, the divider to the tool
+// row, "Fold to report" closes it; an unmarked turn draws as the full transcript; the header's toggle shows the full
+// transcript with the marks still as cards. No engine runs.
+test('M5 the report view folds a marked turn into its working record and draws the four marks as cards', async () => {
+  test.setTimeout(120_000);
+  const fixture = 'test/fixtures/engine/p2c-report-marks.jsonl';
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-report-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const engineId = randomUUID();
+  const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session that reports' }, uuid: randomUUID(), timestamp: '2026-10-09T07:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.295' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { page } = maws;
+    let id = '';
+    await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    await page.mouse.move(0, 0);
+    const pane = page.locator('[data-region="main"] [data-pane="0"]');
+    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await launchReady(page, id, fixture, { cwd: repo });
+    const prompts = readFileSync(join(REPO_ROOT, fixture), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; message?: { content?: string } } }).filter((row) => row.direction === 'out' && row.frame.type === 'user').map((row) => row.frame.message!.content!);
+    for (const content of prompts) {
+      value(await invoke(page, 'session.send', { appSessionId: id as never, content }));
+      await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).turn, { timeout: 20_000 }).toBeNull();
+    }
+    await expect(pane.getByText('Nothing else for now.', { exact: true })).toBeVisible();
+
+    // The header: the view toggle at the trailing end, on the report
+    const toggle = pane.getByRole('group', { name: 'Session view' });
+    await expect(toggle.getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
+
+    // Level 0: the prompt, one working record that counts what it holds, the cards in the reply's order
+    const record = pane.getByRole('button', { name: /^Working record/ });
+    await expect(record).toHaveText('Working record · 1 tool call · 1 message');
+    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    const report = pane.locator('[data-owner-report]');
+    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
+    await expect(report.locator('[data-owner-card="to-human"]')).toContainText("I haven't opened any files");
+    await expect(report.locator('[data-owner-card="essential"]')).toContainText('The README above is unverified.');
+    const question = report.locator('[data-owner-card="need-input"]');
+    await expect(question).toContainText('Which tone should the README use?');
+    await expect(question.getByRole('group', { name: 'Choices' }).getByRole('button')).toHaveText([/^Concise reference style.*Recommended$/, /^Friendly guide style/]);
+    await expect(question.getByRole('button', { name: 'Reply' })).toBeDisabled(); // M5 draws; M6 answers
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0); // the unmarked turn has no work: no divider either
+    // the insight beside the message when the pane leaves a 240 px margin, else under it in reading order
+    const placement = await report.locator('.owner-insights').evaluate((el) => {
+      const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
+      const column = el.closest('.thread-column') as HTMLElement;
+      return { placement: el.getAttribute('data-placement'), room: (scroller.clientWidth - column.offsetWidth) / 2 };
+    });
+    expect(placement.placement).toBe(placement.room >= 256 ? 'margin' : 'inline');
+    await captureReportShot(page, 'report-level0');
+
+    // Level 1: the turn as the full transcript draws it folded, the record above it
+    await record.click();
+    const fold = pane.getByRole('button', { name: 'Fold to report' });
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    const divider = pane.locator('[data-kind="divider"] .transcript-divider > .transcript-disclosure');
+    await expect(divider).toHaveAttribute('aria-expanded', 'false');
+    await expect(divider).toContainText('1 tool call');
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
+    // Level 2: the divider expanded shows the tool row
+    await divider.click();
+    await expect(pane.getByText('git status --short', { exact: false }).first()).toBeVisible();
+    await captureReportShot(page, 'report-level2');
+    await fold.click();
+    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+
+    // The full transcript: no record, every word, the marks still as cards
+    await toggle.getByRole('button', { name: 'Transcript' }).click();
+    await expect(pane.getByRole('button', { name: /^Working record/ })).toHaveCount(0);
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
+    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
+    await toggle.getByRole('button', { name: 'Report' }).click();
+    await expect(pane.getByRole('button', { name: /^Working record/ })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Light and dark shots of the report for M5's review, outside the repository.
+async function captureReportShot(page: Page, name: string) {
+  const dir = '/tmp/maws-p2c-m5-evidence';
+  mkdirSync(dir, { recursive: true });
+  try {
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(dir, `${name}-${theme}.png`), animations: 'disabled' });
+    }
+  } finally {
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+  }
+}
 
 const sittingReplays = [
   { fixture: 'mods-surface-sitting', headers: false },

@@ -53,6 +53,7 @@ function partOf(row: Row): string | null {
     case 'artifact': return `**${artifactHeading(row)}**`; // E2
     case 'browser_action': return browserActionPart(row); // E4c
     case 'browser_activity': return `- ${browserActivityLine(row.activity)}`; // E13
+    case 'owner_record': return null; // P2-C (2026-10-09): the report view's own row; the copy is the transcript's
   }
 }
 

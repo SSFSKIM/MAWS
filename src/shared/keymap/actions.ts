@@ -72,6 +72,10 @@ export const ACTIONS = {
   // unbound by default
   'file.commentLine':        { title: 'Comment on this line',     chord: null,           sink: 'menu', menu: 'file', scope: 'app' },
   // E11 end
+  // P2-C start (2026-10-09; the parent's Decision Log 19): the focused pane's session tab between its report and its
+  // full transcript while the owner channel's lane is on, as the pane header's toggle does; unbound by default
+  'transcript.toggleReport': { title: 'Toggle report and transcript', chord: null,         sink: 'renderer', menu: null, scope: 'app' },
+  // P2-C end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

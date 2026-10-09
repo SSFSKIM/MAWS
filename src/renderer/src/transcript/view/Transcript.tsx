@@ -24,6 +24,9 @@ import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
 import { withBrowserActivityRows } from '../model/browser-activity'; // E13
 import type { AppSessionId } from '@shared/graph/ids'; // E13
+// P2-C start (2026-10-09)
+import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/project';
+// P2-C end
 import './transcript.css';
 
 export const SCROLL_END_THRESHOLD = 80;
@@ -39,6 +42,7 @@ const ESTIMATES: Record<RowKind, number> = {
   artifact: 44, // E2
   browser_action: 34, // E4c: one line and its bottom padding
   browser_activity: 34, // E13: as a browser action's
+  owner_record: 32, // P2-C: one line
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;
@@ -188,6 +192,7 @@ export interface TranscriptProps {
   // presentation the rows' context carries ('local': the owner channel through MAWS's presenter)
   startAt?: (rows: readonly Row[], loaded: boolean) => number | null;
   presentation?: 'local';
+  ownerLane?: boolean; // P2-C, additive: the session's owner-channel lane as main reports it; absent, the store's stays
 }
 
 const NO_ROWS: Row[] = [];
@@ -217,7 +222,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
@@ -227,7 +232,23 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
-  const merged = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane, when the mount knows it,
+  // told to the store (a marked commentary then stays in view when its turn folds), and while the lane is on and the
+  // reader has not chosen the transcript, the report projection of the rows: a marked turn's work in one working record
+  const storedLane = useTranscriptStore((state) => (state.entries[storeKey] ? (state.entries[storeKey].state.ui.ownerLane ?? false) : null));
+  useEffect(() => {
+    // again whenever the key's state starts over (an attach, a source's reset), which starts its ui afresh
+    if (ownerLane !== undefined && storedLane !== null && storedLane !== ownerLane) useTranscriptStore.getState().setOwnerLane(storeKey, ownerLane);
+  }, [storeKey, ownerLane, storedLane]);
+  const report = useTranscriptStore((state) => reportViewOf(state.entries[storeKey]?.state.ui));
+  const openRecords = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.reportOpenTurns);
+  const liveMarked = useTranscriptStore((state) => (report ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
+  const merged = useMemo(() => {
+    const state = useTranscriptStore.getState().entries[storeKey]?.state; // read when the rows change, as the rows are
+    return report && state ? reportRows(queued, state, { reportOpenTurns: openRecords }, liveMarked) : queued;
+  }, [queued, report, openRecords, liveMarked, storeKey]);
+  // P2-C end
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
   const rows = useMemo(() => {

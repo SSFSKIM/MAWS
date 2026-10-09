@@ -22,6 +22,11 @@ import { assistantInput, commandInput, groupInput, questionInput, userInput } fr
 import { SurfaceCellLine } from './Tools';
 
 import { useTranscriptContext } from '../view/context';
+// P2-C start (2026-10-09)
+import { OwnerReport } from '../../owner/report/OwnerReport';
+import { reportViewOf } from '../../owner/report/project';
+import { marksOfText } from '../model/owner-marks';
+// P2-C end
 import { useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
@@ -46,16 +51,30 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
   const attached = useSurfaceAttached(appSessionId);
-  const reportInk = useCallback((ink: boolean) => {
-    if (row.turnId !== null) useTranscriptStore.getState().setAssistantInk(storeKey, row.id, row.turnId, ink, attached ? 'surface' : 'local');
-  }, [storeKey, row.id, row.turnId, attached]);
   const text = live ?? row.markdown;
-  const presentation = useMemo(() => attached ? null : assistantPresentation(text), [attached, text]);
+  // P2-C start (2026-10-09; the P2-C document, Design §7, R15): while the session's owner-channel lane is on, a text with
+  // a mark is MAWS's to draw (the report module), whether or not an engine surface is attached, and its ink is local; a
+  // text without one keeps the path above, so another plugin's AssistantMessage drawing still draws. A mount with
+  // `presentation: 'local'` (E1's comment card) draws its marks through the same module. In the report, a closed
+  // working record hides the words outside the marks. With the lane off, P1's path runs unchanged.
+  const ownerSession = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
+  const laneOn = useTranscriptStore((s) => s.entries[storeKey]?.state.ui.ownerLane === true);
+  const owned = ownerSession !== null && (laneOn || forcedLocal) && marksOfText(text, row.live).marked;
+  const folded = useTranscriptStore((s) => {
+    const ui = s.entries[storeKey]?.state.ui;
+    return reportViewOf(ui) && row.turnId !== null && !ui!.reportOpenTurns?.has(row.turnId);
+  });
+  const owner = useMemo(() => (owned ? { appSessionId: ownerSession!, folded } : null), [owned, ownerSession, folded]);
+  // P2-C end
+  const reportInk = useCallback((ink: boolean) => {
+    if (row.turnId !== null) useTranscriptStore.getState().setAssistantInk(storeKey, row.id, row.turnId, ink, attached && !owned ? 'surface' : 'local');
+  }, [storeKey, row.id, row.turnId, attached, owned]);
+  const presentation = useMemo(() => attached || owned ? null : assistantPresentation(text), [attached, owned, text]);
   const showRecord = useTranscriptStore((s) => {
     const state = s.entries[storeKey]?.state;
     return row.turnId === null || !state || state.ui.expandedTurns.has(row.turnId) || (turn?.state === 'open' && !state.ui.collapsedTurns.has(row.turnId));
   });
-  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: assistantDrawingKey(storeKey, row.id), answerable: forcedLocal /* P2-E1 */ };
+  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: assistantDrawingKey(storeKey, row.id), answerable: forcedLocal /* P2-E1 */, text, owner /* P2-C */ };
 }
 
 // The virtualized divider bounds these ask-only mounts to turns in/near the viewport. Only assistant text bypasses
@@ -74,19 +93,19 @@ export function FoldedAssistantProbes({ row }: { row: Extract<Row, { kind: 'divi
   }, [row.expanded, row.turnId, ownRows, storeKey]);
 }
 function AssistantProbe({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
-  const { appSessionId, input, reportInk, key, attached, presentation } = useAssistantInput(row);
+  const { appSessionId, input, reportInk, key, attached, presentation, owner } = useAssistantInput(row);
   const owned = useAssistantDrawings((s) => s.has(key));
-  const answer = useSurfaceSite({ appSessionId, component: 'AssistantMessage', instanceId: input?.instanceId ?? row.id, props: input?.props ?? { text: '', isFirstOfReply: false }, enabled: input !== null });
+  const answer = useSurfaceSite({ appSessionId, component: 'AssistantMessage', instanceId: input?.instanceId ?? row.id, props: input?.props ?? { text: '', isFirstOfReply: false }, enabled: input !== null && owner === null /* P2-C: a marked text is MAWS's */ });
   const ink = answer?.hooked === true && hasInk(answer.tree) && (!answer.rewritten || parseTranscriptProps('AssistantMessage', answer.props, input!.props) !== null);
   useEffect(() => {
     // Read ownership at application time too: a drawing may have mounted since this probe rendered.
-    if (!useAssistantDrawings.getState().has(key) && (!attached || answer !== null)) reportInk(attached ? ink : presentation !== null);
-  }, [owned, key, attached, answer, ink, presentation, reportInk]);
+    if (!useAssistantDrawings.getState().has(key) && (owner !== null || !attached || answer !== null)) reportInk(owner !== null || (attached ? ink : presentation !== null)); // P2-C: owner
+  }, [owned, key, attached, answer, ink, presentation, reportInk, owner]);
   return null;
 }
 
 export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
-  const { appSessionId, input, reportInk, key, attached, presentation, showRecord, answerable } = useAssistantInput(row);
+  const { appSessionId, input, reportInk, key, attached, presentation, showRecord, answerable, text, owner } = useAssistantInput(row);
   const { storeKey } = useTranscriptContext();
   const hasWorkFold = useTranscriptStore((s) => {
     const state = s.entries[storeKey]?.state;
@@ -95,8 +114,11 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
   // Claim in layout before a folded probe's passive answer or surface cleanup can demote this drawing.
   useLayoutEffect(() => retainAssistantDrawing(key), [key]);
   useEffect(() => {
-    if (!attached) reportInk(presentation !== null);
-  }, [attached, presentation, reportInk]);
+    if (owner !== null) reportInk(true); // P2-C
+    else if (!attached) reportInk(presentation !== null);
+  }, [attached, presentation, reportInk, owner]);
+  // P2-C: the report module draws a marked text under the lane (or in a forced-local mount)
+  if (owner !== null) return <OwnerReport appSessionId={owner.appSessionId} text={text} live={row.live} showRecord={!owner.folded} recordKey={key} anchor={row.messageUuid === null ? null : { messageUuid: row.messageUuid, blockIndex: row.blockIndex }} />;
   if (!attached) return presentation ? presentation.render({ showRecord, live: row.live, hasWorkFold, recordKey: key, answerable /* P2-E1 */ }) : <AssistantTextRow row={{ ...row, forHuman: false }} />;
   if (!input) return <AssistantTextRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="AssistantMessage" {...input} onInk={reportInk} placeholder={<AssistantTextRow row={row} text="…" />}>

@@ -83,6 +83,14 @@ export interface TranscriptUi {
   global: number;
   stamps: Map<TurnId, number>;
   version: number;
+  // P2-C start (2026-10-09; the P2-C document, Design §7): the owner channel's lane for the session (absent: off, P1's
+  // drawing), under which a commentary block with a mark stays in view when its turn folds, as an inked one does; the
+  // view the reader chose (absent: the report while the lane is on); and the turns whose working record they opened in
+  // the report. Only `ownerLane` reaches a turn's rows; the other two are read by the report projection.
+  ownerLane?: boolean;
+  view?: 'report' | 'transcript';
+  reportOpenTurns?: Set<TurnId>;
+  // P2-C end
 }
 
 // A receipt's undo state, driven by the view through the RewindInterface: the dry run's answer (asked once per

@@ -396,3 +396,70 @@ describe('transcript store', () => {
     });
   });
 });
+
+// P2-C start (2026-10-09): the owner channel's lane, the view and the report's open records (the P2-C document, §7)
+describe('transcript store: the report view', () => {
+  function markedTurn() {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Checking. <essential>Mind the migration.</essential>');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m2', 0, 'Unmarked answer.');
+    b.end(['u1']);
+    return b;
+  }
+  const T1 = turnId.ofMessage(uuid('u1'));
+  const marked = rowId.text(api('m1'), 0);
+
+  it('the lane keeps a marked commentary in view when its turn folds, and off it is P1’s again', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    expect(store.getState().rows(KEY).some((row) => row.id === marked)).toBe(false);
+    store.getState().setOwnerLane(KEY, true);
+    expect(store.getState().rows(KEY).find((row) => row.id === marked)).toMatchObject({ forHuman: true });
+    const ui = store.getState().entries[KEY].state.ui;
+    store.getState().setOwnerLane(KEY, true); // unchanged: no new state
+    expect(store.getState().entries[KEY].state.ui).toBe(ui);
+    store.getState().setOwnerLane(KEY, false);
+    expect(store.getState().rows(KEY).some((row) => row.id === marked)).toBe(false);
+  });
+
+  it('the view and the open records are the reader’s, and survive another ui change', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setOwnerLane(KEY, true);
+    store.getState().setView(KEY, 'transcript');
+    store.getState().toggleReportRecord(KEY, T1);
+    store.getState().toggleTurn(KEY, T1);
+    expect(store.getState().entries[KEY].state.ui).toMatchObject({ ownerLane: true, view: 'transcript', reportOpenTurns: new Set([T1]) });
+    store.getState().toggleReportRecord(KEY, T1);
+    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
+  });
+
+  it('opening a record shows the turn folded (level 1), whatever its divider was', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setOwnerLane(KEY, true);
+    store.getState().toggleTurn(KEY, T1); // the reader had opened its work in the transcript
+    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
+    store.getState().toggleReportRecord(KEY, T1);
+    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: false });
+  });
+
+  it('a jump in the report to a row the closed record holds opens the record', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setOwnerLane(KEY, true);
+    store.getState().jumpTo(KEY, rowId.text(api('m2'), 0)); // the unmarked answer: in view in the transcript, folded in the report
+    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set([T1]));
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: rowId.text(api('m2'), 0) });
+    store.getState().toggleReportRecord(KEY, T1);
+    store.getState().jumpTo(KEY, marked); // a mark is in view at level 0: nothing opens
+    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
+    store.getState().setView(KEY, 'transcript');
+    store.getState().jumpTo(KEY, cellId.tool(tool('t1'))); // the transcript chosen: the record is not the reader's to open
+    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
+  });
+});
+// P2-C end
