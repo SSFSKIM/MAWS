@@ -461,7 +461,7 @@ pnpm -C <wt> test --maxWorkers=4            # all files pass; the new files name
 /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm -C <wt> e2e:panel
 ```
 
-Expected: every group reports its full count passed (record the counts in `gates.txt`; `e2e:side` gains cases 9 to 12, `e2e:deliverables` keeps its count with the comment case reworked). The live cases, once, at M5: `pnpm -C <wt> e2e:p1-live --grep "^(1 artifacts|2 a comment|3 Send to main)"` with the scratch home the spec's harness sets (case 1 creates the artifact cases 2 and 3 comment on); expected "case 2: PASS" in its note with the thread's lineage, its reply containing `ANCHORED` drawn in the card and the parent's record one version longer, case 3's steer drawn as the anchored prompt row, and the spend within the allocations.
+Expected: every group reports its full count passed (record the counts in `gates.txt`; `e2e:side` gains cases 9 to 12, `e2e:deliverables` keeps its count with the comment case reworked). The live cases, once, at M5: `pnpm -C <wt> e2e:p1-live --grep " (1 artifacts|2 a comment|3 Send to main)"` with the scratch home the spec's harness sets (case 1 creates the artifact cases 2 and 3 comment on); expected "case 2: PASS" in its note with the thread's lineage, its reply containing `ANCHORED` drawn in the card and the parent's record one version longer, case 3's steer drawn as the anchored prompt row, and the spend within the allocations.
 
 Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, including a narrow panel (the docked fallback) and a dark-theme pass.
 
@@ -616,6 +616,9 @@ Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, i
 - Decision: the bridge's locate pair carries a correlation id: `maws:locate {id, selector}` → `maws:located {id, selector, rect | null}`, `id` an integer from a per-frame counter that the bridge echoes and the located schema requires; each pending locate resolves only on its own id (D8, Interfaces and H1 updated in place; the ledger's X21 row needs the same words, hand-back).
   Rationale: M3's task review reproduced against the real `HtmlFrame` that two overlapping locates of one selector both resolved on the first answer, so a resize burst could leave the card on an obsolete rect; serialising the asks would still misattribute a reply arriving after its timeout.
   Date/Author: 2026-10-09, P2-E1 executor (M3 review round).
+- Decision: M5's executor decisions, folded. The live grep is `" (1 artifacts|2 a comment|3 Send to main)"` (Playwright matches the full title path, so the `^` form selected nothing; checked with `--list`; Concrete Steps corrected). `FORK_ALLOCATION_USD` stays 0.08 (the fork receipted US$0.0009). The live thread edits the page with Bash `sed`, since Edit needs a prior Read. `SideJournal.mawsToolCall` includes the recorded permission round; case 12's thread journal is rewritten once the parent's record and runtime id exist; the card's shots go to `p2-e1/shots` only under `MAWS_P2E1_SHOTS=1`; the live `drive` helper takes either the docked approval group or C7's inline card. The needs-you strip's words are held on one line at the card's width (its buttons wrap under them), fixed in M2's file because M5's shots exposed the squeeze.
+  Rationale: each keeps the acceptance as written; the strip fix is a defect found by the shots.
+  Date/Author: 2026-10-09, P2-E1 executor (M5).
 
 ## Outcomes & Retrospective
 
