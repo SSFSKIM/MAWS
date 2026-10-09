@@ -20,7 +20,8 @@
 //   the next reconnect.
 // - Legacy recognition. A human prompt the engine took that answers `Answering "<head>": …` settles the one question of
 //   the session with that head (an answer given in a terminal through the doperpowers mod, or one whose report never
-//   arrived), unless the prompt is itself a member of an answer.
+//   arrived), unless the prompt is itself a member of an answer. While the session waits for its recovery read, whose
+//   prompt it is cannot be known yet: the prompt is held and read once the read is folded.
 // - Projection. While the lane is on, the stored marks project into the attention service (Design §5's table): a restart,
 //   a change of holder and a lane switch re-project silently. The marks table is the one truth.
 import type { AttentionItem } from '@shared/graph/attention';
@@ -76,6 +77,7 @@ interface SessionLive {
   prompts: Map<MessageUuid, { text: string; at: string }>; // human prompts carrying an answer line, written and not yet taken
   userAt: Map<MessageUuid, string>; // when each human prompt was written or read back (a rewind's target)
   checking: Set<MessageUuid>; // uuids whose transcript evidence is being read
+  heldPrompts: { uuid: MessageUuid; text: string; at: string }[]; // taken while the recovery read was out (legacy recognition)
 }
 
 const isForeign = (record: SessionRecord | null) => record !== null && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job');
@@ -294,7 +296,7 @@ export class OwnerChannelService {
 
   private liveOf(appSessionId: AppSessionId): SessionLive {
     let live = this.live.get(appSessionId);
-    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), failures: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set() }));
+    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), failures: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), heldPrompts: [] }));
     return live;
   }
 
@@ -393,7 +395,7 @@ export class OwnerChannelService {
     if (!live.userAt.has(event.messageUuid)) remember(live.userAt, event.messageUuid, event.at);
     const text = typeof event.content === 'string' ? event.content : event.content.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
     if (answersOf(text).length === 0) return false;
-    if (event.seq === null) return this.legacy(appSessionId, event.messageUuid, text, event.at);
+    if (event.seq === null) return this.recognize(appSessionId, event.messageUuid, text, event.at);
     remember(live.prompts, event.messageUuid, { text, at: event.at });
     return false;
   }
@@ -404,7 +406,17 @@ export class OwnerChannelService {
     const prompt = live.prompts.get(event.commandUuid);
     if (prompt === undefined || event.state === 'queued') return false;
     live.prompts.delete(event.commandUuid);
-    return event.state === 'started' || event.state === 'completed' ? this.legacy(appSessionId, event.commandUuid, prompt.text, prompt.at) : false;
+    return event.state === 'started' || event.state === 'completed' ? this.recognize(appSessionId, event.commandUuid, prompt.text, prompt.at) : false;
+  }
+
+  // A taken prompt for legacy recognition: at once, or, while the session waits for its recovery read (whose rows may
+  // make it an answer's member), held until the read is folded (§6's recovery barrier).
+  private recognize(appSessionId: AppSessionId, uuid: MessageUuid, text: string, at: string): boolean {
+    if (!this.recovering.has(appSessionId)) return this.legacy(appSessionId, uuid, text, at);
+    const held = this.liveOf(appSessionId).heldPrompts;
+    held.push({ uuid, text, at });
+    if (held.length > RECENT_MAX) held.shift();
+    return false;
   }
 
   // Legacy recognition (Design §6): each answer line settles the one question of the session with its head, asked before
@@ -499,7 +511,10 @@ export class OwnerChannelService {
     for (const answers of live.answers.values()) for (const answer of answers) seen.forEach((event, i) => applyEvent(answer, event, () => seen.slice(0, i)));
     const marks = [...live.answers.keys()];
     for (const markId of marks) this.persist(appSessionId, markId);
-    if (marks.length > 0) this.changed(appSessionId);
+    // the prompts taken while the read was out, now that their members are known
+    let settled = false;
+    for (const prompt of live.heldPrompts.splice(0)) settled = this.legacy(appSessionId, prompt.uuid, prompt.text, prompt.at) || settled;
+    if (marks.length > 0 || settled) this.changed(appSessionId);
   }
 
   // The host's prompt record since the oldest answer on its way, then what the live stream brought meanwhile (an event

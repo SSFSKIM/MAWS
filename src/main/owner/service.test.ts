@@ -402,6 +402,33 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { origin: 'answer' } });
   });
 
+  it('a prompt taken while the recovery read is out is read as a legacy answer only after the fold: never for another question when it is an answer\'s, still when it is no answer\'s', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const other = t.ask('Which region?');
+    const terminal = t.ask('Which database?');
+    t.sim.turn = true;
+    const text = answerText('Which backend?', `Postgres\n${answerText('Which region?', 'eu')}`);
+    const { entry } = await t.sim.queue.send(text);
+    t.report(q, { disposition: 'queued', queueId: entry.queueId, text });
+    t.service.hostDown();
+    t.sim.listening = false;
+    await t.sim.turnEnded(); // release (Q, U) and the prompt's write, unheard
+    const uuid = t.sim.queue.state.entries[0]!.messageUuid!;
+    t.sim.listening = true;
+    t.sim.resync(['user.message']); // the reconnect re-delivers the prompt before the read
+    t.sim.engine(uuid, 'started');
+    await t.sim.turnEnded([uuid]);
+    const typed = await t.sim.queue.send(answerText('Which database?', 'SQLite')); // no answer's prompt
+    t.sim.engine(typed.entry.messageUuid!, 'started');
+    expect(t.question(other)).toEqual({ state: 'unanswered' });
+    expect(t.question(terminal)).toEqual({ state: 'unanswered' }); // held until the read is folded
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { origin: 'answer' } });
+    expect(t.question(other)).toEqual({ state: 'unanswered' });
+    expect(t.question(terminal)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which database?', 'SQLite'), origin: 'legacy' } });
+  });
+
   it.each(['backoff', 'reconnect'] as const)('a failed recovery read keeps the gate closed, so a partial log concludes nothing, and the read is retried (%s)', async (via) => {
     const t = await harness();
     const q = t.ask('Which backend?');
