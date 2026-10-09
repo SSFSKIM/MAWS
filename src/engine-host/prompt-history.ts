@@ -12,6 +12,7 @@ import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { JournalReader, type LaunchFiles } from './journal';
 import { Normalizer } from './normalizer';
+import { RECOVERED_ACTION } from './queue';
 
 export interface PromptHistory {
   events: PromptHistoryEvent[];
@@ -25,13 +26,15 @@ const isPromptHistory = (event: SessionEvent): event is PromptHistoryEvent => ev
 // `since` is an ISO-8601 instant; the rows' `at` is the host's clock, and a lifecycle frame carries no timestamp of its
 // own, so both kinds compare on that clock. A launch whose last file was last written before `since` holds nothing at or
 // after it and is not read. Complete only when the oldest retained launch began at or before `since` (pruning removes
-// whole launches, oldest first), every launch read parsed to its end, and the newest launch either is `live` (the
-// launch id of the process the host runs for the session now) or ended with its exit row.
+// whole launches, oldest first), every launch read parsed to its end, the newest launch either is `live` (the launch
+// id of the process the host runs for the session now) or ended with its exit row, and no launch's steer is left
+// unstated (a launch that died with its host whose leftovers no later recovery has abandoned yet).
 export async function promptHistory(dir: string, appSessionId: AppSessionId, since: string, opts: { live?: string | null } = {}): Promise<PromptHistory> {
   const from = Date.parse(since);
   const launches = JournalReader.launches(dir);
   const newest = launches.at(-1);
   let complete = launches.length > 0 && launches[0]!.startedAt <= from && (newest!.launchId === opts.live || endsWithExit(newest!));
+  if (complete && (await foldUnsettled(unsettledLaunches(launches, opts.live ?? null))).length > 0) complete = false;
   const events: PromptHistoryEvent[] = [];
   for (const launch of launches) {
     if (statSync(launch.files.at(-1)!).mtimeMs < from) continue;
@@ -49,21 +52,38 @@ export async function promptHistory(dir: string, appSessionId: AppSessionId, sin
   return { events, complete };
 }
 
-// The steers the launches before `current` wrote and left unstated: each launch that ended without settling its queue
-// is folded, oldest first, from the last launch that did. A launch settled when it ended with its exit row after its
-// handshake (`initialize`), the point from which the session's exit settles the queue and abandons what is pending.
+// The steers the launches before `current` wrote and left unstated, for `current`'s queue recovery to abandon.
 export async function unsettledPrompts(dir: string, current: string): Promise<MessageUuid[]> {
   const launches = JournalReader.launches(dir);
   const at = launches.findIndex((launch) => launch.launchId === current);
-  const before = at < 0 ? launches : launches.slice(0, at);
+  return foldUnsettled(unsettledLaunches(at < 0 ? launches : launches.slice(0, at), null));
+}
+
+// The launches whose steers may be unstated, oldest first, walking back from the newest. The evidence is the queue's
+// `recovered` row, which its recovery journals once it has abandoned what the launches before it left: a launch that
+// recovered and then ended with its exit row (whose settle abandons what is pending) closes the walk; one that recovered
+// and has no exit row (the host died with it) is folded and closes it; one with no recovery on record (it died, or
+// exited, before the queue recovered) is folded and the walk goes on past it. The `live` launch's own steers are its
+// process's; it closes the walk once it recovered and is passed over until then.
+function unsettledLaunches(launches: LaunchFiles[], live: string | null): LaunchFiles[] {
   const unsettled: LaunchFiles[] = [];
-  for (let i = before.length - 1; i >= 0; i -= 1) {
-    const launch = before[i]!;
-    if (endsWithExit(launch) && headRows(launch).some((row) => metaEvent(row) === 'initialize')) break;
+  for (let i = launches.length - 1; i >= 0; i -= 1) {
+    const launch = launches[i]!;
+    const recovered = headRows(launch).some(isRecoveredRow);
+    if (launch.launchId === live) {
+      if (recovered) break;
+      continue;
+    }
+    if (recovered && endsWithExit(launch)) break;
     unsettled.unshift(launch);
+    if (recovered) break;
   }
+  return unsettled;
+}
+
+async function foldUnsettled(launches: LaunchFiles[]): Promise<MessageUuid[]> {
   const fold = new UnsettledFold();
-  for (const launch of unsettled) {
+  for (const launch of launches) {
     try {
       for (const file of launch.files) for await (const row of JournalReader.rows(file)) fold.push(row);
     } catch {
@@ -161,6 +181,9 @@ function headRows(launch: LaunchFiles): JournalRow[] {
 }
 
 const metaEvent = (row: JournalRow): unknown => (row.direction === 'meta' ? (row.frame as { event?: unknown } | null)?.event : undefined);
+// The queue's recovery row (queue.ts `recover`): within the head, since recovery follows the handshake; one beyond it
+// reads as no recovery, which only widens the walk (the fold stays exact).
+const isRecoveredRow = (row: JournalRow): boolean => metaEvent(row) === 'queue' && (row.frame as { action?: unknown }).action === RECOVERED_ACTION;
 
 // Whether the launch's last row is its exit row (a host that died with the process leaves none).
 function endsWithExit(launch: LaunchFiles): boolean {

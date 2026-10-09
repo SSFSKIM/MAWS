@@ -33,6 +33,9 @@ export const ACK_TIMEOUT_MS = 5_000;
 // (8 s, under main's 10 s deadline) however long the engine leaves a cancel unanswered (each has its own 8 s timeout).
 export const HOLD_ALL_DEADLINE_MS = 2_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
+// P2-C: the `meta queue` row a recovery journals once it has stated what the launches before it left (not a prompt's
+// transition: the normaliser maps nothing for it); the journal read of unsettled steers takes it as its boundary
+export const RECOVERED_ACTION = 'recovered';
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // `hold`: a host sequence or steer withdrawal stopped holding the queue
 export type SteerPriority = 'now' | 'next';
@@ -133,6 +136,7 @@ export class MessageQueue {
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
       }
       this.settleAfterExit();
+      this.journal({ event: 'queue', action: RECOVERED_ACTION }); // P2-C: the earlier launches' leftovers are on record from here
       await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
       this.deps.onPauseChange?.(this.releasePaused);
     });

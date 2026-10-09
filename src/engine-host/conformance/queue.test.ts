@@ -261,7 +261,7 @@ describe('a submission the engine drops before it started releases the next queu
     await flush();
     await flush();
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['first']);
-    expect(metaRows(s.journal.rows, 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`)).toEqual(['release:send', 'pause:interrupt', 'drop:cancelled']); // P2-C: the drop's row
+    expect(metaRows(s.journal.rows, 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`)).toEqual(['recovered:undefined', 'release:send', 'pause:interrupt', 'drop:cancelled']); // P2-C: the recovery's row, the drop's row
     expect(s.session.status().queue).toEqual({ length: 1, paused: true });
     expect(s.session.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['waiting', 'queued']]);
     expect(ofKind(s.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:dropped:'))).toHaveLength(1);

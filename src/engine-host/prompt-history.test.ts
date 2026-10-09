@@ -8,6 +8,8 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { promptHistory, unsettledPrompts } from './prompt-history';
 import { scriptedSession } from './conformance/session-harness';
+import { MessageQueue } from './queue'; // fix wave 2
+import { MemorySessionStateStore } from './store/memory-session-state-store'; // fix wave 2
 
 const APP = 'app-ph' as AppSessionId;
 let dir: string;
@@ -124,6 +126,7 @@ describe('session.promptHistory: the prompt record from the retained journals (P
 describe('unsettledPrompts: the steers a dead launch left unstated (P2-C)', () => {
   const exitRow = (at: string): Row => ({ direction: 'meta', at, frame: { event: 'exit', code: 0, signal: null, reason: 'quit' } });
   const initRow = (at: string): Row => ({ direction: 'meta', at, frame: { event: 'initialize', current_permission_mode: 'default' } });
+  const recoveredRow = (at: string): Row => ({ direction: 'meta', at, frame: { event: 'queue', action: 'recovered' } });
   const steerOut = (at: string, uuid: string, priority = 'next'): Row => ({ direction: 'out', at, frame: { type: 'user', uuid, message: { role: 'user', content: 'x' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority } });
 
   it("a withdrawal cut by the host (withdraw, the engine's cancelled, then nothing) and a promotion never started are unsettled; a held, a cancelled, a started and a dropped steer are not", async () => {
@@ -140,17 +143,44 @@ describe('unsettledPrompts: the steers a dead launch left unstated (P2-C)', () =
     expect((await unsettledPrompts(dir, 'L2')).sort()).toEqual(['u-cut', 'u-promoted']);
   });
 
-  it('folds every launch back to the last one that settled, so an abandon a later recovery wrote settles it; a settled launch is not read', async () => {
-    write('L0.jsonl', 1, [spawn('2026-01-09T09:00:00.000Z'), initRow('2026-01-09T09:00:00.100Z'), steerOut('2026-01-09T09:00:01.000Z', 'u-old'), exitRow('2026-01-09T09:00:02.000Z')]); // settled: its exit abandoned what it left
-    write('L1.jsonl', 1, [spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), steerOut('2026-01-09T10:00:01.000Z', 'u-a'), steerOut('2026-01-09T10:00:02.000Z', 'u-b')]);
-    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), initRow('2026-01-09T11:00:00.100Z'), queueRow('2026-01-09T11:00:01.000Z', 'abandon', { messageUuid: 'u-a' }), steerOut('2026-01-09T11:00:02.000Z', 'u-c')], '{"seq": 5, "dir');
-    expect((await unsettledPrompts(dir, 'L3')).sort()).toEqual(['u-b', 'u-c']); // L2's recovery abandoned only u-a before the host died again mid-row
+  // fix wave 2: the walk's boundary is the queue's own `recovered` row, not the handshake
+  it('folds back to the last launch whose recovery is on record: one that recovered and exited closes the walk unread, one that recovered and died is folded and closes it', async () => {
+    write('L0.jsonl', 1, [spawn('2026-01-09T09:00:00.000Z'), initRow('2026-01-09T09:00:00.100Z'), recoveredRow('2026-01-09T09:00:00.200Z'), steerOut('2026-01-09T09:00:01.000Z', 'u-old'), exitRow('2026-01-09T09:00:02.000Z')]); // settled: its exit abandoned what it left
+    write('L1.jsonl', 1, [spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), recoveredRow('2026-01-09T10:00:00.200Z'), steerOut('2026-01-09T10:00:01.000Z', 'u-a')]);
+    expect(await unsettledPrompts(dir, 'L2')).toEqual(['u-a']); // L1 died with its host; L0 is not read
+    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), initRow('2026-01-09T11:00:00.100Z'), queueRow('2026-01-09T11:00:01.000Z', 'abandon', { messageUuid: 'u-a' }), recoveredRow('2026-01-09T11:00:01.100Z'), steerOut('2026-01-09T11:00:02.000Z', 'u-c')], '{"seq": 6, "dir');
+    expect(await unsettledPrompts(dir, 'L3')).toEqual(['u-c']); // L2's recovery stated L1's leftovers, then the host died again mid-row
     expect(await unsettledPrompts(dir, 'L1')).toEqual([]); // the launch before L1 settled
   });
 
-  it('a launch that exited before its handshake settled nothing, so the walk goes on past it', async () => {
-    write('L1.jsonl', 1, [spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), steerOut('2026-01-09T10:00:01.000Z', 'u-a')]);
-    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), exitRow('2026-01-09T11:00:01.000Z')]);
+  it('a launch that exited after its handshake but before its queue recovered settled nothing, so the walk goes on past it', async () => {
+    write('L1.jsonl', 1, [spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), recoveredRow('2026-01-09T10:00:00.200Z'), steerOut('2026-01-09T10:00:01.000Z', 'u-a')]);
+    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), initRow('2026-01-09T11:00:00.100Z'), exitRow('2026-01-09T11:00:01.000Z')]);
     expect(await unsettledPrompts(dir, 'L3')).toEqual(['u-a']);
+  });
+
+  // fix wave 2 (the reviewer's regression): L1 died with its host mid-withdrawal; L2 initialized, exited before its
+  // queue recovered; the history says incomplete until L3's recovery abandons the steer, and complete after it
+  it('a withdrawal cut by a host crash, then a launch that exits before its recovery: incomplete until the next recovery abandons it', async () => {
+    write('L1.jsonl', 1, [
+      spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), recoveredRow('2026-01-09T10:00:00.200Z'),
+      steerOut('2026-01-09T10:00:01.000Z', 'u-1'), queueRow('2026-01-09T10:00:02.000Z', 'withdraw', { messageUuid: 'u-1' }), lifecycle('2026-01-09T10:00:02.100Z', 'u-1', 'cancelled'),
+    ]);
+    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), initRow('2026-01-09T11:00:00.100Z'), exitRow('2026-01-09T11:00:01.000Z')]);
+    expect((await promptHistory(dir, APP, '2026-01-09T10:00:00.500Z')).complete).toBe(false);
+
+    // L3's recovery, through the real queue and the journal read the launcher hands it
+    const rows: Record<string, unknown>[] = [];
+    const queue = new MessageQueue({
+      appSessionId: APP, store: new MemorySessionStateStore(), write: async () => {}, meta: (frame) => void rows.push(frame), turnOpen: () => false, canWrite: () => true,
+      cancel: async () => true, onChange: () => {}, log: () => {}, unsettled: () => unsettledPrompts(dir, 'L3'),
+    });
+    await queue.recover();
+    expect(rows).toEqual([{ event: 'queue', action: 'abandon', messageUuid: 'u-1' }, { event: 'queue', action: 'recovered' }]);
+    write('L3.jsonl', 1, [spawn('2026-01-09T12:00:00.000Z'), initRow('2026-01-09T12:00:00.100Z'), ...rows.map((frame) => ({ direction: 'meta' as const, at: '2026-01-09T12:00:00.200Z', frame }))]);
+    const after = await promptHistory(dir, APP, '2026-01-09T10:00:00.500Z', { live: 'L3' });
+    expect(after.complete).toBe(true);
+    expect(summary(after.events).slice(-1)).toEqual(['app-ph:L3:3:0 abandon - u-1']);
+    expect(await unsettledPrompts(dir, 'L4')).toEqual([]);
   });
 });

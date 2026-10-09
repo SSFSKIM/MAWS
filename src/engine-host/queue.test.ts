@@ -71,6 +71,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   return { ...h, h, queue };
 }
 
+const RECOVERED = { event: 'queue', action: 'recovered' }; // P2-C fix wave 2: the row every recovery journals
 const notices = (rows: Record<string, unknown>[]) => rows.filter((r) => r.event === 'notice').map((r) => r.key);
 // The queue's rows from before P2-C (releases, holds, pauses, resumes); P2-C's prompt record is read through `transitions`.
 const PRE_P2C_ROWS: ReadonlySet<unknown> = new Set(['release', 'hold', 'pause', 'resume']);
@@ -233,7 +234,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     await t.queue.onTurnEnded(turnEnded({ origin: 'human', parentToolUseId: 'toolu_x' as TurnEnded['parentToolUseId'] }));
     expect(t.writes).toEqual([]);
     expect(t.queue.state).toMatchObject({ paused: false, entries: [{ state: 'queued' }] });
-    expect(t.rows).toEqual([]);
+    expect(t.rows).toEqual([RECOVERED]); // P2-C: the recovery's own row only
   });
 
   it('an engine turn that leaves the session idle releases the head exactly as a human turn does (concern 1, as ruled)', async () => {
@@ -277,7 +278,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     const empty = await harness();
     await empty.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
     expect(empty.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
-    expect(empty.rows).toEqual([]);
+    expect(empty.rows).toEqual([RECOVERED]); // P2-C: the recovery's own row only
 
     const paused = await harness();
     paused.h.turn = true;
@@ -1376,7 +1377,7 @@ describe('cancelSteer (P2-C)', () => {
     t.queue.onLifecycle(lifecycle(messageUuid, 'started'));
     await expect(t.queue.cancelSteer(messageUuid)).resolves.toEqual({ outcome: 'already_started' });
     expect(t.cancels).toEqual([]);
-    expect(t.rows.filter((r) => r.event === 'queue')).toEqual([]);
+    expect(t.rows.filter((r) => r.event === 'queue')).toEqual([RECOVERED]); // the recovery's own row only
   });
 
   it('is refused while a hold withdraws the steer', async () => {
