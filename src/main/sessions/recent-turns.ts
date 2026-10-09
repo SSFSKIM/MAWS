@@ -9,8 +9,8 @@ import type { SessionId } from '@shared/graph/ids';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, type RecentTurn, type RecentTurns } from '@shared/ipc/schema/session';
 import { previewLine } from '@shared/owner/preview';
 import { slashCommandLine } from '@shared/wire/local-command';
-import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
+import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type Delivery, type TranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, isHumanPrompt, isTaskNotification, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
 import { jsonLines, readTailSized, type OpenFile } from '../files/read-tail';
 
 // How much of the transcript's end is read: enough for a handful of turns with their tool rounds (a long tool result can
@@ -50,6 +50,14 @@ function leafUuidOf(records: readonly TranscriptRecord[]): string | null {
   return leaf;
 }
 
+// The chain follower's delivery classing of a record (chain-follower.ts, `dispatchLine`, `Skeleton.delivery`), which
+// withResponseGroups reads to tell a hook's attachment beside a parallel response from a prompt that branches off it.
+export function deliveryOf(record: TranscriptRecord): Delivery {
+  if (isHumanPrompt(record) || record.isCompactSummary === true || (record.type === 'system' && record.subtype === 'compact_boundary')) return null;
+  if (record.type === 'attachment' || record.type === 'system' || isTaskNotification(record)) return 'interleave';
+  return (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null;
+}
+
 interface Building {
   turn: RecentTurn;
 }
@@ -70,7 +78,7 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
   if (leaf === undefined) return { turns: [], earlier: cut, source: 'transcript' };
   // the walk from the leaf: currentChain starts at the last record with a uuid, so the leaf goes last; then a parallel
   // response's blocks and results the walk passed by rejoin, as the chain follower keeps them
-  const chain = withResponseGroups(currentChain([...records, leaf]).chain, records);
+  const chain = withResponseGroups(currentChain([...records, leaf]).chain, records, deliveryOf);
   const sessionId = (chain.find((r) => typeof r.sessionId === 'string')?.sessionId ?? 'unknown') as SessionId;
   const ctx = createBackfillContext({ sessionId, agent: null });
   const turns: RecentTurn[] = [];

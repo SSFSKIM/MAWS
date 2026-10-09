@@ -84,59 +84,129 @@ export function currentChain(records: TranscriptRecord[]): ChainResult {
   return { chain: leafToRoot.reverse(), leaf, gap };
 }
 
-// The API response a record belongs to: an assistant record's own (`message.id`; a diagnostic belongs to none), or for a
-// tool result, the response of the record that issued its tool (`sourceToolAssistantUUID`, else its parent).
-function responseIdOf(record: TranscriptRecord, byUuid: ReadonlyMap<string, TranscriptRecord>): string | null {
-  const id = (r: TranscriptRecord | undefined): string | null => {
-    if (r?.type !== 'assistant' || r.isApiErrorMessage === true) return null;
-    const message = r.message as { id?: unknown } | null | undefined;
-    return typeof message?.id === 'string' ? message.id : null;
-  };
-  if (record.type === 'assistant') return id(record);
+// How the engine host's chain follower classes a record for response ownership (chain-follower.ts, `Skeleton.delivery`):
+// `interleave` (an attachment, a system record, a task notification) may arrive beside a parallel response's blocks,
+// `tail` (a meta user record, a diagnostic) only after the record it hangs off; a human prompt and everything else is
+// conversation, never a delivery. The classing reads backfill's prompt rules, so the caller supplies it.
+export type Delivery = 'interleave' | 'tail' | null;
+
+const messageIdOf = (record: TranscriptRecord): string | null => {
+  const id = (record.message as { id?: unknown } | null | undefined)?.id;
+  return record.type === 'assistant' && record.isApiErrorMessage !== true && typeof id === 'string' ? id : null;
+};
+const isToolResult = (record: TranscriptRecord): boolean => {
   const content = (record.message as { content?: unknown } | null | undefined)?.content;
-  const toolResult = record.type === 'user' && Array.isArray(content) && content.some((block: unknown) => typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'tool_result');
-  if (!toolResult) return null;
-  const source = typeof record.sourceToolAssistantUUID === 'string' ? record.sourceToolAssistantUUID : record.parentUuid;
-  return typeof source === 'string' ? id(byUuid.get(source)) : null;
-}
+  return record.type === 'user' && Array.isArray(content) && content.some((block: unknown) => typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'tool_result');
+};
+const sameScope = (a: TranscriptRecord, b: TranscriptRecord): boolean => (a.agentId ?? null) === (b.agentId ?? null) && (a.isSidechain === true) === (b.isSidechain === true);
 
 // P2-D (2026-10-09): the engine's recovery of a parallel response (SPEC 11.2.2 and 35.12.3), the chain follower's FX6 rule
-// read over a finished set of records. One API response with several tool calls is written as several assistant records
+// over a finished set of records. One API response with several tool calls is written as several assistant records
 // sharing `message.id`, and each tool result parents on the record that issued its tool, so the walk from the leaf passes
-// through the last result's issuer only and drops the response's other blocks and results. A response whose last-written
-// record is on `chain` regains its members off it, with the records hanging off them written inside the response (a
-// hook's attachment between two results), in file order. A chain that leaves a response before its last record (a fork
-// from an earlier block, a rewind to one) is a real branch: nothing of that response is recovered.
-export function withResponseGroups(chain: readonly TranscriptRecord[], records: readonly TranscriptRecord[]): TranscriptRecord[] {
-  const first = new Map<string, number>(); // uuid → index of its first record (a uuid is written once)
+// through the last result's issuer only and drops the response's other blocks and results. The records are replayed in
+// file order the way the follower keeps its chain (chain-follower.ts, `handleRecord`, `branch`, `responseGroup`): a record
+// on the leaf extends it; one on an earlier record of the chain joins without cutting only when it and every record it
+// would cut belong to that record's response (an assistant record with its message id, a tool result its blocks issued,
+// a delivery proved to have arrived on one of them; `deliveryOf`), and otherwise it branches, its ancestry the new chain;
+// a rewind anchor cuts the chain at its target. What the replay keeps off `chain` rejoins it in file order. A prompt or
+// another response on one of a response's blocks is a real branch, so the members written before it stay off, as they
+// do for the follower; when the replay ends anywhere but `chain`'s leaf, nothing is recovered. The holder rule the
+// follower applies first (W7) reads live state a finished read does not have.
+export function withResponseGroups(chain: readonly TranscriptRecord[], records: readonly TranscriptRecord[], deliveryOf: (record: TranscriptRecord) => Delivery): TranscriptRecord[] {
+  interface Node { record: TranscriptRecord; index: number; delivery: Delivery; owner: string | null }
+  const nodes = new Map<string, Node>(); // the first record of each uuid (a uuid is written once)
+  const parentOf = (uuid: string): string | null => {
+    const parent = nodes.get(uuid)?.record.parentUuid;
+    return typeof parent === 'string' ? parent : null;
+  };
+  // the follower's `responseGroup`: the assistant record whose response this record belongs to
+  const responseOf = (uuid: string): TranscriptRecord | null => {
+    const node = nodes.get(uuid);
+    if (node === undefined) return null;
+    if (node.record.type === 'assistant' && node.record.isApiErrorMessage !== true) return messageIdOf(node.record) === null ? null : node.record;
+    const source = isToolResult(node.record) ? (typeof node.record.sourceToolAssistantUUID === 'string' ? node.record.sourceToolAssistantUUID : parentOf(uuid)) : node.owner;
+    const assistant = source === null ? undefined : nodes.get(source)?.record;
+    return assistant !== undefined && messageIdOf(assistant) !== null && sameScope(node.record, assistant) ? assistant : null;
+  };
+  const inResponse = (uuid: string, response: TranscriptRecord): boolean => {
+    const owner = responseOf(uuid);
+    return owner !== null && messageIdOf(owner) === messageIdOf(response) && sameScope(owner, response);
+  };
+
+  let kept: string[] = []; // the replay's chain, root to leaf
+  let onChain = new Set<string>();
+  let leaf: string | null = null;
   records.forEach((record, index) => {
-    if (typeof record.uuid === 'string' && !first.has(record.uuid)) first.set(record.uuid, index);
-  });
-  const byUuid = new Map([...first].map(([uuid, index]) => [uuid, records[index]]));
-  const responses = new Map<string, number[]>(); // response id → its members' indexes, in file order
-  for (const index of first.values()) {
-    const id = responseIdOf(records[index], byUuid);
-    if (id !== null) responses.set(id, [...(responses.get(id) ?? []), index]);
-  }
-  const onChain = new Set(chain.map((record) => record.uuid));
-  const recovered: number[] = [];
-  for (const members of responses.values()) {
-    const last = members.at(-1)!;
-    if (!onChain.has(records[last].uuid) || members.every((i) => onChain.has(records[i].uuid))) continue;
-    const inResponse = new Set(members.map((i) => records[i].uuid as string));
-    for (let i = members[0] + 1; i < last; i++) {
-      const { uuid, parentUuid } = records[i];
-      if (typeof uuid === 'string' && first.get(uuid) === i && typeof parentUuid === 'string' && inResponse.has(parentUuid)) inResponse.add(uuid);
+    if (typeof record.uuid !== 'string') {
+      const anchor = LastPromptAnchorSchema.safeParse(record);
+      const target = anchor.success && anchor.data.rewound === true ? anchor.data.leafUuid : undefined;
+      if (target !== undefined && onChain.has(target)) {
+        kept = kept.slice(0, kept.indexOf(target) + 1);
+        onChain = new Set(kept);
+        leaf = target;
+      }
+      return;
     }
-    for (const uuid of inResponse) if (!onChain.has(uuid)) recovered.push(first.get(uuid)!);
-  }
+    const uuid = record.uuid;
+    if (nodes.has(uuid)) return;
+    const node: Node = { record, index, delivery: deliveryOf(record), owner: null };
+    nodes.set(uuid, node);
+    if (record.type === 'progress') return; // never the leaf; a child naming it walks through it
+    let parent = parentOf(uuid);
+    while (parent !== null && nodes.get(parent)?.record.type === 'progress') parent = parentOf(parent);
+    const extend = () => {
+      kept.push(uuid);
+      onChain.add(uuid);
+      leaf = uuid;
+    };
+    if (parent === leaf) {
+      const response = parent === null ? null : responseOf(parent);
+      if (response !== null && node.delivery !== null && sameScope(record, response)) node.owner = response.uuid as string;
+      extend();
+      return;
+    }
+    // branch: the ancestry up to the first record on the chain (whose prefix, recovered records included, is kept)
+    const walked = [uuid];
+    const visited = new Set([uuid]);
+    let prefix: string[] = [];
+    for (let current = parent; current !== null && nodes.has(current) && !visited.has(current); current = parentOf(current)) {
+      if (onChain.has(current)) {
+        prefix = kept.slice(0, kept.indexOf(current) + 1);
+        break;
+      }
+      visited.add(current);
+      if (nodes.get(current)!.record.type !== 'progress') walked.push(current);
+    }
+    const next = [...prefix, ...walked.reverse()];
+    const nextSet = new Set(next);
+    const removed = kept.filter((member) => !nextSet.has(member));
+    const typeOf = (member: string) => nodes.get(member)!.record.type;
+    const leafSibling = removed.length > 0 && removed.every((member) => typeOf(member) === 'attachment');
+    if (!leafSibling && parent !== null && onChain.has(parent) && removed.length > 0) {
+      const response = responseOf(parent);
+      const delivery = response !== null && node.delivery === 'interleave' && sameScope(record, response)
+        && removed.every((member) => nodes.get(member)!.delivery === null || typeOf(member) === 'attachment');
+      if (response !== null && (inResponse(uuid, response) || delivery) && removed.every((member) => inResponse(member, response))) {
+        if (delivery) node.owner = response.uuid as string;
+        extend();
+        return;
+      }
+    }
+    kept = next;
+    onChain = nextSet;
+    leaf = uuid;
+  });
+
+  if (leaf === null || chain.at(-1)?.uuid !== leaf) return [...chain];
+  const given = new Set(chain.map((record) => record.uuid));
+  const recovered = kept.filter((uuid) => !given.has(uuid)).map((uuid) => nodes.get(uuid)!.index);
   if (recovered.length === 0) return [...chain];
   // merged by file position, the chain's own order untouched
   recovered.sort((a, b) => a - b);
   const out: TranscriptRecord[] = [];
   let next = 0;
   for (const record of chain) {
-    const at = first.get(record.uuid as string) ?? -1;
+    const at = typeof record.uuid === 'string' ? (nodes.get(record.uuid)?.index ?? -1) : -1;
     while (next < recovered.length && recovered[next] < at) out.push(records[recovered[next++]]);
     out.push(record);
   }

@@ -152,6 +152,15 @@ describe('recentTurnsOf', () => {
     expect(shown([...parallelLines.slice(0, 6), rewind].join('\n'))).toEqual([['Run independent checks.', 1]]);
   });
 
+  it('a prompt or another response written inside a response, on one of its blocks, is never part of it', () => {
+    // between rA and rB, parented on a1: the follower forks to it and back; it never adopts the foreign record
+    for (const shape of [{ type: 'user', message: { role: 'user', content: 'A second writer prompt.' } }, { type: 'assistant', message: { role: 'assistant', id: 'different-response', content: [{ type: 'text', text: 'Another response.' }] } }]) {
+      const foreign = JSON.stringify({ ...shape, uuid: 'foreign', parentUuid: 'a1' });
+      const text = [...parallelLines.slice(0, 5), foreign, ...parallelLines.slice(5)].join('\n');
+      expect(recentTurnsOf(text, 5, false).turns.map((t) => [t.prompt?.text, t.answer?.text, t.toolCalls]), shape.type).toEqual([['Run independent checks.', 'All checks completed.', 5]]);
+    }
+  });
+
   it('an empty or unparsable text has no turns', () => {
     expect(recentTurnsOf('', 5, false)).toEqual({ turns: [], earlier: false, source: 'transcript' });
     expect(recentTurnsOf('{"type":"user", torn', 5, true).turns).toEqual([]);
