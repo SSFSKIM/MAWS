@@ -408,6 +408,13 @@ Dependencies: P2-0's seam (M1); nothing new from npm. Consumers: B (`useLoadedPl
 - Observation: `initialize` carries no plugin facts, so before a turn the loaded list is only reachable through `reload_plugins`.
   Evidence: findings §3 (the initialize answer's 20 top-level keys, none of them plugins).
 
+- Observation: master at `bba95867` failed `pnpm test` before M2: M0 committed its two pass3 fixtures without the conformance pins' update or the transcript snapshots (`*.rows.json`) the fixture suites expect.
+  Evidence: M2's executor's first full run; fixed in `e309cb37` (the pins and `p2-no-prompt-resume-{1,setup}.rows.json`).
+- Observation: in the replay harness, `reads.jsonl` plays its `system/init` only with its recorded turn, and the host's context sample at ready gets an empty answer, so a replayed session shows observed facts only after a turn.
+  Evidence: M2's task report; it bounds what `e2e:available` (M3) can assert about facts before a turn.
+- Observation: no-prompt launches see no `system/init`, but `initialize`'s answer carries `output_style`, so the output style is observable without a turn.
+  Evidence: `spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-1.jsonl` (the initialize answer); the recorder reads it.
+
 ## 12. Decision Log
 
 - Decision: the verification call. This document gets one independent review round by the `doperpowers:adversarial-reviewer` agent on Opus (the astra route limited until 2026-10-13, P1 P-26), on the design and on the execution section's buildability (three milestones after the spike), before the first executor starts; each milestone gets the task-reviewer at its frontier (M1 and M2 independently, M3 after both); the whole branch gets `doperpowers:review-code` at **high** (main-process concurrency in the acquisition registry and host persistence across builds warrant the frontier rung).
@@ -427,6 +434,16 @@ Dependencies: P2-0's seam (M1); nothing new from npm. Consumers: B (`useLoadedPl
 - Decision: the first adversarial review round (Opus, on df98a678; 1 blocking, 4 should-fix, 3 minor; all accepted, none dismissed). The composer's text stays in its draft while a card is docked and `held` no longer clears it, and `dockFor` never replaces a message-carrying card with an empty one (the blocking finding: a joiner's card erased the only copy of the owner's message); a take-over's joiners run their own attempt after it (it usually ends `released`); the record is re-read under the lock (an archive or a delete during the `exiting` wait); intent setups register too and `already_live` maps to `ready`; the watch is built before the reservation read; observed facts merge per field by time and track the launches folded in, so a live write never blocks recovery and an older build's launches are caught up; `engine.observedFacts` is `bounded` with a 5 s reading budget; the smaller gaps (types, the read model's public method, `setDigest`'s input, the dormant widget's operation refetch, Branch P's command, Back to editing on a record) closed in place.
   Rationale: each finding was real and inside the design's intent; none changed what the owner sees beyond keeping the text where it was typed.
   Date/Author: 2026-10-09, P2-A's author.
+
+- Decision: M2 as built (`e309cb37`, `60079fa1`). (a) The wire answer of `engine.observedFacts` and `session.observedFacts` is `ObservedFactsAnswerSchema` — the facts plus `complete: boolean`, never written to the file — where §7 wrote `ObservedFactsSchema.nullable()`; §5.5 already required `complete` on the wire. (b) Live recording and journal recovery share one fold over journal rows, so a live fact's `at` is the row's journal time, the same as a recovered one. (c) A live launch is listed in `launches` only at its exit write, so a crash before then is still recovered from its journal; the recorder's base read skips the live launch. (d) `engine.observedFacts` is main-only; its `bounded` shape lives in a new `P2A_DEADLINE_SHAPES` beside `DEADLINE_SHAPES`, which a test pins to C3's commands exactly. (e) `ObservedFactsStore.merge` takes an optional `{keepLaunches}` so recovery prunes the launch list (an addition to §7's signature). (f) The output style is also read from `initialize`'s `output_style`; effort is recorded only for a valid `applied.effort`. (g) An exited status's own plugin report counts as observed when later than the file's. (h) The panel's Plugins section stays hidden while the list is unknown; Session info's Plugins row reads "Not observed yet"; Session info, not live, shows Main, Output style, Plugins, Mode and Context, never the record's requested values or defaults.
+  Rationale: each follows §5.5's intent (per-field time, recovery once per launch, unknown never empty, defaults never labelled observed); (a) and (e) are §7 refinements the design already implied; (d) keeps C3's pinned table untouched.
+  Date/Author: 2026-10-09, P2-A's plan executor (folded from M2's executor).
+- Decision: the owner answered §10 Q1 yes (spec Decision Log 17, 2026-10-09): a chip choice and a Refresh or Load now start the engine; §4.1's triggers stand; nothing of M3 is held from merging; Branch P is not built.
+  Rationale: the owner's decision; relayed by the architect.
+  Date/Author: 2026-10-09, P2-A's plan executor.
+- Decision: Send to main's acquisition (§5.6) goes in E1's shared form logic (the one hook the sheet and the comment card both call; P2-E1's document `docs/doperpowers/plans/2026-10-08-p2-e1-comment-card.md`, spec Decision Log 18) if E1's extraction has landed when M3 runs, else in `side/CommentComposer.tsx` as planned for E1 to carry into the hook; acquisition never moves into main's `side.sendToMain` (E1's H5 note is not followed). E1's M4 adds `artifactScope` to `session.launch` from `runResume`, which acquisition inherits with no change.
+  Rationale: the architect's relay of E1's design; one acquisition per gesture in the renderer, main's sendToMain unchanged.
+  Date/Author: 2026-10-09, P2-A's plan executor.
 
 ## 13. Outcomes & Retrospective
 
