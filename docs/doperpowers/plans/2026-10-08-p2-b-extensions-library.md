@@ -25,6 +25,7 @@ How to see it working: open a session, type `/plugins` (a wide dialog opens; My 
 - [x] (2026-10-09 08:20Z) Claude Desktop 2.16120.0's plugin library read from its shipped source (a read-only research pass; §5 cites it): the grouped library is in the bundle but gated off for local Code; the live local UI is recorded in §11.
 - [x] (2026-10-09 08:25Z) Adversarial review round (Opus; 2 blocking, 11 should-fix, 8 minor; all accepted) folded into this revision (Decision Log).
 - [x] (2026-10-09 08:50Z) The reviewer's verification: 19 of 21 resolved; the remaining 2 should-fix and 6 minor folded (Decision Log).
+- [x] (2026-10-09 08:35Z) Execution started (P2-B's executor, controller of the milestone loop): refresh pass against master 9e942f25; parent `docs/doperpowers/plans/2026-10-08-p2-daily-driver.md`, child id `P2-B`, re-pinned at blob a7e7d4cf1084; ledger re-pinned at blob 226bb2586cef (Decision Log). A and C not yet on master: M3 builds against §5.6's stand-ins and §5.12's empty hook.
 - [ ] M2 — the data and the manifest service (host, shared).
 - [ ] M3 — the library shell and My items.
 - [ ] M4 — the detail.
@@ -490,6 +491,10 @@ Consumed from P2-A (ledger §1): `useLoadedPlugins`, `Freshness`, `ObservedPlugi
 - Decision: the reviewer's verification (same reviewer, on 06304bcd): 19 of 21 findings resolved, 2 should-fix and 6 minor remaining, all folded: Escape's clearing moved to `WidgetDialogHost`'s `onEscapeKeyDown` (Radix's capture listener closes the dialog before any React handler; §5.2); the acceptance spec on `pluginsScratch()`'s real layout and trust (§6.3); `.lsp.json` and the `monitors` field and `experimental.<kind>` in §5.5's table; the E8 helpers and data attributes re-pointed in M3 (§6.2); `needs_trust` in the loaded line; the other-projects Install checked by the acceptance spec; acceptance 10's milestone conditional on A's M3. No further round: the remaining items were mechanical corrections the reviewer specified exactly, and the round raised no new design question.
   Rationale: the loop stops when a round yields only exact, bounded corrections (the user's review rule).
   Date/Author: 2026-10-09, P2-B's author.
+
+- Decision: refresh pass at execution start (2026-10-09, master 9e942f25): the parent re-pinned from blob 3df342b90afe to a7e7d4cf1084 and the ledger from ab381a34b883 to 226bb2586cef. The parent's changes since the first pin touch C's mechanism (Decision Log 19), statuses, X21's rect and B's own answers (Decision Log 20); the ledger's rows for B (§1 `plugins.manifest`, the additive fields, X19, `mods.list` through `useBuiltInMods`; §4 none; §6 files) match §7 as written. One overlap noted: the ledger's `mods.list` row names `src/renderer/src/widgets/plugins/BuiltInMods.tsx` as P2-C's section, which §5.12 also has B ship; B keeps it a thin consumer of `useBuiltInMods`, so whichever of B and C lands second merges the two files by keeping one component behind that hook.
+  Rationale: the document was authored before A and C coded; its names must match the ledger as resolved before the first milestone builds against them.
+  Date/Author: 2026-10-09, P2-B's executor.
 
 ## 13. Outcomes & Retrospective
 
