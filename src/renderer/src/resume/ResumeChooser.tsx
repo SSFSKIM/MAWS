@@ -9,6 +9,7 @@
 // session (P2-A's acquisition once it lands). The host gives the box (X19's library size) and Esc.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { RecentTurn } from '@shared/ipc/schema/session';
 import { formatDateTime } from '../app/date-format';
@@ -17,6 +18,7 @@ import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
 import { ipc } from '../ipc/client';
+import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A's X16, read only
 import { displayTitle } from '../sessions/title';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -260,16 +262,26 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   );
 }
 
+// P2-A (X16, availability, read only): why the owner cannot continue a session from here, for the two states the chooser
+// lists that no gesture continues (an archive, a terminal or job holding it), in A's words; null otherwise. Opening one
+// still shows its transcript.
+function useRefusal(record: SessionRecord): string | null {
+  const availability = useAvailability(record.appId);
+  return availability === 'archived' || availability === 'foreign_held' ? availabilityRefusal(availability, record.holder) : null;
+}
+
 function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: string; row: ChooserRow; kind: GroupKind; now: number; selected: boolean; badge: string | null; onSelect(): void; onOpen(): void }) {
   const { record } = row;
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   const glyph = glyphFor(record, digest, pending);
+  const refusal = useRefusal(record);
   const branch = sessionBranch(record);
   const title = displayTitle(record);
   return (
     <div
       id={id}
+      title={refusal ?? undefined}
       role="option"
       aria-selected={selected}
       data-selected={selected}
@@ -338,6 +350,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
     if (ready && turns.current) turns.current.scrollTop = turns.current.scrollHeight;
   }, [ready]);
   const glyph = glyphFor(record, digest, pending);
+  const refusal = useRefusal(record);
   const branch = sessionBranch(record);
   const projectName = record.projectId === null ? COPY.otherSessions : (projects.get(record.projectId)?.name ?? null);
   const title = displayTitle(record);
@@ -362,6 +375,11 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
           </Fact>
         )}
       </dl>
+      {refusal && (
+        <p role="note" data-testid="resume-refusal" className="m-0 mt-2 shrink-0 text-ui-sm text-fg-muted">
+          {refusal}
+        </p>
+      )}
       <h4 className="m-0 mt-3 shrink-0 text-ui-sm font-medium text-fg-muted">{COPY.where}</h4>
       <div ref={turns} data-testid="resume-turns" aria-busy={preview.status === 'loading'} tabIndex={0} className="mt-1 min-h-0 flex-1 overflow-y-auto pr-1 outline-accent focus-visible:outline-2">
         {preview.status === 'loading' && <p className="m-0 text-ui-sm text-fg-faint">{COPY.loading}</p>}

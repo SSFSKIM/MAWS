@@ -13,6 +13,17 @@ const SHELL_ENV = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions
 const FIX = 'Fix sidebar drag'; // unread, its transcript test/fixtures/transcripts/w1-steer-next-disk.jsonl
 const CHARTER = 'Charter + research'; // its transcript subagent-parent.jsonl
 const NORTH = 'Workstation north star'; // no process: an exited session
+const HELD = 'Somersault terminal run'; // held by a terminal
+
+// P2-A's `SessionDigest.availability` for a session, from main's read model (the renderer's own client)
+const availabilityOf = (page: Page, title: string) =>
+  page.evaluate(async (t) => {
+    const records = await window.maws.invoke('session.list', {});
+    const digests = await window.maws.invoke('session.digests', undefined);
+    if (!records.ok || !digests.ok) return null;
+    const id = records.value.sessions.find((r) => r.title.text === t)?.appId;
+    return digests.value.digests.find((d) => d.appSessionId === id)?.availability ?? null;
+  }, title);
 
 const chooser = (page: Page) => page.getByRole('dialog', { name: 'Resume session' });
 const options = (page: Page) => chooser(page).getByRole('option');
@@ -90,6 +101,26 @@ test('resume chooser: an exited session opens to its transcript with the session
     await expect(after, 'the opened session offers Resume as its row did').toBeVisible();
     expect(await after.isEnabled()).toBe(enabled);
     await page.keyboard.press('Escape');
+    // P2-A (X16): opening and selecting started nothing; the session stays resumable, for the first Send to acquire
+    expect(await availabilityOf(page, NORTH)).toBe('resumable');
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// P2-A's availability, read only: a session no gesture continues from here says why in the preview (a terminal holds it).
+test('resume chooser: a terminal-held session previews with the reason it cannot be continued here', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { page } = maws;
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 });
+    await openFromSidebar(page);
+    await page.keyboard.press('Control+a'); // All projects
+    await page.keyboard.type('somersault terminal');
+    await expect(options(page)).toHaveCount(1);
+    expect(await availabilityOf(page, HELD)).toBe('foreign_held');
+    await expect(chooser(page).getByTestId('resume-refusal')).toHaveText(/^Held by terminal · \d+$/);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();

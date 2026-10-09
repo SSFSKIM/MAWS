@@ -95,6 +95,20 @@ describe('resume widget', () => {
     expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull(); // opening is the action; the first Send continues it
   });
 
+  // P2-A's availability, read only: a session no gesture continues from here says why, in A's words
+  it('a terminal-held session says why it cannot be continued here; an exited one says nothing', () => {
+    // main's read model derives availability (the scenario's digests carry none): the terminal's session is foreign-held
+    const held = 'app-466b0d0d' as AppSessionId;
+    const digests = new Map(useSessions.getState().digests);
+    digests.set(held, { ...digests.get(held)!, availability: 'foreign_held' });
+    useSessions.setState({ digests });
+    mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
+    expect(screen.getByTestId('resume-refusal').textContent).toMatch(/^Held by terminal · \d+$/);
+    expect(screen.getAllByRole('option')[0].title).toBe(screen.getByTestId('resume-refusal').textContent);
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' }); // Trace stream reconnects: no process
+    expect(screen.queryByTestId('resume-refusal')).toBeNull();
+  });
+
   it('opens the selected session in the current tab on Enter and in a new tab on ⌘Enter, and closes', () => {
     const openSession = vi.fn();
     const openTab = vi.fn();
