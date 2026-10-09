@@ -17,14 +17,15 @@ import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerFocusTarget } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
-import type { BuiltInModRow } from './plugins/builtin-mods';
+import type { BuiltInModsState } from './plugins/builtin-mods';
 import { useLibraryStore } from './plugins/library-store';
 import { PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
-const mods = vi.hoisted(() => ({ rows: [] as BuiltInModRow[], setEnabled: null as ((id: string, enabled: boolean) => Promise<void>) | null }));
-vi.mock('./plugins/builtin-mods', () => ({ useBuiltInMods: () => mods }));
+const NO_MODS = (): BuiltInModsState => ({ read: { state: 'ready', rows: [] }, failure: null, setEnabled: async () => {}, setOverride: async () => {} });
+const mods = vi.hoisted(() => ({ hook: null as unknown as BuiltInModsState }));
+vi.mock('./plugins/builtin-mods', () => ({ useBuiltInMods: () => mods.hook }));
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId;
@@ -98,14 +99,13 @@ beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   cwd = backend.status(ID).cwd;
   standIn();
+  mods.hook = NO_MODS();
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
   useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
-  mods.rows = [];
-  mods.setEnabled = null;
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -896,21 +896,31 @@ describe('plugins widget: the library', () => {
     expect(screen.queryByText('MAWS mods · Built in')).toBeNull();
     cleanup();
     const setEnabled = vi.fn(async () => {});
-    mods.rows = [{ id: 'maws.to-human', name: 'To-human', description: 'Agents mark what is for you', enabled: true, source: 'external-compatible-style', perSession: 'off' }];
-    mods.setEnabled = setEnabled;
+    mods.hook = { ...NO_MODS(), read: { state: 'ready', rows: [{ id: 'maws.to-human', name: 'To-human', description: 'Agents mark what is for you', version: 1, enabled: true, source: 'external-compatible-style', perSession: 'off' }] }, setEnabled };
     await ready();
     const section = screen.getByRole('region', { name: 'MAWS mods · Built in' });
     const mod = section.querySelector<HTMLElement>('[data-mod-row="maws.to-human"]')!;
     expect(mod.textContent).toContain('To-human');
     expect(mod.textContent).toContain('Built in');
-    expect(mod.textContent).toContain('Through your output style');
-    expect(mod.textContent).toContain('This session: off');
+    expect(mod.textContent).toContain('The output style gives the agent its instructions');
+    expect((within(mod).getByRole('radio', { name: 'Off' }) as HTMLInputElement).checked).toBe(true);
     expect(within(mod).queryByRole('button', { name: /More actions/ })).toBeNull();
     expect(mod.textContent).not.toContain('Uninstall');
     const groupsInOrder = [...section.parentElement!.querySelectorAll('[data-plugins-group]')].map((g) => g.getAttribute('data-plugins-group'));
     expect(groupsInOrder.at(-1)).toBe('builtIn');
     fireEvent.click(within(mod).getByRole('switch'));
     expect(setEnabled).toHaveBeenCalledWith('maws.to-human', false);
+  });
+
+  it('keeps MAWS mods · Built in when the engine CLI’s plugin read fails: the mods are MAWS’s, not the CLI’s', async () => {
+    backend.script('plugins.list', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
+    });
+    mods.hook = { ...NO_MODS(), read: { state: 'ready', rows: [{ id: 'maws.to-human', name: 'To-human', description: 'Agents mark what is for you', version: 1, enabled: true, source: 'maws-contract', perSession: 'inherit' }] } };
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    mount();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain("Couldn't load your plugins."));
+    expect(screen.getByRole('region', { name: 'MAWS mods · Built in' }).querySelector('[data-mod-row="maws.to-human"]')).toBeTruthy();
   });
   it('a plugin this project enables that a local override turns off reads Disabled and offers Turn on (U3 F1)', async () => {
     installed = [plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true, projectEnabled: true, enabled: false }), plugin('e8-probe@e8-scratch')];

@@ -1,13 +1,13 @@
-// "MAWS mods · Built in" (X20; the P2-C document, §9 and G7): a row per built-in mod from `mods.list` with the session,
-// its source in words, the app's switch, the session's override, the pending and mismatch lines; no Uninstall; an
-// unreadable registry says so; the search filters; a change of the switch, the override or the session's channel reads
-// the rows again.
+// "MAWS mods · Built in" (X20; the P2-C document, §9 and G7), the last group of the plugin library's My items: a row per
+// built-in mod from `mods.list` with the session, its version, its source in words, the app's switch, the session's
+// override, the pending and mismatch lines; no overflow and no Uninstall; an unreadable registry says so; the library's
+// search filters; a change of the switch, the override or the session's channel reads the rows again.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModRow } from '@shared/mods/registry';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { BuiltInModsContent } from './BuiltInModsContent';
+import { BuiltInMods } from './BuiltInMods';
 
 const hold = vi.hoisted(() => ({ client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null }));
 vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: unknown[]) => (hold.client!.invoke as (...a: unknown[]) => unknown)(...args), on: (...args: unknown[]) => (hold.client!.on as (...a: unknown[]) => unknown)(...args) } }));
@@ -24,11 +24,14 @@ afterEach(cleanup);
 const section = () => screen.getByRole('region', { name: 'MAWS mods · Built in' });
 
 describe('the built-in mods section', () => {
-  it('draws a row per mod with its version, its source in words and the session’s override, and no Uninstall', async () => {
-    render(<BuiltInModsContent appSessionId={APP} />);
+  it('draws a row per mod as a library group, with its version, its source in words and the session’s override, and no Uninstall', async () => {
+    render(<BuiltInMods appSessionId={APP} search="" />);
     expect(fake.invoked('mods.list')).toEqual([{ appSessionId: APP }]);
     await act(() => fake.reply('mods.list', [ROW]));
+    expect(section().getAttribute('data-plugins-group')).toBe('builtIn');
+    expect(within(section()).getByRole('heading').textContent).toBe('MAWS mods · Built in1');
     const row = within(section()).getByRole('listitem');
+    expect(row.getAttribute('data-mod-row')).toBe('maws.to-human');
     expect(row.textContent).toContain('To-human');
     expect(row.textContent).toContain('Built in');
     expect(row.textContent).toContain('Version 1');
@@ -37,11 +40,12 @@ describe('the built-in mods section', () => {
     const override = within(row).getByRole('radiogroup', { name: 'To-human in this session' });
     expect(within(override).getAllByRole('radio').map((radio) => radio.closest('label')!.textContent)).toEqual(['Default (On)', 'On', 'Off']);
     expect((within(override).getByRole('radio', { name: 'Default (On)' }) as HTMLInputElement).checked).toBe(true);
-    expect(within(row).queryByRole('button', { name: /Uninstall/ })).toBeNull();
+    expect(within(row).queryByRole('button', { name: /Uninstall|More actions/ })).toBeNull();
+    expect(row.textContent).not.toContain('Uninstall');
   });
 
   it('the override writes the session’s and reads again, showing what it waits for', async () => {
-    render(<BuiltInModsContent appSessionId={APP} />);
+    render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [ROW]));
     fireEvent.click(screen.getByRole('radio', { name: 'Off' }));
     expect(fake.invoked('mods.setSessionOverride')).toEqual([{ appSessionId: APP, id: 'maws.to-human', value: 'off' }]);
@@ -52,7 +56,7 @@ describe('the built-in mods section', () => {
   });
 
   it('the app’s switch is the settings write; a settings or channel change reads the rows again', async () => {
-    render(<BuiltInModsContent appSessionId={APP} />);
+    render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [{ ...ROW, source: 'external-compatible-style', pending: 'next-compaction', mismatch: { resolved: 'default', observed: 'doperpowers:to-human' } }]));
     expect(section().textContent).toContain('The output style gives the agent its instructions');
     expect(section().textContent).toContain('Applies after this session’s next compaction');
@@ -73,7 +77,7 @@ describe('the built-in mods section', () => {
   });
 
   it('a refused write says so in main’s words, and the rows read again show what holds', async () => {
-    render(<BuiltInModsContent appSessionId={APP} />);
+    render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [ROW]));
     fireEvent.click(screen.getByRole('radio', { name: 'Off' }));
     await act(() => fake.fail('mods.setSessionOverride', 'unknown session: app-mods'));
@@ -83,15 +87,16 @@ describe('the built-in mods section', () => {
   });
 
   it('a registry main cannot read says so; an empty one, or a search matching nothing, draws nothing', async () => {
-    render(<BuiltInModsContent appSessionId={APP} />);
+    render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.fail('mods.list', 'index unavailable: locked by another build'));
     expect(within(section()).getByRole('status').textContent).toBe('MAWS mods can’t be read right now: index unavailable: locked by another build');
+    expect(section().getAttribute('data-plugins-group')).toBe('builtIn');
     cleanup();
-    const empty = render(<BuiltInModsContent appSessionId={APP} />);
+    const empty = render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', []));
     expect(empty.container.textContent).toBe('');
     cleanup();
-    const searched = render(<BuiltInModsContent appSessionId={APP} search="sandbox" />);
+    const searched = render(<BuiltInMods appSessionId={APP} search="sandbox" />);
     await act(() => fake.reply('mods.list', [ROW]));
     expect(searched.container.textContent).toBe('');
   });

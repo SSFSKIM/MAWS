@@ -62,6 +62,9 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
             </button>
           </Centered>
         )}
+        {/* P2-C start (2026-10-09): MAWS's mods are not the CLI's, so a failed plugin read keeps them (G7) */}
+        {installed.state === 'error' && view.filter === 'all' && <BuiltInMods appSessionId={appSessionId} search={view.search} />}
+        {/* P2-C end */}
       </div>
     );
   }
