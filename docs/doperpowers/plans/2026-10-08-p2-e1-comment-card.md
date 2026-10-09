@@ -574,6 +574,8 @@ Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, i
   Evidence: `~/claude-desktop-re/readable/app-2.16120.0/web/app/v1/frame-shell-chrome-CXu04DiJ.js:17530-17583` (`RT = 320, zT = 48, BT = (RT * 3) / 4`, `function GT`, `function VT`).
 - Observation: a change to any host-wire `strictObject` changes E10's wire fingerprint, so `session.launch`'s new field is a wire change.
   Evidence: `src/shared/ipc/wire-fingerprint.ts` header: "one changed `strictObject` on the wire changes it".
+- Observation (M1): a header line that appears while picking reflows the frame, so the rect a pick reports is stale by the line's height once the line disappears; any viewer chrome that changes height with picking moves the page under a stored pin.
+  Evidence: e2e:deliverables run 2 at 41e7f758, a card above a fixed footer at 749 against 773; fixed in 22bf6e3b by floating the hint.
 
 ## Decision Log
 
@@ -589,6 +591,12 @@ Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, i
 
 - Decision: refresh pass at execution start. Parent re-pinned to blob a7e7d4cf1084 (spec Decision Log 16 to 20 now present: 18 answers this document's H6, items 1 to 8 as recommended), ledger to blob 226bb2586cef (its §1, §5 and §6 rows record this document's names unchanged). One correction folded: acquisition for Send to main lives in the renderer's shared comment form before `side.sendToMain` (A's §5.6), not inside main (D5, H5). X22's final shape (A's M1, spec Decision Log 17: `started: boolean` beside a `sent | steered | queued | held | refused` disposition) is noted for M2: the card reads P2-0's interim `started` disposition as landed and treats the final shape's `started: true` with `sent` or `queued` by its disposition, a `held` like `refused` (the card is not the composer origin).
   Rationale: the document was written against 7462fe28; the parent and ledger moved since, with no code change under src or e2e.
+  Date/Author: 2026-10-09, P2-E1 executor.
+- Decision: M1's executor decisions, folded. `CommentCardHost` takes an optional `restoreFocus?()` (focus return to the viewer's Comment button, else the frame; proposed for X21's row); the host checks `claimMode` against its own `mode` and the viewer's `accepts` checks only the record; `DeliverableTab` keeps `visible` true by default (the pane mounts only the active tab); the host is mounted only for an HTML body; a card is closed on host unmount after a microtask, so StrictMode's effect replay does not close it; `openCard` without a card placement takes the target's kind as its host; only the rect's four numbers are kept; `cardGone` lands in M1, `enterThread` and `shownThread` in M2. The form logic lives in `src/renderer/src/side/comment-form.ts` (`useCommentForm`) with its parts in `side/CommentFormParts.tsx`; P2-A's acquisition block for Send to main therefore goes in `useCommentForm`'s `send`, at the marked place before `sendComment`, not in `CommentComposer.tsx` (hand-back: ledger §6's line for A). The picking hint now floats as a pill over the body's top instead of a header line (a header line reflowed the frame by 24 px on pick, so a pick's rect went stale; a card above a bottom element sat 28 px off).
+  Rationale: each keeps D3 to D5 and D9 as designed; the hint's move is the one visible change to E2's viewer, required for acceptance 1's 4 px.
+  Date/Author: 2026-10-09, P2-E1 executor (M1).
+- Decision: M3 also re-pins through `locate` when the host box resizes (not only on claim and on `CardFrame.key`), since a stored rect goes stale on any reflow of the frame (an element fixed to the frame's viewport moves with the frame's height). D4's "re-placed from the stored rect on resize" stays the fallback when no `locate` is available.
+  Rationale: M1's executor observed the stale rect directly (e2e run 2); one extra locate per resize is cheap and the clamps already bound any answer.
   Date/Author: 2026-10-09, P2-E1 executor.
 
 ## Outcomes & Retrospective
