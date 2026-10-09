@@ -27,7 +27,7 @@ import * as Hooks from './HooksWidget';
 import * as Mcp from './McpWidget';
 import * as Memory from './MemoryWidget';
 import * as Permissions from './PermissionsWidget';
-import * as Plugins from './PluginsWidget';
+import * as Plugins from './plugins/LoadedView';
 import * as Sandbox from './SandboxWidget';
 import * as Skills from './SkillsWidget';
 import * as Status from './StatusWidget';
@@ -187,11 +187,11 @@ describe('every widget renders its fixture response', () => {
   it('plugins: the eleven loaded plugins with their versions', () => {
     const init = line<{ plugins: { name: string; path: string; source: string; version?: string }[] }>('pass2/real-settings', 15);
     const plugins = init.plugins.map((p) => ({ name: p.name, path: p.path, source: p.source, version: p.version ?? null }));
-    const view = Plugins.present({ plugins, pluginErrors: [], pluginWarnings: [] });
+    const view = Plugins.present({ plugins, errors: [], warnings: [] });
     expect(view.plugins).toHaveLength(11);
     expect(view.plugins[0]).toEqual({ name: 'designer', version: '2.1.0', source: 'designer@designer', path: '/Users/new/.claude/plugins/cache/designer/designer/2.1.0' });
     expect(view.plugins[8]).toMatchObject({ name: 'agents-md', version: null, path: 'builtin' });
-    const failing = Plugins.present({ plugins: [], pluginErrors: [{ plugin: 'x', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [{ plugin: 'y', type: 'deprecated', message: 'old' }] });
+    const failing = Plugins.present({ plugins: [], errors: [{ plugin: 'x', type: 'load', message: 'bad manifest', path: null }], warnings: [{ plugin: 'y', type: 'deprecated', message: 'old' }] });
     expect(failing.problems).toEqual([
       { plugin: 'x', level: 'error', text: 'load · bad manifest' },
       { plugin: 'y', level: 'warning', text: 'deprecated · old' },

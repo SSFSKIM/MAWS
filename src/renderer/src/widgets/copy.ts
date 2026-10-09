@@ -359,15 +359,7 @@ const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
   reloadSkills: 'Reload skills',
-  // Installed
-  installed: 'Installed',
-  installedList: 'Installed plugins',
-  noInstalled: 'No plugins installed',
-  enabled: 'enabled',
-  disabled: 'disabled',
-  enabledSwitch: (id: string) => `Enabled: ${id}`,
-  update: 'Update',
-  uninstall: 'Uninstall…',
+  // Installed: P2-B's library (`LIBRARY`) draws the installed plugins
   // Marketplaces
   marketplaces: 'Marketplaces',
   marketplaceList: 'Known marketplaces',
@@ -406,7 +398,6 @@ export const PLUGIN_MANAGEMENT = {
   records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
   dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',
   overrides: 'and any enable or disable override for them in these settings files',
-  elsewhere: (path: string) => `In ${path} · manage it from a session there`, // another project's installation, read-only here
   alsoUninstalls: (plugins: string[]) => `Also uninstalls ${plugins.length} plugin${plugins.length === 1 ? '' : 's'}: ${plugins.join(', ')}`,
   resolving: 'Resolving the engine…',
   unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words
@@ -468,3 +459,57 @@ export const RESUME = {
   open: 'Open',
   resume: 'Resume',
 };
+
+// P2-B start (2026-10-09): the plugin library (the P2-B execution document §5.4 to §5.12; Claude Desktop's words where
+// it has them, §10 Q9). The person's words; no provenance.
+export const LIBRARY = {
+  searchPlugins: 'Search plugins',
+  show: 'Show',
+  filter: { all: 'All plugins', enabled: 'Enabled', disabled: 'Disabled', loaded: 'Loaded in this session', otherProjects: 'Other projects' } as const,
+  sortBy: 'Sort by',
+  sort: { updated: 'Last updated', name: 'Name' } as const,
+  group: {
+    here: 'In this project',
+    yours: 'Created by you',
+    synced: 'Synced from claude.ai',
+    anthropic: 'From Anthropic & Partners',
+    added: 'From marketplaces you added',
+    otherProjects: 'Other projects',
+    builtIn: 'MAWS mods · Built in',
+  } as const,
+  list: 'Plugins',
+  noneHere: 'No plugins installed for this project yet.',
+  firstTitle: 'Add your first plugins',
+  firstBody: 'Give Claude role-level expertise with plugins. Add them from Browse.',
+  noMatch: 'Nothing matches these filters.',
+  resetFilters: 'Reset filters',
+  failed: "Couldn't load your plugins.",
+  retry: 'Retry',
+  // a row
+  isNew: 'New',
+  newTooltip: 'Added or updated in the last 14 days',
+  disabled: 'Disabled',
+  by: (author: string) => `by ${author}`,
+  skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`,
+  moreActions: (name: string) => `More actions for ${name}`,
+  turnOn: 'Turn on',
+  turnOff: 'Turn off',
+  update: 'Update',
+  uninstall: 'Uninstall…',
+  managedIn: (project: string) => `In ${project} · manage it from a session there`,
+  managedInMany: (n: number) => `In ${n} other projects · manage it from a session there`,
+  // the loaded line
+  loadedCount: (n: number) => `${n} plugin${n === 1 ? '' : 's'} loaded in this session`,
+  problems: (n: number) => `${n} problem${n === 1 ? '' : 's'}`,
+  refresh: 'Refresh',
+  starting: 'Starting…',
+  missingDirectory: (directory: string) => `Directory not found: ${directory}`, // A's words for the state
+  builtIntoClaudeCode: 'Built into Claude Code',
+  loadedFromFolder: 'Loaded from a folder',
+  // MAWS mods · Built in (X20)
+  builtIn: 'Built in',
+  throughStyle: 'Through your output style',
+  thisSession: (on: boolean) => `This session: ${on ? 'on' : 'off'}`,
+  modSwitch: (name: string) => `Turn ${name} on or off`,
+};
+// P2-B end

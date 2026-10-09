@@ -132,11 +132,16 @@ function materialise(state, ctx, env) {
 
 // One installation as `plugin list --json` prints it from `ctx.cwd`: `projectEnabled` when an enabled project-scope
 // installation of the id is recorded for that directory (the engine reads the directory's `.claude/settings.json`).
+// P2-B (M3): `enabled` is the id's effective state as that directory sees it, as the engine prints it (U3 F1: the same
+// project-scoped row listed from another directory reads enabled false): the narrowest installation that applies there
+// (local, then project, for that directory; then the user's) decides, and an id with none that applies reads false.
 function rowOf(p, ctx, state) {
   const { name, marketplace } = splitId(p.id);
   const projectEnabled = state.installed.some((q) => q.id === p.id && q.scope === 'project' && q.projectPath === ctx.cwd && q.enabled);
+  const applies = (scope) => state.installed.find((q) => q.id === p.id && q.scope === scope && (scope === 'user' || q.projectPath === ctx.cwd));
+  const effective = applies('local') || applies('project') || applies('user');
   return {
-    id: p.id, version: p.version, scope: p.scope, enabled: p.enabled, installPath: `${ctx.configHome}/plugins/cache/${marketplace}/${name}/${p.version}`,
+    id: p.id, version: p.version, scope: p.scope, enabled: effective ? effective.enabled : false, installPath: `${ctx.configHome}/plugins/cache/${marketplace}/${name}/${p.version}`,
     ...(p.installedAt ? { installedAt: p.installedAt } : {}), ...(p.lastUpdated ? { lastUpdated: p.lastUpdated } : {}),
     ...(p.projectPath ? { projectPath: p.projectPath } : {}), projectEnabled,
   };

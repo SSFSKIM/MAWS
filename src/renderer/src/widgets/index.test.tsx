@@ -53,7 +53,7 @@ describe('every widget renders its fixture response', () => {
     permissions: 'Bash(git log --oneline)',
     usage: '$0.0208',
     config: 'dialogExpiry',
-    plugins: 'doperpowers',
+    plugins: '11 plugins loaded in this session', // P2-B: the library's loaded line
     mcp: 'openaiDeveloperDocs',
     sandbox: 'Sandbox off',
     'reload-plugins': 'Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors', // E11 §2.2: it reloads on opening

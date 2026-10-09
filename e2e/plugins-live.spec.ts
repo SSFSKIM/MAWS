@@ -113,15 +113,34 @@ async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
 async function openPlugins(page: Page): Promise<Locator> {
   return listing('opening /plugins (plugin list --json, plugin marketplace list --json)', async () => {
     const w = await openWidget(page, 'plugins');
-    await expect(w.locator('[data-plugins-section="installed"]')).toBeVisible({ timeout: 30_000 });
-    await expect(w.locator('[data-plugins-section="installed"]')).not.toContainText('Reading', { timeout: 30_000 });
+    await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible({ timeout: 30_000 }); // P2-B M3: the library's My items
     await expect(w.locator('[data-plugins-section="marketplaces"]')).not.toContainText('Reading', { timeout: 30_000 });
     return w;
   });
 }
-const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="installed"] [data-plugin-row="${id}"]`);
+// P2-B M3: My items draws one row per plugin ("Disabled" when the CLI lists it not enabled here), its changes in the
+// row's overflow; what the session loaded is Show › "Loaded in this session" (installed plugins as their rows, the
+// engine's own and a folder's as plain rows), and the loaded line under the head counts them.
+const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"]`);
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
-const loaded = (w: Locator) => w.locator('[data-plugins-section="loaded"]');
+const disabledBadge = (row: Locator) => row.getByText('Disabled', { exact: true });
+async function rowAction(row: Locator, item: string): Promise<void> {
+  await row.getByRole('button', { name: /^More actions for / }).click();
+  await row.page().getByRole('menuitem', { name: item, exact: true }).click();
+}
+async function show(w: Locator, filter: 'All plugins' | 'Loaded in this session'): Promise<void> {
+  await w.getByRole('button', { name: 'Show' }).click();
+  await w.page().getByRole('menuitemradio', { name: filter }).click();
+}
+// The ids (or, for a plugin the CLI does not list, the names) of what Show › "Loaded in this session" lists; the
+// filter is set back to All plugins after.
+async function loadedIds(w: Locator): Promise<string[]> {
+  await show(w, 'Loaded in this session');
+  const items = w.locator('[data-plugins-section="my-items"]');
+  const ids = await items.locator('[data-plugin-row], [data-loaded-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-plugin-row') ?? row.getAttribute('data-loaded-row') ?? ''));
+  await show(w, 'All plugins');
+  return ids;
+}
 // An Available plugin's line: on its row, or beneath the groups once the engine's `--available` stops offering it (it
 // leaves out what is installed).
 const availableLine = (w: Locator, id: string) => w.locator(`[data-plugins-section="available"] [data-plugin-row="${id}"], [data-plugins-section="available"] [data-plugin-result="${id}"]`);
@@ -242,7 +261,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await step('plugins', '/plugins lists the engine’s (empty) registry', async () => {
       const w = await openPlugins(page);
       const text = await w.innerText();
-      scratch.log(`installed: ${(await w.locator('[data-plugins-section="installed"]').innerText()).replaceAll('\n', ' · ')}`);
+      scratch.log(`installed: ${(await w.locator('[data-plugins-section="my-items"]').innerText()).replaceAll('\n', ' · ')}`);
+      scratch.log(`loaded line: ${await w.locator('[data-plugins-loaded]').innerText()}`);
       scratch.log(`marketplaces: ${(await w.locator('[data-plugins-section="marketplaces"]').innerText()).replaceAll('\n', ' · ')}`);
       scratch.observe('plugins', text);
       await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: the sheet names the scratch home a change writes
@@ -288,8 +308,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const row = group.locator(`[data-plugin-row="${PLUGIN}"]`);
       const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => availableLine(w, PLUGIN) }, () => row.getByRole('button', { name: 'Install…' }).click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
-      await expect(installedRow(w)).toContainText('user · enabled · e8-scratch');
-      await expect(loaded(w).getByRole('list', { name: 'Loaded plugins' })).toContainText('e8-probe');
+      await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
+      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
+      await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
       const s = await status(page, id);
       scratch.log(`status before any new turn: plugins ${JSON.stringify(s.plugins.map((p) => p.name))}`);
       expect(s.plugins.map((p) => p.name)).toContain('e8-probe');
@@ -323,10 +344,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       scratch.setPluginVersion('0.2.0');
       const w = page.locator('[data-widget="plugins"]');
       const row = installedRow(w);
-      const result = await action({ name: 'update', action: 'update', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'update', submit: 'Update', line: () => row }, () => row.getByRole('button', { name: 'Update' }).click());
+      const result = await action({ name: 'update', action: 'update', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'update', submit: 'Update', line: () => row }, () => rowAction(row, 'Update'));
       expect(result.text).toContain('0.1.0 → 0.2.0');
       await expect(row).toContainText('0.2.0');
-      scratch.log(`loaded after the update's reload: ${(await loaded(w).innerText()).replaceAll('\n', ' · ')}`);
+      scratch.log(`loaded after the update's reload: ${(await loadedIds(w)).join(' · ')}`);
     });
 
     await step('skills', '/skills after the next turn lists e8-probe:e8-hello', async () => {
@@ -342,30 +363,30 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await step('disable', 'the switch: disable; the Loaded list loses e8-probe', async () => {
       const w = await openPlugins(page);
       const row = installedRow(w);
-      const result = await action({ name: 'disable', action: 'disable', scope: 'user', source: null, fill: {}, sheet: 'disable', submit: 'Disable', line: () => row }, () => row.getByRole('switch').click());
+      const result = await action({ name: 'disable', action: 'disable', scope: 'user', source: null, fill: {}, sheet: 'disable', submit: 'Disable', line: () => row }, () => rowAction(row, 'Turn off'));
       expect(result.text).toBe('Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
-      await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
-      await expect(loaded(w)).not.toContainText('e8-probe');
+      await expect(disabledBadge(row)).toBeVisible();
+      await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
     await step('enable', 'the switch: enable; the Loaded list regains e8-probe', async () => {
       const w = page.locator('[data-widget="plugins"]');
       const row = installedRow(w);
-      const result = await action({ name: 'enable', action: 'enable', scope: 'user', source: null, fill: {}, sheet: 'enable', submit: 'Enable', line: () => row }, () => row.getByRole('switch').click());
+      const result = await action({ name: 'enable', action: 'enable', scope: 'user', source: null, fill: {}, sheet: 'enable', submit: 'Enable', line: () => row }, () => rowAction(row, 'Turn on'));
       expect(result.text).toBe('Successfully enabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
-      await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
-      await expect(loaded(w).getByRole('list', { name: 'Loaded plugins' })).toContainText('e8-probe');
+      await expect(disabledBadge(row)).toHaveCount(0);
+      await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
     });
 
     await step('uninstall', 'Uninstall…: the row leaves, its result stays; the Loaded list loses e8-probe', async () => {
       const w = page.locator('[data-widget="plugins"]');
       const row = installedRow(w);
       const result = await action({ name: 'uninstall', action: 'uninstall', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'uninstall', submit: 'Uninstall', acknowledge: true, line: () => w.locator(`[data-plugin-result="${PLUGIN}"]`) }, () =>
-        row.getByRole('button', { name: 'Uninstall…' }).click(),
+        rowAction(row, 'Uninstall…'),
       );
       expect(result.text).toBe('Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
       await expect(row).toHaveCount(0);
-      await expect(loaded(w)).not.toContainText('e8-probe');
+      await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
     await step('offer-nope', 'the marketplace offers `nope`: Refresh reads it in, and Available lists it', async () => {
@@ -399,7 +420,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const row = group.locator(`[data-plugin-row="${PLUGIN}"]`);
       const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => availableLine(w, PLUGIN) }, () => row.getByRole('button', { name: 'Install…' }).click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
-      await expect(installedRow(w)).toContainText('user · enabled · e8-scratch');
+      await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
+      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
     });
 
     await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
@@ -414,8 +436,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       await expect(row).toHaveCount(0);
       await expect(w.locator('[data-plugins-section="marketplaces"]')).toContainText('No marketplaces configured');
       await expect(installedRow(w)).toHaveCount(0); // the engine uninstalled it with its marketplace
-      await expect(loaded(w)).not.toContainText('e8-probe', { timeout: 30_000 }); // and the reload after the removal dropped it
-      scratch.log(`loaded after the removal's reload: ${(await loaded(w).innerText()).replaceAll('\n', ' · ')}`);
+      await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN); // and the reload after the removal dropped it
+      scratch.log(`loaded after the removal's reload: ${(await loadedIds(w)).join(' · ')}`);
     });
 
     scratch.observe('consoleErrors', maws.consoleErrors());

@@ -17,7 +17,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { WidgetsHarnessApi, WidgetsPane } from '../src/renderer/src/harness/widgets/api';
 import type { WidgetBackend } from '../test/support/widget-backend';
-import { scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
+import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -136,7 +136,7 @@ async function openPlugins(maws: BackendLaunch): Promise<Locator> {
   await inProject(maws);
   await pick(maws.page, 'plugins');
   const w = widget(maws.page, 'plugins');
-  await expect(w.locator('[data-plugins-section="installed"]')).toBeVisible();
+  await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible(); // P2-B M3: the library's My items
   return w;
 }
 const configHome = (maws: MawsLaunch) => join(maws.userData, 'claude-config');
@@ -157,7 +157,27 @@ async function settledLog(maws: BackendLaunch): Promise<string> {
     .toBe(true);
   return last;
 }
-const installedRow = (w: Locator, id: string, scope = 'user') => w.locator(`[data-plugins-section="installed"] [data-plugin-row="${id}"][data-plugin-scope="${scope}"]`);
+// P2-B M3: My items draws one row per plugin, at its representative installation's scope (`data-plugin-scope`); "Disabled"
+// when the CLI lists it not enabled here; its changes in the row's overflow (Turn on or off, Update, Uninstall…).
+const installedRow = (w: Locator, id: string, scope = 'user') => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"][data-plugin-scope="${scope}"]`);
+async function expectListed(w: Locator, id: string, scope = 'user', enabled = true): Promise<void> {
+  const row = installedRow(w, id, scope);
+  await expect(row).toBeVisible();
+  await expect(row.getByText('Disabled', { exact: true })).toHaveCount(enabled ? 0 : 1);
+}
+async function rowAction(row: Locator, item: string): Promise<void> {
+  await row.getByRole('button', { name: /^More actions for / }).click();
+  await row.page().getByRole('menuitem', { name: item, exact: true }).click();
+}
+// The overflow's items, the menu closed again by Escape (which closes only the menu: the widget stays).
+async function rowActions(row: Locator): Promise<string[]> {
+  await row.getByRole('button', { name: /^More actions for / }).click();
+  const items = await row.page().getByRole('menuitem').allInnerTexts();
+  await row.page().keyboard.press('Escape');
+  await expect(row.page().getByRole('menuitem')).toHaveCount(0);
+  await expect(row).toBeVisible();
+  return items;
+}
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
 const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-plugins-argv]').getAttribute('data-plugins-argv')) ?? 'null') as string[];
@@ -272,7 +292,11 @@ test.describe('interactive', () => {
 
     await inProject(backend); // E8: the frame follows `plugins.list`, the CLI stub's, run in the session's directory
     await pick(page, 'plugins'); // pass2/real-settings.jsonl seq 15, from the status
+    // P2-B M3: the loaded line counts them; its count shows them (Show › Loaded in this session)
+    await widget(page, 'plugins').getByRole('button', { name: '11 plugins loaded in this session' }).click();
     await expect(widget(page, 'plugins').getByRole('list', { name: 'Loaded plugins' }).getByRole('listitem')).toHaveCount(11);
+    await widget(page, 'plugins').getByRole('button', { name: 'Show' }).click();
+    await page.getByRole('menuitemradio', { name: 'All plugins' }).click();
 
     await pick(page, 'permissions'); // pass2/grant-askrule-start.jsonl seq 65
     const permissions = widget(page, 'permissions');
@@ -850,8 +874,11 @@ test.describe('plugin management (E8)', () => {
     const w = await openPlugins(backend);
     const tools = installedRow(w, 'e8-tools@e8-scratch');
     await expect(tools).toContainText('1.0.0');
-    await expect(tools).toContainText('user · enabled · e8-scratch');
-    await expect(tools.getByRole('switch', { name: 'Enabled: e8-tools@e8-scratch' })).toHaveAttribute('aria-checked', 'true');
+    await expect(tools).toContainText('E8 tools');
+    await expect(tools).toContainText('by MAWS stub · An installed plugin of the scratch marketplace'); // read from its files (plugins.manifest)
+    await expectListed(w, 'e8-tools@e8-scratch');
+    await expect(tools.locator('xpath=ancestor::*[@data-plugins-group][1]')).toHaveAttribute('data-plugins-group', 'added');
+    expect(await rowActions(tools)).toEqual(['Turn off', 'Update', 'Uninstall…']);
     const market = marketplaceRow(w, MARKET);
     await expect(market).toContainText('directory');
     await expect(market).toContainText(join(backend.userData, 'market'));
@@ -894,7 +921,7 @@ test.describe('plugin management (E8)', () => {
     await expect(lineOf(row)).toHaveText('Holding install e8-probe@e8-scratch --scope user (plugin CLI stub)'); // the CLI's progress line
     await expect(row.getByRole('button', { name: 'Stop' })).toBeVisible();
     backend.cli.hold(false);
-    await expect(installedRow(w, 'e8-probe@e8-scratch')).toContainText('user · enabled · e8-scratch'); // plugins.changed reread the list
+    await expectListed(w, 'e8-probe@e8-scratch'); // plugins.changed reread the list
     await expect(row).toHaveCount(0); // and Available, which no longer offers it
     await expect(availableResult(w, 'e8-probe@e8-scratch')).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
     expect(mutations(backend)).toEqual([argv]); // G4: exactly the argument list the sheet showed
@@ -920,7 +947,7 @@ test.describe('plugin management (E8)', () => {
       await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').first()).toHaveText(`${project}/${file}`);
       shown.push(argv);
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
-      await expect(installedRow(w, `${plugin}@e8-scratch`, scope)).toContainText(`${scope} · enabled · e8-scratch`);
+      await expectListed(w, `${plugin}@e8-scratch`, scope);
       await expect(row).toHaveCount(0);
       await expect(availableResult(w, `${plugin}@e8-scratch`)).toHaveText(`Successfully installed plugin: ${plugin}@e8-scratch (scope: ${scope}) · No running session to reload`);
     }
@@ -933,7 +960,6 @@ test.describe('plugin management (E8)', () => {
     const w = await openPlugins(backend);
     const id = 'e8-tools@e8-scratch';
     const row = installedRow(w, id);
-    const toggle = row.getByRole('switch', { name: `Enabled: ${id}` });
     const shown: string[][] = [];
     const confirm = async (action: string, submit: string, expected: string[]) => {
       const sheet = sheetOf(page, action);
@@ -944,20 +970,19 @@ test.describe('plugin management (E8)', () => {
       await expect(sheet).toBeHidden();
     };
 
-    await toggle.click();
+    await rowAction(row, 'Turn off');
     await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`]);
     await confirm('disable', 'Disable', ['plugin', 'disable', id, '--scope', 'user', '--json']);
     await expect(lineOf(row)).toHaveText('Successfully disabled plugin: e8-tools (scope: user) · No running session to reload');
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
-    await expect(row).toContainText('user · disabled · e8-scratch');
-    await toggle.click();
+    await expectListed(w, id, 'user', false); // the read-back: Disabled
+    await rowAction(row, 'Turn on');
     await confirm('enable', 'Enable', ['plugin', 'enable', id, '--scope', 'user', '--json']);
     await expect(lineOf(row)).toHaveText('Successfully enabled plugin: e8-tools (scope: user) · No running session to reload');
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expectListed(w, id);
 
     // Cancel: the sheet closes and the CLI never runs: the whole calls.log, reads included, is as it was
     const log = await settledLog(backend);
-    await row.getByRole('button', { name: 'Update' }).click();
+    await rowAction(row, 'Update');
     await sheetOf(page, 'update').getByRole('button', { name: 'Cancel' }).click();
     await expect(sheetOf(page, 'update')).toBeHidden();
     await page.waitForTimeout(500);
@@ -967,13 +992,13 @@ test.describe('plugin management (E8)', () => {
     // Update: the marketplace now offers 1.1.0
     const state = backend.cli.state();
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.map((p) => (p.name === 'e8-tools' ? { ...p, version: '1.1.0' } : p)) })) });
-    await row.getByRole('button', { name: 'Update' }).click();
+    await rowAction(row, 'Update');
     await confirm('update', 'Update', ['plugin', 'update', id, '--scope', 'user', '--json']);
     await expect(lineOf(row)).toHaveText('Plugin "e8-tools" updated from 1.0.0 to 1.1.0 for scope user. Restart to apply changes. · 1.0.0 → 1.1.0 · No running session to reload');
     await expect(row).toContainText('1.1.0');
 
     // Uninstall: destructive, so the default button waits for the acknowledgement; the row leaves, its result stays
-    await row.getByRole('button', { name: 'Uninstall…' }).click();
+    await rowAction(row, 'Uninstall…');
     const sheet = sheetOf(page, 'uninstall');
     await expect(sheet.getByRole('button', { name: 'Uninstall', exact: true })).toBeDisabled();
     await page.keyboard.press('Enter'); // Enter never destroys without the acknowledgement
@@ -982,7 +1007,7 @@ test.describe('plugin management (E8)', () => {
     await confirm('uninstall', 'Uninstall', ['plugin', 'uninstall', id, '--scope', 'user', '--json']);
     await expect(row).toHaveCount(0);
     await expect(w.locator(`[data-plugin-result="${id}"]`)).toContainText('Successfully uninstalled plugin: e8-tools (scope: user) · No running session to reload');
-    await expect(w.locator('[data-plugins-section="installed"]')).toContainText('No plugins installed');
+    await expect(w.locator('[data-plugins-section="my-items"]')).toContainText('Add your first plugins');
     expect(mutations(backend)).toEqual(shown);
     expect(backend.consoleErrors()).toEqual([]);
   });
@@ -1104,8 +1129,8 @@ test.describe('plugin management (E8)', () => {
     await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     const shown = [await argvOf(install)];
     await install.getByRole('button', { name: 'Install', exact: true }).click();
-    await expect(installedRow(w, 'e8-deps@e8-scratch')).toContainText('user · enabled · e8-scratch');
-    await expect(installedRow(w, 'e8-probe@e8-scratch')).toContainText('user · enabled · e8-scratch'); // the dependency came with it
+    await expectListed(w, 'e8-deps@e8-scratch');
+    await expectListed(w, 'e8-probe@e8-scratch'); // the dependency came with it
 
     // the marketplace removal uninstalls all three: the sheet names them and the files that writes
     await marketplaceRow(w, MARKET).getByRole('button', { name: 'Remove…' }).click();
@@ -1134,8 +1159,69 @@ test.describe('plugin management (E8)', () => {
     await remove.getByRole('checkbox', { name: 'I understand' }).check();
     await remove.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(w.locator('[data-marketplace-result="e8-scratch"]')).toContainText('Successfully removed marketplace: e8-scratch');
-    await expect(w.locator('[data-plugins-section="installed"]')).toContainText('No plugins installed');
+    await expect(w.locator('[data-plugins-section="my-items"]')).toContainText('Add your first plugins');
     expect(mutations(backend)).toEqual(shown);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // P2-B M3 (the execution document §4 items 1, 2 and 9; §6.2): the library over a registry shaped like the owner's.
+  test('My items on an owner-shaped registry: one row per plugin in Desktop’s groups, no path or “unknown”; Turn off and on, Update and Uninstall from the overflow run exactly the sheets’ argv', async ({ backend }) => {
+    const { page, project, userData } = backend;
+    backend.cli.setState(ownerShapedState(project, join(userData, 'elsewhere')));
+    const w = await openPlugins(backend);
+    const items = w.locator('[data-plugins-section="my-items"]');
+    const idsIn = (group: string) => items.locator(`[data-plugins-group="${group}"] [data-plugin-row]`).evaluateAll((rows) => rows.map((row) => row.getAttribute('data-plugin-row')));
+    const o = (name: string) => `${name}@claude-plugins-official`;
+    // newest first within each group (the representative installation's last update)
+    await expect.poll(() => idsIn('here')).toEqual(['doperpowers@doperpowers', ...['feature-dev', 'code-review', 'frontend-design', 'claude-code-setup', 'claude-md-management', 'security-guidance', 'context7', 'typescript-lsp', 'plugin-dev'].map(o)]);
+    expect(await idsIn('anthropic')).toEqual(['chrome-devtools-mcp', 'telegram', 'code-modernization', 'pyright-lsp', 'rust-analyzer-lsp', 'swift-lsp'].map(o));
+    expect(await idsIn('added')).toEqual(['ptc@ptc-tool', 'designer@designer', 'cua@cua', 'eli5@claude-community']);
+    await expect(items.locator('[data-plugins-group]')).toHaveCount(3);
+    await expect(items.getByRole('heading')).toHaveText(['In this project', 'From Anthropic & Partners', 'From marketplaces you added'].map((h) => new RegExp(`^${h}`)));
+    await expect(items).not.toContainText('unknown');
+    await expect(items).not.toContainText(project);
+    await expect(items.locator('[data-plugin-row="doperpowers@doperpowers"]')).toHaveCount(1); // 47 installations, one row
+    await expect(installedRow(w, o('context7'), 'project').getByText('Disabled', { exact: true })).toBeVisible();
+    await expect(installedRow(w, o('pyright-lsp'))).toContainText('by Anthropic · python language server'); // no plugin.json: its marketplace entry
+    await expect(installedRow(w, o('feature-dev'), 'project').getByText('New', { exact: true })).toBeVisible();
+
+    // Show › Other projects: what is installed only for other projects, read-only
+    await w.getByRole('button', { name: 'Show' }).click();
+    await page.getByRole('menuitemradio', { name: 'Other projects' }).click();
+    await expect.poll(async () => (await idsIn('otherProjects')).sort()).toEqual(['agent-sdk-dev', 'cloud-sql-postgresql', 'code-simplifier', 'commit-commands', 'explanatory-output-style', 'linear', 'playground', 'skill-creator', 'supabase'].map(o));
+    await expect(items.getByRole('button', { name: /^More actions for / })).toHaveCount(0);
+    await expect(items.locator(`[data-plugin-row="${o('supabase')}"]`)).toContainText('other projects · manage it from a session there');
+    await w.getByRole('button', { name: 'Show' }).click();
+    await page.getByRole('menuitemradio', { name: 'All plugins' }).click();
+
+    const shown: string[][] = [];
+    const confirm = async (action: string, submit: string, expected: string[], acknowledge = false) => {
+      const sheet = sheetOf(page, action);
+      const argv = await argvOf(sheet);
+      expect(argv).toEqual(expected);
+      shown.push(argv);
+      if (acknowledge) await sheet.getByRole('checkbox', { name: 'I understand' }).check();
+      await sheet.getByRole('button', { name: submit, exact: true }).click();
+      await expect(sheet).toBeHidden();
+    };
+    const chrome = installedRow(w, o('chrome-devtools-mcp'));
+    await rowAction(chrome, 'Turn off');
+    await confirm('disable', 'Disable', ['plugin', 'disable', o('chrome-devtools-mcp'), '--scope', 'user', '--json']);
+    await expect(lineOf(chrome)).toContainText('Successfully disabled plugin');
+    await expectListed(w, o('chrome-devtools-mcp'), 'user', false);
+    await rowAction(chrome, 'Turn on');
+    await confirm('enable', 'Enable', ['plugin', 'enable', o('chrome-devtools-mcp'), '--scope', 'user', '--json']);
+    await expectListed(w, o('chrome-devtools-mcp'));
+    await rowAction(chrome, 'Update');
+    await confirm('update', 'Update', ['plugin', 'update', o('chrome-devtools-mcp'), '--scope', 'user', '--json']);
+    await expect(lineOf(chrome)).not.toHaveText('Working…');
+    // the representative installation of a plugin installed here is the project's: the change acts on it
+    const design = installedRow(w, o('frontend-design'), 'project');
+    await rowAction(design, 'Uninstall…');
+    await confirm('uninstall', 'Uninstall', ['plugin', 'uninstall', o('frontend-design'), '--scope', 'project', '--json'], true);
+    await expect(design).toHaveCount(0);
+    await expect(w.locator(`[data-plugin-result="${o('frontend-design')}"]`)).toContainText('Successfully uninstalled plugin');
+    expect(mutations(backend)).toEqual(shown); // G4: exactly the argument lists the sheets showed
     expect(backend.consoleErrors()).toEqual([]);
   });
 

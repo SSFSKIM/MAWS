@@ -137,6 +137,19 @@ describe('the plugin CLI stub', () => {
     expect(state.marketplaces.flatMap((m) => m.plugins).filter((p) => p.manifest === false).map((p) => p.name)).toEqual(['pyright-lsp', 'rust-analyzer-lsp', 'swift-lsp', 'typescript-lsp']);
     expect(rows.every((r) => r.installedAt !== null && r.lastUpdated !== null)).toBe(true);
   });
+
+  it('lists each row enabled as the listing directory sees the id, as the engine does (P2-B M3; U3 F1)', () => {
+    const project = '/tmp/p2b/project';
+    const state = ownerShapedState(project, '/tmp/p2b/elsewhere', new Date('2026-10-09T12:00:00Z'));
+    const listed = (cwd: string) => pluginRowsOf(runPluginCli(['plugin', 'list', '--json'], state, { ...ctx, cwd }).stdout);
+    const enabledOf = (rows: ReturnType<typeof listed>, id: string) => [...new Set(rows.filter((r) => r.id === id).map((r) => r.enabled))];
+    const here = listed(project);
+    expect(enabledOf(here, 'supabase@claude-plugins-official')).toEqual([false]); // installed for other projects only
+    expect(enabledOf(here, 'context7@claude-plugins-official')).toEqual([false]); // disabled here
+    expect(enabledOf(here, 'doperpowers@doperpowers')).toEqual([true]); // every one of its 47 rows reads this directory's state
+    expect(enabledOf(here, 'chrome-devtools-mcp@claude-plugins-official')).toEqual([true]); // the user's
+    expect(enabledOf(listed('/tmp/p2b/elsewhere/e1'), 'supabase@claude-plugins-official')).toEqual([true]);
+  });
   // P2-B end
 
   it('installs, disables, enables, updates and uninstalls as the engine words it, at the scope asked', () => {
