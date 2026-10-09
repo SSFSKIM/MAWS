@@ -3,7 +3,7 @@ U2 — P2-C's M0 probe: the contract's delivery and the advertisement's transpor
 Parent: docs/doperpowers/plans/2026-10-08-p2-daily-driver.md (child P2-C, §4.10 U2), parent pin 8814d733db1b3c50798b9d3ec766985b29e05420.
 Execution document: docs/doperpowers/plans/2026-10-08-p2-c-to-human.md (M0; Design §2 and §3 rest on these verdicts).
 Engine: the installed Claude Code 2.1.295 (/Users/new/.local/share/claude/versions/2.1.295), unmodified, by absolute path.
-Fixtures: spikes/protocol-probe/fixtures/pass3/p2-to-human-*.jsonl (32 launches; provenance child P2-C, spec and document as above).
+Fixtures: spikes/protocol-probe/fixtures/pass3/p2-to-human-*.jsonl (36 launches in runs 2 to 6; provenance child P2-C, spec and document as above).
 Recorded by the P2-C author on its worktree branch; nothing outside the worktree's fixtures and this file was written.
 
 SAFETY RECORD (P1's live-harness rules, through E0a's helpers in scenarios/pass3/p1-common.mjs and c10-common.mjs)
@@ -12,13 +12,13 @@ SAFETY RECORD (P1's live-harness rules, through E0a's helpers in scenarios/pass3
   owner's (assertScratch); the environment was rebuilt from the base keys (clearEngineEnvironment: PATH, HOME, USER,
   LOGNAME, SHELL, TMPDIR, LANG, LC_*), then MAWS's constants and the relay's two variables; every other CLAUDE_* dropped.
 - The relay answered GET /api/hello 200 before each launch (relayReady); it was used as a client only.
-- The owner's ~/.claude.json /tmp project keys were read before and after every launch: 32 of 32 "same": true.
+- The owner's ~/.claude.json /tmp project keys were read before and after every launch: 36 of 36 "same": true.
 - --max-budget-usd 0.5 (run 2) or 0.3 (runs 3 to 5) per launch; Haiku; the summed per-launch result costs are under
   US$0.07 (resumed launches report the conversation's cumulative cost, so the sum over-counts).
 - The plugin in runs 2 and the style arm was a scratch plugin written into the scratch root and loaded with
   --plugin-dir; the owner's doperpowers was never loaded. The scratch roots were removed after the verdicts were read.
 - The scenarios ran from /tmp/maws-p2c-u2/ (outside the repository; their full text is Appendix B, their sha256 in each
-  fixture's provenance row). The admission test passes: `node --test spikes/protocol-probe/fixtures.test.mjs`, 198 of 198.
+  fixture's provenance row). The admission test passes: `node --test spikes/protocol-probe/fixtures.test.mjs`, 202 of 202 after run 6.
 - A first run (2026-10-09 07:01 UTC, four launches) is not kept: its plugin declared two hook modules, which the engine
   refuses ("hooks.json `modules` names one hooks module per plugin"), so its worker reading was void, and its prompt
   questions were confounded by the conversation's history. Its one clean observation (a launch without the flag knew a
@@ -66,15 +66,30 @@ QUESTIONS (spec §4.10 U2) AND VERDICTS
    what you mark reaches them, so anything you want them to read, your answers included, goes inside a mark": S13 put
    the whole reply in marks (0 unmarked characters; the essential, insight and question nested inside one to-human).
 
+6. (Run 6, added after the document's first review asked for the snapshot records themselves.) What a prompt snapshot
+   holds, kept whole in the fixtures' `prompt_snapshot_records` notes (`pass3/p2-to-human-shapes-*`):
+   - S14: the contract appended is the snapshot's last segment, `systemPrompt[11]`, and starts with the header
+     "# Messages to the human (MAWS to-human contract 1)"; the same after a compaction (a new snapshot after the
+     boundary, line 49, again segment 11). 12 segments with the append, 11 without (S16).
+   - S15: a plugin output style carrying the owner's doperpowers to-human body verbatim plus `maws-to-human-contract: 1`,
+     selected by the user settings, is NOT in the snapshot (11 segments, no segment with the four tags). The transcript
+     carries it as conversation attachments instead: `attachment.type: "output_style_instructions"` (line 6, 2872
+     bytes, `style: {name: "maws-u2-style:to-human", prompt: "The human does not watch this session. …"}`) and
+     `attachment.type: "output_style"` (line 12, `style: "maws-u2-style:to-human"`), read from the scratch transcript
+     before the root was removed. So an output style follows the settings in force (it is not frozen by the snapshot),
+     and `system/init.output_style` names the style the engine injects; only `--append-system-prompt` is snapshotted.
+   VERDICT: the classifier needs only the contract header; the decision table loses its "semantics" class.
+
 WHAT THIS CHANGES FOR P2-C (the execution document's Design §2 carries the rule; spec §4.5 assumed a per-launch append)
 
 - MAWS passes `--append-system-prompt <contract>` on every MAWS-owned launch whose desired state carries the contract
   (it takes effect whenever the prompt renders: a new session, after a compaction, or under the flag below), and never
   on others.
 - Before a resume or a fork, MAWS reads the session's (or the parent's) last prompt_snapshot after its last compact
-  boundary and classifies it: unrecorded, the MAWS contract n (its header line), to-human semantics from another source
-  (all four tag names in one segment), or none. When the recorded state differs from the desired one (the lane turned on
-  for a session recorded without the semantics, turned off for one recorded with MAWS's contract, or a contract version
+  boundary and classifies it: unrecorded, the MAWS contract n (a segment starting with its header line; run 6 S14), or
+  none. An output style is never in the snapshot (verdict 6), so the snapshot only ever carries MAWS's own appended text.
+  When the recorded state differs from the desired one (the lane turned on for a session recorded without the contract,
+  turned off for one recorded with it, a compatible style now selected for one recorded with it, or a contract version
   change), the launch also passes `--system-prompt-snapshot off`; it does so on each launch while they differ, which
   ends at the session's next compaction (the next plain launch then records the desired prompt).
 - The variable travels in `extraSettings.env` (verdict 2); the constructed environment and the client id stay unused.
@@ -104,6 +119,12 @@ Run 3 (p2-to-human-snapshot.mjs; one home per case; first launch a neutral "OK" 
 Run 4 (p2-to-human-snapoff.mjs; the later launch with --system-prompt-snapshot off)
 - s6 new N6 → resume R6 off (neutral turn) → plain resume asked: N6 (the off launch recorded nothing).
 - s7 new N7 → resume none off: NONE.  s8 new none → resume X8 off: X8.  s9 new N9 → fork F9 off: NONE (see s11).
+Run 6 (p2-to-human-shapes.mjs; records kept whole in the `prompt_snapshot_records` notes)
+- s14 new with the contract, neutral turn; resume with the contract, /compact, neutral turn: snapshots at lines 16, 21
+  (12 segments, the last starting with the contract header), a boundary at 31, snapshots at 49 and 51 (the same).
+- s15 new with the owner's style body plus the key, selected by settings, --plugin-dir: snapshots of 11 segments, none
+  carrying the style; the style as `output_style_instructions` and `output_style` attachments (verdict 6).
+- s16 new with neither: snapshots of 11 segments.
 Run 5 (p2-to-human-converge.mjs)
 - s10 new N10 → resume R10 off, /compact, neutral turn → plain resume asked: NONE (snapshots: N10 before the boundary,
   the plain launch's own after it).  s11 new N11 → fork F11 off: F11.  s12 new N12 → resume R12 off: R12.
@@ -699,4 +720,107 @@ for(const [label,second,fork] of [['s11','F11',true],['s12','R12',false]]){const
  out('s13',{marks:{toHuman:/<to-human>/.test(said),essential:/<essential>/.test(said),needInput:/<need-input>/.test(said),choice:/<choice( recommended)?>/.test(said),insight:/<insight>/.test(said)},unmarkedChars:outside.length,unmarkedHead:outside.slice(0,300),answer:answer.slice(0,2500),snapshots:snapshots(run)});
 }catch(e){console.error('s13',e.message);verdicts.s13Error=e.message;}}
 writeFileSync(join(HERE,'verdicts-5.json'),JSON.stringify(verdicts,null,1)+'\n');
+console.log('DONE');
+
+B.5 p2-to-human-shapes.mjs (run 6; sha256 887479348ab8b98dd43701bf196cb4284c95263e87776615a7a064f367f069a8)
+
+// U2, P2-C's M0 probe, sixth run (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U2; execution document
+// docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M0 and M2; parent pin 8814d733db1b3c50798b9d3ec766985b29e05420).
+// The classifier of Design §2 reads the engine's `prompt_snapshot` records; the earlier runs kept only summaries of
+// them. This run keeps the records themselves (and the compact boundary's), as notes, for M2's conformance test:
+//   S14 new with the contract appended, a neutral turn; then a resume, /compact, a neutral turn (a snapshot after a boundary)
+//   S15 new with a scratch plugin style carrying the owner's doperpowers to-human style body verbatim plus
+//       `maws-to-human-contract: 1`, selected by the user settings, loaded with --plugin-dir; a neutral turn
+//   S16 new with neither, a neutral turn
+// Safety as the earlier runs. Run from outside the repository:  node /tmp/maws-p2c-u2/p2-to-human-shapes.mjs <worktree>
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,realpathSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human-shapes.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {run:harnessRun,scratch}=await import(join(P,'harness.mjs'));
+const {assertScratch,RELAY_ENV,slug}=await import(join(P,'scenarios/pass3/c10-common.mjs'));
+const {clearEngineEnvironment}=await import(join(P,'scenarios/pass3/mods-environment.mjs'));
+const {BIN,ENGINE_VERSION,relayReady,ownerTmpKeys,initPayload,success,endAsStop,lastResult,resultSummary}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const HERE=fileURLToPath(new URL('.',import.meta.url));
+const SELF=fileURLToPath(import.meta.url);
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'8814d733db1b3c50798b9d3ec766985b29e05420',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'U2',run:6,engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:createHash('sha256').update(readFileSync(SELF)).digest('hex')};
+const SPEND_CAP='0.3';
+const digest=keys=>createHash('sha1').update(keys.join('\n')).digest('hex').slice(0,12);
+const CONTRACT=readFileSync(join(HERE,'contract-v1.md'),'utf8').trim();
+// the owner's style, read only from the owner's repository (doperpowers e96479ec), body verbatim, front matter plus the key
+const OWNER_STYLE=readFileSync('/Users/new/Developer/GitHub/doperpowers/output-styles/to-human.md','utf8');
+const STYLE_WITH_KEY=OWNER_STYLE.replace(/^---\n([\s\S]*?)\n---/, (m,fm)=>`---\n${fm}\nmaws-to-human-contract: 1\n---`);
+const NEUTRAL='Reply with exactly OK.';
+
+function scratchRun(label,{settings={},plugin=false}={}){
+ const root=realpathSync(mkdtempSync(`/tmp/maws-p2c-u2s-${label}-`));
+ const home=join(root,'config');mkdirSync(home);
+ const cwd=realpathSync(scratch(join(root,'repo-')));
+ writeFileSync(join(home,'settings.json'),JSON.stringify(settings)+'\n');
+ writeFileSync(join(home,'.claude.json'),JSON.stringify({hasCompletedOnboarding:true,projects:{[cwd]:{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}}})+'\n');
+ let pluginDir=null;
+ if(plugin){pluginDir=join(root,'plugin');mkdirSync(join(pluginDir,'.claude-plugin'),{recursive:true});mkdirSync(join(pluginDir,'output-styles'));
+  writeFileSync(join(pluginDir,'.claude-plugin','plugin.json'),JSON.stringify({name:'maws-u2-style',version:'0.1.0',description:'MAWS P2-C U2 probe style',author:{name:'MAWS U2 probe'}},null,1)+'\n');
+  writeFileSync(join(pluginDir,'output-styles','to-human.md'),STYLE_WITH_KEY);}
+ return {root,home,cwd,pluginDir,debugFile:join(root,'debug.log')};
+}
+function engineEnv(home){
+ clearEngineEnvironment();
+ return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
+}
+// The records themselves: every prompt_snapshot attachment (its systemPrompt segments whole, its other keys by name)
+// and every compact boundary (its keys), with the line each stands on.
+function records(run){
+ const dir=join(run.home,'projects',slug(run.cwd));
+ if(!existsSync(dir))return {};
+ return Object.fromEntries(readdirSync(dir).filter(f=>f.endsWith('.jsonl')).map(f=>{
+  const rows=readFileSync(join(dir,f),'utf8').trim().split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}});
+  return [f.slice(0,8),rows.flatMap((r,i)=>r?.type==='attachment'&&r.attachment?.type==='prompt_snapshot'?[{line:i+1,recordKeys:Object.keys(r).sort(),attachmentKeys:Object.keys(r.attachment).sort(),systemPrompt:r.attachment.systemPrompt}]:r?.type==='system'&&r.subtype==='compact_boundary'?[{line:i+1,compactBoundary:true,recordKeys:Object.keys(r).sort()}]:[])];
+ }));
+}
+async function launch(name,run,{append=null,sessionId=randomUUID(),resume=null,question},body){
+ const env=engineEnv(run.home);
+ const {configHome,globalConfig}=assertScratch(env);
+ await relayReady();
+ const before=ownerTmpKeys();
+ const flags=['--forward-subagent-text','--replay-user-messages','--include-hook-events',...(resume?['--resume',resume]:['--session-id',sessionId]),'--max-budget-usd',SPEND_CAP,'--settings',JSON.stringify({dialogExpiry:'never'}),...(run.pluginDir?['--plugin-dir',run.pluginDir]:[]),...(append?['--append-system-prompt',append]:[]),'--debug-file',run.debugFile];
+ let failure;
+ const p=await harnessRun(name,async p=>{
+  p.note({event:'provenance',...PROVENANCE,question,model:'haiku',configHome,globalConfig,pinnedSessionId:resume?null:sessionId,resumed:resume,envKeys:Object.keys(env).sort(),appendChars:append?.length??0,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8'))});
+  p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
+  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+  p.on('elicitation',()=>({action:'decline'}));
+  try{success(await p.init(initPayload(run.cwd)),'initialize');await body(p,{sessionId});}catch(e){failure=e;throw e;}
+  finally{p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model:'haiku',settingSources:'user,project,local',strictMcp:false,mode:'default',flags});
+ await p.closed;
+ const after=ownerTmpKeys();
+ const same=JSON.stringify(after)===JSON.stringify(before);
+ p.note({event:'owner_file_check',phase:'after',count:after.length,digest:digest(after),same});
+ p.note({event:'prompt_snapshot_records',after:name,records:records(run)});
+ if(!same)throw new Error(name+": the owner's ~/.claude.json /tmp project keys changed");
+ if(failure)throw failure;
+ return p;
+}
+const ask=async(p,prompt)=>{const r=await p.turn(prompt);p.note({event:'turn_text',prompt,result:r.result??null});return r.result??'';};
+const out={};
+const summary=run=>Object.fromEntries(Object.entries(records(run)).map(([f,rs])=>[f,rs.map(r=>r.compactBoundary?{line:r.line,compactBoundary:true}:{line:r.line,segments:r.systemPrompt?.length,lastHead:String(r.systemPrompt?.at(-1)??'').slice(0,70),fourTagsIn:(r.systemPrompt||[]).map((s,i)=>['<to-human>','<essential>','<need-input>','<insight>'].every(t=>String(s).includes(t))?i:-1).filter(i=>i>=0)})]));
+{const run=scratchRun('s14');try{let id;
+ await launch('p2-to-human-shapes-s14-new',run,{append:CONTRACT,question:'U2 run 6 S14: the contract appended to a new session, a neutral turn'},async(p,{sessionId})=>{id=sessionId;await ask(p,NEUTRAL);await endAsStop(p);});
+ await launch('p2-to-human-shapes-s14-compact',run,{append:CONTRACT,resume:id,question:'U2 run 6 S14: a resume with the contract, /compact, a neutral turn (a snapshot after a boundary)'},async p=>{await ask(p,'/compact');await ask(p,NEUTRAL);await endAsStop(p);});
+ out.s14=summary(run);console.log('s14',JSON.stringify(out.s14));
+}catch(e){console.error('s14',e.message);out.s14Error=e.message;}}
+{const run=scratchRun('s15',{settings:{outputStyle:'maws-u2-style:to-human'},plugin:true});try{
+ await launch('p2-to-human-shapes-s15-new',run,{question:'U2 run 6 S15: the owner\'s style body with the declared key, selected by the user settings, a neutral turn'},async p=>{await ask(p,NEUTRAL);await endAsStop(p);});
+ out.s15=summary(run);console.log('s15',JSON.stringify(out.s15));
+}catch(e){console.error('s15',e.message);out.s15Error=e.message;}}
+{const run=scratchRun('s16');try{
+ await launch('p2-to-human-shapes-s16-new',run,{question:'U2 run 6 S16: neither, a neutral turn'},async p=>{await ask(p,NEUTRAL);await endAsStop(p);});
+ out.s16=summary(run);console.log('s16',JSON.stringify(out.s16));
+}catch(e){console.error('s16',e.message);out.s16Error=e.message;}}
+writeFileSync(join(HERE,'verdicts-6.json'),JSON.stringify(out,null,1)+'\n');
 console.log('DONE');
