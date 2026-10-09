@@ -355,10 +355,16 @@ export const events = {
   // the popup open over the tab's window, for that tab's action button (pressed while its popup shows); null: none
   'browser.extensions.popup': z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema.nullable() }),
   // a menu's choice (in main) the chrome showing `tabId` carries on: show the options tab main opened (a main tab moves
-  // to it; the panel shows the session's selected tab already), or open Settings › Browser (Manage extensions…)
+  // to it; the panel shows the session's selected tab already), or open Settings › Browser (Manage extensions…); or
+  // `replacement`: the options tab `tabId` left its extension's pages and closed, `tab` opened in its place (a main tab
+  // showing it shows `tab` instead, in place)
   'browser.extensions.reveal': z.strictObject({
     tabId: BrowserTabIdSchema,
-    show: z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('tab'), tab: BrowserTabSchema }), z.strictObject({ kind: z.literal('settings') })]),
+    show: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('tab'), tab: BrowserTabSchema }),
+      z.strictObject({ kind: z.literal('settings') }),
+      z.strictObject({ kind: z.literal('replacement'), tab: BrowserTabSchema }),
+    ]),
   }),
   // cua #90 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

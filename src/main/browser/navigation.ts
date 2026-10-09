@@ -328,15 +328,15 @@ export class Navigator {
 
   // cua #90: an internal tab leaving its extension's pages. The page opens as a new ordinary tab of the same session and
   // partition (selected when the internal tab was; no opener; a fresh history, so Back never returns to the extension's
-  // page in an ordinary tab), the chrome showing the internal tab moves to it, and the internal tab closes. Answers the
-  // new tab, or null when the internal tab is already gone.
+  // page in an ordinary tab), a main tab showing the internal tab shows it in place (`replacement`), and the internal tab
+  // closes. Answers the new tab, or null when the internal tab is already gone.
   leaveInternal(entry: TabEntry, url: string | null): BrowserTab | null {
     const { store } = this.deps;
     const { tabId, appSessionId, partition } = entry.tab;
     if (store.entry(tabId) !== entry || !entry.tab.internal) return null;
     const selected = store.list(appSessionId).selected[appSessionId] === tabId;
     const { tab } = store.open({ appSessionId, url, select: selected, partition });
-    this.deps.emit('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab } });
+    this.deps.emit('browser.extensions.reveal', { tabId, show: { kind: 'replacement', tab } });
     store.close(tabId);
     return tab;
   }

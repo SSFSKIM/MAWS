@@ -836,11 +836,16 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       expect((await preloadRunsAt(s, optionsUrl)).map((runs) => runs.main)).toEqual([0]);
 
       // leaving the options tab (the person's navigation, as a bookmark chip's): it closes, and the page opens as a new
-      // ordinary tab the main tab moves to, with no Back into the options page
+      // ordinary tab that the options tab's main tab shows in place (one main tab where there was one), with no Back
+      // into the options page
+      const mainTabs = () => s.page.locator('[data-region="main"] [role="tab"][data-tab-id^="browser:"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
+      expect(await mainTabs()).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${optionsTab}`]);
       value(await invoke(s.page, 'browser.tabs.navigate', { tabId: optionsTab, to: { url: server.url('/b.html'), typed: false } }));
       await expect.poll(async () => (await tabsOf(s, id)).tabs.some((tab) => tab.tabId === optionsTab)).toBe(false);
       const left = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
       expect(left).toMatchObject({ url: server.url('/b.html'), internal: null, partition: DEFAULT });
+      await expect.poll(mainTabs).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${left.tabId}`]);
+      await expect(s.page.locator(`[data-region="main"] [role="tab"][data-tab-id="browser:${id}:${left.tabId}"]`)).toHaveAttribute('aria-selected', 'true');
       expect((await tabsOf(s, id)).selected).toBe(left.tabId);
       await expect(chipOf(main, left.tabId).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
       await expect.poll(async () => (await viewOf(s, left.tabId))?.visible).toBe(true);

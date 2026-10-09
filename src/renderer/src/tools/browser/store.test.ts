@@ -6,7 +6,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { BROWSER_COPY } from './copy';
-import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, onShowRequest, raiseNotice, requestShow, resetBrowser, tabOpened, tabTitle } from './store';
+import { currentSet } from '../../stores/layout-model';
+import { useLayout } from '../../stores/layout';
+import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, onExtensionReveal, onShowRequest, raiseNotice, requestShow, resetBrowser, tabOpened, tabTitle } from './store';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -97,6 +100,25 @@ describe('connectBrowser', () => {
     // a session the store has not heard of yet
     tabOpened(browserTab(T3, B));
     expect(sessionOf(B)).toEqual({ tabs: [browserTab(T3, B)], selected: T3 });
+  });
+
+  // cua #90 (M3's re-review P3): an options tab main replaced with a page leaves one main tab where there was one
+  it('an options tab replaced with a page: the main tab showing it shows the page in place, and no chrome is asked to open one', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    const { openTab } = useLayout.getState();
+    openTab({ kind: 'browser', appSessionId: A, browserTabId: T1 }); // the options tab, as its own main tab
+    openTab({ kind: 'diagnostics' });
+    useLayout.getState().activateTab(`browser:${A}:${T1}`);
+    const heard = vi.fn();
+    const off = onExtensionReveal(heard);
+    fake.event('browser.extensions.reveal', { tabId: T1, show: { kind: 'replacement', tab: browserTab(T2, A) } });
+    off();
+    const pane = currentSet(useLayout.getState().main).panes[0];
+    expect(pane.tabs.map((tab) => tab.id)).toEqual([`browser:${A}:${T2}`, 'diagnostics']);
+    expect(pane.activeTabId).toBe(`browser:${A}:${T2}`);
+    expect(useLayout.getState().main.closedTabs).toEqual([]);
+    expect(sessionOf(A)!.tabs.map((tab) => tab.tabId)).toEqual([T2]); // listed before main's event, as a tab opened here is
+    expect(heard).not.toHaveBeenCalled();
   });
 
   it('relays a request to show a tab on a surface to every listener until it unsubscribes', () => {

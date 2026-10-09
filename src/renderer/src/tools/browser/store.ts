@@ -20,7 +20,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserChromeCommand, BrowserNotice, BrowserTabsChanged } from '@shared/ipc/schema/browser';
 import type { EventPayload } from '@shared/ipc/schema';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { tabId as layoutTabId } from '@shared/ipc/schema/layout';
 import { ipc } from '../../ipc/client';
+import { useLayout } from '../../stores/layout';
 
 export const BROWSER_NOTICE_MS = 4000;
 
@@ -174,7 +176,8 @@ export function onChromeCommand(listener: (command: BrowserChromeCommand) => voi
 const extensionPopups = createStore<{ open: ReadonlyMap<string, string> }>()(() => ({ open: new Map() }));
 export const useExtensionPopup = (tabId: string | null): string | null => useStore(extensionPopups, (s) => (tabId === null ? null : (s.open.get(tabId) ?? null)));
 
-// A choice made in a native menu that the chrome showing the tab carries on (the options tab main opened; Settings).
+// A choice made in a native menu that the chrome showing the tab carries on (the options tab main opened; Settings). An
+// options tab's replacement is not relayed: `connectBrowser` retargets its main tab itself.
 export type ExtensionReveal = EventPayload<'browser.extensions.reveal'>;
 const revealListeners = new Set<(reveal: ExtensionReveal) => void>();
 export function onExtensionReveal(listener: (reveal: ExtensionReveal) => void): () => void {
@@ -232,7 +235,16 @@ export function connectBrowser(client: MawsBridge = ipc): () => void {
         return { open };
       }),
     ),
-    client.on('browser.extensions.reveal', (reveal) => revealListeners.forEach((listener) => listener(reveal))),
+    client.on('browser.extensions.reveal', (reveal) => {
+      if (reveal.show.kind !== 'replacement') return revealListeners.forEach((listener) => listener(reveal));
+      // an options tab left its extension's pages for a new tab: a main tab showing it, mounted or not, shows the new
+      // tab in its place (the panel shows the session's selected tab already)
+      const { tab } = reveal.show;
+      const appSessionId = tab.appSessionId as AppSessionId;
+      tabOpened(tab);
+      const old = layoutTabId({ kind: 'browser', appSessionId, browserTabId: reveal.tabId });
+      useLayout.getState().retargetTab(old, { kind: 'browser', appSessionId, browserTabId: tab.tabId });
+    }),
     // cua #90 end
   ];
   list(client);

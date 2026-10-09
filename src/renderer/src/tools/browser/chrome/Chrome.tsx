@@ -5,9 +5,9 @@
 // Main's `browser.chrome.command` (⌘L, ⌘F, and Esc pressed inside a page) goes to the chrome whose pane holds the page's
 // view (`owns`), for the tab it names: `focusAddress` focuses the address field, `openFind` opens the find bar (or takes
 // the keyboard back to it), `closeFind` closes it (main already stopped finding). cua #90: an extensions menu's choice
-// made in main, or an options tab main replaced with a page (`browser.extensions.reveal`), goes to every chrome showing
-// the tab: the tab main opened is shown (a main tab moves to it; the panel shows the session's selected tab already),
-// and Manage extensions… opens Settings › Browser.
+// made in main (`browser.extensions.reveal`) goes to every chrome showing the tab: the options tab main opened is shown
+// (a main tab moves to it; the panel shows the session's selected tab already), and Manage extensions… opens Settings ›
+// Browser. An options tab main replaced with a page is the store's (`connectBrowser` retargets its main tab in place).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -69,6 +69,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
     return onExtensionReveal(({ tabId: from, show }) => {
       if (from !== tabId) return;
       if (show.kind === 'settings') return useLayout.getState().openTab({ kind: 'settings', section: 'browser' });
+      if (show.kind !== 'tab') return; // a replacement never reaches here (`connectBrowser`)
       tabOpened(show.tab);
       if (surface === 'main') openMainTab(appSessionId, show.tab.tabId);
     });

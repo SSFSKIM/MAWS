@@ -703,7 +703,7 @@ describe('navigation: the page\'s own navigations and handlers (E4a Design §8, 
       expect(opened!.tab).toMatchObject({ appSessionId: A, url: 'https://docs.test/help', partition: 'persist:maws-chrome-Default', internal: null });
       expect(opened!.openerTabId).toBeNull(); // no opener relation to the options document
       expect(h.store.list(A).selected[A]).toBe(opened!.tab.tabId);
-      expect(reveals(h)).toEqual([{ tabId: id, show: { kind: 'tab', tab: expect.objectContaining({ tabId: opened!.tab.tabId }) } }]);
+      expect(reveals(h)).toEqual([{ tabId: id, show: { kind: 'replacement', tab: expect.objectContaining({ tabId: opened!.tab.tabId }) } }]);
       // its own page, with a fresh history: Back has nothing to return to, least of all the options page
       const fresh = h.wc(opened!.tab.tabId);
       expect(fresh).not.toBe(optionsContents);
