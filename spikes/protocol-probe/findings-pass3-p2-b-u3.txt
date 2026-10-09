@@ -1,0 +1,176 @@
+P2-B U3 — is installCount populated by the installed engine's catalog?
+Recorded 2026-10-09T07:26Z–07:41Z (2026-10-09 00:26–00:41 PDT).
+Child P2-B; document docs/doperpowers/plans/2026-10-08-p2-b-extensions-library.md;
+parent docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 (U3);
+parent pin 3df342b90afe4b41358bc38980cfd07d22223215.
+
+Outcome
+-------
+Yes, partly. On installed Claude Code 2.1.295, `claude plugin list --json
+--available` carries `installCount` for the plugins of the marketplace named
+`claude-plugins-official` (313 of its 315 entries) once that marketplace is
+added, and for no other source: none of the 3,231 entries of the engine's
+built-in directory (`anthropic-plugin-directory`, listed on every home, even an
+empty one) and none of a third-party marketplace's. The count is the engine's
+own: the CLI reads it from its plugin catalog (`plugin-catalog-cache.json`
+under the config home's `plugins/`, fetched from a public GCS URL and kept for
+24 h), keyed by `<name>@claude-plugins-official`, and puts it on a row whose
+id matches. A home without that marketplace, or an engine that cannot fetch
+the catalog, gets no counts at all. MAWS shows a count only on a row that
+carries one and never computes or borrows one.
+
+Method
+------
+1. Read-only inspection of the owner's ~/.claude/plugins/ (python's json.load
+   on the files; nothing written, no CLI run against that home):
+   - plugin-catalog-cache.json: {version: 1, fetchedAt 2026-10-07T11:00:53Z,
+     catalog: {generated_at, installs_generated_at 2026-10-02T06:00:05Z,
+     marketplace_sha, models [claude-opus-4-7, claude-sonnet-4-6], plugins}};
+     315 plugins, every key `<name>@claude-plugins-official`; 313 carry
+     `unique_installs` (all non-zero; `math-proof` and `notion` carry none);
+     each entry also carries `components` {commands, agents, skills, hooks,
+     mcpServers, lspServers} with names and character counts, `tokens` per
+     model, `last_updated`, `version`, and `marketplace_entry` {name,
+     description, author (233 of 315), category (301), homepage (299),
+     displayName (14), …}.
+   - plugin-directory-cache-v2.json: {schemaVersion 2, fetchedAt, listings
+     (3,235: id, name, summary, links, surfaces, source, checks, release,
+     publisher on 2), entryNames, entryNameClaims}: the built-in directory.
+   - known_marketplaces.json names six marketplaces, among them
+     `claude-plugins-official` (github anthropics/claude-plugins-official).
+   - installed_plugins.json: version 2, 29 plugin ids, 130 installation
+     records (project 71, local 46, user 13) over 50 projects;
+     doperpowers@doperpowers has 47 records and supabase@claude-plugins-official
+     46; record keys {scope, projectPath, installPath, version, installedAt,
+     lastUpdated, gitCommitSha}; 10 records read version "unknown".
+2. Engine source (readable 2.1.292 extraction, ~/claude-code-bundle/2.1.292/
+   cli.pretty.js): the `--available` branch of `plugin list` pushes
+   `{pluginId, name, description, marketplaceName, version, source,
+   installCount: te?.get(pluginId)}` (:207477) where `te` is `n_t()` (:795914),
+   the catalog's `unique_installs` by catalog key, loaded through `Bfn` (cache
+   first, 24 h, else GET of the plugin-stats URL at :795813; `null` on failure).
+3. Under a scratch home only (HOME=/tmp/p2b-u3/home,
+   CLAUDE_CONFIG_DIR=/tmp/p2b-u3/home/.claude, PATH=/usr/bin:/bin:/usr/sbin:/sbin,
+   DISABLE_AUTOUPDATER=1, TERM=dumb; no CLAUDE_* or ANTHROPIC_* variable
+   inherited; cwd /tmp/p2b-u3/proj), binary
+   /Users/new/.local/share/claude/versions/2.1.295:
+   a. `plugin list --json --available` on the empty home (3.4 s, 1.9 MB):
+      installed 0; available 3,231, every one `anthropic-plugin-directory`;
+      keys pluginId, name, marketplaceName, source (3,231), description
+      (3,181), version (3,060); `installCount` on none. The scratch home then
+      held plugins/plugin-catalog-cache.json (fetched 07:34:08Z; 315 entries,
+      313 with unique_installs) and plugin-directory-cache-v2.json.
+   b. `plugin marketplace add anthropics/claude-plugins-official --json`
+      (6.8 s; "Successfully added marketplace: claude-plugins-official
+      (declared in user settings)").
+   c. `plugin list --json --available` again (0.9 s, 2.1 MB): available
+      3,231 directory + 315 official; `installCount` on 313 official rows and
+      no directory row; e.g. {"pluginId":"frontend-design@claude-plugins-official",
+      "source":"./plugins/frontend-design","installCount":1290640} beside
+      {"pluginId":"frontend-design@anthropic-plugin-directory","source":
+      {"source":"git-subdir","url":"https://github.com/anthropics/claude-plugins-official",
+      "path":"plugins/frontend-design","sha":"315c4e…"}} (no count).
+      Highest counts: frontend-design 1,290,640; superpowers 1,153,057;
+      code-review 492,072; context7 458,090; skill-creator 440,508.
+   d. `plugin marketplace list --json` lists only claude-plugins-official:
+      the built-in directory is never a marketplace row (nothing to refresh
+      or remove).
+   e. Installed code-review (user), frontend-design (project) and supabase
+      (user) from claude-plugins-official, then `--available` again: the
+      three left both lists (the installed id, and the directory entry whose
+      source is the installed one's); 251 plugin names are still listed by
+      both the directory and the official marketplace.
+
+Findings beside U3 that bear on P2-B's design
+---------------------------------------------
+F1 `plugin list --json` rows on 2.1.295 (the scratch installs):
+   {"id":"code-review@claude-plugins-official","version":"315c4e48967d","scope":"user",
+    "enabled":true,"installPath":".../cache/claude-plugins-official/code-review/315c4e48967d",
+    "installedAt":"2026-10-09T07:35:54.762Z","lastUpdated":"2026-10-09T07:35:54.762Z",
+    "projectEnabled":false}
+   {"id":"frontend-design@claude-plugins-official","version":"315c4e48967d","scope":"project",
+    "enabled":true,...,"projectPath":"/private/tmp/p2b-u3/proj","projectEnabled":true}
+   {"id":"supabase@claude-plugins-official","version":"0.1.15","scope":"user","enabled":true,
+    ...,"mcpServers":{"supabase":{"type":"http","url":"https://mcp.supabase.com/mcp",
+    "headers":{"X-Source-Name":"claude-code-plugin","X-Source-Version":"0.1.15"}}},
+    "projectEnabled":false}
+   - A plugin whose manifest declares no version now reads the 12-character
+     commit prefix ("315c4e48967d"); older records read "unknown" (the
+     owner's registry has 10).
+   - `projectPath` is the realpath (/private/tmp/…, while the cwd passed was
+     /tmp/…): a project comparison must compare realpaths.
+   - `enabled` is the effective state as seen from the cwd: the same
+     project-scoped row listed from /tmp/p2b-u3/other read enabled false and
+     kept its projectPath. `projectEnabled` is the cwd's
+     `.claude/settings.json` enabledPlugins entry (MOt, :49461).
+   - Rows carry `mcpServers` with headers (and may carry env) verbatim; a
+     header or env value can be a secret. MAWS's reduction drops the field
+     today and must keep dropping its values.
+   - The list also carries pseudo-scope rows: "session" (--plugin-dir,
+     --plugin-url, CLAUDE_CODE_PLUGIN_DIRS), "synced" (claude.ai sync), and
+     skills-directory plugins (`<name>@skills-dir`, scope user or project)
+     (:207435).
+F2 The plugin manifest schema (2.1.292 :673281, `qp`): name, displayName,
+   version, description, author {name, email?, url?}, homepage, repository,
+   license, keywords, defaultEnabled, dependencies, metadata, plus the
+   component fields. There is no icon field. Installed manifests seen:
+   code-review and frontend-design {name, description, author {name, email}},
+   supabase {name, version, description, author {name, url}, repository,
+   license, skills "./skills/", mcpServers "./agents/claude/.mcp.json",
+   keywords}; supabase's `agents/` directory holds per-tool folders (claude,
+   codex, copilot, cursor, grok, open-plugin), not agent files, so an
+   inventory must follow the manifest's paths, not guess from folder names.
+F3 `claude plugin details <name>` exists on 2.1.295 ("Show a plugin's
+   component inventory and projected token cost"): text only, no --json; an
+   installed plugin answers its description, source, component inventory
+   (Skills, Agents, Hooks, MCP servers, LSP servers; a commands/ file is
+   counted under Skills) and token estimates in 0.7 s; an uninstalled one
+   exits 1 ("Plugin "context7@claude-plugins-official" not found."). Not a
+   machine contract.
+F4 A no-prompt stream-json run (`claude -p --input-format stream-json
+   --output-format stream-json --verbose --max-budget-usd 0.05`, scratch home,
+   no credentials, no user message, so no model request) answered, before any
+   turn: `initialize`; `get_skills_dialog` populated with per-skill source:
+   {"name":"frontend-design:frontend-design","display_name":"frontend-design:frontend-design",
+    "description":"Guidance for distinctive, intentional visual design …","source":"plugin",
+    "tokens":79,"state":"on","locked_by":"plugin","advertised":true,
+    "handles":{"aliases":["frontend-design"]}}
+   {"name":"u3-project-skill",…,"source":"project","tokens":21,"state":"on","advertised":true,"handles":{}}
+   {"name":"u3-user-skill",…,"source":"user","tokens":19,"state":"on","advertised":true,"handles":{}}
+   (a plugin's commands/ file, code-review:code-review, is not in the skills
+   dialog; it is in initialize's commands as "(code-review) Code review a
+   pull request"). The engine's source words (2.1.292 `xRe` :401474) are
+   "plugin", "mcp", "memory store", "built-in", "claude.ai sync", or a
+   settings source ("user", "project", "project, gitignored", "cli flag",
+   "managed"). C11's recordings answered the dialog empty on older engines;
+   2.1.295 answers it.
+   `get_sandbox_dialog`: {supported true, locked false, overrides_locked
+   false, enabled false, enabled_in_settings false, mode "disabled",
+   auto_allow_available true, no_sandbox_allowed true, unsandboxed_fallback
+   true, dependencies {errors [], warnings []}, excluded_commands [],
+   restrictions {fs_deny_read, fs_allow_read, fs_allow_write, fs_deny_write,
+   network_allowed_domains, network_denied_domains, network_managed false,
+   unix_sockets, allow_all_unix_sockets false, ignored_glob_patterns}}: the
+   fields /sandbox reads are all present; `mode`, `overrides_locked`,
+   `no_sandbox_allowed`, `unix_sockets`, `allow_all_unix_sockets` and
+   `ignored_glob_patterns` are new beside them.
+   `reload_plugins`: plugins code-review and frontend-design (path, source
+   `<id>`) and the three `cc-plugin-*@builtin` (path "builtin"); the disabled
+   supabase absent.
+F5 The engine reserves marketplace names for Anthropic (2.1.292 :673170:
+   claude-plugins-official, claude-code-plugins, anthropic-marketplace,
+   agent-skills, knowledge-work-plugins, … and the community and directory
+   names) and refuses them unless the source is a GitHub repository of the
+   `anthropics` organisation (:673235 `wit`). Its terminal discover view folds
+   a directory entry and the same plugin in an Anthropic marketplace into one
+   item ("Also listed in …", install count the larger of the folded ids, sort
+   by count, then directory first, then name; `Ako`, `GUn`, `Gkr` :158921 to
+   :159010), which `--available` does not do (F e).
+
+Owner-file checks
+-----------------
+~/.claude.json's /tmp and /private/tmp project-key set (A-15): 25 keys,
+identical before and after every step. ~/.claude/plugins/ top-level names,
+mtimes and sizes: identical before and after. The scratch home was the only
+config home any CLI or engine process saw. Cost: no model request (no user
+message was ever sent; no credentials were in the environment).
