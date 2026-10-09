@@ -542,6 +542,8 @@ Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, i
 
 ### H6. Open questions for the architect (each with the recommendation taken; nothing here blocks execution)
 
+> Answered by the architect 2026-10-09 (the P2 spec's Decision Log 18; the ledger's §1, §5 and §6 rows record the names): items 1 to 8 as recommended, with one correction to H5's note for P2-A: acquisition for Send to main stays in the renderer's shared comment form before `side.sendToMain` (A's §5.6), inherited by the sheet and the card alike; nothing acquires inside main's `sendToMain`.
+
 1. **Send to main and §4.3's letter.** §4.3 lists Send to main among the seam's callers; §4.7 says both sends are unchanged. Taken: Send to main stays on `side.sendToMain` (main builds the image block under its root checks and already applies X22's steer-or-send), the card mapping its answer to X22's dispositions, and P2-A adds acquisition inside main's `sendToMain`. Alternative if you hold to the letter: a main read that builds the comment content (`side.comment.content`) and the renderer sends it through the seam, at the cost of shipping the screenshot's bytes through the renderer.
 2. **The re-dock control.** Taken: "Show in deliverable" in the Side pane's thread header beside "Open as tab". Alternative: an icon on the thread's chip (the parent's wording "its chip re-docking the card"); the chip is 220 px wide and already a selection target.
 3. **The card's height in thread phase.** Taken: the placement's max height, fixed (the virtualised list needs a bounded box). Alternative: grow with the content up to the max (Desktop's), which needs a measured list height; worth it if the owner finds a one-reply card too tall.
