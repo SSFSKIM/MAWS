@@ -121,7 +121,7 @@ A narrow host-owned read that answers, for the installations and available entri
 | Kind | Default | A manifest field | Item drawn |
 |---|---|---|---|
 | Commands | `commands/**/*.md` (a nested directory is `dir:name`) | `commands` (a path, a list, or an object of name → `{source | content}`) **replaces** the default | name; description from front matter |
-| Agents | `agents/*.md` | `agents` (a path or a list) **replaces** the default | name and description from front matter, else the file name |
+| Agents | `agents/**/*.md` (recursive, 2.1.292 :729782-729814) | `agents` (a path to a file or a folder, or a list of them, :753347-753359) **replaces** the default | name and description from front matter, else the file name |
 | Skills | `skills/*/SKILL.md` | `skills` (paths) **adds** to the default | name and description from front matter, else the directory name |
 | Hooks | `hooks/hooks.json` | `hooks` (a path, an object, or a list of either) **adds** | "<event> · <matcher>" per matcher; a hooks module (`modules`) counted as one "hooks module" |
 | MCP servers | `.mcp.json` | `mcpServers` (a path or an object) **adds** | name and transport (`stdio`, `http`, `sse`, `ws`); an MCPB file or URL entry counted as one "MCP bundle", never read or fetched |
@@ -511,6 +511,10 @@ Consumed from P2-A (ledger §1): `useLoadedPlugins`, `Freshness`, `ObservedPlugi
   Date/Author: 2026-10-09, the architect's ruling, recorded by P2-B's executor.
 - Decision: `BuiltInMods.tsx` (the architect's ruling, ledger §6): C owns the section's content, B the mount and `useBuiltInMods`; the first lander ships both files in its own shape (B's thin: no rows, nothing drawn until C), the second merges C's body into B's mount and re-points the hook at `mods.list` and C's writes. §5.12 stands.
   Date/Author: 2026-10-09, the architect, recorded by P2-B's executor.
+
+- Decision: M2's task review (round 1, sol): 0 critical, 5 important, 3 minor; all accepted for the fix wave. Important: a URL-valued path declaration (monitors, a command map's `source`, an available entry's string source) is `unknown shape` under the declaring file and never echoed (the probe saw `https:/monitor.example/config?token=…: could not be read`); a size bound that excludes a file sets `partial`; the 200-item bound covers the MCP-bundle and hook-module counters; the 2.5 s deadline bounds each awaited filesystem operation, not only the gaps between them; agents follow the engine (§5.5's table amended: `agents/**/*.md` recursive, a declared folder scanned). Minor, fixed since each is small and on the boundary: `sourceKey` drops an explicit default port and decodes unreserved percent escapes as the engine does; empty optional anchor fields (`readFromFolder`, `installLocation`) read as absent; the bound tests assert bounded work (bytes and entries), not only the answer.
+  Rationale: the boundary's purpose is that a wrong answer is never quiet; each finding was reproduced by the reviewer's probe.
+  Date/Author: 2026-10-09, P2-B's executor (controller).
 
 ## 13. Outcomes & Retrospective
 
