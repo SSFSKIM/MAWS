@@ -71,7 +71,7 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
 
   const reading = (context: { percent: number; maxTokens: number }) => `${Math.round(context.percent)}% of ${tokens(context.maxTokens)} used`;
   let body;
-  if (usage.data) body = <Breakdown usage={usage.data} />;
+  if (live && usage.data) body = <Breakdown usage={usage.data} />; // P2-A: a cached full read is a live view; dormant, the dated reading below
   else if (!live && observed)
     body = (
       <>
@@ -86,7 +86,7 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
     <div className="flex flex-col gap-2.5 p-3.5">
       <h3 className="font-semibold">Context window</h3>
       {body}
-      {usage.isError && digest === null && <p className="text-ui-sm text-fg-muted">{usage.error.message}</p>}
+      {live && usage.isError && digest === null && <p className="text-ui-sm text-fg-muted">{usage.error.message}</p>}
       {compactable && (
         <button type="button" onClick={() => void compact()} className="self-start rounded-sm border border-border-strong px-2 py-0.5 outline-accent hover:bg-bg-hover focus-visible:outline-2">
           Compact now

@@ -39,6 +39,7 @@ export const INFO = {
   subagents: 'Subagents',
   subagentChosen: 'CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch',
   subagentsInherit: "each agent's own, else Main", // W3: no CLAUDE_CODE_SUBAGENT_MODEL (the engine's precedence, SPEC 18)
+  effort: 'Effort', // P2-A: the engine's last reported effort, while no process is live
   outputStyle: 'Output style', // P2-A: the engine's last reported output style, while no process is live
   overrides: 'Overrides',
   passedThrough: 'passed through from your shell',

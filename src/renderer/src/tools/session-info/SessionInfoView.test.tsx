@@ -196,13 +196,14 @@ describe('session info of a session with no live process', () => {
     const hours = ago(3 * 3_600_000);
     backend.script('session.observedFacts', () =>
       facts({
-        model: { value: 'claude-haiku-4-5', at: days, launchId: 'L1' }, effort: { value: 'high', at: days, launchId: 'L1' }, mode: { value: 'plan', at: hours, launchId: 'L1' },
+        model: { value: 'claude-haiku-4-5', at: days, launchId: 'L1' }, effort: { value: 'high', at: hours, launchId: 'L1' }, mode: { value: 'plan', at: hours, launchId: 'L1' },
         outputStyle: { value: 'Explanatory', at: days, launchId: 'L1' }, plugins: { value: { plugins: [{ name: 'p', path: '/p', source: null, version: null }], errors: [], warnings: [] }, at: days, launchId: 'L1' },
         contextUsage: { value: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 }, at: hours, launchId: 'L1' },
       }),
     );
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe('claude-haiku-4-5 · high · Last observed 2 days ago'));
+    await waitFor(() => expect(valueOf('Main')).toBe('claude-haiku-4-5 · Last observed 2 days ago'));
+    expect(valueOf('Effort')).toBe('high · Last observed 3 hours ago'); // its own age, not the model's
     expect(valueOf('Output style')).toBe('Explanatory · Last observed 2 days ago');
     expect(valueOf('Plugins')).toBe('1 loaded · Last observed 2 days ago');
     expect(valueOf('Mode')).toBe('Plan · Last observed 3 hours ago');
@@ -216,7 +217,7 @@ describe('session info of a session with no live process', () => {
     backend.script('session.observedFacts', () => null);
     mount(ctxOf(READY));
     await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
-    for (const label of ['Output style', 'Plugins', 'Mode', 'Context']) expect(valueOf(label)).toBe('Not observed yet');
+    for (const label of ['Effort', 'Output style', 'Plugins', 'Mode', 'Context']) expect(valueOf(label)).toBe('Not observed yet');
   });
 });
 // P2-A end

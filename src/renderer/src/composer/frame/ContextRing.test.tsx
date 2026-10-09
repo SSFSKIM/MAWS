@@ -139,17 +139,50 @@ describe('the context ring of a session with no live process', () => {
     expect(within(screen.getByRole('dialog', { name: 'Context window' })).getByText('Not observed yet')).toBeTruthy();
   });
 
-  it('keeps the digest’s sample first, unlabelled, and reads no facts for it', async () => {
-    fake = fakeClient({});
+  // the review's fix: a dormant ring always says when its reading was taken, when the host kept it
+  const twelve = { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null };
+  function mountWith(process: 'ready' | 'exited', answers: Parameters<typeof fakeClient>[0]) {
+    fake = fakeClient(answers);
     window.maws = fake.client;
-    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process: 'exited' })]]), digests: new Map([[A, digest('app-a', { context: { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null } })]]) });
-    render(
+    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process })]]), digests: new Map([[A, digest('app-a', { context: twelve })]]) });
+    return render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ContextRing appSessionId={A} />
       </QueryClientProvider>,
     );
+  }
+
+  it('an exited ring with a digest sample draws the host’s dated reading, labelled with when', async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
+    mountWith('exited', { 'session.observedFacts': observed({ value: { ...twelve, percent: 14 }, at: twoHoursAgo, launchId: 'L1' }) });
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 14% full of 200k · Last reading, 2 hours ago');
+  });
+
+  it('an exited ring whose host kept no reading keeps the digest’s sample; a live one reads no facts', async () => {
+    mountWith('exited', { 'session.observedFacts': null });
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 12% full of 200k');
+    cleanup();
+    mountWith('ready', {});
+    await settle();
     expect(ring().getAttribute('aria-label')).toBe('Context window 12% full of 200k');
     expect(fake.invoked('session.observedFacts')).toEqual([]);
+  });
+
+  it('a popover opened live keeps no cached full read once the session exits: the dated reading replaces it', async () => {
+    const hourAgo = new Date(Date.now() - 3_600_000 - 60_000).toISOString();
+    mountWith('ready', { 'session.getContextUsage': CONTEXT, 'session.catalog': catalog([]), 'session.observedFacts': observed({ value: { ...twelve, percent: 31 }, at: hourAgo, launchId: 'L1' }) });
+    fireEvent.click(ring());
+    await settle();
+    const popover = () => screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover()).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
+    act(() => useSessions.setState({ engine: new Map([[A, status('app-a', { process: 'exited' })]]) }));
+    await settle();
+    expect(within(popover()).queryByText('47k of 200k · autocompact at 167k')).toBeNull();
+    expect(within(popover()).getByText('31% of 200k used')).toBeTruthy();
+    expect(within(popover()).getByText('Last reading, 1 hour ago')).toBeTruthy();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 31% full of 200k · Last reading, 1 hour ago');
   });
 });
 // P2-A end

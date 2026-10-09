@@ -143,13 +143,14 @@ function modelSection(input: SessionInfoInput): InfoSection {
   return { title: INFO.sections.model, rows };
 }
 
-// P2-A (X17): with no live process, the model and effort the engine last reported, and its output style
+// P2-A (X17): with no live process, the model, the effort and the output style the engine last reported, each with its
+// own age (they are reported at different moments)
 function observedModelSection({ status, now }: SessionInfoInput, observed: NonNullable<SessionInfoInput['observed']>): InfoSection {
-  const effort = observed.facts?.effort?.value ?? null;
   return {
     title: INFO.sections.model,
     rows: [
-      observedRow(INFO.main, observed, (f) => f.model, (model) => (effort ? `${model} · ${effort}` : model), now),
+      observedRow(INFO.main, observed, (f) => f.model, (model) => model, now),
+      observedRow(INFO.effort, observed, (f) => f.effort, (effort) => effort, now),
       status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
       observedRow(INFO.outputStyle, observed, (f) => f.outputStyle, (style) => style, now),
     ],

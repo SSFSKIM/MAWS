@@ -3,8 +3,8 @@
 // turn), amber once it reaches the autocompact threshold. Its popover is the context window's own: the engine's full
 // reading on open, the threshold, and Compact. Per session only: no account windows and no cost (those are the top
 // bar's, W6, and Session info's). A session with no record yet has no ring.
-// P2-A (X17): with no live process and no sample in the digest, the ring draws the last reading the engine host kept for
-// the session, its title saying when ("Last reading, 3 hours ago"); reading it starts nothing.
+// P2-A (X17): with no live process, the ring draws the last reading the engine host kept for the session, its title
+// saying when ("Last reading, 3 hours ago"), else the digest's sample; reading it starts nothing.
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -39,10 +39,12 @@ function Ring({ record }: { record: SessionRecord }) {
   const appSessionId = record.appId;
   const sampled = useSessions((s) => s.digests.get(appSessionId)?.context ?? null);
   const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
-  const { facts } = useObservedFacts(appSessionId, { enabled: !live && sampled === null }); // P2-A
-  const observed = !live && sampled === null ? (facts?.contextUsage ?? null) : null;
+  // P2-A: not live, the last reading the host kept, dated. It is never older than the digest's sample (the recorder
+  // writes every sample the digest folds), which carries no time; the digest's stands only when the host kept none.
+  const { facts } = useObservedFacts(appSessionId, { enabled: !live });
+  const observed = live ? null : (facts?.contextUsage ?? null);
   const [open, setOpen] = useState(false);
-  const ring = contextRingOf(sampled ?? observed?.value ?? null);
+  const ring = contextRingOf(observed?.value ?? sampled);
   const label = observed ? `${ring.label} · ${FRESHNESS.lastReading(observed.at)}` : ring.label;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
