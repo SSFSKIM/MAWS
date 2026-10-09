@@ -27,6 +27,7 @@ import { useSessions } from '../stores/sessions';
 import { terminals, type TerminalId } from '../terminal/registry';
 import { openTerminal } from '../tools/terminal';
 import { toastHeld } from './holder-words';
+import { startNoticeId } from './store'; // P2-A
 
 export const ATTACH_TABS_KEY = 'sessions.attachTabs';
 
@@ -227,5 +228,5 @@ export async function attachOrSay(appSessionId: AppSessionId, known: KnownJob | 
 // A session held elsewhere, in words, with the job's Attach when there is a job to attach to: from a `held` answer, or
 // from the engine's own refusal that failed a resume (the setup store is handed this at composition).
 export function heldToast(appSessionId: AppSessionId, holder: SessionRecord['holder'], attach: KnownJob | null): void {
-  toastHeld(holder, attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }]);
+  toastHeld(holder, attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }], startNoticeId(appSessionId)); // P2-A: the id
 }

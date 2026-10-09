@@ -7,7 +7,7 @@ import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
-import { status } from '../../../../test/support/builders';
+import { record as sessionRecord, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, setInlineText, setResubmit, useComposerStore, type InlineEdit } from '../stores/composer';
 import { prefillToDoc } from './editor/recall';
@@ -31,6 +31,7 @@ import {
   REWIND_WINDOW_MS,
   REWOUND_COPY,
   resubmitProvider,
+  READY_WAIT_MS,
   rewindAgain,
   sendInlineEdit,
   startInlineEdit,
@@ -464,6 +465,119 @@ describe('one submission at a time: the send or fork is with the host until it a
     expect(record()).toMatchObject({ state: 'idle', exited: true, sending: false });
     expect(edit()).not.toBeNull();
     expect(rewinds).toHaveLength(1);
+  });
+});
+
+// P2-A (2026-10-09; the execution document §5.6): an edit's Send on a session with a record and no ready process
+// starts it first (`session.acquire`, reason resubmit), holding the edit meanwhile, then runs the flow as today.
+describe('an edit resubmitted on an exited session', () => {
+  const exited = () => useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]), records: new Map([[A, sessionRecord(A)]]) });
+
+  it('starts the session first, holding the edit, then rewinds once the session reads ready and resends', async () => {
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resubmit' }]);
+    expect(record()).toMatchObject({ state: 'idle', sending: true });
+    expect(rewinds).toHaveLength(0);
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false });
+    expect(rewinds).toHaveLength(0); // the renderer's status still trails: nothing goes to a process it reads as gone
+    useSessions.setState({ engine: new Map([[A, status(A)]]) });
+    await settle();
+    expect(rewinds).toHaveLength(1);
+    rewinds[0].answer(rewound());
+    expect(await outcome).toBe('rewound');
+    await settle();
+    expect(sends()).toHaveLength(1);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  it('a blocked prompt sent anew on an exited session starts it, then sends once', async () => {
+    exited();
+    editing({ kind: 'blocked' });
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: false, joined: true });
+    useSessions.setState({ engine: new Map([[A, status(A)]]) });
+    expect(await outcome).toBe('sent');
+    expect(sends()).toHaveLength(1);
+    expect(rewinds).toHaveLength(0);
+  });
+
+  // M3 review: main answered ready, so the host's own status is read rather than waiting on an event that may not come
+  it('acquire answers ready and no ready event follows: the host’s status read reconciles it and the flow goes on', async () => {
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false });
+    expect(fake.invoked('session.status')).toEqual([{ appSessionId: A }]);
+    await fake.reply('session.status', status(A));
+    await settle();
+    expect(useSessions.getState().engine.get(A)?.process).toBe('ready'); // applied: the host's answer is authoritative
+    expect(rewinds).toHaveLength(1);
+    rewinds[0].answer(rewound());
+    expect(await outcome).toBe('rewound');
+  });
+
+  it('acquire answers ready and neither the status read nor an event ever says so: the wait is bounded, the edit released, and a late ready sends nothing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false });
+    expect(record()).toMatchObject({ sending: true });
+    vi.advanceTimersByTime(READY_WAIT_MS);
+    expect(await outcome).toBe('stale');
+    expect(record()).toMatchObject({ state: 'idle', sending: false });
+    expect(edit()).not.toBeNull();
+    expect(toasts()).toEqual(['The session did not become ready']);
+    useSessions.setState({ engine: new Map([[A, status(A)]]) }); // a ready arriving after the bound starts nothing
+    await settle();
+    expect([rewinds.length, sends().length]).toEqual([0, 0]);
+  });
+
+  it('Cancel while the session starts ends the edit: the wait and its subscription go, and nothing is rewound or sent', async () => {
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false });
+    expect(cancelInlineEdit(A)).toBe(true);
+    expect(edit()).toBeNull();
+    expect(await outcome).toBe('stale');
+    useSessions.setState({ engine: new Map([[A, status(A)]]) });
+    await fake.reply('session.status', status(A));
+    await settle();
+    expect([rewinds.length, sends().length]).toEqual([0, 0]);
+    expect(record()).toMatchObject({ state: 'idle', sending: false });
+  });
+
+  it('Cancel during the acquisition itself: the start goes on, the edit ends, and its late ready sends nothing', async () => {
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    expect(cancelInlineEdit(A)).toBe(true);
+    await fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false });
+    expect(await outcome).toBe('stale');
+    expect(fake.invoked('session.status')).toEqual([]);
+    expect([rewinds.length, sends().length]).toEqual([0, 0]);
+  });
+
+  it('a refused start leaves the edit as it was, says why, and rewinds nothing', async () => {
+    exited();
+    editing();
+    const outcome = sendInlineEdit(client, A);
+    await settle();
+    await fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' });
+    expect(await outcome).toBe('stale');
+    expect(record()).toMatchObject({ state: 'idle', sending: false });
+    expect(edit()).not.toBeNull();
+    expect(toasts()).toEqual(['Directory not found: /gone']);
+    expect([rewinds.length, sends().length]).toEqual([0, 0]);
   });
 });
 

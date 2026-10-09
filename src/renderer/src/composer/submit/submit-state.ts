@@ -10,6 +10,7 @@
 // opens the turn at the engine's `started`, so between a write and its start the entry is what makes the session busy).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { QueueEntry } from '@shared/engine/session-state-store';
+import type { Availability } from '@shared/ipc/schema/session'; // P2-A
 import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
 export type SubmitState = 'send' | 'stop' | 'resume';
@@ -20,7 +21,10 @@ export interface SubmitInput {
   queue: { entries: readonly QueueEntry[]; paused: boolean };
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
-  released: boolean; // C12: the session's digest carries the memory budget's released mark (Send resumes it)
+  // P2-A: the session's availability (null without a record, an unstarted intent being C10's) and, while a terminal or
+  // a background job holds it, the holder in words
+  availability: Availability | null;
+  heldBy: string | null;
 }
 
 export interface SubmitDecision {
@@ -38,10 +42,12 @@ export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
 // `!` while busy (architect's ruling on M6): the engine runs it inside the turn and folds its output in.
 export const RUNS_NOW = 'Runs now; the model sees the output in this turn';
-// C12 start: a session released under the memory budget (C12 execution document, "Send-to-resume")
-export const RESUMES = 'Resumes this session';
-export const RESUME_FIRST = 'Send a message to resume this session first';
-// C12 end
+// P2-A start (2026-10-09; the execution document §5.4): a session with a record and no ready process (C12's
+// send-to-resume, for every eligible record)
+export const STARTS = 'Starts this session';
+export const SENDS_WHEN_STARTED = 'Sends once the session has started';
+export const ARCHIVED = 'Archived · unarchive it to continue';
+// P2-A end
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -72,13 +78,16 @@ export function submitState(i: SubmitInput): SubmitDecision {
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
   }
-  // C12 start: a released session with no live process sends to resume it through C10's resume; `!` and `#` wait for the
-  // process. A release still exiting falls to the rule below (refused, the draft kept) until its status reads exited.
-  if (i.released && (status === null || status.process === 'exited')) {
-    if (mode !== 'send') return decide('send', 'Send', false, RESUME_FIRST);
-    return decide('send', 'Send', !empty, null, RESUMES);
+  // P2-A start: with a record and no ready process the submission acquires the session first (the seam, and `!` and `#`
+  // before their own dispatch), joining a start in flight; only an archived or a foreign-held session refuses
+  if ((status === null || status.process !== 'ready') && i.availability !== null) {
+    const label = mode === 'bash' ? 'Run' : mode === 'memory' ? 'Save to memory' : 'Send';
+    if (i.availability === 'archived') return decide('send', label, false, ARCHIVED);
+    if (i.availability === 'foreign_held') return decide('send', label, false, `Held by ${i.heldBy ?? 'another process'}`);
+    if (i.availability === 'starting') return decide('send', 'Starting…', !empty, null, SENDS_WHEN_STARTED);
+    return decide('send', label, !empty, null, STARTS);
   }
-  // C12 end
+  // P2-A end
   if (status === null || status.process !== 'ready') {
     const starting = status !== null && (status.process === 'starting' || status.process === 'initializing');
     return decide('send', 'Send', false, starting ? STARTING : ENDED);

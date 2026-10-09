@@ -130,6 +130,12 @@ export function prefillComposer(appSessionId: AppSessionId, prefill: Prefill): v
   useComposerStore.setState((s) => ({ prefills: new Map(s.prefills).set(appSessionId, prefill) }));
 }
 
+// P2-A (2026-10-09): a record's card continuation asks the composer to clear once the host accepted the message the
+// card held; the composer takes it as it takes a prefill (an empty one), so its editor empties and its draft goes.
+export function clearComposer(appSessionId: AppSessionId): void {
+  prefillComposer(appSessionId, { text: '' });
+}
+
 // The composer's side: the pending prefill, removed as it is taken.
 export function takePrefill(appSessionId: AppSessionId): Prefill | null {
   const prefill = useComposerStore.getState().prefills.get(appSessionId) ?? null;

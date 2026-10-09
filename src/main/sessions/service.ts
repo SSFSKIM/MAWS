@@ -48,6 +48,14 @@ import type { SetupEvent } from '@shared/sessions/setup';
 import { releaseHolder, type TakeOverDeps } from './take-over'; // W7
 import type { ForeignHolder } from '@shared/graph/session'; // W7
 import type { TakeOverOutcome } from '@shared/ipc/schema/session'; // W7
+// P2-A start (2026-10-09; X16)
+import type { AcquireReason } from '@shared/ipc/schema/session';
+import type { AcquireOutcome } from '@shared/sessions/setup';
+import type { AcquisitionMemory } from './availability';
+import { EXIT_WAIT_MS } from './context';
+import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
+import { LaunchWatch } from './launch-watch';
+// P2-A end
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -68,6 +76,9 @@ function startState(intent: SetupIntent): string {
   return JSON.stringify([intent.message, intent.progress]);
 }
 
+// P2-A: what an acquisition that ran nothing leaves: the record and its conversation as they were.
+const UNTOUCHED: SetupResources = { worktree: null, record: 'kept', transcript: 'kept' };
+
 export class SessionService {
   private setup: Setup | null = null;
   private readyPromise: Promise<void> | null = null;
@@ -87,6 +98,10 @@ export class SessionService {
   private streamed = false; // the host streamed while a recovery's table read was in flight
   private offReady: (() => void) | null = null;
   private readonly manifests: DeletionManifests;
+  // P2-A (X16): every run that can launch an engine for an id, registered before its first await; and what the last
+  // acquisition of each id ended with when not ready (this app run only, D-16)
+  private readonly inflight = new InflightRegistry((appSessionId) => this.publishAcquisition(appSessionId));
+  private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
   private readonly now: () => string;
   private readonly log: (message: string) => void;
 
@@ -507,11 +522,30 @@ export class SessionService {
     return target ? { ptyId: target.pane.ptyId, label: target.pane.label } : null;
   }
 
-  async takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
-    await this.ready();
-    if (this.starting.has(appSessionId)) return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it waits for it and then runs its own attempt (a take-over usually ends `released`,
+  // the resume left to the caller); with a run in flight the registry is read again once ready.
+  takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, 'take-over');
+    return this.takeOverWhenReady(appSessionId, expected, paneId, early);
+  }
+
+  private async takeOverWhenReady(appSessionId: AppSessionId, expected: ForeignHolder, paneId: string | null | undefined, early: Registration | null): Promise<TakeOverOutcome> {
+    const end = (registration: Registration | null) => registration?.end({ outcome: { status: 'refused', appSessionId, reason: 'busy', message: 'The session was being taken over.' } }); // its joiners run their own attempt
+    try {
+      await this.ready();
+    } catch (error) {
+      end(early);
+      throw error;
+    }
+    // P2-A: any run in flight counts as a start (an acquisition sits in its pre-lock steps without the `starting` mark)
+    if (this.starting.has(appSessionId) || (early === null && this.inflight.has(appSessionId))) {
+      end(early);
+      return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+    }
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
+    const registration = early ?? this.inflight.open(appSessionId, 'take-over');
     try {
       return await this.serial(appSessionId, async () => {
         const record = this.deps.index.sessions.get(appSessionId);
@@ -550,27 +584,63 @@ export class SessionService {
       });
     } finally {
       this.starting.delete(appSessionId);
+      end(registration);
     }
   }
 
   // ---- start ------------------------------------------------------------------------------------------------------
 
   // `session.start`: an intent's setup, or a record's resume. `starting` is the only answer after which phases stream.
-  async startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
-    await this.ready();
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it joins this start; its end is the setup's own `ready` or `failed`. With a run in
+  // flight the join is decided once ready, when the intents are loaded.
+  startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options);
+    return this.startWhenReady(appSessionId, args, early);
+  }
+
+  private async startWhenReady(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }, early: Registration | null): Promise<StartOutcome> {
+    try {
+      await this.ready();
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
+    // P2-A start: a record's start with no message joins a run in flight (an acquisition's, another start's) and answers
+    // what its guards answered, when it asks with no options or the same ones; with other options (C11's route switch)
+    // it waits for that run to settle and then runs its own start, since a joined switch would report a route its launch
+    // never took. One carrying a message stays refused `starting` (no message is dropped), as does every start while a
+    // take-over runs.
+    const joinable = early === null ? this.inflight.get(appSessionId) : undefined;
+    if (joinable !== undefined && joinable.kind !== 'take-over' && args.message === null && this.deps.intents.get(appSessionId) === null) {
+      const own = canonicalOptions(args.options);
+      if (own === '{}' || own === joinable.options) return joinable.guarded;
+      const settled = () => this.startSession(appSessionId, args);
+      return joinable.done.then(settled, settled);
+    }
+    if (joinable !== undefined) throw new IntentRefused('starting', `starting: a start is in flight for ${appSessionId}`);
+    // P2-A end
     // Marked synchronously, before the guards' first await: a second start, a patch or a release of this id is refused
     // `starting` from here on, and a new worktree's name is reserved against every other start, so two starts can
     // never both pass their guards for one checkout.
-    this.refuseWhileStarting(appSessionId);
+    try {
+      this.refuseWhileStarting(appSessionId);
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
+    const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
+    const captured = capturingSetup(this.s, appSessionId);
     const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
     let release: (() => void) | null = null;
     let handedOff = false;
+    let answered: StartOutcome | null = null; // P2-A: what this start answered without a run (its registration's end)
     try {
       if (claim === 'taken') {
         const location = this.intentOf(appSessionId).location as Extract<Location, { kind: 'newWorktree' }>;
-        return await this.rejectIntent(appSessionId, { status: 'invalid', appSessionId, field: 'location', message: `a worktree named ${location.name} is being created by another start` });
+        return (answered = await this.rejectIntent(appSessionId, { status: 'invalid', appSessionId, field: 'location', message: `a worktree named ${location.name} is being created by another start` }));
       }
       release = await this.lock(appSessionId);
       // a reconciliation that failed at start is re-run first, never the setup in its place; E10: so is one the recovery
@@ -584,24 +654,30 @@ export class SessionService {
       const intent = this.deps.intents.get(appSessionId);
       let outcome: StartOutcome;
       let run: (() => Promise<void>) | null;
-      if (intent !== null) [outcome, run] = await this.guardIntent(intent, args);
+      if (intent !== null) [outcome, run] = await this.guardIntent(captured.setup, intent, args);
       else {
         const record = this.deps.index.sessions.get(appSessionId);
-        if (record === null) return { status: 'refused', appSessionId, reason: 'unknown_session', message: `no setup intent and no session record for ${appSessionId}` };
-        [outcome, run] = await this.guardResume(record, args);
+        if (record === null) return (answered = { status: 'refused', appSessionId, reason: 'unknown_session', message: `no setup intent and no session record for ${appSessionId}` });
+        [outcome, run] = await this.guardResume(captured.setup, record, args);
       }
-      if (run === null) return outcome;
+      registration.guard(outcome); // P2-A
+      if (run === null) return (answered = outcome);
       handedOff = true;
       const held = release;
       void run().finally(() => {
         this.endStart(appSessionId, claim);
         held();
+        registration.end({ outcome: acquireOutcomeOf(appSessionId, captured.outcome()) }); // P2-A
       });
       return outcome;
+    } catch (error) {
+      registration.end({ error }); // P2-A: a guard that could not answer fails its joiners as it fails this start
+      throw error;
     } finally {
       if (!handedOff) {
         this.endStart(appSessionId, claim);
         release?.();
+        if (answered !== null) registration.end({ outcome: acquireOutcomeOfGuard(answered) }); // P2-A
       }
     }
   }
@@ -631,18 +707,18 @@ export class SessionService {
 
   // The start guards (start-guards.ts). One that could not answer (the relay check, a fail-closed holder read, a git
   // failure) hands the message back as a rejection does, then fails the command with its error.
-  private async guardIntent(intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
+  private async guardIntent(s: Setup, intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
     try {
-      return await guardIntentStart(this.s, this.guardContext, intentIn, args);
+      return await guardIntentStart(s, this.guardContext, intentIn, args);
     } catch (error) {
       await this.rejectIntent(intentIn.appSessionId, null).catch(() => {});
       throw error;
     }
   }
 
-  private async guardResume(record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
+  private async guardResume(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
     try {
-      return await guardResumeStart(this.s, record, args, this.resumeMessages);
+      return await guardResumeStart(s, record, args, this.resumeMessages);
     } catch (error) {
       this.resumeMessages.delete(record.appId); // a guard that could not answer hands the message back
       throw error;
@@ -656,6 +732,117 @@ export class SessionService {
     bindTrust: (intent, locationChanged, decision) => this.bindTrust(intent, locationChanged, decision),
     forgetQuietly: (appSessionId) => this.forgetQuietly(appSessionId),
   };
+
+  // ---- acquisition (P2-A, X16; the execution document §5.3) ---------------------------------------------------------
+
+  // `session.acquire`: the one entry every engine-needing gesture calls. It answers at once for a ready session, joins
+  // a run already in flight (a take-over excepted, and a run with other options: those wait for it, then run their
+  // own), or runs the guarded resume, and answers after the launch: `ready`, a card, a refusal, or `failed`. Only owner
+  // gestures call it (nothing on mount, on a poll or on a timer); `reason` is logged and nothing branches on it.
+  acquire(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
+    this.log(`acquire ${appSessionId} (${reason})`);
+    return this.acquireOrJoin(appSessionId, options);
+  }
+
+  private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+    const entry = this.inflight.get(appSessionId);
+    if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
+    const own = canonicalOptions(options);
+    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    const settled = () => this.acquireOrJoin(appSessionId, options);
+    return entry.done.then(settled, settled);
+  }
+
+  // A durable record no intent owns. An intent's provisional record (a failed or interrupted setup keeps both) is C10's:
+  // it starts with its first message, never by acquisition.
+  private acquirable(appSessionId: AppSessionId): boolean {
+    return this.deps.index.sessions.get(appSessionId) !== null && this.deps.intents.get(appSessionId) === null;
+  }
+
+  // No durable record and nothing in flight: refused without registering, so a start of an unstarted intent is never
+  // refused `starting` for it. Acquisition never runs C10's setup.
+  private async refuseUnknown(appSessionId: AppSessionId): Promise<AcquireOutcome> {
+    await this.ready();
+    return this.refusal(appSessionId);
+  }
+
+  private refusal(appSessionId: AppSessionId): AcquireOutcome {
+    const message = this.deps.intents.get(appSessionId) !== null ? 'an unstarted session starts with its first message' : `no session record for ${appSessionId}`;
+    return { status: 'refused', appSessionId, reason: 'unknown_session', message };
+  }
+
+  // One acquisition: registered in the caller's tick, its memory published (in flight, the last answer cleared), the
+  // steps run, and the answer remembered when it is a card, a missing directory or a failure.
+  private async acquireOnce(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+    this.lastAttempt.delete(appSessionId);
+    const registration = this.inflight.open(appSessionId, 'acquire', options);
+    let outcome: AcquireOutcome;
+    try {
+      outcome = await this.acquisition(appSessionId, options, registration);
+    } catch (error) {
+      this.remember(appSessionId, 'failed', error instanceof Error ? error.message : String(error));
+      registration.end({ error });
+      throw error;
+    }
+    if (outcome.status === 'needs_trust' || outcome.status === 'missing_directory') this.remember(appSessionId, outcome.status, null);
+    if (outcome.status === 'failed') this.remember(appSessionId, 'failed', outcome.message);
+    registration.end({ outcome });
+    return outcome;
+  }
+
+  private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+    const s = await this.ready();
+    if (!this.acquirable(appSessionId)) return this.refusal(appSessionId); // the intents are loaded only once ready
+    // the watch before the reservation read, so a ready status landing between the two is not missed
+    const watch = new LaunchWatch(s, appSessionId);
+    try {
+      const live = await reservationOf(s.dispatch, appSessionId);
+      if (live?.process === 'ready') return { status: 'ready', appSessionId, launched: false, joined: false };
+      if (live?.process === 'exiting') {
+        // a stop or a budget release mid-ladder: its exit is waited out, bounded
+        const gone = await until(async () => (await reservationOf(s.dispatch, appSessionId)) === null, this.deps.timing?.exitWaitMs ?? EXIT_WAIT_MS, 100);
+        if (!gone) return { status: 'failed', appSessionId, message: 'The session is still stopping.', resources: UNTOUCHED };
+      } else if (live !== null) {
+        // launching outside the registry (a harness's own `session.launch`; every product launch registers)
+        const end = await watch.untilReady();
+        if (end.kind === 'ready') return { status: 'ready', appSessionId, launched: false, joined: false };
+        if (end.kind === 'timeout') return { status: 'failed', appSessionId, message: 'The session did not become ready.', resources: UNTOUCHED };
+      }
+    } finally {
+      watch.dispose();
+    }
+    return this.resumeForAcquisition(appSessionId, options, registration);
+  }
+
+  // The guarded resume under the id's lock and the `starting` mark, the record read again first: an archive or a delete
+  // holds the same lock and may have run while the steps above waited. Nothing is retained (no message), so a card's
+  // continuation is the caller's own next acquisition.
+  private async resumeForAcquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+    const release = await this.lock(appSessionId);
+    this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
+    try {
+      const record = this.deps.index.sessions.get(appSessionId);
+      if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
+      const captured = capturingSetup(this.s, appSessionId, true); // its phases stream tagged: the reply tells its end
+      const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
+      registration.guard(guard);
+      if (run === null) return acquireOutcomeOfGuard(guard);
+      await run();
+      return acquireOutcomeOf(appSessionId, captured.outcome());
+    } finally {
+      this.starting.delete(appSessionId);
+      release();
+    }
+  }
+
+  private remember(appSessionId: AppSessionId, kind: NonNullable<AcquisitionMemory['last']>['kind'], message: string | null): void {
+    this.lastAttempt.set(appSessionId, { kind, at: this.now(), message });
+  }
+
+  private publishAcquisition(appSessionId: AppSessionId): void {
+    this.deps.acquisitions?.observeAcquisition(appSessionId, { inFlight: this.inflight.has(appSessionId), last: this.lastAttempt.get(appSessionId) ?? null });
+  }
 
   // ---- fork, archive, delete, rename, reveal (record-actions.ts) --------------------------------------------------
 

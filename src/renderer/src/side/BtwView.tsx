@@ -4,15 +4,21 @@
 // Shift+Enter breaks a line), Clear starts a new side conversation, and "Continue as a side thread" turns the answered
 // exchanges (with what the field holds, as the thread's own ask) into a side thread the pane then shows. The log is
 // the host's (`side.question.list`): it is listed on mount and whenever the session's process changes, so a renderer
-// reload shows a pending question pending and then answered. Asking and Retry need a ready process, and say so;
-// continuing as a thread does not (a fork resumes from disk).
+// reload shows a pending question pending and then answered. P2-A (2026-10-09; the execution document §5.6): Ask and
+// Retry on a session with no ready process start it first (`acquireSession(id, 'side')`, the field reading Starting…)
+// and then ask; a refused start says why and keeps the question; a terminal or job holding it, or an archive, disables
+// them with the reason. Continuing as a thread needs no process (a fork resumes from disk). Opening starts nothing.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
+import { STARTS } from '../composer/submit/submit-state';
+import { useAvailability } from '../sessions/availability';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { useSessions } from '../stores/sessions';
 import { Markdown } from '../transcript/view/markdown/Markdown';
 import { promoteSide } from './actions';
+import { sideBlock, startForSide } from './btw';
+import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
 import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, useSidePane } from './store';
 
@@ -23,9 +29,14 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const ready = process === 'ready';
+  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const availability = useAvailability(parent);
   const [question, setQuestion] = useState('');
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
+  const blocked = ready ? null : sideBlock(availability, holder);
+  const canAsk = blocked === null && !starting;
   const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => void refreshSide(parent), [parent, process]);
@@ -35,17 +46,32 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
     if (log.current) log.current.scrollTop = log.current.scrollHeight; // the newest exchange in view
   }, [shown.length, last?.state]);
 
-  const ask = () => {
+  // P2-A: the session started first when it has no ready process; null when it can be asked, else the words shown
+  const started = async (): Promise<boolean> => {
+    if (ready) return true;
+    setStarting(true);
+    setRefusal(null);
+    const words = await startForSide(parent);
+    setStarting(false);
+    if (words !== null) setRefusal(words);
+    return words === null;
+  };
+  const ask = async () => {
     const q = question.trim();
-    if (!ready || q === '') return;
+    if (!canAsk || q === '') return;
+    if (!(await started())) return;
     void askSide(parent, q);
-    setQuestion('');
+    setQuestion((current) => (current.trim() === q ? '' : current));
+  };
+  const retry = async (exchange: SideExchange) => {
+    if (canAsk && (await started())) void retrySide(parent, exchange);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    ask();
+    void ask();
   };
+  const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
   const canPromote = !promoting && promotable(exchanges ?? []).length > 0;
   const promote = async () => {
     if (!canPromote) return;
@@ -66,13 +92,13 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
         ) : (
           <ol className="m-0 flex list-none flex-col gap-4 p-0">
             {shown.map((exchange) => (
-              <Exchange key={exchange.id} exchange={exchange} canRetry={ready} onRetry={() => void retrySide(parent, exchange)} />
+              <Exchange key={exchange.id} exchange={exchange} canRetry={canAsk} onRetry={() => void retry(exchange)} />
             ))}
           </ol>
         )}
       </div>
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2.5">
-        {!ready && <p className="m-0 text-ui-sm text-fg-muted">{COPY.notRunning}</p>}
+        {note !== null && <p className="m-0 text-ui-sm text-fg-muted">{note}</p>}
         {refusal !== null && (
           <p role="alert" className="m-0 text-ui-sm break-words text-danger">
             {refusal}
@@ -88,7 +114,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
             onKeyDown={onKeyDown}
             className={`${FIELD} min-h-[52px] resize-none leading-snug placeholder:text-fg-faint`}
           />
-          <button type="button" className={PRIMARY} disabled={!ready || question.trim() === ''} onClick={ask}>
+          <button type="button" className={PRIMARY} disabled={!canAsk || question.trim() === ''} onClick={() => void ask()}>
             {COPY.ask}
           </button>
         </div>

@@ -12,6 +12,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
+import { digest, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerFocusTarget } from '../stores/composer';
@@ -19,6 +20,7 @@ import { useSessions } from '../stores/sessions';
 import type { BuiltInModRow } from './plugins/builtin-mods';
 import { useLibraryStore } from './plugins/library-store';
 import { PluginsWidget } from './PluginsWidget';
+import { useReadLoads } from './read';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
 const mods = vi.hoisted(() => ({ rows: [] as BuiltInModRow[], setEnabled: null as ((id: string, enabled: boolean) => Promise<void>) | null }));
@@ -99,7 +101,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map(), records: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   mods.rows = [];
   mods.setEnabled = null;

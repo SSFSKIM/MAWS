@@ -84,7 +84,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     expect(value(await invoke(page, 'attention.list', undefined))).toEqual([]);
     await shoot(page, testInfo, 'released');
 
-    // Its tab, the Overview closed first (it floats over the composer): Send is enabled and says it resumes the session;
+    // Its tab, the Overview closed first (it floats over the composer): Send is enabled and says it starts the session (P2-A);
     // Session info reads the budget and the release.
     await overview.getByRole('button', { name: 'Close Overview' }).click();
     await expect(overview).toHaveCount(0);
@@ -94,7 +94,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await page.keyboard.type('Carry on');
     const send = main.locator('[data-submit-state]');
     await expect(send).toBeEnabled();
-    await expect(send).toHaveAttribute('aria-description', 'Resumes this session');
+    await expect(send).toHaveAttribute('aria-description', 'Starts this session'); // P2-A: every eligible record, released or not
     const panel = page.locator('[data-region="panel"]');
     await panel.getByRole('button', { name: 'Add a tool' }).click();
     await page.getByRole('menuitem', { name: 'Session info' }).click();

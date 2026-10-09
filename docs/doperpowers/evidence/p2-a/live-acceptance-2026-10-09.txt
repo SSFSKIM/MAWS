@@ -1,0 +1,62 @@
+# P2-A live acceptance, 2026-10-09 (e2e/sessions-available-live.spec.ts). Two runs; the second added a per-key digest of ~/.claude.json.
+
+## Run 1 (scratch /private/tmp/maws-p2a-live-3jllXX)
+P2-A live acceptance · 2026-10-09T14:34:19.470Z · engine 2.1.295 (~/.local/share/claude/versions/2.1.295) · relay http://127.0.0.1:8641 · scratch /private/tmp/maws-p2a-live-3jllXX
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files before: ~/.claude.json sha256 a434688fd86b6bc289a83aea480718ced0e4b36e460936e55d9f7abc05662811 · ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04
+discovered: a2a2e000-0000-4000-8000-0000000000a1 → be4a8fa0-3d30-4cd6-bcd6-a0908181d66e; a2a2e000-0000-4000-8000-0000000000a2 → 6cee8b38-06f0-4294-bee8-8fd7d85cd342
+
+=== 01-open · a discovered terminal session opened: nothing launches; Session info reads Not observed yet
+Session info Main: Not observed yet · journal directory: absent
+
+=== 02-send · Send "Reply with OK": the composer reads Starting…, then the reply streams in the same conversation
+control read: Starting…
+spawn args: -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local --permission-mode auto --resume a2a2e000-0000-4000-8000-0000000000a1 --settings · engine session a2a2e000-0000-4000-8000-0000000000a1 · model {"requested":null,"resolved":"claude-haiku-5-5[1m]"} · user frames 1
+reply: "OK" · spend US$0.00228
+
+=== 03-stop-send · the sent session stopped
+
+=== 04-skills-prepare · the other session started once with no prompt (Session info’s Refresh) and stopped: an exited MAWS-run session
+launches so far: 1; user frames 0
+
+=== 05-skills · /skills on the exited MAWS-run session: Not read yet. with Load now, which says Starting… and then shows the skill
+frame read: Starting…
+skills rows: ["/p2a-hello\nUse\nSays hello, for the P2-A live acceptance."]
+
+=== 06-relaunch · quit and relaunch: the ring reads Last reading, …, Session info Last observed …, and nothing starts
+after relaunch: {"main":"claude-haiku-5-5[1m] · Last observed just now","context":"18,216 of 1,000,000 · 2% · autocompact at 967,000 · Last observed just now","ring":"Context window 2% full of 1M · Last reading, just now"} · engines running: 0
+
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files after: ~/.claude.json sha256 6b77d0cd2a223e1e9d5ec91a159667b15d82b8b0054e2f6c7bfb8948dc5b5a05 · ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04
+spend: US$0.00228 (the sent session's receipts; the two no-prompt starts made no model request)
+
+## Run 2 (scratch /private/tmp/maws-p2a-live-fm4qa2)
+P2-A live acceptance · 2026-10-09T14:36:41.404Z · engine 2.1.295 (~/.local/share/claude/versions/2.1.295) · relay http://127.0.0.1:8641 · scratch /private/tmp/maws-p2a-live-fm4qa2
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files before: ~/.claude.json sha256 929266244dad0ffe2b556f246ac33052e5f44ec5cd8599db753276f85933ac0b · ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04
+discovered: a2a2e000-0000-4000-8000-0000000000a1 → 4e8035f7-f3bf-472a-af76-dd665c628d01; a2a2e000-0000-4000-8000-0000000000a2 → 9108f5ad-2cc1-4e05-a8f9-a11f9a34dcc7
+
+=== 01-open · a discovered terminal session opened: nothing launches; Session info reads Not observed yet
+Session info Main: Not observed yet · journal directory: absent
+
+=== 02-send · Send "Reply with OK": the composer reads Starting…, then the reply streams in the same conversation
+control read: Starting…
+spawn args: -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local --permission-mode auto --resume a2a2e000-0000-4000-8000-0000000000a1 --settings · engine session a2a2e000-0000-4000-8000-0000000000a1 · model {"requested":null,"resolved":"claude-haiku-5-5[1m]"} · user frames 1
+reply: "OK" · spend US$0.00093
+
+=== 03-stop-send · the sent session stopped
+
+=== 04-skills-prepare · the other session started once with no prompt (Session info’s Refresh) and stopped: an exited MAWS-run session
+launches so far: 1; user frames 0
+
+=== 05-skills · /skills on the exited MAWS-run session: Not read yet. with Load now, which says Starting… and then shows the skill
+frame read: Starting…
+skills rows: ["/p2a-hello\nUse\nSays hello, for the P2-A live acceptance."]
+
+=== 06-relaunch · quit and relaunch: the ring reads Last reading, …, Session info Last observed …, and nothing starts
+after relaunch: {"main":"claude-haiku-5-5[1m] · Last observed just now","context":"18,219 of 1,000,000 · 2% · autocompact at 967,000 · Last observed just now","ring":"Context window 2% full of 1M · Last reading, just now"} · engines running: 0
+
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files after: ~/.claude.json sha256 929266244dad0ffe2b556f246ac33052e5f44ec5cd8599db753276f85933ac0b · ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04
+~/.claude.json keys whose digest moved: [] · mtime 2026-10-09T14:36:27.267Z
+spend: US$0.00093 (the sent session's receipts; the two no-prompt starts made no model request)

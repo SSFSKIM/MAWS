@@ -59,3 +59,28 @@ describe('the mode menu on its own binding', () => {
     expect((screen.getByRole('menuitemradio', { name: /^Plan/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+// P2-A (2026-10-09; the execution document §5.6): on a session with no ready process a choice starts it first
+describe('the mode menu on a session with no ready process', () => {
+  it('Bypass asks before anything starts: Cancel starts nothing; the confirm says Starting… then sets the mode', async () => {
+    let answer!: (value: unknown) => void;
+    const invoke = vi.fn((name: string) =>
+      name === 'session.acquire' ? new Promise((resolve) => (answer = resolve)) : Promise.resolve({ ok: true, value: { effective: 'bypassPermissions', refusal: null, error: null } }),
+    );
+    const client = { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as Parameters<typeof liveModeBinding>[3];
+    const done = vi.fn();
+    render(<ModeMenu binding={liveModeBinding(record('app-a'), null, [], client)} onDone={done} />);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Bypass permissions/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Bypass permissions/ }));
+    expect(invoke).not.toHaveBeenCalled(); // the confirm is UI state before `set`
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Bypass permissions' }));
+    await settle();
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(['session.acquire']);
+    expect(screen.getByRole('status').textContent).toBe('Starting…');
+    await act(async () => answer({ ok: true, value: { status: 'ready', appSessionId: A, launched: true, joined: false } }));
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(['session.acquire', 'session.setPermissionMode']);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+});

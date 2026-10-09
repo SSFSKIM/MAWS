@@ -58,13 +58,30 @@ describe('mode menu', () => {
   });
   // C11 end
 
-  it('a session with no ready process offers no change', () => {
+  // P2-A (2026-10-09; the execution document §5.6): no ready process is not a refusal; a choice starts the session
+  it('a session with no ready process offers every change, refused only by why it cannot start', () => {
     const exited = { ...status('a'), process: 'exited' as const };
-    expect(liveModeBinding(record('a'), exited, models).disabled).toBe('The session is not running');
-    expect(liveModeBinding(record('a'), null, models).disabled).toBe('The session is not running');
+    expect(liveModeBinding(record('a'), exited, models).disabled).toBeNull();
+    expect(liveModeBinding(record('a'), null, models).disabled).toBeNull();
+    expect(liveModeBinding(record('a'), null, models, undefined, 'Archived · unarchive it to continue').disabled).toBe('Archived · unarchive it to continue');
+    expect(liveModeBinding(record('a'), status('a'), models, undefined, 'Archived · unarchive it to continue').disabled).toBeNull(); // ready: the status decides
     expect(liveModeBinding(record('a', { permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' } }), null, null)).toMatchObject({
       value: 'default',
       refusal: 'auto_mode_model',
+      starts: true,
     });
+  });
+
+  it('a choice on a session with no ready process acquires it (chip), then sets the mode; a refused start sets nothing', async () => {
+    const ok = fakeClient({ 'session.acquire': { status: 'ready', appSessionId: 'a', launched: true, joined: false }, 'session.setPermissionMode': { effective: 'plan', refusal: null, error: null } });
+    expect(await liveModeBinding(record('a'), null, models, ok.client).set('plan')).toEqual({ ok: true });
+    expect(ok.invoked('session.acquire')).toEqual([{ appSessionId: 'a', reason: 'chip' }]);
+    expect(ok.invoked('session.setPermissionMode')).toEqual([{ appSessionId: 'a', mode: 'plan' }]);
+    const held = fakeClient({ 'session.acquire': { status: 'held', appSessionId: 'a', holder: { kind: 'terminal', pid: 9 }, attach: null } });
+    expect(await liveModeBinding(record('a'), null, models, held.client).set('plan')).toEqual({ ok: false, error: 'Held by terminal · 9' });
+    expect(held.invoked('session.setPermissionMode')).toEqual([]);
+    const archived = fakeClient({});
+    expect(await liveModeBinding(record('a'), null, models, archived.client, 'Archived · unarchive it to continue').set('plan')).toEqual({ ok: false, error: 'Archived · unarchive it to continue' });
+    expect(archived.invoked('session.acquire')).toEqual([]);
   });
 });

@@ -211,6 +211,13 @@ export class SideJournal {
     }
   }
 
+  // P2-A (2026-10-09): a read MAWS asks (a widget's, after its Load now) and the engine's answer, e.g. `get_skills_dialog`.
+  read(request: Frame, response: Frame): void {
+    const requestId = this.uuid();
+    this.push('out', { type: 'control_request', request_id: requestId, request });
+    this.push('in', { type: 'control_response', response: { subtype: 'success', request_id: requestId, response } });
+  }
+
   write(dir: string, name: string): string {
     const path = join(dir, `${name}.jsonl`);
     writeFileSync(path, this.rows.map((row) => JSON.stringify(row)).join('\n') + '\n');

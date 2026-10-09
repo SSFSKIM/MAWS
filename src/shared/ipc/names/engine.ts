@@ -16,4 +16,5 @@ export const events = [
 ] as const;
 
 // Only main's settings coordinator may update host configuration or policy.
-export const mainOnlyCommands = ['engine.configure', 'engine.policy.set'] as const;
+// P2-A (2026-10-09): main alone reads the observed facts from the host, relaying them as `session.observedFacts`.
+export const mainOnlyCommands = ['engine.configure', 'engine.policy.set', 'engine.observedFacts' /* P2-A */] as const;

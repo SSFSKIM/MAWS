@@ -600,6 +600,15 @@ describe('background work', () => {
     expect(summary().textContent).toContain('Shells and monitors are known only while the session runs here');
   });
 
+  // P2-A (2026-10-09; the execution document §5.6): an exited status is not live; the summary acquires nothing
+  it('the summary of a session whose process exited reads as disk-only, not as live', async () => {
+    seedSessions(live({ process: 'exited' }));
+    render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);
+    const text = () => document.querySelector<HTMLElement>('[data-summary="background"]')!.textContent;
+    expect(text()).toContain('Shells and monitors are known only while the session runs here');
+    expect(text()).not.toContain('Nothing running');
+  });
+
   it('the summary of a disk-only session whose runs could not be read says why', async () => {
     seedSessions(null);
     render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);

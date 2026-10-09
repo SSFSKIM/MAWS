@@ -54,5 +54,28 @@ export const SetupEventSchema = z.strictObject({
       z.strictObject({ kind: z.literal('error'), message: z.string(), resources: SetupResourcesSchema }),
     ])
     .nullable(),
+  // P2-A (2026-10-09): present on the phases of an acquisition's own run, whose end reaches every caller in its
+  // `session.acquire` reply (delivered on another transport, in no fixed order with these events): nothing docks a card
+  // or tells a failure from a tagged event; phase readers read it as any other
+  acquisition: z.literal(true).optional(),
 });
 export type SetupEvent = z.infer<typeof SetupEventSchema>;
+
+// P2-A start (2026-10-09; X16, the P2 interface ledger §1): what `session.acquire` answers, after the launch it awaited.
+// `ready` when the session's engine is ready (`launched`: this acquisition launched it; `joined`: it joined a launch
+// already in flight); the guards' card and refusal answers verbatim from `StartOutcome` (its `starting` and
+// `already_live` never: the first is not an end, the second is `ready`); `failed`, the setup's error outcome.
+const [, needsTrust, relayUnreachable, held, , archived, missingDirectory, invalid, refused] = StartOutcomeSchema.options;
+export const AcquireOutcomeSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ready'), appSessionId: AppSessionIdSchema, launched: z.boolean(), joined: z.boolean() }),
+  needsTrust,
+  relayUnreachable,
+  held,
+  archived,
+  missingDirectory,
+  invalid,
+  refused,
+  z.strictObject({ status: z.literal('failed'), appSessionId: AppSessionIdSchema, message: z.string(), resources: SetupResourcesSchema }),
+]);
+export type AcquireOutcome = z.infer<typeof AcquireOutcomeSchema>;
+// P2-A end

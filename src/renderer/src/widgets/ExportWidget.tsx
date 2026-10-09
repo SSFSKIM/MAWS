@@ -62,7 +62,7 @@ export function ExportBody({ view }: { view: ExportView }) {
 export function ExportWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.exportConversation', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.export} command="export" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.export} command="export" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <ExportBody view={present(read.data)} />}
     </WidgetFrame>
   );

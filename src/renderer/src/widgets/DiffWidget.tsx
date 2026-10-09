@@ -81,7 +81,7 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
 export function DiffWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getWorkspaceDiff', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.diff} command="diff" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.diff} command="diff" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <DiffBody view={present(read.data)} appSessionId={appSessionId} close={close} />}
     </WidgetFrame>
   );

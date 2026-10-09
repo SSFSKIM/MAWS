@@ -20,6 +20,7 @@ export function emptyDigest(appSessionId: AppSessionId): SessionDigest {
   return {
     appSessionId, phase: 'idle', activity: null, lastAssistantLine: null, turnStartedAt: null, lastTurnEndedAt: null,
     context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 0,
+    availability: 'resumable', // P2-A: a placeholder; the read model derives the digest's availability at every commit
   };
 }
 

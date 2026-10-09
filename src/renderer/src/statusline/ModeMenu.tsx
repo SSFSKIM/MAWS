@@ -6,7 +6,7 @@
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useState, type KeyboardEvent } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
-import { BYPASS_CONFIRM, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from './mode-menu';
+import { BYPASS_CONFIRM, MODE_OPTIONS, MODE_REFUSAL_WORDS, STARTING_SESSION, type ModeBinding } from './mode-menu';
 
 const ITEM =
   'flex w-full flex-col items-start rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent aria-checked:bg-bg-active';
@@ -51,6 +51,11 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
     return (
       <div role="group" aria-label={`Switch to ${PERMISSION_MODE_LABELS[confirming]}`} className="flex flex-col gap-2 p-1">
         <p>{BYPASS_CONFIRM}</p>
+        {pending && binding.starts && (
+          <p role="status" className="m-0 text-ui-sm text-fg-muted">
+            {STARTING_SESSION}
+          </p>
+        )}
         <div className="flex justify-end gap-1">
           {/* focus starts on the safe choice: an Enter pressed on through the menu never grants bypassPermissions */}
           <button type="button" className={`${BUTTON} text-fg-muted`} onClick={() => setConfirming(null)} disabled={pending} autoFocus>
@@ -75,6 +80,11 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
         </p>
       )}
       {binding.disabled && <p className="px-2 text-ui-sm text-fg-muted">{binding.disabled}</p>}
+      {pending && binding.starts && (
+        <p role="status" className="px-2 text-ui-sm text-fg-muted">
+          {STARTING_SESSION}
+        </p>
+      )}
       <div role="menu" aria-label="Permission mode" onKeyDown={moveFocus} className="flex flex-col">
         {MODE_OPTIONS.filter((o) => binding.options.includes(o.mode)).map((option) => {
           const reason = binding.disabled ?? (option.mode === 'auto' ? binding.autoUnavailable : null);

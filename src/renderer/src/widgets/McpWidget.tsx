@@ -202,7 +202,7 @@ export function McpWidget({ appSessionId, close }: { appSessionId: AppSessionId;
   const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh }} />}
     </WidgetFrame>
   );

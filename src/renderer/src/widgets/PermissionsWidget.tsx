@@ -16,7 +16,7 @@ import { liveModeBinding, ModeMenu, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNIN
 import { useSessions } from '../stores/sessions';
 import { FRAME, PERMISSIONS, TYPED, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
-import { engineReadKey, useEngineRead } from './read';
+import { engineReadKey, isDormant, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const DescriptionSchema = z.looseObject({ prefix: z.string(), emphasis: z.string().optional() });
@@ -177,8 +177,8 @@ export function PermissionsWidget({ appSessionId, args, close }: { appSessionId:
       appSessionId={appSessionId}
       title={WIDGET_TITLE.permissions}
       command="permissions"
-      state={read.state === 'not_running' || !status ? read.state : 'ready'}
-      error={read.data ? read.error : null}
+      state={isDormant(read.state) || !status ? read.state : 'ready'}
+      error={read.data || isDormant(read.state) ? read.error : null}
       close={close}
     >
       {argument && (

@@ -26,12 +26,16 @@ import { unstartedRoute } from '../gateway/routing-facts';
 import { useCommand } from '../ipc/query';
 import { patchIntent } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
-import { NOT_RUNNING } from '../statusline/mode-menu';
-import { isStarting, rememberListedModels, useComposerStore } from '../stores/composer';
+import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
+import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
+import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
+import { NOT_YET } from '../composer/submit/submit-state'; // P2-A
+import { routeOf, useModelCatalogue } from '../composer/list-models'; // P2-A
+import { isStarting, listedModelsOf, rememberListedModels, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
-import { MODEL, SELECTOR } from './copy';
+import { FRAME, MODEL, SELECTOR } from './copy';
 import {
   acceptedModel,
   applyFlagSettings,
@@ -70,6 +74,7 @@ interface Binding {
   fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
   route: { value: Route; choices: Route[]; set(patch: { gateway: Route; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
+  observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
 }
 
 const ok: ControlAnswer = { ok: true };
@@ -94,7 +99,7 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
       effort,
       overridden: status.effort !== null,
       mode: status.permissionMode.effective,
-      disabled: status.process === 'ready' ? null : NOT_RUNNING,
+      disabled: null, // P2-A: bound only over a ready process (a dormant one has its own binding)
       setModel: (model) => (model === asked || (model !== null && model === row?.value) ? Promise.resolve(ok) : setModel({ appSessionId, model })),
       setEffort: (next) => (next === status.effort ? Promise.resolve(ok) : setEffort({ appSessionId, effort: next })),
       fast: {
@@ -154,6 +159,57 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
           },
   };
 }
+
+// P2-A start (2026-10-09; the execution document §5.6): a session with a record and no ready process. The options are
+// the route's catalogue and the models the engine last listed for it; the row checked is the record's requested model,
+// with the model the engine last ran named beside it. A choice is marked pending, starts the session (`chip`), then
+// applies as a live session's does; the live binding's pending-until-confirmed takes over once the status is ready. An
+// attempt that does not end ready clears the mark and says why. Fast mode and the route need the live status: hidden.
+type DormantChoice = { model: string | null } | { effort: Effort | null };
+function useDormantBinding(appSessionId: AppSessionId): (Binding & { choosing: boolean }) | null {
+  const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+  const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
+  const availability = useAvailability(appSessionId);
+  const listed = useComposerStore((s) => listedModelsOf(s, appSessionId));
+  const catalogue = useModelCatalogue(routeOf(status, record), false, record?.directory ?? null);
+  const { facts } = useObservedFacts(appSessionId, { enabled: record !== null && status?.process !== 'ready' });
+  const [choice, setChoice] = useState<DormantChoice | null>(null);
+  if (!record) return null;
+  const models: readonly ModelRow[] = listed && listed.length > 0 ? listed : (catalogue ?? []);
+  const asked = choice && 'model' in choice ? choice.model : record.model.requested;
+  const effort = choice && 'effort' in choice ? choice.effort : (EffortSchema.safeParse(record.effort).data ?? null);
+  const observed = facts?.model ?? null;
+  const apply = async (next: DormantChoice, write: () => Promise<ControlAnswer>): Promise<ControlAnswer> => {
+    setChoice(next);
+    try {
+      const outcome = await acquireSession(appSessionId, 'chip');
+      if (outcome.status !== 'ready') return { ok: false, error: refusalWords(outcome) ?? outcome.status, caption: null };
+      return await write();
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error), caption: null };
+    } finally {
+      setChoice(null);
+    }
+  };
+  return {
+    models,
+    current: asked === null ? null : (rowOf(models, asked)?.value ?? asked),
+    shown: asked ?? observed?.value ?? record.model.resolved,
+    pending: choice !== null && 'model' in choice,
+    effort,
+    overridden: effort !== null,
+    mode: record.permissionMode.effective,
+    disabled: availabilityRefusal(availability, record.holder),
+    setModel: (model) => apply({ model }, () => setModel({ appSessionId, model })),
+    setEffort: (next) => apply({ effort: next }, () => setEffort({ appSessionId, effort: next })),
+    fast: null,
+    unstarted: false,
+    route: null,
+    observed: observed ? { model: observed.value, at: observed.at } : null,
+    choosing: choice !== null,
+  };
+}
+// P2-A end
 
 // The account the gateway note names: the session's pinned account, else the relay's routing account.
 function useRoutingAccount(appSessionId: AppSessionId): string {
@@ -362,7 +418,10 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
       {failure.caption && <span className="block text-fg-muted">{failure.caption}</span>}
     </p>
   );
-  const status = state === 'not_running' ? NOT_RUNNING : state === 'loading' ? SELECTOR.reading : state === 'error' ? error : null;
+  // P2-A: a dormant session's selector reads nothing of the engine (its options are the catalogue's); it says only why a
+  // choice cannot start it
+  const status = state === 'unavailable' ? error : state === 'starting' ? FRAME.starting : state === 'loading' ? SELECTOR.reading : state === 'error' ? error : null;
+  const observedName = binding.observed ? (rowFor(binding.models, binding.observed.model)?.displayName ?? binding.observed.model) : null;
 
   const effortView = (
     <div role="group" aria-label={SELECTOR.effortView} className="flex flex-col gap-2 p-1.5">
@@ -417,6 +476,11 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
         </p>
       )}
       {binding.pending && <p className="m-0 px-2 text-ui-sm text-fg-muted">{MODEL.pending}</p>}
+      {binding.observed && observedName && !binding.pending && (
+        <p data-model-observed className="m-0 px-2 text-ui-sm text-fg-muted">
+          {observedName} · {FRESHNESS.lastObserved(binding.observed.at)}
+        </p>
+      )}
       {view === 'effort' && gatewayNote}
       {status && <p className="m-0 px-2 text-ui-sm text-fg-muted">{status}</p>}
       {view === 'effort' && alert}
@@ -516,9 +580,14 @@ function ModelSelector({ name, appSessionId, args }: { name: Name; appSessionId:
     if (listed) rememberListedModels(appSessionId, listed); // the composer's model chip names its model from these
   }, [appSessionId, listed]);
   const live = useLiveBinding(appSessionId, listed ?? []);
-  const binding = intent ?? live;
-  if (!binding) return <p className="m-0 w-[254px] p-3 text-ui-sm text-fg-muted">{NOT_RUNNING}</p>;
-  return <SelectorBody name={name} args={args} binding={binding} state={intent ? 'ready' : read.state} error={intent ? null : read.error} appSessionId={appSessionId} />;
+  // P2-A: a record with no ready process binds to its record; a choice in flight keeps that binding (and its pending
+  // mark) until it has applied, then the live binding takes over
+  const dormant = useDormantBinding(appSessionId);
+  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  const binding = intent ?? (dormant && (!ready || dormant.choosing) ? dormant : ready ? live : null);
+  if (!binding) return <p className="m-0 w-[254px] p-3 text-ui-sm text-fg-muted">{NOT_YET}</p>;
+  const state = intent ? 'ready' : binding === dormant ? (read.state === 'unavailable' || read.state === 'starting' ? read.state : 'ready') : read.state;
+  return <SelectorBody name={name} args={args} binding={binding} state={state} error={intent ? null : read.error} appSessionId={appSessionId} />;
 }
 
 // The three palette names, one selector opened at its view.

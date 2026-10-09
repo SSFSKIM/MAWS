@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { NOT_RUNNING } from '../statusline/mode-menu';
+import { record } from '../../../../test/support/builders';
 import { useSessions } from '../stores/sessions';
 import { ReloadPluginsWidget } from './ReloadPluginsWidget';
 
@@ -50,11 +50,21 @@ describe('/reload-plugins', () => {
     await waitFor(() => expect(reloads()).toHaveLength(2));
   });
 
-  it('without a ready process says the session is not running and asks nothing of the engine', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
+  // P2-A (2026-10-09; the execution document §5.6): no ready process offers Load now; opening starts and asks nothing
+  it('without a ready process offers Load now and asks nothing of the engine; Load now starts it, then the reload runs', async () => {
+    const offStatus = backend.bridge().on('session.status', (event) => useSessions.getState().applyStatus(event));
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), records: new Map([[ID, record(ID)]]) });
+    act(() => void backend.emitStatus(ID, { process: 'exited' })); // the backend's engine and the store alike
     mount();
-    expect(screen.getByText(NOT_RUNNING)).toBeTruthy();
+    expect(screen.getByText('Not read yet.')).toBeTruthy();
+    expect(screen.queryByText(/not running/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect(reloads()).toEqual([]);
+    expect(backend.calls.filter((c) => c.command === 'session.acquire')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
+    await waitFor(() => expect(reloads()).toHaveLength(1));
+    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    offStatus();
+    useSessions.setState({ records: new Map() });
   });
 });

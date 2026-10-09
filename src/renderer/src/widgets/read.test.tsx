@@ -8,7 +8,9 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { useSessions } from '../stores/sessions';
-import { readIntoCache, useEngineRead, WidgetReadPolicyContext, type WidgetReadPolicy } from './read';
+import { digest, record } from '../../../../test/support/builders';
+import { trustState } from '../test-support/setup-intents';
+import { readIntoCache, useEngineRead, useReadLoads, WidgetReadPolicyContext, type WidgetReadPolicy } from './read';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId;
@@ -24,7 +26,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   delete (window as { maws?: MawsBridge }).maws;
-  useSessions.setState({ engine: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useReadLoads.setState({ loads: new Map() });
 });
 
 const wrapper =
@@ -82,18 +85,19 @@ describe('useEngineRead', () => {
     await waitFor(() => expect(reads('session.getSandboxDialog')).toBe(2));
   });
 
-  it('is not running, and reads nothing, without a ready process', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
+  it('is dormant, and reads nothing, without a ready process', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID)]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
-    expect(result.current.state).toBe('not_running');
+    expect(result.current.state).toBe('dormant');
+    expect(result.current.readAt).toBeNull();
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog')).toBe(0);
   });
 
   it('reads once when the process becomes ready after the widget opened', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'initializing' }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'initializing' }]]), records: new Map([[ID, record(ID)]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
-    expect(result.current.state).toBe('not_running');
+    expect(result.current.state).toBe('starting'); // P2-A: a launch in flight
     act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
     await waitFor(() => expect(result.current.state).toBe('ready'));
     await new Promise((r) => setTimeout(r, 10));
@@ -186,5 +190,80 @@ describe('useEngineRead', () => {
     await waitFor(() => expect(result.current.state).toBe('ready'));
     expect(result.current.data?.totalTokens).toBe(30433);
     expect(reads('session.getContextUsage')).toBe(1);
+  });
+
+  // P2-A (2026-10-09; the execution document §5.6): no ready process is dormant, starting or unavailable; only the owner's
+  // Load now acquires, and the read follows at ready.
+  describe('a session with a record and no ready process', () => {
+    const exited = () => ({ ...backend.status(ID), process: 'exited' as const });
+    const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire');
+
+    it('keeps the cached answer, dated, and reads nothing: not on a status move, an operation, a refetch or a refresh', async () => {
+      useSessions.setState({ records: new Map([[ID, record(ID)]]) });
+      const { result } = renderHook(() => useEngineRead('session.mcpStatus', { appSessionId: ID }), { wrapper: wrapper() });
+      await waitFor(() => expect(result.current.state).toBe('ready'));
+      const readAt = result.current.readAt;
+      expect(typeof readAt).toBe('number');
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: exited() }));
+      expect(result.current.state).toBe('dormant');
+      expect(result.current.data).toBeDefined();
+      expect(result.current.readAt).toBe(readAt);
+      const done = { opId: 'op-1', command: 'session.mcpReconnect' as const, late: false, outcome: { ok: true as const, value: null } };
+      act(() => backend.emitOperation({ ...done, appSessionId: ID }));
+      act(() => result.current.refetch());
+      await act(async () => void (await result.current.refresh()));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(reads('session.mcpStatus')).toBe(1);
+      expect(acquires()).toHaveLength(0);
+      expect(result.current.state).toBe('dormant');
+    });
+
+    it('Load now acquires once (reason read), says Starting… meanwhile, and reads at ready', async () => {
+      useSessions.setState({ engine: new Map([[ID, exited()]]), records: new Map([[ID, record(ID)]]) });
+      let answer!: (outcome: unknown) => void;
+      backend.script('session.acquire', () => new Promise((resolve) => (answer = resolve)));
+      const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+      expect(result.current.state).toBe('dormant');
+      let loaded!: Promise<unknown>;
+      act(() => void (loaded = result.current.load()));
+      expect(result.current.state).toBe('starting');
+      expect(acquires().map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+      await act(async () => {
+        useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) });
+        answer({ status: 'ready', appSessionId: ID, launched: true, joined: false });
+        await loaded;
+      });
+      await waitFor(() => expect(result.current.state).toBe('ready'));
+      expect(reads('session.getSandboxDialog')).toBe(1);
+      expect(acquires()).toHaveLength(1);
+    });
+
+    it('a refused Load now is unavailable with its words until the next one', async () => {
+      useSessions.setState({ engine: new Map([[ID, exited()]]), records: new Map([[ID, record(ID)]]) });
+      backend.script('session.acquire', () => ({ status: 'missing_directory', appSessionId: ID, directory: '/gone' }));
+      const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+      await act(async () => void (await result.current.load()));
+      expect(result.current.state).toBe('unavailable');
+      expect(result.current.error).toBe('Directory not found: /gone');
+      backend.script('session.acquire', () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }));
+      await act(async () => void (await result.current.load()));
+      expect(result.current.error).toBe('Trust this folder in the session to continue');
+      expect(reads('session.getSandboxDialog')).toBe(0);
+    });
+
+    it('a terminal holding it, or an archive, is unavailable in words; a launch in flight is starting', () => {
+      const terminal = record(ID, { holder: { kind: 'terminal', pid: 4711 } });
+      useSessions.setState({ engine: new Map(), records: new Map([[ID, terminal]]), digests: new Map([[ID, digest(ID, { availability: 'foreign_held' })]]) });
+      const { result, rerender } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+      expect(result.current.state).toBe('unavailable');
+      expect(result.current.error).toBe('Held by terminal · 4711');
+      act(() => useSessions.setState({ records: new Map([[ID, record(ID, { archived: true })]]), digests: new Map([[ID, digest(ID, { availability: 'archived' })]]) }));
+      rerender();
+      expect(result.current.error).toBe('Archived · unarchive it to continue');
+      act(() => useSessions.setState({ records: new Map([[ID, record(ID)]]), digests: new Map([[ID, digest(ID, { availability: 'starting' })]]) }));
+      rerender();
+      expect(result.current.state).toBe('starting');
+      expect(acquires()).toHaveLength(0);
+    });
   });
 });

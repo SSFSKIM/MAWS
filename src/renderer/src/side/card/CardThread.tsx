@@ -238,7 +238,7 @@ function useReply(child: AppSessionId) {
     try {
       result = await sendHumanPrompt(child, content, { origin: 'comment' });
     } catch (error) {
-      result = { disposition: 'refused', reason: error instanceof Error ? error.message : String(error) };
+      result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }
     const outcome = replyOutcomeOf(result);
     setSending(false);

@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { deliverableUrl } from '@shared/maws/deliverable';
-import { record, status } from '../../../../../test/support/builders';
+import { digest, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
@@ -147,13 +147,19 @@ describe('the composer half', () => {
     expect(send.disabled).toBe(false);
   });
 
-  it('Send to main is disabled with its reason while the parent is not running', () => {
+  // P2-A (2026-10-09; its execution document §5.6, through the shared form): Send to main is offered for every parent
+  // the Send can start; one a terminal holds says why
+  it('Send to main stays enabled for an exited parent, saying it starts the session; disabled with the reason while a terminal holds it', () => {
     withParent('exited');
     mount();
     pick();
-    const main = screen.getByRole('radio', { name: 'Send to main' }) as HTMLInputElement;
-    expect(main.disabled).toBe(true);
-    expect(card()!.querySelector('[data-destination="main"]')!.getAttribute('title')).toBe('The main session isn’t running');
+    const main = () => screen.getByRole('radio', { name: 'Send to main' }) as HTMLInputElement;
+    const caption = () => card()!.querySelector('[data-destination="main"]')!.getAttribute('title');
+    expect(main().disabled).toBe(false);
+    expect(caption()).toBe('Starts this session');
+    act(() => useSessions.setState((s) => ({ records: new Map([[PARENT, { ...record(PARENT), holder: { kind: 'terminal', pid: 42 } }]]), digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'foreign_held' })) })));
+    expect(main().disabled).toBe(true);
+    expect(caption()).toBe('Held by terminal · 42');
   });
 
   it('Side thread sends exactly the sheet’s side.thread.open for the same anchor and text; Enter sends, Shift+Enter breaks, a composition’s Enter does not', async () => {

@@ -9,6 +9,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { transportWords } from '../ipc/transport-words'; // C11
+import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 
 type ModelOption = ListModelsResponse['models'][number]; // C3's `session.listModels` entry
 
@@ -68,21 +69,41 @@ export interface ModeBinding {
   set: (mode: PermissionMode) => Promise<{ ok: true } | { ok: false; error: string }>;
   refusal: AutoModeRefusalCode | null; // why the requested mode was refused, shown in words
   autoUnavailable: string | null; // why auto is disabled in the list
+  starts?: boolean; // P2-A: a choice starts the session first (no ready process); the menu says "Starting…" meanwhile
 }
 
 export const NOT_RUNNING = 'The session is not running';
+export { STARTING_SESSION } from '../sessions/acquire'; // P2-A: the menu's line while a choice starts the session
 
 // A started session's binding: the effective mode from C3's status (the record's when no process is live) and
 // `session.setPermissionMode` for a ready process.
-export function liveModeBinding(record: Pick<SessionRecord, 'appId' | 'permissionMode' | 'model'>, status: EngineSessionStatus | null, models: readonly ModelOption[] | null, client: MawsBridge = ipc): ModeBinding {
+// P2-A (2026-10-09; the execution document §5.6): a record with no ready process is not refused: a choice starts it
+// (`chip`) and then sets the mode; `unavailable` is why no choice can start it (a terminal or a job holds it, it is
+// archived), in words. Bypass's inline confirm (ModeMenu) runs before `set`, so a cancelled confirm starts nothing.
+export function liveModeBinding(
+  record: Pick<SessionRecord, 'appId' | 'permissionMode' | 'model'>,
+  status: EngineSessionStatus | null,
+  models: readonly ModelOption[] | null,
+  client: MawsBridge = ipc,
+  unavailable: string | null = null,
+): ModeBinding {
   const mode = status?.permissionMode ?? record.permissionMode;
+  const ready = status?.process === 'ready';
   return {
     value: mode.effective,
     options: MODE_OPTIONS.map((o) => o.mode),
-    disabled: status?.process === 'ready' ? null : NOT_RUNNING,
+    disabled: ready ? null : unavailable,
     refusal: mode.refusal,
     autoUnavailable: autoUnavailableReason(models, status?.model ?? record.model),
+    starts: !ready, // P2-A
     async set(next) {
+      // P2-A start
+      if (!ready) {
+        if (unavailable !== null) return { ok: false, error: unavailable };
+        const outcome = await acquireSession(record.appId, 'chip', {}, client);
+        if (outcome.status !== 'ready') return { ok: false, error: refusalWords(outcome) ?? outcome.status };
+      }
+      // P2-A end
       const result = await client.invoke('session.setPermissionMode', { appSessionId: record.appId, mode: next });
       if (!result.ok) return { ok: false, error: transportWords(result.error) }; // C11: a rejected invoke in words, the mode kept
       // C3's host answers a refusal with the control error's message beside its code: the code's words come first

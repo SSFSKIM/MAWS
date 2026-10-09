@@ -11,6 +11,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { resetCatalogStore } from '../../stores/catalog';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { useReadLoads } from '../../widgets/read';
 import { ContextRing, contextRingOf } from './ContextRing';
 
 const A = 'app-a' as AppSessionId;
@@ -48,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetCatalogStore();
+  useReadLoads.setState({ loads: new Map() }); // P2-A: a Refresh a case left unanswered
   delete (window as { maws?: MawsBridge }).maws;
   vi.useRealTimers();
 });
@@ -97,3 +99,119 @@ describe('the context ring', () => {
     expect(screen.queryByRole('button', { name: 'Compact now' })).toBeNull();
   });
 });
+
+// P2-A start (2026-10-09; X17): with no live process and no sample in the digest, the last reading the host kept, with
+// when; "Not observed yet" where there is none; nothing is read from the engine
+describe('the context ring of a session with no live process', () => {
+  const observed = (contextUsage: unknown) => ({
+    version: 1, appSessionId: A, engineSessionId: null, writtenAt: '2026-10-09T09:00:00.000Z', source: 'live', launches: ['L1'],
+    engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage, complete: true,
+  });
+  function mountExited(facts: unknown) {
+    fake = fakeClient({ 'session.observedFacts': facts });
+    window.maws = fake.client;
+    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process: 'exited' })]]), digests: new Map([[A, digest('app-a', { context: null })]]) });
+    return render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ContextRing appSessionId={A} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('draws the last reading, its label saying when, and the popover says the same with no engine read', async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000 - 60_000).toISOString();
+    mountExited(observed({ value: { percent: 41, totalTokens: 82_000, maxTokens: 200_000, autoCompactThreshold: 167_000 }, at: threeHoursAgo, launchId: 'L1' }));
+    await settle();
+    expect(ring().getAttribute('data-context-ring')).toBe('41');
+    expect(ring().getAttribute('aria-label')).toBe('Context window 41% full of 200k · Last reading, 3 hours ago');
+    fireEvent.click(ring());
+    await settle();
+    const popover = screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover).getByText('41% of 200k used')).toBeTruthy();
+    expect(within(popover).getByText('Last reading, 3 hours ago')).toBeTruthy();
+    expect(fake.invoked('session.getContextUsage')).toEqual([]);
+  });
+
+  it('says "Not observed yet" for a session MAWS never ran (a terminal-only one)', async () => {
+    mountExited(null);
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window · no reading yet');
+    fireEvent.click(ring());
+    await settle();
+    expect(within(screen.getByRole('dialog', { name: 'Context window' })).getByText('Not observed yet')).toBeTruthy();
+  });
+
+  // M3: the popover's Refresh is the owner's gesture that starts the session; opening the popover starts nothing
+  it('the popover offers Refresh, which acquires the session for a read; opening it acquired nothing', async () => {
+    mountExited(null);
+    await settle();
+    fireEvent.click(ring());
+    await settle();
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Context window' })).getByRole('button', { name: 'Refresh' }));
+    await settle();
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'read' }]);
+  });
+
+  // M3 review (§10 Q7, acceptance 6): a terminal holding the session: the holder's actions where Refresh would be
+  it('the popover of a session a terminal holds names the holder and offers its actions in place of Refresh', async () => {
+    mountExited(null);
+    act(() => useSessions.setState({ records: new Map([[A, record('app-a', { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[A, digest('app-a', { context: null, availability: 'foreign_held' })]]) }));
+    await settle();
+    fireEvent.click(ring());
+    await settle();
+    const popover = screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover).getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(within(popover).getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(within(popover).getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(within(popover).queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(fake.invoked('session.acquire')).toEqual([]);
+  });
+
+  // the review's fix: a dormant ring always says when its reading was taken, when the host kept it
+  const twelve = { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null };
+  function mountWith(process: 'ready' | 'exited', answers: Parameters<typeof fakeClient>[0]) {
+    fake = fakeClient(answers);
+    window.maws = fake.client;
+    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process })]]), digests: new Map([[A, digest('app-a', { context: twelve })]]) });
+    return render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ContextRing appSessionId={A} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('an exited ring with a digest sample draws the host’s dated reading, labelled with when', async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
+    mountWith('exited', { 'session.observedFacts': observed({ value: { ...twelve, percent: 14 }, at: twoHoursAgo, launchId: 'L1' }) });
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 14% full of 200k · Last reading, 2 hours ago');
+  });
+
+  it('an exited ring whose host kept no reading keeps the digest’s sample; a live one reads no facts', async () => {
+    mountWith('exited', { 'session.observedFacts': null });
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 12% full of 200k');
+    cleanup();
+    mountWith('ready', {});
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 12% full of 200k');
+    expect(fake.invoked('session.observedFacts')).toEqual([]);
+  });
+
+  it('a popover opened live keeps no cached full read once the session exits: the dated reading replaces it', async () => {
+    const hourAgo = new Date(Date.now() - 3_600_000 - 60_000).toISOString();
+    mountWith('ready', { 'session.getContextUsage': CONTEXT, 'session.catalog': catalog([]), 'session.observedFacts': observed({ value: { ...twelve, percent: 31 }, at: hourAgo, launchId: 'L1' }) });
+    fireEvent.click(ring());
+    await settle();
+    const popover = () => screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover()).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
+    act(() => useSessions.setState({ engine: new Map([[A, status('app-a', { process: 'exited' })]]) }));
+    await settle();
+    expect(within(popover()).queryByText('47k of 200k · autocompact at 167k')).toBeNull();
+    expect(within(popover()).getByText('31% of 200k used')).toBeTruthy();
+    expect(within(popover()).getByText('Last reading, 1 hour ago')).toBeTruthy();
+    expect(ring().getAttribute('aria-label')).toBe('Context window 31% full of 200k · Last reading, 1 hour ago');
+  });
+});
+// P2-A end
