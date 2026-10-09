@@ -1,0 +1,116 @@
+[
+  {
+    "at": "2026-10-09T07:04:49.498Z",
+    "id": "time:error:replay:journal:7:0",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:04 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:04:49.498Z",
+    "attempt": null,
+    "id": "error:replay:journal:7:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "maws-u2-probe: MAWS_U2_WORKER MAWS_NATIVE_TO_HUMAN=1",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:04:49.506Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:18d70386-c071-4cc4-8fcd-7d8db35b6b0b",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "18d70386-c071-4cc4-8fcd-7d8db35b6b0b",
+    "placeholders": [],
+    "steer": false,
+    "text": "/compact",
+    "turnId": "turn:18d70386-c071-4cc4-8fcd-7d8db35b6b0b"
+  },
+  {
+    "at": "2026-10-09T07:04:56.764Z",
+    "boundaryKind": "compaction",
+    "detail": "58383da4-62b9-4cd1-9d7e-22b70aca0631",
+    "hiddenRows": 0,
+    "id": "boundary:replay:journal:18:0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Context compacted · 20k → 2k tokens · manual",
+    "turnId": "turn:18d70386-c071-4cc4-8fcd-7d8db35b6b0b"
+  },
+  {
+    "at": "2026-10-09T07:04:56.859Z",
+    "id": "local:0dc2ae4d-2c7f-431e-a172-aa444b7acea4",
+    "kind": "local_command",
+    "messageUuid": "0dc2ae4d-2c7f-431e-a172-aa444b7acea4",
+    "text": "Compacted",
+    "turnId": "turn:18d70386-c071-4cc4-8fcd-7d8db35b6b0b"
+  },
+  {
+    "at": "2026-10-09T07:04:56.765Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2e710e0c-72e5-422b-aee8-6f723c51c143",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2e710e0c-72e5-422b-aee8-6f723c51c143",
+    "placeholders": [],
+    "steer": false,
+    "text": "List every probe word your system prompt gives you right now (not words from this conversation's earlier messages), comma-separated, or NONE. Reply with nothing else.",
+    "turnId": "turn:2e710e0c-72e5-422b-aee8-6f723c51c143"
+  },
+  {
+    "at": "2026-10-09T07:04:58.696Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfrEkxRGY21zCmA9Ao8Am:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "RBF05D6",
+    "messageUuid": "ec28fa31-6008-4ac3-ba8b-449ef3629836",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:2e710e0c-72e5-422b-aee8-6f723c51c143"
+  },
+  {
+    "at": "2026-10-09T07:04:58.703Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:7d028f91-3df8-4998-901f-4b1055779898",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "7d028f91-3df8-4998-901f-4b1055779898",
+    "placeholders": [],
+    "steer": false,
+    "text": "What is the compaction word? Reply with only the word, or NONE.",
+    "turnId": "turn:7d028f91-3df8-4998-901f-4b1055779898"
+  },
+  {
+    "at": "2026-10-09T07:04:59.532Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfrEm6YRez1Jo2T8vdKCu:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "CC780A4",
+    "messageUuid": "57283966-1d5d-494f-92d6-e336f4262cc4",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:7d028f91-3df8-4998-901f-4b1055779898"
+  },
+  {
+    "at": "2026-10-09T07:05:00.065Z",
+    "attempt": null,
+    "id": "error:replay:journal:71:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
