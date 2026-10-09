@@ -698,14 +698,30 @@ describe('the comment card in the viewer', () => {
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 600 });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 800 });
     onTestFinished(() => sizes.forEach(([key, descriptor]) => Object.defineProperty(HTMLElement.prototype, key, descriptor)));
+    // the load happy-dom fires on its own is held back, so the case says when each frame loads
+    let loading = false;
+    const dispatch = HTMLIFrameElement.prototype.dispatchEvent;
+    HTMLIFrameElement.prototype.dispatchEvent = function (this: HTMLIFrameElement, event: Event) {
+      return event.type === 'load' && !loading ? true : dispatch.call(this, event);
+    };
+    onTestFinished(() => void (HTMLIFrameElement.prototype.dispatchEvent = dispatch));
     const { handle } = await mount({ target: ART.id });
-    // the frame's page answers once loaded (happy-dom may have fired the load itself; a locate posts after it either way,
-    // and listens for its answer only from then)
-    const frameEl = () => document.querySelector<HTMLIFrameElement>('[data-deliverable-frame="html"]')!;
+    // the frame loads, the viewer asks it where `#hero` is, and the page answers each ask by its id
     const loadAndAnswer = (rect: { x: number; y: number; width: number; height: number }) => {
-      const el = frameEl();
-      act(() => void el.dispatchEvent(new Event('load')));
-      post({ type: 'maws:located', selector: '#hero', rect }, el.contentWindow);
+      const el = document.querySelector<HTMLIFrameElement>('[data-deliverable-frame="html"]')!;
+      const asked: { type: string; id: number; selector: string }[] = [];
+      el.contentWindow!.postMessage = ((data: { type: string; id: number; selector: string }) => void asked.push(data)) as typeof window.postMessage;
+      act(() => {
+        loading = true;
+        el.dispatchEvent(new Event('load'));
+        loading = false;
+      });
+      const locates = asked.filter((message) => message.type === 'maws:locate');
+      expect(locates.length).toBeGreaterThan(0);
+      for (const { id, selector } of locates) {
+        expect(selector).toBe('#hero');
+        post({ type: 'maws:located', id, selector, rect }, el.contentWindow);
+      }
     };
     redock();
     await settle();

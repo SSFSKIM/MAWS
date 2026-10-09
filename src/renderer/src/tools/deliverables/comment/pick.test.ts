@@ -31,21 +31,24 @@ describe('parsePickMessage', () => {
 
 // P2-E1 (M3): re-pin's two messages (P2-E1 document, D8)
 describe('locate', () => {
-  it('asks by selector, and reads the answer’s rect (its four numbers alone) or null', () => {
-    expect(locateMessage('#hero')).toEqual({ type: 'maws:locate', selector: '#hero' });
+  it('asks by an id and a selector, and reads the answer’s id, selector and rect (its four numbers alone) or null', () => {
+    expect(locateMessage(3, '#hero')).toEqual({ type: 'maws:locate', id: 3, selector: '#hero' });
     const rect = { x: 1.5, y: -2, width: 300, height: 90 };
-    expect(parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect: { ...rect, extra: 1 } })).toEqual({ type: 'maws:located', selector: '#hero', rect });
-    expect(parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect: null })).toEqual({ type: 'maws:located', selector: '#hero', rect: null });
+    expect(parseLocatedMessage({ type: 'maws:located', id: 3, selector: '#hero', rect: { ...rect, extra: 1 } })).toEqual({ type: 'maws:located', id: 3, selector: '#hero', rect });
+    expect(parseLocatedMessage({ type: 'maws:located', id: 3, selector: '#hero', rect: null })).toEqual({ type: 'maws:located', id: 3, selector: '#hero', rect: null });
   });
 
-  it('refuses a malformed answer: a rect with a missing, non-numeric or non-finite field, no selector, another type', () => {
-    const answer = (rect: unknown, over: object = {}) => parseLocatedMessage({ type: 'maws:located', selector: '#hero', rect, ...over });
+  it('refuses a malformed answer: a rect with a missing, non-numeric or non-finite field, no id or selector, another type', () => {
+    const answer = (rect: unknown, over: object = {}) => parseLocatedMessage({ type: 'maws:located', id: 3, selector: '#hero', rect, ...over });
     expect(answer({ x: 1, y: 2, width: 3 })).toBeNull();
     expect(answer({ x: '1', y: 2, width: 3, height: 4 })).toBeNull();
     expect(answer({ x: Number.NaN, y: 2, width: 3, height: 4 })).toBeNull();
     expect(answer({ x: Number.POSITIVE_INFINITY, y: 2, width: 3, height: 4 })).toBeNull();
     expect(answer(undefined)).toBeNull();
     expect(answer(null, { selector: 7 })).toBeNull();
+    expect(answer(null, { id: undefined })).toBeNull();
+    expect(answer(null, { id: '3' })).toBeNull();
+    expect(answer(null, { id: 1.5 })).toBeNull();
     expect(answer(null, { type: 'maws:locate' })).toBeNull();
     expect(parseLocatedMessage('maws:located')).toBeNull();
   });

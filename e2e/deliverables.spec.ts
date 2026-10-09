@@ -264,17 +264,18 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
     expect((await posted())[1]).toBe('e2-page-click'); // picking ended with the pick: the page has its clicks back
 
     // P2-E1 (M3): re-pin's locate round trip (P2-E1 document, D8): the page answers where an element is now, by selector,
-    // null for one it has not or an invalid selector; a locate starts no picking and leaves nothing in the page
+    // null for one it has not or an invalid selector, each answer carrying its ask's id; a locate starts no picking and
+    // leaves nothing in the page
     await maws.page.evaluate(() => {
       const element = document.getElementById('e2-frame') as HTMLIFrameElement;
-      for (const selector of ['#hero', 'body > p:nth-of-type(1)', '#gone', 'h1[']) element.contentWindow!.postMessage({ type: 'maws:locate', selector }, '*');
+      ['#hero', 'body > p:nth-of-type(1)', '#gone', 'h1['].forEach((selector, i) => element.contentWindow!.postMessage({ type: 'maws:locate', id: i + 1, selector }, '*'));
     });
     await expect.poll(posted).toHaveLength(6);
     expect((await posted()).slice(2)).toEqual([
-      { type: 'maws:located', selector: '#hero', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
-      { type: 'maws:located', selector: 'body > p:nth-of-type(1)', rect: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) } },
-      { type: 'maws:located', selector: '#gone', rect: null },
-      { type: 'maws:located', selector: 'h1[', rect: null },
+      { type: 'maws:located', id: 1, selector: '#hero', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
+      { type: 'maws:located', id: 2, selector: 'body > p:nth-of-type(1)', rect: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) } },
+      { type: 'maws:located', id: 3, selector: '#gone', rect: null },
+      { type: 'maws:located', id: 4, selector: 'h1[', rect: null },
     ]);
     const lead = (await posted())[3] as { rect: { y: number; height: number } };
     expect(lead.rect.y).toBeGreaterThanOrEqual(200); // under the heading

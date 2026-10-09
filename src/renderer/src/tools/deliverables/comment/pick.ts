@@ -32,18 +32,21 @@ export const parsePickMessage = (data: unknown): PickMessage | null => {
 };
 
 // P2-E1 (M3): re-pin (P2-E1 document, D8): the app asks the frame's page where the element a card is pinned to is now,
-// by its selector; the answer's rect is the page's to choose, like a pick's, so it is read for its four finite numbers
-// alone (the placement's clamps bound any value).
-export const locateMessage = (selector: string) => ({ type: 'maws:locate', selector }) as const;
+// by its selector, under an id of the ask's own that the answer echoes (two asks of one selector in flight, or an answer
+// arriving after its ask gave up, must not be mistaken for each other); the answer's rect is the page's to choose, like
+// a pick's, so it is read for its four finite numbers alone (the placement's clamps bound any value).
+export const locateMessage = (id: number, selector: string) => ({ type: 'maws:locate', id, selector }) as const;
 
 const LocatedMessageSchema = z.looseObject({
   type: z.literal('maws:located'),
+  id: z.number().int(),
   selector: z.string(),
   rect: z.looseObject({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).nullable(),
 });
 
 export interface LocatedMessage {
   type: 'maws:located';
+  id: number;
   selector: string;
   rect: CardRect | null;
 }
@@ -51,8 +54,8 @@ export interface LocatedMessage {
 export const parseLocatedMessage = (data: unknown): LocatedMessage | null => {
   const parsed = LocatedMessageSchema.safeParse(data);
   if (!parsed.success) return null;
-  const { selector, rect } = parsed.data;
-  return { type: 'maws:located', selector, rect: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+  const { id, selector, rect } = parsed.data;
+  return { type: 'maws:located', id, selector, rect: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
 };
 
 const LABEL_MAX = 200; // X10's label cap

@@ -14,8 +14,10 @@
 // or a cancelled message, nothing else. When picking ends the page is told so.
 //
 // P2-E1 (M3), re-pin (P2-E1 document, D8): the frame hands its parent a handle (`onFrame`) whose `locate(selector)` asks
-// the page where an element is now (`maws:locate`) and resolves on the matching `maws:located` from this frame's own
-// window, or null `LOCATE_TIMEOUT_MS` after the post (a page that blocks its main thread, or one without the bridge).
+// the page where an element is now (`maws:locate`, under an id of its own from this frame's counter) and resolves on the
+// `maws:located` echoing that id from this frame's own window, or null `LOCATE_TIMEOUT_MS` after the post (a page that
+// blocks its main thread, or one without the bridge); an answer after that matches nothing, and two asks of one
+// selector in flight each take their own answer.
 // The frame is an opaque origin, so a message posted before its load reaches the blank document and is lost: a locate
 // waits for this frame's load before posting, and its clock starts at the post. Answers are heard whether or not
 // picking is on; the frame going away answers its pending locates with null.
@@ -73,8 +75,10 @@ export function HtmlFrame({ url, title, appSessionId, deliverableId, version, pi
     if (!frame) return;
     const { waiting } = load.current;
     const unanswered = new Set<() => void>(); // each pending locate's null answer, for the frame going away
+    let asks = 0;
     const locate = (selector: string) =>
       new Promise<CardRect | null>((resolve) => {
+        const id = ++asks;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const finish = (rect: CardRect | null) => {
           clearTimeout(timer);
@@ -87,12 +91,12 @@ export function HtmlFrame({ url, title, appSessionId, deliverableId, version, pi
         const onMessage = (event: MessageEvent) => {
           if (event.source === null || event.source !== frame.contentWindow) return;
           const message = parseLocatedMessage(event.data);
-          if (message?.selector === selector) finish(message.rect);
+          if (message?.id === id && message.selector === selector) finish(message.rect);
         };
         const post = () => {
           waiting.delete(post);
           window.addEventListener('message', onMessage);
-          frame.contentWindow?.postMessage(locateMessage(selector), '*'); // an opaque origin has no name to target
+          frame.contentWindow?.postMessage(locateMessage(id, selector), '*'); // an opaque origin has no name to target
           timer = setTimeout(gone, LOCATE_TIMEOUT_MS);
         };
         unanswered.add(gone);
