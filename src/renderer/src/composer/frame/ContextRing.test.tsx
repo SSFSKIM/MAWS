@@ -11,6 +11,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { resetCatalogStore } from '../../stores/catalog';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { useReadLoads } from '../../widgets/read';
 import { ContextRing, contextRingOf } from './ContextRing';
 
 const A = 'app-a' as AppSessionId;
@@ -48,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetCatalogStore();
+  useReadLoads.setState({ loads: new Map() }); // P2-A: a Refresh a case left unanswered
   delete (window as { maws?: MawsBridge }).maws;
   vi.useRealTimers();
 });
@@ -149,6 +151,21 @@ describe('the context ring of a session with no live process', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Context window' })).getByRole('button', { name: 'Refresh' }));
     await settle();
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'read' }]);
+  });
+
+  // M3 review (§10 Q7, acceptance 6): a terminal holding the session: the holder's actions where Refresh would be
+  it('the popover of a session a terminal holds names the holder and offers its actions in place of Refresh', async () => {
+    mountExited(null);
+    act(() => useSessions.setState({ records: new Map([[A, record('app-a', { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[A, digest('app-a', { context: null, availability: 'foreign_held' })]]) }));
+    await settle();
+    fireEvent.click(ring());
+    await settle();
+    const popover = screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover).getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(within(popover).getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(within(popover).getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(within(popover).queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(fake.invoked('session.acquire')).toEqual([]);
   });
 
   // the review's fix: a dormant ring always says when its reading was taken, when the host kept it

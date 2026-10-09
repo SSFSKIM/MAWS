@@ -11,6 +11,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
+import { digest } from '../../../../../test/support/builders';
+import { useReadLoads } from '../../widgets/read';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
 import { useGateway } from '../../gateway/store';
@@ -59,6 +61,7 @@ afterEach(() => {
   useGateway.setState({ switching: new Map(), directLogin: new Map() }); // W2
   useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() }); // W2
   useSettings.setState({ state: null }); // W2
+  useReadLoads.setState({ loads: new Map() }); // P2-A
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -230,6 +233,19 @@ describe('session info of a session with no live process', () => {
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY, reason: 'read' }]));
+  });
+
+  // M3 review (§10 Q7, acceptance 6): a terminal holding the session: its facts read-only, the holder's actions in place of Refresh
+  it('a session a terminal holds names the holder and offers its actions where Refresh would be, starting nothing', async () => {
+    useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, holder: { kind: 'terminal', pid: 4711 } }]]), digests: new Map([[READY, digest(READY, { availability: 'foreign_held' })]]) });
+    backend.script('session.observedFacts', () => null);
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    expect(screen.getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(backend.calls.filter((c) => c.command === 'session.acquire')).toEqual([]);
   });
 });
 // P2-A end

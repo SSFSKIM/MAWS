@@ -9,11 +9,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
-import { record } from '../../../../test/support/builders';
+import { digest, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { useSessions } from '../stores/sessions';
 import { PluginsWidget } from './PluginsWidget';
+import { useReadLoads } from './read';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId;
@@ -72,7 +73,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map(), records: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useReadLoads.setState({ loads: new Map() });
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -175,6 +177,50 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
     expect(invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'read' }]);
     await waitFor(() => expect(section('loaded').textContent).toContain('Loaded now'));
+  });
+
+  // M3 review: the Refresh's reload says when it fails, whether the invoke was refused or the operation failed
+  it('Refresh says a reload the host refused, and a reload that failed after the start, in the section', async () => {
+    backend.script('session.reloadPlugins', () => {
+      throw new WidgetBackendError({ code: 'timeout', message: 'the host did not answer' });
+    });
+    await ready();
+    fireEvent.click(within(section('loaded')).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(within(section('loaded')).getByRole('alert').textContent).toBe('The engine did not answer · showing the last value it reported'));
+    expect(invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'read' }]);
+  });
+
+  it('a reload whose operation fails after a successful start says so in the section', async () => {
+    backend.scriptOutcome('session.reloadPlugins', () => ({ ok: false, error: { code: 'timeout', message: 'reload_plugins unanswered after 60 s', engineCode: null } }));
+    await ready();
+    fireEvent.click(within(section('loaded')).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(within(section('loaded')).getByRole('alert').textContent).toBe('reload_plugins unanswered after 60 s · timeout'));
+  });
+
+  it('an acquisition that cannot be asked at all (main or the host unreachable) says so in the section', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID)]]) });
+    backend.script('session.acquire', () => {
+      throw new WidgetBackendError({ code: 'host_unavailable', message: 'the engine host is not running' });
+    });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(section('loaded')).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(within(section('loaded')).getByRole('alert').textContent).toBe('the engine host is not running'));
+    expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toEqual([]);
+  });
+
+  // M3 review (§10 Q7, acceptance 6): a terminal holding the session keeps its list read-only with the holder's actions
+  it('a session a terminal holds shows its last list read-only, the holder named and its actions in place of Refresh', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID, { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[ID, digest(ID, { availability: 'foreign_held' })]]) });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    const loaded = section('loaded');
+    expect(within(loaded).getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(within(loaded).getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(within(loaded).getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(within(loaded).queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(within(loaded).getAllByRole('listitem').length).toBeGreaterThan(0);
+    expect(invoked('session.acquire')).toEqual([]);
   });
 
   it('a session MAWS has never run reads Not observed yet in place of a list', async () => {

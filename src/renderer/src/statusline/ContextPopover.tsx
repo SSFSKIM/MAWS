@@ -14,7 +14,8 @@ import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { useSessionCatalog } from '../stores/catalog';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { DormantRefresh } from '../widgets/WidgetFrame'; // P2-A
+import { FRAME } from '../widgets/copy'; // P2-A
+import { DormantGesture } from '../widgets/DormantGesture'; // P2-A
 import { tokens } from './format';
 
 const SEGMENT = ['bg-fg', 'bg-fg-muted', 'bg-accent', 'bg-fg-faint', 'bg-info'];
@@ -90,7 +91,7 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
       {body}
       {live && usage.isError && digest === null && <p className="text-ui-sm text-fg-muted">{usage.error.message}</p>}
       {/* P2-A M3: not live, the owner's Refresh starts the session; the host samples the context at ready and the full read follows */}
-      <DormantRefresh appSessionId={id} />{/* P2-A */}
+      {!live && <DormantGesture appSessionId={id} label={FRAME.refresh} />}{/* P2-A */}
       {compactable && (
         <button type="button" onClick={() => void compact()} className="self-start rounded-sm border border-border-strong px-2 py-0.5 outline-accent hover:bg-bg-hover focus-visible:outline-2">
           Compact now

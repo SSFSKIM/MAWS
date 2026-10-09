@@ -13,7 +13,8 @@ import { ipc } from '../ipc/client';
 import { IpcCommandError } from '../ipc/query';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { useSessions } from '../stores/sessions';
-import { useOperation } from '../widgets/operation'; // P2-A M3
+import { operationLine, useOperation } from '../widgets/operation'; // P2-A M3
+import { lineFailed, reloadSummary } from '../widgets/plugins/reload'; // P2-A M3: E8's reload line
 import { loadForRead } from '../widgets/read'; // P2-A M3
 
 export type Freshness = { kind: 'now' } | { kind: 'last'; at: string } | { kind: 'unknown' };
@@ -75,18 +76,25 @@ export function loadedPluginsOf(status: EngineSessionStatus | null, facts: Obser
 
 // P2-A M3 (2026-10-09; the execution document §5.7, branch Y): `refresh` is the owner's Refresh: it acquires the session
 // for a read (joining a launch in flight), then reloads its plugins (`reload_plugins` answers before any turn with the
-// loaded list, U1), so the list reads "Loaded now". It runs only from that gesture, never on open.
-export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins & { refresh(): Promise<AcquireOutcome> } {
+// loaded list, U1), so the list reads "Loaded now". It runs only from that gesture, never on open. `reload` is that
+// reload's line (`Working…`, the reload summarised, or its failure in words: a refused invoke, or a failed operation)
+// and whether it failed; an acquisition that did not end ready reaches no reload.
+export interface PluginsReload {
+  line: string | null;
+  failed: boolean;
+}
+export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins & { refresh(): Promise<AcquireOutcome>; reload: PluginsReload } {
   const status = useSessions(useShallow((s) => s.engine.get(appSessionId) ?? null));
   const liveNow = status?.process === 'ready' && status.pluginsObservedAt !== null;
   const { facts } = useObservedFacts(appSessionId, { enabled: !liveNow });
-  const reload = useOperation(appSessionId, 'session.reloadPlugins');
-  const { run } = reload;
+  const operation = useOperation(appSessionId, 'session.reloadPlugins');
+  const { run, state } = operation;
   const refresh = useCallback(async () => {
     const outcome = await loadForRead(appSessionId);
     if (outcome.status === 'ready') await run({});
     return outcome;
   }, [appSessionId, run]);
   const loaded = useMemo(() => loadedPluginsOf(status, facts), [status, facts]);
-  return useMemo(() => ({ ...loaded, refresh }), [loaded, refresh]);
+  const reload = useMemo(() => ({ line: operationLine(state, reloadSummary), failed: lineFailed(state) }), [state]);
+  return useMemo(() => ({ ...loaded, refresh, reload }), [loaded, refresh, reload]);
 }

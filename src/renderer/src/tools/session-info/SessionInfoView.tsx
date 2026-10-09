@@ -22,7 +22,8 @@ import { rowOf } from '../../widgets/model';
 import { Group, KeyValues } from '../../widgets/parts';
 import { useEngineRead } from '../../widgets/read';
 import { useObservedFacts } from '../../sessions/observed'; // P2-A
-import { DormantRefresh } from '../../widgets/WidgetFrame'; // P2-A M3
+import { DormantGesture } from '../../widgets/DormantGesture'; // P2-A M3
+import { FRAME } from '../../widgets/copy'; // P2-A M3
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
@@ -114,7 +115,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
       {/* P2-A M3: not live, the owner's Refresh starts the session; the 30 s reads follow at ready */}
       {!live && !firstLaunch && (
         <div className="mb-2">
-          <DormantRefresh appSessionId={appSessionId} />
+          <DormantGesture appSessionId={appSessionId} label={FRAME.refresh} />
         </div>
       )}
       {sections.map((section) => (
