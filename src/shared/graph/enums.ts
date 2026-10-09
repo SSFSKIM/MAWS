@@ -26,6 +26,10 @@ export const DenialKindSchema = z.enum(DENIAL_KINDS);
 export const ATTENTION_KINDS = [
   'permission', 'question', 'plan', 'dialog', 'elicitation', 'error', 'interrupted',
   'held_peer_message', 'auto_mode_unavailable',
+  // P2-C start (2026-10-09; the P2-C document, Design §5): a question an agent left (`need-input`, unanswered) and a
+  // must-read (`essential`, not marked read), each projected from the owner channel's marks table
+  'async_input', 'essential_unread',
+  // P2-C end
 ] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 export const AttentionKindSchema = z.enum(ATTENTION_KINDS);

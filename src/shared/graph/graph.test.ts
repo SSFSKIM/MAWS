@@ -70,7 +70,7 @@ describe('graph schemas accept and reject', () => {
       expect(PERMISSION_MODES).toEqual(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions', 'dontAsk']);
       expect(AUTO_MODE_REFUSAL_CODES).toEqual(['auto_mode_settings', 'auto_mode_circuit_breaker', 'auto_mode_fast_mode', 'auto_mode_model', 'auto_mode_unavailable']);
       expect(DENIAL_KINDS).toEqual(['user-rejected', 'permission-rule', 'automode-blocked', 'automode-unavailable', 'automode-parsing-error', 'interrupted', 'cancelled']);
-      expect(ATTENTION_KINDS).toEqual(['permission', 'question', 'plan', 'dialog', 'elicitation', 'error', 'interrupted', 'held_peer_message', 'auto_mode_unavailable']);
+      expect(ATTENTION_KINDS).toEqual(['permission', 'question', 'plan', 'dialog', 'elicitation', 'error', 'interrupted', 'held_peer_message', 'auto_mode_unavailable', 'async_input', 'essential_unread' /* P2-C */]);
       expect(ATTENTION_STATES).toEqual(['pending', 'delivered', 'confirmed', 'retired']);
       expect(SAFEGUARD_VERDICTS).toEqual(['not_evaluated', 'skipped', 'not_flagged', 'flagged']);
       expect(TITLE_SOURCES).toEqual(['user', 'generated', 'tool', 'none']);

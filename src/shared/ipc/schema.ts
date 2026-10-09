@@ -45,6 +45,7 @@ import * as browser from './schema/browser';
 // E4a end
 // P2-C start (2026-10-09)
 import * as mods from './schema/mods';
+import * as ownerChannel from './schema/owner-channel'; // M4
 // P2-C end
 
 export {
@@ -134,6 +135,7 @@ export const commands = {
   ...browser.commands,
   // E4a end
   ...mods.commands, // P2-C (2026-10-09)
+  ...ownerChannel.commands, // P2-C M4 (2026-10-09)
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -172,6 +174,7 @@ export const events = {
   ...browser.events,
   // E4a end
   ...mods.events, // P2-C (2026-10-09)
+  ...ownerChannel.events, // P2-C M4 (2026-10-09)
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

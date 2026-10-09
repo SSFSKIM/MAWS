@@ -497,3 +497,62 @@ describe('attention service persistence failures', () => {
     service.stop();
   });
 });
+
+// P2-C start (2026-10-09; the P2-C document, Design §5): the owner channel's items are a third list, projected from the
+// marks table, which is their truth: the service never restores them from its own store, and a projection may be silent.
+describe('the owner channel projects its items as a third list (P2-C)', () => {
+  const anchor = { messageUuid: '44444444-4444-4444-8444-444444444444', blockIndex: 0, span: 0 };
+  const ownerItem = (kind: 'async_input' | 'essential_unread', span = 0): AttentionItem =>
+    AttentionItemSchema.parse({
+      id: `${APP}:${kind}:${APP}:${anchor.messageUuid}:0:${kind === 'async_input' ? 'q' : 'e'}${span}`, appSessionId: APP, sessionId: SID, kind,
+      request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, summary: kind === 'async_input' ? 'Question — Which backend?' : 'Must read — The key rotates',
+      createdAt: AT, state: 'pending', stateChangedAt: AT, expiresAt: null, anchor: { ...anchor, span },
+    });
+
+  it('merges them after the broker and derived items, persists the whole list, and marks the silent ids restored before the change is emitted', async () => {
+    const { service, store, fire, batch, changed, last } = setup();
+    await service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    const restoredAtEmit: boolean[] = [];
+    const question = ownerItem('async_input');
+    const essential = ownerItem('essential_unread');
+    const before = changed.length;
+    service.setOwnerItems(APP, [question, essential], [essential.id]);
+    restoredAtEmit.push(service.restoredIds.has(essential.id), service.restoredIds.has(question.id));
+    expect(changed.length).toBe(before + 1);
+    expect(last()).toEqual([permission, question, essential]);
+    expect(restoredAtEmit).toEqual([true, false]);
+    // a human turn retires neither kind, nor does a stop
+    batch(event('turn.started', { userMessageUuid: null, origin: 'human' }));
+    expect(last()).toEqual([permission, question, essential]);
+    await service.settled();
+    expect(store.sessions.get(APP)).toEqual([permission, question, essential]);
+    service.setOwnerItems(APP, [essential], []);
+    expect(last()).toEqual([permission, essential]);
+    service.stop();
+  });
+
+  it('skips the two kinds at load: the marks table re-projects them', async () => {
+    const persisted = [ownerItem('async_input'), item({ kind: 'error', state: 'pending' })];
+    const { service, last } = setup({ store: new FakeStore(persisted) });
+    await service.ready;
+    expect(last()).toEqual([persisted[1]]);
+    expect(service.restoredIds.has(persisted[0]!.id)).toBe(false);
+    service.stop();
+  });
+
+  it('an archive retires them with the rest, and a later projection for the archived session is ignored', async () => {
+    const { service, fire, last, changed } = setup();
+    await service.ready;
+    service.setOwnerItems(APP, [ownerItem('async_input')], []);
+    fire('session.forgotten', { appSessionId: APP });
+    expect(last()).toEqual([]);
+    const count = changed.length;
+    service.setOwnerItems(APP, [ownerItem('essential_unread')], []);
+    expect(changed.length).toBe(count);
+    expect(service.list()).toEqual([]);
+    service.stop();
+  });
+});
+// P2-C end

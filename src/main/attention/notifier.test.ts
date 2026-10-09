@@ -141,6 +141,18 @@ describe('notifier fires once per item when unfocused', () => {
     expect(posted()).toHaveLength(4);
   });
 
+  it('P2-C: posts an owner-channel question and must-read under their own groups (asyncInput, essential), and counts them in the badge', () => {
+    for (const [asyncInput, essential, bodies] of [[true, false, ['async_input']], [false, true, ['essential_unread']]] as const) {
+      electron.FakeNotification.instances = [];
+      const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds: { ...SETTINGS.notifications.kinds, asyncInput, essential } } };
+      const h = harness({ settings });
+      h.set(CHARTER, [item(CHARTER, 'async_input', T), item(CHARTER, 'essential_unread', '2026-09-28T10:01:00Z')]);
+      expect(posted().map((n) => n.options.body)).toEqual(bodies.map((kind) => `${kind} for ${CHARTER}`));
+      expect(electron.setBadge).toHaveBeenLastCalledWith('1');
+      h.stop();
+    }
+  });
+
   it('never posts for the items that were already waiting when it started', () => {
     const waiting = item(CHARTER, 'permission', T);
     const h = harness({ before: (w) => w.observeAttention(CHARTER, [waiting]) });

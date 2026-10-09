@@ -200,6 +200,23 @@ export class OwnerChannelStore {
     return this.db.all<MarkRow>('SELECT * FROM owner_channel_marks WHERE app_session_id = ? ORDER BY at, rowid', appSessionId).map(toMark);
   }
 
+  // M4 start (2026-10-09): what main's owner channel reads at start and per command
+  mark(id: string): OwnerMarkRow | null {
+    const row = this.db.get<MarkRow>('SELECT * FROM owner_channel_marks WHERE id = ?', id);
+    return row === null ? null : toMark(row);
+  }
+
+  // Every question whose answer is still on its way (queued or unconfirmed), across sessions.
+  openAnswers(): OwnerMarkRow[] {
+    return this.db.all<MarkRow>("SELECT * FROM owner_channel_marks WHERE state IN ('queued', 'unconfirmed') ORDER BY at, rowid").map(toMark);
+  }
+
+  // The sessions holding any mark.
+  markedSessions(): AppSessionId[] {
+    return this.db.all<{ app_session_id: string }>('SELECT DISTINCT app_session_id FROM owner_channel_marks ORDER BY app_session_id').map((row) => row.app_session_id as AppSessionId);
+  }
+  // M4 end
+
   // Idempotent on the mark's id: a replay, a resync burst or a backfill re-delivering a mark changes nothing. True when
   // the mark is new. Only the id's conflict is skipped (not `OR IGNORE`, which would also drop a row failing a CHECK).
   putMark(mark: OwnerMarkRow): boolean {

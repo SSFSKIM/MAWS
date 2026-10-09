@@ -5,8 +5,10 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { MessageUuid } from '@shared/graph/ids';
 import { CONTRACT_HEADER, TO_HUMAN_CONTRACT } from '@shared/owner/contract';
-import { classifySnapshot, PromptStateReader, recordedState } from './prompt-state';
+import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { classifySnapshot, PromptStateReader, recordedState, transcriptEvidence } from './prompt-state';
 
 let dir: string;
 beforeEach(() => {
@@ -129,5 +131,52 @@ describe('conformance: the classifier on the engine’s recorded prompt snapshot
   it('S15 (a declared style selected, no contract) records none: a style never reaches the snapshot', async () => {
     expect(notes('s15-new').every((note) => note.systemPrompt?.length === 11)).toBe(true);
     expect(await recordedState(rebuild('s15-new'))).toBe('none');
+  });
+});
+
+// M4's disk evidence (Design §6; spikes/protocol-probe/findings-pass3-p2-to-human.txt, "M4 DISK EVIDENCE"): the engine
+// writes a record carrying a human prompt's uuid only when it took the prompt: a `user` record for an idle prompt, a
+// `queued_command` attachment (its `source_uuid`) for a `next` steer; a steer it cancelled leaves no record naming it.
+// Pinned on the engine's own transcripts: w1-steer-next-cancelled is the transcript of pass3/steer-next-cancelled (the
+// steer d7fade79 cancelled at seq 34-36), w1-steer-next-disk the run whose steer 1566e499 folded mid-turn.
+describe('transcriptEvidence', () => {
+  const fixture = (name: string) => join(TRANSCRIPT_FIXTURE_DIR, `${name}.jsonl`);
+  const IDLE = 'c4d464bf-50e4-4a07-8f8f-ef85370a994f' as MessageUuid; // the cancelled run's first prompt, started and completed
+  const CANCELLED = 'd7fade79-6f39-40b6-91f3-9998597857b4' as MessageUuid;
+  const FOLDED = '1566e499-2c53-4cc8-b952-0729fca81e91' as MessageUuid;
+  const NEVER = '99999999-9999-4999-8999-999999999999' as MessageUuid;
+  const userWith = (uuid: string) => JSON.stringify({ type: 'user', uuid, message: { role: 'user', content: 'hi' } });
+
+  it('finds an idle prompt the engine took by its user record, and nothing for the steer it cancelled', async () => {
+    expect(await transcriptEvidence(fixture('w1-steer-next-cancelled'), [CANCELLED])).toBeNull();
+    expect(await transcriptEvidence(fixture('w1-steer-next-cancelled'), [CANCELLED, IDLE])).toBe(IDLE);
+  });
+
+  it('finds a steer the engine folded mid-turn by its queued_command attachment', async () => {
+    expect(await transcriptEvidence(fixture('w1-steer-next-disk'), [FOLDED])).toBe(FOLDED);
+    expect(await transcriptEvidence(fixture('w1-steer-next-disk'), [NEVER])).toBeNull();
+  });
+
+  it('reads no other record naming the uuid as evidence, reads across chunks, and is null for a missing file or no uuid', async () => {
+    const lines = [
+      JSON.stringify({ type: 'file-history-snapshot', messageId: NEVER, snapshot: { messageId: NEVER } }),
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: `the prompt ${NEVER}` }),
+      JSON.stringify({ type: 'attachment', uuid: 'a2', attachment: { type: 'edited_text_file', source_uuid: NEVER } }),
+      ...Array.from({ length: 40 }, (_, i) => user(`filler ${i} ${'x'.repeat(50)}`)),
+    ];
+    const path = write('t.jsonl', lines);
+    expect(await new PromptStateReader({ chunkBytes: 64 }).transcriptEvidence(path, [NEVER])).toBeNull();
+    const taken = write('taken.jsonl', [userWith(NEVER), ...lines.slice(3)]);
+    expect(await new PromptStateReader({ chunkBytes: 64 }).transcriptEvidence(taken, [NEVER])).toBe(NEVER);
+    expect(await transcriptEvidence(join(dir, 'missing.jsonl'), [NEVER])).toBeNull();
+    expect(await transcriptEvidence(taken, [])).toBeNull();
+  });
+
+  it('leaves a last line still being written out', async () => {
+    const path = join(dir, 'torn.jsonl');
+    writeFileSync(path, `${user('one')}\n${userWith(NEVER)}`);
+    expect(await transcriptEvidence(path, [NEVER])).toBeNull();
+    appendFileSync(path, '\n');
+    expect(await transcriptEvidence(path, [NEVER])).toBe(NEVER);
   });
 });

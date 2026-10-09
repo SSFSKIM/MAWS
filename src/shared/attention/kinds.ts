@@ -4,7 +4,9 @@
 import type { AttentionItem } from '../graph/attention';
 import type { AttentionKind } from '../graph/enums';
 
-export const ACTIONABLE_KINDS: AttentionKind[] = ['permission', 'question', 'plan', 'dialog', 'elicitation', 'auto_mode_unavailable', 'error', 'interrupted'];   // tier 1
+export const ACTIONABLE_KINDS: AttentionKind[] = ['permission', 'question', 'plan', 'dialog', 'elicitation', 'auto_mode_unavailable', 'error', 'interrupted',
+  'async_input', 'essential_unread', // P2-C (2026-10-09): the owner channel's question and must-read count in the badge and stand in tier 1
+];   // tier 1
 const ACTIONABLE = new Set<AttentionKind>(ACTIONABLE_KINDS);
 
 // An item still waits on a human while pending or delivered (§4.6: delivered is not an alarm state, but it is not

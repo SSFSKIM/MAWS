@@ -11,6 +11,9 @@
 // is persisted through the AttentionStore (a failed write is owed and retried, never taken as saved)
 // and emitted whole as `attention.changed`; `attention.list` and `attention.request` are answered here, the latter by
 // asking the engine host for the item's originating request event (`session.pendingRequest`).
+// P2-C (2026-10-09; the P2-C document, Design §5): a third list per session, the owner channel's `async_input` and
+// `essential_unread` items (`setOwnerItems`), a projection of its marks table: never restored from this store (the owner
+// channel re-projects at start), retired by no turn, and silent when the owner channel says so (`restoredIds`).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
@@ -27,6 +30,9 @@ export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
 ]);
 const BROKER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'dialog', 'elicitation']);
 const RETIRED_BY_NEXT_TURN: ReadonlySet<AttentionItem['kind']> = new Set(['error', 'interrupted', 'auto_mode_unavailable']);
+// P2-C (2026-10-09; the P2-C document, Design §5): the owner channel's kinds, a projection of its marks table, which it
+// re-projects at start; never restored from this service's store, and retired by no turn
+const OWNER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['async_input', 'essential_unread']);
 
 // E11 F2b (plan 2.4): a failed turn in words. The result's subtype and terminal reason are the engine's codes; the
 // summary is what Needs you, the session's notice and a notification read. A limit says which limit stopped the turn;
@@ -82,6 +88,10 @@ export interface AttentionService {
   readonly restoredIds: ReadonlySet<AttentionId>; // accepted persisted items, marked before their change is emitted
   readonly ready: Promise<void>; // the persisted items are loaded (pending while every load attempt fails)
   list(): AttentionItem[];
+  // P2-C (2026-10-09): the owner channel's items for a session, whole (replacing its last projection); `silent` ids join
+  // `restoredIds` before the change is emitted, so the notifier announces none of them. Ignored for a session archived
+  // in this run.
+  setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   settled(): Promise<void>; // every change so far has reached the store
   stop(): void;
 }
@@ -89,6 +99,7 @@ export interface AttentionService {
 interface SessionState {
   broker: AttentionItem[];
   derived: Map<string, AttentionItem>;
+  owner: AttentionItem[]; // P2-C: the owner channel's projection
   signature: string;
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
@@ -106,10 +117,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), signature: '[]', retiredBefore: new Map() }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], signature: '[]', retiredBefore: new Map() }));
     return state;
   };
-  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values()];
+  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner];
 
   // Persistence (M5 review): the sessions whose stored list is behind the in-memory one, written in order; a failed
   // write stays owed, is retried with the next change and after PERSIST_RETRY_MS, and makes settled() reject until a
@@ -287,7 +298,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const state = stateOf(id);
       for (const stored of items) {
         const item = inWords(stored);
-        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || retiredByThisRun(state, item)) continue;
+        if (BROKER_KINDS.has(item.kind) || OWNER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || retiredByThisRun(state, item)) continue;
         // a failure the transcript replayed before the load is the same occurrence: the stored acknowledgement stands
         const live = state.derived.get(item.id);
         if (live && !(live.state === 'pending' && item.state !== 'pending')) continue;
@@ -334,10 +345,21 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   };
   void load(true);
 
+  // P2-C start (2026-10-09)
+  const setOwnerItems = (id: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]) => {
+    if (forgotten.has(id)) return;
+    for (const itemId of silent) restoredIds.add(itemId);
+    const state = stateOf(id);
+    state.owner = items;
+    changed(id, state);
+  };
+  // P2-C end
+
   return {
     ready,
     restoredIds,
     list,
+    setOwnerItems, // P2-C
     settled: async () => {
       await attempt;
       if (!loadedOk) throw loadError;

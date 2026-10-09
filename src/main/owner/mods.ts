@@ -51,7 +51,7 @@ async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string |
 // (a lane switch, a compatible style over the contract, or another contract version), until the next compaction; a
 // style selected since that launch is not a lane change and reads nothing. The lane switched since that launch: the next
 // launch, unless what that launch left in effect already matches it.
-function pendingOf(row: OwnerSessionRow | null, on: boolean): LanePending | null {
+export function pendingOf(row: OwnerSessionRow | null, on: boolean): LanePending | null {
   if (row === null || row.desired === null || row.applied === null) return on ? 'next-launch' : null;
   if ((row.desired !== 'off') === on) return row.offUnavailable ? 'next-compaction' : null;
   return (row.applied !== 'off') === on ? null : 'next-launch';

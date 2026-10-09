@@ -14,4 +14,8 @@ export const ATTENTION_HEADINGS: Readonly<Record<AttentionItem['kind'], { char: 
   error: { char: '!', tone: 'danger', text: 'Error' },
   interrupted: { char: '!', tone: 'danger', text: 'Interrupted' },
   held_peer_message: { char: '✉', tone: 'info', text: 'Held message' },
+  // P2-C start (2026-10-09; the P2-C document, M6's glyphs): the owner channel's two kinds
+  async_input: { char: '?', tone: 'info', text: 'Question waiting' },
+  essential_unread: { char: '◆', tone: 'info', text: 'Must read' },
+  // P2-C end
 };

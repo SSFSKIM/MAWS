@@ -96,6 +96,18 @@ describe('OwnerChannelStore', () => {
       expect(index.ownerChannel.marks(a)[0]).toEqual(mark({ state: 'queued', answerText: 'Answering "Which backend?": Postgres', answerOrigin: 'answer', answerMembers: members, stateChangedAt: '2026-10-09T10:01:00.000Z' }));
     });
 
+    it('M4: reads one mark by id, the open answers across sessions, and the sessions holding marks', () => {
+      index.ownerChannel.putMark(mark());
+      index.ownerChannel.putMark(mark({ id: `${b}:m2:0:q0`, appSessionId: b, messageUuid: 'm2', state: 'unconfirmed', answerText: 'Answering "Which backend?": Postgres', answerOrigin: 'answer' }));
+      index.ownerChannel.putMark(mark({ id: `${b}:m3:0:q0`, appSessionId: b, messageUuid: 'm3', state: 'delivered', at: '2026-10-09T10:02:00.000Z' }));
+      expect(index.ownerChannel.mark(mark().id)).toEqual(mark());
+      expect(index.ownerChannel.mark('nothing')).toBeNull();
+      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([`${b}:m2:0:q0`]);
+      index.ownerChannel.updateMark(mark().id, { state: 'queued' });
+      expect(index.ownerChannel.openAnswers().map((m) => m.id)).toEqual([mark().id, `${b}:m2:0:q0`]);
+      expect(index.ownerChannel.markedSessions()).toEqual([a, b].sort());
+    });
+
     it('refuses a state or kind outside the table’s checks', () => {
       expect(() => index.ownerChannel.putMark(mark({ state: 'answered' as OwnerMarkRow['state'] }))).toThrow(/CHECK/);
       expect(() => index.ownerChannel.putMark(mark({ id: 'x', kind: 'insight' as OwnerMarkRow['kind'] }))).toThrow(/CHECK/);
