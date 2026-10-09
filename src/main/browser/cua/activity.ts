@@ -12,9 +12,11 @@
 // Typed text never leaves main. At most ACTIVITY_MAX_PER_SECOND activities per tab reach the windows (mouse moves are
 // never activities, so a storm of them costs nothing; a burst beyond the bound is dropped). What was told is kept per
 // session, the last BROWSER_ACTIVITIES_KEPT, for `browser.agent.activities.list`: a window lists them when a session's
-// transcript mounts, so a reload or a second window shows the rows again. Since cua board #93 they are also written
-// through to the index (src/main/index/browser-activity.ts) and a session's are loaded from it on first use, so an app
-// restart shows them too; the store is never in the way of a live row (a failed read or write is logged, once).
+// transcript mounts, so a reload or a second window shows the rows again. Since cua board #93 they are also written to
+// the index (src/main/index/browser-activity.ts), and a session's are loaded from it on first use, so an app restart
+// shows them too. The store is never in the way of a live row: what a tick told is written in one transaction on the
+// next turn of the event loop, after the CDP handler that produced it returned, over a connection that fails at once
+// rather than wait for a lock; a failed read or write is logged, once, and its rows are kept live only.
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_ACTIVITIES_KEPT, BROWSER_ACTIVITY_KEY_MAX_CHARS, BROWSER_ACTIVITY_LABEL_MAX_CHARS, type BrowserActivity, type BrowserAgentActivity } from '@shared/browser/activity';
 import type { BrowserActivityStore } from '../../index/browser-activity';
@@ -139,6 +141,7 @@ export class ActivityFeed {
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   private storeFailing = false; // the store's last read or write failed (logged once until one succeeds again)
+  private unwritten: BrowserAgentActivity[] = []; // told this tick, written on the next (cua board #93)
 
   constructor(private readonly deps: ActivityFeedDeps) {
     this.now = deps.now ?? Date.now;
@@ -192,6 +195,15 @@ export class ActivityFeed {
   dispose(): void {
     for (const { timer } of this.typing.values()) clearTimeout(timer);
     this.typing.clear();
+    this.write();
+  }
+
+  // What was told since the last write, in one transaction (cua board #93).
+  private write(): void {
+    const told = this.unwritten;
+    if (told.length === 0) return;
+    this.unwritten = [];
+    this.stored(() => this.deps.store?.append(told, BROWSER_ACTIVITIES_KEPT), `write ${told.length} activities to the index`);
   }
 
   // The session's kept activities, loaded from the store on first use (cua board #93).
@@ -241,6 +253,7 @@ export class ActivityFeed {
     kept.push(told);
     if (kept.length > BROWSER_ACTIVITIES_KEPT) kept.splice(0, kept.length - BROWSER_ACTIVITIES_KEPT);
     this.deps.emit('browser.agent.activity', told);
-    this.stored(() => this.deps.store?.append(told, BROWSER_ACTIVITIES_KEPT), `write an activity of ${appSessionId} to the index`); // written through, after the live row
+    if (!this.deps.store) return;
+    if (this.unwritten.push(told) === 1) setImmediate(() => this.write()); // after the live row, on the next turn
   }
 }

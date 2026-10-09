@@ -37,7 +37,7 @@ export class Index {
     this.fixtures = new ReplayFixtureStore(this.db);
     this.sideThreads = new SideThreadStore(this.db); // E3
     this.browserHistory = new BrowserHistoryStore(this.db); // E4a
-    this.browserActivity = new BrowserActivityStore(this.db); // cua board #93
+    this.browserActivity = new BrowserActivityStore(this.db, path); // cua board #93: writes over a connection of its own
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.
@@ -67,6 +67,7 @@ export class Index {
   }
 
   close(): void {
+    this.browserActivity.close();
     this.db.close();
   }
 }
