@@ -54,6 +54,10 @@ export const SetupEventSchema = z.strictObject({
       z.strictObject({ kind: z.literal('error'), message: z.string(), resources: SetupResourcesSchema }),
     ])
     .nullable(),
+  // P2-A (2026-10-09): present on the phases of an acquisition's own run, whose end reaches every caller in its
+  // `session.acquire` reply (delivered on another transport, in no fixed order with these events): nothing docks a card
+  // or tells a failure from a tagged event; phase readers read it as any other
+  acquisition: z.literal(true).optional(),
 });
 export type SetupEvent = z.infer<typeof SetupEventSchema>;
 

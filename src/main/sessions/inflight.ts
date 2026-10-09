@@ -115,7 +115,10 @@ export function acquireOutcomeOfGuard(outcome: StartOutcome): AcquireOutcome {
 }
 
 // The setup with its `emit` wrapped to keep the id's last end (`ready` or `failed`) as it streams (the take-over's pattern).
-export function capturingSetup(s: Setup, appSessionId: AppSessionId): { setup: Setup; outcome(): SetupEvent['outcome'] } {
+// `acquisition`: the run is an acquisition's own, so its phases of the id stream tagged (`SetupEvent.acquisition`): its
+// end reaches the callers in the reply, on another transport than the events, and the renderer docks and tells nothing
+// from a tagged event whatever order the two arrive in.
+export function capturingSetup(s: Setup, appSessionId: AppSessionId, acquisition = false): { setup: Setup; outcome(): SetupEvent['outcome'] } {
   let last: SetupEvent['outcome'] = null;
   const setup: Setup = {
     ...s,
@@ -123,6 +126,7 @@ export function capturingSetup(s: Setup, appSessionId: AppSessionId): { setup: S
       if (name === 'session.setup') {
         const event = payload as SetupEvent;
         if (event.appSessionId === appSessionId && (event.phase === 'ready' || event.phase === 'failed')) last = event.outcome;
+        if (acquisition && event.appSessionId === appSessionId) return s.emit('session.setup', { ...event, acquisition: true });
       }
       return s.emit(name, payload);
     },

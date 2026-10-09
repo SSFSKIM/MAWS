@@ -116,12 +116,12 @@ export function createSetupStore() {
     },
     applySetup(event) {
       // C3's own relay answer at launch docks the relay card, with the message the intent (or the resume) still retains.
-      // P2-A: not while a record card's continuation holds the claim; its acquisition's answer docks (or, its card
-      // dismissed, does not dock) the card with the message it carries.
+      // P2-A: not from an acquisition's own run (tagged): its reply docks the card, with the message its caller carries,
+      // only while the caller still wants it, whichever of the reply and this event arrives first.
       const id = event.appSessionId;
       const message = get().intents.get(id)?.message ?? get().resumes.get(id) ?? null;
       const cards =
-        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' && !get().continuing.has(id)
+        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' && event.acquisition !== true
           ? new Map(get().cards).set(id, { kind: 'relay', health: event.outcome.health, message })
           : get().cards;
       // a resume's message is the engine's at `ready`, the card's or the editor's at `failed` (connectSetup hands it back)
@@ -220,11 +220,11 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
       // a resume that failed after it started has no card: its message returns to the editor (main handed it back) and
       // its reason is a toast (the record stays, exited); the engine's own refusal (a job took the session after MAWS's
       // read) names the holder and offers its Attach. C3's relay answer docked the relay card with the message instead.
-      // P2-A: a record card's continuation tells its own failure under the same notice id, and nothing once its card
-      // was dismissed, so a session it holds the claim of is not told here.
+      // P2-A: an acquisition's own run (tagged) is told by its callers from the reply (a card's continuation says nothing
+      // once its card was dismissed), so it is not told here.
       if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
         if (resumed !== null && e.outcome?.kind !== 'relay_unreachable') returnMessage(e.appSessionId, resumed);
-        if (store.getState().continuing.has(e.appSessionId)) return;
+        if (e.acquisition === true) return;
         if (e.outcome?.kind === 'error') toast({ id: startNoticeId(e.appSessionId), level: 'danger', text: e.outcome.message, actions: [], dismissible: true }); // P2-A: the id
         else if (e.outcome?.kind === 'held') onHeld(e.appSessionId, e.outcome.holder, e.outcome.attach);
       }

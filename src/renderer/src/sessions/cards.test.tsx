@@ -419,11 +419,11 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
-  it('a failed acquisition is told once: the row’s Resume names the failure the setup already toasted, replacing it (P2-A)', async () => {
+  it('a failed acquisition is told once: the row’s Resume names it from the reply; its run’s tagged failure toasts nothing (P2-A)', async () => {
     withMain({ 'session.acquire': () => ({ status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true }));
     expect(await act(() => resumeSession(ID))).toBe(false);
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
@@ -790,10 +790,15 @@ describe('a record’s trust card and its continuation', () => {
     expect(fake.invoked('session.acquire')).toEqual([]);
   });
 
-  // The whole-branch review: main streams the attempt's `session.setup` failure before `session.acquire` answers; while a
-  // continuation holds the session's claim its own answer decides the card, so the streamed one replaces nothing
-  describe('with the setup stream connected', () => {
-    const RELAY_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } } as const;
+  // The whole-branch review: an acquisition's own run streams its phases tagged `acquisition`, and its end reaches the
+  // caller in the `session.acquire` reply, which Electron delivers on another transport in no fixed order with the
+  // events; the reply alone decides the card and tells the failure, whichever arrives first
+  describe('with the setup stream connected, in either delivery order', () => {
+    const RELAY_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() }, acquisition: true } as const;
+    const RELAY_ANSWER = { status: 'relay_unreachable', appSessionId: ID, health: health() };
+    const ERROR_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true } as const;
+    const ERROR_ANSWER = { status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) };
+    const ORDERS = ['event first', 'reply first'] as const;
     let connection: { disconnect(): void };
     beforeEach(() => {
       withMain({ 'session.intent.list': { intents: [] }, 'session.deletions.list': { manifests: [] } });
@@ -802,37 +807,44 @@ describe('a record’s trust card and its continuation', () => {
     });
     afterEach(() => connection.disconnect());
 
-    it('a relay failure streamed during Trust and start leaves the relay card carrying the message', async () => {
+    // The run's `failed` event and the acquisition's reply in the order given; answers what the continuation answered.
+    const deliver = async (order: (typeof ORDERS)[number], event: unknown, answer: unknown, continuing: Promise<unknown>) => {
+      if (order === 'event first') act(() => fake.event('session.setup', event));
+      await act(() => fake.reply('session.acquire', answer));
+      const ended = await continuing;
+      if (order === 'reply first') act(() => fake.event('session.setup', event));
+      return ended;
+    };
+
+    it.each(ORDERS)('a relay failure during Trust and start (%s) leaves the relay card carrying the message', async (order) => {
       const continuing = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
-      act(() => fake.event('session.setup', RELAY_FAILED));
-      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: ID, health: health() }));
-      expect(await continuing).toEqual({ ok: true });
+      expect(await deliver(order, RELAY_FAILED, RELAY_ANSWER, continuing)).toEqual({ ok: true });
       expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'relay', health: health(), message: MESSAGE });
+      expect(useSetup.getState().phases.get(ID)?.phase, 'phase readers still see the run end').toBe('failed');
     });
 
-    it('a relay failure streamed after Cancel recreates no card', async () => {
+    it.each(ORDERS)('a relay failure after Cancel (%s) recreates no card', async (order) => {
       const continuing = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
       await act(() => releaseMessage(ID, MESSAGE));
-      act(() => fake.event('session.setup', RELAY_FAILED));
-      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: ID, health: health() }));
-      await continuing;
+      await deliver(order, RELAY_FAILED, RELAY_ANSWER, continuing);
       expect(useSetup.getState().cards.has(ID)).toBe(false);
     });
 
-    it('a failure streamed after Cancel says nothing; one the card still waits on is told once', async () => {
-      const failed = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } } as const;
-      const answer = { status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) };
+    it.each(ORDERS)('a failure after Cancel (%s) says nothing; one the card still waits on is told once', async (order) => {
       const cancelled = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
       await act(() => releaseMessage(ID, MESSAGE));
-      act(() => fake.event('session.setup', failed));
-      await act(() => fake.reply('session.acquire', answer));
-      await cancelled;
+      await deliver(order, ERROR_FAILED, ERROR_ANSWER, cancelled);
       expect(useNotices.getState().notices).toEqual([]);
       act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
-      const waited = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
-      act(() => fake.event('session.setup', failed));
-      await act(() => fake.reply('session.acquire', answer));
-      await waited;
+      await deliver(order, ERROR_FAILED, ERROR_ANSWER, continueSetup(ID, { trust: 'accepted' }, MESSAGE));
+      expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    });
+
+    it('an untagged run (a record’s own start) still docks its relay card and tells its failure', () => {
+      act(() => useSetup.getState().undock(ID));
+      act(() => fake.event('session.setup', { ...RELAY_FAILED, acquisition: undefined }));
+      expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay' });
+      act(() => fake.event('session.setup', { ...ERROR_FAILED, acquisition: undefined }));
       expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
     });
   });

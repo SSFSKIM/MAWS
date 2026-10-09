@@ -200,6 +200,19 @@ describe('session.acquire: the lifecycle table', () => {
     expect(availability(record.appId)).toBe('resumable');
   });
 
+  // The whole-branch review: the reply and the events travel on separate transports, so the renderer cannot tell an
+  // acquisition's streamed end from a record start's by order; the acquisition's run tags its phases instead
+  it('an acquisition’s own run streams every phase tagged `acquisition`; a record’s start streams untagged', async () => {
+    const acquired = recordAt();
+    h.host.script = () => ({ answer: { relay: DOWN_RELAY } });
+    await h.service.acquire(acquired.appId, 'send');
+    expect(h.setupEvents(acquired.appId).map((e) => [e.phase, e.acquisition])).toEqual([['launching', true], ['failed', true]]);
+    const started = recordAt();
+    expect(await h.service.startSession(started.appId, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+    await h.settled(started.appId);
+    expect(h.setupEvents(started.appId).map((e) => [e.phase, e.acquisition])).toEqual([['launching', undefined], ['failed', undefined]]);
+  });
+
   it('a launch that fails answers failed with the engine’s words, and is remembered as failed', async () => {
     const record = recordAt();
     h.host.script = () => ({ exit: { error: 'the model is not available' } });

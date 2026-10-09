@@ -824,7 +824,7 @@ export class SessionService {
     try {
       const record = this.deps.index.sessions.get(appSessionId);
       if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
-      const captured = capturingSetup(this.s, appSessionId);
+      const captured = capturingSetup(this.s, appSessionId, true); // its phases stream tagged: the reply tells its end
       const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
       registration.guard(guard);
       if (run === null) return acquireOutcomeOfGuard(guard);
