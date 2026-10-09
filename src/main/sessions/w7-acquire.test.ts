@@ -7,7 +7,7 @@
 // host follower's (`src/engine-host/fs/service.test.ts`, "a contested session (W7)"); here main's side of it: the index's
 // holder projection, availability, the yield and every launch.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
@@ -78,7 +78,7 @@ describe('W7 under acquisition: one writer at every point', () => {
     expect(h.index.sessions.get(record.appId)!.holder).toEqual({ kind: 'self' });
 
     // MAWS's turn runs; the terminal resumes the id and writes its sibling branch
-    h.host.reserve(record.appId, { ...status(record.appId), turn: humanTurn, keepAlive: ['turn'] });
+    h.host.reserve(record.appId, { ...status(record.appId), turn: { ...humanTurn, id: 'turn-w7' as EventId, acceptedAt: null }, keepAlive: ['turn'] });
     fire('session.status', { appSessionId: record.appId, status: status(record.appId) });
     terminalStarts(record);
     expect(h.index.sessions.get(record.appId)!.holder).toEqual({ kind: 'self', contestedBy: TERMINAL });
