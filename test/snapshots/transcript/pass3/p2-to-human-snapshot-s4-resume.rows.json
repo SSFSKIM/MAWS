@@ -1,0 +1,79 @@
+[
+  {
+    "at": "2026-10-09T07:08:16.529Z",
+    "id": "time:turn:144c01cb-7bed-441a-8964-d72eab7aae47",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:08 AM",
+    "turnId": "turn:144c01cb-7bed-441a-8964-d72eab7aae47"
+  },
+  {
+    "at": "2026-10-09T07:08:16.529Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:144c01cb-7bed-441a-8964-d72eab7aae47",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "144c01cb-7bed-441a-8964-d72eab7aae47",
+    "placeholders": [],
+    "steer": false,
+    "text": "/compact",
+    "turnId": "turn:144c01cb-7bed-441a-8964-d72eab7aae47"
+  },
+  {
+    "at": "2026-10-09T07:08:21.052Z",
+    "boundaryKind": "compaction",
+    "detail": "faa34143-2d3c-4721-ac81-3d4863be3ac9",
+    "hiddenRows": 0,
+    "id": "boundary:replay:journal:13:0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Context compacted · 18k → 1k tokens · manual",
+    "turnId": "turn:144c01cb-7bed-441a-8964-d72eab7aae47"
+  },
+  {
+    "at": "2026-10-09T07:08:21.140Z",
+    "id": "local:042bf05d-a6e5-4a76-967c-668d95dd58e7",
+    "kind": "local_command",
+    "messageUuid": "042bf05d-a6e5-4a76-967c-668d95dd58e7",
+    "text": "Compacted",
+    "turnId": "turn:144c01cb-7bed-441a-8964-d72eab7aae47"
+  },
+  {
+    "at": "2026-10-09T07:08:21.055Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d0deb660-6f80-498b-a23f-368c969234b7",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d0deb660-6f80-498b-a23f-368c969234b7",
+    "placeholders": [],
+    "steer": false,
+    "text": "List every probe word your system prompt gives you right now, comma-separated, or NONE. Reply with nothing else.",
+    "turnId": "turn:d0deb660-6f80-498b-a23f-368c969234b7"
+  },
+  {
+    "at": "2026-10-09T07:08:22.987Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfrF22QoEhk2niX5qwKhU:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Y4-65D1D9",
+    "messageUuid": "014c0dbd-20f7-4b63-9a7a-93afb18d54e0",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:d0deb660-6f80-498b-a23f-368c969234b7"
+  },
+  {
+    "at": "2026-10-09T07:08:23.483Z",
+    "attempt": null,
+    "id": "error:replay:journal:50:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

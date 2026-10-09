@@ -96,7 +96,12 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // E4c start: M4's browser tools recorded live through MAWS's own host, main played by the stand-in
     const e4c = ['p1-maws-browser'];
     // E4c end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c].sort());
+    // P2 start (2026-10-09): U1, P2-A's M0 on the installed 2.1.295 (a stopped session resumed with no user frame, and its
+    // setup turn); U2, P2-C's M0 on the same engine (the system-prompt snapshot across new, resume and fork, the output
+    // style as attachments, --system-prompt-snapshot off, the contract's convergence runs, the shapes); all under scratch homes
+    const p2 = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup', 'p2-to-human-converge-s10-new', 'p2-to-human-converge-s10-resume', 'p2-to-human-converge-s10-then', 'p2-to-human-converge-s11-fork', 'p2-to-human-converge-s11-new', 'p2-to-human-converge-s12-new', 'p2-to-human-converge-s12-resume', 'p2-to-human-converge-s13-new', 'p2-to-human-fork', 'p2-to-human-new', 'p2-to-human-off', 'p2-to-human-resume', 'p2-to-human-shapes-s14-compact', 'p2-to-human-shapes-s14-new', 'p2-to-human-shapes-s15-new', 'p2-to-human-shapes-s16-new', 'p2-to-human-snapoff-s6-new', 'p2-to-human-snapoff-s6-resume', 'p2-to-human-snapoff-s6-then', 'p2-to-human-snapoff-s7-new', 'p2-to-human-snapoff-s7-resume', 'p2-to-human-snapoff-s8-new', 'p2-to-human-snapoff-s8-resume', 'p2-to-human-snapoff-s9-fork', 'p2-to-human-snapoff-s9-new', 'p2-to-human-snapshot-s1-new', 'p2-to-human-snapshot-s1-resume', 'p2-to-human-snapshot-s2-new', 'p2-to-human-snapshot-s2-resume', 'p2-to-human-snapshot-s3-new', 'p2-to-human-snapshot-s3-resume', 'p2-to-human-snapshot-s4-new', 'p2-to-human-snapshot-s4-resume', 'p2-to-human-snapshot-s5-fork', 'p2-to-human-snapshot-s5-new', 'p2-to-human-style'];
+    // P2 end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -630,6 +635,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
       'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
       'boundary.compaction', // W1: pass3/compact seq 43
+      'session.reconnect', // P2-C U2 (2026-10-09): pass3/p2-to-human-* resumes under --system-prompt-snapshot off reconnect to the host
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
       // E1 M2: pass3/p1-maws-*; maws.ask.cancelled from E11 S1's pass3/p1-maws-ask-interrupt (the engine's
