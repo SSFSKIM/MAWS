@@ -1,0 +1,337 @@
+P2-A U1 — an existing stopped session resumed with no prompt
+Recorded 2026-10-09T07:01:45Z–07:02:47Z (2026-10-09 00:01–00:02 PDT).
+Child P2-A; document docs/doperpowers/plans/2026-10-08-p2-a-sessions-available.md;
+parent docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10;
+parent pin 8814d733db1b3c50798b9d3ec766985b29e05420.
+
+Outcome
+-------
+On installed Claude Code 2.1.295, the no-prompt resume became ready, ran its
+SessionStart:resume command hook, and answered reload_plugins and
+get_context_usage, but emitted no system/init and made no HTTP request after
+ready during the 55.122-second observation. It was not a disk-read-only action:
+the transcript mtime changed during acquisition and stop appended two records.
+This is one run on 2.1.295, not a confirmation on MAWS's tested 2.1.293 baseline.
+
+Evidence pointers
+-----------------
+R = spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-1.jsonl
+S = spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-setup.jsonl
+Both are the shared harness's redacted exports, copied byte for byte. Their
+seq-0 provenance names P2-A, both documents, the parent pin, engine version,
+model alias haiku, scenario, and journal cost (rounded by closeSession to four
+decimals). All numbered journal references below preserve the live row seqs.
+
+Installed engine: /Users/new/.local/share/claude/versions/2.1.295
+Gate version: 2.1.295; claude --version: 2.1.295 (Claude Code).
+MAWS TESTED_ENGINE_VERSION: 2.1.293 (src/engine-host/engine-compat.ts).
+Node v22.23.2; pnpm 11.23.0; Vitest 5.0.2.
+Launch model alias: haiku; observed wire model: claude-haiku-5-5[1m].
+The launch captured ANTHROPIC_DEFAULT_HAIKU_MODEL (key name only journaled);
+the alias did not select the older Haiku family assumed by some reference docs.
+Permission mode default; gateway gateway; subagentModel null; effort null.
+Both launches used --max-budget-usd 0.15 (the cap is cumulative for a resumed
+conversation), below the authorized maximum 1 and total-spend ceiling 0.20.
+
+Scratch config home: /private/tmp/maws-p2-a-u1-config-YrCrsH
+Scratch userData: /private/tmp/maws-p2-a-u1-live-kdUef5
+Scratch repository: /private/tmp/maws-p2-a-u1-repo-KFXhHO
+App session id: live-4724beca
+Engine session id: eccb28f9-d563-4ff1-bb95-1c23c25d4a3b
+Setup launch id: n5oesz55; resume launch id: mfpbyicj.
+Uncommitted temporary test: test/live/u1-no-prompt-resume.live.test.ts, removed.
+Raw measurements retained outside the repository at
+/private/tmp/maws-p2-a-u1-live-kdUef5/u1-measurements.json.
+The proxy was closed after the run. No owner app, dist, user-data, index database,
+engine binary, or owner settings was modified by this probe. LiveHost supplied
+the scratch CLAUDE_CONFIG_DIR after dropping all inherited CLAUDE_* variables;
+no messaging token was supplied or recorded.
+
+1. Does system/init arrive before any user frame?
+------------------------------------------------
+No. R seqs 1–37 contain no system/init, no user frame in either direction, no
+result, and no command_lifecycle frame. Its inbound system frames are the
+SessionStart hook frames (seqs 5–6) and ui_panes (seq 19). No turn.started event
+was observed by LiveHost.
+The ready snapshot was at 2026-10-09T07:01:51.930Z with journal tail seq 28.
+After the first 45.002-second wait, at 07:02:36.932Z, the tail was still seq 28.
+After the controls and another 10.002-second wait, at 07:02:47.052Z, the tail
+was seq 32; stop began then. Thus observation was 55.122 s after the ready
+snapshot, with no prompt ever sent on this launch. R exit seq 37 is at
+07:02:47.577Z, code 0.
+Positive setup comparison: S outbound user prompt seq 27 at 07:01:47.081Z,
+then system/init seq 32 at 07:01:47.104Z, replayed user seq 34 at
+07:01:47.812Z, and result OK seq 42 at 07:01:47.827Z.
+
+2. Does the engine request the model gateway in that window?
+----------------------------------------------------------
+After ready: zero HTTP requests, across the 45 s initial wait, both controls,
+the 10 s second wait, and stop. No POST /v1/messages and no count_tokens
+request on the resume launch.
+Across acquisition before ready, there were two proxy requests: MAWS's known
+GET /api/hello health check once, and the engine's HEAD /api/hello once. The
+HEAD is real engine startup traffic to the relay, not a model-generation call.
+Attribution: src/engine-host/relay-health.ts:32 explicitly sends GET; this
+probe itself sends no HTTP requests except the harness health gate and the
+unchanged forwarding of host/engine requests. The HEAD was after resume spawn
+(R seq 2 at 07:01:51.236Z) and before any engine output (seq 5 at 07:01:51.749Z).
+The proxy sees relay-bound HTTP only; it is not a packet capture of unrelated
+engine egress, and cannot establish whether some other destination was used.
+
+Complete no-prompt acquisition/observation/stop proxy log
+  2026-10-09T07:01:51.205Z GET  /api/hello  (MAWS prelaunch health)
+  2026-10-09T07:01:51.481Z HEAD /api/hello  (engine startup)
+  No entries at or after the ready snapshot 2026-10-09T07:01:51.930Z.
+Count by method/path: GET /api/hello = 1; HEAD /api/hello = 1;
+engine-only count = 1 before ready, 0 after ready.
+
+Full run proxy log, to expose the boundary and the setup traffic too
+  2026-10-09T07:01:45.049Z GET  /api/hello  (openGate)
+  2026-10-09T07:01:46.789Z HEAD /api/hello  (setup engine startup)
+  2026-10-09T07:01:47.116Z POST /v1/messages
+  2026-10-09T07:01:47.116Z POST /v1/messages
+  2026-10-09T07:01:51.205Z GET  /api/hello  (resume prelaunch health)
+  2026-10-09T07:01:51.481Z HEAD /api/hello  (resume engine startup)
+Only method, URL pathname, and ISO timestamp were logged; no headers, query
+strings, request bodies, or response bodies were logged. The requests were
+forwarded with their original method, raw URL (including query), raw headers,
+and streamed body to http://127.0.0.1:8641. Response status, raw headers, and
+body were streamed back unchanged. The listener was http://127.0.0.1:52032.
+MAWS_RELAY_URL was set to that listener before dynamically importing the host
+modules, then restored after the run. The proxy originated no relay request
+of its own. No direct relay query beyond the harness GET /api/hello was made.
+
+3. Does reload_plugins answer before a turn; what plugin facts does initialize carry?
+-----------------------------------------------------------------------------------
+Yes. session.reloadPlugins returned {opId:"mfpbyicj-6"} in 1 ms, then the
+operation completed successfully, late:false, before any user prompt or turn.
+R request seq 29 at 2026-10-09T07:02:36.933Z; response seq 30 at
+07:02:37.012Z (79 ms journal round trip); operation observed at 07:02:37.040Z.
+Response top-level keys: commands, agents, plugins, mcpServers, error_count.
+Observed plugins (also the setup system/init list S seq 32)
+  {"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"}
+  {"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"}
+  {"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}
+No owner plugin was loaded; closeSession's owner-plugin checks passed.
+
+Initialize response R seq 9 at 2026-10-09T07:01:51.876Z has no plugins key
+and no top-level key containing "plugin". It carries command and agent
+catalogues (48 commands, 5 agents) but no explicit plugin inventory. Exact
+body top-level keys, in wire order
+  commands
+  agents
+  output_style
+  available_output_styles
+  user_output_styles_dir
+  models
+  account
+  pid
+  current_permission_mode
+  feedback_mode
+  analytics_disabled
+  remote_control_auto_enable
+  remote_control_auto_connect_default
+  remote_control_available
+  remote_control_auto_on_by_default
+  ide_rc_auto_enable_gate
+  fast_mode_state
+  fast_mode_disabled_reason
+  session_state
+  capabilities
+Its capabilities list is ["ui_surface_v1"]. The builtin command metadata is
+not a replacement for the explicit name/path/source plugin list in reload.
+The initializer envelope's keys are subtype, request_id, response; the list
+above is response.response, the actual initialize answer body.
+
+4. Does get_context_usage answer before a turn, with what totals?
+---------------------------------------------------------------
+Yes, twice, with identical totals. The host's own ready sample is R request
+seq 27 at 2026-10-09T07:01:51.912Z and response seq 28 at 07:01:51.928Z
+(16 ms journal round trip). The explicitly requested session.getContextUsage
+{detail:"summary"} is request seq 31 at 07:02:37.041Z and response seq 32
+at 07:02:37.048Z (7 ms journal round trip; LiveHost call completed in 9 ms).
+Neither needed a new turn or a gateway HTTP request.
+Both engine answers report
+  totalTokens 19058; maxTokens 1000000; rawMaxTokens 1000000; percentage 2;
+  autoCompactThreshold 967000; isAutoCompactEnabled true;
+  model "claude-haiku-5-5[1m]";
+  apiUsage {input_tokens:2, output_tokens:4,
+            cache_creation_input_tokens:18192, cache_read_input_tokens:0}.
+The apiUsage is restored setup-turn usage, not newly spent resume tokens.
+Categories reported by both answers
+  System prompt: 2815 used
+  System tools: 14277 used
+  MCP tools (deferred): 3149 deferred
+  System tools (deferred): 18510 deferred
+  Skills: 1966 used
+  Autocompact buffer: 33000 buffer
+  Free space: 947942 free
+The engine's messageBreakdown separately reports assistantMessageTokens 7,
+userMessageTokens 8 and attachmentTokens 19319. These are the raw engine
+figures; this probe does not reinterpret or reconcile them with totalTokens.
+
+5. Does the session JSONL get written, or its mtime/size move?
+-----------------------------------------------------------
+Yes, its mtime moves across acquisition even though its size and SHA-256 do
+not. During both waits and the controls, size/mtime/hash remain unchanged.
+At stop it grows by 579 bytes (two records) and its mtime/hash change.
+Transcript path
+/private/tmp/maws-p2-a-u1-config-YrCrsH/projects/-private-tmp-maws-p2-a-u1-repo-KFXhHO/eccb28f9-d563-4ff1-bb95-1c23c25d4a3b.jsonl
+All stat samples below saw the file present. Times are UTC ISO strings.
+
+Sample                 observed at                 size    mtime
+before resume launch   2026-10-09T07:01:51.203Z      96477   2026-10-09T07:01:50.866Z
+ready (tail R 28)      2026-10-09T07:01:51.930Z      96477   2026-10-09T07:01:51.820Z
+after 45 s (tail R 28) 2026-10-09T07:02:36.932Z      96477   2026-10-09T07:01:51.820Z
+after controls (R 32)  2026-10-09T07:02:37.050Z      96477   2026-10-09T07:01:51.820Z
+after 10 s (tail R 32) 2026-10-09T07:02:47.052Z      96477   2026-10-09T07:01:51.820Z
+after stop (tail R 37) 2026-10-09T07:02:47.581Z      97056   2026-10-09T07:02:47.063Z
+
+Exact mtimeMs before launch: 1791529310865.884;
+ready through the waits: 1791529311820;
+after stop: 1791529367063.1384.
+SHA-256 before launch and ready/controls/waits
+  81a73627d1e6a1e00f151a671b89d67baef3eff7e4e4da2e389d081ee25d78b9
+SHA-256 after stop
+  fa40e62a10145ea6eac4112dc3163f794bcd6bf88603e182afd2c12ca77fa295
+The redacted transcript exports from closeSession are retained in the scratch
+userData's exports/ directory under the same scenario names with suffix
+-transcript.jsonl. Setup has 25 records; after resume stop it has 27. The two
+new records are type:"mode", mode:"normal", and type:"cost-state" with
+sessionId unchanged, totalCostUSD:0.0024006, totalAPIDuration:1421,
+totalAPIDurationWithoutRetries:1397, totalDuration:59450, and modelUsage
+preserving the setup's cost. The mtime-only movement at acquisition does not
+prove content was appended or rewritten then; byte content was identical.
+R stop requests ui_detach and end_session are seqs 33–34 at 07:02:47.053Z;
+responses seqs 35–36 at 07:02:47.054Z–07:02:47.055Z; exit seq 37 code 0.
+
+6. Do SessionStart hooks run on the no-prompt resume?
+---------------------------------------------------
+Yes. R seq 5 at 2026-10-09T07:01:51.749Z is hook_started for
+SessionStart:resume, followed by hook_response seq 6 at 07:01:51.817Z,
+exit_code:0, outcome:"success", stdout/stderr empty. Both precede the
+initialize answer seq 9, and no system/init or user frame was needed.
+The scratch command hook log /private/tmp/maws-p2-a-u1-live-kdUef5/session-start.log
+contains exactly these two lines, unchanged after the waits and stop
+{"at":"2026-10-09T07:01:47.012Z","event":"SessionStart","source":"startup","sessionId":"eccb28f9-d563-4ff1-bb95-1c23c25d4a3b"}
+{"at":"2026-10-09T07:01:51.804Z","event":"SessionStart","source":"resume","sessionId":"eccb28f9-d563-4ff1-bb95-1c23c25d4a3b"}
+S setup hook_started seq 4 is at 07:01:46.968Z and hook_response seq 5 at
+07:01:47.016Z. A separate synthetic stdin pipe-check wrote a separate
+hook-pipe-check.log before engine launch; it is not in the measured hook log.
+
+A-15 and cost
+-------------
+Observed safety lines (timestamps added by the temporary test's logger)
+  2026-10-09T07:01:46.518Z A-15 before: 25 keys; none under newly-created scratch
+  2026-10-09T07:01:51.191Z A-15 after: 25 keys (identical) [setup closeSession]
+  2026-10-09T07:02:47.595Z A-15 after: 25 keys (identical) [resume closeSession]
+  2026-10-09T07:02:47.600Z A-15 after: 25 keys (identical) [afterAll checkA15]
+AfterAll explicitly found ownKeys:[] under all three scratch directories.
+The owner's ~/.claude.json was read only by the harness's A-15 reader; no
+project key under this run's scratch appeared or vanished. Owner-plugin
+checks passed for both launches. The resume's init plugin list is null
+because no system/init arrived, not because reload_plugins returned no plugins.
+
+Total reported cost: US$0.0024006, from S result seq 42 at
+2026-10-09T07:01:47.827Z. R has no result receipt, so journalCost(R)=0 is not
+itself a billable-cost proof; the proxy observes zero model HTTP calls on the
+resume, and the stop's transcript cost-state preserves totalCostUSD 0.0024006.
+This is the engine's reported USD estimate, not an independently queried relay
+invoice. Two launches share one engine session: their cumulative costs must
+not be summed. Setup export provenance costUsd "0.0024"; resume "0.0000".
+
+Procedure to re-run (the temporary test is not kept)
+---------------------------------------------------
+1. Use the shared live harness without changes: test/live/support/harness.ts
+   openGate, scratchRepo, closeSession, readJournal, checkA15;
+   test/live/support/live-host.ts LiveHost; test/live/support/live.ts liveSpec.
+   Follow test/live/maws-ask-interrupt.live.test.ts's installed-engine pattern:
+   new LiveHost({userData:g.userData, configHome:g.home, binary:null}).
+   Install locked dependencies with pnpm -C <worktree> install --frozen-lockfile
+   if needed. No app is launched, and no build step is needed.
+2. Create a temporary test/live/u1-no-prompt-resume.live.test.ts. Statically
+   import only vitest and node builtin modules (type-only support imports are
+   fine). In beforeAll, start node:http createServer on 127.0.0.1 port 0.
+   For each incoming request, append {method, path:new URL(incoming.url,
+   'http://127.0.0.1').pathname, at:new Date().toISOString()} to an in-memory
+   array. Forward it with node:http request({hostname:'127.0.0.1',port:8641,
+   method:incoming.method,path:incoming.url,headers:incoming.rawHeaders}); pipe
+   incoming into upstream. Copy upstream response status/statusMessage and
+   rawHeaders to outgoing.writeHead and pipe upstream response to outgoing.
+   Never inspect/log headers or bodies. Use a 502 only on an upstream socket
+   error; do not synthesize or retry any model request. Close the listener and
+   its connections in afterAll.
+3. Set process.env.MAWS_RELAY_URL to http://127.0.0.1:<bound port> BEFORE
+   dynamically importing harness, live-host and live. Restore its former
+   value in afterAll. Call openGate('p2-a-u1', logger) (beforeAll timeout
+   300000 ms), allowing its only authorized GET /api/hello gate and standard
+   installed-binary probe. Respect its skip instead of rerouting traffic.
+4. Read and merge g.home/settings.json. Append a SessionStart entry
+   {hooks:[{type:'command', command:<command below>, timeout:10}]} to its
+   existing hooks.SessionStart array, preserving other settings. Use the
+   absolute process.execPath as NODE and a path under g.userData as LOG.
+   The command's -e program is
+     const fs=require('node:fs');
+     const input=JSON.parse(fs.readFileSync(0,'utf8'));
+     fs.appendFileSync(LOG,JSON.stringify({at:new Date().toISOString(),
+       event:input.hook_event_name,source:input.source,
+       sessionId:input.session_id})+'\n');
+   Shell-quote NODE and the -e program. Pipe a synthetic SessionStart JSON to
+   a command using a DIFFERENT check log, verify its exit code and line, and
+   validate the merged settings structure. The actual hook log starts empty.
+   Do not change any owner settings, inherited CLAUDE_* variable, or engine.
+5. Call scratchRepo(g,'p2-a-u1') to obtain a trusted scratch git repository.
+   Setup spec is liveSpec(repo,{model:'haiku',permissionMode:'default',
+   subagentModel:null,maxBudgetUsd:0.15}); keep its appSessionId and sessionId.
+   Launch with the installed-engine LiveHost and a 120000 ms ready deadline.
+   Send precisely "Reply with the single word OK." through session.send.
+   Wait up to 300000 ms for a main-lane, non-echo turn.ended, then for turn:null
+   and pendingRequests:0. Wait 3000 ms for the host's post-turn reads. Call
+   session.stop {appSessionId,reason:'stop'} and wait for process:'exited'.
+   In finally call closeSession with scenario p2-no-prompt-resume-setup,
+   the P2-A provenance above, and transcript name p2-no-prompt-resume-setup-
+   transcript plus the engine session id. Record its exact cost and exports;
+   stop the run if the total budget ceiling is reached. No retry in this probe.
+6. Find the session JSONL under g.home/projects/*/<engineSessionId>.jsonl.
+   Before resume launch record statSync.size, mtimeMs, mtime.toISOString and
+   SHA-256 of its bytes, current hook-log lines, proxy request array length,
+   and wall-clock timestamp. These measurements all read scratch files only.
+7. A NEW installed-engine LiveHost uses the SAME g.userData, g.home, repo,
+   appSessionId, and engine session id. Resume spec is liveSpec(repo,
+   {appSessionId,model:'haiku',permissionMode:'default',subagentModel:null,
+   maxBudgetUsd:0.15,resume:{sessionId:engineSessionId,fork:false},sessionId:null}).
+   Do not call session.send. host.launch drives the actual host handshake,
+   SDK MCP setup, ui_attach/ui_panes, initialize, get_status, empty persisted
+   queue recovery, ready publication, and automatic get_context_usage sample;
+   do not reproduce those controls by hand. Record host.launch's ready
+   snapshot time, journal tail, transcript stats/hash, hook log and HTTP count.
+8. Wait 45000 ms after ready. Record the same snapshot. CallRaw
+   session.reloadPlugins {appSessionId}; it returns a receipt, NOT the plugin
+   list. Await host.operations(appSessionId) containing the matching opId
+   (90000 ms deadline); record its completion outcome and the raw correlated
+   journal answer. Then callRaw session.getContextUsage
+   {appSessionId,detail:'summary'}; record its answer and journal correlation.
+   Wait another 10000 ms. Record all snapshots, then stop and wait for exit;
+   stat/hash the transcript once more. Assert no turn.started was observed.
+9. Always closeSession in finally for the resume, scenario p2-no-prompt-
+   resume-1, the same provenance, and a scratch transcript export named
+   p2-no-prompt-resume-1-transcript. This shuts down any remaining process,
+   redacts/exports the journal, costs it, records init plugins and runs A-15.
+   Run another checkA15 in afterAll. Copy the two redacted journal exports to
+   the assigned pass3 fixture paths; do not copy raw journals into the repo.
+   Persist the proxy log and measured facts, and delete the temporary test.
+10. Run
+    MAWS_LIVE=1 pnpm -C <worktree> exec vitest run --project live test/live/u1-no-prompt-resume.live.test.ts
+    Then verify with
+    pnpm -C <worktree> exec node --test <worktree>/spikes/protocol-probe/fixtures.test.mjs
+    pnpm -C <worktree> test:probes
+
+Validation observed in this sitting
+----------------------------------
+Temporary live test: 1 test passed, 1 file passed, exit 0, duration 63.86 s.
+fixtures.test.mjs: 168 tests passed, 0 failed, 0 skipped, exit 0.
+Full pnpm test:probes: 178 tests passed, 0 failed, 0 skipped, exit 0.
+The P2 fixture provenance admission was supplied by master commit 4b737b44
+via the worktree owner; this probe did not edit the integrity test or run git
+mutating operations. Only the two named fixtures and this findings file are
+left by this probe in the repository. No measurement was skipped.
