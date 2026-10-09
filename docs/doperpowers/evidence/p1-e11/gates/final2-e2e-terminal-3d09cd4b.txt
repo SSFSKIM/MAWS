@@ -1,0 +1,5 @@
+step e2e-terminal
+command: pnpm e2e:terminal
+head 3d09cd4b  ended 2026-10-09T00:49:07Z  load { 21.97 22.13 19.92 }  156s
+  15 passed (1.9m)
+exit 0

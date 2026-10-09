@@ -1,0 +1,5 @@
+step e2e-composer
+command: pnpm e2e:composer
+head 3d09cd4b  ended 2026-10-09T01:12:11Z  load { 13.81 16.16 17.57 }  79s
+  18 passed (48.8s)
+exit 0

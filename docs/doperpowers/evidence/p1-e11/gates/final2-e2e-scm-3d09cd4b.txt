@@ -1,0 +1,5 @@
+step e2e-scm
+command: pnpm e2e:scm
+head 3d09cd4b  ended 2026-10-09T01:00:59Z  load { 13.73 17.84 19.18 }  60s
+  8 passed (33.0s)
+exit 0

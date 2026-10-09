@@ -1,0 +1,5 @@
+step e2e-browser
+command: pnpm e2e:browser
+head 3d09cd4b  ended 2026-10-09T01:06:51Z  load { 19.52 17.77 18.52 }  50s
+  8 passed (20.3s)
+exit 0

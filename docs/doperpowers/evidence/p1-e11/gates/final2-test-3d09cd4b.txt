@@ -1,0 +1,6 @@
+step test
+command: pnpm test --maxWorkers=4
+head 3d09cd4b  ended 2026-10-09T00:38:25Z  load { 23.27 19.51 18.40 }  197s
+ Test Files  716 passed | 1 skipped (717)
+      Tests  9977 passed | 1 skipped (9978)
+exit 0
