@@ -100,9 +100,10 @@ export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
 // E8: `session.reloadSkills`, an operation like its plugins sibling. The `plugins.*` and `marketplaces.*` reads are one
 // CLI run each under the bridge's 10 s deadline (accepted, E8 M1); their mutations are operations of the plugin runner.
 export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.reloadSkills': 'operation' };
-// P2-C (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold` is; the
-// prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
+// P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
+// is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// P2-C end
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
