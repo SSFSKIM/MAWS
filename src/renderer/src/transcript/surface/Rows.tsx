@@ -54,7 +54,7 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const text = live ?? row.markdown;
   // P2-C start (2026-10-09; the P2-C document, Design §7, R15): while the session's owner-channel lane is on, a text with
   // a mark is MAWS's to draw (the report module), whether or not an engine surface is attached, and its ink is local; a
-  // text without one keeps the path above, so another plugin's AssistantMessage drawing still draws. A mount with
+  // text without one keeps P1's path below, so another plugin's AssistantMessage drawing still draws. A mount with
   // `presentation: 'local'` (E1's comment card) draws its marks through the same module. In the report, a closed
   // working record hides the words outside the marks. With the lane off, P1's path runs unchanged.
   const ownerSession = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
