@@ -27,7 +27,10 @@ export const installationOf = (key: string): Installation => {
 // The installation's own scope where the CLI takes it; a pseudo-scope falls back to user (E8).
 const scopeOfRow = (scope: string): PluginsScope => ((PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user');
 
-const basename = (path: string) => path.slice(path.replace(/\/+$/, '').lastIndexOf('/') + 1) || path;
+const basename = (path: string) => {
+  const trimmed = path.replace(/\/+$/, '');
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || path;
+};
 
 export function PluginTile() {
   return (
@@ -84,11 +87,12 @@ function RowMenu({ identity, name, busy }: { identity: PluginIdentity; name: str
   );
 }
 
-// Where a plugin with nothing to change from this session is managed: its other project, or how many there are.
-function managedWords(identity: PluginIdentity): { text: string; title: string } | null {
+// Where a plugin with nothing to change from this session is managed: its other project by name, or how many there are
+// with their names as the tooltip. A row shows no absolute path anywhere, its attributes included (acceptance 2).
+function managedWords(identity: PluginIdentity): { text: string; title?: string } | null {
   const projects = [...new Set(identity.installations.filter((p) => p.projectPath !== null && !p.here).map((p) => p.projectPath!))];
   if (projects.length === 0) return null;
-  return projects.length === 1 ? { text: L.managedIn(basename(projects[0])), title: projects[0] } : { text: L.managedInMany(projects.length), title: projects.join('\n') };
+  return projects.length === 1 ? { text: L.managedIn(basename(projects[0])) } : { text: L.managedInMany(projects.length), title: [...new Set(projects.map(basename))].join('\n') };
 }
 
 export function PluginRow({ identity, now }: { identity: PluginIdentity; now: number }) {

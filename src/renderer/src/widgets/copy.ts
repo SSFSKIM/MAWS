@@ -485,6 +485,7 @@ export const LIBRARY = {
   resetFilters: 'Reset filters',
   failed: "Couldn't load your plugins.",
   retry: 'Retry',
+  manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
   // a row
   isNew: 'New',
   newTooltip: 'Added or updated in the last 14 days',

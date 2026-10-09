@@ -68,10 +68,12 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
 
   const plugins = installed.data?.plugins;
   const markets = marketplaces.data?.marketplaces;
-  const loadedIds = useMemo(() => (loaded.freshness.kind === 'unknown' ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
+  // the plugins the session loaded, as last observed; none observed (no list, no time) is not "loaded none"
+  const loadedIds = useMemo(() => (loaded.freshness.kind === 'unknown' && loaded.plugins.length === 0 ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
   // the manifest request derives from the listing held, never from the change event (§5.5)
   const requests = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], NO_VIEWS, null).map(({ representative }) => ({ ...installationRef(representative), lastUpdated: representative.lastUpdated })), [plugins, markets]);
-  const { views } = usePluginManifests(cwd, requests);
+  const manifests = usePluginManifests(cwd, requests);
+  const { views } = manifests;
   const identities = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], views, loadedIds), [plugins, markets, views, loadedIds]);
 
   return (
@@ -86,7 +88,16 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
           onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
         />
         <div data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          <MyItems appSessionId={appSessionId} installed={installed} identities={identities} loaded={loaded} loadedIds={loadedIds} onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] })} />
+          <MyItems
+            appSessionId={appSessionId}
+            installed={installed}
+            identities={identities}
+            loaded={loaded}
+            loadedIds={loadedIds}
+            onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] })}
+            manifestError={manifests.error}
+            onRetryManifests={manifests.retry}
+          />
           {cwd !== null && (
             <div className="mt-4 border-t border-border px-1 pt-2">
               <MarketplacesSection cwd={cwd} installed={plugins ?? []} />

@@ -99,6 +99,20 @@ describe('the library model: groups', () => {
     expect(identitiesOf([project('supabase@claude-plugins-official', '/work/other', { enabled: true })], MARKETS, NO_VIEWS, null)[0].group).toBe('anthropic');
   });
 
+  it('enabled here is the CLI’s effective enabled alone: a project that enables a plugin its local settings turn off reads Disabled, still in this project (U3 F1)', () => {
+    // the project's settings enable it (`projectEnabled`), a local override disables it: the CLI's effective `enabled` is false
+    const [identity] = identitiesOf([project('frontend-design@claude-plugins-official', HERE, { projectEnabled: true, enabled: false })], MARKETS, NO_VIEWS, null);
+    expect(identity.enabledHere).toBe(false);
+    expect(identity.group).toBe('here');
+    const base = { search: '', sort: 'updated' as const, loadedIds: null };
+    expect(myItems([identity], { ...base, filter: 'disabled' }).flatMap((g) => ids(g.rows))).toEqual(['frontend-design@claude-plugins-official']);
+    expect(myItems([identity], { ...base, filter: 'enabled' }).flatMap((g) => ids(g.rows))).toEqual([]);
+    // records only in sibling worktrees, enabled by the project but off here: listed in this project, disabled
+    const [sibling] = identitiesOf([project('supabase@claude-plugins-official', '/work/maws-wt-1', { projectEnabled: true, enabled: false })], MARKETS, NO_VIEWS, null);
+    expect(sibling.group).toBe('here');
+    expect(sibling.enabledHere).toBe(false);
+  });
+
   it('draws one identity for 47 installations of one id', () => {
     const rows = [project('doperpowers@doperpowers', HERE), ...Array.from({ length: 45 }, (_, i) => project('doperpowers@doperpowers', `${HERE}/.claude/worktrees/wt-${i}`, { coversHere: false })), project('doperpowers@doperpowers', '/elsewhere')];
     const identities = identitiesOf(rows, MARKETS, NO_VIEWS, null);
@@ -131,6 +145,25 @@ describe('the library model: the representative installation', () => {
     const [identity] = identitiesOf([inst('x@m'), project('x@m', HERE), project('x@m', '/work', { here: false, coversHere: true }), project('x@m', '/a')], MARKETS, NO_VIEWS, null);
     expect(identity.actionable.map((i) => i.scope)).toEqual(['user', 'project']);
     expect(identity.actionable.every((i) => i.scope === 'user' || i.projectPath === HERE)).toBe(true);
+  });
+});
+
+describe('the library model: pseudo-scope installations are never actionable', () => {
+  it('a skills-directory plugin offers no change at user or project scope, even one here (U3 F1)', () => {
+    const user = inst('chatgpt-advisor@skills-dir');
+    const here = project('chatgpt-advisor@skills-dir', HERE);
+    for (const installation of [user, here]) {
+      const [identity] = identitiesOf([installation], MARKETS, NO_VIEWS, null);
+      expect(identity.actionable).toEqual([]);
+      expect(identity.group).toBe(installation.scope === 'project' ? 'here' : 'yours');
+    }
+  });
+
+  it('a session folder or a claude.ai sync offers no change', () => {
+    for (const scope of ['session', 'synced']) {
+      const [identity] = identitiesOf([inst('x@m', { scope, here: true, coversHere: true })], MARKETS, NO_VIEWS, null);
+      expect(identity.actionable).toEqual([]);
+    }
   });
 });
 
@@ -207,6 +240,14 @@ describe('the library model: the view', () => {
     expect(myItems(elsewhere, { ...base, sort: 'name' }).map((g) => g.group)).toEqual([null]);
     expect(myItems(elsewhere, { ...base, filter: 'enabled' }).map((g) => g.group)).toEqual(['anthropic']);
     expect(myItems(elsewhere, { ...base, search: 'code' }).map((g) => g.group)).toEqual(['anthropic']);
+    // nothing relevant here at all: the default view still says so under its heading; Name, unfiltered, says it in its
+    // one list; only a filter or a search finds nothing
+    const otherOnly = identitiesOf([project('supabase@claude-plugins-official', '/work/other', { enabled: false })], MARKETS, NO_VIEWS, null);
+    expect(myItems(otherOnly, base)).toEqual([{ group: 'here', rows: [] }]);
+    expect(myItems(otherOnly, { ...base, sort: 'name' })).toEqual([{ group: null, rows: [] }]);
+    expect(myItems(otherOnly, { ...base, filter: 'enabled' })).toEqual([]);
+    expect(myItems(otherOnly, { ...base, search: 'supa' })).toEqual([]);
+    expect(myItems(otherOnly, { ...base, sort: 'name', search: 'supa' })).toEqual([]);
   });
 
   it('Name flattens the groups into one list by display name', () => {

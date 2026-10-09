@@ -22,7 +22,7 @@ export interface PluginIdentity {
   representative: InstalledPlugin; // its row's version, date and target; the detail's default chip
   actionable: InstalledPlugin[]; // here or user: the only installations a change from this session acts on
   group: SourceGroup | null; // null: installed only for other projects
-  enabledHere: boolean;
+  enabledHere: boolean; // the CLI's effective `enabled` from this directory (a local override can turn off what the project enables)
   manifest: PluginManifestView | null; // the representative installation's view, once read
 }
 
@@ -31,10 +31,11 @@ export const BUILT_IN_DIRECTORY = 'anthropic-plugin-directory';
 const SKILLS_DIR = 'skills-dir';
 const CLI_SCOPES: ReadonlySet<string> = new Set(['user', 'project', 'local']);
 
-// A pseudo-scope installation: a `--plugin-dir` folder (session), a claude.ai sync, a skills-directory plugin.
+// A pseudo-scope installation: a `--plugin-dir` folder (session), a claude.ai sync, a skills-directory plugin (whose
+// scope reads user or project, U3 F1). The CLI's scopes do not reach it, so nothing from this session acts on it.
 const isPseudo = (p: InstalledPlugin): boolean => !CLI_SCOPES.has(p.scope) || p.marketplace === SKILLS_DIR;
 const isHere = (p: InstalledPlugin): boolean => p.here && (p.scope === 'project' || p.scope === 'local');
-const isActionable = (p: InstalledPlugin): boolean => isHere(p) || (p.scope === 'user' && p.marketplace !== SKILLS_DIR);
+const isActionable = (p: InstalledPlugin): boolean => !isPseudo(p) && (isHere(p) || p.scope === 'user');
 
 export function groupOfMarketplace(marketplace: string, marketplaces: readonly Marketplace[]): 'anthropic' | 'added' {
   if (marketplace === BUILT_IN_DIRECTORY) return 'anthropic';
@@ -55,7 +56,7 @@ export function representativeOf(installations: readonly InstalledPlugin[]): Ins
   const pick =
     installations.find((p) => isHere(p) && p.scope === 'local') ??
     installations.find((p) => isHere(p) && p.scope === 'project') ??
-    installations.find((p) => p.scope === 'user' && p.marketplace !== SKILLS_DIR) ??
+    installations.find((p) => p.scope === 'user' && !isPseudo(p)) ??
     installations.find((p) => p.coversHere) ??
     installations.find(isPseudo);
   return pick ?? [...installations].sort((a, b) => timeOf(b) - timeOf(a))[0];
@@ -88,8 +89,10 @@ export function identitiesOf(installed: readonly InstalledPlugin[], marketplaces
   for (const p of installed) byId.set(p.id, [...(byId.get(p.id) ?? []), p]);
   return [...byId].map(([id, installations]) => {
     const representative = representativeOf(installations);
-    const enabledHere = installations.some((p) => p.enabled || p.projectEnabled);
-    const relevant = enabledHere || installations.some((p) => p.scope === 'user' || p.coversHere || isPseudo(p)) || (loadedIds?.has(id) ?? false);
+    // the CLI prints one effective `enabled` per id as this directory sees it; `projectEnabled` (the project's settings
+    // file alone) makes a plugin relevant here and places it, but a local override can still turn it off
+    const enabledHere = installations.some((p) => p.enabled);
+    const relevant = enabledHere || installations.some((p) => p.projectEnabled || p.scope === 'user' || p.coversHere || isPseudo(p)) || (loadedIds?.has(id) ?? false);
     return {
       id,
       name: representative.name,
@@ -157,21 +160,27 @@ function shown(identity: PluginIdentity, filter: LibraryFilter, loadedIds: Reado
   }
 }
 
+// Whether the view narrows the list (a search or a Show other than All): only such a view can find nothing to match.
+export const isNarrowed = (view: { search: string; filter: LibraryFilter }): boolean => view.search.trim() !== '' || view.filter !== 'all';
+
 // The list as drawn: the groups in Desktop's order (an empty one dropped, except "In this project" in the default view,
-// which says so), each newest first; a sort other than the default flattens them into one list (group null); Other
-// projects is its own list.
+// which says so), each newest first; a sort other than the default flattens them into one list (group null), kept
+// empty when the view is not narrowed so it can say so too; Other projects is its own list. An empty result means
+// nothing matched the view's search or Show.
 export function myItems(identities: readonly PluginIdentity[], view: { search: string; filter: LibraryFilter; sort: LibrarySort; loadedIds: ReadonlySet<string> | null }): { group: SourceGroup | 'otherProjects' | null; rows: PluginIdentity[] }[] {
   const needle = view.search.trim().toLowerCase();
   const rows = identities.filter((i) => shown(i, view.filter, view.loadedIds) && matches(i, needle));
-  if (view.sort === 'name') return rows.length === 0 ? [] : [{ group: null, rows: [...rows].sort(byName) }];
+  const narrowed = isNarrowed(view);
+  if (view.sort === 'name') return rows.length === 0 && narrowed ? [] : [{ group: null, rows: [...rows].sort(byName) }];
   if (view.filter === 'otherProjects') return rows.length === 0 ? [] : [{ group: 'otherProjects', rows: [...rows].sort(byUpdated) }];
-  const defaultView = needle === '' && view.filter === 'all';
-  return GROUP_ORDER.map((group) => ({ group, rows: rows.filter((i) => i.group === group).sort(byUpdated) })).filter(({ group, rows }) => rows.length > 0 || (group === 'here' && defaultView));
+  return GROUP_ORDER.map((group) => ({ group, rows: rows.filter((i) => i.group === group).sort(byUpdated) })).filter(({ group, rows }) => rows.length > 0 || (group === 'here' && !narrowed));
 }
 
+export type LoadedOnly = { name: string; source: string; kind: 'builtin' | 'folder' | 'other' };
+
 // Loaded plugins that are no identity of the list: the engine's own (`@builtin`), a folder's (a skills directory, a
-// `--plugin-dir`), or another the CLI does not list.
-export function loadedOnly(loaded: readonly ObservedPlugin[], identities: readonly PluginIdentity[]): { name: string; source: string; kind: 'builtin' | 'folder' | 'other' }[] {
+// `--plugin-dir`), or another the CLI does not list. In the engine's order; `loadedOnlyShown` applies the view.
+export function loadedOnly(loaded: readonly ObservedPlugin[], identities: readonly PluginIdentity[]): LoadedOnly[] {
   const listed = new Set(identities.map((i) => i.id));
   return loaded
     .filter((p) => p.source === null || !listed.has(p.source))
@@ -180,4 +189,20 @@ export function loadedOnly(loaded: readonly ObservedPlugin[], identities: readon
       const kind = p.path === 'builtin' || source.endsWith('@builtin') ? 'builtin' : p.source === null || source.endsWith(`@${SKILLS_DIR}`) || source.endsWith('@inline') ? 'folder' : 'other';
       return { name: p.name, source, kind };
     });
+}
+
+// The loaded-only rows through the view's search (their name and id) and sort. They carry no date, so under either sort
+// the name orders them (Last updated's tie-breaker).
+export function loadedOnlyShown(extras: readonly LoadedOnly[], search: string): LoadedOnly[] {
+  const needle = search.trim().toLowerCase();
+  return extras.filter((p) => needle === '' || [p.name, p.source].some((text) => text.toLowerCase().includes(needle))).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+}
+
+// The init's problems under the plugins shown: all of them when the view is not searched (a plugin that failed to load is
+// no row), else those whose plugin is a shown row or matches the search. The engine names a problem's plugin by name.
+export function problemsShown<P extends { plugin: string }>(problems: readonly P[], search: string, rows: readonly PluginIdentity[], extras: readonly LoadedOnly[]): P[] {
+  const needle = search.trim().toLowerCase();
+  if (needle === '') return [...problems];
+  const shownNames = new Set([...rows.flatMap((i) => [i.id, i.name]), ...extras.flatMap((p) => [p.name, p.source])]);
+  return problems.filter((p) => shownNames.has(p.plugin) || p.plugin.toLowerCase().includes(needle));
 }

@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
@@ -98,7 +99,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   mods.rows = [];
   mods.setEnabled = null;
@@ -197,14 +198,25 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     await waitFor(() => expect(screen.getByText('The engine did not answer · showing the last value it reported')).toBeTruthy());
   });
 
-  it('on an exited session starts nothing, offers no reload, says it has not observed the loaded plugins, and still manages plugins through the CLI', async () => {
+  it('on an exited session starts nothing, offers no reload, lists the plugins it last reported, and still manages plugins through the CLI', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    expect(loadedLine().textContent).toBe('Not observed yet'); // A's facts reach the line when A lands; the live status is all until then
+    // E8's last-reported list (the architect's ruling, §5.6): the count with no freshness word, never a time invented
+    expect(loadedLine().textContent).toBe('11 plugins loaded in this session');
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect(menuItems('e8-probe@e8-scratch')).toEqual(['Turn off', 'Update', 'Uninstall…']);
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: '11 plugins loaded in this session' }));
+    expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     // opening /plugins acquires nothing (A's G5): no acquisition, start or launch of any kind
+    expect(backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command))).toEqual([]);
+  });
+
+  it('with no status for the session says Not observed yet, and still lists its plugins from its directory', async () => {
+    useSessions.setState({ records: new Map([[ID, { appId: ID, directory: cwd } as SessionRecord]]) });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(loadedLine().textContent).toBe('Not observed yet');
     expect(backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command))).toEqual([]);
   });
 
@@ -578,7 +590,7 @@ describe('plugins widget: whole-branch review fixes', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Other projects' }));
     const elsewhere = await waitFor(() => row('e8-probe@e8-scratch'));
     expect(elsewhere.textContent).toContain('In other · manage it from a session there');
-    expect(elsewhere.textContent).not.toContain('/work/other');
+    expect(elsewhere.outerHTML).not.toContain('/work/other'); // neither its words nor any attribute (a tooltip) names a path
     expect(within(elsewhere).queryByRole('button')).toBeNull();
     expect(row('e8-tools@e8-scratch')).toBeNull();
     // this project's own installation keeps its actions and needs no naming
@@ -722,5 +734,95 @@ describe('plugins widget: the library', () => {
     fireEvent.click(within(mod).getByRole('switch'));
     expect(setEnabled).toHaveBeenCalledWith('maws.to-human', false);
   });
-});
+  it('a plugin this project enables that a local override turns off reads Disabled and offers Turn on (U3 F1)', async () => {
+    installed = [plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true, projectEnabled: true, enabled: false }), plugin('e8-probe@e8-scratch')];
+    await ready();
+    const tools = row('e8-tools@e8-scratch');
+    expect(within(tools).getByText('Disabled')).toBeTruthy();
+    expect(menuItems('e8-tools@e8-scratch')).toEqual(['Turn on', 'Update', 'Uninstall…']);
+  });
 
+  it('a plugin managed from several other projects names them by count, its tooltip by basenames, never a path', async () => {
+    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/alpha', enabled: false }), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/srv/beta/', enabled: false })];
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    mount();
+    await waitFor(() => expect(within(section('my-items')).getByText('In this project')).toBeTruthy());
+    act(() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'otherProjects' } })));
+    const elsewhere = await waitFor(() => row('e8-probe@e8-scratch'));
+    const words = within(elsewhere).getByText('In 2 other projects · manage it from a session there');
+    expect(words.getAttribute('title')).toBe('alpha\nbeta');
+    expect(elsewhere.outerHTML).not.toMatch(/\/work\/alpha|\/srv\/beta/);
+  });
+
+  it('with every installation in another project, the default view keeps In this project and says it has none', async () => {
+    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other', enabled: false })];
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    mount();
+    await waitFor(() => expect(within(section('my-items')).getByText('No plugins installed for this project yet.')).toBeTruthy());
+    expect(within(section('my-items')).getByText('In this project')).toBeTruthy();
+    expect(within(section('my-items')).queryByText('Nothing matches these filters.')).toBeNull();
+    // a search that finds nothing is a no-match
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'nothing like this' } });
+    expect(within(section('my-items')).getByText('Nothing matches these filters.')).toBeTruthy();
+    expect(within(section('my-items')).queryByText('In this project')).toBeNull();
+  });
+
+  it('Loaded in this session searches and sorts its loaded-only rows, and shows only the shown plugins’ problems', async () => {
+    useSessions.setState({
+      engine: new Map([
+        [
+          ID,
+          {
+            ...backend.status(ID),
+            plugins: [
+              { name: 'zeta-tools', path: 'builtin', source: 'zeta-tools@builtin', version: null },
+              { name: 'mid-thing', path: '/cfg/plugins/cache/far/mid-thing/1.0.0', source: 'mid-thing@far', version: '1.0.0' },
+              { name: 'alpha-dir', path: '/Users/me/.claude/skills/alpha-dir', source: 'alpha-dir@skills-dir', version: null },
+            ],
+            pluginErrors: [{ plugin: 'zeta-tools', type: 'load', message: 'zeta failed', path: null }],
+            pluginWarnings: [{ plugin: 'alpha-dir', type: 'manifest', message: 'alpha warned' }],
+          },
+        ],
+      ]),
+    });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: '3 plugins loaded in this session' }));
+    const loadedRows = () => [...section('my-items').querySelectorAll('[data-loaded-row]')].map((r) => r.getAttribute('data-loaded-row'));
+    const problemText = () => section('my-items').querySelector('[data-plugins-group="problems"]')?.textContent ?? '';
+    // Last updated: none of them has a date, so the name decides (Desktop's tie-breaker)
+    expect(loadedRows()).toEqual(['alpha-dir@skills-dir', 'mid-thing@far', 'zeta-tools@builtin']);
+    expect(problemText()).toContain('zeta failed');
+    expect(problemText()).toContain('alpha warned');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Name' }));
+    expect(loadedRows()).toEqual(['alpha-dir@skills-dir', 'mid-thing@far', 'zeta-tools@builtin']);
+    const search = screen.getByRole('searchbox', { name: 'Search plugins' });
+    fireEvent.change(search, { target: { value: 'ZETA' } });
+    expect(loadedRows()).toEqual(['zeta-tools@builtin']);
+    expect(problemText()).toContain('zeta failed');
+    expect(problemText()).not.toContain('alpha warned');
+    fireEvent.change(search, { target: { value: 'nothing like this' } });
+    expect(loadedRows()).toEqual([]);
+    expect(problemText()).toBe('');
+    expect(within(section('my-items')).getByText('Nothing matches these filters.')).toBeTruthy();
+  });
+
+  it('a refused manifest read keeps the rows, says so with Retry, and the retry reads again', async () => {
+    let refuse = true;
+    backend.script('plugins.manifest', (input) => {
+      if (refuse) throw new WidgetBackendError({ code: 'timeout', message: 'plugins.manifest unanswered after 10 s' });
+      return { manifests: (input as { items: ManifestItemRef[] }).items.map((key) => manifestOf(key)) };
+    });
+    await ready();
+    const notice = await waitFor(() => within(section('my-items')).getByText(/Couldn.t read your plugins. details/).closest<HTMLElement>('[role="status"]')!);
+    expect(notice.textContent).toContain('plugins.manifest unanswered after 10 s');
+    expect(row('e8-probe@e8-scratch').textContent).toContain('E8 probe');
+    expect(row('e8-probe@e8-scratch').textContent).not.toContain('by E8');
+    refuse = false;
+    fireEvent.click(within(notice).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(row('e8-probe@e8-scratch').textContent).toContain('by E8'));
+    expect(within(section('my-items')).queryByText(/Couldn.t read your plugins. details/)).toBeNull();
+    expect(invoked('plugins.manifest')).toHaveLength(2);
+  });
+});

@@ -4,8 +4,11 @@
 // and the plugin types (`src/renderer/src/sessions/observed.ts`, `src/shared/engine/observed-facts.ts`),
 // `useAvailability` and `Availability` (`sessions/availability.ts`, `src/shared/ipc/schema/session.ts`), and
 // `acquisitionWords` and `AcquireOutcome` (`sessions/acquire.ts`, `src/shared/sessions/setup.ts`). What they answer
-// is the live status only: the loaded list is "now" when the process is ready and unknown otherwise (no observed facts
-// file before A), availability is usable or resumable, and there is no `refresh` (A's M3 adds it).
+// is the engine status only (no observed facts file before A): the loaded list is the status's whenever there is one,
+// "now" when its process is ready; a status that outlived its process keeps the list it last reported, as E8 drew it,
+// with freshness `unknown` because the status says no time (so the line names none, never an invented one; the
+// architect's ruling of 2026-10-09: no stand-in draws less than master did). Availability is usable or resumable, and
+// there is no `refresh` (A's M3 adds it).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { StartOutcome } from '@shared/sessions/setup';
@@ -39,7 +42,7 @@ const UNKNOWN: LoadedPlugins = { plugins: [], errors: [], warnings: [], freshnes
 
 export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins {
   const status = useSessions(useShallow((s) => s.engine.get(appSessionId) ?? null));
-  return useMemo(() => (status?.process === 'ready' ? { plugins: status.plugins, errors: status.pluginErrors, warnings: status.pluginWarnings, freshness: { kind: 'now' } } : UNKNOWN), [status]);
+  return useMemo(() => (status ? { plugins: status.plugins, errors: status.pluginErrors, warnings: status.pluginWarnings, freshness: status.process === 'ready' ? { kind: 'now' } : { kind: 'unknown' } } : UNKNOWN), [status]);
 }
 
 export type Availability = 'usable' | 'starting' | 'resumable' | 'foreign_held' | 'archived' | 'missing_directory' | 'needs_trust' | 'failed';

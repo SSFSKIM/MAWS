@@ -111,6 +111,29 @@ describe('the loaded line', () => {
     expect(document.querySelector('[data-plugins-loaded]')!.textContent).toContain('Loaded last time, 2 days ago');
   });
 
+  it('a still-pending Refresh keeps Starting… once the process is ready, until its outcome lands', async () => {
+    let answer: (outcome: AcquireOutcome) => void = () => {};
+    const refresh = vi.fn(() => new Promise<AcquireOutcome>((resolve) => (answer = resolve)));
+    const props: LoadedLineProps = { appSessionId: ID, availability: 'resumable', loaded: LAST, refresh, reloads: null, onShowLoaded: () => {}, now: NOW };
+    const view = render(<LoadedLine {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    view.rerender(<LoadedLine {...props} availability="usable" loaded={NOW_FACTS} reloads={RELOADS} />);
+    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
+    await act(async () => answer({ status: 'ready', appSessionId: ID, launched: true, joined: false }));
+    expect(screen.queryByText('Starting…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
+  });
+
+  it('a list with no freshness to say (a status that outlived its process, the stand-in) draws the count and the problems, no freshness word', () => {
+    const el = line({ loaded: { ...LAST, freshness: { kind: 'unknown' } } });
+    expect(el.textContent).toContain('3 plugins loaded in this session');
+    expect(screen.getByRole('button', { name: '1 problem' })).toBeTruthy();
+    expect(el.textContent).not.toContain('Loaded now');
+    expect(el.textContent).not.toContain('Loaded last time');
+    expect(el.textContent).not.toContain('Not observed yet');
+  });
+
   it('without A’s refresh (the stand-in), a session that is not ready offers no Refresh', () => {
     line({ availability: 'resumable', refresh: null });
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();

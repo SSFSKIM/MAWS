@@ -2,7 +2,7 @@
 // the app run only when `read` and complete, read again when an installation's `lastUpdated` moves, and never asked by a
 // harness mounting widgets passively.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -34,12 +34,17 @@ const C: ManifestRequest = { kind: 'installation', id: 'c@m', scope: 'user', pro
 
 let asked: ManifestItemRef[][];
 let answer: (key: ManifestItemRef) => PluginManifestView;
+// how the next call ends: answered, refused by the host, or the bridge's promise rejected
+let ending: 'answer' | 'refuse' | 'reject';
 beforeEach(() => {
   asked = [];
   answer = (key) => view(key);
+  ending = 'answer';
   window.maws = {
     invoke: vi.fn(async (_name: string, input: { items: ManifestItemRef[] }) => {
       asked.push(input.items);
+      if (ending === 'reject') throw new Error('the bridge went away');
+      if (ending === 'refuse') return { ok: false, error: { code: 'timeout', message: 'plugins.manifest unanswered after 10 s' } };
       return { ok: true, value: { manifests: input.items.map((key) => answer(key)) } };
     }),
     on: () => () => {},
@@ -90,5 +95,35 @@ describe('usePluginManifests', () => {
     renderHook(() => usePluginManifests(null, [{ ...A, id: 'q@m' }]), { wrapper: wrapper() });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(asked).toEqual([]);
+  });
+  for (const how of ['refuse', 'reject'] as const) {
+    it(`a ${how === 'refuse' ? 'refused' : 'rejected'} read settles with its words and a retry, keeps nothing, and the retry reads again`, async () => {
+      ending = how;
+      const items = [{ ...A, id: `${how}@m` }];
+      const hook = renderHook(() => usePluginManifests(CWD, items), { wrapper: wrapper() });
+      await waitFor(() => expect(hook.result.current.error).toBe(how === 'refuse' ? 'plugins.manifest unanswered after 10 s' : 'the bridge went away'));
+      expect(hook.result.current.loading).toBe(false);
+      expect(hook.result.current.views.size).toBe(0);
+      ending = 'answer';
+      act(() => hook.result.current.retry());
+      await waitFor(() => expect(hook.result.current.views.size).toBe(1));
+      expect(asked).toHaveLength(2);
+      expect(hook.result.current.error).toBeNull();
+      hook.unmount();
+    });
+  }
+
+  it('never keeps a failure: the next open asks again', async () => {
+    ending = 'refuse';
+    const items = [{ ...A, id: 'again@m' }];
+    const first = renderHook(() => usePluginManifests(CWD, items), { wrapper: wrapper() });
+    await waitFor(() => expect(first.result.current.error).not.toBeNull());
+    first.unmount();
+    ending = 'answer';
+    const second = renderHook(() => usePluginManifests(CWD, items), { wrapper: wrapper() });
+    await waitFor(() => expect(second.result.current.views.size).toBe(1));
+    expect(asked).toHaveLength(2);
+    expect(second.result.current.error).toBeNull();
+    second.unmount();
   });
 });
