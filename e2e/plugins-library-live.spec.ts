@@ -137,8 +137,8 @@ async function show(w: Locator, filter: string): Promise<void> {
 }
 // Counts the invokes main answers for each command, by wrapping their handlers where Electron keeps them (as
 // support/plugins-live.ts's read tracker does), so "starts no engine" and "sends nothing" are read from main itself,
-// not from a status that a fast turn could leave unchanged. A command with no handler (session.acquire before P2-A)
-// counts 0.
+// not from a status that a fast turn could leave unchanged. Only session.acquire may have no handler (before P2-A); it
+// then counts 0.
 type Tracked = 'session.start' | 'session.acquire' | 'session.send' | 'session.steer';
 async function trackInvokes(app: ElectronApplication): Promise<(commands: readonly Tracked[]) => Promise<number>> {
   await app.evaluate(({ ipcMain }) => {
@@ -147,7 +147,8 @@ async function trackInvokes(app: ElectronApplication): Promise<(commands: readon
     (globalThis as unknown as { __p2bInvokes: typeof log }).__p2bInvokes = log;
     for (const command of ['session.start', 'session.acquire', 'session.send', 'session.steer']) {
       const handler = handlers.get(`maws:cmd:${command}`);
-      if (!handler) continue;
+      if (!handler && command === 'session.acquire') continue;
+      if (!handler) throw new Error(`main answers no ${command}: nothing to count`);
       log[command] = 0;
       handlers.set(`maws:cmd:${command}`, (event, ...args) => {
         log[command] += 1;
