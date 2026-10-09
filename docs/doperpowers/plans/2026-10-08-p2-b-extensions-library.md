@@ -84,7 +84,7 @@ Rejected: a separate library host (a second one-open rule and focus return; the 
 
 - `InstalledPlugin` gains `installedAt: string | null`, `lastUpdated: string | null` (ISO times as printed; null when absent), `projectEnabled: boolean` (false when absent), `here: boolean` and `coversHere: boolean` (§5.1, computed in the host from realpaths: `fs.promises.realpath` of the `cwd` and of `projectPath`; a project that no longer exists is neither). When the row names `readFromFolder` (a directory marketplace's plugin the engine loads in place), `version` is the row's `folderVersion` when it has one, since that is the copy that loads (2.1.292 `cli.pretty.js:207456`). Nothing else of the row crosses: the row's `mcpServers` carries header and environment values verbatim (U3 F1) and stays dropped.
 - `AvailablePlugin` gains `source: PluginSourceRef | null` (the entry's source reduced to `{kind, url, repo, path}`, or the relative path string an in-repository entry has) and `installCount: number | null` (only the CLI's own number; null when the row has none).
-- `Marketplace` is unchanged (its `source` kind and `locator` decide the source group).
+- `Marketplace` (`src/shared/ipc/schema/marketplaces.ts`) gains only an optional `ref: string | null`, the branch or tag a marketplace is pinned to (null when none); its `source` kind and `locator` decide the source group. `PluginSourceRef`'s object form likewise gains an optional `ref` (cleared by the host when a separate `sha` pins the entry). Both exist for the fold key (§5.8): the engine gives no key to an entry carrying a `ref`, nor to a relative entry of a marketplace carrying one (2.1.292 :832437-832464).
 
 A version reading `unknown` or nothing is no version: the row shows none and the detail "Version not reported". A 12-character commit prefix (2.1.295 writes one for a manifest with no version, U3 F1) is a version the engine reports and is shown as it is. No version is ever inferred from a directory name.
 
@@ -332,7 +332,7 @@ Shared and host:
 ```ts
 // src/shared/ipc/schema/plugins.ts (P2-B block, additive)
 InstalledPluginSchema gains: installedAt: z.string().nullable(), lastUpdated: z.string().nullable(), projectEnabled: z.boolean(), here: z.boolean(), coversHere: z.boolean()
-export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable() })]);
+export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable(), ref: z.string().nullable().optional() })]);
 AvailablePluginSchema gains: source: PluginSourceRefSchema.nullable(), installCount: z.number().int().nonnegative().nullable()
 
 export const ManifestItemRefSchema = z.discriminatedUnion('kind', [
@@ -361,7 +361,7 @@ export const PluginManifestViewSchema = z.strictObject({
 // names/plugins.ts: 'plugins.manifest' appended to `commands`
 
 // src/shared/plugins/source-key.ts
-export function sourceKey(source: PluginSourceRef | null, marketplace: { source: string; locator: string | null } | null): string | null;
+export function sourceKey(source: PluginSourceRef | null, marketplace: { source: string; locator: string | null; ref?: string | null } | null): string | null; // the engine's key (Sb/Gze); none for an entry or a relative entry's marketplace carrying a ref
 export function isAnthropicDefaultMarketplace(marketplace: { source: string; locator: string | null }): boolean; // anthropics/claude-plugins-official by repo or GitHub URL
 
 // src/engine-host/plugins/manifest.ts
