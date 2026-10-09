@@ -4,6 +4,7 @@
 // cells whose labels read their results. The recorded `p1-maws-artifacts` journal pins the same rows; the disk path
 // (no events) is pinned over its exported transcript in disk.test.ts.
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
@@ -106,6 +107,30 @@ describe('the artifact row', () => {
     const rows = foldedRows(b.events);
     expect(rows.filter((row) => row.kind !== 'time').map((row) => row.kind)).toEqual(['user', 'divider', 'artifact', 'assistant_text']);
     expect(isPersistentRow(ofKind(rows, 'artifact')[0])).toBe(true);
+  });
+
+  // P2-E1 (D10): a side thread's update of an ancestor's artifact names the record's session on its row
+  it("a side thread's update of its parent's artifact carries the owner, from the event and from the result alone; its own carries none", () => {
+    const PARENT = 'app-parent' as AppSessionId;
+    const announced = builder();
+    announced.turn('u1');
+    announced.toolUse('toolu_t', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    announced.emit('maws.delivery.artifact', { toolUseId: tool('toolu_t'), requestId: request('r1'), action: 'update', artifactId: 'dash', deliverableId: DELIVERABLE, version: 2, title: 'Dashboard', ownerAppSessionId: PARENT });
+    announced.result('toolu_t', json({ status: 'updated', id: 'dash', deliverableId: DELIVERABLE, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: PARENT }));
+    expect(ofKind(expandedRows(announced.events), 'artifact')[0]).toMatchObject({ deliverableId: DELIVERABLE, version: 2, ownerAppSessionId: PARENT });
+
+    // the disk path: the call and its result, no host event
+    const disk = builder();
+    disk.turn('u1');
+    disk.toolUse('toolu_t', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    disk.result('toolu_t', json({ status: 'updated', id: 'dash', deliverableId: DELIVERABLE, version: 3, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: PARENT }));
+    expect(ofKind(expandedRows(disk.events), 'artifact')[0]).toMatchObject({ version: 3, ownerAppSessionId: PARENT });
+
+    const own = builder();
+    own.turn('u1');
+    own.toolUse('toolu_o', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    own.result('toolu_o', updated(2));
+    expect(ofKind(expandedRows(own.events), 'artifact')[0]).not.toHaveProperty('ownerAppSessionId');
   });
 });
 

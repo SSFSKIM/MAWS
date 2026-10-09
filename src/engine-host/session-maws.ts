@@ -40,6 +40,7 @@ export interface SessionMawsHost {
   // E1: where the `maws` tools record deliverables (EngineSessionOptions.deliverables); E10: whether an app is connected
   deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
   hasClient?: () => boolean;
+  artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -78,6 +79,7 @@ export class SessionMaws {
       tools: mawsTools({
         deliverables: this.deliverables, bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
+        artifactScope: host.artifactScope, // P2-E1
       }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),

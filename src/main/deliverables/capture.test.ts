@@ -132,6 +132,18 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
     expect(result.ok && result.consoleErrors).not.toContain('a warning');
   });
 
+  // P2-E1 (D10): a side thread's screenshot of its ancestor's artifact
+  it("reads an ancestor's record and renders its URL when the request names the owner; the requester's own otherwise", async () => {
+    const OWNER = 'App-Parent' as AppSessionId;
+    const read = reader();
+    expect((await captureArtifact(request({ ownerAppSessionId: OWNER }), { reader: read, env: {} })).ok).toBe(true);
+    expect(read.get).toHaveBeenCalledExactlyOnceWith(OWNER, ID);
+    expect(lastWindow().webContents.url).toBe(`maws-deliverable://${ID}/${OWNER}/2`);
+    read.get.mockClear();
+    await captureArtifact(request(), { reader: read, env: {} });
+    expect(read.get).toHaveBeenCalledExactlyOnceWith(A, ID);
+  });
+
   it('answers why when the record, the version or its file is gone, and opens no window', async () => {
     const gone = { get: vi.fn(async () => ({ record: null, present: [] })) };
     expect(await captureArtifact(request(), { reader: gone, env: {} })).toEqual({ ok: false, error: `no deliverable ${ID} in this session` });
@@ -200,6 +212,18 @@ describe('the capture service: the event in, the host command out, two at a time
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(3));
     expect(dispatch.mock.calls.map((call) => (call as unknown[])[0] as { requestId: string }).map((input) => input.requestId)).toEqual(['r1', 'r2', 'r3']);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ appSessionId: A, requestId: 'r1', result: expect.objectContaining({ ok: true, width: 640, height: 480 }) }));
+    stop();
+  });
+
+  it("P2-E1: a capture of an ancestor's artifact is answered to the requesting session", async () => {
+    let listener!: (payload: MawsArtifactCapture) => void;
+    const dispatch = vi.fn(async () => ({ ok: true }));
+    const read = reader();
+    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, reader: read, env: {} });
+    listener(request({ requestId: 'r-owner' as RequestId, ownerAppSessionId: 'App-Parent' as AppSessionId }));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1));
+    expect(read.get).toHaveBeenCalledWith('App-Parent', ID);
+    expect(dispatch).toHaveBeenCalledWith({ appSessionId: A, requestId: 'r-owner', result: expect.objectContaining({ ok: true }) });
     stop();
   });
 });

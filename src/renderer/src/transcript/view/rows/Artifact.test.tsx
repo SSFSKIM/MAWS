@@ -86,6 +86,16 @@ describe('the artifact row', () => {
     expect(child.actions.openDeliverable).toHaveBeenCalledExactlyOnceWith(APP, ID, 1);
   });
 
+  // P2-E1 (D10): a version a side thread wrote into its parent's artifact opens, and chips, against the parent's record
+  it("a row naming the artifact's owner opens the owner's record and reads the owner's console", () => {
+    const PARENT = 'app-parent' as AppSessionId;
+    const { actions, container } = renderRow({ ...BASE, action: 'update', version: 2, ownerAppSessionId: PARENT }, { storeKey: APP });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(actions.openDeliverable).toHaveBeenCalledExactlyOnceWith(PARENT, ID, 2);
+    act(() => deliverables.setState({ console: new Map([[consoleKey(PARENT, ID, 2), [{ level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null }]]]) }));
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+  });
+
   it('outside a mounted transcript Open is disabled', () => {
     const { actions } = renderRow(BASE);
     const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open' });

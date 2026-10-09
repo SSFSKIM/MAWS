@@ -6,7 +6,7 @@ import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { ARTIFACT_MAX_BYTES, ArtifactCreateResultSchema, ArtifactListResultSchema, ArtifactScreenshotResultSchema, ArtifactUpdateResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
-import { FileDeliverableStore } from '../deliverables/store';
+import { FileDeliverableStore, SessionChains } from '../deliverables/store';
 import { artifactCreateTool, artifactListTool, artifactScreenshotTool, artifactUpdateTool, externalReferenceCount, type ArtifactCaptureRequest } from './artifacts';
 import { HostBridge } from './bridge';
 import type { McpToolContext, McpToolResult } from './server';
@@ -258,6 +258,136 @@ describe('artifact_screenshot with no app connected (E10)', () => {
     expect(sent).toEqual([]);
   });
 });
+
+// P2-E1 start (2026-10-09): the artifact scope (G4, D10). A side thread's tools resolve over its own artifacts, then its
+// ancestors' nearest first; each session has a store of its own, as the launcher builds them, sharing one SessionChains.
+describe('the artifact scope of a side thread (P2-E1 G4)', () => {
+  const P = 'app-parent' as AppSessionId;
+  const T = 'app-thread' as AppSessionId;
+  const T2 = 'app-thread-2' as AppSessionId;
+  let family: { [K in 'parent' | 'thread' | 'thread2']: FileDeliverableStore };
+  let announced: [AppSessionId, string, string][];
+  beforeEach(() => {
+    const chains = new SessionChains();
+    announced = [];
+    const storeOf = () => new FileDeliverableStore(userData, { chains, onWritten: (record, change) => announced.push([record.appSessionId, record.id, change]) });
+    family = { parent: storeOf(), thread: storeOf(), thread2: storeOf() };
+  });
+  const parentDeps = () => ({ ...deps(), deliverables: family.parent });
+  const threadDeps = () => ({ ...deps(), deliverables: family.thread, artifactScope: [P] });
+  const parentCtx = (over: Partial<McpToolContext> = {}) => ctx({ appSessionId: P, ...over });
+  const threadCtx = (over: Partial<McpToolContext> = {}) => ctx({ appSessionId: T, ...over });
+  const underSession = (appSessionId: AppSessionId) => filesUnder(join(userData, 'deliverables', appSessionId));
+  async function parentCreated() {
+    const result = await artifactCreateTool(parentDeps()).call({ id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }, parentCtx({ toolUseId: 'toolu_create' as ToolUseId }));
+    expect(result.isError).toBeUndefined();
+  }
+
+  it("artifact_update on the parent's id writes the parent's next version, names the owner and leaves nothing under the thread", async () => {
+    await parentCreated();
+    writeFileSync(join(root, 'dashboard.html'), '<h1 style="font-size:4em">Dashboard</h1>');
+    const result = await artifactUpdateTool(threadDeps()).call({ id: 'dash', html_path: 'dashboard.html' }, threadCtx({ toolUseId: 'toolu_thread' as ToolUseId }));
+    const answer = { status: 'updated', id: 'dash', deliverableId: ID1, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: P };
+    expect(textOf(result)).toBe(JSON.stringify(answer, null, 2)); // the owner after today's fields
+    expect(ArtifactUpdateResultSchema.parse(jsonOf(result))).toEqual(answer);
+    const v2 = join(userData, 'deliverables', P, ID1, 'v2.html');
+    expect(readFileSync(v2, 'utf8')).toContain('font-size:4em');
+    expect(await family.parent.get(P, ID1)).toMatchObject({ appSessionId: P, path: v2, versions: [{ toolUseId: 'toolu_create' }, { path: v2, toolUseId: 'toolu_thread' }] });
+    expect(underSession(T)).toEqual([]);
+    expect(announced).toEqual([[P, ID1, 'created'], [P, ID1, 'updated']]); // announced under the record's own session
+  });
+
+  it('a thread of a thread updates the family root’s artifact through its chain', async () => {
+    await parentCreated();
+    const result = await artifactUpdateTool({ ...deps(), deliverables: family.thread2, artifactScope: [T, P] }).call({ id: 'dash', html_path: 'dashboard.html' }, ctx({ appSessionId: T2 }));
+    expect(jsonOf(result)).toMatchObject({ version: 2, ownerAppSessionId: P });
+    expect((await family.parent.get(P, ID1))!.versions).toHaveLength(2);
+    expect(underSession(T)).toEqual([]);
+    expect(underSession(T2)).toEqual([]);
+  });
+
+  it("a session's own artifact stays nearest: no owner on its own update, and a copy it holds of an ancestor's id is the one updated", async () => {
+    await parentCreated();
+    const own = await artifactCreateTool(threadDeps()).call({ id: 'notes', html_path: 'dashboard.html', title: 'Notes' }, threadCtx());
+    const ownId = (jsonOf(own) as { deliverableId: string }).deliverableId;
+    expect(textOf(await artifactUpdateTool(threadDeps()).call({ id: 'notes', html_path: 'dashboard.html' }, threadCtx()))).toBe(
+      JSON.stringify({ status: 'updated', id: 'notes', deliverableId: ownId, version: 2, title: 'Notes', externalReferences: 1 }, null, 2),
+    );
+    // a copy registered under the thread before the scope existed (the tracker's kind): found first, being nearest
+    const copyId = '00000000-0000-4000-8000-0000000000c0';
+    await family.thread.write({ id: copyId, appSessionId: T, kind: 'artifact', artifactId: 'dash', title: 'Copy', path: '/x/v1.html', versions: [{ path: '/x/v1.html', at: at(0) }], createdAt: at(50) });
+    expect(jsonOf(await artifactUpdateTool(threadDeps()).call({ id: 'dash', html_path: 'dashboard.html' }, threadCtx()))).toEqual({ status: 'updated', id: 'dash', deliverableId: copyId, version: 2, title: 'Copy', externalReferences: 1 });
+    expect((await family.parent.get(P, ID1))!.versions).toHaveLength(1);
+  });
+
+  it('an id no session of the chain holds is refused as today', async () => {
+    await parentCreated();
+    expect(textOf(await artifactUpdateTool(threadDeps()).call({ id: 'nope', html_path: 'dashboard.html' }, threadCtx()))).toBe(TOOL_ERRORS.noArtifact('artifact_update', 'nope'));
+  });
+
+  it('artifact_list lists its own artifacts, then its ancestors’ with their owner, an id already listed nearer skipped', async () => {
+    await parentCreated();
+    await artifactCreateTool(parentDeps()).call({ id: 'shared', html_path: 'dashboard.html', title: 'Parent shared' }, parentCtx());
+    await artifactCreateTool({ ...deps(), deliverables: family.thread }).call({ id: 'shared', html_path: 'dashboard.html', title: 'Thread shared' }, threadCtx()); // a copy made before the scope existed
+    await artifactCreateTool(threadDeps()).call({ id: 'notes', html_path: 'dashboard.html', title: 'Notes' }, threadCtx());
+    const listed = ArtifactListResultSchema.parse(jsonOf(await artifactListTool(threadDeps()).call({}, threadCtx())));
+    expect(listed.artifacts.map((a) => [a.id, a.title, a.ownerAppSessionId])).toEqual([
+      ['shared', 'Thread shared', undefined],
+      ['notes', 'Notes', undefined],
+      ['dash', 'Dashboard', P],
+    ]);
+    expect(Object.keys(listed.artifacts[2]!).at(-1)).toBe('ownerAppSessionId');
+    expect('ownerAppSessionId' in listed.artifacts[0]!).toBe(false);
+    // the parent does not see the thread's own artifacts (A-39: a thread's own stay its own)
+    const parentList = ArtifactListResultSchema.parse(jsonOf(await artifactListTool(parentDeps()).call({}, parentCtx())));
+    expect(parentList.artifacts.map((a) => a.id)).toEqual(['dash', 'shared']);
+  });
+
+  it("artifact_screenshot captures an ancestor's artifact: the capture names the owner, the answer too", async () => {
+    await parentCreated();
+    const sent: ArtifactCaptureRequest[] = [];
+    const capture = new HostBridge<ArtifactCaptureRequest, MawsArtifactCapturedResult>({ send: (r) => sent.push(r), answerMs: CAPTURE_ANSWER_MS });
+    const pending = artifactScreenshotTool({ deliverables: family.thread, capture, artifactScope: [P] }).call({ id: 'dash' }, threadCtx({ requestId: 'r-shot' as RequestId }));
+    for (let i = 0; i < 100 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(sent).toEqual([{ requestId: 'r-shot', deliverableId: ID1, version: 1, width: 1280, height: 800, ownerAppSessionId: P }]);
+    capture.answer('r-shot' as RequestId, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] });
+    expect(ArtifactScreenshotResultSchema.parse(jsonOf(await pending))).toMatchObject({ deliverableId: ID1, version: 1, ownerAppSessionId: P });
+  });
+
+  it('artifact_create refuses an id an ancestor holds, with its own text, and writes nothing', async () => {
+    await parentCreated();
+    const result = await artifactCreateTool(threadDeps()).call({ id: 'dash', html_path: 'dashboard.html', title: 'Mine' }, threadCtx());
+    expect(result).toEqual({ content: [{ type: 'text', text: 'artifact_create: an artifact "dash" already exists in the conversation this side thread was opened from; use artifact_update' }], isError: true });
+    expect(TOOL_ERRORS.artifactExistsInParent('dash')).toBe(textOf(result));
+    expect(underSession(T)).toEqual([]);
+  });
+
+  it("a parent update and a thread update racing on one artifact append v2 then v3 in the order they entered the owner's chain", async () => {
+    await parentCreated();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let copying = false;
+    const held = Object.assign(Object.create(family.parent) as FileDeliverableStore, {
+      copyVersion: async (...args: Parameters<FileDeliverableStore['copyVersion']>) => {
+        copying = true;
+        await gate;
+        return family.parent.copyVersion(...args);
+      },
+    });
+    const first = artifactUpdateTool({ ...deps(), deliverables: held }).call({ id: 'dash', html_path: 'dashboard.html' }, parentCtx({ toolUseId: 'toolu_parent' as ToolUseId }));
+    for (let i = 0; i < 100 && !copying; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(copying).toBe(true);
+    const second = artifactUpdateTool(threadDeps()).call({ id: 'dash', html_path: 'dashboard.html' }, threadCtx({ toolUseId: 'toolu_thread' as ToolUseId }));
+    await new Promise((r) => setTimeout(r, 20)); // the thread's call reaches the parent's chain and waits there
+    release();
+    const [parentAnswer, threadAnswer] = await Promise.all([first, second]);
+    expect(jsonOf(parentAnswer)).toMatchObject({ version: 2 });
+    expect(jsonOf(threadAnswer)).toMatchObject({ version: 3, ownerAppSessionId: P });
+    expect((await family.parent.get(P, ID1))!.versions.map((v) => v.toolUseId)).toEqual(['toolu_create', 'toolu_parent', 'toolu_thread']);
+    expect(filesUnder(join(userData, 'deliverables', P, ID1))).toEqual(['v1.html', 'v2.html', 'v3.html']);
+  });
+});
+// P2-E1 end
 
 describe('externalReferenceCount', () => {
   it('counts the http(s) URLs a page names in src, href, srcset, url( and @import positions, and no data: URL', () => {

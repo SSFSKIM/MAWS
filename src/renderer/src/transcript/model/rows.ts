@@ -111,7 +111,11 @@ export type Row = RowBase &
     // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
     // carry none), `deliverableId` and `version` null until the version is registered; `answered` once the call's result
     // is in (a result that does not parse leaves the version null on an answered row)
-    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true /* E11: as the delivery row's */ }
+    // P2-E1: `ownerAppSessionId`, from the result or the event, when the version is a side thread's ancestor's record's
+    | {
+        kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
+        neverAnswered?: true /* E11: as the delivery row's */; ownerAppSessionId?: AppSessionId /* P2-E1 */;
+      }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,
     // `target` as `maws.browser.action` names them; `value`: a select's option, a key, a check or a scroll amount, never

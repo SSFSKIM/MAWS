@@ -178,4 +178,36 @@ describe('side threads', () => {
     expect(h.index.sessions.get(outcome.appSessionId)!.lineage).toEqual({ kind: 'fork', parentAppSessionId: parent.appId, parentEngineSessionId: SID, openedBy: 'fork' });
     expect(parentEvents(parent.appId)).toEqual([]); // a fork is no side thread: no row in the parent
   });
+
+  // P2-E1 start (2026-10-09): the artifact scope beside the launch spec (D10)
+  describe('the artifact scope (P2-E1 G4)', () => {
+    const launchOf = (appSessionId: string) => h.host.calledWith('session.launch').filter((input) => (input as { spec: LaunchSpec }).spec.appSessionId === appSessionId) as { spec: LaunchSpec; artifactScope?: AppSessionId[] }[];
+
+    it('a side thread launches with its ancestors nearest first, a thread of a thread through its parent thread to the root; a fork with none', async () => {
+      const parent = parentRecord();
+      const first = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+      await h.settled(first.appSessionId);
+      expect(launchOf(first.appSessionId).map((input) => input.artifactScope)).toEqual([[parent.appId]]);
+      const nested = await h.service.openSideThread(first.appSessionId, { kind: 'btw', exchanges: [{ question: 'Q?', response: 'A' }], text: 'More.' });
+      await h.settled(nested.appSessionId);
+      expect(launchOf(nested.appSessionId).map((input) => input.artifactScope)).toEqual([[first.appSessionId, parent.appId]]);
+      const fork = await h.service.fork(parent.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+      await h.settled(fork.appSessionId);
+      expect(launchOf(fork.appSessionId)).toEqual([{ spec: expect.anything() }]); // no artifactScope key at all
+    });
+
+    it("a side thread's resume launches with its scope again; a root's resume with none", async () => {
+      const parent = parentRecord();
+      const thread = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+      await h.settled(thread.appSessionId);
+      h.host.table.clear(); // both exited
+      expect(await h.service.startSession(thread.appSessionId, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(thread.appSessionId, 2)).toMatchObject({ phase: 'ready' });
+      expect(launchOf(thread.appSessionId).map((input) => input.artifactScope)).toEqual([[parent.appId], [parent.appId]]);
+      await h.service.startSession(parent.appId, { message: null, options: {} });
+      expect(await h.settled(parent.appId)).toMatchObject({ phase: 'ready' });
+      expect(launchOf(parent.appId)).toEqual([{ spec: expect.anything() }]);
+    });
+  });
+  // P2-E1 end
 });
