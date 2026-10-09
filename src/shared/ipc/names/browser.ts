@@ -13,7 +13,7 @@ export const commands = [
   // E4b end
   'browser.agent.activities.list', // E13
   // cua #90 start
-  'browser.bookmarks.tree', 'browser.bookmarks.sync',
+  'browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons',
   // cua #90 end
 ] as const;
 

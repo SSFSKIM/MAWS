@@ -18,7 +18,9 @@ interface Row {
 }
 
 // LIKE's wildcards in typed text are text.
-const likePattern = (query: string) => `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+const escapeLike = (query: string) => query.replace(/[\\%_]/g, (char) => `\\${char}`);
+const likePattern = (query: string) => `%${escapeLike(query)}%`;
+const prefixPattern = (query: string) => `${escapeLike(query)}%`;
 
 export class BrowserBookmarksStore {
   constructor(private readonly db: Db) {}
@@ -73,15 +75,20 @@ export class BrowserBookmarksStore {
     return tree;
   }
 
-  // URL bookmarks whose name or URL holds `query` (ASCII case-insensitively, SQLite's LIKE), in document order, each URL
-  // once (its first bookmark's name); an empty query matches nothing, so an empty field suggests history only.
+  // URL bookmarks whose name or URL holds `query` (ASCII case-insensitively, SQLite's LIKE), names matching first (M1b),
+  // else in document order, each URL once (its first bookmark's name); an empty query matches nothing, so an empty field
+  // suggests history only.
   suggest(partition: string, query: string, limit: number): { url: string; title: string | null }[] {
     if (this.db.readOnly || query === '') return [];
     return this.db
       .all<{ url: string; name: string }>(
-        `SELECT url, name, min(id) AS first FROM browser_bookmarks WHERE partition = ?1 AND kind = 'url' AND (url LIKE ?2 ESCAPE '\\' OR name LIKE ?2 ESCAPE '\\')
-         GROUP BY url ORDER BY first LIMIT ?3`,
-        partition, likePattern(query), limit,
+        // cua #90 M1b: a name starting with the query, then a name holding it, then a URL holding it (Chrome's omnibox
+        // ranks a title match over a URL's), each in document order
+        `SELECT url, name FROM (
+           SELECT url, name, min(id) AS first FROM browser_bookmarks WHERE partition = ?1 AND kind = 'url' AND (url LIKE ?2 ESCAPE '\\' OR name LIKE ?2 ESCAPE '\\')
+           GROUP BY url
+         ) ORDER BY CASE WHEN name LIKE ?4 ESCAPE '\\' THEN 0 WHEN name LIKE ?2 ESCAPE '\\' THEN 1 ELSE 2 END, first LIMIT ?3`,
+        partition, likePattern(query), limit, prefixPattern(query),
       )
       .map(({ url, name }) => ({ url, title: name === '' ? null : name }));
   }

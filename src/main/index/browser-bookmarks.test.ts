@@ -135,6 +135,14 @@ describe('BrowserBookmarksStore', () => {
     expect(index.browserBookmarks.suggest(P, '', 8)).toEqual([]); // an empty field suggests history only
   });
 
+  // cua #90 M1b: Chrome's omnibox ranks a title match over a URL match; a URL's random path must not crowd out the
+  // bookmark whose name the person typed (the field shows at most 3)
+  it('ranks a name that starts with the query, then a name that holds it, then a URL that holds it, each in document order', () => {
+    index.browserBookmarks.replace(P, tree([u('A', 'https://a.example/x-f1'), u('B', 'https://b.example/'), u('Of1', 'https://c.example/'), u('F1', 'https://d.example/'), u('f1 again', 'https://e.example/')]));
+    expect(index.browserBookmarks.suggest(P, 'f1', 3).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1']);
+    expect(index.browserBookmarks.suggest(P, 'f1', 8).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1', 'A']);
+  });
+
   it('the boot sweep removes every partition it is not given', () => {
     index.browserBookmarks.replace(P, SAMPLE);
     index.browserBookmarks.replace(W, tree([u('W1', 'https://w1.example/')]));

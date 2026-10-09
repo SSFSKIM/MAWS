@@ -241,7 +241,7 @@ export class Navigator {
       if (!live()) return;
       const request = (this.faviconRequests.get(entry) ?? 0) + 1;
       this.faviconRequests.set(entry, request);
-      void this.deps.favicons.resolve(entry.tab.partition, favicons).then((favicon) => {
+      void this.deps.favicons.resolve(entry.tab.partition, favicons, entry.committedUrl /* cua #90: the bar's icons */).then((favicon) => {
         if (live() && this.faviconRequests.get(entry) === request) store.update(tabId, { favicon });
       });
     });

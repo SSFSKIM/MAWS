@@ -43,7 +43,9 @@ import { ImportedProfileSchema } from '../../browser/profiles';
 import { AbsolutePathSchema } from './settings';
 // E4b end
 // cua #90 start
-import { BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
+import { BOOKMARK_FAVICON_ORIGINS_MAX, BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
+
+const BookmarkNodeIdSchema = z.number().int().min(1); // an index row's id (the empty tree's roots, 0, are never acted on)
 // cua #90 end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
@@ -62,7 +64,8 @@ const TabOnly = z.strictObject({ tabId: BrowserTabIdSchema });
 export const BrowserTabsChangedSchema = z.strictObject({ appSessionId: AppSessionIdSchema, tabs: z.array(BrowserTabSchema), selected: BrowserTabIdSchema.nullable() });
 export type BrowserTabsChanged = z.infer<typeof BrowserTabsChangedSchema>;
 
-export const BrowserChromeCommandSchema = z.strictObject({ tabId: BrowserTabIdSchema, command: z.enum(['focusAddress', 'openFind', 'closeFind']) });
+// cua #90: `toggleBookmarksBar`, ⌘⇧B pressed inside the page (the chrome flips `browser.bookmarksBar`)
+export const BrowserChromeCommandSchema = z.strictObject({ tabId: BrowserTabIdSchema, command: z.enum(['focusAddress', 'openFind', 'closeFind', 'toggleBookmarksBar']) });
 export type BrowserChromeCommand = z.infer<typeof BrowserChromeCommandSchema>;
 
 // A transient chrome notice (4 s), never an app toast (E4a Design §3 and Decision Log 28). `refusedScheme` is a page's
@@ -264,6 +267,30 @@ export const commands = {
       z.strictObject({ syncedAt: z.iso.datetime(), count: ImportCountSchema }),
       z.strictObject({ error: z.union([BookmarkSyncErrorSchema, z.literal('refused')]), reason: ImportTextSchema.optional() }),
     ]),
+    owner: 'main',
+  },
+  // The bar's commands name the tab they came from: main reads the partition and the session from it, so a node id is
+  // looked up in that tab's partition only (a node of another partition is unknown) and every page opens in that
+  // tab's session. `open`: a chip's click (`current`, as a link the person clicked) or ⌘-click and middle-click
+  // (`newTab`, unselected). `menu`: a folder's native menu, or the » menu of the chips from `hiddenFrom` on and the
+  // other roots, popped at `anchor` (CSS px of the window's content area) on the sender's window; the chosen item acts in
+  // main. `favicons`: the icons the partition's favicon cache already holds for these page origins (no fetch).
+  'browser.bookmarks.open': { input: z.strictObject({ tabId: BrowserTabIdSchema, nodeId: BookmarkNodeIdSchema, how: z.enum(['current', 'newTab']) }), output: z.void(), owner: 'main' },
+  'browser.bookmarks.menu': {
+    input: z.strictObject({
+      tabId: BrowserTabIdSchema,
+      request: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('folder'), nodeId: BookmarkNodeIdSchema }),
+        z.strictObject({ kind: z.literal('overflow'), hiddenFrom: z.number().int().min(0) }),
+      ]),
+      anchor: z.strictObject({ x: z.number().int(), y: z.number().int() }),
+    }),
+    output: z.void(),
+    owner: 'main',
+  },
+  'browser.bookmarks.favicons': {
+    input: z.strictObject({ partition: BrowserPartitionSchema, origins: z.array(z.string().max(2048)).max(BOOKMARK_FAVICON_ORIGINS_MAX) }),
+    output: z.strictObject({ icons: z.record(z.string(), z.string()) }),
     owner: 'main',
   },
   // cua #90 end

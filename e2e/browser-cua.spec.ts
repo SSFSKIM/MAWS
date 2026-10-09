@@ -19,6 +19,10 @@
 // app restarts over the same profile (cua board #93): the session's activity lists the same as before the quit.
 // cua board #98's case: on a leased idle tab the person's own navigations are theirs, never an agent row: ⌘R in the page
 // (through the page's input hook) and the chrome's Reload over IPC (through none, which the Navigator now stamps).
+// cua board #90's case (its spec's acceptance 11): a person's bookmark click on a leased idle tab of an imported profile
+// (`browser.bookmarks.open` from the window) is theirs too: no agent row, and the agent's next acting command within the
+// hand-back window is refused as the person's; the agent's own navigation through CDP still makes its row. The profile is
+// imported over IPC from the synthetic Chrome fixture (bookmarks only), never the owner's Chrome.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -30,6 +34,10 @@ import { invoke, value } from './support/c7-replay';
 import { browserIn, tabsOf } from './support/browser-scene';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { closeScene, launchScene, scratchProject, show } from './support/maws-tools';
+// cua #90 start
+import { profilePartition } from '@shared/browser/tab';
+import { buildChromeUserData } from '../test/support/chrome-profile';
+// cua #90 end
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -378,3 +386,66 @@ test('the person\'s own navigations of a leased idle tab are theirs: ⌘R in the
     rmSync(userData, { recursive: true, force: true });
   }
 });
+
+// cua #90 start
+test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, and the agent\'s acting command in the hand-back window is refused; the agent\'s own navigation still makes its row', async () => {
+  const userData = mkdtempSync('/tmp/mcua-e2e-');
+  const chromeDir = mkdtempSync('/tmp/mcua-chrome-');
+  const pages = await startPages();
+  const chrome = buildChromeUserData(chromeDir, { bookmarksOrigin: pages.origin });
+  const maws = await launchMaws({
+    userData,
+    env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_CHROME_USER_DATA: chrome.dir, MAWS_E2E_KEYCHAIN: `file:${chrome.passwordFile}` },
+  });
+  let host: FakeHost | null = null;
+  try {
+    const app = seam(maws);
+    // Default imported with its bookmarks alone, and made the profile new tabs open in
+    const { inspectionId } = value(await invoke(maws.page, 'browser.import.inspect', { userDataDir: chrome.dir, profileDir: 'Default' }));
+    value(await invoke(maws.page, 'browser.import.start', { inspectionId, categories: { history: false, cookies: false, extensions: false, bookmarks: true }, extensionIds: [], allowUnverifiedExtensions: false }));
+    await expect.poll(async () => value(await invoke(maws.page, 'browser.import.list', undefined)).profiles.map((record) => record.bookmarks?.count ?? null), { timeout: 30_000 }).toEqual([46]);
+    value(await invoke(maws.page, 'settings.set', { browser: { profile: 'Default' } }));
+    const partition = profilePartition('Default');
+    const a = value(await invoke(maws.page, 'browser.bookmarks.tree', { partition })).tree.bar.children[0]!;
+    expect(a).toMatchObject({ kind: 'url', name: 'A', url: chrome.profiles.Default.bookmarks!.urls.A });
+
+    await maws.page.evaluate(() => {
+      const w = window as unknown as { __acts: unknown[]; maws: { on(name: string, listener: (payload: unknown) => void): () => void } };
+      w.__acts = [];
+      w.maws.on('browser.agent.activity', (payload) => void w.__acts.push(payload));
+    });
+    const kinds = () => maws.page.evaluate(() => (window as unknown as { __acts: { activity: { kind: string } }[] }).__acts.map((act) => act.activity.kind));
+    host = await connectFakeHost((await app.socketPathFor(A))!);
+    const created = await host.request<{ id: number }>('tabs.create', { url: pages.url('/'), group: { key: 's', title: 'cua' } });
+    await host.waitFor('tabs.updated', (p) => p.tabId === created.id && p.status === 'complete' && String(p.url).startsWith(pages.origin));
+    await host.request('debugger.attach', { tabId: created.id });
+    const tab = (await app.inspect())[A]!.leased[0]!;
+    expect(value(await invoke(maws.page, 'browser.tabs.list', {})).tabs.find((t) => t.tabId === tab)?.partition).toBe(partition);
+    const send = cdp(host, created.id);
+    await send('Page.enable');
+    expect(await app.control(tab)).toBe('idle');
+    const committed = () => host!.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.frameNavigated').length;
+
+    // the person clicks the bar's A: the tab loads it as theirs
+    const before = committed();
+    expect(await invoke(maws.page, 'browser.bookmarks.open', { tabId: tab, nodeId: a.id, how: 'current' })).toMatchObject({ ok: true });
+    await expect.poll(committed).toBeGreaterThan(before);
+    // the agent's acting command in the hand-back window: the takeover gate holds it and refuses it as the person's
+    await expect(send('Runtime.evaluate', { expression: `document.title = 'agent'; 1`, returnByValue: true }, { timeoutMs: 3_000 })).rejects.toThrow('A person is using this tab; wait and retry');
+    expect(await app.control(tab)).toBe('human');
+    expect(await kinds()).toEqual(['tabOpened']); // no agent row for the person's bookmark
+
+    // handed back, the agent's own navigation makes its row
+    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    await send('Page.navigate', { url: pages.url('/frames.html') });
+    await expect.poll(kinds, { timeout: 5_000 }).toEqual(['tabOpened', 'navigated']);
+  } finally {
+    await host?.close();
+    await maws.cleanup();
+    await pages.close();
+    rmSync(userData, { recursive: true, force: true });
+    rmSync(chromeDir, { recursive: true, force: true });
+  }
+});
+// cua #90 end
+

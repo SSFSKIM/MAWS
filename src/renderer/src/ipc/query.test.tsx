@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { IpcCommandError, QUERY_COMMANDS, useCommand } from './query';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,7 +21,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -49,7 +49,7 @@ describe('useCommand is for reads only', () => {
     const e2 = ['deliverables.list', 'deliverables.listAll', 'deliverables.get']; // E2: the deliverable store's reads
     const e4a = ['browser.tabs.list', 'browser.history.suggest', 'browser.profiles.list']; // E4a: the browser's tab list, suggestions, profiles
     const e4b = ['browser.import.profiles', 'browser.import.list']; // E4b: the import sheet's picker, the imported records
-    const cua90 = ['browser.bookmarks.tree']; // cua #90: the bookmarks bar's tree
+    const cua90 = ['browser.bookmarks.tree', 'browser.bookmarks.favicons']; // cua #90: the bookmarks bar's tree and icons
     expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2, ...e4a, ...e4b, ...cua90].sort());
   });
 

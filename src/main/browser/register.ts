@@ -7,6 +7,7 @@ import { BROWSER_SUGGESTIONS_MAX } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
+import type { BrowserWindow, WebContents } from 'electron';
 import type { BrowserBookmarksStore } from '../index/browser-bookmarks';
 import type { BrowserHistoryStore, BrowserSuggestion } from '../index/browser-history';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../ipc/router';
@@ -15,6 +16,10 @@ import type { Downloads } from './downloads';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import type { ViewManager } from './view';
+// cua #90 start
+import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
+import type { Favicons } from './favicon';
+// cua #90 end
 
 export interface BrowserHandlerDeps {
   store: TabStore;
@@ -23,6 +28,11 @@ export interface BrowserHandlerDeps {
   downloads: Pick<Downloads, 'reveal'>;
   history: Pick<BrowserHistoryStore, 'suggest'>;
   bookmarks: Pick<BrowserBookmarksStore, 'suggest'>; // cua #90: an imported profile's bookmarks, suggested first
+  // cua #90 start: the bookmarks bar's chips and menus, the sender's app window (where a menu pops), the bar's icons
+  bar: Pick<BookmarkBar, 'open' | 'menu'>;
+  windowOf(sender: WebContents): BrowserWindow | null;
+  favicons: Pick<Favicons, 'forOrigins'>;
+  // cua #90 end
   profiles(): BrowserProfile[];
   register: typeof registerMainHandler;
 }
@@ -33,7 +43,7 @@ function knownTabs<N extends CommandName>(handler: MainHandler<N>): MainHandler<
     try {
       return handler(input, context);
     } catch (error) {
-      if (error instanceof UnknownTabError) throw new CommandFailure(ipcError('invalid_input', error.message));
+      if (error instanceof UnknownTabError || error instanceof UnknownBookmarkError /* cua #90 */) throw new CommandFailure(ipcError('invalid_input', error.message));
       throw error;
     }
   };
@@ -64,7 +74,7 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, profiles, register }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, profiles, register }: BrowserHandlerDeps): void {
   register('browser.tabs.list', ({ appSessionId }) => store.list(appSessionId === undefined ? undefined : session(appSessionId)));
   register('browser.tabs.open', (request) => store.open({ ...request, appSessionId: session(request.appSessionId) }));
   register('browser.tabs.close', knownTabs(({ tabId }) => store.close(tabId)));
@@ -91,4 +101,15 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   });
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
   register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
+  // cua #90 start: the bookmarks bar (bookmarks/bar.ts): a chip's click, a native menu on the sender's window, the icons
+  register('browser.bookmarks.open', knownTabs(({ tabId, nodeId, how }) => bar.open(tabId, nodeId, how)));
+  register(
+    'browser.bookmarks.menu',
+    knownTabs(({ tabId, request, anchor }, { sender }) => {
+      const window = windowOf(sender);
+      if (window) bar.menu(tabId, request, anchor, window);
+    }),
+  );
+  register('browser.bookmarks.favicons', ({ partition, origins }) => ({ icons: favicons.forOrigins(partition, origins) }));
+  // cua #90 end
 }

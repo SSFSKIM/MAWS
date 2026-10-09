@@ -93,6 +93,8 @@ export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryCli
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.profiles.list'] });
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.import.profiles'] }); // the picker's "Imported" marks
     }),
+    // cua #90: a partition's bookmark rows were replaced (an import, a sync): its bars read the tree again
+    client.on('browser.bookmarks.changed', ({ partition }) => void queries.invalidateQueries({ queryKey: ['maws', 'browser.bookmarks.tree', { partition }] })),
   ];
   void list(client);
   return () => offs.forEach((off) => off());

@@ -3,9 +3,9 @@
 // a struck lock for http, centered as Codex's is; an empty tab shows the placeholder. Focused (a click, or main's
 // `focusAddress` for ⌘L pressed in the page) it holds the whole URL selected; typing opens the suggestions: the typed
 // address, then the partition's history (`browser.history.suggest`, 60 ms after the last keystroke, the newest query's
-// answer only). ↑ and ↓ move, Enter runs the highlighted row (the typed address by default), Esc puts the URL back and
-// leaves. What goes to main is always a parsed URL, never the typed text; a refused scheme raises the chrome's line and
-// keeps the text. A tab-less surface opens a tab for the address.
+// answer only; cua #90: an imported profile's bookmarks first, with the bookmark star). ↑ and ↓ move, Enter runs the
+// highlighted row (the typed address by default), Esc puts the URL back and leaves. What goes to main is always a parsed
+// URL, never the typed text; a refused scheme raises the chrome's line and keeps the text. A tab-less surface opens a tab for the address.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { displayUrl, resolveAddress } from '@shared/browser/url';

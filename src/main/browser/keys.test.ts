@@ -34,6 +34,13 @@ describe('keyAction: the chords taken inside the page (E4a Design §4, Decision 
     expect(keyAction(cmd('-'), idle)).toEqual({ kind: 'zoom', action: 'out' });
   });
 
+  // cua #90: Chrome's chord for the bookmarks bar; it shadows MAWS's ⌘⇧B (Toggle right panel) inside the page only
+  it('takes ⇧⌘B as the bookmarks bar toggle, and ⌘B, ⌥⇧⌘B, ⌃⇧⌘B not', () => {
+    expect(keyAction(cmd('B', { shift: true }), idle)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
+    expect(keyAction(cmd('b', { shift: true }), idle)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
+    for (const input of [cmd('b'), cmd('B', { shift: true, alt: true }), cmd('B', { shift: true, control: true }), key('B', { shift: true })]) expect(keyAction(input, idle)).toBeNull();
+  });
+
   it('acts on keyDown only', () => {
     expect(keyAction(cmd('r', { type: 'keyUp' }), idle)).toBeNull();
     expect(keyAction(cmd('r', { type: 'char' }), idle)).toBeNull();
@@ -107,6 +114,14 @@ describe('attachKeys: before-input-event', () => {
       { tabId: h.tabId, command: 'openFind' },
       { tabId: h.tabId, command: 'closeFind' },
     ]);
+  });
+
+  it('⇧⌘B tells the chrome to flip the bookmarks bar and leaves the focus in the page (cua #90)', () => {
+    const h = harness();
+    expect(h.press(cmd('B', { shift: true, code: 'KeyB' }))).toBe(true);
+    expect(h.focus).not.toHaveBeenCalled();
+    expect(h.commands()).toEqual([{ tabId: h.tabId, command: 'toggleBookmarksBar' }]);
+    expect(h.press(cmd('B', { shift: true, type: 'keyUp', code: 'KeyB' }))).toBe(true); // its keyUp stays out of the page
   });
 
   it('a taken chord whose keyUp went to the app window does not swallow the next press of its key', () => {

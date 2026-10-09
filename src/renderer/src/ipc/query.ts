@@ -71,6 +71,7 @@ export const QUERY_COMMANDS = [
   'browser.import.list',
   // E4b end
   'browser.bookmarks.tree', // cua #90: the bookmarks bar's tree
+  'browser.bookmarks.favicons', // cua #90: the bar's icons, from the partition's favicon cache
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

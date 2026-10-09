@@ -5,6 +5,8 @@
 // A taken chord is prevented (which also keeps it from the menu's own accelerators) and acted on at keyDown; its keyUp is
 // swallowed so the page never sees half a keystroke. Every other chord passes: MAWS's menu accelerators (⌘K, ⌘W, ⌘0, …)
 // keep winning, and ⌘L stays `composer.focus` everywhere but inside a page. No keymap action is added.
+// cua #90: ⇧⌘B, Chrome's bookmarks bar chord, is told to the chrome (`toggleBookmarksBar`), which flips the setting; like
+// ⌘L it shadows a MAWS chord (`panel.toggle`) inside the page only, and leaves the focus where it is.
 import type { Input } from 'electron';
 import type { BrowserChromeCommand } from '@shared/ipc/schema/browser';
 import type { Navigator } from './navigation';
@@ -30,6 +32,7 @@ export function keyAction(input: KeyInput, state: { findOpen: boolean; loading: 
   if (key === 'r') return { kind: 'navigate', to: 'reload' }; // ⇧⌘R too
   if (key === '=' || key === '+') return { kind: 'zoom', action: 'in' };
   if (key === '-') return { kind: 'zoom', action: 'out' };
+  if (key === 'b' && shift) return { kind: 'chrome', command: 'toggleBookmarksBar' }; // cua #90
   if (shift) return null;
   if (key === '[') return { kind: 'navigate', to: 'back' };
   if (key === ']') return { kind: 'navigate', to: 'forward' };
@@ -72,7 +75,7 @@ export function attachKeys(entry: TabEntry, { store, navigator, emit }: KeysDeps
         if (action.command === 'closeFind') {
           navigator.find(tabId, { text: null });
           entry.findOpen = false;
-        } else {
+        } else if (action.command !== 'toggleBookmarksBar') {
           entry.host?.webContents.focus(); // the native focus leaves the page for the chrome's field
           if (action.command === 'openFind') entry.findOpen = true;
         }

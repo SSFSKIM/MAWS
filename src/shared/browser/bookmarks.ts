@@ -10,6 +10,8 @@ import { validateBrowserUrl } from './url';
 
 export const BOOKMARKS_MAX = 20000; // URL nodes kept per profile, in document order; the rest are skipped and counted
 export const BOOKMARK_SUGGESTIONS_MAX = 3; // of the address field's BROWSER_SUGGESTIONS_MAX rows, the bookmarks at most, first
+export const BOOKMARK_FAVICON_ORIGINS_MAX = 500; // the page origins one bar asks icons for (its chips')
+export const BOOKMARKS_OPEN_ALL_ASK_ABOVE = 20; // "Open all (n)" asks first above this many tabs (Chrome's habit)
 
 export type BookmarkUrl = { kind: 'url'; id: number; name: string; url: string; addedAt: number | null };
 export type BookmarkFolder = { kind: 'folder'; id: number; name: string; children: BookmarkNode[] };

@@ -119,6 +119,16 @@ export const BROWSER_COPY = {
   agentBadge: 'Opened by an agent', // E13: the badge on a tab an agent created through cua
   // E4c end
 
+  // cua #90 start: the bookmarks bar (Chrome's words) and the address field's bookmark rows
+  bookmarks: {
+    bar: 'Bookmarks bar',
+    more: 'More bookmarks', // the » slot (Chrome's tooltip names the hidden ones "bookmarks")
+    chipTitle: (name: string, url: string) => (name === '' ? url : `${name}\n${url}`),
+    folderTitle: (name: string) => name,
+    suggestion: 'Bookmark', // the star's label on an address suggestion
+  },
+  // cua #90 end
+
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----
   sessionInfoLabel: 'Browser tabs',
   sessionInfo: (loaded: number, mib: number | null) => `${loaded} loaded${mib === null ? '' : ` · ${mib} MB`} · outside the engine budget`,

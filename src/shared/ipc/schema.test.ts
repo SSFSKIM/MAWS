@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V11 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -328,7 +328,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -363,7 +363,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -594,7 +594,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V11, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V12, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1403,9 +1403,9 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('appends browser.bookmarks.tree, .sync and .changed after E13’s entries, main-owned, every name bridged', () => {
-      expect(Object.keys(browser.commands).slice(-2)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync']);
+      expect(Object.keys(browser.commands).slice(-5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
       expect(Object.keys(browser.events).slice(-1)).toEqual(['browser.bookmarks.changed']);
-      for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync'] as const) expect(commands[name].owner).toBe('main');
+      for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons'] as const) expect(commands[name].owner).toBe('main');
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1431,6 +1431,25 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('browser.import.progress', { importId: '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c', phase: 'bookmarks', done: 0, total: 1 }).ok).toBe(true);
       expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
       expect(validateEventPayload('browser.bookmarks.changed', { partition: 'persist:maws-chrome-Default', tree }).ok).toBe(false);
+    });
+
+    // M1b: the bar's commands name their tab; a node id is an index row's (from 1); ⇧⌘B reaches the chrome
+    it('validates the bar\'s open, menu and favicons, and the chrome\'s toggleBookmarksBar', () => {
+      const tabId = 'b_000000000001';
+      expect(validateCommandInput('browser.bookmarks.open', { tabId, nodeId: 4, how: 'current' }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.open', { tabId, nodeId: 4, how: 'newTab' }).ok).toBe(true);
+      for (const bad of [{ tabId, nodeId: 0, how: 'current' }, { tabId, nodeId: 1.5, how: 'current' }, { tabId, nodeId: 4, how: 'window' }, { nodeId: 4, how: 'current' }, { tabId, nodeId: 4, how: 'current', url: 'https://a.b/' }]) {
+        expect(validateCommandInput('browser.bookmarks.open', bad).ok, JSON.stringify(bad)).toBe(false);
+      }
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'folder', nodeId: 4 }, anchor: { x: 10, y: 64 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: 0 }, anchor: { x: 0, y: 0 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: -1 }, anchor: { x: 0, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'folder', hiddenFrom: 3 }, anchor: { x: 0, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.menu', { tabId, request: { kind: 'overflow', hiddenFrom: 3 }, anchor: { x: 0.5, y: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.bookmarks.favicons', { partition: 'persist:maws-chrome-Default', origins: ['https://a.b'] }).ok).toBe(true);
+      expect(validateCommandInput('browser.bookmarks.favicons', { partition: 'persist:maws-chrome-Default', origins: Array.from({ length: 501 }, () => 'https://a.b') }).ok).toBe(false);
+      expect(validateCommandOutput('browser.bookmarks.favicons', { icons: { 'https://a.b': 'data:image/png;base64,QQ==' } }).ok).toBe(true);
+      expect(validateEventPayload('browser.chrome.command', { tabId, command: 'toggleBookmarksBar' }).ok).toBe(true);
     });
   });
   // cua #90 end

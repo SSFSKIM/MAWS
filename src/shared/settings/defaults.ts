@@ -1,13 +1,13 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
-import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
+import { BrowserSettingsSchema, ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V11: Settings = {
-  version: 11, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11
+export const SETTINGS_DEFAULTS_V12: Settings = {
+  version: 12, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -18,7 +18,7 @@ export const SETTINGS_DEFAULTS_V11: Settings = {
   permissions: { autoFallback: 'acceptEdits' }, // W3: the owner's ruling of 2026-10-01 (charter D-18)
   voice: { locale: null }, // E9: the system locale
   supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
-  browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11)
+  browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11); cua #90: the bookmarks bar shown
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -30,8 +30,13 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
-// E4a start: E10's version 10, as it wrote it: version 11's sections less the browser section
-const SettingsV10Schema = SettingsSchema.omit({ browser: true }).extend({ version: z.literal(10) });
+// cua #90 start: E4a's version 11, as it wrote it: version 12's sections less the bookmarks bar's switch
+const SettingsV11Schema = SettingsSchema.extend({ version: z.literal(11), browser: BrowserSettingsSchema.omit({ bookmarksBar: true }) });
+type SettingsV11 = z.infer<typeof SettingsV11Schema>;
+// cua #90 end
+
+// E4a start: E10's version 10, as it wrote it: version 11's sections less the browser section (cua #90: re-based on version 11)
+const SettingsV10Schema = SettingsV11Schema.omit({ browser: true }).extend({ version: z.literal(10) });
 type SettingsV10 = z.infer<typeof SettingsV10Schema>;
 // E4a end
 
@@ -75,10 +80,16 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V11);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V12);
 
-// E4a: v10 → v11, the browser section with its defaults
-const fromV10 = (v10: SettingsV10): Settings => ({ ...v10, version: 11, browser: defaults().browser });
+// cua #90: v11 → v12, the bookmarks bar shown
+const fromV11 = (v11: SettingsV11): Settings => ({ ...v11, version: 12, browser: { ...v11.browser, bookmarksBar: defaults().browser.bookmarksBar } });
+// E4a: v10 → v11, the browser section with its defaults (cua #90: then v11 → v12)
+const fromV10 = (v10: SettingsV10): Settings => {
+  const { bookmarksBar: _bar, ...browser } = defaults().browser;
+  void _bar;
+  return fromV11({ ...v10, version: 11, browser });
+};
 // E10: v9 → v10, the supervisor section with its defaults; E4a: then v10 → v11
 const fromV9 = (v9: SettingsV9): Settings => fromV10({ ...v9, version: 10, supervisor: defaults().supervisor });
 // E9: v8 → v9, the voice section with the system locale; E10: then v9 → v10
@@ -99,7 +110,7 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch) → v8
 // (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section) → v11 (E4a: the browser
-// section). A version 11 object is validated and returned as it is;
+// section) → v12 (cua #90: the bookmarks bar's switch). A version 12 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -136,6 +147,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV9(SettingsV9Schema.parse(raw)); // E10
     case 10:
       return fromV10(SettingsV10Schema.parse(raw)); // E4a
+    case 11:
+      return fromV11(SettingsV11Schema.parse(raw)); // cua #90
     default:
       return SettingsSchema.parse(raw);
   }

@@ -209,7 +209,7 @@ describe('navigation: the view\'s own events into the tab (E4a Design §5, §7)'
     const wc = h.wc(id);
     wc.emit('page-favicon-updated', {}, ['https://a.test/old.ico']);
     wc.emit('page-favicon-updated', {}, ['https://a.test/new.ico']);
-    expect(h.favicons.resolve).toHaveBeenLastCalledWith(DEFAULT_PARTITION, ['https://a.test/new.ico']);
+    expect(h.favicons.resolve).toHaveBeenLastCalledWith(DEFAULT_PARTITION, ['https://a.test/new.ico'], null); // cua #90: the page's URL once committed
     h.icons[1]!('data:image/png;base64,TkVX');
     await Promise.resolve();
     expect(h.tab(id).favicon).toBe('data:image/png;base64,TkVX');

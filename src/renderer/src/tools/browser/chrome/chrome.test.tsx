@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { useLayout } from '../../../stores/layout';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { installFakeMain, ok, type Handler } from '../../../test-support/code';
@@ -23,7 +23,7 @@ import { Chrome, type ChromeProps } from './Chrome';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
-const SEARCH = SETTINGS_DEFAULTS_V11.browser.searchUrl;
+const SEARCH = SETTINGS_DEFAULTS_V12.browser.searchUrl;
 
 let main: ReturnType<typeof installFakeMain>;
 let disconnect: () => void;
@@ -186,6 +186,24 @@ describe('the address field', () => {
     await wait(0);
     expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T1, to: { url: `${SEARCH.replace('%s', 'wikipedia.org')}`, typed: true } }]);
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  // cua #90: an imported profile's bookmarks, first after the typed address, each with the bookmark star
+  it('lists the partition’s bookmarks above its history, each with the bookmark glyph, and runs one like any row', async () => {
+    const user = userEvent.setup();
+    suggest = () =>
+      ok({ suggestions: [{ url: 'https://b.test/F1', title: 'F1', kind: 'bookmark' }, { url: 'https://h.test/f1', title: 'f1 history', kind: 'history' }] });
+    show({ tab: tab() });
+    await user.click(field());
+    await user.keyboard('f1');
+    await wait(80);
+    const options = screen.getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([BROWSER_COPY.searchFor('f1'), 'F1https://b.test/F1', 'f1 historyhttps://h.test/f1']);
+    expect(options.map((option) => option.querySelector('[data-suggestion-bookmark]') !== null)).toEqual([false, true, false]);
+    expect(within(options[1]!).getByRole('img', { name: BROWSER_COPY.bookmarks.suggestion })).toBeTruthy();
+    await user.keyboard('{ArrowDown}{Enter}');
+    await wait(0);
+    expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T1, to: { url: 'https://b.test/F1', typed: true } }]);
   });
 
   it('Enter with no arrow goes to the typed address as main’s check parses it, and a click runs a row', async () => {

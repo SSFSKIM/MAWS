@@ -43,6 +43,10 @@ import { startCuaBackend, type CuaBackend } from './cua';
 import { TabControls } from './agent/control';
 import { AgentCursor } from './agent/cursor';
 // E13 end
+// cua #90 start: the bookmarks bar's commands and native menus
+import { BookmarkBar, openAllConfirmation } from './bookmarks/bar';
+import { NativeMenus } from './bookmarks/menu';
+// cua #90 end
 
 export interface BrowserDeps {
   userData: string;
@@ -109,13 +113,14 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
   const focusEmulation = focusEmulationMode(env);
+  const windowOf = (sender: Electron.WebContents) => {
+    const win = BrowserWindow.fromWebContents(sender);
+    return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
+  };
   const views = new ViewManager({
     store,
     emit,
-    windowOf: (sender) => {
-      const win = BrowserWindow.fromWebContents(sender);
-      return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
-    },
+    windowOf,
     focusEmulation,
     setFocusEmulation,
   });
@@ -140,7 +145,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     if (focusEmulation === 'on') attachFocusEmulation(entry, (tab) => views.focusEmulationWanted(tab));
   });
 
-  registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, bookmarks: index.browserBookmarks /* cua #90 */, profiles, register });
+  // cua #90 start: the bookmarks bar's menus (recorded for the e2e's seam under MAWS_E2E=1) and its commands
+  const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1' });
+  const confirmOpenAll = openAllConfirmation(env);
+  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: index.browserBookmarks, menus, confirmOpenAll });
+  // cua #90 end
+  registerBrowserHandlers({
+    store, views, navigator, downloads, history: index.browserHistory, profiles, register,
+    bookmarks: index.browserBookmarks, bar, windowOf, favicons, // cua #90
+  });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
@@ -191,6 +204,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   if (inspector) inspector.cua = cua; // E13: the e2e's fake host reads the socket and the leases
+  if (inspector) inspector.menu = { ...menus.seam, openAllAsked: () => confirmOpenAll.asked() }; // cua #90: the native menus
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
   const commentMode = startCommentMode({ store, emit, register, userData, env });

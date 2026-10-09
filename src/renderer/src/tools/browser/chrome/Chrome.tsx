@@ -5,10 +5,12 @@
 // Main's `browser.chrome.command` (⌘L, ⌘F, and Esc pressed inside a page) goes to the chrome whose pane holds the page's
 // view (`owns`), for the tab it names: `focusAddress` focuses the address field, `openFind` opens the find bar (or takes
 // the keyboard back to it), `closeFind` closes it (main already stopped finding).
-import { useEffect, useRef, useState } from 'react';
-import type { BrowserTab } from '@shared/browser/tab';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
+import { toggleBookmarksBar } from '../settings';
 import { onChromeCommand } from '../store';
+import { BookmarksBar } from './BookmarksBar';
 import { FindBar } from './FindBar';
 import { NavRow } from './NavRow';
 import { Notices } from './Notices';
@@ -44,14 +46,23 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
       if (command.tabId !== tabId) return;
       if (command.command === 'focusAddress') addressRef.current?.focus();
       else if (command.command === 'openFind') setFinding(findOpened(tabId));
+      else if (command.command === 'toggleBookmarksBar') void toggleBookmarksBar(); // cua #90
       else setFinding(null);
     });
   }, [owns, tabId]);
 
+  // cua #90: ⌘⇧B with the chrome focused (inside the page, keys.ts takes it)
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!event.metaKey || !event.shiftKey || event.altKey || event.ctrlKey || event.key.toLowerCase() !== 'b') return;
+    event.preventDefault();
+    void toggleBookmarksBar();
+  };
+
   return (
-    <div data-browser-chrome="" className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
+    <div data-browser-chrome="" onKeyDown={onKeyDown} className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
       <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={tabId} />
       <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} onFind={openFind} />
+      {tab && tab.partition !== DEFAULT_PARTITION && <BookmarksBar tab={tab} /> /* cua #90 */}
       {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} owns={owns} />}
       {tab && finding !== null && <FindBar tab={tab} focusRequest={finding.focus} onClose={() => setFinding(null)} />}
       <Notices appSessionId={appSessionId} tab={tab} />

@@ -4,7 +4,7 @@ const electron = vi.hoisted(() => ({ windows: [] as { webContents: { send: Retur
 vi.mock('../windows', () => ({ appWindows: () => electron.windows })); // E2: the emitter sends to app windows only
 
 import { emit, onEmitted } from './events';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 
 const window = (destroyed = false) => ({ webContents: { send: vi.fn(), isDestroyed: () => destroyed } });
 
@@ -17,7 +17,7 @@ describe('main event emitter', () => {
   it('sends a valid payload to every live window on the event channel', () => {
     const [a, b, closed] = [window(), window(), window(true)];
     electron.windows = [a, b, closed];
-    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'dark' as const }, resolvedTheme: 'dark' as const };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'dark' as const }, resolvedTheme: 'dark' as const };
     expect(emit('settings.changed', state)).toBe(true);
     expect(a.webContents.send).toHaveBeenCalledExactlyOnceWith('maws:evt:settings.changed', state);
     expect(b.webContents.send).toHaveBeenCalledExactlyOnceWith('maws:evt:settings.changed', state);

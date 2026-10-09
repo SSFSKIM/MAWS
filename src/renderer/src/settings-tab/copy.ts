@@ -237,6 +237,10 @@ export const BROWSER = {
   links: 'Links that open a new window',
   linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
   linksNote: 'In MAWS, such a link opens as a new tab of the same session.',
+  // cua #90: settings 12's switch
+  bookmarksBar: 'Bookmarks bar',
+  bookmarksBarLabel: 'Show the bookmarks bar',
+  bookmarksBarNote: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.',
   // E4b start: the imported Chrome profiles (E4b execution document, Design §11; Decision Log 35)
   chromeProfile: 'Chrome profile',
   import: 'Import a Chrome profile…',

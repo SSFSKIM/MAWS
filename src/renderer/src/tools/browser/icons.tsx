@@ -89,3 +89,30 @@ export const HistoryIcon = ({ className }: Glyph) => (
     <path d="M8 5v3l2 1.5" />
   </Icon>
 );
+
+// cua #90 start: the bookmarks bar's glyphs: a folder, the » that lists the chips the bar cannot fit, a page with no
+// favicon, and the star an address suggestion that is a bookmark carries (Chrome's omnibox mark)
+export const FolderIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+  </Icon>
+);
+
+export const MoreBookmarksIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M4 4.5 7.5 8 4 11.5M8.5 4.5 12 8l-3.5 3.5" />
+  </Icon>
+);
+
+export const PageIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3" />
+  </Icon>
+);
+
+export const BookmarkIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="m8 2.5 1.7 3.5 3.8.5-2.8 2.6.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z" />
+  </Icon>
+);
+// cua #90 end

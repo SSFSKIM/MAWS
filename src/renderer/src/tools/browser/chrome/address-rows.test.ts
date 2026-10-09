@@ -52,3 +52,25 @@ describe('the highlighted row', () => {
     expect(moveRow(-1, 1, 0)).toBe(-1);
   });
 });
+
+// cua #90: an imported profile's bookmarks, which main sends first (at most 3 of 8), drawn with the bookmark glyph
+describe('addressRows: bookmark rows', () => {
+  const bookmark = (url: string, title: string | null) => ({ url, title, kind: 'bookmark' as const });
+  it('keeps main\'s bookmark rows after the typed address and before history, as bookmarks', () => {
+    expect(addressRows('f1', [bookmark('https://b.test/F1', 'F1'), { url: 'https://h.test/f1', title: 'H', kind: 'history' as const }], SEARCH)).toEqual([
+      { kind: 'search', url: 'https://search.test/?q=f1', query: 'f1' },
+      { kind: 'bookmark', url: 'https://b.test/F1', title: 'F1' },
+      { kind: 'history', url: 'https://h.test/f1', title: 'H' },
+    ]);
+  });
+
+  it('never defaults to a bookmark row: Enter runs the typed address, or nothing until an arrow moves', () => {
+    expect(defaultRow(addressRows('', [bookmark('https://b.test/', 'B')], SEARCH))).toBe(-1);
+    expect(defaultRow(addressRows('b.test', [bookmark('https://b.test/x', 'B')], SEARCH))).toBe(0);
+  });
+
+  it('drops a bookmark row that is not http(s) or that repeats the typed URL', () => {
+    expect(addressRows('b.test', [bookmark('https://b.test/', 'B'), bookmark('javascript:x', 'J')], SEARCH).map((row) => row.kind)).toEqual(['go', 'search']);
+  });
+});
+
