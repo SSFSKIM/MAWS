@@ -26,7 +26,7 @@ How to see it working: open a session, type `/plugins` (a wide dialog opens; My 
 - [x] (2026-10-09 08:25Z) Adversarial review round (Opus; 2 blocking, 11 should-fix, 8 minor; all accepted) folded into this revision (Decision Log).
 - [x] (2026-10-09 08:50Z) The reviewer's verification: 19 of 21 resolved; the remaining 2 should-fix and 6 minor folded (Decision Log).
 - [x] (2026-10-09 08:35Z) Execution started (P2-B's executor, controller of the milestone loop): refresh pass against master 9e942f25; parent `docs/doperpowers/plans/2026-10-08-p2-daily-driver.md`, child id `P2-B`, re-pinned at blob a7e7d4cf1084; ledger re-pinned at blob 226bb2586cef (Decision Log). A and C not yet on master: M3 builds against §5.6's stand-ins and §5.12's empty hook.
-- [ ] M2 — the data and the manifest service (host, shared).
+- [ ] M2 — the data and the manifest service (host, shared). (2026-10-09) Implemented at 2e95f6d9 (origin/master 20d21872 merged at ee8d95ce); the executor's report is `.doperpowers/sde/2026-10-08-p2-b-extensions-library/task-2-report.md` (gitignored; decisions 1 to 6 there, number 4 a proposed §5.5 correction toward the engine's merge). **Resume here:** confirm M2's gates, then dispatch the task review on 19d0e002..2e95f6d9 with the secret-bearing fixtures as evidence, fold the report's decisions into this log, and tick M2 before M3 starts.
 - [ ] M3 — the library shell and My items.
 - [ ] M4 — the detail.
 - [ ] M5 — Browse, Add marketplace, Manage marketplaces.
