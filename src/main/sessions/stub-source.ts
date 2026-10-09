@@ -15,6 +15,7 @@ import type { interceptCommand } from '../ipc/router';
 import type { ReadModelWriter, SessionSource } from './read-model';
 import type { ScenarioClock } from './select-source';
 import { StubStore } from './stub-store';
+import { readRecentTurns } from './recent-turns'; // P2-D
 import type { SessionPatch } from '@shared/ipc/schema/session';
 
 export interface StubSourceDeps {
@@ -180,6 +181,12 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
           return { events: [], lastSeq: 0, complete: true };
         }),
         // end C6
+        // P2-D (2026-10-09): the resume chooser's preview reads the scenario's transcript for the session, through main's
+        // own derivation; a session the scenario gives none has nothing to read
+        deps.intercept('session.recentTurns', ({ appSessionId, limit }) => {
+          if (!s.get(appSessionId as AppSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+          return readRecentTurns(loaded.transcripts?.[appSessionId as AppSessionId] ?? null, limit);
+        }),
       ];
       // C12: a scenario that scripts the memory budget answers engine.budget itself (the last state played, or its first
       // state before any has played); one that does not leaves the command to the engine host

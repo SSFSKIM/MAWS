@@ -20,7 +20,8 @@ import { useSessions } from '../stores/sessions';
 import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
-import { useResumePicker } from './ResumePicker';
+import { useResumeChooser } from '../resume/host'; // P2-D
+import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
 import { Sidebar } from './Sidebar';
 
@@ -45,7 +46,7 @@ beforeEach(() => resetShellStores());
 afterEach(() => {
   cleanup();
   closeDialog();
-  useResumePicker.setState({ projectId: null });
+  useResumeChooser.setState({ open: null }); // P2-D
   offs.splice(0).forEach((off) => off());
   delete (window as { maws?: MawsBridge }).maws;
 });
@@ -521,29 +522,38 @@ describe('an expanded project', () => {
   });
 });
 
-// W11 (I7, as the owner corrected it): the Resume… picker opens from the project row's search icon and its context menu,
-// lists the project's sessions as `claude --resume` does, and opens one.
-describe('the Resume… picker', () => {
+// W11 (I7, as the owner corrected it); P2-D (the P2 spec, child P2-D, G1 to G5): the project row's search icon and its
+// context menu open the resume chooser `/resume` opens too, scoped to the project, and open a session from it.
+describe('the resume chooser from the sidebar', () => {
+  const TURNS = { turns: [{ prompt: { text: 'Fix the drag handle', at: '2026-09-28T10:00:00.000Z' }, answer: { text: 'Done: the handle drags.', at: '2026-09-28T10:01:00.000Z' }, toolCalls: 3 }], earlier: true, source: 'transcript' };
+  let fake: ReturnType<typeof fakeClient>;
   beforeEach(() => {
+    clearPreviewCache();
     fillStores(nine);
     const maws = nine.projects.find((p) => p.id === 'proj-maws')!;
-    window.maws = fakeClient({
+    fake = fakeClient({
       'git.worktree.list': { repoRoot: maws.directory, commonDir: `${maws.directory}/.git`, worktrees: [{ repoRoot: maws.directory, path: maws.directory, branch: 'master', head: 'abc', isMain: true, locked: false, prunable: false, managed: false }] },
-    }).client;
+      'session.recentTurns': TURNS,
+    });
+    window.maws = fake.client;
   });
   const picker = () => screen.getByRole('dialog', { name: 'Resume session' });
-  const options = () => within(picker()).queryAllByRole('option').map((o) => o.querySelector('span')!.textContent);
+  const options = () => within(picker()).queryAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent);
+  const selectedTitle = () => within(picker()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.querySelector('[data-title]')?.textContent;
+  const openFromRow = async (user: ReturnType<typeof userEvent.setup>) => user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
 
-  it('opens from the row’s search icon on the project, searches, and Enter opens the session', async () => {
+  it('opens from the row’s search icon on the project, searches, and Enter opens the session in the current tab', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
     const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' });
     expect(button.title).toBe('Resume a session…');
     await user.click(button);
     expect(expanded()).toEqual([]); // the click does not toggle the row
+    expect(picker().getAttribute('data-widget-size')).toBe('library'); // X19's box
     expect(within(picker()).getByTestId('resume-scope').textContent).toBe('MAWS');
     expect(options().sort()).toEqual(['Charter + research', 'Fix sidebar drag', 'Sidebar interaction pass', 'Workstation north star']);
-    expect(within(picker()).getAllByRole('option')[0].querySelectorAll('span')[1].textContent).toMatch(/^(now|\d+[mhdw] ago)( · [^·]+)?$/); // age · branch
+    expect(within(picker()).getAllByRole('group').map((g) => g.getAttribute('aria-label')).filter((l) => l !== 'Scope').length).toBeGreaterThan(0); // the activity groups
+    expect(document.activeElement).toBe(within(picker()).getByRole('combobox', { name: 'Search by title, folder, or branch' }));
     await user.keyboard('drag');
     expect(options()).toEqual(['Fix sidebar drag']);
     await user.keyboard('{Enter}');
@@ -551,11 +561,44 @@ describe('the Resume… picker', () => {
     expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
   });
 
-  it('⌃A widens to every project, ⌘Enter opens in a new tab, Esc closes', async () => {
+  it('a click selects and previews without opening; the arrows move; a double click opens', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await openFromRow(user);
+    const first = selectedTitle();
+    const other = within(picker()).getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent !== first)!;
+    await user.click(other);
+    expect(selectedTitle()).toBe(other.querySelector('[data-title]')!.textContent);
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+    expect(document.activeElement).toBe(within(picker()).getByRole('combobox')); // the list keeps the keyboard in the search
+    await user.keyboard('{ArrowUp}');
+    const up = selectedTitle();
+    await user.dblClick(within(picker()).getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === up)!);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf(up!) });
+  });
+
+  it('the preview shows the cached facts at once, then the recent turns read for the selection, launching and marking nothing', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    await user.keyboard('drag');
+    const preview = within(picker()).getByTestId('resume-preview');
+    const fix = nine.sessions.find((r) => r.title.text === 'Fix sidebar drag')!;
+    expect(preview.textContent).toContain(fix.directory);
+    expect(preview.textContent).toContain('Last active');
+    await waitFor(() => expect(within(preview).getByTestId('resume-turns').textContent).toContain('Done: the handle drags.'));
+    expect(within(preview).getByTestId('resume-turns').textContent).toContain('Fix the drag handle');
+    expect(within(preview).getByTestId('resume-turns').textContent).toContain('3 tool calls');
+    expect(within(preview).getByTestId('resume-turns').textContent).toContain('Earlier messages not shown');
+    expect(fake.invoked('session.recentTurns').at(-1)).toEqual({ appSessionId: fix.appId, limit: 6 });
+    expect(fake.calls.filter((c) => /session\.(start|setVisible|acquire|launch)|session\.update/.test(c))).toEqual([]);
+  });
+
+  it('⌃A widens to every project, ⌘Enter opens in a new tab, Esc clears the search and then closes', async () => {
     const user = userEvent.setup();
     act(() => useLayout.getState().openSession(idOf('Charter + research')));
     render(<Sidebar />);
-    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    await openFromRow(user);
     await user.keyboard('{Control>}a{/Control}');
     expect(within(picker()).getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('true');
     expect(within(picker()).getByTestId('resume-scope').textContent).toBe('All projects');
@@ -565,16 +608,62 @@ describe('the Resume… picker', () => {
     const panes = currentSet(useLayout.getState().main).panes; // W12: the strip's tab set (one here: no projectOf given)
     expect(panes[0].tabs.map((t) => (t.kind === 'session' ? t.appSessionId : t.id))).toEqual([idOf('Charter + research'), idOf('Quota reset recovery')]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Quota reset recovery') });
-    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
-    expect(within(picker()).getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('false'); // a fresh picker
+    await openFromRow(user);
+    expect(within(picker()).getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('false'); // a fresh chooser
+    await user.keyboard('drag');
+    await user.keyboard('{Escape}');
+    expect(within(picker()).getByRole('combobox')).toHaveProperty('value', '');
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+  });
+
+  it('an Escape that ends an IME composition leaves the chooser open, even on an empty search', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await openFromRow(user);
+    const search = within(picker()).getByRole('combobox');
+    expect(search).toHaveProperty('value', '');
+    fireEvent.keyDown(search, { key: 'Escape', code: 'Escape', isComposing: true });
+    expect(screen.getByRole('dialog', { name: 'Resume session' })).toBeTruthy();
+    fireEvent.keyDown(search, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+  });
+
+  it('dismissed, the chooser returns focus to the control that opened it; an opened session keeps it', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' });
+    await user.click(button);
+    await user.click(within(picker()).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+    expect(document.activeElement).toBe(button);
+    fireEvent.contextMenu(row('MAWS'));
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Resume…' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+    expect(document.activeElement, 'from the context menu: the project row').toBe(row('MAWS'));
+    // the row's hover actions hide once the pointer leaves the row, and a browser focuses no hidden control (happy-dom
+    // does, so the opener here refuses focus as Chromium's would)
+    await user.click(button);
+    const focus = vi.spyOn(button, 'focus').mockImplementation(() => undefined);
+    await user.click(within(picker()).getByRole('button', { name: 'Close' }));
+    expect(document.activeElement, 'an opener hidden since: its row').toBe(row('MAWS'));
+    focus.mockRestore();
+    await user.click(button);
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    const stop = useLayout.subscribe(() => elsewhere.isConnected && elsewhere.focus()); // the opened tab takes the keyboard
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session' });
+    expect(document.activeElement).toBe(elsewhere);
+    stop();
+    elsewhere.remove();
   });
 
   it('a filter button keeps Enter and Space: Tab from the search to All projects, Enter presses it and opens nothing', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
-    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    await openFromRow(user);
     expect(document.activeElement).toBe(within(picker()).getByRole('combobox'));
     await user.tab();
     const all = within(picker()).getByRole('button', { name: /^All projects/ });
@@ -588,14 +677,18 @@ describe('the Resume… picker', () => {
     expect(activeTab(useLayout.getState().main)).toBeNull();
   });
 
-  it('⌃B keeps the checkout’s branch; the project’s context menu offers Resume… too', async () => {
+  it('⌃B keeps the checkout’s branch, the search finds a branch, and the project’s context menu offers Resume… too', async () => {
     const user = userEvent.setup();
-    fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.projectId === 'proj-maws' ? { ...r, branch: r.title.text === 'Fix sidebar drag' ? 'master' : 'feature' } : r)) });
+    fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.projectId === 'proj-maws' ? { ...r, branch: r.title.text === 'Fix sidebar drag' ? 'master' : 'feature/chooser' } : r)) });
     render(<Sidebar />);
     fireEvent.contextMenu(row('MAWS'));
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent).slice(0, 2)).toEqual(['New chat', 'Resume…']);
     await user.click(within(menu).getByRole('menuitem', { name: 'Resume…' }));
+    expect(within(picker()).getAllByTestId('row-branch').map((b) => b.textContent).sort()).toEqual(['⎇ chooser', '⎇ chooser', '⎇ chooser', '⎇ master']);
+    await user.keyboard('chooser');
+    expect(options()).toHaveLength(3);
+    await user.clear(within(picker()).getByRole('combobox'));
     await user.keyboard('{Control>}b{/Control}');
     await waitFor(() => expect(options()).toEqual(['Fix sidebar drag']));
   });

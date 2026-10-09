@@ -54,10 +54,20 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
 
 // W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.
 const IN_MODEL_CHIP: ReadonlySet<WidgetCommandName> = new Set(['model', 'effort', 'fast']);
+// P2-B (2026-10-09; X19): the libraries open in the library box (`/skills` joins in M6).
+// P2-D (2026-10-09): `/resume`'s chooser too. P2-B's registration hunk is taken byte for byte; this set is the one line
+// the second of B and D to land unions (B's `plugins` and `skills`, D's `resume`).
+const LIBRARY: ReadonlySet<WidgetCommandName> = new Set(['resume']);
 
 export function registerAllWidgets(): () => void {
   const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) =>
-    registerSlashWidget(name, { title: WIDGET_TITLE[name], component: WIDGETS[name], apply: TYPED_APPLY[name], ...(IN_MODEL_CHIP.has(name) && { placement: 'modelChip' as const }) }),
+    registerSlashWidget(name, {
+      title: WIDGET_TITLE[name],
+      component: WIDGETS[name],
+      apply: TYPED_APPLY[name],
+      ...(IN_MODEL_CHIP.has(name) && { placement: 'modelChip' as const }),
+      ...(LIBRARY.has(name) && { size: 'library' as const }), // P2-B (2026-10-09)
+    }),
   );
   return () => offs.forEach((off) => off());
 }

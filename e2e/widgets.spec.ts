@@ -584,18 +584,26 @@ test.describe('interactive', () => {
     await expect.poll(mcpReads).toBe(reads + 1);
   });
 
-  test('resume lists the project’s sessions', async ({ backend }) => {
+  // P2-D (the P2 spec, child P2-D, G1, G4, G5): `/resume` is the resume chooser in X19's library box, over this session's
+  // project; previewing reads the transcript only (none for these stub sessions), and opening starts nothing
+  test('resume opens the chooser over the project’s other sessions, and opening one starts nothing', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
-    await pick(page, 'resume');
-    const rows = widget(page, 'resume').getByRole('list', { name: 'Sessions of this project' }).getByRole('listitem');
+    await typeCommand(page, '/resume ');
+    const dialog = page.locator('[data-widget-dialog="resume"]');
+    await expect(dialog).toHaveAttribute('data-widget-size', 'library');
+    const rows = widget(page, 'resume').getByRole('option');
     await expect(rows).toHaveCount(2); // nine-sessions' proj-claude-usage-menubar, without this session
     await expect(rows.nth(0)).toContainText('Usage reset countdown');
     await expect(rows.nth(1)).toContainText('SDK wire inventory');
-    // C10's resume (the session action it registers): P2-A, an acquisition (`session.acquire`, reason resume)
-    await rows.nth(1).getByRole('button', { name: 'Resume' }).click();
+    await expect(widget(page, 'resume').getByTestId('resume-turns')).toHaveText('No messages yet.');
+    await page.keyboard.press('ArrowDown');
+    await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(widget(page, 'resume').getByTestId('resume-preview')).toContainText('SDK wire inventory');
+    await page.keyboard.press('Enter');
     await expect(widget(page, 'resume')).toBeHidden();
-    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.acquire')).toEqual([{ command: 'session.acquire', input: { appSessionId: 'app-1238089b', reason: 'resume' } }]);
+    const launches = (await commandsOf(backend)).filter((c) => /^session\.(start|launch|acquire|setVisible)$/.test(c.command));
+    expect(launches, 'opening shows the transcript; the first Send continues the session').toEqual([]);
     expect(backend.consoleErrors()).toEqual([]);
   });
 

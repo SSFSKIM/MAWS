@@ -1,0 +1,25 @@
+// The resume chooser's words (P2-D). Claude Desktop 2.16120.0's picker where it has one
+// (readable/app-2.16120.0/web/app/v1/cc43287c9-ua-2O55p.js:34583-34794, 34961-35044), the CLI's toggle names otherwise.
+export const RESUME_COPY = {
+  title: 'Resume session',
+  close: 'Close',
+  search: 'Search by title, folder, or branch',
+  filters: 'Scope',
+  toggles: { allProjects: 'All projects', currentBranch: 'Current branch', allWorktrees: 'All worktrees', archived: 'Archived' },
+  allProjects: 'All projects',
+  otherSessions: 'Other sessions',
+  list: 'Sessions',
+  none: 'No sessions',
+  noMatch: 'No sessions match',
+  more: (shown: number, all: number) => `The ${shown} newest of ${all}; type to narrow`,
+  archived: 'Archived',
+  legend: { move: 'navigate', open: 'open', newTab: 'new tab', close: 'close' },
+  facts: { folder: 'Folder', branch: 'Branch', project: 'Project', lastActive: 'Last active', lastAnswer: 'Last answer' },
+  where: 'Where you left off',
+  loading: 'Loading preview…',
+  failed: 'Couldn’t load the preview.',
+  empty: 'No messages yet.',
+  nothing: 'Nothing to preview.',
+  earlier: 'Earlier messages not shown',
+  toolCalls: (n: number) => `${n} tool call${n === 1 ? '' : 's'}`,
+};

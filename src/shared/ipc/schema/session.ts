@@ -597,6 +597,31 @@ const p2aCommands = {
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P2-A end --------------------------------------------------------------------------------------------------------------
+// P2-D start (2026-10-09; the P2 spec docs/doperpowers/plans/2026-10-08-p2-daily-driver.md, child P2-D, G4; the P2
+// interface ledger §1) ---------------------------------------------------------------------------------------------------
+// The resume chooser's preview: the last turns of a session's transcript, read by main from the engine's JSONL tail
+// (src/main/sessions/recent-turns.ts), the same way for a live, an exited and a terminal-only session. Immediate: one
+// bounded file read, no host call, no engine launched, no read-state, unread or index change, no follow. Oldest first;
+// `prompt` null when the turn opened without a human prompt or before the window; `answer` the turn's last assistant
+// text through the owner-aware preview; `earlier` when turns precede the first returned; `source: 'none'` when the
+// session has no transcript to read.
+export const RECENT_TURNS_LIMIT_MAX = 20;
+export const RECENT_TURN_PROMPT_MAX = 2_000;
+export const RECENT_TURN_ANSWER_MAX = 4_000;
+const RecentTurnTextSchema = (max: number) => z.strictObject({ text: z.string().max(max), at: z.string() });
+export const RecentTurnSchema = z.strictObject({
+  prompt: RecentTurnTextSchema(RECENT_TURN_PROMPT_MAX).nullable(),
+  answer: RecentTurnTextSchema(RECENT_TURN_ANSWER_MAX).nullable(),
+  toolCalls: z.number().int().nonnegative(),
+});
+export type RecentTurn = z.infer<typeof RecentTurnSchema>;
+export const RecentTurnsSchema = z.strictObject({ turns: z.array(RecentTurnSchema).max(RECENT_TURNS_LIMIT_MAX), earlier: z.boolean(), source: z.enum(['transcript', 'none']) });
+export type RecentTurns = z.infer<typeof RecentTurnsSchema>;
+const p2dCommands = {
+  'session.recentTurns': { input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().min(1).max(RECENT_TURNS_LIMIT_MAX) }), output: RecentTurnsSchema, owner: 'main' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+export const P2D_SESSION_COMMANDS = Object.keys(p2dCommands) as (keyof typeof p2dCommands)[];
+// P2-D end --------------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -609,6 +634,7 @@ export const commands = {
   ...e8Commands, // E8
   ...p2cCommands, // P2-C (2026-10-09)
   ...p2aCommands, // P2-A
+  ...p2dCommands, // P2-D
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

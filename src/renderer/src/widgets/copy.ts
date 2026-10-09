@@ -26,7 +26,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   compact: 'Compact',
   context: 'Context',
   rename: 'Rename',
-  resume: 'Resume',
+  resume: 'Resume session', // P2-D: the chooser's name
   export: 'Export',
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
@@ -473,10 +473,4 @@ export const RENAME = {
   renamed: (title: string) => `Renamed · ${title}`,
 };
 
-// Resume.
-export const RESUME = {
-  list: 'Sessions of this project',
-  none: 'No other sessions in this project',
-  open: 'Open',
-  resume: 'Resume',
-};
+// Resume: P2-D's chooser has its words in resume/copy.ts.

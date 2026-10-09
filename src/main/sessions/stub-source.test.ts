@@ -83,8 +83,17 @@ describe('stub source plays a timeline', () => {
     expect(answer.event).toMatchObject({ kind: 'permission.requested', toolName: 'Bash' });
     expect(h.call('attention.request', { appSessionId: FIX, requestId: 'nope' })).toEqual({ event: null });
     expect([...h.handlers.keys()].sort()).toEqual([
-      'attention.list', 'attention.request', 'session.answer', 'session.events', 'session.get', 'session.list', 'session.projects.list', 'session.update',
+      'attention.list', 'attention.request', 'session.answer', 'session.events', 'session.get', 'session.list', 'session.projects.list', 'session.recentTurns' /* P2-D */, 'session.update',
     ]);
+  });
+
+  // P2-D: the resume chooser's preview reads the scenario's transcript through main's own derivation
+  it('answers session.recentTurns from the scenario’s transcript, none for a session without one, and refuses an id it does not hold', async () => {
+    const turns = await h.call<Promise<{ turns: { prompt: { text: string } | null; toolCalls: number }[]; source: string }>>('session.recentTurns', { appSessionId: FIX, limit: 5 });
+    expect(turns.source).toBe('transcript');
+    expect(turns.turns).toEqual([expect.objectContaining({ prompt: expect.objectContaining({ text: expect.stringMatching(/^Count to 8/) }), toolCalls: 8 })]);
+    expect(await h.call('session.recentTurns', { appSessionId: USAGE, limit: 5 })).toEqual({ turns: [], earlier: false, source: 'none' });
+    expect(() => h.call('session.recentTurns', { appSessionId: 'nope', limit: 5 })).toThrow('unknown app session: nope');
   });
 
   // C6: a stub session's transcript hydrates to an empty history instead of the load-failure banner.

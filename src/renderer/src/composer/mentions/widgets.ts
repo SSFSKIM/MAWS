@@ -44,6 +44,10 @@ export interface SlashWidget {
   // `tooLate` aborts once the editor stopped waiting and opened the widget: nothing may be applied after it.
   apply?: (appSessionId: AppSessionId, args: string, tooLate: AbortSignal) => Promise<boolean>;
   // C11 end
+  // P2-B start (2026-10-09): X19, the dialog's box (the P2-B execution document §5.2): `library` for the libraries
+  // (`/plugins`, `/skills`, P2-D's chooser), `utility` (every other widget) by default
+  size?: 'utility' | 'library';
+  // P2-B end
 }
 
 const widgets = new Map<string, SlashWidget>();

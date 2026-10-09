@@ -12,7 +12,7 @@ import { createSession, useSessionCreatorRegistered } from '../keymap/actions-ru
 import { openDialog } from '../sessions/dialogs';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
-import { openResumePicker } from './ResumePicker';
+import { openResumeChooser } from '../resume/host'; // P2-D
 
 export type MenuTarget = { kind: 'other' } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
@@ -68,6 +68,10 @@ function SessionItem({ id, record }: { id: SessionActionId; record: SessionRecor
   );
 }
 
+// The project's row in the tree, which a chooser opened from its menu returns the keyboard to.
+const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
+
 function ProjectItems({ projectId }: { projectId: ProjectId }) {
   const canCreate = useSessionCreatorRegistered();
   const records = useSessions((s) => s.records);
@@ -78,7 +82,7 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
         New chat
       </Item>
       {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}
-      <Item enabled onSelect={() => openResumePicker(projectId)}>
+      <Item enabled onSelect={() => openResumeChooser(projectId, projectRowOf(projectId))}>
         Resume…
       </Item>
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
