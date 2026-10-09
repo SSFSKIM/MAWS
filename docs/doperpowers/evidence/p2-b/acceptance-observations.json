@@ -1,0 +1,30 @@
+{
+  "start": {
+    "id": "73db459e-90d1-433f-bcfc-6f95155821ad",
+    "model": "claude-haiku-5-5[1m]",
+    "plugins": [
+      "code-review@claude-plugins-official",
+      "frontend-design@claude-plugins-official",
+      "cc-plugin-agents-md@builtin",
+      "cc-plugin-telemetry@builtin",
+      "cc-plugin-plugin-authoring@builtin"
+    ]
+  },
+  "size": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dialog": {
+      "width": 960,
+      "height": 765
+    }
+  },
+  "detail.loaded": "Loaded in this session",
+  "loadedLine": "5 plugins loaded in this session",
+  "skills": [
+    "here: frontend-design:frontend-design, p2b-project, supabase:supabase, supabase:supabase-postgres-best-practices",
+    "yours: p2b-user"
+  ],
+  "consoleErrors": []
+}
