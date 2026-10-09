@@ -402,7 +402,8 @@ export function usePluginManifests(cwd: string | null, items: readonly ManifestI
 export interface BuiltInModRow { id: string; name: string; description: string; enabled: boolean; source: 'maws-contract' | 'external-compatible-style' | 'off'; perSession: 'inherit' | 'on' | 'off' | null }
 export function useBuiltInMods(appSessionId: AppSessionId): { rows: BuiltInModRow[]; setEnabled: ((id: string, enabled: boolean) => Promise<void>) | null };
 // src/renderer/src/widgets/plugins/browse.ts
-export interface BrowseCard { pluginId: string; name: string; description: string | null; marketplace: string; section: 'anthropic' | string; alsoListedIn: string[]; installCount: number | null; version: string | null; installed: { identity: PluginIdentity; where: 'here' | 'otherProjects' } | null }
+export type BrowseSection = { kind: 'anthropic' } | { kind: 'marketplace'; name: string }; // sectionKey(): 'anthropic' | 'marketplace:<name>' for DOM, radio values and keys (M5's fix: a marketplace named anthropic keeps its own section)
+export interface BrowseCard { pluginId: string; name: string; description: string | null; marketplace: string; section: BrowseSection; inventoryFrom: string | null; alsoListedIn: string[]; installCount: number | null; version: string | null; installed: { identity: PluginIdentity; where: 'here' | 'otherProjects' } | null }
 export function browseCards(available: readonly AvailablePlugin[], identities: readonly PluginIdentity[], marketplaces: readonly Marketplace[]): BrowseCard[];
 export function installCountWords(n: number): string; // "999", "3.4K", "1.3M"
 // src/renderer/src/widgets/skills/skills.ts
@@ -548,6 +549,9 @@ Consumed from P2-A (ledger §1): `useLoadedPlugins`, `Freshness`, `ObservedPlugi
 - Decision: the live plugin specs (`e2e/plugins-live.spec.ts`, `e2e/plugins-library-live.spec.ts`) run their turns without `--max-budget-usd`: their sessions launch through the product path, whose budget is null by C11's rule, and E8's live run set the precedent; the bound is one-line Haiku turns with the owner-file check before and after. §6.1's "`--max-budget-usd` ≤ 1 where a turn runs" therefore applies to CLI-driven turns only, not to these two specs. The architect's ruling of 2026-10-09 (no launch-mapping change).
   Date/Author: 2026-10-09, the architect, recorded by P2-B's executor.
 - Decision: M5's task review (round 1, sol): 2 correctness defects and 2 minor accepted, 1 dismissed. Accepted: Browse's `anthropic` section key collided with a third-party marketplace of that name; a zero install count was shown (§5.8 forbids a count shown as 0); the committed live evidence named the engine binary's absolute location; clicking the current tab did not return from its detail (Radix's toggle group emits an empty value). Dismissed: the live run's missing budget flag (the ruling above).
+  Date/Author: 2026-10-09, P2-B's executor (controller).
+
+- Decision: M5's fix wave 1 (555e5564, 2384c186) closed round 1's four items. `BrowseCard.section` is a `BrowseSection` (§7); only a positive count is a count, applied before the fold (0 beside 42 gives 42; 0 and 0 give none; Most popular not offered on zeros alone); the live spec logs only the engine's version. The fixer also found and fixed a race already in M5: after an install from a card's detail, the catalogue read can answer before the installed list, so the card vanished for one render and the detail closed for good (`widgets.spec.ts:978` failed on it; M5's gate had passed on the other order). The detail now keeps the clicked card while either read is in flight and closes only once both answered without it.
   Date/Author: 2026-10-09, P2-B's executor (controller).
 
 ## 13. Outcomes & Retrospective
