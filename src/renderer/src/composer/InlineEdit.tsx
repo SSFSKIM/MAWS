@@ -61,11 +61,13 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
     el.setSelectionRange(el.value.length, el.value.length);
   }, []);
 
-  const busy = status !== null && (status.turn !== null || status.engineState === 'running');
-  const locked = resubmit.sending || resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain';
   // P2-A start (2026-10-09; the execution document §5.6): a session with no ready process is started by Send; only a
-  // terminal or job holding it, an archive, or no record keeps Send closed
+  // terminal or job holding it, an archive, or no record keeps Send closed. Busy is a ready process's: an exit keeps the
+  // engine's last `engineState` (a crash mid-turn leaves `running`), which closes nothing.
   const ready = status?.process === 'ready';
+  const busy = ready && (status.turn !== null || status.engineState === 'running');
+  const locked = resubmit.sending || resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain';
+  const startingHere = resubmit.sending && !ready; // the edit is starting its session: Cancel may leave it
   const availability = useAvailability(appSessionId);
   const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
   const notStartable = ready ? null : availabilityRefusal(availability, holder, NOT_STARTABLE);
@@ -127,7 +129,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
         ) : (
           <>
             {why !== null && <span className="mr-auto text-ui-sm text-fg-muted">{why}</span>}
-            <button type="button" className={BUTTON} disabled={locked} onClick={() => cancelInlineEdit(appSessionId)}>
+            <button type="button" className={BUTTON} disabled={locked && !startingHere} onClick={() => cancelInlineEdit(appSessionId)}>
               Cancel
             </button>
             {fork && (

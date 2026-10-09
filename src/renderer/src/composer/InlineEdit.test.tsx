@@ -155,10 +155,20 @@ describe('Edit turns the bubble into an editor in its place', () => {
     await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resubmit' }]));
     expect(within(editor()).getByRole('status').textContent).toBe('Starting this session…');
     expect(send.disabled).toBe(true);
+    expect((within(editor()).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled, 'Cancel may leave a start').toBe(false);
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
     act(() => useSessions.setState({ engine: new Map([[A, status(A)]]) }));
     await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
     expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  // M3 review: a crash mid-turn keeps the engine's last `engineState: running` on the exited status; it closes nothing
+  it('a session that crashed mid-turn (exited, engineState still running) lets the edit be resubmitted', () => {
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited', engineState: 'running' })]]) });
+    renderRow(rowOf('u-1'), { storeKey: A });
+    act(() => editAndResubmitRow(rowOf('u-1')));
+    expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(editor().textContent).not.toContain(BUSY_REASON);
   });
 
   it('a session a terminal holds keeps Send disabled with the holder named', () => {

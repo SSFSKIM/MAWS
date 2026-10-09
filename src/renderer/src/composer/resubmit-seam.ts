@@ -122,12 +122,16 @@ interface Flight {
   offs: (() => void)[];
 }
 const flights = new Map<AppSessionId, Flight>();
+// P2-A: the sessions whose edit is starting its session (the acquisition and the wait for ready): Cancel ends it there
+// (the start itself goes on, the gesture having asked for it; nothing is rewound or sent).
+const starting = new Set<AppSessionId>();
 
 export const REWOUND_COPY = 'The conversation was already rewound past that message; your edited text is in the composer';
 
 // Ends whatever the session's flow was waiting on (its timer, its subscriptions, an answer still in flight).
 function dispose(appSessionId: AppSessionId): Flight {
   const flight = flights.get(appSessionId) ?? { generation: 0, offs: [] };
+  starting.delete(appSessionId); // P2-A: a start the flight was waiting on is no longer this edit's
   flight.offs.splice(0).forEach((off) => off());
   flight.generation += 1;
   flights.set(appSessionId, flight);
@@ -171,7 +175,7 @@ const editPrefill = (edit: InlineEdit) => ({ text: edit.text, bodies: edit.bodie
 // Cancel, Keep editing's way out, or the dock line's ×. Refused while the rewind is in flight or unconfirmed, or the
 // edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere.
 export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
-  if (inFlight(appSessionId)) return false;
+  if (inFlight(appSessionId) && !starting.has(appSessionId)) return false; // P2-A: a session still starting for the edit may be left
   const edit = editOf(appSessionId);
   const rewound = record(appSessionId).state === 'rewound_awaiting_send';
   end(appSessionId);
@@ -247,33 +251,70 @@ export function newerTurnSince(appSessionId: AppSessionId): MessageUuid | null {
 // refused start says why and leaves the edit as it was. A rewind in flight or awaiting its send is never restarted here.
 const hasRecord = (appSessionId: AppSessionId): boolean => useSessions.getState().records.has(appSessionId);
 
-// The renderer's status reading ready for the acquired process: at once, or when the status event lands.
-const whenReady = (appSessionId: AppSessionId): Promise<boolean> =>
-  new Promise((resolve) => {
-    if (ready(appSessionId)) return resolve(true);
+// How long the renderer's status may trail an acquisition that answered ready before the edit gives up and is released.
+export const READY_WAIT_MS = 15_000;
+export const DID_NOT_START = 'The session did not start';
+export const NOT_READY_IN_TIME = 'The session did not become ready';
+
+
+// The renderer's status reading ready for the acquired process. Main answered ready, so the host's own status is read
+// (and applied: it is authoritative) beside the status events; a new launch that exited, the bound or the flight's
+// disposal (Cancel, another edit) ends the wait, whose subscription, timer and read go with it.
+function whenReady(client: MawsBridge, appSessionId: AppSessionId, flight: Flight): Promise<'ready' | 'exited' | 'timeout' | 'cancelled'> {
+  return new Promise((resolve) => {
+    if (ready(appSessionId)) return resolve('ready');
+    const before = useSessions.getState().engine.get(appSessionId)?.launchId ?? null; // a trailing exited status is the old launch's
+    let done = false;
+    const finish = (answer: 'ready' | 'exited' | 'timeout' | 'cancelled') => {
+      if (done) return;
+      done = true;
+      off();
+      clearTimeout(timer);
+      flight.offs = flight.offs.filter((f) => f !== cancel);
+      resolve(answer);
+    };
     const off = useSessions.subscribe((s) => {
-      const process = s.engine.get(appSessionId)?.process;
-      if (process === 'ready' || process === 'exited') {
-        off();
-        resolve(process === 'ready');
-      }
+      const status = s.engine.get(appSessionId);
+      if (status?.process === 'ready') finish('ready');
+      else if (status?.process === 'exited' && status.launchId !== before) finish('exited');
     });
+    const timer = setTimeout(() => finish('timeout'), READY_WAIT_MS);
+    const cancel = () => finish('cancelled');
+    flight.offs.push(cancel);
+    void client.invoke('session.status', { appSessionId }).then(
+      (result) => {
+        if (done || !result.ok) return;
+        if (result.value.process === 'ready') useSessions.getState().applyStatus({ appSessionId, status: result.value }); // the subscription finishes it
+        else if (result.value.process === 'exited') finish('exited');
+      },
+      () => undefined, // the events and the bound still answer
+    );
   });
+}
+
+// Whether the edit is starting its session (Cancel may end it then).
+export const startingEdit = (appSessionId: AppSessionId): boolean => starting.has(appSessionId);
 
 async function startThenSend(client: MawsBridge, appSessionId: AppSessionId, how: 'send' | 'without_rewinding'): Promise<RewindOutcome | 'sent' | 'stale'> {
   const flight = dispose(appSessionId);
   const generation = flight.generation;
   const current = () => flights.get(appSessionId)?.generation === generation;
   setResubmit(appSessionId, { ...record(appSessionId), sending: true });
+  starting.add(appSessionId);
   let refusal: string | null;
   try {
     const outcome = await acquireSession(appSessionId, 'resubmit', {}, client);
     refusal = refusalWords(outcome);
-    if (refusal === null && !(await whenReady(appSessionId))) refusal = 'The session did not start';
+    if (refusal === null && current()) {
+      const answer = await whenReady(client, appSessionId, flight);
+      refusal = answer === 'exited' ? DID_NOT_START : answer === 'timeout' ? NOT_READY_IN_TIME : null;
+    }
   } catch (error) {
     refusal = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (current()) starting.delete(appSessionId);
   }
-  if (!current()) return 'stale';
+  if (!current()) return 'stale'; // cancelled, or another edit took the flight: it owns the record now
   setResubmit(appSessionId, { ...record(appSessionId), sending: false });
   if (refusal !== null) {
     toast({ level: 'warning', text: refusal, actions: [], dismissible: true });
