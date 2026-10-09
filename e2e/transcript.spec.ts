@@ -264,6 +264,40 @@ test('a viewport that grows and then shrinks with no scroll keeps a follower at 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// P2-C (2026-10-09): a viewport that shrinks while a scroll is still settling, which the virtualiser need not report,
+// does not hide the owner's next scroll upward: it leaves follow mode, shows the control, and the stream leaves the
+// reader where they are.
+test('a scroll upward after a viewport shrinks mid-scroll leaves follow mode', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const frames = async (n: number) => {
+      for (let k = 0; k < n; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    scroller.scrollBy(0, -1); // within the threshold: still following, and the virtualiser now scrolling
+    await frames(1);
+    scroller.style.height = `${scroller.clientHeight - 80}px`; // shrinks while that scroll settles
+    await frames(3);
+    scroller.scrollBy(0, -200); // the owner scrolls up
+  });
+  const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  await expect.poll(async () => (await metrics(page)).following, { message: 'the scroll up leaves follow mode' }).toBe(false);
+  await expect(jump).toBeVisible();
+  const readingAt = await scrollerTop(page);
+  const batches = (await metrics(page)).batches;
+  await play(page, 1);
+  await expect.poll(async () => (await metrics(page)).batches).toBeGreaterThan(batches + 30);
+  expect(await scrollerTop(page), 'the stream does not move the reader').toBe(readingAt);
+  expect((await metrics(page)).following, 'still not following').toBe(false);
+  await expect(jump).toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('collapsing a divider keeps its position', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);

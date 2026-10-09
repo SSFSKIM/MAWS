@@ -69,7 +69,6 @@ export interface TranscriptListProps {
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
-  const seen = useRef<{ offset: number | null; size: number | null }>({ offset: null, size: null }); // P2-C: the scroll offset and viewport size at the virtualiser's last change
   // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
   // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
   // 280 px the moment it opens, and the rows below would jump there and back while the disclosure motion starts it
@@ -97,24 +96,51 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     anchorTo: 'end',
     followOnAppend: true,
     scrollEndThreshold: SCROLL_END_THRESHOLD,
-    // Reaching the end (within the threshold) enters follow mode; only a scroll upward leaves it. Content changing
-    // size under a follower is not a reason to stop following.
+    // Reaching the end (within the threshold) enters follow mode; only a scroll upward leaves it (the scroller's own
+    // scroll events, P2-C below). Content changing size under a follower is not a reason to stop following.
     onChange: (instance) => {
-      // P2-C start (2026-10-09): a scroll upward is a backward direction with the offset moved since the last change
-      // seen and the viewport the same size. The virtualiser's direction outlives the scroll that set it (the browser's
-      // clamp as the viewport grew), so a viewport then shrinking with no scroll (the composer growing with a notice)
-      // read as a scroll upward and left follow mode whenever the end moved past the threshold.
-      const offset = instance.scrollOffset;
-      const size = instance.scrollRect?.height ?? null;
-      const movedUp = instance.scrollDirection === 'backward' && offset !== seen.current.offset && size === seen.current.size;
-      seen.current = { offset, size };
-      const next = instance.isAtEnd() ? true : movedUp ? false : followingRef.current;
-      // P2-C end
-      if (next === followingRef.current) return;
-      followingRef.current = next;
-      onFollowChange?.(next);
+      if (!instance.isAtEnd() || followingRef.current) return;
+      followingRef.current = true;
+      onFollowChange?.(true);
     },
   });
+
+  // P2-C start (2026-10-09): what leaves follow mode, read from the scroller itself rather than the virtualiser, whose
+  // notifications come only when its range or scrolling state changes and whose direction outlives the scroll that set
+  // it (a viewport resize then read as a scroll upward or, unreported, hid the next real one). Two things leave it, each
+  // only away from the end: a jump the handle is asked for (the offset is read as soon as it is written, before a row
+  // change in the same frame could pin the end again), and a scroll event whose offset is lower than at the last scroll
+  // event or viewport resize with the viewport the same height. The browser's clamp as the viewport grows is not one,
+  // and the follow logic only ever scrolls toward the end.
+  const leaveIfAway = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element || !followingRef.current || element.scrollHeight - element.clientHeight - element.scrollTop <= SCROLL_END_THRESHOLD) return;
+    followingRef.current = false;
+    onFollowChange?.(false);
+  }, [onFollowChange]);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    let offset = element.scrollTop;
+    let height = element.clientHeight;
+    const baseline = () => {
+      offset = element.scrollTop;
+      height = element.clientHeight;
+    };
+    const scrolled = () => {
+      const movedUp = element.scrollTop < offset && element.clientHeight === height;
+      baseline();
+      if (movedUp) leaveIfAway();
+    };
+    const observer = new ResizeObserver(baseline);
+    observer.observe(element);
+    element.addEventListener('scroll', scrolled, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener('scroll', scrolled);
+    };
+  }, [leaveIfAway]);
+  // P2-C end
 
   // A transcript opens at its end, and a following reader stays there through every structural change. The
   // virtualiser's own followOnAppend covers a new last row only; a row inserted above the last one (the live answer
@@ -143,7 +169,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   }, [virtualizer]);
 
   useImperativeHandle(handle, () => ({
-    scrollToIndex: (index, align) => virtualizer.scrollToIndex(index, { align, behavior: 'instant' }),
+    scrollToIndex: (index, align) => {
+      virtualizer.scrollToIndex(index, { align, behavior: 'instant' });
+      leaveIfAway(); // P2-C
+    },
     scrollToEnd: () => virtualizer.scrollToEnd({ behavior: 'instant' }),
     get following() {
       return followingRef.current;
