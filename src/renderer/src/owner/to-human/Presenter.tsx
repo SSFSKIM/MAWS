@@ -5,7 +5,8 @@ import { parse, type Kind, type Part } from '@shared/owner/to-human-parser';
 import './presenter.css';
 
 const labels: Record<Kind, string> = { 'to-human': 'to human', essential: 'essential', 'need-input': 'need input', insight: 'insight' };
-type Drawing = { showRecord: boolean; live: boolean; recordKey: string; hasWorkFold?: boolean };
+// answerable (P2-E1): a Reply field sits under the drawing (the comment card's), so a question is answered there
+type Drawing = { showRecord: boolean; live: boolean; recordKey: string; hasWorkFold?: boolean; answerable?: boolean };
 
 // The only registration API: callers know whether a presentation exists, not the owner's vocabulary.
 export function assistantPresentation(text: string) {
@@ -15,7 +16,7 @@ export function assistantPresentation(text: string) {
   } : null;
 }
 
-function Presenter({ parts, showRecord, live, recordKey, hasWorkFold = true }: Drawing & { parts: Part[] }) {
+function Presenter({ parts, showRecord, live, recordKey, hasWorkFold = true, answerable = false }: Drawing & { parts: Part[] }) {
   const [recordOpen, toggleRecord] = useDisclosure(`owner-report:${recordKey}`);
   // A text-only answer has no turn work divider. Keep its record reachable without changing transcript derivation.
   const ownFold = !hasWorkFold && parts.some((part) => part.kind === 'plain' && part.text.trim());
@@ -32,7 +33,7 @@ function Presenter({ parts, showRecord, live, recordKey, hasWorkFold = true }: D
             <Markdown markdown={choice.text} live={false} />
             {choice.recommended && <span className="owner-report-recommended">Recommended</span>}
           </li>)}</ol>}
-          {part.kind === 'need-input' && <p className="owner-report-resume">Resume this session to answer.</p>}
+          {part.kind === 'need-input' && !answerable && <p className="owner-report-resume">Resume this session to answer.</p>}
         </div>
       </Tag>;
     })}

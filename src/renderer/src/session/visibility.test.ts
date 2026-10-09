@@ -7,6 +7,7 @@ import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectVisibility } from './visibility';
 import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
+import { hideCardThread, showCardThread, useCommentCard } from '../side/card/store'; // P2-E1
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -32,6 +33,7 @@ afterEach(() => {
   stop();
   vi.restoreAllMocks();
   useSidePane.setState({ panes: new Map() }); // E3
+  useCommentCard.setState({ open: null, shownThread: null }); // P2-E1
 });
 
 describe('session visibility', () => {
@@ -141,5 +143,22 @@ describe('session visibility', () => {
     useLayout.getState().openTab({ kind: 'file', path: '/work/a.ts', line: null, appSessionId: A });
     showSideChild(A, CHILD);
     expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
+  });
+
+  // P2-E1: a thread a comment card shows (published while its host is on screen) is on screen, so its unread mark clears
+  // as the Side pane's does; the window's focus still rules
+  it('counts the thread a comment card shows while the card publishes it, and not once it stops or the window blurs', () => {
+    const CHILD = 'app-child' as AppSessionId;
+    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    showCardThread(A, CHILD);
+    expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
+    focused = false;
+    window.dispatchEvent(new Event('blur'));
+    expect(sent().slice(1)).toEqual([{ appSessionId: CHILD, visible: false }]);
+    focused = true;
+    window.dispatchEvent(new Event('focus'));
+    expect(sent().slice(2)).toEqual([{ appSessionId: CHILD, visible: true }]);
+    hideCardThread(CHILD);
+    expect(sent().slice(3)).toEqual([{ appSessionId: CHILD, visible: false }]);
   });
 });

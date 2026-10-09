@@ -32,6 +32,31 @@ export const SIDE_COPY = {
   card: {
     title: (label: string) => `Comment on ${label}`, // the dialog's accessible name, the sheet's own
     close: 'Close',
+    // the thread phase
+    replyField: 'Reply',
+    replyPlaceholder: 'Reply to this thread',
+    send: 'Send',
+    sendReply: 'Send reply',
+    starting: 'Starting…',
+    retry: 'Retry',
+    replyRefused: 'The reply was not sent', // a refusal the seam gave no reason for
+    openInSidePane: 'Open in Side pane',
+    openAsTab: 'Open as tab',
+    // the needs-you strip above Reply
+    needs: {
+      trust: 'Waiting for you to trust this folder',
+      relay: 'The relay is not answering',
+      failed: 'Could not start',
+      held: (holder: string) => `Held by ${holder}`,
+      permission: 'Waiting for your permission',
+      question: 'Asked you a question',
+      plan: 'Waiting for you to review a plan',
+      input: 'Waiting for your input', // a dialog, an elicitation
+      error: 'Hit an error',
+      interrupted: 'Was interrupted',
+      autoModeUnavailable: 'Auto mode is unavailable',
+      other: 'Waiting for you', // a tier-1 kind with no words of its own
+    },
   },
   pane: {
     title: 'Side',

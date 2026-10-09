@@ -33,7 +33,7 @@ interface Props {
 
 const mountedHosts = new Set<string>();
 
-export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, restoreFocus }: Props) {
+export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, visible, restoreFocus }: Props) {
   const open = useCommentCard((s) => s.open);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -74,7 +74,7 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, re
   };
   return (
     <div ref={ref} data-card-host={host} className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-      {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} onDismiss={() => dismiss(card.serial)} />}
+      {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
     </div>
   );
 }

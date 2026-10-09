@@ -11,6 +11,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { hideSideChild, showSideChild } from '../side/store';
+import { hideCardThread, showCardThread } from '../side/card/store'; // P2-E1
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 import { connectAttention } from './navigation';
@@ -190,6 +191,27 @@ describe('the fallback toast', () => {
       expect(toasted()).toEqual([`attention:${item.id}`]);
     } finally {
       hideSideChild(parent, child);
+    }
+  });
+
+  // P2-E1: a thread a comment card shows draws its requests inline (C7's card in the card's thread), so its request is
+  // on screen while the card publishes it, whatever the panel shows; once the card closes, a toast again
+  it('posts no toast for a thread a comment card shows, and one once the card closes', () => {
+    const parent = idOf('Fix sidebar drag');
+    const child = idOf('Quota reset recovery') as AppSessionId;
+    const item = nine.attention.find((a) => a.appSessionId === child)!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: child, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    useLayout.getState().setPanel({ collapsed: true });
+    showCardThread(parent, child);
+    try {
+      notify();
+      expect(toasted()).toEqual([]);
+      hideCardThread(child);
+      notify();
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+    } finally {
+      hideCardThread(child);
     }
   });
 

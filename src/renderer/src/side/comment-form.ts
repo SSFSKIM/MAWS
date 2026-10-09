@@ -23,10 +23,13 @@ export interface CommentFormInput {
   anchor: Anchor;
   parent: AppSessionId;
   gone(): boolean; // the presentation was closed or replaced while the send was on its way
-  onSent(): void; // a send that went: the presentation closes
+  onSent(sent: { child?: AppSessionId; text: string }): void; // a send that went (the side thread it opened, the text sent)
+  // asked when a side thread's fork answers: whether to reveal it in the parent's Side pane (the sheet: always; the card:
+  // only once it is gone, since it shows the thread itself)
+  reveal?: () => boolean;
 }
 
-export function useCommentForm({ anchor, parent, gone, onSent }: CommentFormInput) {
+export function useCommentForm({ anchor, parent, gone, onSent, reveal }: CommentFormInput) {
   const status = useSessions((s) => s.engine.get(parent) ?? null);
   const [text, setText] = useState('');
   const [destination, setDestination] = useState<CommentDestination>('thread');
@@ -42,12 +45,13 @@ export function useCommentForm({ anchor, parent, gone, onSent }: CommentFormInpu
     setPhase({ kind: 'sending', destination: to });
     // Send to main's acquisition of a parent that is not ready (P2-A, A's §5.6) runs here, before sendComment's
     // `side.sendToMain`, so the sheet and the card inherit it alike.
-    const result = await sendComment(to, { parent, anchor, text: text.trim(), screenshot });
+    const sent = text.trim();
+    const result = await sendComment(to, { parent, anchor, text: sent, screenshot }, reveal ? { reveal } : {});
     if (gone()) {
       if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
       return;
     }
-    if (result.ok) onSent();
+    if (result.ok) onSent({ ...(result.child && { child: result.child }), text: sent });
     else setPhase({ kind: 'refused', destination: to, error: result.error });
   };
 

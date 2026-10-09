@@ -32,7 +32,14 @@ export interface OpenCard {
 
 export const CLAIM_DEADLINE_MS = 5_000;
 
-export const useCommentCard = create<{ open: OpenCard | null }>()(() => ({ open: null }));
+// `shownThread`: the thread a thread-phase card draws while its host is on screen (P2-E1 document, D6), read by the
+// unread rule (`session/visibility.ts`) and attention navigation (`attention/navigation.ts`) as the Side pane's shown
+// child is; kept apart from the Side store's `shownChild`, which also means "hosted in the Side pane".
+export interface ShownThread {
+  parent: AppSessionId;
+  child: AppSessionId;
+}
+export const useCommentCard = create<{ open: OpenCard | null; shownThread: ShownThread | null }>()(() => ({ open: null, shownThread: null }));
 
 let serials = 0;
 
@@ -85,4 +92,21 @@ export function closeCard(serial?: number): void {
   const { open } = useCommentCard.getState();
   if (open === null || (serial !== undefined && open.serial !== serial)) return;
   useCommentCard.setState({ open: null });
+}
+
+// The card's Side thread answered: the card becomes that thread, the comment as typed echoed until the thread's own
+// anchored prompt arrives. Nothing when the card was closed or replaced meanwhile.
+export function enterThread(serial: number, child: AppSessionId, echo: string): void {
+  const { open } = useCommentCard.getState();
+  if (open?.serial !== serial) return;
+  useCommentCard.setState({ open: { ...open, phase: { kind: 'thread', child, echo } } });
+}
+
+// Published by a thread-phase card while its host is on screen; withdrawn (only if it is still the one shown) when not.
+export function showCardThread(parent: AppSessionId, child: AppSessionId): void {
+  const shown = useCommentCard.getState().shownThread;
+  if (shown?.parent !== parent || shown.child !== child) useCommentCard.setState({ shownThread: { parent, child } });
+}
+export function hideCardThread(child: AppSessionId): void {
+  if (useCommentCard.getState().shownThread?.child === child) useCommentCard.setState({ shownThread: null });
 }
