@@ -2,16 +2,14 @@
 // merge, the previous launch's facts kept across a launch that observed nothing, subagent inits ignored, its base the
 // recovered snapshot) and recovery by launch (each exported fixture's fields, a launch folded once never re-read, an
 // older build's launch caught up, a reading budget that answers `complete: false` and continues at the next read).
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createInterface } from 'node:readline';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyObservedFacts, type ObservedFacts } from '@shared/engine/observed-facts';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { ObservedFactsFold, ObservedFactsService, type ObservedFactsServiceDeps } from './observed-facts';
+import { ObservedFactsFold, ObservedFactsService, readJournalLines, type ObservedFactsServiceDeps } from './observed-facts';
 import { MemoryObservedFactsStore } from './store/observed-facts-store';
 
 const FIXTURES = resolve(__dirname, '../../spikes/protocol-probe/fixtures/pass3');
@@ -21,10 +19,12 @@ const BUILTINS = ['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugi
 let root: string;
 let store: MemoryObservedFactsStore;
 let opened: string[];
+let starts: number[];
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'maws-facts-'));
   store = new MemoryObservedFactsStore();
   opened = [];
+  starts = [];
 });
 afterEach(async () => {
   vi.useRealTimers();
@@ -37,9 +37,10 @@ const service = (over: Partial<ObservedFactsServiceDeps> = {}) =>
     store,
     journalRoot: root,
     log: () => {},
-    lines: (file) => {
+    lines: (file, start) => {
       opened.push(file);
-      return createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+      starts.push(start);
+      return readJournalLines(file, start);
     },
     ...over,
   });
@@ -262,7 +263,7 @@ describe('the live recorder', () => {
     const file = store.files.get(ID)!;
     expect(file.plugins?.launchId).toBe('L1');
     expect(file.mode).toEqual({ value: 'acceptEdits', at: at(11), launchId: 'L2' });
-    expect(file.launches.sort()).toEqual(['L1', 'L2']);
+    expect(file.launches).toEqual(['L2']); // L1 is no longer in the journal: the exit write prunes it (§5.5)
     expect((await recorder.answer()).plugins?.launchId).toBe('L1');
   });
 
@@ -308,5 +309,106 @@ describe('the file on disk', () => {
     const again = await service({ store: new FileObservedFactsStore(root) }).read(ID);
     expect(again?.model?.value).toBe('claude-haiku-4-5');
     expect(JSON.parse(await readFile(join(root, 'engine-host', 'state', `${ID}.observed.json`), 'utf8'))).not.toHaveProperty('complete');
+  });
+});
+
+// The review's fixes (2026-10-09): recovery advances through a launch longer than one budget, carrying its open
+// requests; it never recreates a forgotten file; a journal it cannot open rejects the read; an inherited reload takes
+// an older init's errors on a first recovery; the launch list is pruned on ordinary reads and exit writes.
+describe('recovery across budgets, forget, unreadable journals, inherited errors and pruning', () => {
+  const status = (s: number, mode: string): Omit<JournalRow, 'seq'> => ({ direction: 'in', at: at(s), frame: { type: 'system', subtype: 'status', permissionMode: mode } });
+
+  it('a launch longer than several budgets advances at each read, carrying its open requests, and says complete: false until folded', async () => {
+    await journalRows('L1', [
+      spawn(0), init(1), request(2, 'r1', 'get_settings'), // the first read stops here, the request open
+      status(3, 'plan'), status(4, 'acceptEdits'), answer(5, 'r1', { effective: {}, sources: [], applied: { effort: 'max' } }),
+      status(6, 'default'), init(7, { model: 'm-last' }),
+    ]);
+    let ticks = 0;
+    const host = service({ budgetMs: 2, clock: () => ticks++ }); // three lines per read
+    const answers = [];
+    for (let read = 0; read < 3; read += 1) answers.push((await host.read(ID))!);
+    expect(answers.map((a) => a.complete)).toEqual([false, false, true]);
+    expect(answers.map((a) => a.model?.value)).toEqual(['claude-haiku-4-5', 'claude-haiku-4-5', 'm-last']);
+    expect(answers[0]!.effort).toBeNull(); // the request was read in the first read, its answer not yet
+    expect(answers[1]!.effort).toEqual({ value: 'max', at: at(5), launchId: 'L1' }); // matched across the cut
+    expect(answers[1]!.mode?.value).toBe('acceptEdits');
+    expect(answers.map((a) => a.launches)).toEqual([[], [], ['L1']]);
+    expect(starts[0]).toBe(0);
+    expect(starts[1]).toBeGreaterThan(0); // resumed where the first read stopped, never from the first row
+    expect(starts[2]).toBeGreaterThan(starts[1]!);
+    expect(await host.read(ID)).toMatchObject({ complete: true, model: { value: 'm-last' } });
+    expect(opened).toHaveLength(3);
+  });
+
+  it('a recorder whose base recovery was cut answers complete: false, and its next answer continues the recovery', async () => {
+    await journalRows('L1', [spawn(0), init(1), status(2, 'plan'), status(3, 'acceptEdits')]);
+    let ticks = 0;
+    const recorder = service({ budgetMs: 1, clock: () => ticks++ }).recorder({ appSessionId: ID, launchId: 'L2', engineSessionId: () => null });
+    expect((await recorder.answer()).complete).toBe(false);
+    expect(await recorder.answer()).toMatchObject({ complete: true, mode: { value: 'acceptEdits' } });
+  });
+
+  it('a recovery that finishes after session.forget began never recreates the file', async () => {
+    await journalRows('L1', [spawn(0), init(1)]);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const host = service({
+      lines: async function* (file, start) {
+        await held; // the journal read is still running when forget begins
+        yield* readJournalLines(file, start);
+      },
+    });
+    const reading = host.read(ID);
+    const forgetting = host.forget(ID, () => rm(dir(), { recursive: true, force: true }));
+    expect(await host.read(ID)).toBeNull(); // nothing begins while the erase runs
+    release();
+    expect(await reading).toBeNull();
+    await forgetting;
+    expect(store.files.has(ID)).toBe(false);
+    expect(await host.read(ID)).toBeNull();
+  });
+
+  it('a journal that cannot be opened rejects the read (main answers null), and no stream is left open', async () => {
+    await expect(async () => {
+      for await (const line of readJournalLines(join(root, 'missing.jsonl'))) void line;
+    }).rejects.toThrow(/ENOENT/);
+    await journalRows('L1', [spawn(0), init(1)]);
+    await chmod(join(dir(), 'L1.jsonl'), 0o000);
+    try {
+      await expect(service().read(ID)).rejects.toThrow(/EACCES/);
+      expect(store.files.size).toBe(0);
+    } finally {
+      await chmod(join(dir(), 'L1.jsonl'), 0o644);
+    }
+  });
+
+  it('a first recovery gives a newer no-init reload the errors and warnings of an older launch’s init, keeping the newer list', async () => {
+    await journalRows('L1', [spawn(0), init(1, { plugin_warnings: [{ plugin: 'p1', type: 'shadowed', message: 'shadowed by user' }] })]);
+    await journalRows('L2', [spawn(10), request(11, 'r1', 'reload_plugins'), answer(12, 'r1', { commands: [], agents: [], plugins: [{ name: 'p2', path: '/p2' }], error_count: 1 })]);
+    const facts = (await service().read(ID))!;
+    expect(facts.plugins).toEqual({
+      value: { plugins: [{ name: 'p2', path: '/p2', source: null, version: null }], errors: [{ plugin: 'bad', type: 'load', message: 'no manifest', path: null }], warnings: [{ plugin: 'p1', type: 'shadowed', message: 'shadowed by user' }] },
+      at: at(12), launchId: 'L2',
+    });
+  });
+
+  it('the same when the older init is folded only at a later read (the budget cut before it)', async () => {
+    await journalRows('L1', [spawn(0), init(1), status(2, 'plan')]);
+    await journalRows('L2', [spawn(10), request(11, 'r1', 'reload_plugins'), answer(12, 'r1', { commands: [], agents: [], plugins: [{ name: 'p2', path: '/p2' }], error_count: 1 })]);
+    let ticks = 0;
+    const host = service({ budgetMs: 3, clock: () => ticks++ });
+    expect((await host.read(ID))!.plugins?.value.errors).toEqual([]); // L2 folded, L1 not yet
+    let last = (await host.read(ID))!;
+    while (!last.complete) last = (await host.read(ID))!;
+    expect(last.plugins).toMatchObject({ launchId: 'L2', value: { plugins: [{ name: 'p2' }], errors: [{ plugin: 'bad' }] } });
+  });
+
+  it('prunes launches the journal no longer holds on an ordinary read, with no recovery to run', async () => {
+    await journalRows('L1', [spawn(0), init(1)]);
+    await service().read(ID);
+    await store.merge(ID, { ...emptyObservedFacts(ID, at(20), 'live'), launches: ['pruned-long-ago'] });
+    expect((await service().read(ID))!.launches).toEqual(['L1']);
+    expect(store.files.get(ID)?.launches).toEqual(['L1']);
   });
 });

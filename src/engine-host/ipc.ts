@@ -603,8 +603,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     streams.delete(id);
     specs.delete(id);
     modelKeys.delete(id);
-    await store.forget(id);
-    await observed.forget(id); // P2-A: the observed facts go with the conversation (an archive keeps them)
+    // P2-A: the observed facts go with the conversation (an archive keeps them); no recovery from the journal can
+    // commit while the erase runs, and the facts file goes after the journal it could be recovered from
+    await observed.forget(id, () => store.forget(id));
     emit('session.forgotten', { appSessionId: id });
   });
   // C10 end -------------------------------------------------------------------------------------------------------------
