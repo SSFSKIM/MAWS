@@ -16,7 +16,7 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION, FIXTURE_ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
 import { compareVersions } from '../../src/engine-host/engine-compat'; // cua board #94
 import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
 import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
@@ -29,6 +29,8 @@ import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, redactJo
 import { LiveHost, startDirectSession } from './support/live-host';
 
 const REPO_ROOT = resolve(__dirname, '../..');
+// cua board #94: 2.1.286 introduced the `delivery_id` every queued_command attachment carries (2.1.284 and 2.1.285 omit it).
+const DELIVERY_ID_SINCE = '2.1.286';
 const TURN_MS = 120_000;
 const LONG_CASE_MS = 300_000;
 const COST_CAP_USD = 5; // the owner's stop-and-report line for one run
@@ -1061,10 +1063,9 @@ describe('engine host live', () => {
     const steerUuid = outFrames(readJournal(journalPath)).find((r) => r.frame.type === 'user' && r.frame.priority === 'next')!.frame.uuid;
     const queued = records.filter((r) => r.attachment?.type === 'queued_command');
     // cua board #94: the live run takes the newest installed engine once the fixtures' 2.1.283 is gone (test/support/
-    // engine-pin). 2.1.283 writes no `delivery_id`; from 2.1.287 on (read in its bundle, unchanged on 2.1.295) the
-    // attachment always carries one, a fresh id assigned when the command is first attached. The case takes either
-    // engine, and holds each to its own form.
-    const deliveryId = (compareVersions(ENGINE_VERSION, FIXTURE_ENGINE_VERSION) ?? 0) > 0 ? expect.any(String) : undefined;
+    // engine-pin), so the case takes an engine on either side of DELIVERY_ID_SINCE and holds each to its own form: no
+    // `delivery_id` before it, and from it on always one, a fresh id assigned when the command is first attached.
+    const deliveryId = (compareVersions(ENGINE_VERSION, DELIVERY_ID_SINCE) ?? -1) >= 0 ? expect.any(String) : undefined;
     expect(queued.map((r) => r.attachment)).toEqual([{ type: 'queued_command', prompt: 'Reply NEXT_OK', source_uuid: steerUuid, delivery_id: deliveryId, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: expect.any(String), humanTurn: true }]);
     expect(records.filter((r) => r.uuid === steerUuid)).toEqual([]);
     const parent = records.find((r) => r.uuid === queued[0]!.parentUuid);
