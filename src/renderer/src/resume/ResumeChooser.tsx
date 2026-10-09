@@ -34,6 +34,7 @@ import {
   type ChooserRow,
   type ChooserToggles,
   type GroupKind,
+  LOCALE,
 } from './model';
 import { useRecentTurns } from './preview';
 
@@ -287,7 +288,7 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: st
           {badge}
         </span>
       )}
-      <span title={new Date(row.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
+      <span title={new Date(row.at).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
         {rowTime(row.at, kind, now)}
       </span>
     </div>
@@ -348,7 +349,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
         </Fact>
         {branch && <Fact label={COPY.facts.branch}>⎇ {branch}</Fact>}
         {projectName && <Fact label={COPY.facts.project}>{projectName}</Fact>}
-        <Fact label={COPY.facts.lastActive} title={new Date(row.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}>
+        <Fact label={COPY.facts.lastActive} title={new Date(row.at).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })}>
           {capitalised(relativeAge(Math.max(0, now - row.at)))}
         </Fact>
         {digest?.lastAssistantLine && (

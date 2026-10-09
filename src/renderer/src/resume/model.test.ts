@@ -4,7 +4,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
-import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
+import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, LOCALE, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
 
 const P = project('p', 0, { name: 'maws' });
 const Q = project('q', 1, { name: 'usage' });
@@ -91,7 +91,7 @@ describe('the chooser’s groups', () => {
     expect(groupOf(local(4, 23), now)).toMatchObject({ kind: 'lastWeek', label: 'Last week' }); // Sunday
     expect(groupOf(local(28, 9, 8), now)).toMatchObject({ kind: 'lastWeek' }); // Monday 2026-09-28
     expect(groupOf(local(27, 9, 8), now)).toMatchObject({ kind: 'week', key: `week:${local(21, 0, 8)}` });
-    expect(groupOf(local(27, 9, 8), now).label).toBe(`Week of ${new Date(local(21, 0, 8)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`);
+    expect(groupOf(local(27, 9, 8), now).label).toBe(`Week of ${new Date(local(21, 0, 8)).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' })}`);
     expect(groupOf(local(30, 9, 11, 2025), now).label, 'another year names it').toContain('2025');
   });
 
@@ -102,11 +102,11 @@ describe('the chooser’s groups', () => {
       ['Today', ['a', 'b']],
       ['Yesterday', ['c']],
       ['Last week', ['d']],
-      [`Week of ${new Date(local(14, 0, 8)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, ['e']],
+      [`Week of ${new Date(local(14, 0, 8)).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' })}`, ['e']],
     ]);
-    expect(rowTime(local(8, 14), 'today', now)).toBe(new Date(local(8, 14)).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
+    expect(rowTime(local(8, 14), 'today', now)).toBe(new Date(local(8, 14)).toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' }));
     expect(rowTime(local(6, 14), 'thisWeek', now)).toMatch(/^\S+ /);
-    expect(rowTime(local(1), 'lastWeek', now)).toBe(new Date(local(1)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    expect(rowTime(local(1), 'lastWeek', now)).toBe(new Date(local(1)).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' }));
   });
 
   it('a Monday week runs across New Year (Mon 2026-12-28 to Sun 2027-01-03)', () => {

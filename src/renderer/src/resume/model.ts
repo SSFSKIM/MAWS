@@ -84,6 +84,8 @@ export interface ChooserGroup {
   rows: ChooserRow[];
 }
 
+// The chooser's words are English (the app has no other copy yet), so its dates and times are too, whatever the system locale.
+export const LOCALE = 'en-US';
 const DAY = 24 * 60 * 60 * 1000;
 const midnight = (ms: number): number => {
   const d = new Date(ms);
@@ -99,7 +101,7 @@ const weekStart = (ms: number): number => {
   return d.getTime();
 };
 const shortDate = (ms: number, now: number): string =>
-  new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() !== new Date(now).getFullYear() && { year: 'numeric' }) });
+  new Date(ms).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() !== new Date(now).getFullYear() && { year: 'numeric' }) });
 
 // The group a time falls in, by local calendar: Today, Yesterday, the earlier days of this week, last week, then one
 // group per week ("Week of Sep 14"). A time in the future (a clock moved back) counts as today.
@@ -132,9 +134,9 @@ export function chooserGroups(rows: readonly ChooserRow[], now: number): Chooser
 // What a row says of its time inside its group: the clock time for Today and Yesterday, the weekday and the clock for
 // the rest of this week, the date for the weeks before.
 export function rowTime(at: number, kind: GroupKind, now: number): string {
-  const clock = new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const clock = new Date(at).toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
   if (kind === 'today' || kind === 'yesterday') return clock;
-  if (kind === 'thisWeek') return `${new Date(at).toLocaleDateString(undefined, { weekday: 'short' })} ${clock}`;
+  if (kind === 'thisWeek') return `${new Date(at).toLocaleDateString(LOCALE, { weekday: 'short' })} ${clock}`;
   return shortDate(at, now);
 }
 

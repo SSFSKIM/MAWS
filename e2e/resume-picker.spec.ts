@@ -12,6 +12,7 @@ import { openProject, projectLine, projectRow, sidebarOf } from './support/sideb
 const SHELL_ENV = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' };
 const FIX = 'Fix sidebar drag'; // unread, its transcript test/fixtures/transcripts/w1-steer-next-disk.jsonl
 const CHARTER = 'Charter + research'; // its transcript subagent-parent.jsonl
+const NORTH = 'Workstation north star'; // no process: an exited session
 
 const chooser = (page: Page) => page.getByRole('dialog', { name: 'Resume session' });
 const options = (page: Page) => chooser(page).getByRole('option');
@@ -42,14 +43,15 @@ test('resume chooser from the sidebar: library box, search, the lazy preview, En
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(FIX);
     const preview = dialog.getByTestId('resume-preview');
-    await expect(preview).toContainText('/Users/new/Developer/GitHub/MAWS');
+    await expect(preview).toContainText('Folder/private/tmp/maws-probe-qqboLh'); // the record's own directory
     await expect(preview).toContainText('Last active');
     const turns = preview.getByTestId('resume-turns');
     await expect(turns).toContainText('Count to 8 with separate Bash sleep 1 calls');
     await expect(turns).toContainText('8 tool calls');
     await expect(turns).toContainText('COUNTED');
     // previewing an unread session leaves it unread
-    await expect(sessionRow(page, FIX).getByRole('img', { name: 'Unread' })).toHaveCount(1);
+    // (the modal dialog hides the window behind it from the accessibility tree, so the row is read with hidden ones)
+    await expect(sidebarOf(page).getByRole('treeitem', { name: FIX, includeHidden: true }).getByRole('img', { name: 'Unread', includeHidden: true })).toHaveCount(1);
 
     await page.keyboard.press('Enter');
     await expect(dialog).toHaveCount(0);
@@ -68,14 +70,25 @@ test('resume chooser: an exited session opens to its transcript with the session
   try {
     const { page } = maws;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 });
+    // the row's own menu first: what the owner had before the chooser (enabled where C10 registers its handler, the
+    // product's index mode; the stub scenario registers none, so it renders disabled there, before and after alike)
+    await openProject(page, 'MAWS');
+    await sessionRow(page, NORTH).click({ button: 'right' });
+    const before = page.getByRole('menuitem', { name: 'Resume', exact: true });
+    await expect(before).toBeVisible();
+    const enabled = await before.isEnabled();
+    await page.keyboard.press('Escape');
+
     await openFromSidebar(page);
     await page.keyboard.type('north star');
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.press('Enter');
     await expect(chooser(page)).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'Workstation north star · MAWS' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: `${NORTH} · MAWS` })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('banner').getByRole('button', { name: 'Session actions' }).click();
-    await expect(page.getByRole('menuitem', { name: 'Resume', exact: true })).toBeEnabled();
+    const after = page.getByRole('menuitem', { name: 'Resume', exact: true });
+    await expect(after, 'the opened session offers Resume as its row did').toBeVisible();
+    expect(await after.isEnabled()).toBe(enabled);
     await page.keyboard.press('Escape');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
