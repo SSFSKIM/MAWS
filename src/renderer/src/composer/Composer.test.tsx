@@ -499,6 +499,24 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
   });
 
+  // P2-A M3 review (acceptance 5): on a session with no ready process the chosen directory starts it first, said beside the "+"
+  it('Add directory… on an exited session says Starting… after the choice while the session starts, then adds it', async () => {
+    live(A, { status: { process: 'exited' } });
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    expect(await addDirectoryState(user)).toBeNull(); // offered: the choice starts the session
+    await user.click(plusOf());
+    await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
+    await waitFor(() => expect(invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'chip' }])); // after the picker answered
+    expect(invoked('layout.pickFiles')).toHaveLength(1);
+    const phase = composerOf(0).querySelector('[data-add-directory-phase]');
+    expect(phase?.textContent).toBe('Starting…');
+    expect(invoked('session.applyFlagSettings')).toEqual([]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
+    await waitFor(() => expect(composerOf(0).querySelector('[data-add-directory-phase]')).toBeNull());
+  });
+
   // W10 (C10): "model matters a bit more": the model chip toward the middle, the context ring at the outermost edge
   it('orders the toolbar + · location · mode · mic … model · context ring, the ring last', async () => {
     live(A);

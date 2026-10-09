@@ -30,8 +30,11 @@ export interface ChipBinding<V, O = never> {
   value: V;
   options: O[];
   disabled: string | null;
-  set: (v: V) => Promise<HookResult>;
+  set: (v: V, progress?: (phase: ChipPhase) => void) => Promise<HookResult>; // P2-A: `progress` hears a start before the change
 }
+
+// P2-A (2026-10-09): a live chip's change on a session with no ready process starts it first, then applies
+export type ChipPhase = 'starting' | 'applying';
 
 export interface ModelChoice {
   model: string | null;
@@ -144,11 +147,13 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const ready = status?.process === 'ready';
   const writable = ready ? null : availabilityRefusal(availability === undefined ? 'resumable' : availability, record?.holder ?? null);
   // P2-A: the acquisition a choice on a session with no ready process runs first; a refusal in words
-  const acquired = async (): Promise<HookResult | null> => {
+  const acquired = async (progress?: (phase: ChipPhase) => void): Promise<HookResult | null> => {
     if (ready) return null;
     if (writable !== null) return { ok: false, error: writable };
     try {
+      progress?.('starting');
       const outcome = await acquireSession(appSessionId, 'chip', {}, client);
+      if (outcome.status === 'ready') progress?.('applying');
       return outcome.status === 'ready' ? null : { ok: false, error: refusalWords(outcome) ?? outcome.status };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -191,8 +196,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       disabled: writable,
       // The engine's own list is read at the moment of the change (the chip's value may be the record's, or stale), and
       // the new directories are added to it: flag settings replace the list, so nothing the engine holds is dropped.
-      set: async (next) => {
-        const refused = await acquired(); // P2-A
+      set: async (next, progress) => {
+        const refused = await acquired(progress); // P2-A
         if (refused) return refused;
         const rules = await client.invoke('session.listPermissionRules', { appSessionId });
         if (!rules.ok) return { ok: false, error: rules.error.message };
