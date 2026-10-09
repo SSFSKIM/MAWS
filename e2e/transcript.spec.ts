@@ -1133,7 +1133,8 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 // after one Bash call and one unmarked sentence (test/fixtures/engine/p2c-report-marks.jsonl), reads as the report:
 // the prompt, one "Working record" row, the cards. The record opens to the ordinary divider, the divider to the tool
 // row, "Fold to report" closes it; an unmarked turn draws as the full transcript; the header's toggle shows the full
-// transcript with the marks still as cards. No engine runs.
+// transcript with the marks still as cards. With room for the margin, a long insight after a short message keeps its
+// height in its row: it ends above the next insight and the next transcript row. No engine runs.
 test('M5 the report view folds a marked turn into its working record and draws the four marks as cards', async () => {
   test.setTimeout(120_000);
   const fixture = 'test/fixtures/engine/p2c-report-marks.jsonl';
@@ -1172,7 +1173,7 @@ test('M5 the report view folds a marked turn into its working record and draws t
     const record = pane.getByRole('button', { name: /^Working record/ });
     await expect(record).toHaveText('Working record · 1 tool call · 1 message');
     await expect(record).toHaveAttribute('aria-expanded', 'false');
-    const report = pane.locator('[data-owner-report]');
+    const report = pane.locator('[data-owner-report]').filter({ hasText: "I haven't opened any files" });
     await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
     await expect(report.locator('[data-owner-card="to-human"]')).toContainText("I haven't opened any files");
     await expect(report.locator('[data-owner-card="essential"]')).toContainText('The README above is unverified.');
@@ -1214,6 +1215,39 @@ test('M5 the report view folds a marked turn into its working record and draws t
     await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
     await toggle.getByRole('button', { name: 'Report' }).click();
     await expect(pane.getByRole('button', { name: /^Working record/ })).toBeVisible();
+
+    // The margin keeps an insight's height (the M5 fix wave): widen the window and narrow the column until the pane
+    // leaves the margin's room, then a long insight after a short message ends above the next message's insight, inside
+    // its own transcript row, and the next row starts below that row.
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000));
+    const notes = pane.locator('[data-owner-report]').filter({ hasText: 'Keep the README short.' });
+    await notes.scrollIntoViewIfNeeded();
+    await notes.evaluate((el) => {
+      const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
+      document.documentElement.style.setProperty('--measure', `${Math.max(240, scroller.clientWidth - 2 * 272)}px`);
+    });
+    await expect.poll(() => notes.locator('.owner-insights').evaluateAll((els) => els.map((el) => el.getAttribute('data-placement')))).toEqual(['margin', 'margin']);
+    await expect.poll(() => notes.evaluate((el) => {
+      const box = (node: Element | null | undefined) => node?.getBoundingClientRect() ?? null;
+      const [tall, short] = Array.from(el.querySelectorAll('.owner-insights'), (node) => node.getBoundingClientRect());
+      const first = el.querySelector('.owner-report-item');
+      const message = box(first?.querySelector('[data-owner-card="to-human"]'));
+      const column = box(el.closest('.thread-column'));
+      const row = el.closest('[data-index]')!;
+      const next = box(row.parentElement?.querySelector(`[data-index="${Number(row.getAttribute('data-index')) + 1}"]`));
+      const own = row.getBoundingClientRect();
+      const wrong: string[] = [];
+      if (!message || message.height >= tall.height) wrong.push(`the message (${message?.height}) is not shorter than its insight (${tall.height})`);
+      if (column && tall.left < column.right) wrong.push(`the insight (left ${tall.left}) is not in the margin (column right ${column.right})`);
+      if (first && first.getBoundingClientRect().bottom < tall.bottom - 0.5) wrong.push(`the item (bottom ${first.getBoundingClientRect().bottom}) does not hold its insight (bottom ${tall.bottom})`);
+      if (short.top < tall.bottom) wrong.push(`the next insight (top ${short.top}) overlaps the long one (bottom ${tall.bottom})`);
+      const lowest = Math.max(tall.bottom, short.bottom);
+      if (own.bottom < lowest - 0.5) wrong.push(`the row (bottom ${own.bottom}) does not hold its insights (bottom ${lowest})`);
+      if (!next || next.top < own.bottom - 0.5) wrong.push(`the next row (top ${next?.top}) starts above this row's end (${own.bottom})`);
+      return wrong;
+    })).toEqual([]);
+    await captureReportShot(page, 'report-margin');
+    await page.evaluate(() => document.documentElement.style.removeProperty('--measure'));
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();

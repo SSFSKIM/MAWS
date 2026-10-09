@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { describe, expect, it } from 'vitest';
+import { withBrowserActivityRows, type BrowserActivityEntry } from '../../transcript/model/browser-activity';
 import { rowsOf } from '../../transcript/model/derive';
 import { rowId, turnId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi, type TranscriptState, type TranscriptUi } from '../../transcript/model/reduce';
@@ -129,6 +130,38 @@ describe('the report projection (the P2-C document, Design §7)', () => {
     const rows = project(stateOf(b.events));
     expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'text:Preamble.\n<to-human>Done.</to-human>']);
     expect(rows[2]).toMatchObject({ toolCalls: 0, messages: 1 });
+  });
+
+  // Standalone browser activity carries no turn and is placed by its time inside the turn it happened in
+  // (`withBrowserActivityRows`), so a turn's rows need not be contiguous.
+  function withActivityInside(markBefore: boolean) {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    if (markBefore) b.text('m1', 0, 'First notes. <to-human>First message.</to-human>');
+    const at = new Date(b.at + 50).toISOString();
+    b.tick(100);
+    b.text('m2', 0, 'Later notes. <to-human>Last message.</to-human>');
+    b.end(['u1']);
+    const state = stateOf(b.events);
+    const activity = { appSessionId: 'app-1', tabId: 'tab-1', seq: 1, at, activity: { kind: 'navigate', url: 'https://example.test' } } as unknown as BrowserActivityEntry;
+    const rows = withBrowserActivityRows(rowsOf(state), { byCall: new Map(), calls: new Map(), standalone: [activity] });
+    expect(rows.findIndex((row) => row.kind === 'browser_activity')).toBeLessThan(rows.length - 1); // placed inside the turn
+    return reportRows(rows, state, state.ui);
+  }
+
+  it('a turnless row inside a marked turn stays in place, and the turn still folds into its one record', () => {
+    const rows = withActivityInside(false);
+    expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'browser_activity', 'text:Later notes. <to-human>Last message.</to-human>']);
+    expect(rows[2]).toMatchObject({ toolCalls: 1, messages: 1 });
+  });
+
+  it('marks on both sides of a turnless row: one record, no divider, and every row id unique', () => {
+    const rows = withActivityInside(true);
+    expect(rows.filter((row) => row.kind === 'owner_record')).toHaveLength(1);
+    expect(rows.filter((row) => row.kind === 'divider')).toHaveLength(0);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
   });
 
   it('is the report only while the lane is on and the reader has not chosen the transcript', () => {

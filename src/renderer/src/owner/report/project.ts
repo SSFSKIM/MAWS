@@ -38,35 +38,54 @@ export function liveMarkedRowIds(state: TranscriptState | undefined): string {
   return ids.join('\n');
 }
 
+// A turn's rows need not sit together: a row with no turn (standalone browser activity) is placed by its time inside
+// the turn it happened in (`withBrowserActivityRows`). So a turn's marks and fold are read over all of its rows, its
+// record is drawn once, and a turnless row keeps its place.
 export function reportRows(rows: readonly Row[], state: TranscriptState, ui: Pick<TranscriptUi, 'reportOpenTurns'>, liveMarked = ''): Row[] {
   const live: ReadonlySet<string> = liveMarked === '' ? NONE : new Set(liveMarked.split('\n'));
+  const turns = new Map<TurnId, Row[]>();
+  for (const row of rows) {
+    if (row.turnId === null) continue;
+    const own = turns.get(row.turnId);
+    if (own) own.push(row);
+    else turns.set(row.turnId, [row]);
+  }
+  const recordBefore = new Map<Row, Row>();
+  const recordAfter = new Map<Row, Row>();
+  const hidden = new Set<Row>();
+  for (const [turn, own] of turns) {
+    if (!own.some((row) => row.kind === 'assistant_text' && isMarked(row, live))) continue;
+    const fold = foldOf(own, turn, state, ui.reportOpenTurns?.has(turn) ?? false);
+    if (fold === null) continue;
+    if (fold.prompt > 0) recordAfter.set(own[fold.prompt - 1], fold.record);
+    else recordBefore.set(own[0], fold.record);
+    if (!fold.record.open) for (const row of own.slice(fold.prompt)) if (!showsFolded(row, live)) hidden.add(row);
+  }
   const out: Row[] = [];
-  for (let i = 0; i < rows.length;) {
-    const turn = rows[i].turnId;
-    let end = i + 1;
-    while (end < rows.length && turn !== null && rows[end].turnId === turn) end += 1;
-    const own = rows.slice(i, end);
-    if (turn === null || !own.some((row) => row.kind === 'assistant_text' && isMarked(row, live))) out.push(...own);
-    else out.push(...markedTurn(own, turn, state, ui.reportOpenTurns?.has(turn) ?? false, live));
-    i = end;
+  for (const row of rows) {
+    const before = recordBefore.get(row);
+    if (before) out.push(before);
+    if (!hidden.has(row)) out.push(row);
+    const after = recordAfter.get(row);
+    if (after) out.push(after);
   }
   return out;
 }
 
-function markedTurn(own: Row[], turn: TurnId, state: TranscriptState, open: boolean, live: ReadonlySet<string>): Row[] {
+// A marked turn's record, and where it goes: right after the turn's prompt (`prompt` counts the turn's rows up to and
+// including it); a turn the owner did not start (no prompt row) opens with its record. Null when nothing is folded (no
+// work, every word marked): the turn is its marks, with no record to open.
+function foldOf(own: Row[], turn: TurnId, state: TranscriptState, open: boolean): { record: Extract<Row, { kind: 'owner_record' }>; prompt: number } | null {
   const divider = own.find((row) => row.kind === 'divider');
   const messages = unmarkedMessages(state, turn);
-  // Nothing folded (no work, every word marked): the turn is its marks, with no record to open.
-  if (divider === undefined && messages === 0) return own;
-  // The record follows the turn's prompt; a turn the owner did not start (no prompt row) opens with it.
+  if (divider === undefined && messages === 0) return null;
   const lead = Math.max(own.findIndex((row) => row.kind !== 'time'), 0);
   const prompt = own[lead].kind === 'user' && !own[lead].steer ? lead + 1 : lead;
-  const record: Row = {
-    id: rowId.ownerRecord(turn), turnId: turn, at: own[lead].at, kind: 'owner_record', open,
+  const record = {
+    id: rowId.ownerRecord(turn), turnId: turn, at: own[lead].at, kind: 'owner_record' as const, open,
     working: divider?.kind === 'divider' && divider.state === 'working', toolCalls: divider?.kind === 'divider' ? divider.toolCalls : 0, messages,
   };
-  const rest = own.slice(prompt);
-  return [...own.slice(0, prompt), record, ...(open ? rest : rest.filter((row) => showsFolded(row, live)))];
+  return { record, prompt };
 }
 
 // The turn's assistant texts with words outside any mark, counted over its whole work area whether or not the reader

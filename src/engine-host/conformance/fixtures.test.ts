@@ -4,7 +4,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
 import { ArtifactCreateResultSchema, ArtifactListResultSchema, ArtifactScreenshotResultSchema, ArtifactUpdateResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
-import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
+import { FIXTURE_PASSES, listJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
 import { RELAY_URL } from '../launch';
 import { replayFixture, type ConformanceRun } from './harness';
@@ -1107,3 +1107,30 @@ describe('normaliser: the browser tools recorded live (E4c M4, pass3/p1-maws-bro
   });
 });
 // E4c end
+
+// P2-C start (2026-10-09)
+// The report view's synthetic replay (test/fixtures/engine/p2c-report-marks.jsonl, P2-C M5) conforms as a probe
+// fixture does, and each turn's result names that turn's own prompt and carries that turn's last text. The fixture has
+// no exit row (the e2e session stays alive after it), so the replay here ends at one appended.
+describe('the P2-C report fixture replays into the X1 graph', () => {
+  it('engine/p2c-report-marks', async () => {
+    const label = 'engine/p2c-report-marks';
+    const journal = loadEngineJournal('p2c-report-marks');
+    const exit = { seq: journal.length + 1, direction: 'meta' as const, at: journal.at(-1)!.at, frame: { event: 'exit', code: 0, signal: null } };
+    const result = await replayFixture([...journal, exit], { label });
+    const events = result.events;
+    expect(events.filter((e) => !SessionEventSchema.safeParse(e).success).map((e) => `${label} seq ${e.seq} ${e.kind}`)).toEqual([]);
+    expect(ofKind(events, 'frame.unknown').map((e) => `${label} seq ${e.seq}: ${e.frameType}/${e.subtype}`)).toEqual([]);
+    expect(ofKind(events, 'error.raised').filter((e) => e.code === 'invalid_frame').map((e) => `${label}: ${e.message}`)).toEqual([]);
+    expect(result.problems.map((p) => `${label}: ${p.message}`)).toEqual([]);
+    expect(result.writeErrors).toEqual([]);
+    expect(result.warnings.filter((w) => w.event === 'block_pairing')).toEqual([]);
+    expect(result.requests.filter((r) => !r.ok)).toEqual([]);
+    const prompts = ofKind(events, 'turn.started').map((e) => e.userMessageUuid);
+    const lastText = (prompt: string | null) =>
+      ofKind(events, 'assistant.block.complete').filter((e) => e.block.type === 'text' && e.userMessageUuids.includes(prompt as never)).map((e) => e.block.text).at(-1);
+    expect(ofKind(events, 'turn.ended').map((e) => [e.userMessageUuids, e.resultText])).toEqual(prompts.map((prompt) => [[prompt], lastText(prompt)]));
+    expect(prompts).toHaveLength(3); // the marked turn, the insight-margin turn, the unmarked turn
+  });
+});
+// P2-C end

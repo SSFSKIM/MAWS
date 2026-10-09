@@ -1,7 +1,6 @@
 /* The report view's cards and record row (the P2-C document, Design §7 and §8). X7 tokens only, light first. */
 
 .owner-report { display: flex; flex-direction: column; gap: calc(var(--space) * 2); padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }
-.owner-report-item { position: relative; }
 
 /* A card: its label over its Markdown body, on the raised ground with a hairline border */
 .owner-card { padding: calc(var(--space) * 2.5) calc(var(--space) * 3.5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); }
@@ -28,10 +27,15 @@
 .owner-question-choice-text { flex: 1; min-width: 0; }
 .owner-question-recommended { flex: none; color: var(--accent); font-size: var(--text-ui-sm); font-weight: 600; }
 
-/* An insight: an inline aside in reading order, or in the right margin beside the text it follows when there is room */
+/* An insight: an inline aside in reading order, or in the right margin beside the text it follows when there is room.
+   In the margin the item is a two-column grid whose second track lies past the column's right edge (the measured room
+   holds it): the insight stays in flow, so the item, and the virtualised row that measures it, is as tall as the taller
+   of the text and its insights, and nothing below is overlapped. An item holding only an insight leaves its first
+   track empty. */
 .owner-insights { display: flex; flex-direction: column; gap: calc(var(--space) * 2); }
 .owner-insights[data-placement="inline"] { margin-top: calc(var(--space) * 2); }
-.owner-insights[data-placement="margin"] { position: absolute; top: 0; left: calc(100% + var(--measure-pad) + 16px); width: 240px; }
+.owner-report-item:has(> .owner-insights[data-placement="margin"]) { display: grid; grid-template-columns: 100% 240px; column-gap: calc(var(--measure-pad) + 16px); align-items: start; }
+.owner-insights[data-placement="margin"] { grid-row: 1; grid-column: 2; }
 .owner-insight { padding-inline-start: calc(var(--space) * 3); border-left: 2px solid var(--info); color: var(--fg); font-size: var(--text-ui-sm); line-height: var(--lh-prose); }
 .owner-insight > .owner-card-label { color: var(--info); }
 
