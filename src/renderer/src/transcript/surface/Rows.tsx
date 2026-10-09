@@ -35,7 +35,13 @@ export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> })
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const { storeKey, variant } = useTranscriptContext();
-  const appSessionId = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
+  // P2-E1 start (2026-10-09): a transcript mounted with `presentation: 'local'` (the comment card's thread) treats its
+  // session as unattached for assistant text: no surface site is asked, marks draw through MAWS's presenter and its ink
+  // is recorded as local; such a drawing is answerable, a Reply field being under it. Other mounts of the same session
+  // are unchanged (the option is this mount's context). P2-C's module replaces what the option selects.
+  const forcedLocal = useTranscriptContext().presentation === 'local';
+  const appSessionId = variant === 'session' && storeKey && !forcedLocal ? storeKey as AppSessionId : null;
+  // P2-E1 end
   const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
@@ -49,7 +55,7 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
     const state = s.entries[storeKey]?.state;
     return row.turnId === null || !state || state.ui.expandedTurns.has(row.turnId) || (turn?.state === 'open' && !state.ui.collapsedTurns.has(row.turnId));
   });
-  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: assistantDrawingKey(storeKey, row.id) };
+  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: assistantDrawingKey(storeKey, row.id), answerable: forcedLocal /* P2-E1 */ };
 }
 
 // The virtualized divider bounds these ask-only mounts to turns in/near the viewport. Only assistant text bypasses
@@ -80,7 +86,7 @@ function AssistantProbe({ row }: { row: Extract<Row, { kind: 'assistant_text' }>
 }
 
 export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
-  const { appSessionId, input, reportInk, key, attached, presentation, showRecord } = useAssistantInput(row);
+  const { appSessionId, input, reportInk, key, attached, presentation, showRecord, answerable } = useAssistantInput(row);
   const { storeKey } = useTranscriptContext();
   const hasWorkFold = useTranscriptStore((s) => {
     const state = s.entries[storeKey]?.state;
@@ -91,7 +97,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
   useEffect(() => {
     if (!attached) reportInk(presentation !== null);
   }, [attached, presentation, reportInk]);
-  if (!attached) return presentation ? presentation.render({ showRecord, live: row.live, hasWorkFold, recordKey: key }) : <AssistantTextRow row={{ ...row, forHuman: false }} />;
+  if (!attached) return presentation ? presentation.render({ showRecord, live: row.live, hasWorkFold, recordKey: key, answerable /* P2-E1 */ }) : <AssistantTextRow row={{ ...row, forHuman: false }} />;
   if (!input) return <AssistantTextRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="AssistantMessage" {...input} onInk={reportInk} placeholder={<AssistantTextRow row={row} text="…" />}>
     {(props, { ink }) => <AssistantTextRow row={{ ...row, forHuman: ink }} text={stripAnsi(props.text)} />}

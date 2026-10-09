@@ -1,0 +1,64 @@
+P2-E1 M5: the live cases, run once (2026-10-09, branch worktree-agent-aebcc33c93831f363 at 3808711f)
+
+Command, from the worktree, through the slot wrapper, every CLAUDE* variable of the runner unset first (the app's launch
+drops them again: launchEnvironment), MAWS_P1_LIVE=1, MAWS_P1_LIVE_OUT=/tmp/maws-p2e1-live,
+MAWS_P1_LIVE_STAMP=p2e1-m5-20261009T131446Z:
+  pnpm e2e:p1-live --grep " (1 artifacts|2 a comment|3 Send to main)"
+(The dispatch's "^(1 artifacts|...)" selects nothing: Playwright matches --grep against the whole title path, file and
+describe first, so `playwright test --list` with it reported "No tests found"; the leading space selects the same three
+cases and nothing else, checked with --list before the run.)
+
+Result: 3 passed (1.0 m), first and only run. case 1: PASS, case 2: PASS, case 3: PASS.
+
+Engine: ~/.local/share/claude/versions/2.1.295 (2.1.295), unmodified; TESTED_ENGINE_VERSION is 2.1.293
+(src/engine-host/engine-compat.ts): the machine's engine is two patch versions newer. Through ClaudeUsage's relay
+http://127.0.0.1:8641 (the spec's one GET /api/hello health check, then the engine only), Haiku, default permission mode.
+Config home: a scratch CLAUDE_CONFIG_DIR per case (/private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3/claude-config),
+never ~/.claude. Budgets: the parent's --max-budget-usd 0.3700 (at most US$1); the fork bounded by FORK_ALLOCATION_USD
+0.08, unchanged (it receipted US$0.0009 for a three-call turn: Bash, artifact_update, the reply).
+Spend: S3 US$0.0054 of US$0.50, the run US$0.0054 of US$1.20 (journal receipts; reservations settled).
+
+A-15 (the owner's ~/.claude.json `projects` keys under /tmp and /private/tmp, read only, the standing rule's command
+through `| shasum`):
+  before the run (2026-10-09T13:14:43Z, taken by the executor): 26 keys, ae14a6db5b459b9c44163d3af24237aa8ad1372b
+  after the run  (2026-10-09T13:16:22Z, taken by the executor): 26 keys, ae14a6db5b459b9c44163d3af24237aa8ad1372b
+  and the spec's own readings below (before the case, after each session, after the app closed): identical throughout.
+
+What case 2 shows (P2-E1 acceptance 3, 4 and 7, live): the pick opened the card (no sheet); Side thread turned the card
+into the thread (no Side pane, the Deliverables tab still selected); the thread ran `sed` on page-v2.html (Bash) and
+called artifact_update on "p1-page", both permissions allowed once in the card's inline request card; the host answered
+{"status":"updated","id":"p1-page","version":3,...,"ownerAppSessionId":<the parent>}; the parent's record went 2 -> 3
+versions, the latest titled "P1 live page, commented"; no deliverable under the thread; the parent's viewer moved to v3
+with the card open in thread phase; the reply "ANCHORED" drawn in the card; the parent's row finished with ANCHORED;
+the parent's turns 1 -> 1 and written prompts 1 -> 1.
+Case 3: Send to main from the card's composer half, mid-turn, written with priority "next" and drawn as the anchored
+prompt row; the reply carries STEER_SEEN.
+
+The sitting's log (live-s3.txt), verbatim:
+
+==== S3, 2026-10-09T13:15:15.230Z; run root /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z
+engine: ~/.local/share/claude/versions/2.1.295 (2.1.295), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S3 US$0.0000 of US$0.50, the run US$0.0000 of US$1.20
+scratch: /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3 (claude-config/ settings.json {} and .claude.json trusting repo/; user-data/ the app's profile); the app: the harness build as the product (MAWS_HARNESS=0), every CLAUDE* variable of the runner dropped (launchEnvironment)
+A-15 before the case: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+  charged US$0.3700 to S3 for the launch budget of parent (counted beyond bf4dd87b-597c-4da1-a0a5-cd528628f49b's receipts) [s3:launch:bf4dd87b-597c-4da1-a0a5-cd528628f49b]; S3 US$0.3700 of US$0.50, the run US$0.3700 of US$1.20
+parent bf4dd87b-597c-4da1-a0a5-cd528628f49b: launched on Haiku, default mode, maxBudgetUsd 0.3700 (the smaller of what S3 and the run leave, less US$0.1300 held back for the side thread’s allocation and the side question’s reservation), resuming 946c8c47-389a-4622-b323-caeed91188c8 in place; pid 14057
+case 1: maws artifact calls [["artifact_create",{"id":"p1-page","title":"P1 page","html_path":"page-v1.html"}],["artifact_screenshot",{"id":"p1-page"}],["artifact_update",{"id":"p1-page","html_path":"page-v2.html"}]]; permissions allowed once through the card ["mcp__maws__artifact_create","mcp__maws__artifact_screenshot","mcp__maws__artifact_update"]
+case 1: the screenshot's PNG 1280 × 800, 12832 bytes, dominant rgb(211, 47, 47) over 99.2% (the page's v1 background rgb(211, 47, 47), distance 0); the result {"status":"captured","id":"p1-page","deliverableId":"8c3f222e-f88e-4ac8-af46-7b023f0851cc","title":"P1 page","version":1,"width":1280,"height":800,"bytes":12832,"consoleErrors":[]}; reply "COLOUR: red"
+case 1: PASS: record 8c3f222e-f88e-4ac8-af46-7b023f0851cc (2 versions under /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3/user-data/deliverables/bf4dd87b-597c-4da1-a0a5-cd528628f49b); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Deliverables tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour
+  charged US$0.0800 to S3 for the side thread’s allocation (reserved until its journal settles it) [s3-fork]; S3 US$0.4500 of US$0.50, the run US$0.4500 of US$1.20
+case 2: thread 1d14827b-a149-45fb-8ad0-4e6b53e0995b (lineage {"kind":"side-thread","openedBy":"comment","anchor":{"kind":"artifact-element","locator":"#title","label":"P1 page v2 › h1#title “P1 live page, version 2”"}}); its maws calls [["artifact_update",{"id":"p1-page","html_path":"page-v2.html"}]]; artifact_update answered {"status":"updated","id":"p1-page","deliverableId":"8c3f222e-f88e-4ac8-af46-7b023f0851cc","version":3,"title":"P1 page","externalReferences":0,"ownerAppSessionId":"bf4dd87b-597c-4da1-a0a5-cd528628f49b"}; the parent's record 2 → 3 versions, the latest's title "P1 live page, commented"; deliverables under the thread: none; the viewer at v3; its reply "ANCHORED"; permissions allowed in the card ["Bash","mcp__maws__artifact_update"]; the parent's row "Side thread on P1 page v2 › h1#title “P1 live page, version 2” finished: ANCHOREDOpen"; the parent's turns 1 → 1, its written prompts 1 → 1; no --max-budget-usd on the fork (Q12): bounded by the test's US$0.08 allocation
+  side thread 1d14827b-a149-45fb-8ad0-4e6b53e0995b stopped; spend 0.0047 for the case's profile so far; journals /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3/user-data/engine-host/journal/1d14827b-a149-45fb-8ad0-4e6b53e0995b
+  side thread init plugins (x54o73re.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after side thread: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+  charged US$0.0000 to S3 for the side thread beyond its receipts (its journal shows US$0.0009, counted there) [s3-fork]; S3 US$0.3709 of US$0.50, the run US$0.3709 of US$1.20
+case 2: PASS
+case 3: the parent may spend up to US$0.3662 more under its launch budget US$0.3700 (reserved); S3 US$0.3709 of US$0.50, the run US$0.3709 of US$1.20
+case 3: the card's Send to main caption "Send to main"; sent 40 s before the turn ended; the written prompt priority "next"; permissions allowed []; reply "SLEPT\n\nThe comment is on \"P1 page v3\", but I only created versions 1 and 2, so I haven't changed anything for it. STEER_SEEN"
+case 3: PASS
+  parent bf4dd87b-597c-4da1-a0a5-cd528628f49b stopped; spend 0.0054 for the case's profile so far; journals /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3/user-data/engine-host/journal/bf4dd87b-597c-4da1-a0a5-cd528628f49b
+  parent init plugins (p5yjbcq3.jsonl): [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}] (none of the owner’s)
+  A-15 after parent: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+  A-15 after the app closed: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+survivor check: none of 9 recorded pids (13743, 14057, 16620, 13823, 13825, 13873, 13913, 13917, 16560) and no process naming /private/tmp/maws-e11-p1live-p2e1-m5-20261009T131446Z/s3; maws-supervisor processes: 81243 maws-supervisor /Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-BuxgcUAy.js --detached /Users/new/Library/Application Support/MAWS/supervisor
+  charged US$0.0000 to S3 for the launch budget of parent, settled to its receipts (US$0.0045) (counted beyond bf4dd87b-597c-4da1-a0a5-cd528628f49b's receipts) [s3:launch:bf4dd87b-597c-4da1-a0a5-cd528628f49b]; S3 US$0.0054 of US$0.50, the run US$0.0054 of US$1.20
+spend: the case's profile 0.0054; S3 US$0.0054 of US$0.50, the run US$0.0054 of US$1.20

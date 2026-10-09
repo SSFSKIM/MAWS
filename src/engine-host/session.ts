@@ -11,7 +11,7 @@
 // the asks in SessionMaws (session-maws.ts).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { MessageUuid, RequestId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
@@ -105,6 +105,9 @@ export interface EngineSessionOptions {
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
+  // P2-E1 (D10): a side thread's ancestors, nearest first, whose artifacts its artifact tools also resolve (main's
+  // `artifactScopeOf`, sent beside the spec by `session.launch`; never stored). Absent or empty for any other session.
+  artifactScope?: readonly AppSessionId[];
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -203,7 +206,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,

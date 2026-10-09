@@ -39,6 +39,9 @@ export const MawsArtifactCaptureSchema = z.strictObject({
   version: z.number().int().min(1),
   width: z.number().int(),
   height: z.number().int(),
+  // P2-E1 (D10): the record's session when it is the requesting side thread's ancestor; absent, `appSessionId`'s own.
+  // The answer still goes to `appSessionId`, whose call waits for it.
+  ownerAppSessionId: AppSessionIdSchema.optional(),
 });
 export type MawsArtifactCapture = z.infer<typeof MawsArtifactCaptureSchema>;
 

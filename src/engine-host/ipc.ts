@@ -313,7 +313,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // C11 end
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
-  handle('session.launch', async ({ spec }) => launch(spec as Parameters<typeof launch>[0]));
+  handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
   handle('session.events', async ({ appSessionId, afterSeq, limit }) => {
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose

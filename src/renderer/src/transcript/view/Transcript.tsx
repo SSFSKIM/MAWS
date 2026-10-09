@@ -184,6 +184,10 @@ export interface TranscriptProps {
   tail?: readonly Row[];
   withdrawn?: ReadonlySet<string>;
   effort?: string | null; // W8, additive: the effort the session runs at, which the live thinking label names
+  // P2-E1, additive: the index of the first row shown, told whether the history is loaded (null: none yet); and the
+  // presentation the rows' context carries ('local': the owner channel through MAWS's presenter)
+  startAt?: (rows: readonly Row[], loaded: boolean) => number | null;
+  presentation?: 'local';
 }
 
 const NO_ROWS: Row[] = [];
@@ -213,7 +217,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
@@ -223,7 +227,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
-  const rows = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  const merged = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
+  const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
+  const rows = useMemo(() => {
+    if (startAt === undefined) return merged;
+    const start = startAt(merged, loaded);
+    return start === null ? NO_ROWS : start === 0 ? merged : merged.slice(start);
+  }, [merged, startAt, loaded]);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
@@ -290,8 +301,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort, motion }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort, motion],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort, motion, ...(presentation && { presentation }) }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort, motion, presentation],
   );
 
   return (

@@ -18,6 +18,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown } from '../side/store';
+import { useCommentCard } from '../side/card/store'; // P2-E1
 import { askSheet } from '../tools/maws/ask/store';
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
@@ -55,6 +56,10 @@ function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undef
   if (inFront && !(regions.panel.maximized && panelOpen)) return true;
   const shown = shownSession(main);
   if (panelOpen && shown !== null && sideChildrenShown().get(shown) === appSessionId) return true;
+  // P2-E1 start (2026-10-09): a thread a comment card draws on screen shows its requests inline (C7's card in the card's
+  // thread), as the Side pane shows a thread's
+  if (useCommentCard.getState().shownThread?.child === appSessionId) return true;
+  // P2-E1 end
   return item !== undefined && isMawsAsk(item) && panelOpen && shown === appSessionId;
 }
 

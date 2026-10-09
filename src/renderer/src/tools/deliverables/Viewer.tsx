@@ -9,15 +9,20 @@
 // Comment (M6, Design §10) picks an element in the artifact's frame: the frame is told to pick, the hint shows, and a
 // pick opens the comment composer (E3's, through E5's seam) with the `artifact-element` anchor. Picking belongs to one
 // frame: a version switch or a Reload (a new frame) ends it, as do Escape in the app (where the keyboard stays while the
-// pointer is over the frame) and Escape in the frame, and a pick ends it (one pick per Comment).
+// pointer is over the frame) and Escape in the frame, and a pick ends it (one pick per Comment). Since P2-E1 a pick
+// opens the comment card beside the element, in the card host the HTML body's container holds (P2-E1 document, D9),
+// rather than the sheet; the host is a sibling of the body, so a Reload's new frame keeps the card, and the host re-pins
+// it through the frame's locate handle (D8).
 //
 // A frame is never re-pointed: its URL is fixed at creation and the frame is keyed by it and by Reload's count, so a
 // version switch and a Reload mount a new frame on a scheme URL and an unmount removes it, never routing a deliverable
 // frame through `about:blank` or anywhere main's frame policies would block.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
+import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
+import type { OpenCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { openCommentComposer } from '../code/anchor/anchor';
@@ -28,7 +33,7 @@ import { mawsTranscriptActions } from '../maws/actions';
 import { artifactElementAnchor, type PickMessage } from './comment/pick';
 import { ConsoleChip } from './ConsoleChip';
 import { DELIVERABLES_COPY } from './copy';
-import { HtmlFrame } from './frames/HtmlFrame';
+import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { basename, bodyOf, latestVersion, titleOf, underSession, versionPath, type BodyKind } from './model';
@@ -54,12 +59,13 @@ interface Props {
   id: string;
   version: number | null; // null: the latest
   mode: 'panel' | 'tab';
+  visible?: boolean; // P2-E1: on screen (the panel tool's `ctx.visible`; a main tab is mounted while active)
   onBack?(): void;
-  onVersion(version: number): void;
+  onVersion(version: number | null): void; // null: the latest (P2-E1: the comment card's row Open)
   onGone(id: string): void;
 }
 
-export function DeliverableViewer({ appSessionId, id, version, mode, onBack, onVersion, onGone }: Props) {
+export function DeliverableViewer({ appSessionId, id, version, mode, visible = true, onBack, onVersion, onGone }: Props) {
   const found = useDeliverables((s) => s.lookups.get(lookupKey(appSessionId, id)));
   const [reloads, setReloads] = useState(0);
   // The read this mount (or this Reload) made; until it answers, the body waits rather than trusting an older answer.
@@ -97,6 +103,7 @@ export function DeliverableViewer({ appSessionId, id, version, mode, onBack, onV
       checked={fresh}
       reloads={reloads}
       mode={mode}
+      visible={visible}
       onBack={onBack}
       onVersion={onVersion}
       onReload={reload}
@@ -145,12 +152,13 @@ interface ShownProps {
   checked: boolean; // this mount's read answered: the body may draw
   reloads: number;
   mode: 'panel' | 'tab';
+  visible: boolean;
   onBack?(): void;
-  onVersion(version: number): void;
+  onVersion(version: number | null): void;
   onReload(): void;
 }
 
-function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersion, onReload }: ShownProps) {
+function Shown({ record, shown, present, checked, reloads, mode, visible, onBack, onVersion, onReload }: ShownProps) {
   const path = versionPath(record, shown);
   const body = bodyOf(path);
   const title = titleOf(record);
@@ -168,10 +176,24 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [picking]);
+  // P2-E1 start (2026-10-09): the pick opens the comment card in this viewer's host, beside the element (D2, D9)
+  const hostId = useId();
+  const commentButton = useRef<HTMLButtonElement>(null);
+  const bodyBox = useRef<HTMLDivElement>(null);
   const onPick = (message: PickMessage) => {
     setPickingIn(null);
-    if (message.type === 'maws:picked') openCommentComposer(artifactElementAnchor(record, shown, message), { appSessionId: record.appSessionId });
+    if (message.type !== 'maws:picked') return;
+    const { x, y, width, height } = message.rect;
+    openCommentComposer(artifactElementAnchor(record, shown, message), { appSessionId: record.appSessionId, placement: { kind: 'card', host: 'deliverable', hostId, rect: { x, y, width, height } } });
   };
+  const hostsCard = record.kind === 'artifact' && body === 'html';
+  const accepts = (card: OpenCard) => card.target?.kind === 'deliverable' && card.target.appSessionId === record.appSessionId && card.target.deliverableId === record.id;
+  // the HTML frame's locate handle (M3, D8): one per mounted frame, so the host re-pins when a new frame's arrives
+  const [frameHandle, setFrameHandle] = useState<FrameHandle | null>(null);
+  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frame, locate: frameHandle?.locate, showVersion: onVersion }; // the frame fills the body
+  // a dismissed card gives focus back to Comment, or to the frame when Comment is gone
+  const restoreFocus = () => (commentButton.current ?? bodyBox.current?.querySelector('iframe'))?.focus({ preventScroll: true });
+  // P2-E1 end
   const comment = commentable ? { picking, toggle: () => setPickingIn(picking ? null : frame) } : null;
   return (
     <div data-deliverable-viewer="" data-deliverable-id={record.id} data-version={shown} data-body={body} className="flex h-full min-h-0 flex-col bg-bg">
@@ -184,14 +206,9 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
           {record.kind === 'artifact' && <Versions record={record} shown={shown} onChange={onVersion} />}
           {body === 'html' && <ConsoleChip appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />}
         </div>
-        <Actions record={record} shown={shown} reloads={reloads} path={path} body={body} present={present} mode={mode} comment={comment} onReload={onReload} />
-        {picking && (
-          <p role="status" data-picking="" className="px-1 text-ui-sm text-accent">
-            {DELIVERABLES_COPY.picking}
-          </p>
-        )}
+        <Actions record={record} shown={shown} reloads={reloads} path={path} body={body} present={present} mode={mode} comment={comment} commentRef={commentButton} onReload={onReload} />
       </header>
-      <div className="relative min-h-0 flex-1">
+      <div ref={bodyBox} className="relative min-h-0 flex-1">
         {!checked ? (
           <p className="p-4 text-ui text-fg-muted">{DELIVERABLES_COPY.loading}</p>
         ) : !present ? (
@@ -199,8 +216,23 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
             {DELIVERABLES_COPY.missing(path)}
           </p>
         ) : (
-          <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} />
+          <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} onFrame={setFrameHandle} />
         )}
+        {/* P2-E1 start (2026-10-09): the picking hint floats over the body rather than taking a header line, so ending a
+            pick never resizes the frame under the rect it just reported (a card pinned to an element at the frame's
+            bottom would otherwise sit off by the line's height); and the comment card's host, a sibling of the body so
+            a new frame keeps the card */}
+        {picking && (
+          <p
+            role="status"
+            data-picking=""
+            className="pointer-events-none absolute top-2 left-1/2 z-20 m-0 max-w-[calc(100%-16px)] -translate-x-1/2 truncate rounded-full border border-border-strong bg-bg-raised px-2.5 py-0.5 text-ui-sm text-accent shadow-float"
+          >
+            {DELIVERABLES_COPY.picking}
+          </p>
+        )}
+        {hostsCard &&<CommentCardHost hostId={hostId} host="deliverable" mode={mode} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} />}
+        {/* P2-E1 end */}
       </div>
     </div>
   );
@@ -215,14 +247,25 @@ interface BodyProps {
   title: string;
   picking: boolean;
   onPick(message: PickMessage): void;
+  onFrame(handle: FrameHandle | null): void; // P2-E1: the HTML frame's locate handle
 }
 
-function Body({ record, shown, reloads, path, body, title, picking, onPick }: BodyProps) {
+function Body({ record, shown, reloads, path, body, title, picking, onPick, onFrame }: BodyProps) {
   const url = deliverableUrl(record.appSessionId, record.id, shown);
   switch (body) {
     case 'html':
       return (
-        <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} appSessionId={record.appSessionId} deliverableId={record.id} version={shown} picking={picking} onPick={onPick} />
+        <HtmlFrame
+          key={url}
+          url={url}
+          title={DELIVERABLES_COPY.frameTitle(title)}
+          appSessionId={record.appSessionId}
+          deliverableId={record.id}
+          version={shown}
+          picking={picking}
+          onPick={onPick}
+          onFrame={onFrame}
+        />
       );
     case 'pdf':
       return <PdfFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} />;
@@ -243,10 +286,11 @@ interface ActionsProps {
   present: boolean;
   mode: 'panel' | 'tab';
   comment: { picking: boolean; toggle(): void } | null; // an artifact's frame on screen
+  commentRef: RefObject<HTMLButtonElement | null>; // P2-E1: where a dismissed comment card gives focus back
   onReload(): void;
 }
 
-function Actions({ record, shown, reloads, path, body, present, mode, comment, onReload }: ActionsProps) {
+function Actions({ record, shown, reloads, path, body, present, mode, comment, commentRef, onReload }: ActionsProps) {
   const session = useSessions((s) => s.records.get(record.appSessionId));
   const drawnKind = useViewer((s) => (body === 'file' ? (s.entries.get(viewerTabId(record.id, shown, reloads))?.kind ?? null) : null));
   const [problem, setProblem] = useState<{ text: string } | null>(null); // a new object per refusal, so each one is shown its full time
@@ -294,7 +338,7 @@ function Actions({ record, shown, reloads, path, body, present, mode, comment, o
   );
   if (comment) {
     buttons.push(
-      <button key="comment" type="button" className={`${action} aria-pressed:bg-bg-active`} aria-pressed={comment.picking} onClick={comment.toggle}>
+      <button key="comment" ref={commentRef} type="button" className={`${action} aria-pressed:bg-bg-active`} aria-pressed={comment.picking} onClick={comment.toggle}>
         {DELIVERABLES_COPY.comment}
       </button>,
     );

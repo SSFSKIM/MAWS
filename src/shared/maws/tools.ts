@@ -8,6 +8,7 @@
 // E4c appended six browser tools after the artifact tools; they left the server on 2026-10-08 (P1 A-54: cua_repl drives
 // the in-app browser), and `./browser` keeps their names and schemas only to read journals written before.
 import * as z from 'zod';
+import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
 
 export const MAWS_SERVER_NAME = 'maws';
@@ -171,17 +172,25 @@ export const ArtifactCreateResultSchema = z.strictObject({
   status: z.literal('created'), id: z.string(), deliverableId: z.uuid(), version: z.literal(1), title: z.string(), externalReferences: z.number().int().min(0),
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
+// P2-E1 (2026-10-09, a dated exception inside E2's result schemas; D10): `ownerAppSessionId` names the session whose
+// record the result is about when that is a side thread's ancestor, not the calling session; absent for its own.
+const OwnerAppSessionIdSchema = AppSessionIdSchema.optional();
 export const ArtifactUpdateResultSchema = z.strictObject({
   status: z.literal('updated'), id: z.string(), deliverableId: z.uuid(), version: z.number().int().min(2), title: z.string(), externalReferences: z.number().int().min(0),
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
 });
 export type ArtifactUpdateResult = z.infer<typeof ArtifactUpdateResultSchema>;
-export const ListedArtifactSchema = z.strictObject({ id: z.string(), deliverableId: z.uuid(), title: z.string(), versions: z.number().int().min(1), createdAt: z.string(), updatedAt: z.string() });
+export const ListedArtifactSchema = z.strictObject({
+  id: z.string(), deliverableId: z.uuid(), title: z.string(), versions: z.number().int().min(1), createdAt: z.string(), updatedAt: z.string(),
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
+});
 export type ListedArtifact = z.infer<typeof ListedArtifactSchema>;
 export const ArtifactListResultSchema = z.strictObject({ status: z.literal('listed'), artifacts: z.array(ListedArtifactSchema) });
 export type ArtifactListResult = z.infer<typeof ArtifactListResultSchema>;
 export const ArtifactScreenshotResultSchema = z.strictObject({
   status: z.literal('captured'), id: z.string(), deliverableId: z.uuid(), title: z.string(), version: z.number().int().min(1),
   width: z.number().int(), height: z.number().int(), bytes: z.number().int().min(0), consoleErrors: z.array(z.string()),
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
 });
 export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSchema>;
 
@@ -278,6 +287,8 @@ export const TOOL_ERRORS = {
   notHtml: (tool: ArtifactToolName, path: string) => `${tool}: not an HTML file: ${path}`,
   tooLarge: (tool: ArtifactToolName, path: string, bytes: number) => `${tool}: too large: ${path} (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`,
   artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_update`,
+  // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
+  artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_update`,
   noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session${tool === 'artifact_update' ? '; use artifact_create' : ''}`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
