@@ -124,7 +124,7 @@ function ProjectActions({ projectId, name }: { projectId: ProjectId; name: strin
         title="Resume a session…"
         onClick={(event) => {
           event.stopPropagation();
-          openResumeChooser(projectId);
+          openResumeChooser(projectId, event.currentTarget);
         }}
         className={ACTION}
       >

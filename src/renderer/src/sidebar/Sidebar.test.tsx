@@ -617,6 +617,49 @@ describe('the resume chooser from the sidebar', () => {
     expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
   });
 
+  it('an Escape that ends an IME composition leaves the chooser open, even on an empty search', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await openFromRow(user);
+    const search = within(picker()).getByRole('combobox');
+    expect(search).toHaveProperty('value', '');
+    fireEvent.keyDown(search, { key: 'Escape', code: 'Escape', isComposing: true });
+    expect(screen.getByRole('dialog', { name: 'Resume session' })).toBeTruthy();
+    fireEvent.keyDown(search, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+  });
+
+  it('dismissed, the chooser returns focus to the control that opened it; an opened session keeps it', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' });
+    await user.click(button);
+    await user.click(within(picker()).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+    expect(document.activeElement).toBe(button);
+    fireEvent.contextMenu(row('MAWS'));
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Resume…' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+    expect(document.activeElement, 'from the context menu: the project row').toBe(row('MAWS'));
+    // the row's hover actions hide once the pointer leaves the row, and a browser focuses no hidden control (happy-dom
+    // does, so the opener here refuses focus as Chromium's would)
+    await user.click(button);
+    const focus = vi.spyOn(button, 'focus').mockImplementation(() => undefined);
+    await user.click(within(picker()).getByRole('button', { name: 'Close' }));
+    expect(document.activeElement, 'an opener hidden since: its row').toBe(row('MAWS'));
+    focus.mockRestore();
+    await user.click(button);
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    const stop = useLayout.subscribe(() => elsewhere.isConnected && elsewhere.focus()); // the opened tab takes the keyboard
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session' });
+    expect(document.activeElement).toBe(elsewhere);
+    stop();
+    elsewhere.remove();
+  });
+
   it('a filter button keeps Enter and Space: Tab from the search to All projects, Enter presses it and opens nothing', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);

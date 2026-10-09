@@ -90,10 +90,12 @@ const midnight = (ms: number): number => {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
-// The local Monday that starts the week holding `ms`.
+// The local Monday that starts the week holding `ms` (its own first hour: a day the clock skips midnight on starts later,
+// and the Monday does not inherit it).
 const weekStart = (ms: number): number => {
   const d = new Date(midnight(ms));
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
 const shortDate = (ms: number, now: number): string =>
@@ -137,11 +139,12 @@ export function rowTime(at: number, kind: GroupKind, now: number): string {
 }
 
 // The row's folder badge: a worktree's folder name, else the project's name (a session without one: its folder's name);
-// none when it says what the scope already says (the project the chooser opened on, outside a worktree).
-export function folderBadge(record: SessionRecord, projects: ReadonlyMap<ProjectId, ProjectRecord>, context: ChooserContext): string | null {
+// none when it says what the scope already says: the project the list is scoped to (`scopedTo`; null under All
+// projects, where every row names its own), outside a worktree.
+export function folderBadge(record: SessionRecord, projects: ReadonlyMap<ProjectId, ProjectRecord>, scopedTo: ProjectId | null): string | null {
   const base = (path: string) => path.replace(/\/+$/, '').split('/').at(-1) || path;
   if (record.worktree !== null) return base(record.worktree.path);
-  if (record.projectId !== null && record.projectId === context.projectId) return null;
+  if (record.projectId !== null && record.projectId === scopedTo) return null;
   return (record.projectId !== null ? projects.get(record.projectId)?.name : null) ?? base(record.directory);
 }
 

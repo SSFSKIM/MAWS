@@ -68,6 +68,10 @@ function SessionItem({ id, record }: { id: SessionActionId; record: SessionRecor
   );
 }
 
+// The project's row in the tree, which a chooser opened from its menu returns the keyboard to.
+const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
+
 function ProjectItems({ projectId }: { projectId: ProjectId }) {
   const canCreate = useSessionCreatorRegistered();
   const records = useSessions((s) => s.records);
@@ -78,7 +82,7 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
         New chat
       </Item>
       {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}
-      <Item enabled onSelect={() => openResumeChooser(projectId)}>
+      <Item enabled onSelect={() => openResumeChooser(projectId, projectRowOf(projectId))}>
         Resume…
       </Item>
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>

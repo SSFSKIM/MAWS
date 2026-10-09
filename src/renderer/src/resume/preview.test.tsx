@@ -75,6 +75,44 @@ describe('useRecentTurns', () => {
     expect(fake.invoked('session.recentTurns').map((i) => (i as { appSessionId: string }).appSessionId)).toEqual([A, B, A]);
   });
 
+  it('a cached preview that goes stale while shown is read again, never left loading', async () => {
+    const { rerender, result } = hook(A, true);
+    await settle(0);
+    await answer(() => fake.reply('session.recentTurns', turns('a')));
+    rerender({ id: B, immediate: false });
+    await settle(SETTLE_MS);
+    await answer(() => fake.reply('session.recentTurns', turns('b')));
+    rerender({ id: A, immediate: false });
+    expect(result.current).toEqual({ status: 'ready', value: turns('a') }); // from the cache, nothing read
+    await settle(CACHE_MS);
+    rerender({ id: A, immediate: false }); // the pane draws again (the clock's tick) after the half minute
+    await settle(SETTLE_MS);
+    expect(fake.invoked('session.recentTurns').map((i) => (i as { appSessionId: string }).appSessionId)).toEqual([A, B, A]);
+    await answer(() => fake.reply('session.recentTurns', turns('a again')));
+    expect(result.current).toEqual({ status: 'ready', value: turns('a again') });
+  });
+
+  it('an older read answering after a newer one for the same session does not replace it', async () => {
+    const reads: { appSessionId: AppSessionId; resolve(value: unknown): void }[] = [];
+    const client = {
+      invoke: (_name: string, input: { appSessionId: AppSessionId }) => new Promise((resolve) => reads.push({ appSessionId: input.appSessionId, resolve })),
+      on: () => () => undefined,
+    } as unknown as typeof fake.client;
+    const { rerender, result } = renderHook(({ id }) => useRecentTurns(id, false, client), { initialProps: { id: A } });
+    await settle(SETTLE_MS); // A, first read
+    rerender({ id: B });
+    await settle(SETTLE_MS); // B
+    rerender({ id: A });
+    await settle(SETTLE_MS); // A, second read: the first is still out
+    expect(reads.map((r) => r.appSessionId)).toEqual([A, B, A]);
+    await act(async () => reads[2].resolve({ ok: true, value: turns('a new') }));
+    expect(result.current).toEqual({ status: 'ready', value: turns('a new') });
+    await act(async () => reads[0].resolve({ ok: true, value: turns('a old') }));
+    rerender({ id: B });
+    rerender({ id: A });
+    expect(result.current).toEqual({ status: 'ready', value: turns('a new') });
+  });
+
   it('a refused read says so', async () => {
     const { result } = hook(A, true);
     await settle(0);

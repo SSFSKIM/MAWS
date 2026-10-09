@@ -9,7 +9,6 @@
 // session (P2-A's acquisition once it lands). The host gives the box (X19's library size) and Esc.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { RecentTurn } from '@shared/ipc/schema/session';
 import { relativeAge } from '../app/relative-age';
@@ -45,7 +44,7 @@ const ANSWER_SHOWN = 700;
 
 export interface ResumeChooserProps {
   context: ChooserContext;
-  close(): void;
+  close(reason?: 'opened'): void; // 'opened': the close opened a session, whose tab takes the keyboard
 }
 
 // The branch the project's own checkout has out, as git lists it; null until it answers, and for a folder git does not
@@ -94,9 +93,12 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query }), [records, digests, projects, context, toggles, branch, query]);
   const shown = rows.slice(0, SHOWN);
   const groups = chooserGroups(shown, now);
-  // The selection stays on its session while the stores change; one that left the list falls back to the first row.
+  // The selection stays on its session while the stores change; one that left the list falls back to the first row. The
+  // row shown selected is the one kept: the opening one, a search's first row and a fallback are committed as they show,
+  // so a row that becomes the newest, or the one that left coming back, takes nothing.
   const selected = shown.find((row) => row.record.appId === picked) ?? shown[0] ?? null;
   const selectedId = selected?.record.appId ?? null;
+  if (selectedId !== picked) setPicked(selectedId);
   const optionId = (appSessionId: AppSessionId) => `${ids}-${appSessionId}`;
 
   useEffect(() => {
@@ -110,7 +112,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
     setSettled(true);
   };
   const open = (appSessionId: AppSessionId, newTab: boolean) => {
-    close();
+    close('opened');
     if (newTab) useLayout.getState().openTab({ kind: 'session', appSessionId });
     else useLayout.getState().openSession(appSessionId);
   };
@@ -160,7 +162,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
         <span data-testid="resume-scope" className="min-w-0 truncate text-ui-sm text-fg-muted">
           {scopeLabel}
         </span>
-        <button type="button" aria-label={COPY.close} onClick={close} className="ml-auto rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+        <button type="button" aria-label={COPY.close} onClick={() => close()} className="ml-auto rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           ×
         </button>
       </header>
@@ -223,7 +225,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
                     kind={group.kind}
                     now={now}
                     selected={row === selected}
-                    badge={folderBadge(row.record, projects, context)}
+                    badge={folderBadge(row.record, projects, toggles.allProjects ? null : context.projectId)}
                     onSelect={() => select(row.record.appId)}
                     onOpen={() => open(row.record.appId, false)}
                   />
@@ -303,31 +305,39 @@ function Fact({ label, children, title }: { label: string; children: ReactNode; 
   );
 }
 
-function Preview({ row, projects, now, immediate }: { row: ChooserRow | null; projects: ReadonlyMap<ProjectId, ProjectRecord>; now: number; immediate: boolean }) {
-  const record: SessionRecord | null = row?.record ?? null;
-  const digest = useSessions((s) => (record === null ? null : (s.digests.get(record.appId) ?? null)));
-  const pending = useAttention((s) => (record === null ? [] : selectPendingOf(s, record.appId)));
-  const preview = useRecentTurns(record?.appId ?? null, immediate);
+const PREVIEW_FRAME = 'flex min-h-0 min-w-0 flex-1 flex-col border-t border-border pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-4';
+
+type PreviewProps = { row: ChooserRow; projects: ReadonlyMap<ProjectId, ProjectRecord>; now: number; immediate: boolean };
+
+// The preview pane: nothing to preview without a selection, else the selected session's (which owns the subscriptions).
+function Preview({ row, ...rest }: Omit<PreviewProps, 'row'> & { row: ChooserRow | null }) {
+  if (row === null) {
+    return (
+      <section aria-label="Preview" className={PREVIEW_FRAME}>
+        <p className="m-0 text-ui-sm text-fg-muted">{COPY.nothing}</p>
+      </section>
+    );
+  }
+  return <SessionPreview row={row} {...rest} />;
+}
+
+function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
+  const { record } = row;
+  const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
+  const pending = useAttention((s) => selectPendingOf(s, record.appId));
+  const preview = useRecentTurns(record.appId, immediate);
   const turns = useRef<HTMLDivElement>(null);
   const ready = preview.status === 'ready' ? preview.value : null;
   // the latest turn in view, as a transcript opens
   useEffect(() => {
     if (ready && turns.current) turns.current.scrollTop = turns.current.scrollHeight;
   }, [ready]);
-  const frame = 'flex min-h-0 min-w-0 flex-1 flex-col border-t border-border pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-4';
-  if (row === null || record === null) {
-    return (
-      <section aria-label="Preview" className={frame}>
-        <p className="m-0 text-ui-sm text-fg-muted">{COPY.nothing}</p>
-      </section>
-    );
-  }
   const glyph = glyphFor(record, digest, pending);
   const branch = sessionBranch(record);
   const projectName = record.projectId === null ? COPY.otherSessions : (projects.get(record.projectId)?.name ?? null);
   const title = displayTitle(record);
   return (
-    <section aria-label="Preview" data-testid="resume-preview" className={frame}>
+    <section aria-label="Preview" data-testid="resume-preview" className={PREVIEW_FRAME}>
       <h3 className="m-0 flex min-w-0 items-center gap-1.5 text-ui font-semibold text-fg">
         <GlyphMark glyph={glyph} className="w-3 shrink-0 text-ui-sm font-normal" />
         <span className="truncate">{title}</span>

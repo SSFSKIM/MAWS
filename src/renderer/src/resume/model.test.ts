@@ -130,13 +130,11 @@ describe('the chooser’s groups', () => {
 
   // The local days of 2026 on which the clock moves (the UTC offset at noon differs from the day before's); a zone
   // without daylight saving time has none, and these cases have nothing to prove there. A change at midnight (a day
-  // with no 00:00, as in America/Santiago) is left out: the model's week start there carries the missing midnight's
-  // 01:00 back to the Monday, a known gap (P2-D M1 fix wave report) outside these cases.
+  // with no 00:00, as in America/Santiago) counts too: its day starts at the first hour it has.
   const clockChanges: { day: Date; forward: boolean }[] = [];
   for (let d = new Date(2026, 0, 2, 12); d.getFullYear() === 2026; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 12)) {
     const before = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12).getTimezoneOffset();
-    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getHours() === 0;
-    if (d.getTimezoneOffset() !== before && midnight) clockChanges.push({ day: d, forward: d.getTimezoneOffset() < before });
+    if (d.getTimezoneOffset() !== before) clockChanges.push({ day: d, forward: d.getTimezoneOffset() < before });
   }
   // Around a clock change: the days stay calendar days (23 or 25 hours long) and the weeks start at local Monday midnight.
   const acrossChange = (change: { day: Date }) => {
@@ -163,13 +161,15 @@ describe('the chooser’s groups', () => {
 });
 
 describe('row badges', () => {
-  it('names a worktree’s folder, another project, or a projectless session’s folder; nothing for the opened project', () => {
-    const context = { projectId: P.id as ProjectId, exclude: null };
+  it('names a worktree’s folder, another project, or a projectless session’s folder; nothing for the project scoped to', () => {
     const projects = new Map([P, Q].map((p) => [p.id, p]));
-    expect(folderBadge(recs[0], projects, context)).toBeNull();
-    expect(folderBadge(recs[3], projects, context)).toBe('w');
-    expect(folderBadge(recs[5], projects, context)).toBe('usage');
-    expect(folderBadge(recs[6], projects, context)).toBe('no-project');
+    expect(folderBadge(recs[0], projects, P.id as ProjectId)).toBeNull();
+    expect(folderBadge(recs[3], projects, P.id as ProjectId)).toBe('w');
+    expect(folderBadge(recs[5], projects, P.id as ProjectId)).toBe('usage');
+    expect(folderBadge(recs[6], projects, P.id as ProjectId)).toBe('no-project');
+    // under All projects the list is scoped to no one project, so the opened project's rows name it too
+    expect(folderBadge(recs[0], projects, null)).toBe('maws');
+    expect(folderBadge(recs[6], projects, null)).toBe('no-project');
     expect(shortBranch('feature/resume-chooser')).toBe('resume-chooser');
     expect(shortBranch('master')).toBe('master');
   });
