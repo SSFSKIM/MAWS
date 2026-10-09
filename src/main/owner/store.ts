@@ -19,8 +19,9 @@ export interface OwnerSessionRow {
   recorded: RecordedState | null;
   appended: boolean; // --append-system-prompt passed
   snapshotOff: boolean; // --system-prompt-snapshot off passed
+  offUnavailable: boolean; // "off" was wanted and the binary did not declare it: the change waits for a compaction
   applied: ContractSource | null; // the instructions in effect after that launch
-  style: string | null; // the resolver's style name for it
+  style: string | null; // the resolver's style name for it (read from the settings, whatever a mismatch decided by)
   observedStyle: string | null; // the engine's, at its first session.init
   styleMismatch: boolean;
 }
@@ -34,6 +35,7 @@ export interface LaunchRecord {
   recorded: RecordedState;
   appended: boolean;
   snapshotOff: boolean;
+  offUnavailable: boolean;
   applied: ContractSource;
   style: string;
 }
@@ -71,6 +73,7 @@ interface SessionRow {
   recorded: string | null;
   appended: number;
   snapshot_off: number;
+  off_unavailable: number;
   applied: ContractSource | null;
   style: string | null;
   observed_style: string | null;
@@ -108,6 +111,7 @@ const toSession = (row: SessionRow): OwnerSessionRow => ({
   recorded: row.recorded as RecordedState | null,
   appended: row.appended === 1,
   snapshotOff: row.snapshot_off === 1,
+  offUnavailable: row.off_unavailable === 1,
   applied: row.applied,
   style: row.style,
   observedStyle: row.observed_style,
@@ -179,7 +183,7 @@ export class OwnerChannelStore {
       this.db.run('INSERT INTO owner_channel_sessions (app_session_id) VALUES (?) ON CONFLICT (app_session_id) DO NOTHING', appSessionId);
       const values: Record<string, Value> = {
         launch_id: launch.launchId, launched_at: launch.at, desired: launch.desired, recorded: launch.recorded, appended: launch.appended,
-        snapshot_off: launch.snapshotOff, applied: launch.applied, style: launch.style,
+        snapshot_off: launch.snapshotOff, off_unavailable: launch.offUnavailable, applied: launch.applied, style: launch.style,
       };
       if (!launch.laneOn) values.enabled_at = null;
       else if ((this.session(appSessionId)?.enabledAt ?? null) === null) values.enabled_at = launch.at;

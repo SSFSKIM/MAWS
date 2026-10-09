@@ -10,7 +10,8 @@
 // While the lane is on the launch also advertises MAWS_NATIVE_TO_HUMAN (the contract version) in its settings env, so a
 // plugin drawing its own to-human view can defer. The decision is recorded in the index when the host answers
 // `launching`, and the engine's own report of its output style at that launch's first `session.init` is compared with
-// the resolver's (the mismatch check): a mismatch makes the next decision resolve by the engine's name.
+// the resolver's reading of the settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's
+// name until a launch's init agrees with the resolver's own reading again.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
@@ -37,8 +38,9 @@ export interface LaunchDecision {
   snapshotOff: boolean; // --system-prompt-snapshot off passed
   offUnavailable: boolean; // "off" was wanted and the binary does not declare it: the change waits for a compaction
   applied: ContractSource;
-  style: string; // the resolver's style name (or the engine's, after a mismatch)
-  styleUnresolved: string | null; // why the style could not be found, when it could not
+  style: string; // the resolver's style name, read from the settings: the mismatch check compares the engine's with it
+  decidedBy: string; // the style name the desired state was decided by: the resolver's, or the engine's while a mismatch stands
+  styleUnresolved: string | null; // why the deciding style could not be found, when it could not
 }
 
 // The lane's effective value: the session's override when set, else the app's switch.
@@ -77,7 +79,7 @@ export interface OwnerChannelLaunchDeps {
 
 // The decided launches' bookkeeping: the record at `launching`, and the mismatch check at the launch's first init.
 export class OwnerChannelLaunches {
-  private readonly awaitingInit = new Map<AppSessionId, string>(); // the resolved style of a launch whose init is due
+  private readonly awaitingInit = new Map<AppSessionId, string>(); // the resolver's style of a launch whose init is due
   private subscribed = false;
 
   constructor(readonly deps: OwnerChannelLaunchDeps) {}
@@ -91,7 +93,7 @@ export class OwnerChannelLaunches {
     try {
       this.deps.store.recordLaunch(decision.appSessionId, {
         launchId: launch.launchId, at: launch.at, laneOn: decision.laneOn, desired: decision.desired, recorded: decision.recorded,
-        appended: decision.appended, snapshotOff: decision.snapshotOff, applied: decision.applied, style: decision.style,
+        appended: decision.appended, snapshotOff: decision.snapshotOff, offUnavailable: decision.offUnavailable, applied: decision.applied, style: decision.style,
       });
     } catch (error) {
       this.deps.log(`the owner channel could not record the launch of ${decision.appSessionId}: ${messageOf(error)}`);
@@ -99,7 +101,9 @@ export class OwnerChannelLaunches {
   }
 
   // A session's events from the engine host: the first live `session.init` after a decided launch carries the style the
-  // engine put in effect (null reads as the default). A backfill's or replay's init (`seq` null) is no observation.
+  // engine put in effect (null reads as the default). A backfill's or replay's init (`seq` null) is no observation. It is
+  // compared with the resolver's own reading of the settings, never with a name the launch took from an earlier
+  // observation, so a persistent misreading stays a mismatch and only a fresh agreement clears it.
   observe(appSessionId: AppSessionId, events: readonly SessionEvent[]): void {
     const resolved = this.awaitingInit.get(appSessionId);
     if (resolved === undefined) return;
@@ -137,7 +141,10 @@ export async function ownerChannelLaunch(
     flagSettings: spec.extraSettings,
     managedSettingsPath: owner.deps.managedSettingsPath,
   };
-  const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : await resolveStyle(styleContext);
+  // the settings' reading is always taken (the mismatch check compares the engine's with it); while the last observation
+  // contradicted it, the engine's name decides instead
+  const resolved = await resolveStyle(styleContext);
+  const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : resolved;
   const desired: ContractSource = !on ? 'off' : style.compatible ? 'external-compatible-style' : 'maws-contract';
   const recorded = await recordedOf(s, spec, ctx);
   let flags = decideFlags(desired, recorded, true);
@@ -145,7 +152,7 @@ export async function ownerChannelLaunch(
   if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human contract is appended`);
   const record: LaunchDecision = {
     appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append, snapshotOff: flags.off,
-    offUnavailable: flags.offUnavailable, applied: flags.applied, style: style.name, styleUnresolved: style.unresolved,
+    offUnavailable: flags.offUnavailable, applied: flags.applied, style: resolved.name, decidedBy: style.name, styleUnresolved: style.unresolved,
   };
   return { spec: withOwnerChannel(spec, { laneOn: on, append: flags.append, snapshotOff: flags.off }), record };
 }

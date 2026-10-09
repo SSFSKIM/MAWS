@@ -2,7 +2,7 @@
 // the desired state from the lane and the resolved style, the recorded state from the transcript, and the flags that
 // bring the snapshot to the desired state; the advertisement while the lane is on; the record written at `launching`;
 // and the mismatch check at the launch's first `session.init`.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -120,11 +120,12 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content));
   };
   // The transcript the resume reads, under the config home of the given environment
-  const transcript = (home: string, lastSegment: string | null) =>
-    put(
-      join(home, 'projects', slugOf(work), `${ENGINE_ID}.jsonl`),
-      `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', ...(lastSegment === null ? [] : [lastSegment])] } })}\n`,
-    );
+  const snapshotLine = (lastSegment: string | null) =>
+    `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', ...(lastSegment === null ? [] : [lastSegment])] } })}\n`;
+  const transcriptPath = (home: string) => join(home, 'projects', slugOf(work), `${ENGINE_ID}.jsonl`);
+  const transcript = (home: string, lastSegment: string | null) => put(transcriptPath(home), snapshotLine(lastSegment));
+  // a later launch rendering anew records another snapshot (the engine only ever appends)
+  const recordSnapshot = (home: string, lastSegment: string | null) => appendFileSync(transcriptPath(home), snapshotLine(lastSegment));
   const compatibleStyle = (home: string) => {
     put(join(home, 'output-styles/report.md'), '---\nname: report\nmaws-to-human-contract: 1\n---\nbody\n');
     put(join(home, 'settings.json'), { outputStyle: 'report' });
@@ -178,6 +179,8 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       expect(decided.systemPromptSnapshot ?? null).toBeNull();
       expect(decided.appendSystemPrompt).toBe(TO_HUMAN_CONTRACT);
       expect(decision).toMatchObject({ snapshotOff: false, offUnavailable: true, applied: 'off' });
+      launches.launched(decision!, { launchId: 'l1', at: AT });
+      expect(index.ownerChannel.session(record)).toMatchObject({ snapshotOff: false, offUnavailable: true, applied: 'off' });
     }
   });
 
@@ -218,7 +221,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     it('records the engine’s style at the decided launch’s first live init, and decides the next launch by it', async () => {
       compatibleStyle(configHome); // the resolver reads "report", compatible
       const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
-      expect(first.record).toMatchObject({ style: 'report', desired: 'external-compatible-style' });
+      expect(first.record).toMatchObject({ style: 'report', decidedBy: 'report', desired: 'external-compatible-style' });
       launches.launched(first.record!, { launchId: 'l1', at: AT });
       launches.observe(record, [init('default', null)]); // a backfill's init is no observation
       expect(index.ownerChannel.session(record)).toMatchObject({ observedStyle: null, styleMismatch: false });
@@ -227,13 +230,52 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       launches.observe(record, [init('report', 2)]); // only the first init after the launch counts
       expect(index.ownerChannel.session(record)).toMatchObject({ observedStyle: 'default', styleMismatch: true });
 
+      // the settings still read "report": the next decision goes by the engine's "default", the resolver's reading kept
       const second = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
-      expect(second.record).toMatchObject({ style: 'default', desired: 'maws-contract', appended: true });
+      expect(second.record).toMatchObject({ style: 'report', decidedBy: 'default', desired: 'maws-contract', appended: true });
+    });
+
+    it('a persistent misreading keeps deciding by the engine’s name, launch after launch, without alternating', async () => {
+      compatibleStyle(configHome); // the resolver reads "report"; the engine keeps reporting the default
+      const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+      expect(first.record).toMatchObject({ style: 'report', desired: 'external-compatible-style', appended: false });
+      launches.launched(first.record!, { launchId: 'l1', at: AT });
+      launches.observe(record, [init('default', 1)]);
+
+      transcript(configHome, null); // launch 1 recorded no contract
+      for (const [n, recorded] of [[2, 'none'], [3, CURRENT], [4, CURRENT]] as const) {
+        const next = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+        // decided by the engine's "default" each time: the contract is wanted, and once recorded never switched off again
+        expect(next.record).toMatchObject({
+          style: 'report', decidedBy: 'default', desired: 'maws-contract', recorded, appended: true, snapshotOff: recorded !== CURRENT, applied: 'maws-contract',
+        });
+        launches.launched(next.record!, { launchId: `l${n}`, at: AT });
+        launches.observe(record, [init('default', n)]); // the engine agrees with the name the launch decided by, never with the resolver
+        expect(index.ownerChannel.session(record)).toMatchObject({ style: 'report', observedStyle: 'default', styleMismatch: true });
+        if (recorded !== CURRENT) recordSnapshot(configHome, TO_HUMAN_CONTRACT); // the session compacts and records the appended contract
+      }
+    });
+
+    it('a settings change the engine then reports alike clears the mismatch, and the settings decide again', async () => {
+      compatibleStyle(configHome);
+      const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+      launches.launched(first.record!, { launchId: 'l1', at: AT });
+      launches.observe(record, [init('default', 1)]);
+      transcript(configHome, TO_HUMAN_CONTRACT);
+
+      // the owner selects another compatible style, and the engine reads it as the resolver does
+      put(join(configHome, 'output-styles/brief.md'), '---\nname: brief\nmaws-to-human-contract: 1\n---\nbody\n');
+      put(join(configHome, 'settings.json'), { outputStyle: 'brief' });
+      const second = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+      expect(second.record).toMatchObject({ style: 'brief', decidedBy: 'default', desired: 'maws-contract' }); // agreement not yet observed
       launches.launched(second.record!, { launchId: 'l2', at: AT });
-      launches.observe(record, [init('default', 3)]);
-      expect(index.ownerChannel.session(record)).toMatchObject({ style: 'default', observedStyle: 'default', styleMismatch: false });
+      launches.observe(record, [init('brief', 2)]);
+      expect(index.ownerChannel.session(record)).toMatchObject({ style: 'brief', observedStyle: 'brief', styleMismatch: false });
+
       const third = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
-      expect(third.record).toMatchObject({ style: 'report', desired: 'external-compatible-style' }); // agreement: back to the settings
+      expect(third.record).toMatchObject({
+        style: 'brief', decidedBy: 'brief', desired: 'external-compatible-style', recorded: CURRENT, snapshotOff: true, applied: 'external-compatible-style',
+      });
     });
 
     it('ignores an init for a session with no decided launch awaiting one', () => {

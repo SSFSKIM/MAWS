@@ -46,10 +46,13 @@ async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string |
   return style.compatible ? 'external-compatible-style' : 'maws-contract';
 }
 
-// Whether the instructions still differ from the lane: never decided while on, the next launch; decided since the lane
-// changed, the next launch; decided under the same lane but without the flag to honour it, the next compaction.
+// Whether the instructions still differ from what the lane wants. Never decided while on: the next launch. Decided under
+// the lane in force now: pending only when that launch wanted `--system-prompt-snapshot off` and the binary lacked it
+// (a lane switch, a compatible style over the contract, or another contract version), until the next compaction; a
+// style selected since that launch is not a lane change and reads nothing. The lane switched since that launch: the next
+// launch, unless what that launch left in effect already matches it.
 function pendingOf(row: OwnerSessionRow | null, on: boolean): LanePending | null {
-  if (row === null || row.applied === null) return on ? 'next-launch' : null;
-  if ((row.applied !== 'off') === on) return null;
-  return (row.desired !== 'off') === on ? 'next-compaction' : 'next-launch';
+  if (row === null || row.desired === null || row.applied === null) return on ? 'next-launch' : null;
+  if ((row.desired !== 'off') === on) return row.offUnavailable ? 'next-compaction' : null;
+  return (row.applied !== 'off') === on ? null : 'next-launch';
 }

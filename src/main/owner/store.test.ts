@@ -9,7 +9,7 @@ import { Index } from '../index/index';
 import type { LaunchRecord, OwnerMarkRow } from './store';
 
 const launch = (over: Partial<LaunchRecord> = {}): LaunchRecord => ({
-  launchId: 'l1', at: '2026-10-09T10:00:00.000Z', laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default', ...over,
+  launchId: 'l1', at: '2026-10-09T10:00:00.000Z', laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', ...over,
 });
 
 describe('OwnerChannelStore', () => {
@@ -54,13 +54,16 @@ describe('OwnerChannelStore', () => {
     index.ownerChannel.recordLaunch(a, launch());
     expect(index.ownerChannel.session(a)).toEqual({
       appSessionId: a, override: 'inherit', enabledAt: '2026-10-09T10:00:00.000Z', launchId: 'l1', launchedAt: '2026-10-09T10:00:00.000Z',
-      desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default', observedStyle: null, styleMismatch: false,
+      desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', observedStyle: null, styleMismatch: false,
     });
     index.ownerChannel.recordLaunch(a, launch({ launchId: 'l2', at: '2026-10-09T11:00:00.000Z', recorded: 'contract:1' }));
     expect(index.ownerChannel.session(a)).toMatchObject({ enabledAt: '2026-10-09T10:00:00.000Z', launchId: 'l2', launchedAt: '2026-10-09T11:00:00.000Z', recorded: 'contract:1' });
     index.ownerChannel.recordLaunch(a, launch({ launchId: 'l3', at: '2026-10-09T12:00:00.000Z', laneOn: false, desired: 'off', recorded: 'contract:1', appended: false, snapshotOff: true, applied: 'off' }));
     expect(index.ownerChannel.session(a)).toMatchObject({ enabledAt: null, launchId: 'l3', desired: 'off', snapshotOff: true, applied: 'off' });
+    index.ownerChannel.recordLaunch(a, launch({ launchId: 'l3b', at: '2026-10-09T12:30:00.000Z', laneOn: false, desired: 'off', recorded: 'contract:1', appended: false, offUnavailable: true }));
+    expect(index.ownerChannel.session(a)).toMatchObject({ enabledAt: null, launchId: 'l3b', snapshotOff: false, offUnavailable: true, applied: 'maws-contract' });
     index.ownerChannel.recordLaunch(a, launch({ launchId: 'l4', at: '2026-10-09T13:00:00.000Z' }));
+    expect(index.ownerChannel.session(a)?.offUnavailable).toBe(false);
     expect(index.ownerChannel.session(a)?.enabledAt).toBe('2026-10-09T13:00:00.000Z');
   });
 

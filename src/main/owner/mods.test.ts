@@ -14,7 +14,7 @@ import type { LaunchRecord } from './store';
 
 const AT = '2026-10-09T10:00:00.000Z';
 const launch = (over: Partial<LaunchRecord>): LaunchRecord => ({
-  launchId: 'l1', at: AT, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default', ...over,
+  launchId: 'l1', at: AT, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', ...over,
 });
 const MOD = { id: 'maws.to-human', name: BUILT_IN_MODS[0]!.name, description: BUILT_IN_MODS[0]!.description, version: 1 };
 
@@ -78,9 +78,28 @@ describe('mods.list and mods.setSessionOverride', () => {
 
     it('a change the last launch could not honour (no flag) reads pending at the next compaction', async () => {
       setSessionOverride(deps, { appSessionId: a, id: 'maws.to-human', value: 'off' });
-      index.ownerChannel.recordLaunch(a, launch({ laneOn: false, desired: 'off', recorded: 'contract:1', appended: false, snapshotOff: false, applied: 'maws-contract' }));
+      index.ownerChannel.recordLaunch(a, launch({ laneOn: false, desired: 'off', recorded: 'contract:1', appended: false, snapshotOff: false, offUnavailable: true, applied: 'maws-contract' }));
       expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'off', pending: 'next-compaction' }]);
       setSessionOverride(deps, { appSessionId: a, id: 'maws.to-human', value: 'inherit' });
+      expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'inherit' }]);
+    });
+
+    it('with the lane on, a compatible style or a new contract version the launch could not honour reads pending at the next compaction', async () => {
+      // a compatible style over a recorded contract: the contract stays in force until the prompt renders again
+      index.ownerChannel.recordLaunch(a, launch({ desired: 'external-compatible-style', recorded: 'contract:1', appended: false, offUnavailable: true, applied: 'maws-contract', style: 'report' }));
+      expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'inherit', pending: 'next-compaction' }]);
+      // the current contract over another version: the older one stays in force
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l2', recorded: 'contract:2', offUnavailable: true }));
+      expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'inherit', pending: 'next-compaction' }]);
+      // a later launch with the flag honours it
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l3', recorded: 'contract:2', snapshotOff: true }));
+      expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'inherit' }]);
+    });
+
+    it('a style selected since the last launch, with the lane unchanged, reads nothing pending', async () => {
+      index.ownerChannel.recordLaunch(a, launch({ recorded: 'contract:1' }));
+      put(join(configHome, 'output-styles/report.md'), '---\nname: report\nmaws-to-human-contract: 1\n---\n');
+      put(join(configHome, 'settings.json'), { outputStyle: 'report' });
       expect(await modsList(deps, a)).toEqual([{ ...MOD, enabled: true, source: 'maws-contract', perSession: 'inherit' }]);
     });
 

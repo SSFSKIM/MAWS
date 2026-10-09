@@ -69,7 +69,7 @@ describe('startOwnerChannel', () => {
   it('feeds the host’s event batches to the launches’ mismatch check', () => {
     const launches = start();
     launches.launched(
-      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', styleUnresolved: null },
+      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', decidedBy: 'default', styleUnresolved: null },
       { launchId: 'l1', at: 't' },
     );
     const init = { id: 'e1', sessionId: 's', at: 't', seq: 1, agentId: null, parentToolUseId: null, kind: 'session.init', outputStyle: 'Explanatory' } as unknown as SessionEvent;
