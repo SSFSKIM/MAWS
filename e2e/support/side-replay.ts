@@ -147,6 +147,23 @@ export class SideJournal {
     this.push('in', swapped(frameOf(STEER_NEXT, 44), { [RECORDED.steer.session]: this.sessionId }));
   }
 
+  // P2-E1 (M2): a tool call the engine asks permission for, allowed: the assistant's `tool_use` (seq 38's frame, its
+  // tool, id and input swapped), the engine's `can_use_tool` and the host's `allow` the replay holds at (the shapes of
+  // `pass3/p1-maws-artifacts` seq 154 and 157; the replay compares the response's request id and behaviour), then the
+  // tool's result (seq 44's frame). Answers the tool use id.
+  permission(prompt: string, toolName: string, input: Record<string, unknown>, output = 'ok'): string {
+    const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
+    const call = swapped(frameOf(STEER_NEXT, 38), { [RECORDED.steer.session]: this.sessionId, [RECORDED.steer.prompt]: prompt }) as Frame & { message: Frame };
+    const use = { type: 'tool_use', id: toolUseId, name: toolName, input, caller: { type: 'direct' } };
+    this.push('in', { ...call, uuid: this.uuid(), message: { ...call.message, content: [use] }, wire_tool_inputs: { [toolUseId]: input } });
+    const requestId = this.uuid();
+    this.push('in', { type: 'control_request', request_id: requestId, request: { subtype: 'can_use_tool', tool_name: toolName, display_name: toolName, input, tool_use_id: toolUseId } });
+    this.push('out', { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { behavior: 'allow' } } });
+    const result = swapped(frameOf(STEER_NEXT, 44), { [RECORDED.steer.session]: this.sessionId }) as Frame & { message: Frame };
+    this.push('in', { ...result, uuid: this.uuid(), message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: output, is_error: false }] }, tool_use_result: { stdout: output, stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+    return toolUseId;
+  }
+
   // A `next` steer written into the running turn (seq 46's shape), and the engine's `queued` for it.
   steer(): string {
     const uuid = this.uuid();

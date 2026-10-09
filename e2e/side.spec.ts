@@ -21,6 +21,9 @@ import { menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
+import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
+import { deliverableUrl } from '../src/shared/maws/deliverable'; // P2-E1
+import { frameAt, seedArtifact } from './support/maws-tools'; // P2-E1
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
@@ -698,4 +701,136 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await menu(maws, 'theme.light');
     expect(maws.consoleErrors()).toEqual([]);
   });
+
+  // ---- P2-E1 (M2): the comment card's thread (P2-E1 document, acceptance 3, 4 and 5) ----------------------------------
+
+  test('9. a comment on a delivered page’s element becomes its side thread in the card: the comment row and the reply with no parent history above them, the Deliverables tab still selected and no Side tab; Reply while idle reaches the thread and nothing reaches the parent', async () => {
+    test.setTimeout(150_000);
+    const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent'), threadJournal(CHILD, cwd, HERO, [CARD_REPLY, CARD_REPLY_2]).write(dir, 'thread')]);
+    const { page, maws, parent } = c;
+    const { card, tools } = await commentOnHeading(c);
+    await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
+    await card.getByRole('button', { name: 'Send' }).click();
+
+    // the card stays and becomes the thread: the comment under its anchor chip, the reply, none of the parent's history
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    const child = await sideThreadOf(page, parent, 'comment');
+    await expect(card.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
+    await expect(card.locator('[data-chip="anchor"]')).toHaveText(HERO);
+    await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
+    await expect(card.getByText(FIRST_REPLY), 'none of the parent’s copied history').toHaveCount(0);
+    await expect(card.getByText(FIRST_PROMPT)).toHaveCount(0);
+    await expect(tools.getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(tools.getByRole('tab', { name: /^Side/ }), 'no Side tab').toHaveCount(0);
+    await expect(page.getByText('Side thread opened in the panel of', { exact: false })).toHaveCount(0);
+    const first = writtenUsers(maws, child);
+    expect(first).toHaveLength(1);
+    expect(JSON.stringify(first[0]!.frame.message!.content)).toContain(CARD_COMMENT);
+
+    // Reply while the thread is idle: an ordinary prompt to the thread, drawn as its next user row, answered in the card
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: child as never })).turn, { timeout: 20_000 }).toBeNull();
+    await card.getByRole('textbox', { name: 'Reply' }).fill(CARD_FOLLOW_UP);
+    await card.getByRole('textbox', { name: 'Reply' }).press('Enter');
+    await expect.poll(() => writtenUsers(maws, child).length).toBe(2);
+    const reply = writtenUsers(maws, child)[1]!.frame;
+    expect(reply.priority, 'a send, not a steer').toBeUndefined();
+    expect(JSON.stringify(reply.message!.content)).toContain(CARD_FOLLOW_UP);
+    await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+    await expect(card.getByRole('region', { name: 'Your message' }).filter({ hasText: CARD_FOLLOW_UP })).toBeVisible();
+    await expect(card.getByText(CARD_REPLY_2)).toBeVisible({ timeout: 20_000 });
+    expect(writtenUsers(maws, parent), 'the main conversation received nothing').toHaveLength(1);
+    await expect(card).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  test('10. a permission the thread raises is answered inside the card, with the needs-you strip above Reply; a second one moved to the Side pane closes the card and shows its request card there', async () => {
+    test.setTimeout(150_000);
+    const c = await begin((cwd, dir) => {
+      const thread = new SideJournal(CHILD, cwd);
+      const prompt = thread.prompt();
+      thread.rename(HERO);
+      thread.permission(prompt, 'Bash', { command: 'echo first-step', description: 'First step' });
+      thread.permission(prompt, 'Bash', { command: 'echo second-step', description: 'Second step' });
+      thread.reply(prompt, CARD_REPLY);
+      thread.completed(prompt);
+      return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
+    });
+    const { page, maws, parent } = c;
+    const { card } = await commentOnHeading(c);
+    await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
+    await card.getByRole('button', { name: 'Send' }).click();
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    const child = await sideThreadOf(page, parent, 'comment');
+    const allowed = () => journal(maws, child).filter((r) => r.direction === 'out' && r.frame.type === 'control_response').length;
+
+    // the first request: C7's inline card (the transcript's, named by its heading) inside the card's box, the strip above
+    // Reply naming it
+    const request = card.locator('[data-request-card]');
+    await expect(request).toBeVisible({ timeout: 20_000 });
+    await expect(request).toContainText('Approval needed');
+    await expect(request).toContainText('echo first-step');
+    const strip = card.locator('[data-needs-you]');
+    await expect(strip).toContainText('Waiting for your permission');
+    await expect(strip.getByRole('button', { name: 'Open in Side pane' })).toBeVisible();
+    await expect(strip.getByRole('button', { name: 'Open as tab' })).toBeVisible();
+    const allow = request.getByRole('button', { name: 'Allow', exact: true });
+    const [cardBox, allowBox] = [(await card.boundingBox())!, (await allow.boundingBox())!];
+    expect(allowBox.x).toBeGreaterThanOrEqual(cardBox.x);
+    expect(allowBox.x + allowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    expect(allowBox.y + allowBox.height).toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
+    await request.getByRole('radio', { name: 'Allow once' }).click();
+    await allow.click();
+    await expect.poll(allowed).toBe(1);
+
+    // the turn goes on to the second request, the card still open
+    await expect(request).toContainText('echo second-step', { timeout: 20_000 });
+    await expect(card).toBeVisible();
+    await expect(strip).toContainText('Waiting for your permission');
+    await strip.getByRole('button', { name: 'Open in Side pane' }).click();
+    await expect(card).toHaveCount(0);
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+    const docked = pane.getByRole('group', { name: 'Approval needed' });
+    await expect(docked).toContainText('echo second-step');
+    await docked.getByRole('radio', { name: 'Allow once' }).click();
+    await docked.getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect.poll(allowed).toBe(2);
+    await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
+    expect(writtenUsers(maws, parent)).toHaveLength(1);
+    expect(maws.consoleErrors()).toEqual([]);
+  });
 });
+
+// P2-E1: a delivered page whose heading a comment is made on, in the parent's Deliverables viewer.
+const HEADING_PAGE =
+  '<!doctype html><html><head><meta charset="utf-8"><title>Dashboard</title></head><body style="margin:0;font:16px system-ui;background:#ffffff;color:#1b1b1b">' +
+  '<h1 id="hero" style="margin:0;padding:32px 24px;background:#e3f2fd">Sales overview</h1>' +
+  '<p class="lead" style="padding:0 24px">Revenue by region, third quarter.</p></body></html>';
+const HERO = 'Dashboard v1 › h1#hero “Sales overview”';
+const CARD_COMMENT = 'Make the heading larger.';
+const CARD_REPLY = 'The heading is now 48 px, up from 32.';
+const CARD_FOLLOW_UP = 'And the subtitle?';
+const CARD_REPLY_2 = 'The subtitle stays at 16 px.';
+
+// The parent's page seeded as its artifact (the store's own layout), opened in the panel's Deliverables tool, Comment,
+// the heading clicked: answers the card (composing) and the panel's tool strip.
+async function commentOnHeading(c: Case & { parent: string }): Promise<{ card: Locator; tools: Locator }> {
+  const { page, maws, parent } = c;
+  const record = seedArtifact(maws.userData, parent as AppSessionId, 'dash', 'Dashboard', [HEADING_PAGE]);
+  const panel = panelRegion(page);
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Deliverables' }).click();
+  // the session's list was read (empty) before the record was seeded under the parent's runtime id; All sessions reads anew
+  await panel.getByRole('group', { name: 'Show deliverables of' }).getByRole('button', { name: 'All sessions' }).click();
+  await panel.locator(`[data-deliverables-list] [data-deliverable-row][data-deliverable-id="${record.id}"]`).click();
+  const viewer = panel.locator('[data-deliverable-viewer]');
+  const frame = await frameAt(page, deliverableUrl(parent as AppSessionId, record.id, 1));
+  await expect(frame.locator('#hero')).toHaveText('Sales overview');
+  await viewer.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(viewer.locator('[data-picking]')).toBeVisible();
+  const box = (await viewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
+  await page.mouse.click(box.x + 60, box.y + 30);
+  const card = viewer.locator('[data-comment-card]');
+  await expect(card).toHaveAttribute('data-card-phase', 'composing');
+  await expect(card).toHaveAttribute('data-anchor-locator', '#hero');
+  return { card, tools: panel.getByRole('tablist', { name: 'Panel tools' }) };
+}
