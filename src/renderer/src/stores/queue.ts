@@ -73,6 +73,24 @@ export function attachQueue(appSessionId: AppSessionId, client: MawsBridge = ipc
   };
 }
 
+// P2-0: a human send outside a mounted composer still needs the queue's between-write-and-turn busy signal. Use
+// the event-fed value only while it is attached; a detached cached queue can be stale. Subscribe before the read,
+// with the same arrival rule as attachQueue, so a newer queue event always wins over the snapshot.
+export async function readSessionQueue(appSessionId: AppSessionId, client: MawsBridge = ipc): Promise<SessionQueue> {
+  const current = useQueueStore.getState().bySession.get(appSessionId);
+  if (attachments.has(appSessionId) && current?.loaded) return current;
+  let evented: SessionQueue | null = null;
+  const off = client.on('session.queue', (e) => {
+    if (e.appSessionId === appSessionId) evented = sessionQueueOf(e);
+  });
+  try {
+    const result = await client.invoke('session.queue.list', { appSessionId });
+    return evented ?? (result.ok ? sessionQueueOf(result.value) : { ...EMPTY_QUEUE, loaded: true });
+  } finally {
+    off();
+  }
+}
+
 export function resetQueueStore(): void {
   for (const entry of attachments.values()) entry.off();
   attachments.clear();
