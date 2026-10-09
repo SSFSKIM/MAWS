@@ -28,6 +28,10 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
 // C12 end
 import { BROWSER_COPY } from '../browser/copy'; // E4a
+// P2-A start (2026-10-09; X17)
+import type { Fact, ObservedFactsAnswer } from '@shared/engine/observed-facts';
+import { FRESHNESS } from '../../sessions/observed';
+// P2-A end
 
 // W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
 export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: Route[] };
@@ -45,6 +49,9 @@ export interface SessionInfoInput {
   budget: BudgetState | null; // C12: the engine host's memory budget, null before it answered
   browserTabs: { loaded: number; memoryKiB: number | null }; // E4a: the app's loaded browser tabs (the browser store's `loadedTabs`)
   now: number;
+  // P2-A (X17): present while no process is live: the facts the engine host kept for the session (null when it kept
+  // none), which the model, effort, mode, output style, plugin count and context rows show labelled with when
+  observed?: { facts: ObservedFactsAnswer | null; loading: boolean };
   reads: {
     status: GetStatusResponse | null;
     rules: ListPermissionRulesResponse | null;
@@ -88,7 +95,16 @@ export function heldByRow(record: SessionRecord): InfoRow {
   return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
 }
 
-function engineSection({ record, status, digest, budget, browserTabs }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs
+// P2-A start (2026-10-09; X17): a row from one observed fact, labelled with when; "Not observed yet" for an unknown one
+// (never a record's default), `—` while the facts are being read
+function observedRow<T>(label: string, observed: NonNullable<SessionInfoInput['observed']>, fact: (facts: ObservedFactsAnswer) => Fact<T>, value: (v: T) => string, now: number): InfoRow {
+  const known = observed.facts ? fact(observed.facts) : null;
+  if (known) return { label, value: value(known.value), note: FRESHNESS.lastObserved(known.at, now) };
+  return { label, value: observed.loading ? NONE : FRESHNESS.notObserved };
+}
+// P2-A end
+
+function engineSection({ record, status, digest, budget, browserTabs, observed, now }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs; P2-A: observed, now
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
@@ -97,6 +113,7 @@ function engineSection({ record, status, digest, budget, browserTabs }: SessionI
       // W13: the session's own version (its init frame's, else the probe's at spawn, else the record's) and the binary it
       // was spawned from (the spawn row's), never today's setting
       { label: INFO.version, value: version ?? NONE },
+      ...(observed ? [observedRow(INFO.plugins, observed, (f) => f.plugins, (p) => INFO.pluginsLoaded(p.plugins.length), now)] : []), // P2-A
       { label: INFO.binary, value: status ? homeAbbreviated(status.bin) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
       heldByRow(record), // W7
@@ -107,7 +124,9 @@ function engineSection({ record, status, digest, budget, browserTabs }: SessionI
   };
 }
 
-function modelSection({ record, status, models }: SessionInfoInput): InfoSection {
+function modelSection(input: SessionInfoInput): InfoSection {
+  if (input.observed) return observedModelSection(input, input.observed); // P2-A
+  const { record, status, models } = input;
   const model = status?.model ?? record.model;
   const effort = status ? status.effort : record.effort;
   // A set_model the engine accepted and no init frame has confirmed yet: the requested model, pending in the model
@@ -122,6 +141,19 @@ function modelSection({ record, status, models }: SessionInfoInput): InfoSection
   const overrides = Object.entries(status?.modelOverrides ?? {});
   if (overrides.length > 0) rows.push({ label: INFO.overrides, value: overrides.map(([k, v]) => `${k} → ${v}`).join('; '), note: INFO.passedThrough });
   return { title: INFO.sections.model, rows };
+}
+
+// P2-A (X17): with no live process, the model and effort the engine last reported, and its output style
+function observedModelSection({ status, now }: SessionInfoInput, observed: NonNullable<SessionInfoInput['observed']>): InfoSection {
+  const effort = observed.facts?.effort?.value ?? null;
+  return {
+    title: INFO.sections.model,
+    rows: [
+      observedRow(INFO.main, observed, (f) => f.model, (model) => (effort ? `${model} · ${effort}` : model), now),
+      status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
+      observedRow(INFO.outputStyle, observed, (f) => f.outputStyle, (style) => style, now),
+    ],
+  };
 }
 
 function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput): InfoSection {
@@ -146,27 +178,36 @@ function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput)
   return { title: INFO.sections.gateway, rows };
 }
 
-function permissionsSection({ record, status, lane, reads }: SessionInfoInput): InfoSection {
+function permissionsSection({ record, status, lane, reads, observed, now }: SessionInfoInput): InfoSection { // P2-A: observed, now
   const mode = status?.permissionMode ?? record.permissionMode;
   const grants = status?.grants.length ?? 0;
   const rules = reads.rules?.state.rules;
   const count = (behavior: string) => rules?.filter((r) => r.behavior === behavior).length ?? 0;
   const laneValue = lane ? lane.sentence : NONE;
+  // P2-A: with no live process, the effective mode the engine last reported (an old one never confirms a requested one)
+  const modeRow: InfoRow = observed
+    ? observedRow(INFO.mode, observed, (f) => f.mode, (m) => PERMISSION_MODE_LABELS[m], now)
+    : { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote };
   return {
     title: INFO.sections.permissions,
     rows: [
-      { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote },
+      modeRow,
       { label: INFO.lane, value: laneValue, note: lane?.reviews ? LANE.reviews(lane.reviews.evaluated, lane.reviews.flagged) : undefined },
       { label: INFO.rules, value: rules ? INFO.ruleCounts(count('allow'), count('ask'), count('deny'), grants) : INFO.grantsOnly(grants), action: 'permissions' },
     ],
   };
 }
 
-function usageSection({ digest, windows, now, reads }: SessionInfoInput): InfoSection {
+function usageSection({ digest, windows, now, reads, observed }: SessionInfoInput): InfoSection { // P2-A: observed
   // C3's sample (the digest, at ready and after every turn) first; the engine's summary only before one arrived
   const sampled = digest?.context;
+  // P2-A: with no live process, the last reading the engine host kept, labelled with when; the digest's (this app run's,
+  // with no time) when the host kept none
+  const contextLine = (c: NonNullable<SessionDigest['context']>) => CONTEXT.line(num(c.totalTokens), num(c.maxTokens), Math.round(c.percent), c.autoCompactThreshold === null ? null : num(c.autoCompactThreshold));
+  const contextRow: InfoRow | null =
+    observed && (observed.facts?.contextUsage || !sampled) ? observedRow(INFO.context, observed, (f) => f.contextUsage, contextLine, now) : null;
   const context = sampled
-    ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
+    ? contextLine(sampled)
     : reads.context
       ? presentContext({ ...reads.context, ...contextTotal(reads.context) }).line // corrected as C3 corrects its sample (debt wave 4)
       : NONE;
@@ -181,7 +222,7 @@ function usageSection({ digest, windows, now, reads }: SessionInfoInput): InfoSe
   return {
     title: INFO.sections.usage,
     rows: [
-      { label: INFO.context, value: context },
+      contextRow ?? { label: INFO.context, value: context },
       { label: INFO.usage, value: usage || NONE, note: usage ? (windows.source === 'direct' ? INFO.fromEngine : INFO.fromClaudeUsage) : undefined },
       ...(pace.length > 0 ? [{ label: INFO.pace, value: pace.join(' · ') }] : []),
       { label: INFO.cost, value: digest?.cost ? INFO.costLine(usd(digest.cost.totalUsd), usd(digest.cost.sinceSeenUsd)) : NONE },

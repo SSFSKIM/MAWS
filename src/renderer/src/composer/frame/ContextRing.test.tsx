@@ -97,3 +97,59 @@ describe('the context ring', () => {
     expect(screen.queryByRole('button', { name: 'Compact now' })).toBeNull();
   });
 });
+
+// P2-A start (2026-10-09; X17): with no live process and no sample in the digest, the last reading the host kept, with
+// when; "Not observed yet" where there is none; nothing is read from the engine
+describe('the context ring of a session with no live process', () => {
+  const observed = (contextUsage: unknown) => ({
+    version: 1, appSessionId: A, engineSessionId: null, writtenAt: '2026-10-09T09:00:00.000Z', source: 'live', launches: ['L1'],
+    engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage, complete: true,
+  });
+  function mountExited(facts: unknown) {
+    fake = fakeClient({ 'session.observedFacts': facts });
+    window.maws = fake.client;
+    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process: 'exited' })]]), digests: new Map([[A, digest('app-a', { context: null })]]) });
+    return render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ContextRing appSessionId={A} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('draws the last reading, its label saying when, and the popover says the same with no engine read', async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000 - 60_000).toISOString();
+    mountExited(observed({ value: { percent: 41, totalTokens: 82_000, maxTokens: 200_000, autoCompactThreshold: 167_000 }, at: threeHoursAgo, launchId: 'L1' }));
+    await settle();
+    expect(ring().getAttribute('data-context-ring')).toBe('41');
+    expect(ring().getAttribute('aria-label')).toBe('Context window 41% full of 200k · Last reading, 3 hours ago');
+    fireEvent.click(ring());
+    await settle();
+    const popover = screen.getByRole('dialog', { name: 'Context window' });
+    expect(within(popover).getByText('41% of 200k used')).toBeTruthy();
+    expect(within(popover).getByText('Last reading, 3 hours ago')).toBeTruthy();
+    expect(fake.invoked('session.getContextUsage')).toEqual([]);
+  });
+
+  it('says "Not observed yet" for a session MAWS never ran (a terminal-only one)', async () => {
+    mountExited(null);
+    await settle();
+    expect(ring().getAttribute('aria-label')).toBe('Context window · no reading yet');
+    fireEvent.click(ring());
+    await settle();
+    expect(within(screen.getByRole('dialog', { name: 'Context window' })).getByText('Not observed yet')).toBeTruthy();
+  });
+
+  it('keeps the digest’s sample first, unlabelled, and reads no facts for it', async () => {
+    fake = fakeClient({});
+    window.maws = fake.client;
+    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process: 'exited' })]]), digests: new Map([[A, digest('app-a', { context: { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null } })]]) });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ContextRing appSessionId={A} />
+      </QueryClientProvider>,
+    );
+    expect(ring().getAttribute('aria-label')).toBe('Context window 12% full of 200k');
+    expect(fake.invoked('session.observedFacts')).toEqual([]);
+  });
+});
+// P2-A end

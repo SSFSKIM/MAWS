@@ -21,6 +21,7 @@ import { useSessionWindows, useUsage } from '../../stores/usage';
 import { rowOf } from '../../widgets/model';
 import { Group, KeyValues } from '../../widgets/parts';
 import { useEngineRead } from '../../widgets/read';
+import { useObservedFacts } from '../../sessions/observed'; // P2-A
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
@@ -73,6 +74,10 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const budget = useBudget((s) => s.state); // C12
   const browserTabs = useBrowser(useShallow(loadedTabs)); // E4a
   useDirectFallback(appSessionId, visible ? status : null); // W2: a Direct session's windows, read while the tab is shown
+  // P2-A (X17): with no live process the sections show what the engine last reported, labelled with when; a read, never
+  // a start (the 30 s reads above stay enabled only while the process is ready)
+  const live = status?.process === 'ready';
+  const observed = useObservedFacts(appSessionId, { enabled: visible && !live });
 
   // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
   // widget's Route segment), never by a restart from here, as the usage popover's footer branched before routingFacts
@@ -99,12 +104,12 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     budget, // C12
     browserTabs, // E4a
     now,
+    ...(live ? {} : { observed }), // P2-A
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });
 
   return (
     <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
-      {!status && <p className="m-0 mb-2 text-ui-sm text-fg-muted">{INFO.notLive}</p>}
       {sections.map((section) => (
         <Group key={section.title} label={section.title}>
           <KeyValues label={section.title} rows={section.rows.map((row) => ({ label: row.label, value: <Value appSessionId={appSessionId} row={row} /> }))} />

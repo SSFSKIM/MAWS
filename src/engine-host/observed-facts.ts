@@ -147,7 +147,15 @@ export interface ObservedFactsServiceDeps {
   lines?: (file: string) => AsyncIterable<string>; // reads a journal file's lines (tests count the files opened)
 }
 
-const readLines = (file: string): AsyncIterable<string> => createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+// A file's lines; the stream is closed however the reading ends (a budget cut stops mid-file).
+async function* readLines(file: string): AsyncIterable<string> {
+  const input = createReadStream(file, { encoding: 'utf8' });
+  try {
+    yield* createInterface({ input, crlfDelay: Infinity });
+  } finally {
+    input.destroy();
+  }
+}
 
 export class ObservedFactsService {
   constructor(private readonly deps: ObservedFactsServiceDeps) {}

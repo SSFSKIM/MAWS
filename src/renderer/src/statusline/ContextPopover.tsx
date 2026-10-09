@@ -3,10 +3,13 @@
 // percentage while it loads; `<used> of <max> · autocompact at <threshold>`, the tokens left
 // until compaction, a segmented bar of what occupies the window with the threshold marked, the categories, and
 // `Compact now`, which sends `/compact` when the session's catalogue lists it as a headless command.
+// P2-A (X17): with no live process, the last reading the engine host kept for the session, labelled with when ("Last
+// reading, 3 hours ago"), else the digest's, else "Not observed yet"; nothing is read from the engine and nothing starts.
 import type { SessionRecord } from '@shared/graph/session';
 import type { GetContextUsageResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
+import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { useSessionCatalog } from '../stores/catalog';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -56,6 +59,7 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
   const live = useSessions((s) => s.engine.get(id)?.process === 'ready');
   const digest = useSessions((s) => s.digests.get(id)?.context ?? null);
   const usage = useCommand('session.getContextUsage', { appSessionId: id, detail: 'full' }, { enabled: live, staleTime: 10_000 });
+  const observed = useObservedFacts(id, { enabled: !live }).facts?.contextUsage ?? null; // P2-A
   const catalog = useSessionCatalog(live ? id : null);
   const compactable = live && catalog.commands.some((c) => c.name === 'compact') && !catalog.terminalOnly.includes('compact');
 
@@ -65,10 +69,18 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
     if (!result.ok) toast({ level: 'warning', text: `Compact did not start: ${result.error.message}`, actions: [], dismissible: true });
   };
 
+  const reading = (context: { percent: number; maxTokens: number }) => `${Math.round(context.percent)}% of ${tokens(context.maxTokens)} used`;
   let body;
   if (usage.data) body = <Breakdown usage={usage.data} />;
-  else if (digest) body = <p className="text-fg-muted">{Math.round(digest.percent)}% of {tokens(digest.maxTokens)} used</p>;
-  else body = <p className="text-fg-muted">{live ? 'Reading the context window…' : 'No context reading: the session is not running'}</p>;
+  else if (!live && observed)
+    body = (
+      <>
+        <p className="text-fg-muted">{reading(observed.value)}</p>
+        <p className="text-ui-sm text-fg-muted">{FRESHNESS.lastReading(observed.at)}</p>
+      </>
+    );
+  else if (digest) body = <p className="text-fg-muted">{reading(digest)}</p>;
+  else body = <p className="text-fg-muted">{live ? 'Reading the context window…' : FRESHNESS.notObserved}</p>;
 
   return (
     <div className="flex flex-col gap-2.5 p-3.5">

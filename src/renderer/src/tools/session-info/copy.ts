@@ -18,12 +18,13 @@ export const LANE = {
 export const INFO = {
   title: 'Session info',
   noSession: 'Open a session to see its details',
-  notLive: 'Not running in this app · showing what the record last held',
   sections: { engine: 'Engine', model: 'Model', gateway: 'Gateway', permissions: 'Permissions', usage: 'Context, usage, cost', hooks: 'Hooks and MCP' },
   // Engine
   version: 'Version',
   binary: 'Binary',
   sessionId: 'Session id',
+  plugins: 'Plugins', // P2-A: the loaded plugins the engine last reported, while no process is live
+  pluginsLoaded: (n: number) => `${n} loaded`,
   // W7: who holds the session (the glyph's derivation, attention/derive.ts)
   heldBy: 'Held by',
   heldByMaws: 'MAWS',
@@ -38,6 +39,7 @@ export const INFO = {
   subagents: 'Subagents',
   subagentChosen: 'CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch',
   subagentsInherit: "each agent's own, else Main", // W3: no CLAUDE_CODE_SUBAGENT_MODEL (the engine's precedence, SPEC 18)
+  outputStyle: 'Output style', // P2-A: the engine's last reported output style, while no process is live
   overrides: 'Overrides',
   passedThrough: 'passed through from your shell',
   // Gateway

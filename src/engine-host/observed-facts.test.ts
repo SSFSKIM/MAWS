@@ -78,8 +78,7 @@ describe('recovery from the exported fixtures yields the fields the journal hold
     expect(facts.effort).toBeNull();
     expect(facts.launches).toEqual(['LE8']);
     expect(facts.source).toBe('journal');
-    const { complete: _complete, ...file } = facts;
-    expect(await store.load(ID)).toEqual(file); // what was answered is what was written, less the wire's `complete`
+    expect({ ...(await store.load(ID)), complete: true }).toEqual(facts); // what was answered is what was written, plus the wire's `complete`
   });
 
   it('context-sample: the last get_context_usage answer, mapped as the digest maps it', async () => {
