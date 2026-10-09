@@ -720,6 +720,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
     expect(stripLines, 'the needs-you text on one line').toBe(1);
     await shootCard(maws, deliverable, 'card-thread-request');
+
+    // the panel at its narrowest (Home on its resizer): the viewer's body stays wider than the docked layout's 216 px
+    // threshold, so the card stays anchored beside the element (the docked fallback is unreachable in the panel; its
+    // layout is pinned by CardHost's unit test)
+    await page.getByRole('separator', { name: 'Resize right panel' }).focus();
+    await page.keyboard.press('Home');
+    await expect(page.getByRole('separator', { name: 'Resize right panel' })).toHaveAttribute('aria-valuenow', '280');
+    const narrowest = (await deliverable.locator('[data-card-host]').boundingBox())!;
+    console.log(`P2-E1: the viewer body at the panel's minimum width: ${narrowest.width} x ${narrowest.height} px`);
+    expect(narrowest.width).toBeGreaterThanOrEqual(216);
+    await expect(card).toHaveAttribute('data-placement', 'below');
+    await shootCard(maws, deliverable, 'card-thread-request-narrowest');
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -741,6 +753,16 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
     await expect(card.getByText(FIRST_REPLY), 'none of the parent’s copied history').toHaveCount(0);
     await expect(card.getByText(FIRST_PROMPT)).toHaveCount(0);
+    // the comment row's time, Copy and Edit, shown on hover, sit inside the card (the card's narrow width; whole-branch
+    // review, fix wave)
+    const comment = card.getByRole('region', { name: 'Your message' }).first();
+    await comment.hover();
+    const toolbar = comment.locator('.transcript-user-actions');
+    await expect(toolbar).toHaveCSS('opacity', '1');
+    const [cardBox, toolbarBox] = [(await card.boundingBox())!, (await toolbar.boundingBox())!];
+    expect(toolbarBox.x, 'the toolbar’s left inside the card').toBeGreaterThanOrEqual(cardBox.x);
+    expect(toolbarBox.x + toolbarBox.width, 'its right inside the card').toBeLessThanOrEqual(cardBox.x + cardBox.width);
+    await page.mouse.move(1, 1);
     await expect(tools.getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
     await expect(tools.getByRole('tab', { name: /^Side/ }), 'no Side tab').toHaveCount(0);
     await expect(page.getByText('Side thread opened in the panel of', { exact: false })).toHaveCount(0);

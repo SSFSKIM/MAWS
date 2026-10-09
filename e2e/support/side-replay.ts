@@ -176,10 +176,13 @@ export class SideJournal {
     const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
     const swap = { [RECORDED.maws.session]: this.sessionId, [RECORDED.maws.toolUse]: toolUseId, [RECORDED.maws.permission]: this.uuid(), [RECORDED.maws.call]: this.uuid() };
     const tool = `mcp__maws__${name}`;
-    const assistant = swapped(frameOf(MAWS_ARTIFACTS, 357), swap) as Frame & { message: Frame & { content: Frame[] } };
-    this.push('in', { ...assistant, uuid: this.uuid(), message: { ...assistant.message, content: [{ ...assistant.message.content[0]!, name: tool, input }] } });
+    // the recording's labels ("Update artifact", "Artifact Update") name its own tool; another tool's frames go without
+    const labelled = name === 'artifact_update';
+    const { tool_use_meta: meta, ...assistant } = swapped(frameOf(MAWS_ARTIFACTS, 357), swap) as Frame & { message: Frame & { content: Frame[] } };
+    this.push('in', { ...assistant, ...(labelled && { tool_use_meta: meta }), uuid: this.uuid(), message: { ...assistant.message, content: [{ ...assistant.message.content[0]!, name: tool, input }] } });
     const ask = swapped(frameOf(MAWS_ARTIFACTS, 359), swap) as Frame & { request: Frame };
-    this.push('in', { ...ask, request: { ...ask.request, tool_name: tool, input, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: tool }], behavior: 'allow', destination: 'localSettings' }] } });
+    const { display_name: displayName, ...request } = ask.request;
+    this.push('in', { ...ask, request: { ...request, ...(labelled && { display_name: displayName }), tool_name: tool, input, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: tool }], behavior: 'allow', destination: 'localSettings' }] } });
     this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 363), swap));
     const call = swapped(frameOf(MAWS_ARTIFACTS, 366), swap) as Frame & { request: Frame & { message: Frame & { params: Frame } } };
     this.push('in', { ...call, request: { ...call.request, message: { ...call.request.message, params: { ...call.request.message.params, name, arguments: input } } } });
