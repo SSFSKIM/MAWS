@@ -28,6 +28,7 @@ export const commands = [
   'session.observedFacts',
   'session.acquire',
   // P2-A end
+  'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
 ] as const;
 
 export const events = [

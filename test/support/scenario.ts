@@ -5,6 +5,7 @@
 // shape production would refuse. Keys named `_from`, `_synthetic` or `_note` anywhere in the file are provenance
 // annotations (which probe journal a value was copied from, what was invented) and are dropped before validation.
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path'; // P2-D
 import * as z from 'zod';
 import { AttentionItemSchema } from '../../src/shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '../../src/shared/graph/events';
@@ -67,6 +68,9 @@ export const ScenarioFileSchema = z.strictObject({
   engine: z.array(CompactEngineSchema),
   attention: z.array(AttentionEntrySchema),
   timeline: z.array(TimelineEntrySchema),
+  // P2-D (2026-10-09): engine transcripts for the resume chooser's preview read, by session; a relative path is the
+  // scenario file's directory's
+  transcripts: z.record(AppSessionIdSchema, z.string()).optional(),
 });
 export type ScenarioFile = z.infer<typeof ScenarioFileSchema>;
 
@@ -86,6 +90,7 @@ export interface Scenario {
   engine: EngineSessionStatus[];
   attention: { appSessionId: AppSessionId; items: AttentionItem[]; requests: Record<string, SessionEvent> }[];
   timeline: ScenarioOp[]; // in play order: by `at`, file order within the same `at`
+  transcripts?: Partial<Record<AppSessionId, string>>; // P2-D: as the file has them (loadScenario resolves them)
 }
 
 export class ScenarioError extends Error {}
@@ -198,6 +203,7 @@ export function parseScenario(raw: unknown, now: number = Date.now()): Scenario 
   };
   file.digests.forEach((d, i) => known(d.appSessionId, `digests[${i}].appSessionId`));
   file.attention.forEach((a, i) => known(a.appSessionId, `attention[${i}].appSessionId`));
+  for (const id of Object.keys(file.transcripts ?? {})) known(id as AppSessionId, `transcripts.${id}`); // P2-D
 
   const launchedAt = new Date(now).toISOString();
   const engine = file.engine.map((compact, i) =>
@@ -235,7 +241,7 @@ export function parseScenario(raw: unknown, now: number = Date.now()): Scenario 
       }
     });
 
-  return { projects: file.projects, sessions: file.sessions, digests: file.digests, engine, attention: file.attention, timeline };
+  return { projects: file.projects, sessions: file.sessions, digests: file.digests, engine, attention: file.attention, timeline, ...(file.transcripts && { transcripts: file.transcripts }) };
 }
 
 export function loadScenario(path: string, now?: number): Scenario {
@@ -246,7 +252,10 @@ export function loadScenario(path: string, now?: number): Scenario {
     throw new ScenarioError(`cannot read scenario ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return parseScenario(raw, now);
+    const scenario = parseScenario(raw, now);
+    // P2-D: a transcript path relative to the scenario file
+    if (scenario.transcripts) scenario.transcripts = Object.fromEntries(Object.entries(scenario.transcripts).map(([id, file]) => [id, resolve(dirname(path), file!)]));
+    return scenario;
   } catch (error) {
     if (error instanceof ScenarioError) throw new ScenarioError(`scenario ${path}: ${error.message}`);
     throw error;

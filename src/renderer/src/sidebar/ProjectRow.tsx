@@ -18,7 +18,7 @@ import type { ProjectEntry, ProjectKey, SessionTreeRow } from './derive';
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
-import { openResumePicker } from './ResumePicker';
+import { openResumeChooser } from '../resume/host'; // P2-D
 import { SessionRow } from './SessionRow';
 import { moreNodeId, projectNodeId, useTree } from './tree';
 
@@ -124,7 +124,7 @@ function ProjectActions({ projectId, name }: { projectId: ProjectId; name: strin
         title="Resume a session…"
         onClick={(event) => {
           event.stopPropagation();
-          openResumePicker(projectId);
+          openResumeChooser(projectId, event.currentTarget);
         }}
         className={ACTION}
       >

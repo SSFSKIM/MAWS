@@ -16,9 +16,6 @@ export function copyText(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
-const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-export const clockTime = (at: string) => TIME.format(Date.parse(at));
-
 // A line of copy whose backtick spans are code (`Ran \`pnpm test\` in 3s`); an unmatched backtick stays literal.
 export function CodeText({ text }: { text: string }) {
   const parts = text.split('`');

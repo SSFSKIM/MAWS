@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
-import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords } from '../../../test/support/fixtures';
-import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, type TranscriptRecord } from './transcript';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SessionId } from '@shared/graph/ids';
+import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../test/support/memory-reader';
+import { ChainFollower } from '../../engine-host/fs/chain-follower';
+import { deliveryOf } from '../../main/sessions/recent-turns';
+import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, withResponseGroups, type TranscriptRecord } from './transcript';
 
 const uuids = (records: TranscriptRecord[]) => records.map((r) => r.uuid);
 
@@ -102,5 +108,69 @@ describe('transcript records chain from the leaf', () => {
     const meta = AgentMetaSchema.parse({ agentType: 'general-purpose', description: 'Read and report one.txt content', toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, model: 'haiku' });
     expect(meta.spawnDepth).toBe(1);
     expect(AgentMetaSchema.safeParse({ agentType: 'x', description: 'y' }).success).toBe(false);
+  });
+});
+
+describe('a parallel response regains its siblings', () => {
+  // the chain follower's FX6 fixture and the chain it keeps (chain-follower.test.ts, PARALLEL_CHAIN)
+  const records = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-parallel-tool-group.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => parseTranscriptRecord(JSON.parse(line)));
+  const FOLLOWER_CHAIN = ['u1', 'a1', 'a2', 'h1', 'rA', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'a6', 'rC', 'rA2', 'rB2', 'a7', 's1'];
+  const recovered = (window: TranscriptRecord[]) => uuids(withResponseGroups(currentChain(window).chain, window, deliveryOf));
+  // the chain the engine host's real follower keeps after reading the same records from a file
+  async function followerChain(window: TranscriptRecord[]): Promise<string[]> {
+    const follower = new ChainFollower(new MemoryFileReader(window.map((record) => `${JSON.stringify(record)}\n`).join('')), 'S' as SessionId, null, () => {}, { holders: () => 1 });
+    await follower.start();
+    return follower.snapshot().chain;
+  }
+
+  it('the raw walk drops the blocks and results its last result bypasses; the recovery keeps the follower’s chain', async () => {
+    const { chain } = currentChain(records);
+    expect(uuids(chain)).toEqual(['u1', 'a1', 'a2', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'rB2', 'a7', 's1']);
+    expect(recovered(records)).toEqual(FOLLOWER_CHAIN);
+    expect(await followerChain(records)).toEqual(FOLLOWER_CHAIN);
+  });
+
+  it('a chain that leaves a response before its last record (a fork) recovers nothing of it', async () => {
+    const fork = parseTranscriptRecord({ type: 'user', uuid: 'foreign', parentUuid: 'a1', message: { role: 'user', content: 'A second writer prompt.' } });
+    const window = [...records.slice(0, 6), fork];
+    expect(recovered(window)).toEqual(['u1', 'a1', 'foreign']);
+    expect(await followerChain(window)).toEqual(['u1', 'a1', 'foreign']);
+  });
+
+  it.each([
+    ['a human prompt', { type: 'user', message: { role: 'user', content: 'A second writer prompt.' } }],
+    ['another response', { type: 'assistant', message: { role: 'assistant', id: 'different-response', content: [{ type: 'text', text: 'Another response.' }] } }],
+  ])('%s written inside the response, on one of its blocks, is a fork: never recovered, and the members before it stay off', async (_, shape) => {
+    // between rA and rB: the follower forks to it, then rB's walk takes the chain back through a2 only (h1 and rA stay off)
+    const foreign = parseTranscriptRecord({ ...shape, uuid: 'foreign', parentUuid: 'a1' });
+    const window = [...records.slice(0, 5), foreign, ...records.slice(5)];
+    const expected = FOLLOWER_CHAIN.filter((uuid) => uuid !== 'h1' && uuid !== 'rA');
+    expect(await followerChain(window)).toEqual(expected);
+    expect(recovered(window)).toEqual(expected);
+  });
+});
+
+describe('a malformed transcript with a parent cycle never hangs the recovery', () => {
+  // a cycle record is not recovered: the replay ends on the chain's leaf and returns the walk as it is
+  const recover = (rows: Record<string, unknown>[]) => {
+    const window = rows.map((row) => parseTranscriptRecord(row));
+    const { chain } = currentChain(window);
+    return { walk: uuids(chain), recovered: uuids(withResponseGroups(chain, window, deliveryOf)) };
+  };
+  const user = (uuid: string, parentUuid: string | null) => ({ type: 'user', uuid, parentUuid, message: { role: 'user', content: 'go' } });
+  const progress = (uuid: string, parentUuid: string) => ({ type: 'progress', uuid, parentUuid });
+
+  it('a progress row that is its own parent, under a user record', () => {
+    expect(recover([progress('g', 'g'), user('u', 'g')])).toEqual({ walk: ['g', 'u'], recovered: ['g', 'u'] });
+  });
+
+  it('two progress rows parented on each other, under a user record', () => {
+    expect(recover([progress('g1', 'g2'), progress('g2', 'g1'), user('u', 'g1')])).toEqual({ walk: ['g2', 'g1', 'u'], recovered: ['g2', 'g1', 'u'] });
+  });
+
+  it('a two-record cycle through a progress row, between two conversation records, and a record its own parent', () => {
+    expect(recover([user('x', 'g'), progress('g', 'x'), user('y', 'g')])).toEqual({ walk: ['x', 'g', 'y'], recovered: ['x', 'g', 'y'] });
+    expect(recover([user('a', 'b'), user('b', 'a'), user('c', 'b')])).toEqual({ walk: ['a', 'b', 'c'], recovered: ['a', 'b', 'c'] });
+    expect(recover([user('s', 's'), user('t', 's')])).toEqual({ walk: ['s', 't'], recovered: ['s', 't'] });
   });
 });

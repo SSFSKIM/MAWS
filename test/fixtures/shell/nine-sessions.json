@@ -982,6 +982,11 @@
       }
     }
   ],
+  "transcripts": {
+    "_note": "P2-D (2026-10-09): the resume chooser's preview reads these engine transcripts (recorded on the engine, test/fixtures/transcripts/) for two MAWS sessions; the others have none to read.",
+    "app-3eb04b84": "../transcripts/w1-steer-next-disk.jsonl",
+    "app-9a1d4262": "../transcripts/subagent-parent.jsonl"
+  },
   "timeline": [
     {
       "_synthetic": true,
