@@ -1,6 +1,6 @@
 // The summary's Background work section as the tool fills it (X5 `summary`, under C8a's section heading): what runs now
 // by kind, `N shell(s) · N workflow(s) · N monitor(s)` from the task graph's counts (agents are Subagents'), or, for a
-// session not live here, its workflow runs on disk (or why they could not be read) with the sentence that shells and
+// session with no ready process here (P2-A: an exited one included; "Resumes with the session" stays), its workflow runs on disk (or why they could not be read) with the sentence that shells and
 // monitors are known only while it runs; and Open. The reader sees what C8a's baseline showed; the source is the graph.
 // The section watches the store itself: the tool may not be open.
 import { useEffect } from 'react';
@@ -19,7 +19,7 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsLoaded = useTaskGraph((s) => (s.entries.get(appSessionId)?.disk.runs ?? null) !== null);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
-  const live = useSessions((s) => s.engine.has(appSessionId));
+  const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready'); // P2-A: an exited status is not live; nothing here acquires
   const action = (
     <button type="button" className={actionClass} onClick={() => open()}>
       {AGENTS_SUMMARY_COPY.open}

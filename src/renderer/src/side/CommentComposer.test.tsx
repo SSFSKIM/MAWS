@@ -5,7 +5,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { record, status } from '../../../../test/support/builders';
+import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -57,17 +57,65 @@ describe('the comment composer', () => {
     expect(screen.queryByText(/Screenshot/)).toBeNull(); // E5's gutter gives no screenshot: no slot
   });
 
-  it('Send to main is disabled with the reason when the parent is not running; its caption follows the running turn', () => {
+  // P2-A (2026-10-09; the execution document §5.6): Send to main is offered for every parent it can start
+  it('Send to main stays enabled for an exited parent, saying it starts the session; disabled with the reason for one a terminal holds or archived; its caption follows the running turn', () => {
     withParent('exited');
     show();
-    const main = screen.getByRole('radio', { name: /Send to main/ }) as HTMLInputElement;
-    expect(main.disabled).toBe(true);
-    expect(screen.getByText('The main session isn’t running')).toBeTruthy();
+    const main = () => screen.getByRole('radio', { name: /Send to main/ }) as HTMLInputElement;
+    expect(main().disabled).toBe(false);
+    expect(screen.getByText('Starts this session')).toBeTruthy();
+    expect(fake.invoked('session.acquire')).toEqual([]); // opening the sheet starts nothing
+    act(() => useSessions.setState((s) => ({ records: new Map([[PARENT, { ...record(PARENT), holder: { kind: 'terminal', pid: 42 } }]]), digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'foreign_held' })) })));
+    expect(main().disabled).toBe(true);
+    expect(screen.getByText('Held by terminal · 42')).toBeTruthy();
+    act(() => useSessions.setState((s) => ({ digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'archived' })) })));
+    expect(main().disabled).toBe(true);
+    expect(screen.getByText('Archived · unarchive it to continue')).toBeTruthy();
     cleanup();
     useCommentComposer.setState({ open: null });
+    useSessions.setState({ digests: new Map() });
     withParent('ready', true);
     show();
     expect(screen.getByText('Sends at the next step')).toBeTruthy();
+  });
+
+  it('Send to main on an exited parent starts it (side), reading Starting…, then sends once and closes', async () => {
+    fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' } });
+    window.maws = fake.client;
+    withParent('exited');
+    show();
+    await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: PARENT, reason: 'side' }]);
+    expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
+    expect(fake.invoked('side.sendToMain')).toEqual([]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: PARENT, launched: true, joined: false }));
+    expect(fake.invoked('side.sendToMain')).toHaveLength(1);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a refused start keeps the comment in the sheet with its words and Retry; nothing is sent', async () => {
+    withParent('exited');
+    show();
+    await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: PARENT, directory: '/gone' }));
+    expect(screen.getByRole('alert').textContent).toContain('Directory not found: /gone');
+    expect(fake.invoked('side.sendToMain')).toEqual([]);
+    expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe('Look here');
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a refused start after the sheet closed is a toast with its words', async () => {
+    withParent('exited');
+    show();
+    await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
+    act(() => useCommentComposer.setState({ open: null }));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: PARENT, trust: { directory: '/work/repo', trustKey: '/work/repo', keyKind: 'directory', configPath: '/home/.claude.json', trusted: false, source: null, isHome: false, found: [] } }));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: Trust this folder in the session to continue']);
+    expect(fake.invoked('side.sendToMain')).toEqual([]);
   });
 
   it('Side thread sends side.thread.open with the comment and no screenshot; Enter sends, Shift+Enter breaks a line', async () => {
@@ -150,7 +198,7 @@ describe('the comment composer', () => {
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Queued; it sends when the queue resumes']);
   });
 
-  it('Retry is disabled once its destination can no longer send (Send to main, the parent exited meanwhile)', async () => {
+  it('Retry is disabled once its destination can no longer send (Send to main, the parent archived meanwhile); an exited parent can still be started', async () => {
     fake = fakeClient(); // main answers when the test says
     window.maws = fake.client;
     withParent('ready');
@@ -161,6 +209,9 @@ describe('the comment composer', () => {
     const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
     expect(retry.disabled).toBe(false);
     act(() => withParent('exited'));
+    expect(retry.disabled).toBe(false); // P2-A: Retry starts it first
+    act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
     expect(retry.disabled).toBe(true);
+    useSessions.setState({ digests: new Map() });
   });
 });

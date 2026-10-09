@@ -2,7 +2,8 @@
 // registers `BubbleEdit` with C6, which renders it around every user bubble; for the bubble its session is editing it
 // shows an editor in the bubble's place, the text as typed with its pasted placeholders, Cancel, Fork (with C10's
 // provider, for an edit) and Send. Send rewinds this session to that message and resends; a prompt a hook blocked is
-// sent as a new message. The resubmit's states read on the editor's own line (`resubmit-seam.ts` drives them); once the
+// sent as a new message. P2-A (2026-10-09): on a session with no ready process Send starts it first and says so.
+// The resubmit's states read on the editor's own line (`resubmit-seam.ts` drives them); once the
 // rewind hid the bubble with its turn and the resend still waits, `ResubmitLine` carries Send or Retry in the composer's
 // dock. ⌘Enter sends, Esc cancels. Nothing is pulled into the composer.
 import { AlertDialog } from 'radix-ui';
@@ -10,9 +11,11 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { NOT_RUNNING } from '../statusline/mode-menu';
+import { useAvailability } from '../sessions/availability'; // P2-A
+import { holderWords } from '../sessions/holder-words'; // P2-A
 import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
+import { ARCHIVED } from './submit/submit-state'; // P2-A
 import type { UserRow } from './edit-prefill';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 
@@ -20,9 +23,12 @@ const BUTTON = 'rounded-sm px-2 py-0.5 text-ui-sm text-fg-muted outline-accent h
 const PRIMARY = 'rounded-sm bg-accent px-2.5 py-0.5 text-ui-sm text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:bg-bg-active disabled:text-fg-faint';
 
 export const BUSY_REASON = 'Wait for the turn to end, or stop it first';
+export const NOT_STARTABLE = 'The session is not running'; // P2-A: a session with no record cannot be started from here
 
 // What the resubmit's line says in each state; `warn` states read in the warning tone; null at rest.
-function lineCopy({ state, exited, sendFailed, sending }: Resubmit): { text: string; warn: boolean } | null {
+// P2-A: `starting` while the session the edit resubmits to is started first
+function lineCopy({ state, exited, sendFailed, sending }: Resubmit, starting = false): { text: string; warn: boolean } | null {
+  if (sending && starting) return { text: 'Starting this session…', warn: false };
   if (sending) return { text: state === 'rewound_awaiting_send' ? 'Rewound · sending your edited message…' : 'Sending your edited message…', warn: false };
   switch (state) {
     case 'rewinding':
@@ -59,10 +65,17 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
 
   const busy = status !== null && (status.turn !== null || status.engineState === 'running');
   const locked = resubmit.sending || resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain';
-  const why = status?.process !== 'ready' ? NOT_RUNNING : edit.kind === 'edit' && busy ? BUSY_REASON : null;
+  // P2-A start (2026-10-09; the execution document §5.6): a session with no ready process is started by Send; only a
+  // terminal or job holding it, an archive, or no record keeps Send closed
+  const ready = status?.process === 'ready';
+  const availability = useAvailability(appSessionId);
+  const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
+  const notStartable = ready ? null : availability === null ? NOT_STARTABLE : availability === 'foreign_held' ? `Held by ${holder ? holderWords(holder) : 'another process'}` : availability === 'archived' ? ARCHIVED : null;
+  const why = notStartable ?? (edit.kind === 'edit' && busy ? BUSY_REASON : null);
+  // P2-A end
   const empty = edit.text.trim() === '' && edit.images.length === 0;
   const fork = edit.kind === 'edit' && resubmitProvider() !== null;
-  const line = lineCopy(resubmit);
+  const line = lineCopy(resubmit, !ready);
   const send = () => !locked && why === null && !empty && void sendInlineEdit(client, appSessionId);
 
   return (

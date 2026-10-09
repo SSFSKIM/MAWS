@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { record, status } from '../../../../test/support/builders';
+import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { resetComposerStore, resubmitRecordOf, setResubmit, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -141,6 +141,32 @@ describe('Edit turns the bubble into an editor in its place', () => {
     act(() => editAndResubmitRow(rowOf('u-1')));
     expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
     expect(editor().textContent).toContain(BUSY_REASON);
+  });
+
+  // P2-A (2026-10-09; the execution document §5.6): an edit's Send on an exited session starts it first (resubmit)
+  it('on an exited session Send stays enabled; it starts the session, reading Starting…, then rewinds once ready', async () => {
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
+    renderRow(rowOf('u-1'), { storeKey: A });
+    act(() => editAndResubmitRow(rowOf('u-1')));
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    const send = within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resubmit' }]));
+    expect(within(editor()).getByRole('status').textContent).toBe('Starting this session…');
+    expect(send.disabled).toBe(true);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    act(() => useSessions.setState({ engine: new Map([[A, status(A)]]) }));
+    await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  it('a session a terminal holds keeps Send disabled with the holder named', () => {
+    useSessions.setState({ records: new Map([[A, { ...record(A), holder: { kind: 'terminal', pid: 42 } }]]), engine: new Map(), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) });
+    renderRow(rowOf('u-1'), { storeKey: A });
+    act(() => editAndResubmitRow(rowOf('u-1')));
+    expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(editor().textContent).toContain('Held by terminal · 42');
   });
 
   it('with C10’s provider, Fork sends the edited text in a forked session from that message and leaves this one', async () => {

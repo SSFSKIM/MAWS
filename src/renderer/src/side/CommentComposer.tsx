@@ -4,14 +4,18 @@
 // composer's typed slash seam must not run here), and sending it to a side thread (the default, P-6) or to the main
 // conversation. A producer's screenshot shows as a thumbnail the person can remove (E11 F2b, Q4); the sheet has no screenshot of its own.
 // While a side thread starts the form is disabled and Send reads Starting…; a refusal stays under the form with Retry
-// (disabled once its destination cannot send) and, while the parent runs, Send to main instead; a refusal arriving after
-// the sheet closed is a toast. Its own small store, as E5's editor sheets have, so it never
-// collides with C10's one-sheet dialog store or E1's sheets.
+// (disabled once its destination cannot send) and, while the parent can take it, Send to main instead; a refusal arriving
+// after the sheet closed is a toast. P2-A (2026-10-09): Send to main on a parent with no ready process starts it first.
+// Its own small store, as E5's editor sheets have, so it never collides with C10's one-sheet dialog store or E1's sheets.
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
+import { acquireSession, acquisitionWords, cardWords } from '../sessions/acquire'; // P2-A
+import { useAvailability } from '../sessions/availability'; // P2-A
+import { sideBlock } from './btw'; // P2-A
+import { STARTS } from '../composer/submit/submit-state'; // P2-A
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { toast } from '../stores/notices';
@@ -54,16 +58,45 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
   const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
   const [phase, setPhase] = useState<Phase>({ kind: 'editing' });
   const ready = status?.process === 'ready';
+  // P2-A start (2026-10-09; the execution document §5.6): Send to main is offered for every parent it can start (a
+  // record with no ready process starts on the Send); a terminal or job holding it, or an archive, says why
+  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const availability = useAvailability(parent);
+  const mainBlocked = availability === null ? COPY.mainNotRunning : sideBlock(availability, holder);
+  const mainEnabled = ready || mainBlocked === null;
+  // P2-A end
   const sending = phase.kind === 'sending';
-  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' || ready);
+  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' || mainEnabled);
+  // closed, or replaced by another comment, meanwhile
+  const gone = () => useCommentComposer.getState().open?.anchor !== anchor;
 
   const send = async (to: CommentDestination) => {
     if (!canSend(to)) return;
     setDestination(to);
     setPhase({ kind: 'sending', destination: to });
+    // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
+    // first, the Send being the gesture (`acquireSession(parent, 'side')`, then the existing `side.sendToMain` through
+    // sendComment); a refused start stays in the form in its words (a card's, when one docked), the comment kept, and
+    // after the presentation went it is a toast. Needs: acquireSession, acquisitionWords, cardWords (sessions/acquire),
+    // useSessions, toast, COPY, and the form's `parent`, `to`, `gone()`, `setPhase`.
+    if (to === 'main' && useSessions.getState().engine.get(parent)?.process !== 'ready') {
+      let refusal: string | null;
+      try {
+        const acquired = await acquireSession(parent, 'side');
+        refusal = acquired.status === 'ready' ? null : acquired.status === 'needs_trust' || acquired.status === 'relay_unreachable' ? cardWords(acquired) : (acquisitionWords(acquired) ?? 'The session could not start');
+      } catch (error) {
+        refusal = error instanceof Error ? error.message : String(error);
+      }
+      if (refusal !== null) {
+        if (gone()) toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
+        else setPhase({ kind: 'refused', destination: to, error: refusal });
+        return;
+      }
+    }
+    // P2-A end
     const result = await sendComment(to, { parent, anchor, text: text.trim(), screenshot });
-    // closed, or replaced by another comment, meanwhile: a refusal still says so, or the comment would be lost unseen
-    if (useCommentComposer.getState().open?.anchor !== anchor) {
+    // a refusal after the sheet went still says so, or the comment would be lost unseen
+    if (gone()) {
       if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
       return;
     }
@@ -77,8 +110,9 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
     void send(destination);
   };
 
-  const submitLabel = sending ? (phase.destination === 'thread' ? COPY.starting : COPY.sending) : COPY.send;
-  const mainCaption = !ready ? COPY.mainNotRunning : status?.turn ? COPY.mainBusy : COPY.mainIdle;
+  // P2-A: Send to main reads Starting… while its parent starts
+  const submitLabel = sending ? (phase.destination === 'thread' || !ready ? COPY.starting : COPY.sending) : COPY.send;
+  const mainCaption = ready ? (status?.turn ? COPY.mainBusy : COPY.mainIdle) : (mainBlocked ?? STARTS); // P2-A
 
   return (
     <Sheet title={COPY.title(anchor.kind === 'none' ? null : anchor.label)} width="w-[min(560px,90vw)]" onClose={close} data-comment-composer="" data-anchor-kind={anchor.kind} data-anchor-locator={anchor.locator}>
@@ -100,14 +134,14 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
           onKeyDown={onKeyDown}
           className={`${FIELD} min-h-[88px] resize-y leading-snug disabled:text-fg-muted`}
         />
-        <DestinationControl value={destination} onChange={setDestination} disabled={sending} mainEnabled={ready} mainCaption={mainCaption} />
+        <DestinationControl value={destination} onChange={setDestination} disabled={sending} mainEnabled={mainEnabled} mainCaption={mainCaption} />
         {phase.kind === 'refused' && (
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui-sm text-danger">
             <span className="min-w-0 flex-1 break-words">{phase.error}</span>
             <button type="button" className={SECONDARY} disabled={!canSend(phase.destination)} onClick={() => void send(phase.destination)}>
               {COPY.retry}
             </button>
-            {phase.destination === 'thread' && ready && (
+            {phase.destination === 'thread' && mainEnabled && (
               <button type="button" className={SECONDARY} onClick={() => void send('main')}>
                 {COPY.mainInstead}
               </button>

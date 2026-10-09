@@ -27,6 +27,7 @@
 // An edit does not survive a reload (as Codex's does not): nothing in flight resumes on its own.
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { acquireSession, acquisitionWords, cardWords } from '../sessions/acquire'; // P2-A
 import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -239,11 +240,55 @@ export function newerTurnSince(appSessionId: AppSessionId): MessageUuid | null {
   return newest !== null && newest !== edit.seenCursor ? newest : null;
 }
 
+// P2-A start (2026-10-09; the execution document §5.6): an edit's Send on a session with a record and no ready process
+// starts it first (`session.acquire`, reason resubmit) and then runs the flow as today. The record holds `sending` while
+// the start runs (Cancel, Fork and another edit wait, as they do for a send with the host) and the flow goes on only
+// when the renderer's status reads ready, since the rewind and the send go to the process the renderer knows; a
+// refused start says why and leaves the edit as it was. A rewind in flight or awaiting its send is never restarted here.
+const hasRecord = (appSessionId: AppSessionId): boolean => useSessions.getState().records.has(appSessionId);
+
+// The renderer's status reading ready for the acquired process: at once, or when the status event lands.
+const whenReady = (appSessionId: AppSessionId): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (ready(appSessionId)) return resolve(true);
+    const off = useSessions.subscribe((s) => {
+      const process = s.engine.get(appSessionId)?.process;
+      if (process === 'ready' || process === 'exited') {
+        off();
+        resolve(process === 'ready');
+      }
+    });
+  });
+
+async function startThenSend(client: MawsBridge, appSessionId: AppSessionId, how: 'send' | 'without_rewinding'): Promise<RewindOutcome | 'sent' | 'stale'> {
+  const flight = dispose(appSessionId);
+  const generation = flight.generation;
+  const current = () => flights.get(appSessionId)?.generation === generation;
+  setResubmit(appSessionId, { ...record(appSessionId), sending: true });
+  let refusal: string | null;
+  try {
+    const outcome = await acquireSession(appSessionId, 'resubmit', {}, client);
+    refusal = outcome.status === 'ready' ? null : outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : (acquisitionWords(outcome) ?? 'The session could not start');
+    if (refusal === null && !(await whenReady(appSessionId))) refusal = 'The session did not start';
+  } catch (error) {
+    refusal = error instanceof Error ? error.message : String(error);
+  }
+  if (!current()) return 'stale';
+  setResubmit(appSessionId, { ...record(appSessionId), sending: false });
+  if (refusal !== null) {
+    toast({ level: 'warning', text: refusal, actions: [], dismissible: true });
+    return 'stale';
+  }
+  return sendInlineEdit(client, appSessionId, how);
+}
+// P2-A end
+
 // The editor's Send: a blocked prompt goes as a new message; an edit rewinds first (confirming a newer turn), resends
 // once rewound, retries the send after a failed one, and from unresolved sends without rewinding by the human's choice.
 export function sendInlineEdit(client: MawsBridge, appSessionId: AppSessionId, how: 'send' | 'without_rewinding' = 'send'): Promise<RewindOutcome | 'sent' | 'stale'> {
   const edit = editOf(appSessionId);
-  if (!edit || !ready(appSessionId) || record(appSessionId).sending) return Promise.resolve('stale');
+  if (!edit || record(appSessionId).sending) return Promise.resolve('stale');
+  if (!ready(appSessionId)) return hasRecord(appSessionId) ? startThenSend(client, appSessionId, how) : Promise.resolve('stale'); // P2-A
   const { state } = record(appSessionId);
   if (edit.kind === 'blocked' || state === 'rewound_awaiting_send' || (state === 'rewind_unresolved' && how === 'without_rewinding'))
     return sendEdited(client, appSessionId).then((accepted) => (accepted ? 'sent' : 'stale'));
