@@ -16,6 +16,13 @@ import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
 import { resumeSession, startIntent } from './setup-actions';
+// P2-A start
+import { record } from '../../../../test/support/builders';
+import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
+import { resetComposerStore, useComposerStore } from '../stores/composer';
+import { useSessions } from '../stores/sessions';
+import { acquireSession } from './acquire';
+// P2-A end
 import { connectSetup, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 // C11 start
@@ -157,12 +164,14 @@ describe('trust card', () => {
     }
   });
 
-  it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
-    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+  it("Cancel on a resume's card only undocks it, quietly: an acquisition retains nothing in main (P2-A)", async () => {
+    withMain({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
     render(<Docked />);
-    await act(() => resumeSession(ID));
+    expect(await act(() => resumeSession(ID))).toBe(true);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
-    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.intent.release')).toEqual([]);
     expect(returned).toEqual([]);
     expect(useNotices.getState().notices).toEqual([]);
   });
@@ -391,24 +400,15 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
-  it("a resume that fails after it started returns its message to the editor; C3's relay answer docks the card with it instead", async () => {
-    withMain({ 'session.start': answer(starting), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }), 'engine.relayHealth': () => health() });
+  it('a failed acquisition is told once: the row’s Resume names the failure the setup already toasted, replacing it (P2-A)', async () => {
+    withMain({ 'session.acquire': () => ({ status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    render(<Docked />);
-    await act(() => resumeSession(ID, MESSAGE));
     act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
-    expect(returned).toEqual([MESSAGE]);
-    // a resume that became ready sent it: nothing comes back
-    await act(() => resumeSession(ID, MESSAGE));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
-    expect(returned).toEqual([MESSAGE]);
-    // C3's relay answer: the card holds the message, and its Cancel returns it
-    await act(() => resumeSession(ID, MESSAGE));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } }));
-    expect(returned).toEqual([MESSAGE]);
-    expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay', message: MESSAGE });
+    expect(await act(() => resumeSession(ID))).toBe(false);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    expect(returned, 'an acquisition holds no message to hand back').toEqual([]);
     connection.disconnect();
   });
 
@@ -522,6 +522,96 @@ describe('failure card', () => {
 // While a failed attempt's checkout is still the intent's, `session.intent.patch` refuses every location change
 // (`retained_worktree`) until "Keep the worktree" or "Discard changes and remove" resolves it; once the card that offers
 // them is dismissed, the empty state above the composer offers them instead.
+// P2-A start (2026-10-09; the execution document §5.3 and §5.4): a record's card. The composer's message stays in its
+// draft while a trust or relay card shows it; the card's continuation acquires with the owner's choice, sends the
+// message through the human seam and clears the composer only once the host accepted it.
+describe('a record’s trust card and its continuation', () => {
+  const TRUST = trustState();
+  const ACCEPTED = { status: 'ready', appSessionId: ID, launched: true, joined: false };
+  const NEEDS_TRUST = { status: 'needs_trust', appSessionId: ID, trust: TRUST };
+  // `session.acquire` answers in turn: each call takes the next outcome (the last repeats)
+  const acquiring = (...outcomes: unknown[]) => {
+    let n = 0;
+    return () => outcomes[Math.min(n++, outcomes.length - 1)];
+  };
+  const known = () => useSessions.setState({ records: new Map([[ID, record(ID)]]), engine: new Map(), digests: new Map() });
+  const composerSend = () => sendHumanPrompt(ID, MESSAGE.content, { origin: 'composer', display: MESSAGE.display });
+
+  beforeEach(() => {
+    known();
+    resetComposerStore();
+  });
+
+  it('a Send then a Load now on an untrusted session: the docked card still shows the message', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST) });
+    render(<Docked />);
+    expect(await act(composerSend)).toEqual({ disposition: 'held', started: false, reason: 'trust' });
+    expect(await act(() => acquireSession(ID, 'read'))).toMatchObject({ status: 'needs_trust' });
+    expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'trust', trust: TRUST, message: MESSAGE });
+    expect(dockedIds()).toBe('c10:trust');
+  });
+
+  it('Trust and start acquires with the decision, sends the docked message with its display, then clears the composer', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED), 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]));
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { trust: 'accepted' } });
+    await waitFor(() => expect(useComposerStore.getState().prefills.get(ID)).toEqual({ text: '' }));
+    expect(dockedIds()).toBe('');
+    expect(fake.invoked('session.intent.release')).toEqual([]);
+  });
+
+  it('a refused continuation undocks the card and says why; the composer keeps the text (nothing is handed back or cleared)', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: ID, directory: '/gone' }) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Directory not found: /gone']);
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(returned).toEqual([]);
+  });
+
+  it('a host error on the send undocks the card and keeps the text', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    await act(() => fake.fail('session.send', 'write failed'));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['write failed']);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('Cancel (Back to editing) only undocks: no hand-back to main, the text stays where it was typed', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.intent.release')).toEqual([]);
+    expect(returned).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('a widget’s card (no message) only starts the session on Trust and start', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED) });
+    render(<Docked />);
+    await act(() => acquireSession(ID, 'read'));
+    expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'trust', trust: TRUST, message: null });
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'resume', options: { trust: 'accepted' } });
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+});
+// P2-A end
+
 describe('a retained worktree with its card dismissed', () => {
   const path = `${REPO}/.claude/worktrees/accept-fail`;
   const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'accept-fail', branch: { kind: 'new' as const, name: 'worktree-accept-fail', base: 'HEAD' } };

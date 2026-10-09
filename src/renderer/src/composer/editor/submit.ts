@@ -12,6 +12,9 @@ import { toast, useNotices } from '../../stores/notices';
 import { runBash } from '../modes/bash';
 import { appendMemory } from '../modes/memory';
 import { dispatchHumanPrompt, sendHumanPrompt } from '../submit/send-human-prompt';
+import { startNoticeId } from '../../sessions/store'; // P2-A
+import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
+import { useSessions } from '../../stores/sessions'; // P2-A
 import { sendSizeRefusal } from './attachments';
 import type { Serialized } from './serialize';
 
@@ -24,8 +27,8 @@ export interface SubmitOptions {
   retry?: () => void; // offered on the refusal's toast
 }
 
-const warn = (text: string, retry?: () => void) => {
-  const id = toast({ level: 'warning', text, actions: retry ? [{ label: 'Retry', run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
+const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */) => {
+  const id = toast({ ...(notice !== undefined && { id: notice }), level: 'warning', text, actions: retry ? [{ label: 'Retry', run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
 };
 
 // The pre-check: whether the submission may go (a refusal is shown).
@@ -61,19 +64,38 @@ export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s:
   });
 }
 
-// P2-0: the live/released composer's human prompt goes through X22, with its existing pre-check, history and Retry
-// notice. State refusals keep the text quietly, as before; C10's released resume already says why it declined.
+// P2-0: the composer's human prompt goes through X22, with its existing pre-check, history and Retry notice.
+// P2-A: an acquisition's refusal says why with Retry (the text stays); a card holding the message (`held`) keeps the
+// text in the draft quietly, the card being on screen; a session with no record refuses quietly, as before.
 export async function submitHumanSerialized(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
   if (!precheck(s)) return false;
   try {
     const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display }, client);
-    if (result.disposition === 'refused') return false;
+    if (result.disposition === 'held') return false;
+    if (result.disposition === 'refused') {
+      if (useSessions.getState().records.has(appSessionId)) warn(result.reason ?? 'The message was not sent', retry, startNoticeId(appSessionId));
+      return false;
+    }
   } catch (error) {
     warn(error instanceof Error ? error.message : String(error), retry);
     return false;
   }
   afterAccepted(client, appSessionId, s);
   return true;
+}
+
+// P2-A: a `!` or `#` submission on a record with no ready process acquires the session first. Whether it may go on: a
+// card the attempt docks carries no message (the text stays in the draft), and a refusal says why with Retry.
+export async function acquireBeforeMode(client: MawsBridge, appSessionId: AppSessionId, retry?: () => void): Promise<boolean> {
+  try {
+    const outcome = await acquireSession(appSessionId, 'send', {}, client);
+    if (outcome.status === 'ready') return true;
+    const words = acquisitionWords(outcome);
+    if (words !== null) warn(words, retry, startNoticeId(appSessionId));
+  } catch (error) {
+    warn(error instanceof Error ? error.message : String(error), retry);
+  }
+  return false;
 }
 
 // Whether the host accepted it (the editor then clears and the draft goes); on false the text stays where it was.

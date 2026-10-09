@@ -363,7 +363,7 @@ describe('held outcomes and the attach command', () => {
 
   it("Resume answered held offers the job's Attach in its toast, with the command main named", async () => {
     held({ kind: 'none' });
-    answerWith({ 'session.start': { status: 'held', appSessionId: A, holder: JOB, attach: { jobId: 'e6dcd828', command: COMMAND } } });
+    answerWith({ 'session.acquire': { status: 'held', appSessionId: A, holder: JOB, attach: { jobId: 'e6dcd828', command: COMMAND } } }); // P2-A: Resume acquires
     await act(() => resumeSession(A));
     const [toast] = toasts();
     expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
@@ -375,7 +375,7 @@ describe('held outcomes and the attach command', () => {
 
   it('a terminal holder’s held answer toasts without an Attach', async () => {
     held({ kind: 'none' });
-    answerWith({ 'session.start': { status: 'held', appSessionId: A, holder: { kind: 'terminal', pid: 7 }, attach: null } });
+    answerWith({ 'session.acquire': { status: 'held', appSessionId: A, holder: { kind: 'terminal', pid: 7 }, attach: null } }); // P2-A
     await act(() => resumeSession(A));
     expect(toasts()).toMatchObject([{ text: 'Held by terminal · 7', actions: [] }]);
   });
@@ -422,13 +422,13 @@ describe('take over a session another process holds', () => {
   });
 
   it('confirms naming the holder and the loss, asks main to end it, then resumes the session here', async () => {
-    answerWith({ 'session.takeOver': { status: 'released' }, 'session.start': { status: 'starting', appSessionId: A } });
+    answerWith({ 'session.takeOver': { status: 'released' }, 'session.acquire': { status: 'ready', appSessionId: A, launched: true, joined: false } }); // P2-A
     renderNotice(held({ kind: 'terminal', pid: 7 }));
     await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
     const asked = await answerConfirm(true);
     expect(asked.title).toBe('Take over this session?');
     expect(asked.body).toBe('MAWS ends the terminal process that holds this session (pid 7) and resumes the session here. A turn in progress there is lost.');
-    await waitFor(() => expect(fake.invoked('session.start')).toEqual([{ appSessionId: A, message: null, options: {} }]));
+    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resume' }])); // P2-A: the resume is an acquisition
     expect(fake.invoked('session.takeOver')).toEqual([{ appSessionId: A, holder: { kind: 'terminal', pid: 7 } }]);
   });
 
@@ -442,7 +442,7 @@ describe('take over a session another process holds', () => {
     expect(asked.body).toContain('pauses');
     expect(asked.body).toContain('A turn in progress there is lost.');
     await waitFor(() => expect(fake.invoked('session.takeOver')).toHaveLength(1));
-    expect(fake.invoked('session.start')).toEqual([]);
+    expect(fake.invoked('session.acquire')).toEqual([]); // P2-A
   });
 
   it('does nothing when the confirm is cancelled, and says a refusal without resuming', async () => {
@@ -455,7 +455,7 @@ describe('take over a session another process holds', () => {
     const asked = await answerConfirm(true);
     expect(asked.body).toContain('A turn in progress there is lost.');
     await waitFor(() => expect(toasts().map((n) => n.text)).toEqual(['The terminal (pid 7) has not exited after 10 s.']));
-    expect(fake.invoked('session.start')).toEqual([]);
+    expect(fake.invoked('session.acquire')).toEqual([]); // P2-A
   });
 
   it("names a job by its short id and `claude stop`", () => {

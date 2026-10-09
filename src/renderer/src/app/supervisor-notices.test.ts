@@ -123,7 +123,7 @@ describe('the incompatibility banner (supervisor.incompatible)', () => {
     t.one(SUPERVISOR_NOTICE_IDS.incompatible)!.actions[1]!.run();
     t.refuse('session.send'); // a send resumes a released session: a launch too
     expect(t.one(SUPERVISOR_NOTICE_IDS.incompatible)).toBeDefined();
-    for (const launch of ['session.fork', 'session.takeOver'] as const) {
+    for (const launch of ['session.fork', 'session.takeOver', 'session.acquire' /* P2-A: an acquisition launches */] as const) {
       t.one(SUPERVISOR_NOTICE_IDS.incompatible)!.actions[1]!.run();
       t.refuse(launch); // a fork launches its new session; a take-over resumes the session here
       expect(t.one(SUPERVISOR_NOTICE_IDS.incompatible), launch).toBeDefined();

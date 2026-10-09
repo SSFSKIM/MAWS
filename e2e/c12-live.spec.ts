@@ -413,7 +413,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
     // ---- Send-to-resume ----
     await test.step('Send in the released B1 resumes it: process_exit reconnect, a --resume spawn, one user frame, the grant re-applied with no can_use_tool', async () => {
       const before = await statusOf(page, ids.B1!);
-      await expect(main(page).locator('[data-submit-state]')).toHaveAttribute('aria-description', 'Resumes this session');
+      await expect(main(page).locator('[data-submit-state]')).toHaveAttribute('aria-description', 'Starts this session'); // P2-A
       await main(page).getByRole('textbox', { name: 'Message' }).click();
       await page.keyboard.insertText(GRANT_PROMPT);
       const t0 = Date.now();
@@ -534,16 +534,17 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       for (const l of others) expect(after[l], `${l} unchanged`).toEqual(before[l]);
     });
 
-    await test.step('a stopped session’s Send still reads Session ended', async () => {
+    // P2-A (2026-10-09): a stopped session is resumable like a released one; its Send starts it
+    await test.step('a stopped session’s Send offers to start it', async () => {
       await page.keyboard.press('Escape').catch(() => undefined);
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await open(page, ids.B2!);
       await main(page).getByRole('textbox', { name: 'Message' }).click();
       await page.keyboard.insertText('anything');
       const control = main(page).locator('[data-submit-state]');
-      await expect(control).toBeDisabled();
-      await expect(control).toHaveAttribute('title', 'Session ended'); // a disabled control's reason is its title
-      record('stoppedSend', { disabled: true, title: await control.getAttribute('title') });
+      await expect(control).toBeEnabled();
+      await expect(control).toHaveAttribute('aria-description', 'Starts this session');
+      record('stoppedSend', { disabled: false, description: await control.getAttribute('aria-description') });
     });
 
     await test.step('Settings › Engine’s Memory budget takes a GB value with one decimal', async () => {

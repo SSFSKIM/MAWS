@@ -184,7 +184,11 @@ export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' 
 // this store's imports; without it the holder is still named.
 type SessionHolder = SessionRecord['holder'];
 export type HeldNotice = (appSessionId: AppSessionId, holder: SessionHolder, attach: { jobId: string; command: string } | null) => void;
-const nameHolder: HeldNotice = (_appSessionId, holder) => toastHeld(holder);
+const nameHolder: HeldNotice = (appSessionId, holder) => toastHeld(holder, [], startNoticeId(appSessionId)); // P2-A: the id
+
+// P2-A (2026-10-09): the one notice of a record's start that did not end ready, whoever tells it (this store's setup
+// failure, the row's Resume, the composer's refusal): a later telling replaces it rather than stacking a second.
+export const startNoticeId = (appSessionId: AppSessionId): string => `start:${appSessionId}`;
 
 // Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves once the intents are known
 // (answered or failed: a page with no answerer starts empty rather than holding hydration forever).
@@ -201,7 +205,7 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
       // read) names the holder and offers its Attach. C3's relay answer docked the relay card with the message instead.
       if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
         if (resumed !== null && e.outcome?.kind !== 'relay_unreachable') returnMessage(e.appSessionId, resumed);
-        if (e.outcome?.kind === 'error') toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
+        if (e.outcome?.kind === 'error') toast({ id: startNoticeId(e.appSessionId), level: 'danger', text: e.outcome.message, actions: [], dismissible: true }); // P2-A: the id
         else if (e.outcome?.kind === 'held') onHeld(e.appSessionId, e.outcome.holder, e.outcome.attach);
       }
     }),

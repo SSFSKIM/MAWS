@@ -7,16 +7,19 @@ import type { StartOptions } from '@shared/ipc/schema/session';
 import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
+import { sendHumanPrompt } from '../composer/submit/send-human-prompt'; // P2-A
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
+import { clearComposer } from '../stores/composer'; // P2-A
 import type { ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { acquireSession, acquisitionWords, dockFor } from './acquire'; // P2-A
 import { heldToast } from './attach';
 import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
-import { isStarting, useSetup } from './store';
+import { isStarting, startNoticeId, useSetup } from './store'; // P2-A: startNoticeId
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
@@ -50,14 +53,7 @@ function refusalOf(outcome: StartOutcome): string | null {
   }
 }
 
-// Docks the card an outcome waits on, carrying the message the continuation will run with; a record's resume that
-// started keeps its message in the store until it is sent (`ready`) or handed back (`failed`), since it has no intent.
-function dockFor(appSessionId: AppSessionId, outcome: StartOutcome, message: FirstMessage | null): void {
-  const store = useSetup.getState();
-  if (outcome.status === 'needs_trust') store.dock(appSessionId, { kind: 'trust', trust: outcome.trust, message });
-  else if (outcome.status === 'relay_unreachable') store.dock(appSessionId, { kind: 'relay', health: outcome.health, message });
-  else if (outcome.status === 'starting' && message !== null && !store.intents.has(appSessionId)) store.holdResume(appSessionId, message);
-}
+// P2-A: `dockFor`, the card an outcome waits on, lives with the acquisition (`./acquire.ts`), which docks the same cards.
 
 async function start(appSessionId: AppSessionId, message: FirstMessage | null, options: StartOptions): Promise<StartOutcome | { error: string }> {
   const store = useSetup.getState();
@@ -105,6 +101,7 @@ export async function startIntent(appSessionId: AppSessionId, first: FirstMessag
 // same start with the retained message (`message: null`) and only the option the human chose. A refusal or a failure
 // clears the retained message in main, so the card returns the message it docked with to the editor first.
 export async function continueSetup(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
+  if (!useSetup.getState().intents.has(appSessionId)) return continueRecord(appSessionId, options, docked); // P2-A
   const outcome = await start(appSessionId, null, options);
   if ('error' in outcome && outcome.error.startsWith('starting:')) {
     // a start of this id still runs (another window's, or one this page lost to a reload): main holds the message
@@ -121,9 +118,45 @@ export async function continueSetup(appSessionId: AppSessionId, options: StartOp
   return { ok: true };
 }
 
+// P2-A start (2026-10-09; the execution document §5.4): a record's card continuation. The session is acquired with the
+// option the owner chose, then the docked composer message is sent through the human seam, and the composer clears
+// only once the host accepted it: until then the text stays in the composer's draft, so a refusal or a host error only
+// undocks the card and says why. A card a surface docked without a message only starts the session.
+async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
+  const store = useSetup.getState();
+  store.setInvoking(appSessionId, true);
+  const refuse = (words: string): HookResult => {
+    useSetup.getState().undock(appSessionId);
+    toast({ level: 'danger', text: words, actions: [], dismissible: true });
+    return { ok: false, error: words };
+  };
+  try {
+    const outcome = await acquireSession(appSessionId, docked === null ? 'resume' : 'send', { ...options, ...(docked !== null && { dockMessage: docked }) });
+    if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { ok: true }; // a card again, docked by the acquisition
+    if (outcome.status !== 'ready') return refuse(acquisitionWords(outcome) ?? 'The session could not start');
+    if (docked !== null) {
+      const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display });
+      if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
+      clearComposer(appSessionId);
+    }
+    useSetup.getState().undock(appSessionId);
+    return { ok: true };
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  } finally {
+    useSetup.getState().setInvoking(appSessionId, false);
+  }
+}
+// P2-A end
+
 // Cancel and "Back to editing": the retained message back to the editor, then main's hand-back, which clears
-// `intent.message` so the composer's held-message gate opens from the fact it closed on.
+// `intent.message` so the composer's held-message gate opens from the fact it closed on. P2-A: a record's card only
+// undocks; its message never left the composer's draft and main retains nothing for an acquisition.
 export async function releaseMessage(appSessionId: AppSessionId, docked: FirstMessage | null): Promise<HookResult> {
+  if (!useSetup.getState().intents.has(appSessionId)) {
+    useSetup.getState().settle(appSessionId);
+    return { ok: true };
+  }
   useSetup.getState().settle(appSessionId);
   if (docked !== null) returnMessage(appSessionId, docked);
   const result = await ipc.invoke('session.intent.release', { appSessionId });
@@ -172,21 +205,24 @@ export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'd
 
 // ---- a record's resume -------------------------------------------------------------------------------------------
 
-// `session.resume` (and a continuation's first step for a record): a trust or relay card docks in the session's tab,
-// every refusal is a toast naming it. C12: answers whether the resume took the message (it started, or a card holds
-// it), so C7's Send-to-resume keeps the editor's text on a refusal.
-export async function resumeSession(appSessionId: AppSessionId, message: FirstMessage | null = null): Promise<boolean> {
-  const outcome = await start(appSessionId, message, {});
-  if ('error' in outcome) {
-    toast({ level: 'danger', text: outcome.error, actions: [], dismissible: true });
-    return false; // C12
+// `session.resume` (the row's explicit Resume, a take-over's resume): P2-A, an acquisition like every other gesture's,
+// so it joins a start in flight; a trust or relay card docks in the session's tab, every refusal is a toast naming it.
+// Answers whether the session is ready or a card waits.
+export async function resumeSession(appSessionId: AppSessionId): Promise<boolean> {
+  const store = useSetup.getState();
+  store.setInvoking(appSessionId, true);
+  try {
+    const outcome = await acquireSession(appSessionId, 'resume');
+    if (outcome.status === 'ready' || outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return true;
+    if (outcome.status === 'held') heldToast(appSessionId, outcome.holder, outcome.attach);
+    else toast({ id: startNoticeId(appSessionId), level: 'danger', text: acquisitionWords(outcome) ?? 'The session could not start', actions: [], dismissible: true });
+    return false;
+  } catch (error) {
+    toast({ level: 'danger', text: error instanceof Error ? error.message : String(error), actions: [], dismissible: true });
+    return false;
+  } finally {
+    useSetup.getState().setInvoking(appSessionId, false);
   }
-  dockFor(appSessionId, outcome, message);
-  const refusal = refusalOf(outcome);
-  if (refusal === null) return true; // C12
-  if (outcome.status === 'held') heldToast(appSessionId, outcome.holder, outcome.attach);
-  else toast({ level: 'danger', text: refusal, actions: [], dismissible: true });
-  return false; // C12
 }
 
 // ---- closing an unstarted tab ------------------------------------------------------------------------------------

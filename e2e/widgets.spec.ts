@@ -592,10 +592,10 @@ test.describe('interactive', () => {
     await expect(rows).toHaveCount(2); // nine-sessions' proj-claude-usage-menubar, without this session
     await expect(rows.nth(0)).toContainText('Usage reset countdown');
     await expect(rows.nth(1)).toContainText('SDK wire inventory');
-    // C10's resume (the session action it registers): `session.start` with no message, the record's own route
+    // C10's resume (the session action it registers): P2-A, an acquisition (`session.acquire`, reason resume)
     await rows.nth(1).getByRole('button', { name: 'Resume' }).click();
     await expect(widget(page, 'resume')).toBeHidden();
-    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.start')).toEqual([{ command: 'session.start', input: { appSessionId: 'app-1238089b', message: null, options: {} } }]);
+    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.acquire')).toEqual([{ command: 'session.acquire', input: { appSessionId: 'app-1238089b', reason: 'resume' } }]);
     expect(backend.consoleErrors()).toEqual([]);
   });
 

@@ -35,6 +35,8 @@ import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
+import { availabilityIn, useAvailability } from '../sessions/availability'; // P2-A
+import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
@@ -42,7 +44,7 @@ import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts
+import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -173,16 +175,19 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
   const messageHeld = setup !== null && setup.intent.message !== null;
-  // C12: released under the memory budget: main's digest carries the mark (cleared by a launch, an archive, or a terminal
-  // taking the session)
-  const released = useSessions((s) => s.digests.get(appSessionId)?.released !== undefined);
+  // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
+  // availability decides the control, and a terminal or job holding it is named
+  const availability = useAvailability(appSessionId);
+  const holder = record?.holder ?? null;
+  const heldBy = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holderWords(holder) : null;
   const decision = submitState({
     status,
     intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null, noProject: setup.intent.location === null } : null, // C10: the setup phase
     queue,
     empty: draft.empty,
     mode: draft.mode,
-    released, // C12
+    availability, // P2-A
+    heldBy, // P2-A
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
@@ -271,11 +276,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         setStarting(appSessionId, false);
       }
     }
-    // P2-0: the human seam owns steer-or-send, released resume and state refusals. The submit-state table above
+    // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
     if (s.mode === 'send') return submitHumanSerialized(client, appSessionId, s, retry);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, released /* C12 */ });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy });
     if (!decided.enabled) return false;
+    // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
+    // which stays in the draft (never sent to the model as a prompt by the card's continuation)
+    if (useSessions.getState().engine.get(appSessionId)?.process !== 'ready' && record !== null && !(await acquireBeforeMode(client, appSessionId, retry))) return false;
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
     return submitSerialized(client, appSessionId, s, 'send', target, { retry });
   };
