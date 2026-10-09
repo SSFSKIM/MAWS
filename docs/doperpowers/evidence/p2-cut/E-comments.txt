@@ -1,0 +1,76 @@
+P2 GROUNDING E: comments as an in-pane comment card (read-only, master 9cf79bba)
+
+Paths: MAWS = /Users/new/Developer/GitHub/MAWS (short cites are under src/renderer/src). CD = ~/claude-desktop-re/readable/app-2.16120.0. FS = CD/web/app/v1/frame-shell-chrome-CXu04DiJ.js.
+
+=== 1. MAWS TODAY ===
+
+The flow
+- All producers call one seam, `openCommentComposer(anchor, {appSessionId})` (src/renderer/src/tools/code/anchor/anchor.ts:87), which hands to the opener E3 registered (src/renderer/src/side/register.ts:22).
+  * Deliverable viewer: the Comment action arms picking in the sandboxed HTML iframe; the pick message {selector,label,text,rect} returns and src/renderer/src/tools/deliverables/Viewer.tsx:171-173 opens the composer with an `artifact-element` anchor. Only HTML artifacts are commentable (Viewer.tsx:160). `artifactElementAnchor` drops the `rect` (deliverables/comment/pick.ts:20, 40-50) though the bridge posts it in frame-viewport pixels (src/main/deliverables/bridge-script.ts:151-152).
+  * Browser page: `browser.comment.picked` {tabId, appSessionId, anchor, crop} (src/shared/ipc/schema/browser.ts:95-100) reaches browser/comment/connect.ts:40-41. The payload carries no on-screen position; `anchor.box` is document CSS pixels (src/shared/anchor/anchor.ts:46-47, 67).
+  * Code gutter (file-line), src/renderer/src/tools/code/viewer/CodeView.tsx:72.
+- The composer is a modal Radix Sheet, 560px wide, 18% from the top (src/renderer/src/side/CommentComposer.tsx:84; sessions/Sheet.tsx:31): anchor label and locator, a screenshot thumbnail, a plain textarea (Enter sends), and a "Send to" segmented control, Side thread (default) or Send to main (CommentComposer.tsx:92-103, 152-178). Being a dialog, it triggers the browser cover protocol: the native page view hides behind its still picture (tools/browser/cover.ts:2-3, 39; connect.ts:9-11).
+- Send to main: IPC `side.sendToMain`; main steers or sends the anchored text into the parent (side/actions.ts:92). 
+- Side thread: IPC `side.thread.open`; main's `openSideThread` forks the parent in place (a `--fork-session` child, lineage in its intent, the anchored comment as first message; src/main/sessions/service.ts:692-726). The renderer adopts the fork (`adoptFork`, sessions/record-ops.ts:98) and calls `revealNewThread` (actions.ts:98-102).
+- Where it shows: `revealPane` -> `panelHost.addTool('side', {appSessionId: parent, activate})` (actions.ts:27-45). It adds a single-instance "Side" tab to the right panel, activates it when the parent is shown, and reveals the panel (panel/host.ts:294-315): the Deliverables tab holding the viewer is replaced on screen by a Side tab. That is the likely "new tab" the owner saw. An unshown parent gets it inactive plus a toast (actions.ts:35-41).
+- Side pane (side/SideTool.tsx:75-100): a chip strip (a /btw chip, then one per thread, newest first, with phase glyphs) over the selected `ThreadView`.
+- ThreadView (side/ThreadView.tsx:42-150): header with the anchor label (a file anchor opens the file, a page URL the in-app browser), then the thread drawn by the full `SessionPane` (line 132): complete transcript, docked permission requests, holder and setup/trust cards, full composer. "Open as tab" (ThreadView.tsx:117) opens the child as a main session tab; when one exists the pane shows "Shown in the main area".
+- Elsewhere: the parent transcript gets a `side_thread` summary row; the sidebar nests the child (sidebar/derive.ts:128-167). A user row's `AnchorChip` (transcript/view/rows/User.tsx:145-180): a file anchor opens the file at its line, a `browser-element` anchor opens its page in the parent's in-app browser (browser/comment/actions.ts:31-41), any other kind, including `artifact-element`, is inert text.
+- A thread reloaded from disk begins with the parent's copied history; scrolling to its first prompt was deferred (E3 doc line 636).
+
+Contracts (docs/charter.md section 13)
+- X10, charter.md:592: "one shared comment composer (`registerCommentComposer`/`openCommentComposer(anchor, {appSessionId})`) with the destination control (Side thread default, Send to main), showing the screenshot as a thumbnail read through `side.screenshot.preview`".
+- X11, charter.md:593: "`SessionRecord.lineage: {kind: 'side-thread' | 'fork', parentAppSessionId, parentEngineSessionId, anchor?, openedBy: 'comment' | 'btw' | 'fork'} | null`, persisted by index migration 4 from the launch intent".
+- A card is a second presentation behind the same seam; it needs an additive dated Decision Log line against X10's "one shared comment composer".
+
+Intended versus built (docs/doperpowers/plans/2026-10-06-e3-side-threads.md)
+- Intended and built: "The composer is a sheet; the pane never switches the main view" (line 46); the sheet is C10's `Sheet` (line 397); a plain textarea since "a comment is short" (Residue 3, line 466); the thread view is the anchor header plus `SessionPane`, "no second composer implementation" (Design 6, line 127); the thread "opens in the right panel's Side pane" (line 7). E3 chose to reuse `SessionPane` on purpose; that is the "whole side session UI" the owner contrasts with Claude. The gap is taste, not a defect.
+
+=== 2. THE REFERENCE ===
+
+Claude Desktop has three comment surfaces. The owner's description (small card, replies, the agent answers inside) matches the artifact comment thread card.
+
+A. Artifact comment thread (frame shell)
+- Host: the Preview pane loads the claude.ai artifact frame shell in a WebContentsView (`surface=code`, CD/main-process/index.chunk-kXuYPTnM.js:314870-314886); the card is drawn inside the page.
+- Entry: toolbar toggle "Comment on this artifact" / "Exit comment mode" (FS:16272, 16470, 26537), then click anywhere (FS:16420).
+- Anchor: {path, x, y, pin, span.quote, sig, doc, label, region} (FS:25880-25895).
+- Position: the card is `position: fixed`, 300px wide (FS:17585; draft card FS:25931; open thread card FS:26139), left clamped inside the artifact rect, top just under the anchor; with under about 320px below it flips above, bottom on the anchor, max height min(max(320, 60% of viewport), room); the corner at the pin is squared (`GT`, FS:17541-17583; FS:25780-25784). Resting comments are pins that morph into a preview card on hover (CSS FS:55424); a 300px drawer lists all threads (FS:26739-26776).
+- Contents: quoted anchor text, an autosizing textarea, a "Send to Claude" ("Queue for Claude" while Claude works) control (FS:18240-18277, 25095-25097, 25234), replies under the opener (FS:26188).
+- Agent reply: a comment in the same thread. Status marks on yours: "Sent to Claude. Claude is working" / "Queued for Claude" (FS:25506-25520). Strings (CD/ui-strings-web.json): "Claude is working. Your comment goes after that." (fXm5ybjI7k).
+- Dismissal: a Close button (FS:26168), Escape in the field (FS:24499-24503), the close handler (FS:22529), and Resolve.
+- Same conversation? Not a separate one. A thread is a stored comment object on the artifact; `to_claude_at` marks "sent" (FS:25506). Sending "continues your Claude session for this artifact, or starts a new one" (id R7gbG5K1BV). The agent has an `ArtifactComments` tool (read, watch, status; main-process/index.chunk-kXuYPTnM.js:218854, 218955-219000), and the permission strings "Allow Claude to reply to a comment on this artifact?" and "Posts the reply below, written by Claude, to a comment thread" (ids 4Enob41B2M, jLC1ZW3LtU) show the reply returns through it.
+- Labels: "Add comment", "Reply", "Send to Claude", "Queue for Claude", "Comment thread", "Close comments".
+
+B. Preview inline comment (web/app/v1/c0447db9a-_uK48ugn.js): a "Comment" / "Done commenting" toggle (:1933); a click on an element or selection opens a draggable 256px popover with the quote or "Element context: <tag>" and a one-line "Add a comment..." input, Enter submits, Escape cancels (:2211-2260; submit :1827-1850); numbered markers stay (:1990).
+
+C. Plan comments (cccc2cf0a-C-PKwUca.js:1115-1135): select plan text, a popover input, batched into the next message. Its floating "Side chat" (id yxzcnV4kDy) is the /btw analogue, not the comment.
+
+Codex desktop (~/codex-app-src/readable/chatgpt-26.928.40906): also no fork. A browser comment opens a floating editor card ("Browser comment", "Add a comment...") in a separate small popup window the browser host focuses, because the page is a native view (renderer/app/comment-popup-portal-61688a7c1c2a.js:55-60, 128-136, 186-200). Submit is "saved" (batched as annotations; command "Send annotations") or "direct" into the current conversation (:836-842). Documents and PDFs use numbered markers; an artifact-comments sidebar lists threads with reply and resolve (`artifactComments.*`, ui-strings.json). All lands in the one conversation.
+
+Takeaway: both show a small anchored card and neither forks. MAWS's fork stays (X11); the ask is presentation: the card shows the fork's replies.
+
+=== 3. SIZING AND RISKS ===
+
+Verdict: the deliverable half plus the shared card is M; the browser half is a second M, or L with an overlay window. As one child: L. Cut two children; the browser one follows #90.
+
+Deliverable half (M)
+- New `CommentCard` (anchored, 300-340px) replaces the Sheet for the artifact producer: textarea, a compact Side thread / Send to main toggle, screenshot chip, then the thread.
+- Place it from the pick's `rect` (now dropped) inside the viewer body, `relative min-h-0 flex-1` (Viewer.tsx:194); the iframe is renderer DOM, so no cover protocol is involved.
+- Thread view: a compact list of the child's transcript rows (`TranscriptList` / `Transcript variant 'child'`, `useTranscriptStore` as ThreadView.tsx:45 does), from the thread's own anchored prompt on (this also covers the disk-history caveat), and a reply field posting `session.send` (composer/editor/submit.ts:52-53). `sendComment`, `adoptFork` and the fork stay; `revealNewThread` is replaced by "show in the card".
+- The Side pane listing stays; its chip gains "Show in deliverable" to re-dock the card.
+- Backend: none; one additive seam hint (`placement`) amends X10.
+- Tests to rework: side/CommentComposer.test.tsx, actions.test.ts, SideTool.test.tsx, deliverables.test.tsx, e2e/deliverables.spec.ts:876, e2e/side.spec.ts, e2e/p1-live.spec.ts:563.
+
+Browser half (M, or L with an overlay window)
+- The page is a native view above the renderer, so a card over it is hidden unless the cover protocol hides the page (cover.ts:2-3, 39). A body-portaled card freezes the page to a still for as long as it is up, and a thread card lingers while the agent works; Codex solves it with a separate window. Cheaper and in the spirit of the Sheet: dock the card in the pane's own box (a strip above or below the page; the placement shrinks), which needs no cover.
+- An anchored pin needs a viewport position main does not send (browser.ts:95-100): a small additive IPC field. Without it, a docked card with no pin.
+
+Risks
+1. cua board #90 changes the browser tab's top chrome (bookmarks bar, extensions bar). A docked strip or a card clamped to the page rect depends on that height and on `placement.ts`; build after #90. The chrome already overflows at a 379px panel (docs/tech-debt-tracker.md:80).
+2. The deliverables viewer sizing is an open taste row (docs/tech-debt-tracker.md:95, "Closes when (owner P2, E2's viewers) ... fit to pane, zoom and actual size"). A card positioned from `rect` assumes the frame is unscaled; if the viewer later zooms or fits content, rect-to-card mapping must follow. Sequence them together or anchor the card to the viewer box.
+3. The mini view drops SessionPane's duties: the side agent can raise permission requests, questions, trust/relay cards (SessionPane.tsx:48-90). The card needs a "needs you" state with one click to the Side pane or a tab, or the thread stalls unseen. Main design risk.
+4. No stored positions: `artifact-element` anchors keep a selector, not a rect. Cut: the card appears at pick time and re-docks from the Side chip; persistent pins (Claude's model) are a P3 candidate.
+5. Claude's comment is a stored thread answered in place; MAWS's is a session (X11). The card should read as a thread while keeping "Open as tab". "No change in backend" holds: lineage, fork launch and both sends stay.
+6. Tracker line 97: a comment fork cannot update its parent's artifact; a card that reads as a reply inside the artifact makes that more visible, so decide that row at the same sitting.
+
+Recommended cut: E-comment-1 (M): shared `CommentCard`, thread and reply view, deliverable placement, the seam hint; the Sheet stays for the code gutter. E-comment-2 (M, after #90): browser dock, with the picked payload gaining a viewport hint if the owner wants a pin. Owner call: replace the code gutter's Sheet too (cheap once the card exists), or keep it.

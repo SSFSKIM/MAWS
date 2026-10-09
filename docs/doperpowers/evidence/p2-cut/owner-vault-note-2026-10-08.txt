@@ -1,0 +1,7 @@
+The owner's vault note of 2026-10-08 02:49 PDT (WorkStation Design/무제.md), copied verbatim by the architect at the P2 cut; the three images it embeds are the owner's screenshots and are not copied. Routed to P2 child E1 (comments behave like comments).
+
+![[Pasted image 20261008024709.png]]--> compare the comment behavior of ours with Claude's and you'll see difference (it's in [[Claude Docs study — Enriching Side Panel (currently deferred Phase 2)]]) basically let the comment behave exactly like 'comment', not a new tab or anything. below is how CLaude Desktop works: open a small 'commet' chat UI, not the whole new side session UI.![[민 민혁 지금.png]]
+
+![[Pasted image 20261008024902.png]]
+
+--> like this shouldn't open in new tab, it should open wtihin 'deviverable' as a comment chat UI just like Claude's. NO change in backend, just UI/UX
