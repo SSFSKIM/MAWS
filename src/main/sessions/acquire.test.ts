@@ -387,4 +387,29 @@ describe('session.acquire: joins and races', () => {
     expect(await acquiring).toEqual({ status: 'ready', appSessionId: record.appId, launched: true, joined: false });
     expect(launchesOf(record.appId)).toHaveLength(1);
   });
+
+  // The whole-branch review: every lifecycle run registers in its caller's tick, before awaiting readiness, so the one
+  // invoked first is the one an acquisition in the same tick meets
+  it('a take-over invoked first, while readiness is pending, is the run an acquisition in the same tick waits for', async () => {
+    const booting = new SessionHarness({ takeOver: { runStop: async () => void (booting.host.disk.registry.length = 0), waitMs: 2_000, pollMs: 5 } }); // not started
+    try {
+      booting.trustDirectory(booting.work);
+      const record = booting.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xad100), directory: booting.work })).record;
+      const holder = { kind: 'background_job' as const, pid: 7, jobId: 'abcd1234' };
+      booting.host.hold(record.engineSessionId!, holder, booting.work);
+      const [taken, acquired] = await Promise.all([booting.service.takeOver(record.appId, holder), booting.service.acquire(record.appId, 'send')]);
+      expect(taken).toEqual({ status: 'released' });
+      expect(acquired).toEqual({ status: 'ready', appSessionId: record.appId, launched: true, joined: false });
+    } finally {
+      booting.dispose();
+    }
+  });
+
+  it('an intent’s start invoked first is joined by an acquisition in the same tick', async () => {
+    const { appSessionId } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    const [started, acquired] = await Promise.all([h.service.startSession(appSessionId, { message: OK_MESSAGE, options: {} }), h.service.acquire(appSessionId, 'read')]);
+    expect(started).toMatchObject({ status: 'starting' });
+    expect(acquired).toEqual({ status: 'ready', appSessionId, launched: true, joined: true });
+    expect(launchesOf(appSessionId)).toHaveLength(1);
+  });
 });

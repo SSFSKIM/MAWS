@@ -522,15 +522,30 @@ export class SessionService {
     return target ? { ptyId: target.pane.ptyId, label: target.pane.label } : null;
   }
 
-  async takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
-    await this.ready();
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it waits for it and then runs its own attempt (a take-over usually ends `released`,
+  // the resume left to the caller); with a run in flight the registry is read again once ready.
+  takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, 'take-over');
+    return this.takeOverWhenReady(appSessionId, expected, paneId, early);
+  }
+
+  private async takeOverWhenReady(appSessionId: AppSessionId, expected: ForeignHolder, paneId: string | null | undefined, early: Registration | null): Promise<TakeOverOutcome> {
+    const end = (registration: Registration | null) => registration?.end({ outcome: { status: 'refused', appSessionId, reason: 'busy', message: 'The session was being taken over.' } }); // its joiners run their own attempt
+    try {
+      await this.ready();
+    } catch (error) {
+      end(early);
+      throw error;
+    }
     // P2-A: any run in flight counts as a start (an acquisition sits in its pre-lock steps without the `starting` mark)
-    if (this.starting.has(appSessionId) || this.inflight.has(appSessionId)) return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+    if (this.starting.has(appSessionId) || (early === null && this.inflight.has(appSessionId))) {
+      end(early);
+      return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+    }
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
-    // P2-A: registered, so an acquisition arriving now waits for it and then runs its own attempt (a take-over usually
-    // ends `released`, the resume left to the caller)
-    const registration = this.inflight.open(appSessionId, 'take-over');
+    const registration = early ?? this.inflight.open(appSessionId, 'take-over');
     try {
       return await this.serial(appSessionId, async () => {
         const record = this.deps.index.sessions.get(appSessionId);
@@ -569,21 +584,34 @@ export class SessionService {
       });
     } finally {
       this.starting.delete(appSessionId);
-      registration.end({ outcome: { status: 'refused', appSessionId, reason: 'busy', message: 'The session was being taken over.' } }); // P2-A: its joiners run their own attempt
+      end(registration);
     }
   }
 
   // ---- start ------------------------------------------------------------------------------------------------------
 
   // `session.start`: an intent's setup, or a record's resume. `starting` is the only answer after which phases stream.
-  async startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
-    await this.ready();
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it joins this start; its end is the setup's own `ready` or `failed`. With a run in
+  // flight the join is decided once ready, when the intents are loaded.
+  startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options);
+    return this.startWhenReady(appSessionId, args, early);
+  }
+
+  private async startWhenReady(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }, early: Registration | null): Promise<StartOutcome> {
+    try {
+      await this.ready();
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
     // P2-A start: a record's start with no message joins a run in flight (an acquisition's, another start's) and answers
     // what its guards answered, when it asks with no options or the same ones; with other options (C11's route switch)
     // it waits for that run to settle and then runs its own start, since a joined switch would report a route its launch
     // never took. One carrying a message stays refused `starting` (no message is dropped), as does every start while a
     // take-over runs.
-    const joinable = this.inflight.get(appSessionId);
+    const joinable = early === null ? this.inflight.get(appSessionId) : undefined;
     if (joinable !== undefined && joinable.kind !== 'take-over' && args.message === null && this.deps.intents.get(appSessionId) === null) {
       const own = canonicalOptions(args.options);
       if (own === '{}' || own === joinable.options) return joinable.guarded;
@@ -595,11 +623,15 @@ export class SessionService {
     // Marked synchronously, before the guards' first await: a second start, a patch or a release of this id is refused
     // `starting` from here on, and a new worktree's name is reserved against every other start, so two starts can
     // never both pass their guards for one checkout.
-    this.refuseWhileStarting(appSessionId);
+    try {
+      this.refuseWhileStarting(appSessionId);
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
-    // P2-A: registered in the same tick, so an acquisition joins this start; its end is the setup's own `ready` or `failed`
-    const registration = this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options);
+    const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
     const captured = capturingSetup(this.s, appSessionId);
     const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
     let release: (() => void) | null = null;
