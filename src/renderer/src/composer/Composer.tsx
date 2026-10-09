@@ -42,7 +42,7 @@ import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { afterAccepted, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
+import { submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -54,7 +54,6 @@ import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
 import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
-import { releasedResume } from './resume-seam'; // C12
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { isBusy, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -272,24 +271,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         setStarting(appSessionId, false);
       }
     }
+    // P2-0: the human seam owns steer-or-send, released resume and state refusals. The submit-state table above
+    // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
+    if (s.mode === 'send') return submitHumanSerialized(client, appSessionId, s, retry);
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, released /* C12 */ });
     if (!decided.enabled) return false;
-    if (released && (status === null || status.process === 'exited')) return resumeReleased(s); // C12
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
-    // the mode's own dispatch: `!` and `#` through theirs, a prompt as `session.send`, or (W10) the `next` steer while busy
-    return submitSerialized(client, appSessionId, s, decided.steer ? 'steer' : 'send', target, { retry });
+    return submitSerialized(client, appSessionId, s, 'send', target, { retry });
   };
-
-  // C12 start: Send on a released session resumes it through C10's resume (registered in `resume-seam.ts`), the message
-  // going with it; a refused resume says why itself and the editor keeps the text.
-  const resumeReleased = async (s: Serialized): Promise<boolean> => {
-    const resume = releasedResume();
-    if (resume === null || !precheck(s)) return false;
-    const accepted = await resume(appSessionId, { content: s.content, display: s.display });
-    if (accepted) afterAccepted(client, appSessionId, s);
-    return accepted;
-  };
-  // C12 end
 
   // The plain stop (the Stop button): nothing runs after it (W1)
   const stop = () =>
