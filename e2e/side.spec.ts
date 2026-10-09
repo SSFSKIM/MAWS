@@ -798,6 +798,67 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(writtenUsers(maws, parent)).toHaveLength(1);
     expect(maws.consoleErrors()).toEqual([]);
   });
+
+  // ---- P2-E1 (M3): re-dock and re-pin (P2-E1 document, acceptance 6 and 4's last sentence) ------------------------------
+
+  test('11. a thread moved to the Side pane and answered there comes back with “Show in deliverable”: the Deliverables tab selected, the card in thread phase pinned under the heading it found again, kept open, and still pinned after a Reload', async () => {
+    test.setTimeout(150_000);
+    const c = await begin((cwd, dir) => {
+      const thread = new SideJournal(CHILD, cwd);
+      const prompt = thread.prompt();
+      thread.rename(HERO);
+      thread.permission(prompt, 'Bash', { command: 'echo the-step', description: 'The step' });
+      thread.reply(prompt, CARD_REPLY);
+      thread.completed(prompt);
+      return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
+    });
+    const { page, maws, parent } = c;
+    const { card, tools } = await commentOnHeading(c);
+    await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
+    await card.getByRole('button', { name: 'Send' }).click();
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    const child = await sideThreadOf(page, parent, 'comment');
+
+    // the request is moved to the Side pane and answered there; the thread finishes its reply in the pane
+    await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission', { timeout: 20_000 });
+    await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
+    await expect(card).toHaveCount(0);
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+    const docked = pane.getByRole('group', { name: 'Approval needed' });
+    await expect(docked).toContainText('echo the-step');
+    await docked.getByRole('radio', { name: 'Allow once' }).click();
+    await docked.getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
+
+    // Show in deliverable: the parent's Deliverables tool on the record, the card back on the same thread under the heading
+    await pane.getByRole('button', { name: 'Show in deliverable' }).click();
+    await expect(tools.getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
+    const viewer = panelRegion(page).locator('[data-deliverable-viewer]');
+    const redocked = viewer.locator('[data-comment-card]');
+    await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
+    await expect(redocked.locator(`[data-card-thread="${child}"]`)).toBeVisible();
+    await expect(redocked.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
+    await expect(redocked).toHaveAttribute('data-placement', 'below');
+    const hero = viewer.frameLocator('[data-deliverable-frame="html"]').locator('#hero');
+    const pinnedUnder = async () => {
+      const [element, placed] = [(await hero.boundingBox())!, (await redocked.boundingBox())!];
+      return Math.abs(placed.y - (element.y + element.height + 4)) <= 1 && Math.abs(placed.x - element.x) <= 1;
+    };
+    await expect.poll(pinnedUnder, { message: 'the card 4 px under the heading, at its left', timeout: 10_000 }).toBe(true);
+    // not shut by its own close rule (the Side pane drew the thread a moment ago): still open well after the claim
+    await page.waitForTimeout(1_500);
+    await expect(redocked).toBeVisible();
+    await expect(redocked.getByRole('textbox', { name: 'Reply' })).toBeEnabled();
+
+    // a Reload mounts a new frame: the card stays and is pinned in it again
+    await viewer.getByRole('button', { name: 'Reload' }).click();
+    await expect(viewer.frameLocator('[data-deliverable-frame="html"]').locator('#hero')).toHaveText('Sales overview');
+    await expect(redocked).toBeVisible();
+    await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
+    await expect.poll(pinnedUnder, { message: 'pinned under the heading after the Reload', timeout: 10_000 }).toBe(true);
+    expect(writtenUsers(maws, parent)).toHaveLength(1);
+    expect(maws.consoleErrors()).toEqual([]);
+  });
 });
 
 // P2-E1: a delivered page whose heading a comment is made on, in the parent's Deliverables viewer.
