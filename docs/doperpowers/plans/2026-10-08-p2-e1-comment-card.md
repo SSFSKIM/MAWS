@@ -18,10 +18,10 @@ What does not change (the owner's "NO change in backend"): the fork (`side.threa
 - [x] (2026-10-09) This document written.
 - [x] (2026-10-09) Independent review of this document (adversarial reviewer on Opus, design and buildability in one round): 1 blocking, 6 should-fix, 7 minor, all folded (Decision Log).
 - [x] (2026-10-09) Refresh pass before execution (executor of the Plan of Work, branch `worktree-agent-aebcc33c93831f363` from master 9e942f25): re-pinned to the parent `docs/doperpowers/plans/2026-10-08-p2-daily-driver.md`, child id P2-E1, blob `a7e7d4cf1084391d3b95aef232bb9b3de95295a5`, and the ledger `docs/doperpowers/plans/2026-10-08-p2-interface-ledger.md`, blob `226bb2586cefa6234112c6027b8df046ec2bda50`; no source file changed between this document's base 7462fe28 and 9e942f25; the names this document uses are the ledger's §1, §5 and §6 rows as resolved; the architect's H6 correction folded (D5, H5).
-- [ ] M1 — The card in the deliverable viewer: the seam's placement hint, the card store and host, placement, the composer half.
+- [x] (2026-10-09 04:30 PDT) M1 — The card in the deliverable viewer: the seam's placement hint, the card store and host, placement, the composer half. Commits 41e7f758, 22bf6e3b; task review clean (no findings); e2e:deliverables 10/10, e2e:code 36/36, e2e:browser-comment 13/13, focused units 264/264, probes 214/214.
 - [ ] M2 — The thread in the card: rows from the anchored prompt, the forced local presenter, Reply through X22, the needs-you state, the dock rules (after P2-0 lands).
 - [ ] M3 — Re-dock and re-pin: "Show in deliverable" from the Side pane, the bridge's locate message, the card across version changes.
-- [ ] M4 — The artifact scope (G4): a side thread sees and edits its ancestors' artifacts (parallel to M1 to M3).
+- [x] (2026-10-09 04:30 PDT) M4 — The artifact scope (G4): a side thread sees and edits its ancestors' artifacts (parallel to M1 to M3). Built in a separate worktree (958a8733, fix e0e42423), merged at 781ff984; task review Approved with one minor (the race test's fixed delay replaced by a barrier, proven by mutation); probes 214/214, e2e:deliverables 10/10, e2e:transcript 31/31. Master (P2-0's seam, 20d21872's fixture snapshots) merged at ce1f17f1.
 - [ ] M5 — End to end: the reworked e2e groups, the live case, both themes, the acceptance run, the whole-branch review.
 
 ## Terms
@@ -598,6 +598,9 @@ Manual check (owner-equivalent, on `pnpm -C <wt> dev`): D1's scene end to end, i
 - Decision: M3 also re-pins through `locate` when the host box resizes (not only on claim and on `CardFrame.key`), since a stored rect goes stale on any reflow of the frame (an element fixed to the frame's viewport moves with the frame's height). D4's "re-placed from the stored rect on resize" stays the fallback when no `locate` is available.
   Rationale: M1's executor observed the stale rect directly (e2e run 2); one extra locate per resize is cheap and the clamps already bound any answer.
   Date/Author: 2026-10-09, P2-E1 executor.
+- Decision: M4's executor decisions, folded. `artifactScope` is omitted from `session.launch` when the chain is empty (a root or fork launch sends exactly today's input); the launcher takes the scope as a second argument `(spec, artifactScope = [])`; a session with no scope does no extra read on update; an artifact's owner is the session its record was found under; `artifact_create` checks self first (today's message) then refuses an ancestor's id; `artifact_list` skips an id only when a nearer session listed it; an unreadable index ends the chain (as `reachableSessions` does); the chain is capped by `ARTIFACT_SCOPE_MAX_LINKS = 16`, matching the schema's `.max(16)`; the transcript row carries no owner for the session's own artifacts (existing snapshots unchanged); the capture's refusal for a missing ancestor record keeps today's "no deliverable X in this session" wording.
+  Rationale: each keeps D10 as designed and leaves every non-thread path byte-identical; the capture wording is an edge case left as is.
+  Date/Author: 2026-10-09, P2-E1 executor (M4).
 
 ## Outcomes & Retrospective
 
