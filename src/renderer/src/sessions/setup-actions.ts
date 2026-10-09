@@ -54,6 +54,9 @@ function refusalOf(outcome: StartOutcome): string | null {
 }
 
 // P2-A: `dockFor`, the card an outcome waits on, lives with the acquisition (`./acquire.ts`), which docks the same cards.
+// A record's card is one for a session this page knows by its record and no intent (an acquisition's); an intent's
+// provisional record, and an id whose intent has not reached this page yet (a side thread's), stay C10's.
+const isRecordCard = (appSessionId: AppSessionId) => !useSetup.getState().intents.has(appSessionId) && useSessions.getState().records.has(appSessionId);
 
 async function start(appSessionId: AppSessionId, message: FirstMessage | null, options: StartOptions): Promise<StartOutcome | { error: string }> {
   const store = useSetup.getState();
@@ -101,7 +104,7 @@ export async function startIntent(appSessionId: AppSessionId, first: FirstMessag
 // same start with the retained message (`message: null`) and only the option the human chose. A refusal or a failure
 // clears the retained message in main, so the card returns the message it docked with to the editor first.
 export async function continueSetup(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
-  if (!useSetup.getState().intents.has(appSessionId)) return continueRecord(appSessionId, options, docked); // P2-A
+  if (isRecordCard(appSessionId)) return continueRecord(appSessionId, options, docked); // P2-A
   const outcome = await start(appSessionId, null, options);
   if ('error' in outcome && outcome.error.startsWith('starting:')) {
     // a start of this id still runs (another window's, or one this page lost to a reload): main holds the message
@@ -127,7 +130,7 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
   store.setInvoking(appSessionId, true);
   const refuse = (words: string): HookResult => {
     useSetup.getState().undock(appSessionId);
-    toast({ level: 'danger', text: words, actions: [], dismissible: true });
+    toast({ id: startNoticeId(appSessionId), level: 'danger', text: words, actions: [], dismissible: true });
     return { ok: false, error: words };
   };
   try {
@@ -153,7 +156,7 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
 // `intent.message` so the composer's held-message gate opens from the fact it closed on. P2-A: a record's card only
 // undocks; its message never left the composer's draft and main retains nothing for an acquisition.
 export async function releaseMessage(appSessionId: AppSessionId, docked: FirstMessage | null): Promise<HookResult> {
-  if (!useSetup.getState().intents.has(appSessionId)) {
+  if (isRecordCard(appSessionId)) {
     useSetup.getState().settle(appSessionId);
     return { ok: true };
   }

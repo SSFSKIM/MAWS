@@ -57,6 +57,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 
 beforeEach(() => {
   resetSetupStore();
+  useSessions.setState({ records: new Map(), engine: new Map(), digests: new Map() }); // P2-A: a record's card is told by its record
   useNotices.setState({ notices: [] });
   returned = [];
   offReturn = registerMessageReturn((_id, message) => returned.push(message));
@@ -166,6 +167,7 @@ describe('trust card', () => {
 
   it("Cancel on a resume's card only undocks it, quietly: an acquisition retains nothing in main (P2-A)", async () => {
     withMain({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+    useSessions.setState({ records: new Map([[ID, record(ID)]]) });
     render(<Docked />);
     expect(await act(() => resumeSession(ID))).toBe(true);
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);

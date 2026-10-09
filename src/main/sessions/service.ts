@@ -707,11 +707,19 @@ export class SessionService {
 
   private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
     const entry = this.inflight.get(appSessionId);
-    if (entry === undefined) return this.acquireOnce(appSessionId, options);
+    if (entry === undefined) return this.deps.index.sessions.get(appSessionId) === null ? this.refuseUnknown(appSessionId) : this.acquireOnce(appSessionId, options);
     const own = canonicalOptions(options);
     if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
     const settled = () => this.acquireOrJoin(appSessionId, options);
     return entry.done.then(settled, settled);
+  }
+
+  // No record and nothing in flight: refused without registering, so a start of an unstarted intent is never refused
+  // `starting` for it. Acquisition never runs C10's setup: an unstarted session starts with its first message.
+  private async refuseUnknown(appSessionId: AppSessionId): Promise<AcquireOutcome> {
+    await this.ready();
+    const message = this.deps.intents.get(appSessionId) !== null ? 'an unstarted session starts with its first message' : `no session record for ${appSessionId}`;
+    return { status: 'refused', appSessionId, reason: 'unknown_session', message };
   }
 
   // One acquisition: registered in the caller's tick, its memory published (in flight, the last answer cleared), the
@@ -735,10 +743,6 @@ export class SessionService {
 
   private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
     const s = await this.ready();
-    if (this.deps.index.sessions.get(appSessionId) === null) {
-      const message = this.deps.intents.get(appSessionId) !== null ? 'an unstarted session starts with its first message' : `no session record for ${appSessionId}`;
-      return { status: 'refused', appSessionId, reason: 'unknown_session', message };
-    }
     // the watch before the reservation read, so a ready status landing between the two is not missed
     const watch = new LaunchWatch(s, appSessionId);
     try {

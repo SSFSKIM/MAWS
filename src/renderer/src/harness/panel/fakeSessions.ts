@@ -14,7 +14,7 @@ export const FAKE_IDS = ['A', 'B'] as const;
 export type FakeId = (typeof FAKE_IDS)[number];
 
 const records = z.array(SessionRecordSchema).parse(scenario.sessions);
-const digests = z.array(SessionDigestSchema.omit({ revision: true })).parse(scenario.digests);
+const digests = z.array(SessionDigestSchema.omit({ revision: true, availability: true })).parse(scenario.digests); // P2-A: availability is main's read model's
 
 export const FAKE_RECORDS: ReadonlyMap<AppSessionId, SessionRecord> = new Map(records.map((r) => [r.appId, r]));
 
@@ -43,7 +43,8 @@ export function seedFakeSessions(): void {
   useSessions.setState((s) => ({
     loaded: true,
     records: new Map(FAKE_RECORDS),
-    digests: new Map(digests.map((d): [AppSessionId, SessionDigest] => [d.appSessionId, { ...d, revision: 1 }])),
+    // P2-A: what main's read model would derive: A's process is ready, B is disk-only
+    digests: new Map(digests.map((d): [AppSessionId, SessionDigest] => [d.appSessionId, { ...d, availability: d.appSessionId === fakeId('A') ? 'usable' : 'resumable', revision: 1 }])),
     engine: new Map([[fakeId('A'), liveStatus(FAKE_RECORDS.get(fakeId('A'))!)]]),
     recordsVersion: s.recordsVersion + 1,
     digestsVersion: s.digestsVersion + 1,
