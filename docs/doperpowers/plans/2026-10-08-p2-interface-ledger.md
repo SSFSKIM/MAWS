@@ -49,7 +49,7 @@ Allocated in the P1 ledger's §4 table (`docs/doperpowers/plans/2026-10-05-p1-in
 | Name | Owner | Consumers | State |
 |---|---|---|---|
 | `openCommentComposer(anchor, {appSessionId, placement?})` with `placement: {kind: 'card', host: 'deliverable' \| 'browser', rect?: {x, y, width, height}} \| {kind: 'sheet'}`; `CommentCard` in `src/renderer/src/side/`; `artifactElementAnchor` keeps the pick's `rect` | P2-E1 | P2-E2, the deliverables viewer, the browser comment connect | reserved 2026-10-08 |
-| X9: `artifact_update` and `artifact_list` from a side thread resolve the parent session's artifacts (lineage `kind: 'side-thread'`); X12 versions so written belong to the parent's record | P2-E1 | — | reserved 2026-10-08, conditional on the owner's answer to spec Decision Log 9 at approval |
+| X9: `artifact_update` and `artifact_list` from a side thread resolve the parent session's artifacts (lineage `kind: 'side-thread'`); X12 versions so written belong to the parent's record | P2-E1 | — | reserved 2026-10-08; the owner decided yes at approval (spec Decision Log 9), so E1.G4 builds it |
 | Thread rows inside the card draw the owner channel through the local presenter whatever the attachment state (a `presentation: 'local'` option on the transcript list, or the equivalent the child records) until C's X18 module lands | P2-E1 | P2-C replaces it | reserved 2026-10-08 |
 
 ## 6. Shared files and landing order
