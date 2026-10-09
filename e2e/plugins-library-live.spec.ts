@@ -393,9 +393,9 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await shot('browse-install-sheet');
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
       await expect(supabase).toHaveAttribute('data-installed', 'here', { timeout: 120_000 });
-      const result = await supabase.getByRole('status').innerText();
-      scratch.log(`result: ${result}`);
-      expect(result).toContain(`Successfully installed plugin: ${o('supabase')} (scope: project)`);
+      // the session is running since Refresh, so E8's reload of the running sessions follows the install before its result
+      await expect(supabase.getByRole('status')).toContainText(`Successfully installed plugin: ${o('supabase')} (scope: project)`, { timeout: 120_000 });
+      scratch.log(`result: ${await supabase.getByRole('status').innerText()}`);
       await w.getByRole('radio', { name: 'My items' }).click();
       await expect.poll(() => idsIn(myItems(w), 'here', 'plugin'), { timeout: 60_000 }).toContain(o('supabase'));
     });
