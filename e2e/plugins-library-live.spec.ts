@@ -6,10 +6,12 @@
 // refusal is recorded and the counts check is skipped with its words), code-review installed for the user,
 // frontend-design for the scratch repository, supabase for another project only; a user skill and a project skill
 // written. Then, through Playwright: one Haiku turn in the repository and the session stopped; `/plugins` at its library
-// size with Esc handing the keyboard back; My items' groups; frontend-design's detail; the loaded line on the exited
-// session with no engine started; Browse's counts and the other-projects card installing here; Manage marketplaces;
-// the session resumed with no turn (`session.start`, since P2-A's Refresh is not on master), then `/skills`'
-// groups with Use in chat, and `/sandbox`. Light and dark shots of each library. The owner's ~/.claude.json check runs
+// size with Esc handing the keyboard back; My items' groups; frontend-design's detail ("Loaded last time"); the loaded
+// line on the exited session ("Loaded last time, <relative>" with Refresh) with no engine started; `/skills` on the
+// exited session in P2-A's dormant state, starting nothing until its Load now (which then reads the skills with no
+// turn), the session stopped again; the loaded line's Refresh ("Starting…", then "Loaded now"); Browse's counts and the
+// other-projects card installing here; Manage marketplaces; `/skills`' groups with Use in chat, and `/sandbox`. Light
+// and dark shots of each library. The owner's ~/.claude.json check runs
 // around the whole run, outside this file (§6.3). Run on purpose only; it spends usage (one one-line Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 pnpm exec playwright test e2e/plugins-library-live.spec.ts --reporter=line
 import { execFileSync } from 'node:child_process';
@@ -137,8 +139,7 @@ async function show(w: Locator, filter: string): Promise<void> {
 }
 // Counts the invokes main answers for each command, by wrapping their handlers where Electron keeps them (as
 // support/plugins-live.ts's read tracker does), so "starts no engine" and "sends nothing" are read from main itself,
-// not from a status that a fast turn could leave unchanged. Only session.acquire may have no handler (before P2-A); it
-// then counts 0.
+// not from a status that a fast turn could leave unchanged. A command main does not answer fails the run.
 type Tracked = 'session.start' | 'session.acquire' | 'session.send' | 'session.steer';
 async function trackInvokes(app: ElectronApplication): Promise<(commands: readonly Tracked[]) => Promise<number>> {
   await app.evaluate(({ ipcMain }) => {
@@ -147,7 +148,6 @@ async function trackInvokes(app: ElectronApplication): Promise<(commands: readon
     (globalThis as unknown as { __p2bInvokes: typeof log }).__p2bInvokes = log;
     for (const command of ['session.start', 'session.acquire', 'session.send', 'session.steer']) {
       const handler = handlers.get(`maws:cmd:${command}`);
-      if (!handler && command === 'session.acquire') continue;
       if (!handler) throw new Error(`main answers no ${command}: nothing to count`);
       log[command] = 0;
       handlers.set(`maws:cmd:${command}`, (event, ...args) => {
@@ -275,8 +275,8 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       const loaded = await detail.locator('[data-plugin-fact="loaded"]').innerText();
       scratch.log(`loaded fact: ${loaded}`);
       scratch.observe('detail.loaded', loaded);
-      // P2-A's freshness ("Loaded last time, …") is not on master: the stand-in keeps the list the stopped session reported
-      expect(loaded).toMatch(/^Loaded in this session/);
+      // P2-A's observed facts: the stopped session's list, labelled with when it was loaded
+      expect(loaded).toMatch(/^Loaded in this session · Loaded last time, \S/);
       const inside = detail.getByRole('region', { name: 'What’s inside' });
       await expect(inside).toContainText('Skills');
       await expect(inside).toContainText('frontend-design');
@@ -285,16 +285,73 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await w.getByRole('button', { name: /^Back to / }).click();
     });
 
-    await step('loaded-line', 'the loaded line on the stopped session, and no engine started by /plugins', async () => {
+    await step('loaded-line', 'the loaded line on the stopped session: N plugins loaded · Loaded last time, with Refresh; no engine started by /plugins', async () => {
       const plugins = await openWidget(page, 'plugins');
-      const line = await plugins.locator('[data-plugins-loaded]').innerText();
-      scratch.log(`loaded line: ${line}`);
-      scratch.observe('loadedLine', line);
-      expect(line).toMatch(/plugins? loaded in this session/);
-      // P2-A's Refresh (acquire, then reload_plugins) is not on master: the stand-in offers none on a stopped session
-      expect(await plugins.locator('[data-plugins-loaded]').getByRole('button', { name: 'Refresh' }).count()).toBe(0);
+      const line = plugins.locator('[data-plugins-loaded]');
+      await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
+      const text = (await line.textContent()) ?? '';
+      scratch.log(`loaded line: ${text}`);
+      scratch.observe('loadedLine', text);
+      expect(text).toMatch(/^[1-9]\d* plugins? loaded in this session·Loaded last time, \S/);
+      await expect(line.getByRole('button', { name: 'Refresh' })).toBeVisible();
       expect(await starts()).toBe(launched); // nothing since the stop: /plugins, the detail and the line started no engine
       expect((await status(page, id)).process).not.toBe('ready');
+    });
+
+    await step('skills-dormant', '/skills on the stopped session: Not read yet. with Load now, nothing started until it is clicked; Load now reads the skills with no turn; stopped again', async () => {
+      const sent = await invokes(['session.send', 'session.steer']);
+      const w = await openWidget(page, 'skills');
+      await expect(w.getByText('Not read yet.')).toBeVisible();
+      await expect(w.getByRole('button', { name: 'Load now' })).toBeVisible();
+      await page.waitForTimeout(1_000);
+      expect(await starts()).toBe(launched); // opening /skills started nothing
+      await shot('skills-dormant');
+      await w.getByRole('button', { name: 'Load now' }).click();
+      await expect(w.getByText('Starting…')).toBeVisible({ timeout: 10_000 });
+      await expect(w.locator('[data-skill-row="p2b-project"]')).toBeVisible({ timeout: 120_000 });
+      expect(await starts()).toBe(launched + 1); // one acquisition, the click's
+      expect(await invokes(['session.send', 'session.steer'])).toBe(sent); // no prompt to read them
+      scratch.log(`after Load now: ${(await status(page, id)).process}; skills rows ${await w.locator('[data-skill-row]').count()}`);
+      // a start with no turn reports no plugins: the ready session's line keeps the last observed list, never "Loaded now"
+      // over an empty one (the architect's ruling of 2026-10-10, now A's precedence)
+      const s = await status(page, id);
+      const plugins = await openWidget(page, 'plugins');
+      const line = plugins.locator('[data-plugins-loaded]');
+      scratch.log(`ready with no turn: pluginsObservedAt ${s.pluginsObservedAt ?? 'null'}, ${s.plugins.length} plugins in the status; loaded line: ${(await line.textContent()) ?? ''}`);
+      if (s.pluginsObservedAt === null) {
+        await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
+        await expect(line).not.toContainText('Loaded now');
+      }
+      await closeWidgets(page);
+      value(await invoke(page, 'session.stop', { appSessionId: id as AppSessionId, reason: 'stop' }));
+      await expect.poll(async () => (await status(page, id)).process, { timeout: 60_000 }).not.toBe('ready');
+      launched = await starts();
+    });
+
+    await step('refresh', 'the loaded line’s Refresh on the stopped session: Starting…, then Loaded now (acquire, then reload_plugins; no turn)', async () => {
+      const sent = await invokes(['session.send', 'session.steer']);
+      const plugins = await openWidget(page, 'plugins');
+      const line = plugins.locator('[data-plugins-loaded]');
+      await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
+      expect(await starts()).toBe(launched);
+      await line.getByRole('button', { name: 'Refresh' }).click();
+      await expect(line).toContainText('Starting…', { timeout: 10_000 });
+      scratch.log(`after the click: ${(await line.textContent()) ?? ''}`);
+      await expect(line).toHaveAttribute('data-loaded-freshness', 'now', { timeout: 120_000 });
+      await expect(line).toContainText('Loaded now');
+      await expect(line.getByRole('button', { name: 'Reload plugins' })).toBeVisible();
+      const text = (await line.textContent()) ?? '';
+      scratch.log(`loaded line: ${text}`);
+      scratch.observe('refresh', text);
+      expect(text).toMatch(/^[1-9]\d* plugins? loaded in this session·Loaded now/);
+      expect(await starts()).toBe(launched + 1); // one acquisition, the click's
+      expect(await invokes(['session.send', 'session.steer'])).toBe(sent); // no turn
+      expect((await status(page, id)).process).toBe('ready');
+      await bothThemes('refresh');
+      if (!needsCatalogue()) return;
+      await myItems(plugins).locator(`[data-plugin-row="${o('frontend-design')}"]`).click();
+      await expect(plugins.locator('[data-plugin-detail] [data-plugin-fact="loaded"]')).toHaveText('Loaded in this session · Loaded now');
+      await plugins.getByRole('button', { name: /^Back to / }).click();
     });
 
     await step('browse', 'Browse after its click: counts on official cards, none on a directory-only card; supabase Installed in other projects, installed here', async () => {
@@ -355,28 +412,6 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await manage.getByRole('button', { name: 'Done' }).click();
     });
 
-    // The composer refuses a send to a stopped (not released) session, and P2-A's Refresh is not on master: the session is
-    // resumed through `session.start` with no message, the command the gateway chip's start uses; no turn runs.
-    await step('resume', 'the session resumed with no turn (P2-A’s Refresh is not on master); the loaded line reads Not observed yet until the engine reports', async () => {
-      const outcome = value(await invoke(page, 'session.start', { appSessionId: id as AppSessionId, message: null, options: {} }));
-      scratch.log(`session.start: ${outcome.status}`);
-      await expect.poll(async () => (await status(page, id)).process, { timeout: 120_000, intervals: [500] }).toBe('ready');
-      await idle(page, id);
-      const s = await status(page, id);
-      scratch.log(`session ${id}: ${s.process} · plugins loaded: ${s.plugins.map((p) => p.source ?? p.name).join(', ')}`);
-      expect(s.process).toBe('ready');
-      const w = await openWidget(page, 'plugins');
-      const line = w.locator('[data-plugins-loaded]');
-      // the engine reports its plugins with its first system/init: a start with no turn has observed nothing, and the
-      // line must not read "0 plugins loaded in this session · Loaded now" (the architect's ruling of 2026-10-10)
-      if (s.plugins.length + s.pluginErrors.length + s.pluginWarnings.length === 0) {
-        await expect(line).toContainText('Not observed yet');
-        await expect(line).not.toContainText('Loaded now');
-        await expect(line).not.toContainText('loaded in this session');
-      } else await expect(line).toContainText('Loaded now');
-      scratch.log(`loaded line: ${await line.innerText()}`);
-    });
-
     await step('skills', '/skills: p2b-project and frontend-design’s skill under In this project, p2b-user under Created by you; Use in chat inserts and sends nothing', async () => {
       const w = await openWidget(page, 'skills');
       await expect(w.locator('[data-skill-row="p2b-project"]')).toBeVisible({ timeout: 30_000 });
@@ -391,7 +426,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await expect(design).toBeVisible();
       await expect(design.locator('[data-skill-badge]')).not.toHaveText('');
       scratch.log(`frontend-design's skill: ${(await design.innerText()).replaceAll('\n', ' · ')}`);
-      const sends = () => invokes(['session.send', 'session.steer', 'session.start']);
+      const sends = () => invokes(['session.send', 'session.steer', 'session.start', 'session.acquire']);
       const sentBefore = await sends();
       await design.getByRole('button', { name: 'Use in chat' }).click();
       await expect(w).toBeHidden();
