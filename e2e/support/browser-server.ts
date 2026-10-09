@@ -10,7 +10,7 @@
 //   opening `/c.html?popup=1` with `window.open` and one calling `window.close()`), `/plain.html` (no title),
 //   `/framed.html` (a same-origin frame of `/plain.html`, for the preload's main-frame rule), and `/favicon.ico` (a PNG);
 // - `/file.bin` (4 KiB), `/drop` (the socket destroyed: Chromium's ERR_EMPTY_RESPONSE, a generic error), `/slow` (never
-//   answers, for Stop).
+//   answers, for Stop); cua #90: `/later.html` (a page answered after LATER_MS).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 // E4d start
@@ -25,6 +25,8 @@ export interface BrowserServer {
   hits(path: string): number; // requests the server has seen for a path
   close(): Promise<void>;
 }
+
+export const LATER_MS = 800; // cua #90
 
 const page = (title: string, body: string, script = '') =>
   `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>` +
@@ -156,6 +158,15 @@ export async function startBrowserServer(): Promise<BrowserServer> {
     }
     if (path === '/drop') return request.socket.destroy();
     if (path === '/slow') return void held.add(response); // never answered; ended at close
+    // cua #90: `/later.html` answers a page after LATER_MS, so a case can cover the window before the page commits
+    if (path === '/later.html') {
+      const timer = setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        response.end(page('Page later', '<h1>Page later</h1><p>Painted only once the window was already covered.</p>'));
+      }, LATER_MS);
+      response.on('close', () => clearTimeout(timer));
+      return;
+    }
     // E4b start: `/echo-cookies` answers the request's Cookie header as JSON, `{ header, cookies }` with the pairs by
     // name, so a case reads which cookies the partition sent (E4b execution document, Interfaces "Test support and e2e").
     // The JSON is the text of `#echo` in an HTML page, so the imported probe extension's content script (which marks the

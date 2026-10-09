@@ -26,6 +26,10 @@
 // first tab staying in its own; Re-import from the popover runs the removal and the import sheet at app level and the
 // active profile is active again after it; (10, the avatar) removal takes avatar.png with the partition folder. The
 // Chrome account's names reach no log line, console message or the e2e seam.
+//
+// The cover's still (M2's fix): with the popover open in the 380 px session panel the pane shows the page's still, a
+// decoded picture of the page, and at no frame is the page's view hidden with no still in the pane; a page that commits
+// and paints only once the popover is open gets its still too.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -41,7 +45,7 @@ import {
   closeSheet, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard, recordOf, recordPhases,
   settingsFile, suggest, type ImportScene, type ImportSeams,
 } from './support/browser-import-scene';
-import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, paneIn, paneRect, resizeWindow, tabAt, tabsOf } from './support/browser-scene';
+import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, paneIn, paneRect, resizeWindow, tabAt, tabsOf, viewOf } from './support/browser-scene';
 import { invoke, value } from './support/c7-replay';
 import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
 import { menuAfter, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
@@ -584,6 +588,120 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       await expectNothingLogged(s);
       const importLog = existsSync(s.importLog) ? readFileSync(s.importLog, 'utf8') : '';
       for (const [where, text] of Object.entries({ main: s.mainOutput(), console: s.appConsole().join('\n'), importLog })) expect(text, where).not.toMatch(ACCOUNT);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+  } finally {
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+});
+
+// ---- the cover's still -------------------------------------------------------------------------------------------------
+
+// The pane's still once it is there: decoded, the pane's size, and a picture of a page (many colours, dark text pixels),
+// not a blank.
+async function expectStill(pane: Locator): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        pane.evaluate((element) => {
+          const img = element.querySelector('img');
+          if (!img || !img.complete || img.naturalWidth === 0) return null;
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const context = canvas.getContext('2d')!;
+          context.drawImage(img, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          const colours = new Set<number>();
+          let dark = 0;
+          for (let i = 0; i < pixels.length; i += 4) {
+            colours.add(((pixels[i]! >> 4) << 8) | ((pixels[i + 1]! >> 4) << 4) | (pixels[i + 2]! >> 4));
+            if (pixels[i]! < 96 && pixels[i + 1]! < 96 && pixels[i + 2]! < 96) dark++;
+          }
+          const box = element.getBoundingClientRect();
+          return { size: img.naturalWidth === Math.round(box.width) || img.naturalWidth === Math.floor(box.width), many: colours.size > 8, text: dark > 100 };
+        }),
+      { message: 'the pane shows the page’s still', timeout: 5_000 },
+    )
+    .toEqual({ size: true, many: true, text: true });
+}
+
+// Watches, frame by frame in the window and every 2 ms in main, for a moment when the tab's view is hidden and its pane
+// draws no still: answers those moments (ms since the watch began) when stopped.
+async function watchHoles(s: ImportScene, tabId: string, pane: Locator): Promise<() => Promise<number[]>> {
+  await s.maws.app.evaluate((_electron, id) => {
+    const g = globalThis as unknown as { __holeMain: [number, boolean][]; __holeTimer: ReturnType<typeof setInterval>; __maws_browser: { tab(id: string): { visible: boolean } | null } };
+    g.__holeMain = [];
+    g.__holeTimer = setInterval(() => g.__holeMain.push([Date.now(), g.__maws_browser.tab(id)?.visible ?? false]), 2);
+  }, tabId);
+  await pane.evaluate((element) => {
+    const w = window as unknown as { __holeFrames: [number, boolean][]; __holeOn: boolean };
+    w.__holeFrames = [];
+    w.__holeOn = true;
+    const frame = () => {
+      w.__holeFrames.push([Date.now(), element.querySelector('img') !== null]);
+      if (w.__holeOn) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+  const began = Date.now();
+  return async () => {
+    const frames = await s.page.evaluate(() => {
+      const w = window as unknown as { __holeFrames: [number, boolean][]; __holeOn: boolean };
+      w.__holeOn = false;
+      return w.__holeFrames;
+    });
+    const shown = await s.maws.app.evaluate(() => {
+      const g = globalThis as unknown as { __holeMain: [number, boolean][]; __holeTimer: ReturnType<typeof setInterval> };
+      clearInterval(g.__holeTimer);
+      return g.__holeMain;
+    });
+    // the view's state at a frame: main's last sample at or before it
+    const visibleAt = (t: number) => shown.filter(([at]) => at <= t).at(-1)?.[1] ?? true;
+    return frames.filter(([t, still]) => !still && !visibleAt(t)).map(([t]) => t - began);
+  };
+}
+
+test('the cover\'s still: the profile popover over the 380 px panel shows the page\'s still and never a hole, a page painted under it included', async () => {
+  const server = await startBrowserServer();
+  const { scratch, chrome } = importScratch(['cua #90: the still']);
+  try {
+    const s = await launchImportScene(scratch, server, chrome, { keychain: `file:${chrome.passwordFile}` });
+    const [id] = s.ids as [AppSessionId];
+    try {
+      const panel = await browserPanel(s, id);
+      expect(Math.round((await paneRect(paneIn(panel))).width)).toBeLessThanOrEqual(380);
+      await address(panel, server.url('/a.html'));
+      const tabId = await tabAt(s, id, server.url('/a.html'));
+      await expect.poll(async () => (await viewOf(s, tabId))?.visible).toBe(true);
+      await s.page.waitForTimeout(300); // the page has painted
+
+      // a page on screen: kept up until its still is in the pane, then hidden; no frame with neither
+      const holes = await watchHoles(s, tabId, paneIn(panel));
+      const popover = await openPopover(s, panel);
+      await expectStill(paneIn(panel));
+      await expect.poll(async () => (await viewOf(s, tabId))?.visible).toBe(false);
+      await s.page.waitForTimeout(200);
+      expect(await holes(), 'moments with the view hidden and no still in the pane').toEqual([]);
+      await s.page.keyboard.press('Escape');
+      await expect(popover).toHaveCount(0);
+      await expect.poll(async () => (await viewOf(s, tabId))?.visible).toBe(true);
+
+      // a new tab whose page answers after LATER_MS, the popover opened before it commits: it paints under the cover
+      // (never on screen) and still gets its still
+      await panel.getByRole('button', { name: 'New tab', exact: true }).click();
+      await address(panel, server.url('/later.html'));
+      await openPopover(s, panel);
+      const later = await tabAt(s, id, server.url('/later.html'));
+      await expectStill(paneIn(panel));
+      expect((await viewOf(s, later))?.visible).toBe(false);
+      await s.page.keyboard.press('Escape');
+      await expect(popoverOf(s)).toHaveCount(0);
+      await expect.poll(async () => (await viewOf(s, later))?.visible).toBe(true);
     } catch (error) {
       await s.maws.cleanup();
       throw error;

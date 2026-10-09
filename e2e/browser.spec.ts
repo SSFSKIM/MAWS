@@ -340,7 +340,8 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     const placeholder = pane.locator('img');
     const covered = async (yes: boolean, what: string) => {
       await expect.poll(async () => (await tabState(s, t)).tab?.covered, { message: `covered under ${what}` }).toBe(yes);
-      expect((await viewOf(s, t))?.visible, `visible under ${what}`).toBe(!yes);
+      // cua #90: a covered page stays on screen until its still is in the pane, then hides
+      await expect.poll(async () => (await viewOf(s, t))?.visible, { message: `visible under ${what}`, timeout: 1_000 }).toBe(!yes);
     };
 
     // the palette (a modal dialog): hidden within 200 ms, the page's picture in the pane; Esc: back, picture gone

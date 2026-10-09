@@ -5,9 +5,31 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_LOADED_TABS_MAX, BROWSER_PLACEHOLDER_MAX_BYTES, DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 
+// cua #90: the hidden staging window a page that never painted is captured in
+const stages: { options: unknown; children: Set<unknown>; destroyed: boolean }[] = [];
 vi.mock('electron', () => ({
   WebContentsView: class {
     constructor(readonly options?: unknown) {}
+  },
+  BaseWindow: class {
+    readonly children = new Set<unknown>();
+    destroyed = false;
+    readonly contentView = {
+      addChildView: (view: { calls: string[] }) => {
+        view.calls.push('staged');
+        this.children.add(view);
+      },
+      removeChildView: (view: { calls: string[] }) => {
+        view.calls.push('unstaged');
+        this.children.delete(view);
+      },
+    };
+    constructor(readonly options: unknown) {
+      stages.push(this);
+    }
+    destroy() {
+      this.destroyed = true;
+    }
   },
 }));
 
@@ -282,7 +304,8 @@ describe('the view manager: shown (Design §3, §5)', () => {
 });
 
 describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
-  it('hides every placed view of the sender\'s window and no other, then sends each a placeholder taken after hiding', async () => {
+  // cua #90: captured first, hidden after (hiding first left the pane empty until the still arrived)
+  it('captures every placed view of the sender\'s window and no other, sends each its placeholder, then hides it', async () => {
     const h = harness();
     const one = h.win();
     const two = h.win();
@@ -297,7 +320,7 @@ describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
     expect(a.view.visible).toBe(false);
     expect(b.view.visible).toBe(false);
     expect(c.view.visible).toBe(true);
-    expect(a.view.calls).toEqual(['visible false', 'capture']); // hidden first, then captured
+    expect(a.view.calls).toEqual(['capture', 'visible false']); // captured on screen, then hidden
     expect(h.covered().map((p) => p.tabId).sort()).toEqual([a.tabId, b.tabId].sort());
     expect(h.covered()[0]!.placeholder).toMatch(/^data:image\/jpeg;base64,/);
     expect(h.store.entry(a.tabId)!.tab.covered).toBe(true);
@@ -453,6 +476,87 @@ describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
     await first;
     expect(h.covered()).toEqual([{ tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) }]);
     expect(view.calls.filter((c) => c === 'capture')).toHaveLength(1);
+  });
+});
+
+// cua #90: the pane never shows a hole while a layer covers the page
+describe('the view manager: the cover\'s still (cua board #90)', () => {
+  it('keeps a page on screen, already listed covered, until its still is sent; hides it only after', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    let answer!: (image: unknown) => void;
+    view.capture = () => new Promise((resolve) => (answer = resolve));
+    const pending = h.manager.cover(true, sender);
+    expect(view.visible).toBe(true); // the page stays up while it is captured
+    expect(h.store.entry(tabId)!.tab.covered).toBe(true); // the pane keeps the still it is about to get
+    h.store.update(tabId, { title: 'meanwhile' }); // any other change meanwhile keeps it up too
+    expect(view.visible).toBe(true);
+    answer(fakeImage(10));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.covered()).toHaveLength(1);
+    expect(view.visible).toBe(true); // the frames the pane needs to draw the still
+    await pending;
+    expect(view.visible).toBe(false);
+    expect(view.calls.slice(-2)).toEqual(['capture', 'visible false']);
+  });
+
+  it('a cover lifted while the still is taken leaves the page up and sends nothing', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    let answer!: (image: unknown) => void;
+    view.capture = () => new Promise((resolve) => (answer = resolve));
+    const pending = h.manager.cover(true, sender);
+    await h.manager.cover(false, sender);
+    answer(fakeImage(10));
+    await pending;
+    expect(h.covered()).toEqual([]);
+    expect(view.visible).toBe(true);
+    expect(h.store.entry(tabId)!.tab.covered).toBe(false);
+  });
+
+  it('a page that commits under the cover gets its still once its load stopped, captured hidden', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId } = h.store.open({ appSessionId: A, url: 'https://late.test/', select: true }).tab;
+    const view = h.views.at(-1)!;
+    h.place(sender, tabId, 'p1', R, true);
+    await h.manager.cover(true, sender);
+    expect(h.covered()).toEqual([]); // nothing on screen to capture yet
+    h.store.navigationCommitted(tabId, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    expect(view.calls).not.toContain('capture'); // still loading
+    h.store.update(tabId, { loading: false });
+    await vi.waitFor(() => expect(h.covered()).toEqual([{ tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) }]));
+    expect(view.visible).toBe(false);
+    h.store.update(tabId, { title: 'again' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.calls.filter((c) => c === 'capture')).toHaveLength(1); // once per cover
+  });
+
+  it('a page that never painted is captured in a hidden staging window, then put back in its window, hidden, at its rect', async () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId } = h.store.open({ appSessionId: A, url: 'https://late.test/', select: true }).tab;
+    const view = h.views.at(-1)!;
+    h.place(sender, tabId, 'p1', R, true);
+    await h.manager.cover(true, sender);
+    let captures = 0;
+    view.capture = async () => fakeImage(10, ++captures === 1); // empty while it never painted, then the page
+    stages.length = 0;
+    view.calls.length = 0;
+    h.store.navigationCommitted(tabId, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    h.store.update(tabId, { loading: false });
+    await vi.waitFor(() => expect(h.covered()).toEqual([{ tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) }]));
+    expect(stages).toHaveLength(1);
+    expect(stages[0]!.options).toEqual({ show: false, width: R.width, height: R.height });
+    expect(stages[0]!.destroyed).toBe(true);
+    expect(view.calls).toEqual(['capture', 'staged', 'bounds 0,0,300,200', 'visible true', 'capture', 'unstaged', 'visible false', `bounds ${R.x},${R.y},${R.width},${R.height}`]);
+    expect(w.children.has(view)).toBe(true);
+    expect(view.visible).toBe(false);
+    expect(h.store.entry(tabId)!.tab.covered).toBe(true);
   });
 });
 
