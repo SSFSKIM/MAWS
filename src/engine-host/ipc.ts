@@ -16,7 +16,7 @@ import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runti
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -62,6 +62,10 @@ import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli
 import { PluginsRunner, SHUTDOWN_KILL_GRACE_MS, type Timers } from './plugins/runner';
 import { READ_LINES } from '@shared/plugins/cli';
 // E8 end
+// P2-C start (2026-10-09)
+import { journalDir } from './launcher';
+import { promptHistory } from './prompt-history';
+// P2-C end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -96,6 +100,9 @@ export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
 // E8: `session.reloadSkills`, an operation like its plugins sibling. The `plugins.*` and `marketplaces.*` reads are one
 // CLI run each under the bridge's 10 s deadline (accepted, E8 M1); their mutations are operations of the plugin runner.
 export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.reloadSkills': 'operation' };
+// P2-C (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold` is; the
+// prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
+export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
@@ -404,6 +411,14 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     }));
   handle('session.queue.promote', async ({ appSessionId, queueId, priority }) => sessionOf(appSessionId).queue.promote(queueId, { priority: priority ?? 'now' }));
   handle('session.queue.hold', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.hold(messageUuid as MessageUuid))); // W1
+  // P2-C start (2026-10-09; the P2-C document, Design §6): a pending steer withdrawn and dropped; the prompt record read
+  // back from the session's retained journals, whether or not this host holds the session now
+  on('session.steer.cancel', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.cancelSteer(messageUuid as MessageUuid)));
+  on('session.promptHistory', async ({ appSessionId, since }) => {
+    assertSafeAppSessionId(appSessionId); // it names a directory
+    return promptHistory(journalDir(deps.userData, appSessionId as AppSessionId), appSessionId as AppSessionId, since);
+  });
+  // P2-C end
   handle('session.queue.setPaused', async ({ appSessionId, paused }) => sessionOf(appSessionId).queue.setPaused(paused));
   handle('session.interrupt', async ({ appSessionId, cancelEngineQueued, holdEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued, holdEngineQueued: holdEngineQueued ?? false })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));

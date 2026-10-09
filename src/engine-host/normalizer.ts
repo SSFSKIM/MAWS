@@ -11,6 +11,7 @@
 import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
+import { QUEUE_DROP_REASONS, QUEUE_TRANSITION_ACTIONS, type QueueDropReason, type QueueTransitionAction } from '@shared/graph/events'; // P2-C
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { contextTotal, GetContextUsageResponseSchema, RewindConversationResponseSchema, UiPanesResponseSchema } from '@shared/wire/control';
 import { rosterOf } from './surface-wire'; // R2
@@ -577,8 +578,19 @@ export class Normalizer {
         mapMawsAskMeta(meta, out, main, this.state.openAsks);
         return;
       // E1 end
+      // P2-C start (2026-10-09; the P2-C document, Design §6): a prompt's transition through the host's queue; the
+      // queue's pause and resume rows are not a prompt's and yield nothing
+      case 'queue':
+        if (QUEUE_TRANSITIONS.has(meta.action)) {
+          out.emit({
+            kind: 'queue.transition', action: meta.action as QueueTransitionAction, queueId: stringOrNull(meta.queueId), messageUuid: stringOrNull(meta.messageUuid) as MessageUuid | null,
+            reason: meta.action === 'drop' && QUEUE_DROPS.has(meta.reason) ? (meta.reason as QueueDropReason) : null,
+          }, main);
+        }
+        return;
+      // P2-C end
       default:
-        return; // spawn, relay_health, initialize, status_check, queue, the normaliser's own warnings, and the probe's notes
+        return; // spawn, relay_health, initialize, status_check, the normaliser's own warnings, and the probe's notes
     }
   }
 }
@@ -617,6 +629,11 @@ function laneOf(frame: StdoutFrame): ParentToolUseId | null {
   const parent = (frame as { parent_tool_use_id?: unknown }).parent_tool_use_id;
   return typeof parent === 'string' && parent.length > 0 ? (parent as ParentToolUseId) : null;
 }
+
+// P2-C start (2026-10-09): the actions of a `meta queue` row that are a prompt's transitions, and a drop's reasons
+const QUEUE_TRANSITIONS: ReadonlySet<unknown> = new Set<string>(QUEUE_TRANSITION_ACTIONS);
+const QUEUE_DROPS: ReadonlySet<unknown> = new Set<string>(QUEUE_DROP_REASONS);
+// P2-C end
 
 // C12 start: the exit row's `budget` (a release's budget and sum) and the reconnect row's trigger, as the host recorded
 // them; a trigger outside X1's set reads `user`, as every row did before C12 produced `process_exit`.

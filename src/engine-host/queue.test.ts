@@ -5,6 +5,8 @@ import type { QueueEntry, QueueState } from '@shared/engine/session-state-store'
 import type { UserInputFrame } from '@shared/wire/frames';
 import { MessageQueue } from './queue';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+import { SessionEventSchema } from '@shared/graph/events'; // P2-C
+import { Normalizer } from './normalizer'; // P2-C
 
 const ID = 'app-q' as AppSessionId;
 type TurnEnded = Extract<SessionEvent, { kind: 'turn.ended' }>;
@@ -31,7 +33,8 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const held: (() => void)[] = [];
   const cancels: MessageUuid[] = [];
   const prefaces: (Record<string, unknown>[] | undefined)[] = []; // E1: each write's preface rows, as the writer was handed them
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, prefaces, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
+  const timeline: ({ row: Record<string, unknown> } | { change: QueueState })[] = []; // P2-C: rows and published changes, in the order they happened
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, prefaces, timeline, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -44,7 +47,10 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
       if (frame.shouldQuery !== false) h.turn = true;
       h.onWrite?.(frame);
     },
-    meta: (frame) => rows.push(frame),
+    meta: (frame) => {
+      rows.push(frame);
+      timeline.push({ row: frame }); // P2-C
+    },
     turnOpen: () => h.turn,
     canWrite: () => h.ready,
     cancel: async (uuid) => {
@@ -52,7 +58,10 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
       await h.cancelAnswer;
       return h.cancelFor ? h.cancelFor(uuid) : h.cancelled;
     },
-    onChange: (q) => changes.push(q),
+    onChange: (q) => {
+      changes.push(q);
+      timeline.push({ change: q }); // P2-C
+    },
     log: () => {},
     holdAllDeadlineMs: opts.holdAllDeadlineMs,
   });
@@ -61,7 +70,9 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
 }
 
 const notices = (rows: Record<string, unknown>[]) => rows.filter((r) => r.event === 'notice').map((r) => r.key);
-const queueRows = (rows: Record<string, unknown>[]) => rows.filter((r) => r.event === 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`);
+// The queue's rows from before P2-C (releases, holds, pauses, resumes); P2-C's prompt record is read through `transitions`.
+const PRE_P2C_ROWS: ReadonlySet<unknown> = new Set(['release', 'hold', 'pause', 'resume']);
+const queueRows = (rows: Record<string, unknown>[]) => rows.filter((r) => r.event === 'queue' && PRE_P2C_ROWS.has(r.action)).map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1055,3 +1066,280 @@ describe('F2 paused queue admission', () => {
     expect(t.writes.map((w) => w.message.content)).toEqual(['after Stop']);
   });
 });
+
+// P2-C start (2026-10-09; the P2-C document, Design §6's row table and M3): the host states each transition of a prompt
+// through its queue as one `meta queue` row, at the transition, before the change is published; the normaliser reads
+// each as a `queue.transition`. Rows are read here through a real Normalizer, as the session's record path reads them.
+type Transition = { action: string; queueId: string | null; messageUuid: string | null; reason: string | null };
+type Timeline = Awaited<ReturnType<typeof harness>>['timeline'];
+const transitions = (rows: Record<string, unknown>[]): Transition[] => {
+  const normalizer = new Normalizer({ appSessionId: ID, launchId: 'L1', sessionId: null });
+  return rows
+    .flatMap((frame, i) => normalizer.push({ seq: i + 1, direction: 'meta', at: base.at, frame }))
+    .map((event) => SessionEventSchema.parse(event))
+    .flatMap((event) => (event.kind === 'queue.transition' ? [{ action: event.action, queueId: event.queueId, messageUuid: event.messageUuid, reason: event.reason }] : []));
+};
+const tr = (action: string, queueId: string | null, messageUuid: unknown, reason: string | null = null) => ({ action, queueId, messageUuid, reason });
+// the index of the first row of `action` naming `id` (as its uuid or its entry), and of the first published change `shows` matches
+const rowAt = (timeline: Timeline, action: string, id: string) => timeline.findIndex((e) => 'row' in e && e.row.action === action && (e.row.messageUuid === id || e.row.queueId === id));
+const changeAt = (timeline: Timeline, shows: (q: QueueState) => boolean, from = 0) => timeline.findIndex((e, i) => i >= from && 'change' in e && shows(e.change));
+// the first published change without entry `queueId` once a change had shown it
+const goneAt = (timeline: Timeline, queueId: string) => changeAt(timeline, (q) => !q.entries.some((e) => e.queueId === queueId), changeAt(timeline, (q) => q.entries.some((e) => e.queueId === queueId)));
+const failingSaves = (store: MemorySessionStateStore) => {
+  store.saveQueue = async () => {
+    throw new Error('EIO: i/o error');
+  };
+};
+
+describe('the prompt record: each transition one row and one queue.transition (P2-C)', () => {
+  it('release: an idle send is submitted as one row naming its entry and uuid', async () => {
+    const t = await harness();
+    const { entry } = await t.queue.send('one');
+    expect(transitions(t.rows)).toEqual([tr('release', entry.queueId, entry.messageUuid)]);
+  });
+
+  it('revert: a submission whose persist fails, or whose write fails, names the uuid that never reached the engine', async () => {
+    const persisted = await harness();
+    failingSaves(persisted.store);
+    const { entry: notSaved } = await persisted.queue.send('not durable');
+    expect(transitions(persisted.rows)).toEqual([tr('revert', notSaved.queueId, expect.any(String))]);
+    expect(persisted.writes).toEqual([]);
+
+    const written = await harness({ failWrite: () => true });
+    const { entry: doomed } = await written.queue.send('doomed');
+    const uuid = transitions(written.rows)[0]!.messageUuid;
+    expect(transitions(written.rows)).toEqual([tr('release', doomed.queueId, uuid), tr('revert', doomed.queueId, uuid)]);
+    expect(rowAt(written.timeline, 'revert', doomed.queueId)).toBeLessThan(changeAt(written.timeline, (q) => q.paused && q.entries.some((e) => e.queueId === doomed.queueId && e.state === 'queued')));
+  });
+
+  it('uncertain at an exit for a submission it cut; a late write failure states nothing more', async () => {
+    const t = await harness({ holdWrites: true, failWrite: () => true });
+    const sending = t.queue.send('in flight');
+    await flush();
+    const submitting = t.queue.state.entries[0]!;
+    const before = t.rows.length;
+    await t.queue.onProcessExited('crash');
+    t.held.shift()!();
+    await sending;
+    expect(transitions(t.rows.slice(before))).toEqual([tr('uncertain', submitting.queueId, submitting.messageUuid)]);
+  });
+
+  it('abandon and retire at an exit: each pending steer first, then each released entry', async () => {
+    const t = await harness();
+    const { entry } = await t.queue.send('accepted');
+    t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'queued'));
+    t.h.turn = true;
+    const { messageUuid: steer } = await t.queue.steer('fold this in', { priority: 'next' });
+    const before = t.rows.length;
+    await t.queue.onProcessExited('crash');
+    expect(transitions(t.rows.slice(before))).toEqual([tr('abandon', null, steer), tr('retire', entry.queueId, entry.messageUuid)]);
+    expect(t.queue.state.steers).toBeUndefined();
+  });
+
+  it("abandon at a recovery holding a dead process's pending steers, before the uncertain row of its stored submission", async () => {
+    const store = new MemorySessionStateStore();
+    const STEER = '66666666-6666-4666-8666-666666666666' as MessageUuid;
+    const SUBMITTED = '55555555-5555-4555-8555-555555555555' as MessageUuid;
+    await store.saveQueue(ID, {
+      entries: [{ queueId: 'q-sub', appSessionId: ID, content: 'lost?', createdAt: base.at, state: 'submitting', messageUuid: SUBMITTED, submittedAt: base.at, uncertain: false, steer: false }],
+      paused: false, steers: [{ messageUuid: STEER, content: 'fold this in', createdAt: base.at }],
+    });
+    const t = await harness({ store, recovered: false });
+    await t.queue.recover();
+    expect(transitions(t.rows)).toEqual([tr('abandon', null, STEER), tr('uncertain', 'q-sub', SUBMITTED)]);
+    expect(t.queue.state.steers).toBeUndefined();
+    expect((await store.loadQueue(ID)).steers).toBeUndefined();
+  });
+
+  it('drop: a submission the engine cancels, discards or refuses before it started, with its reason, before the change without it', async () => {
+    for (const state of ['cancelled', 'discarded', 'refused'] as const) {
+      const t = await harness();
+      const { entry } = await t.queue.send('one');
+      t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'queued'));
+      t.queue.onLifecycle(lifecycle(entry.messageUuid!, state));
+      await flush();
+      expect(transitions(t.rows)).toEqual([tr('release', entry.queueId, entry.messageUuid), tr('drop', entry.queueId, entry.messageUuid, state)]);
+      expect(rowAt(t.timeline, 'drop', entry.queueId)).toBeLessThan(goneAt(t.timeline, entry.queueId));
+    }
+  });
+
+  it('withdraw then hold: the claim is stated before it is published, the held entry before it is', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('then this', { priority: 'next' });
+    const entry = await t.queue.hold(messageUuid);
+    expect(transitions(t.rows)).toEqual([tr('withdraw', null, messageUuid), tr('hold', entry.queueId, messageUuid)]);
+    expect(rowAt(t.timeline, 'withdraw', messageUuid)).toBeLessThan(changeAt(t.timeline, (q) => q.withdrawn?.includes(messageUuid) === true));
+    expect(rowAt(t.timeline, 'hold', entry.queueId)).toBeLessThan(changeAt(t.timeline, (q) => q.entries.some((e) => e.queueId === entry.queueId)));
+  });
+
+  it('withdraw then giveback: a cancel that fails, or that the engine answers it had nothing to withdraw, gives the claim back as a row', async () => {
+    const failed = await harness();
+    failed.h.turn = true;
+    const { messageUuid: lost } = await failed.queue.steer('then this', { priority: 'next' });
+    failed.h.cancelFor = () => Promise.reject(new Error('cancel_async_message unanswered'));
+    await expect(failed.queue.hold(lost)).rejects.toThrow('unanswered');
+    expect(transitions(failed.rows)).toEqual([tr('withdraw', null, lost), tr('giveback', null, lost)]);
+    expect(rowAt(failed.timeline, 'giveback', lost)).toBeLessThan(changeAt(failed.timeline, (q) => q.withdrawn === undefined, rowAt(failed.timeline, 'withdraw', lost)));
+
+    const refused = await harness();
+    refused.h.turn = true;
+    const { messageUuid: taken } = await refused.queue.steer('then this', { priority: 'next' });
+    refused.h.cancelled = false;
+    await expect(refused.queue.cancelSteer(taken)).resolves.toEqual({ outcome: 'already_started' });
+    expect(transitions(refused.rows)).toEqual([tr('withdraw', null, taken), tr('giveback', null, taken)]);
+  });
+
+  it('promote: journaled before its write, so a start the write drains follows it; a failed write reverts it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('queued');
+    let atWrite: Transition[] = [];
+    t.h.onWrite = (frame) => {
+      atWrite = transitions(t.rows);
+      t.queue.onLifecycle(lifecycle(frame.uuid as MessageUuid, 'started')); // the writer's settle drains the engine's start
+    };
+    const { messageUuid } = await t.queue.promote(entry.queueId, { priority: 'next' });
+    expect(atWrite).toEqual([tr('promote', entry.queueId, messageUuid)]);
+    expect(transitions(t.rows)).toEqual([tr('promote', entry.queueId, messageUuid)]);
+    expect(rowAt(t.timeline, 'promote', entry.queueId)).toBeLessThan(goneAt(t.timeline, entry.queueId));
+
+    const failing = await harness({ failWrite: () => true });
+    failing.h.turn = true;
+    const { entry: queued } = await failing.queue.send('queued');
+    await expect(failing.queue.promote(queued.queueId)).rejects.toThrow('EPIPE');
+    const uuid = transitions(failing.rows)[0]!.messageUuid;
+    expect(transitions(failing.rows)).toEqual([tr('promote', queued.queueId, uuid), tr('revert', queued.queueId, uuid)]);
+  });
+
+  it('remove: one row once the removal is saved and before it is published; a removal that cannot be saved states nothing', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('changed my mind');
+    await t.queue.remove(entry.queueId);
+    expect(transitions(t.rows)).toEqual([tr('remove', entry.queueId, null)]);
+    expect(rowAt(t.timeline, 'remove', entry.queueId)).toBeLessThan(goneAt(t.timeline, entry.queueId));
+
+    const failing = await harness();
+    failing.h.turn = true;
+    const { entry: kept } = await failing.queue.send('kept');
+    failingSaves(failing.store);
+    await expect(failing.queue.remove(kept.queueId)).rejects.toThrow('EIO');
+    expect(transitions(failing.rows)).toEqual([]);
+    expect(failing.queue.state.entries.map((e) => e.queueId)).toEqual([kept.queueId]);
+  });
+});
+
+// P2-C (the P2-C document, Design §6 "Cancel" and Interfaces `session.steer.cancel`): a pending steer withdrawn and
+// dropped, never re-queued, so a cancelled answer is never sent by its own cancellation.
+describe('cancelSteer (P2-C)', () => {
+  const steps = (rows: Record<string, unknown>[]) => transitions(rows).map((t) => [t.action, t.messageUuid]);
+
+  it('withdraws the pending steer and drops it: no held entry, no release, its uuid kept withdrawn, the cancel row before the published change', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    await expect(t.queue.cancelSteer(messageUuid)).resolves.toEqual({ outcome: 'cancelled' });
+    expect(t.cancels).toEqual([messageUuid]);
+    expect(steps(t.rows)).toEqual([['withdraw', messageUuid], ['cancel', messageUuid]]);
+    expect(t.queue.state).toMatchObject({ entries: [], withdrawn: [messageUuid] });
+    expect(t.queue.state.steers).toBeUndefined();
+    expect(await t.store.loadQueue(ID)).toMatchObject({ entries: [], withdrawn: [messageUuid] });
+    const cancelRow = rowAt(t.timeline, 'cancel', messageUuid);
+    expect(t.timeline.slice(cancelRow + 1).some((e) => 'change' in e)).toBe(true); // published after its row
+    expect(t.writes).toHaveLength(1); // the steer's own write only
+  });
+
+  it('with the turn ending mid-cancel: drops the steer, releases nothing and writes nothing (where hold would send it)', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const cancelling = t.queue.cancelSteer(messageUuid);
+    await flush();
+    t.queue.onLifecycle(lifecycle(messageUuid, 'cancelled')); // the engine's withdrawal, then the running turn ends
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ origin: 'human' }));
+    answer();
+    await expect(cancelling).resolves.toEqual({ outcome: 'cancelled' });
+    await flush();
+    expect(t.writes).toHaveLength(1);
+    expect(t.queue.state.entries).toEqual([]);
+    expect(queueRows(t.rows)).toEqual([]);
+  });
+
+  it("an entry the unstarted steer held back at the turn's end goes once the steer is cancelled, under the usual gates", async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry: waiting } = await t.queue.send('queued behind');
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const cancelling = t.queue.cancelSteer(messageUuid);
+    await flush();
+    await t.queue.onTurnEnded(turnEnded({ origin: 'human' })); // the turn ends while the steer is still unstarted (busy): nothing goes
+    expect(t.writes).toHaveLength(1);
+    t.queue.onLifecycle(lifecycle(messageUuid, 'cancelled'));
+    t.h.turn = false; // withdrawn: nothing waits to start any more
+    answer();
+    await cancelling;
+    expect(t.writes.map((w) => w.message.content)).toEqual(['the answer', 'queued behind']);
+    expect(t.queue.state.entries).toMatchObject([{ queueId: waiting.queueId, state: 'submitting' }]);
+    expect(queueRows(t.rows)).toEqual(['release:hold']);
+  });
+
+  it('answers already_started for a uuid that is not a pending steer, without asking the engine, and after the engine took it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await expect(t.queue.cancelSteer('77777777-7777-4777-8777-777777777777' as MessageUuid)).resolves.toEqual({ outcome: 'already_started' });
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    t.queue.onLifecycle(lifecycle(messageUuid, 'started'));
+    await expect(t.queue.cancelSteer(messageUuid)).resolves.toEqual({ outcome: 'already_started' });
+    expect(t.cancels).toEqual([]);
+    expect(t.rows.filter((r) => r.event === 'queue')).toEqual([]);
+  });
+
+  it('is refused while a hold withdraws the steer', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const holding = t.queue.hold(messageUuid);
+    await flush();
+    await expect(t.queue.cancelSteer(messageUuid)).rejects.toThrow('already being withdrawn');
+    answer();
+    await holding;
+    expect(t.cancels).toEqual([messageUuid]);
+  });
+
+  it('a failed cancel gives the claim back and rejects; the steer stays pending and can be cancelled again', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    t.h.cancelFor = () => Promise.reject(new Error('cancel_async_message unanswered'));
+    await expect(t.queue.cancelSteer(messageUuid)).rejects.toThrow('unanswered');
+    expect(t.queue.state.steers?.map((s) => s.messageUuid)).toEqual([messageUuid]);
+    expect(t.queue.state.withdrawn).toBeUndefined();
+    t.h.cancelFor = null;
+    await expect(t.queue.cancelSteer(messageUuid)).resolves.toEqual({ outcome: 'cancelled' });
+    expect(steps(t.rows)).toEqual([['withdraw', messageUuid], ['giveback', messageUuid], ['withdraw', messageUuid], ['cancel', messageUuid]]);
+  });
+
+  it('an exit while the cancel is unanswered abandons the steer; the cancel failing after it gives nothing back', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    let fail!: (error: Error) => void;
+    t.h.cancelFor = () => new Promise<boolean>((_, reject) => (fail = reject));
+    const cancelling = t.queue.cancelSteer(messageUuid);
+    await flush();
+    t.queue.onLifecycle(lifecycle(messageUuid, 'cancelled')); // the engine withdrew it; the process dies before answering
+    await t.queue.onProcessExited('crash');
+    fail(new Error('no engine process'));
+    await expect(cancelling).rejects.toThrow('no engine process');
+    expect(steps(t.rows)).toEqual([['withdraw', messageUuid], ['abandon', messageUuid]]);
+  });
+});
+// P2-C end

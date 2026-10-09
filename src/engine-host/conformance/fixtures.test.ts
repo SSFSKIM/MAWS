@@ -649,6 +649,9 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E4c start: M4's pass3/p1-maws-browser (open, two snapshots, two fills, a click, a screenshot)
       'maws.browser.action',
       // E4c end
+      // P2-C start (2026-10-09): the queue's recorded `release` rows (pass3/steer-next and the other C3/W1 live records)
+      'queue.transition',
+      // P2-C end
     ].sort());
     void kinds;
   });

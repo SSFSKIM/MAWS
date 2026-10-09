@@ -13,7 +13,7 @@ import {
   SESSION_STATES,
   TITLE_SOURCES,
 } from './enums';
-import { EVENT_KINDS, SessionEventSchema, type SessionEvent } from './events';
+import { EVENT_KINDS, QUEUE_TRANSITION_ACTIONS /* P2-C */, SessionEventSchema, type SessionEvent } from './events';
 import { SessionRecordSchema, type SessionRecord } from './session';
 
 const base = {
@@ -81,10 +81,11 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(68); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action
-      expect(EVENT_KINDS.at(-3)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
-      expect(EVENT_KINDS.at(-2)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
-      expect(EVENT_KINDS.at(-1)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
+      expect(EVENT_KINDS).toHaveLength(69); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action; P2-C: queue.transition
+      expect(EVENT_KINDS.at(-4)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
+      expect(EVENT_KINDS.at(-3)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
+      expect(EVENT_KINDS.at(-2)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
+      expect(EVENT_KINDS.at(-1)).toBe('queue.transition'); // P2-C (2026-10-09): after E4c's
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -202,6 +203,9 @@ describe('graph schemas accept and reject', () => {
           ms: 40, deliverableId: null, error: null, waitedFor: 'human', waitedMs: 3012,
         },
         // E4c end
+        // P2-C start (2026-10-09): a drop row of the host queue's prompt record
+        'queue.transition': { action: 'drop', queueId: 'q-1', messageUuid: 'u-1', reason: 'cancelled' },
+        // P2-C end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {
@@ -221,6 +225,15 @@ describe('graph schemas accept and reject', () => {
       expect(SessionEventSchema.safeParse({ ...action, error: undefined }).success).toBe(false); // required, nullable
     });
     // E4c end
+    // P2-C start (2026-10-09): a transition names one of the twelve actions, and a drop's reason one of the three drops
+    it('queue.transition takes the twelve actions of the prompt record, nullable ids, and a drop reason or null', () => {
+      const transition = { ...base, kind: 'queue.transition', action: 'withdraw', queueId: null, messageUuid: 'u-1', reason: null };
+      for (const action of QUEUE_TRANSITION_ACTIONS) expect(SessionEventSchema.safeParse({ ...transition, action }).success, action).toBe(true);
+      expect(SessionEventSchema.safeParse({ ...transition, action: 'pause' }).success).toBe(false); // a pause is not a prompt's transition
+      expect(SessionEventSchema.safeParse({ ...transition, reason: 'completed' }).success).toBe(false);
+      expect(SessionEventSchema.safeParse({ ...transition, queueId: undefined }).success).toBe(false); // required, nullable
+    });
+    // P2-C end
 
     it('rejects an unknown kind and wrong-typed payload fields', () => {
       expect(SessionEventSchema.safeParse({ ...base, kind: 'tool.exploded' }).success).toBe(false);

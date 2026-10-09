@@ -121,7 +121,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const { messageUuid } = await session.send('hi');
     const row = journal.rows.at(-1)!;
     expect(row).toMatchObject({ direction: 'out', frame: { type: 'user', uuid: messageUuid, origin: { kind: 'human' }, parent_tool_use_id: null, message: { role: 'user', content: 'hi' } } });
-    expect(events.map((e) => [e.kind, e.seq])).toEqual([['user.message', row.seq]]);
+    expect(events.map((e) => [e.kind, e.seq])).toEqual([['queue.transition', row.seq - 1] /* P2-C: the queue's release row, before the write */, ['user.message', row.seq]]);
     expect(session.status().turn).toBeNull();
     transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: 'lc-1', session_id: 's', timestamp: '2026-09-28T10:00:01.000Z' });
     await flush();
@@ -390,9 +390,10 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     await session.start();
     const sent = await session.send('hi');
     expect(sent).toMatchObject({ disposition: 'queued', messageUuid: null, entry: { state: 'queued', content: 'hi' } });
-    expect(journal.rows.at(-2)!.frame).toMatchObject({ event: 'write_failed', frameType: 'user', subtype: null, requestId: null });
+    expect(journal.rows.at(-3)!.frame).toMatchObject({ event: 'write_failed', frameType: 'user', subtype: null, requestId: null });
+    expect(journal.rows.at(-2)!.frame).toEqual({ event: 'queue', action: 'revert', queueId: sent.queueId, messageUuid: expect.any(String) }); // P2-C: the uuid that never reached the engine
     expect(journal.rows.at(-1)!.frame).toEqual({ event: 'queue', action: 'pause', reason: 'write_failed' });
-    expect(events.map((e) => e.kind)).toEqual(['error.raised']);
+    expect(events.map((e) => e.kind)).toEqual(['queue.transition', 'error.raised', 'queue.transition']); // P2-C: release, then revert
     expect(session.status().turn).toBeNull();
     expect(session.status().queue).toEqual({ length: 1, paused: true });
   });

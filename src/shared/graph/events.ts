@@ -28,6 +28,14 @@ import { AnchorSchema } from '../anchor/anchor';
 import { AppSessionIdSchema } from './ids';
 // E3 end
 
+// P2-C start (2026-10-09; the P2-C document, Design §6's row table): the queue's transitions of a prompt, each journaled
+// as a `meta queue` row at the transition it names; a drop's reason is the engine's lifecycle state that dropped it.
+export const QUEUE_TRANSITION_ACTIONS = ['release', 'revert', 'uncertain', 'retire', 'drop', 'withdraw', 'giveback', 'hold', 'cancel', 'abandon', 'promote', 'remove'] as const;
+export type QueueTransitionAction = (typeof QUEUE_TRANSITION_ACTIONS)[number];
+export const QUEUE_DROP_REASONS = ['cancelled', 'discarded', 'refused'] as const;
+export type QueueDropReason = (typeof QUEUE_DROP_REASONS)[number];
+// P2-C end
+
 // An API content block, unknown keys kept.
 export const ContentBlockSchema = z.looseObject({ type: z.string() });
 export type ContentBlock = z.infer<typeof ContentBlockSchema>;
@@ -116,6 +124,9 @@ export const EVENT_KINDS = [
   // E4c start: one browser tool call the maws server answered (P1 X9 `browser_*`)
   'maws.browser.action',
   // E4c end
+  // P2-C start (2026-10-09): a prompt's transition through the host's queue, from the queue's `meta queue` row
+  'queue.transition',
+  // P2-C end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -312,9 +323,22 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     waitedFor: BrowserWaitReasonSchema.nullable(), waitedMs: z.number().int().min(0).nullable(),
   }),
   // E4c end
+  // P2-C start (2026-10-09; the P2-C document, Design §6 and Interfaces X1): one row of the host queue's prompt record,
+  // mapped from its `meta queue` row by the normaliser. The ids are the entry (`queueId`) and the prompt (`messageUuid`)
+  // the row names, each null where its action names none; `reason` is a drop's lifecycle state, null on every other row.
+  event('queue.transition', { action: z.enum(QUEUE_TRANSITION_ACTIONS), queueId: z.string().nullable(), messageUuid: MessageUuidSchema.nullable(), reason: z.enum(QUEUE_DROP_REASONS).nullable() }),
+  // P2-C end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;
+
+// P2-C start (2026-10-09; the P2-C document, Interfaces `session.promptHistory`): the two kinds of the prompt record read
+// back from the journals, as the very members of SessionEventSchema
+type EventMember<K extends EventKind> = Extract<(typeof SessionEventSchema.options)[number], { shape: { kind: z.ZodLiteral<K> } }>;
+const memberOf = <K extends EventKind>(kind: K): EventMember<K> => SessionEventSchema.options.find((option) => option.shape.kind.value === kind) as EventMember<K>;
+export const PromptHistoryEventSchema = z.discriminatedUnion('kind', [memberOf('queue.transition'), memberOf('command.lifecycle')]);
+export type PromptHistoryEvent = z.infer<typeof PromptHistoryEventSchema>;
+// P2-C end
 
 // The payload half of each member, `kind` included; `SessionEvent` is `EventBase & EventPayload` member by member.
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
