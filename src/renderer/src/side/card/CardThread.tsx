@@ -100,7 +100,8 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
       </div>
       {needs !== null && (
         <div role="status" data-needs-you={needs.kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-warning px-2 py-1 text-ui-sm text-fg">
-          <span className="min-w-0 flex-1">{needs.text}</span>
+          {/* P2-E1 M5: a 10rem basis, so at the card's width the buttons wrap under the words rather than squeeze them */}
+          <span className="min-w-0 grow basis-40">{needs.text}</span>
           {!needs.tabOnly && (
             <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => openThreadInSidePane(serial, parent, child)}>
               {COPY.openInSidePane}
