@@ -26,7 +26,7 @@ export interface StubPlugin {
   // P2-B end
 }
 
-export type StubMarketplace = { name: string; plugins: StubPlugin[]; countsInstalls?: boolean /* P2-B */ } & ({ source: 'directory'; path: string } | { source: 'github'; repo: string } | { source: 'git' | 'url'; url: string });
+export type StubMarketplace = { name: string; plugins: StubPlugin[]; countsInstalls?: boolean /* P2-B */ } & ({ source: 'directory'; path: string } | { source: 'github'; repo: string; ref?: string /* P2-B */ } | { source: 'git' | 'url'; url: string; ref?: string /* P2-B: git only */ });
 
 export interface StubInstallation {
   id: string;

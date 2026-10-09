@@ -38,7 +38,7 @@ describe('the plugin CLI stub', () => {
     expect(await installedOf(pluginRowsOf(installed.stdout), ctx.cwd)).toEqual([
       { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/tmp/e8/config/plugins/cache/e8-scratch/e8-probe/0.1.0', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false },
     ]);
-    expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', installLocation: '/tmp/e8/market' }]);
+    expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', ref: null, installLocation: '/tmp/e8/market' }]);
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout)).toEqual([]); // the engine leaves out what is installed
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], base()).stdout)).toEqual([
       { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: '0.1.0', source: './plugins/e8-probe', installCount: null },
@@ -71,6 +71,14 @@ describe('the plugin CLI stub', () => {
       ['quiet@claude-plugins-official', './plugins/quiet', null],
       ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null, ref: null }, null],
     ]);
+  });
+
+  it('lists the branch or tag a repository marketplace is pinned to, as the engine does: only when it has one (P2-B)', () => {
+    const state = base();
+    state.marketplaces.push({ name: 'pinned', source: 'github', repo: 'acme/pinned', ref: 'v2', plugins: [] }, { name: 'tip', source: 'git', url: 'https://example.com/tip.git', plugins: [] });
+    const printed = JSON.parse(run(['plugin', 'marketplace', 'list', '--json'], state).stdout) as Record<string, unknown>[];
+    expect(printed.map((m) => m.ref)).toEqual([undefined, 'v2', undefined]);
+    expect(marketplacesOf(JSON.stringify(printed)).map((m) => [m.name, m.ref])).toEqual([['e8-scratch', null], ['pinned', 'v2'], ['tip', null]]);
   });
 
   it('writes each installation’s tree and each cloned marketplace’s catalogue inside CLAUDE_CONFIG_DIR, which the manifest reader reads (P2-B)', async () => {
@@ -183,10 +191,10 @@ describe('the plugin CLI stub', () => {
     expect(step(commandLine('marketplace-add', { source: 'acme/tools' }))).toMatchObject({ ok: true, result: { marketplace: 'tools' } });
     expect(step(commandLine('marketplace-add', { source: 'https://example.com/acme/more.git' }))).toMatchObject({ ok: true, result: { marketplace: 'more' } });
     expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([
-      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', installLocation: '/tmp/e8/market' },
-      { name: 'e8-other', source: 'directory', locator: market, installLocation: market },
-      { name: 'tools', source: 'github', locator: 'acme/tools', installLocation: '/tmp/e8/config/plugins/marketplaces/tools' },
-      { name: 'more', source: 'git', locator: 'https://example.com/acme/more.git', installLocation: '/tmp/e8/config/plugins/marketplaces/more' },
+      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', ref: null, installLocation: '/tmp/e8/market' },
+      { name: 'e8-other', source: 'directory', locator: market, ref: null, installLocation: market },
+      { name: 'tools', source: 'github', locator: 'acme/tools', ref: null, installLocation: '/tmp/e8/config/plugins/marketplaces/tools' },
+      { name: 'more', source: 'git', locator: 'https://example.com/acme/more.git', ref: null, installLocation: '/tmp/e8/config/plugins/marketplaces/more' },
     ]);
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout).map((p) => p.pluginId)).toEqual(['e8-probe@e8-scratch', 'e8-extra@e8-other']);
     expect(step(commandLine('marketplace-add', { source: join(root, 'missing') }))).toMatchObject({ ok: false, error: { message: `Path does not exist: ${join(root, 'missing')}`, failureCode: 'invalid_source' } });

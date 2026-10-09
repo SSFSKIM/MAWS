@@ -40,7 +40,16 @@ describe('sourceKey', () => {
     expect(sourceKey(subdir('https://github.com/a/b', 'p\\q'), null)).toBeNull();
     expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'main' }, null)).toBeNull();
     expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: null }, null)).toBe('github.com/a/b#p');
-    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'f'.repeat(40) }, null)).toBe('github.com/a/b#p');
+    // the engine reads `sha`, never the ref's content: a ref that looks like a sha pins a branch or tag all the same
+    // (2.1.292 `Sb`, cli.pretty.js:832443-832447); the host clears a ref a separate sha pins (`cli-result.ts`)
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'f'.repeat(40) }, null)).toBeNull();
+  });
+
+  it('refuses a relative entry of a marketplace pinned to a branch or tag; an unpinned one keys as the directory does', () => {
+    const directory = sourceKey(subdir('https://github.com/anthropics/claude-plugins-official', 'plugins/x'), null);
+    expect(sourceKey('./plugins/x', { ...OFFICIAL, ref: 'v2' })).toBeNull();
+    expect(sourceKey('./plugins/x', { ...OFFICIAL, ref: null })).toBe(directory);
+    expect(sourceKey('./plugins/x', OFFICIAL)).toBe(directory);
   });
 
   it('keeps apart what is not the same code', () => {

@@ -204,7 +204,9 @@ function run(argv, input, ctx) {
   }
   if (marketplaceVerb && verb === 'list') {
     const locator = (m) => (m.source === 'directory' ? { path: m.path } : m.source === 'github' ? { repo: m.repo } : { url: m.url });
-    say(pretty(state.marketplaces.map((m) => ({ name: m.name, source: m.source, ...locator(m), installLocation: locationOf(m) }))));
+    // a repository marketplace's branch or tag, printed as the engine prints it: only when there is one (P2-B)
+    const pin = (m) => ((m.source === 'github' || m.source === 'git') && m.ref ? { ref: m.ref } : {});
+    say(pretty(state.marketplaces.map((m) => ({ name: m.name, source: m.source, ...locator(m), ...pin(m), installLocation: locationOf(m) }))));
     return out;
   }
 

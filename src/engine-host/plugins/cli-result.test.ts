@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sourceKey } from '../../shared/plugins/source-key';
 import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, pluginRowsOf } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
@@ -142,7 +143,7 @@ describe('the reads', () => {
     ]);
   });
 
-  it('reduces marketplace list rows to name, source kind, locator and install location', () => {
+  it('reduces marketplace list rows to name, source kind, locator, the branch or tag it is pinned to, and install location', () => {
     const stdout = JSON.stringify([
       { name: 'e8-scratch', source: 'directory', path: '/tmp/e8-g0/run1/market', installLocation: '/tmp/e8-g0/run1/market' },
       { name: 'gh', source: 'github', repo: 'owner/repo', ref: 'main', installLocation: '/c/plugins/marketplaces/gh' },
@@ -151,12 +152,30 @@ describe('the reads', () => {
       { name: 'blank', source: 'github', repo: 'o/b', installLocation: '' },
     ]);
     expect(marketplacesOf(stdout)).toEqual([
-      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-g0/run1/market', installLocation: '/tmp/e8-g0/run1/market' },
-      { name: 'gh', source: 'github', locator: 'owner/repo', installLocation: '/c/plugins/marketplaces/gh' },
-      { name: 'u', source: 'url', locator: 'https://example.com/m.json', installLocation: '/c/plugins/marketplaces/u' },
-      { name: 'org', source: 'claudeai', locator: null, installLocation: null },
-      { name: 'blank', source: 'github', locator: 'o/b', installLocation: null }, // P2-B: an empty location is none
+      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-g0/run1/market', ref: null, installLocation: '/tmp/e8-g0/run1/market' },
+      { name: 'gh', source: 'github', locator: 'owner/repo', ref: 'main', installLocation: '/c/plugins/marketplaces/gh' }, // P2-B: the ref decides its relative entries' fold key
+      { name: 'u', source: 'url', locator: 'https://example.com/m.json', ref: null, installLocation: '/c/plugins/marketplaces/u' },
+      { name: 'org', source: 'claudeai', locator: null, ref: null, installLocation: null },
+      { name: 'blank', source: 'github', locator: 'o/b', ref: null, installLocation: null }, // P2-B: an empty location is none
     ]);
+  });
+
+  // P2-B: the reduction and the key together give the engine's fold (2.1.292 `Sb`/`x5`, cli.pretty.js:832435-832464)
+  it('keys what the engine folds and nothing it refuses, read from the CLI’s own rows', () => {
+    const entry = (source: unknown) => availableOf(JSON.stringify({ available: [{ pluginId: 'x@m', name: 'x', marketplaceName: 'm', source }] }))[0].source;
+    const repo = { source: 'github', repo: 'anthropics/claude-plugins-official', path: 'plugins/x' };
+    const key = 'github.com/anthropics/claude-plugins-official#plugins/x';
+    expect(sourceKey(entry(repo), null)).toBe(key);
+    expect(sourceKey(entry({ ...repo, ref: 'f'.repeat(40) }), null)).toBeNull(); // a sha-looking ref is still a ref
+    expect(sourceKey(entry({ ...repo, ref: 'v2', sha: 'a'.repeat(40) }), null)).toBe(key); // a separate sha pins the code
+    const [pinned, unpinned] = marketplacesOf(
+      JSON.stringify([
+        { name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', ref: 'v2', installLocation: '/clone' },
+        { name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', installLocation: '/clone' },
+      ]),
+    );
+    expect(sourceKey(entry('./plugins/x'), pinned)).toBeNull();
+    expect(sourceKey(entry('./plugins/x'), unpinned)).toBe(key);
   });
 
   it('answers a listing only from a CLI that exited 0, else with its own last words', () => {

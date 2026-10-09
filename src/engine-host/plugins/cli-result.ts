@@ -190,14 +190,17 @@ export function availableOf(stdout: string): AvailablePlugin[] {
   }));
 }
 
-// `{ name, source, repo?|url?|path?, ref?, installLocation }`, or a claude.ai entry with no locator (SPEC 30).
-const MarketplaceRowSchema = z.looseObject({ name: z.string(), source: z.string(), repo: z.string().optional(), url: z.string().optional(), path: z.string().optional(), installLocation: z.string().optional() });
+// `{ name, source, repo?|url?|path?, ref?, installLocation }`, or a claude.ai entry with no locator (SPEC 30). The
+// `ref`, a repository marketplace's branch or tag, is kept (P2-B): it denies the marketplace's relative entries the
+// engine's fold key (2.1.292 `Sb`/`x5`, cli.pretty.js:832437-832440, :832459-832464).
+const MarketplaceRowSchema = z.looseObject({ name: z.string(), source: z.string(), repo: z.string().optional(), url: z.string().optional(), path: z.string().optional(), ref: z.unknown().optional(), installLocation: z.string().optional() });
 
 export function marketplacesOf(stdout: string): Marketplace[] {
   return documentOf(stdout, z.array(MarketplaceRowSchema), 'plugin marketplace list --json').map((m) => ({
     name: m.name,
     source: m.source,
     locator: m.repo ?? m.url ?? m.path ?? null,
+    ref: str(m.ref), // P2-B
     installLocation: m.installLocation || null, // P2-B: an empty location is none
   }));
 }

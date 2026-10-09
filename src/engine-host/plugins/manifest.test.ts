@@ -467,6 +467,14 @@ describe('the bounds', () => {
     expect(await view({ root: await modules(201) })).toMatchObject({ partial: true, components: { hookModules: 200 } });
   });
 
+  it('hook modules that are not a list of paths are `unknown shape`, never counted (a number, a map, a string, a non-path entry)', async () => {
+    for (const [i, modules] of ([42, { a: './m.ts' }, './m.ts', ['./m.ts', 42]] as unknown[]).entries()) {
+      const answer = await view({ root: await tree(join(root, `odd${i}`), { '.claude-plugin/plugin.json': { name: 'p' }, 'hooks/hooks.json': { modules } }) });
+      expect(answer.problems).toEqual(['hooks/hooks.json: unknown shape']);
+      expect(answer.components.hookModules).toBe(Array.isArray(modules) ? 1 : 0);
+    }
+  });
+
   it('a filesystem call that stalls past the deadline ends the read: partial, at once, no message', async () => {
     const stalled = { ...fsp, realpath: (async () => new Promise<string>(() => undefined)) as unknown as typeof fsp.realpath };
     const started = Date.now();

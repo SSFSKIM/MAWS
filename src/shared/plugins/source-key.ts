@@ -8,9 +8,10 @@
 // lowercased on GitHub without a port only, repeated and trailing slashes and `.git` dropped; then `#` and the entry's
 // path inside it with `.` segments dropped and `..` applied (no key when it climbs out, or holds a backslash). A
 // relative entry (`./plugins/x`) is resolved against its marketplace's repository (a `github` or `git` marketplace; a
-// folder one has none). A source pinned to a branch or tag (`ref`) has no key unless the ref is itself a full commit
-// sha (the host reduces a ref a sha pins beside it to none, `cli-result.ts`). Anything else has no key, and no key
-// never folds.
+// folder one has none), and has no key when that marketplace is pinned to a branch or tag. A source pinned to a branch
+// or tag (`ref`) has no key, whatever the ref looks like: the engine excepts only a full commit sha given separately
+// (`sha`), and the host reduces a ref such a sha pins beside it to none (`cli-result.ts`). Anything else has no key,
+// and no key never folds.
 import type { PluginSourceRef } from '../ipc/schema/plugins';
 
 const GITHUB = 'github.com';
@@ -20,7 +21,6 @@ const UNRESERVED = '[A-Za-z0-9._~-]';
 const SHORTHAND = new RegExp(`^${SEGMENT}/${SEGMENT}$`);
 const SCP = new RegExp(`^git@(${HOST}):(${SEGMENT}(?:/${SEGMENT})*)/?$`);
 const HTTPS = new RegExp(`^https://(?:${UNRESERVED}+(?::${UNRESERVED}*)?@)?(${HOST})(?::[1-9][0-9]{0,4})?((?:/(?:${UNRESERVED}|%[0-9A-Fa-f]{2})*)*)$`);
-const FULL_SHA = /^[a-f0-9]{40}$/;
 
 // `host[:port]/path` for a repository locator, or null when it names none.
 function repositoryOf(locator: string): string | null {
@@ -71,13 +71,14 @@ function keyOf(locator: string | null, path: string | null): string | null {
   return repository === null || subpath === null ? null : `${repository}#${subpath}`;
 }
 
-export function sourceKey(source: PluginSourceRef | null, marketplace: { source: string; locator: string | null } | null): string | null {
+export function sourceKey(source: PluginSourceRef | null, marketplace: { source: string; locator: string | null; ref?: string | null } | null): string | null {
   if (source === null) return null;
   if (typeof source === 'string') {
     if (marketplace === null || (marketplace.source !== 'github' && marketplace.source !== 'git')) return null;
+    if (typeof marketplace.ref === 'string') return null; // the marketplace is pinned to a branch or tag
     return keyOf(marketplace.locator, source);
   }
-  if (typeof source.ref === 'string' && !FULL_SHA.test(source.ref)) return null; // pinned to a branch or tag
+  if (typeof source.ref === 'string') return null; // pinned to a branch or tag
   switch (source.kind) {
     case 'github':
       return keyOf(source.repo, source.path);

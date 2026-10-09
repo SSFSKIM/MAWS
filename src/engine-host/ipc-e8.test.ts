@@ -119,7 +119,7 @@ esac
     const host = engineHost();
     expect(await host.call('plugins.list', { cwd: project })).toEqual({ plugins: [{ id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false }] });
     expect(await host.call('plugins.available', { cwd: project })).toEqual({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'd', version: null, source: './p', installCount: null }] });
-    expect(await host.call('marketplaces.list', { cwd: project })).toEqual({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/m', installLocation: '/m' }] });
+    expect(await host.call('marketplaces.list', { cwd: project })).toEqual({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/m', ref: null, installLocation: '/m' }] });
     expect(calls()).toEqual(['plugin list --json', 'plugin list --json --available', 'plugin marketplace list --json']);
   });
 

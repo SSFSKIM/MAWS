@@ -415,8 +415,12 @@ class Inventory {
       this.r.problem(by, 'unknown shape');
       return;
     }
-    if (Array.isArray(value.modules)) for (const module of value.modules) if (typeof module === 'string') this.r.count(this.components, 'hookModules'); // counted, never read
-    else if (value.modules !== undefined) this.r.problem(by, 'unknown shape');
+    if (Array.isArray(value.modules)) {
+      for (const module of value.modules) {
+        if (typeof module === 'string') this.r.count(this.components, 'hookModules'); // counted, never read
+        else this.r.problem(by, 'unknown shape');
+      }
+    } else if (value.modules !== undefined) this.r.problem(by, 'unknown shape');
     if (value.hooks !== undefined) this.eventsOf(value.hooks, by);
   }
   async hooks(declared: Declaration[]): Promise<void> {
