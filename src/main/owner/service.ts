@@ -692,11 +692,14 @@ function textOf(content: string | readonly { type: string; text?: unknown }[]): 
   return typeof content === 'string' ? content : content.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
 }
 
-// Each answer whose entry the queue shows takes the entry's content as its text; answers the questions whose text moved.
+// Each answer on its way whose entry the queue shows takes the entry's content as its text; answers the questions whose
+// text moved. One the engine took keeps the text it took: its entry may still be shown (an exit's uncertain entry the
+// transcript proved taken) and be edited for another send, which is not this answer.
 function followContent(live: SessionLive, entries: readonly QueueEntry[]): Set<MarkId> {
   const touched = new Set<MarkId>();
   for (const [markId, answers] of live.answers) {
     for (const answer of answers) {
+      if (!onItsWay(answer)) continue;
       for (const entry of entries) {
         if (!answer.members.some((m) => m.kind === 'entry' && m.id === entry.queueId)) continue;
         const text = textOf(entry.content);

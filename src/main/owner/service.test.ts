@@ -424,6 +424,25 @@ describe('answers follow their members (Design §6)', () => {
     expect(index.ownerChannel.mark(q)!.answerText).toBe(edited);
   });
 
+  it('a delivered answer keeps the text the engine took: editing its uncertain entry afterwards changes nothing', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const postgres = answerText('Which backend?', 'Postgres');
+    const { entry } = await t.sim.queue.send(postgres);
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, text: postgres });
+    t.taken(entry.messageUuid!);
+    await t.sim.exit('crash'); // the entry comes back uncertain; the transcript says its prompt was taken
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: postgres } });
+    const followUp = answerText('Which backend?', 'My follow-up');
+    const pending = await t.sim.queue.send(followUp);
+    t.report(q, { disposition: 'queued', queueId: pending.entry.queueId, text: followUp }); // keeps the delivered answer in memory
+    await t.sim.queue.edit(entry.queueId, answerText('Which backend?', 'SQLite'));
+    await t.sim.queue.remove(pending.entry.queueId);
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: postgres } });
+    expect(index.ownerChannel.mark(q)!.answerText).toBe(postgres);
+  });
+
   it('a first report that arrives after the log forgot its prompt is read through the recovery read: delivered', async () => {
     const t = await harness();
     const q = t.ask('Which region?');
