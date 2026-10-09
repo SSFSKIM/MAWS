@@ -86,7 +86,11 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   const held = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job');
   const exitedUnreleased = useSessions((s) => s.engine.get(child)?.process === 'exited' && s.digests.get(child)?.released === undefined);
 
-  const placeholder = record === null ? COPY.starting : held && needs !== null ? needs.text : COPY.replyPlaceholder;
+  // The field waits while the thread starts, while a terminal holds it, and while a started reply is pending (a failed
+  // start hands that reply back into it, so nothing may compete with it); delivery, the hand-back or Close release it.
+  const waiting = record === null || reply.pending !== null;
+  const blocked = waiting || held;
+  const placeholder = waiting ? COPY.starting : held && needs !== null ? needs.text : COPY.replyPlaceholder;
   return (
     <>
       <div className="-mx-2.5 flex min-h-0 flex-1 flex-col" data-card-thread={child}>
@@ -119,12 +123,12 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
           placeholder={placeholder}
           rows={1}
           value={reply.text}
-          disabled={record === null || held || reply.sending}
+          disabled={blocked || reply.sending}
           onChange={(event) => reply.setText(event.target.value)}
           onKeyDown={reply.onKeyDown}
           className={`${FIELD} min-w-0 flex-1 max-h-[calc(4lh+0.5rem)] resize-none leading-snug field-sizing-content disabled:text-fg-muted`}
         />
-        <button type="submit" aria-label={COPY.sendReply} disabled={!reply.canSend || record === null || held} className={PRIMARY}>
+        <button type="submit" aria-label={COPY.sendReply} disabled={!reply.canSend || blocked} className={PRIMARY}>
           {COPY.send}
         </button>
       </form>
@@ -184,7 +188,8 @@ function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptAct
 // The Reply field: Enter sends (Shift+Enter breaks a line, a composition keeps its Enter), through the seam; a host
 // error thrown by the send reads as a refusal with its message. A started reply waits as a pending bubble until a user
 // row of the thread newer than it arrives; while it waits the card claims the thread's returned message, so a failed
-// start puts the text back here (with the failure in the strip), never into the thread's unseen composer draft.
+// start puts the text back here (with the failure in the strip), never into the thread's unseen composer draft. No
+// other send is taken meanwhile.
 function useReply(child: AppSessionId) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -205,7 +210,7 @@ function useReply(child: AppSessionId) {
     return release;
   }, [pending, child]);
 
-  const canSend = text.trim() !== '' && !sending;
+  const canSend = text.trim() !== '' && !sending && pending === null;
   const send = async () => {
     if (!canSend) return;
     const content = text.trim();

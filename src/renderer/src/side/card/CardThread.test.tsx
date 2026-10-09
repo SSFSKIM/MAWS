@@ -284,6 +284,25 @@ describe('Reply through the human send seam', () => {
     await waitFor(() => expect(card()!.querySelector('[data-card-pending]')).toBeNull());
   });
 
+  // Task review (M2): nothing may compete with the text a failed start hands back, so the field waits with the reply
+  it('while a started reply is pending, Reply is disabled with “Starting…”; a failed start then puts the original back', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'started' });
+    await userEvent.type(replyField(), 'Wake up and do it{Enter}');
+    await waitFor(() => expect(card()!.querySelector('[data-card-pending]')).not.toBeNull());
+    expect(replyField().disabled).toBe(true);
+    expect(replyField().placeholder).toBe('Starting…');
+    expect((within(card()!).getByRole('button', { name: 'Send reply' }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(replyField(), 'A newer draft{Enter}');
+    expect(replyField().value).toBe('');
+    expect(seam).toHaveBeenCalledTimes(1);
+
+    act(() => returnMessage(child, { content: 'Wake up and do it', display: 'Wake up and do it' }));
+    expect(replyField().disabled).toBe(false);
+    expect(replyField().value).toBe('Wake up and do it');
+    expect(card()!.querySelector('[data-needs-you]')?.textContent).toContain('Could not start');
+  });
+
   it('a failed start hands the reply back to the card’s field, not the registered return, with the failure in the strip', async () => {
     const registered = vi.fn();
     offs.push(registerMessageReturn(registered));
