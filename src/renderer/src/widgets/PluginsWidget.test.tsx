@@ -1262,7 +1262,7 @@ describe('plugins widget: Browse', () => {
     expect(section('browse').className).not.toContain('hidden');
   });
 
-  it('a card’s detail outlives a change whose catalogue answers before the installed list; a card that left closes it once both have answered', async () => {
+  it('a card’s detail outlives a change whose catalogue answers before the installed list, and a card the reads no longer list: only Back leaves it', async () => {
     await ready();
     await toBrowse();
     const id = 'counted-none@claude-plugins-official';
@@ -1282,11 +1282,45 @@ describe('plugins widget: Browse', () => {
     await act(async () => listed({ plugins: [...installed, plugin(id)] }));
     expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
     await waitFor(() => expect(within(detail()!).queryByRole('button', { name: 'Install' })).toBeNull()); // installed here now
-    // uninstalled and no longer offered: once both reads answer, the detail returns to the grid
+    // uninstalled elsewhere and no longer offered: the detail stays on the card as last read, until Back
     backend.script('plugins.list', () => ({ plugins: installed }));
+    const lists = invoked('plugins.list').length;
     act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(detail()).toBeNull());
+    await waitFor(() => expect(invoked('plugins.list').length).toBe(lists + 1));
+    await act(async () => {});
+    expect(card(id)).toBeNull(); // gone from the grid beneath
+    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
+    expect(within(detail()!).queryByRole('button', { name: 'Install' })).toBeNull(); // as last read: installed here
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to Browse' }));
+    expect(detail()).toBeNull();
     expect(section('browse').className).not.toContain('hidden');
+  });
+
+  it('overlapping changes keep a card’s detail while an installed read owed to the second change has not yet run (review, M5 round 2)', async () => {
+    await ready();
+    await toBrowse();
+    const id = 'counted-none@claude-plugins-official';
+    fireEvent.click(within(card(id)).getByRole('button', { name: 'View Counted none' }));
+    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]');
+    let finishOld!: (value: { plugins: InstalledPlugin[] }) => void;
+    let lists = 0;
+    backend.script('plugins.list', () => (++lists === 1 ? new Promise((resolve) => (finishOld = resolve)) : { plugins: [...installed, plugin(id)] }));
+    const beforeAvailable = invoked('plugins.available').length;
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(lists).toBe(1));
+    await waitFor(() => expect(invoked('plugins.available').length).toBe(beforeAvailable + 1));
+    await act(async () => {});
+    // a later install completes while the first change's installed listing is still in flight: its reread is owed
+    backend.script('plugins.available', () => ({ plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only')] }));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.available').length).toBe(beforeAvailable + 2));
+    await act(async () => {});
+    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
+    // the stale listing answers (nothing fetching for a moment), then the owed one adds the card back as installed
+    await act(async () => finishOld({ plugins: installed }));
+    await waitFor(() => expect(lists).toBe(2));
+    await waitFor(() => expect(card(id)?.getAttribute('data-installed')).toBe('here'));
+    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
   });
 
   it('every open starts on My items with no catalogue read, whatever the last open showed', async () => {
