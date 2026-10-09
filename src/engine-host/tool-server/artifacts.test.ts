@@ -377,8 +377,24 @@ describe('the artifact scope of a side thread (P2-E1 G4)', () => {
     const first = artifactUpdateTool({ ...deps(), deliverables: held }).call({ id: 'dash', html_path: 'dashboard.html' }, parentCtx({ toolUseId: 'toolu_parent' as ToolUseId }));
     for (let i = 0; i < 100 && !copying; i++) await new Promise((r) => setTimeout(r, 1));
     expect(copying).toBe(true);
-    const second = artifactUpdateTool(threadDeps()).call({ id: 'dash', html_path: 'dashboard.html' }, threadCtx({ toolUseId: 'toolu_thread' as ToolUseId }));
-    await new Promise((r) => setTimeout(r, 20)); // the thread's call reaches the parent's chain and waits there
+    // the thread's store, watched: a barrier when its call queues on the owner's chain, and whether its task has run
+    let entered!: () => void;
+    const threadEntered = new Promise<void>((resolve) => (entered = resolve));
+    let threadTaskRan = false;
+    const watched = Object.assign(Object.create(family.thread) as FileDeliverableStore, {
+      exclusive: <R>(owner: AppSessionId, task: () => Promise<R>): Promise<R> => {
+        const queued = family.thread.exclusive(owner, () => {
+          threadTaskRan = true;
+          return task();
+        });
+        entered();
+        return queued;
+      },
+    });
+    const second = artifactUpdateTool({ ...threadDeps(), deliverables: watched }).call({ id: 'dash', html_path: 'dashboard.html' }, threadCtx({ toolUseId: 'toolu_thread' as ToolUseId }));
+    await threadEntered;
+    await new Promise((r) => setImmediate(r)); // a chain of its own would have run the task by now
+    expect(threadTaskRan).toBe(false); // queued behind the parent's held write on the owner's chain
     release();
     const [parentAnswer, threadAnswer] = await Promise.all([first, second]);
     expect(jsonOf(parentAnswer)).toMatchObject({ version: 2 });
