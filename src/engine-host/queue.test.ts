@@ -7,6 +7,7 @@ import { MessageQueue } from './queue';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionEventSchema } from '@shared/graph/events'; // P2-C
 import { Normalizer } from './normalizer'; // P2-C
+import { UnsettledFold } from './prompt-history'; // P2-C
 
 const ID = 'app-q' as AppSessionId;
 type TurnEnded = Extract<SessionEvent, { kind: 'turn.ended' }>;
@@ -25,7 +26,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */ } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -64,6 +65,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     },
     log: () => {},
     holdAllDeadlineMs: opts.holdAllDeadlineMs,
+    unsettled: opts.unsettled, // P2-C
   });
   if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
@@ -1227,6 +1229,83 @@ describe('the prompt record: each transition one row and one queue.transition (P
     await expect(failing.queue.remove(kept.queueId)).rejects.toThrow('EIO');
     expect(transitions(failing.rows)).toEqual([]);
     expect(failing.queue.state.entries.map((e) => e.queueId)).toEqual([kept.queueId]);
+  });
+});
+
+// P2-C fix wave 1: every steer the engine was handed ends on record, also when the host dies with the process (the
+// queue object replaced without its exit: the next launch's recovery reads what the dead one left unstated from its
+// journal) and whatever the steer's priority.
+describe('no steer outlives its process unrecorded (P2-C)', () => {
+  // the dead launch's journal as the session would have written it: each write an `out` row, each meta row, each lifecycle an `in` row
+  const journalOf = (entries: ({ out: UserInputFrame } | { meta: Record<string, unknown> } | { lifecycle: [MessageUuid, string] })[]) =>
+    entries.map((e, i) => ({
+      seq: i + 1, at: base.at,
+      ...('out' in e ? { direction: 'out' as const, frame: e.out } : 'meta' in e ? { direction: 'meta' as const, frame: e.meta } : { direction: 'in' as const, frame: { type: 'command_lifecycle', command_uuid: e.lifecycle[0], state: e.lifecycle[1], uuid: `l-${i}`, session_id: 's' } }),
+    }));
+  const unsettledOf = (rows: ReturnType<typeof journalOf>) => async () => {
+    const fold = new UnsettledFold();
+    for (const row of rows) fold.push(row);
+    return fold.unsettled();
+  };
+
+  for (const outcome of ['cancel', 'hold'] as const) {
+    it(`a host that dies after the engine's cancelled is saved and before the ${outcome}'s outcome: the next recovery abandons the steer`, async () => {
+      const store = new MemorySessionStateStore();
+      const dead = await harness({ store });
+      dead.h.turn = true;
+      const { messageUuid } = await dead.queue.steer('the answer', { priority: 'next' });
+      dead.h.cancelAnswer = new Promise<void>(() => {}); // never answered: the host dies first
+      void (outcome === 'cancel' ? dead.queue.cancelSteer(messageUuid) : dead.queue.hold(messageUuid)).catch(() => {});
+      await flush();
+      dead.queue.onLifecycle(lifecycle(messageUuid, 'cancelled'));
+      await flush();
+      expect(await store.loadQueue(ID)).toMatchObject({ withdrawn: [messageUuid] }); // the window: withdrawn, no pending steer, no outcome
+      expect((await store.loadQueue(ID)).steers).toBeUndefined();
+      const rows = journalOf([{ out: dead.writes[0]! }, ...dead.rows.map((meta) => ({ meta })), { lifecycle: [messageUuid, 'cancelled'] }]);
+      // the old object is dropped without its onProcessExited; a new launch recovers the same store
+      const next = await harness({ store, recovered: false, unsettled: unsettledOf(rows) });
+      await next.queue.recover();
+      expect(transitions(next.rows)).toEqual([tr('abandon', null, messageUuid)]);
+    });
+  }
+
+  it('a default-priority promotion flushed and removed, then the exit before any lifecycle: abandoned at the exit', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('the answer');
+    const { messageUuid } = await t.queue.promote(entry.queueId);
+    expect(t.queue.state.entries).toEqual([]);
+    expect(t.queue.state.steers).toBeUndefined(); // the composer sees no pending steer for a `now` promotion, as before
+    const before = t.rows.length;
+    await t.queue.onProcessExited('crash');
+    expect(transitions(t.rows.slice(before))).toEqual([tr('abandon', null, messageUuid)]);
+  });
+
+  it('…and when the host dies with it instead: the next recovery abandons it from the journal', async () => {
+    const store = new MemorySessionStateStore();
+    const dead = await harness({ store });
+    dead.h.turn = true;
+    const { entry } = await dead.queue.send('the answer');
+    const { messageUuid } = await dead.queue.promote(entry.queueId);
+    expect((await store.loadQueue(ID)).entries).toEqual([]); // the removal is saved: the state file names it nowhere
+    const rows = journalOf([...dead.rows.map((meta) => ({ meta })), { out: dead.writes[0]! }]);
+    const next = await harness({ store, recovered: false, unsettled: unsettledOf(rows) });
+    await next.queue.recover();
+    expect(transitions(next.rows)).toEqual([tr('abandon', null, messageUuid)]);
+  });
+
+  it('a steer the engine started, or dropped while nothing withdrew it, is not abandoned; nor is one never written', async () => {
+    const t = await harness({ failWrite: (frame) => frame.message.content === 'never' });
+    t.h.turn = true;
+    const started = await t.queue.steer('started', { priority: 'now' });
+    const dropped = await t.queue.steer('dropped', { priority: 'next' });
+    await expect(t.queue.steer('never', { priority: 'now' })).rejects.toThrow('EPIPE');
+    const left = await t.queue.steer('left', { priority: 'now' });
+    t.queue.onLifecycle(lifecycle(started.messageUuid, 'started'));
+    t.queue.onLifecycle(lifecycle(dropped.messageUuid, 'discarded'));
+    const before = t.rows.length;
+    await t.queue.onProcessExited('crash');
+    expect(transitions(t.rows.slice(before))).toEqual([tr('abandon', null, left.messageUuid)]);
   });
 });
 

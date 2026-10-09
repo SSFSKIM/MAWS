@@ -417,7 +417,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   on('session.steer.cancel', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.cancelSteer(messageUuid as MessageUuid)));
   on('session.promptHistory', async ({ appSessionId, since }) => {
     assertSafeAppSessionId(appSessionId); // it names a directory
-    return promptHistory(journalDir(deps.userData, appSessionId as AppSessionId), appSessionId as AppSessionId, since);
+    const live = table.get(appSessionId as AppSessionId);
+    return promptHistory(journalDir(deps.userData, appSessionId as AppSessionId), appSessionId as AppSessionId, since, { live: live && live.lifecycle !== 'exited' ? live.status().launchId : null });
   });
   // P2-C end
   handle('session.queue.setPaused', async ({ appSessionId, paused }) => sessionOf(appSessionId).queue.setPaused(paused));

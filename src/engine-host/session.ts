@@ -105,6 +105,9 @@ export interface EngineSessionOptions {
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
+  // P2-C (2026-10-09): the steers earlier launches left unstated when the host died with them (the launcher's read of
+  // the session's journals), abandoned as rows at the queue's recovery. Absent, none.
+  unsettledPrompts?: () => Promise<MessageUuid[]>;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -276,6 +279,7 @@ export class EngineSession {
       turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clearAndImplement.holding),
       canWrite: () => this.processState === 'ready',
       cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
+      unsettled: opts.unsettledPrompts, // P2-C
       onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
       onChange: (queue) => {
         this.emit('queue', queue);

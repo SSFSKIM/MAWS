@@ -27,6 +27,7 @@ import { replayEngine } from './replay-transport';
 import { EngineSession } from './session';
 import { FileDeliverableStore } from './deliverables/store'; // E1
 import type { EngineTransport } from './transport';
+import { unsettledPrompts } from './prompt-history'; // P2-C
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
 
@@ -103,6 +104,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         // C12 end
         deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
+        unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
       });
       deps.wire(session, plan, spec);
       return session;

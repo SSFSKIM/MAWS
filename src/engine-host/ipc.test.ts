@@ -1120,6 +1120,7 @@ describe('session.steer.cancel and session.promptHistory (P2-C M3)', () => {
       { seq: 1, direction: 'meta', at: '2026-01-09T10:00:00.000Z', frame: { event: 'spawn', args: [] } },
       { seq: 2, direction: 'meta', at: '2026-01-09T10:00:01.000Z', frame: { event: 'queue', action: 'withdraw', messageUuid: 'u-1' } },
       { seq: 3, direction: 'meta', at: '2026-01-09T10:00:02.000Z', frame: { event: 'queue', action: 'cancel', messageUuid: 'u-1' } },
+      { seq: 4, direction: 'meta', at: '2026-01-09T10:00:03.000Z', frame: { event: 'exit', code: 0, signal: null, reason: 'quit' } }, // fix wave 1: an ended launch, complete
     ];
     writeFileSync(join(dir, 'L1.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const answer = await host.call('session.promptHistory', { appSessionId: 'app-ph' as AppSessionId, since: '2026-01-09T10:00:00.500Z' });
