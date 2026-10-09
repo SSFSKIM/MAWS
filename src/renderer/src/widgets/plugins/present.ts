@@ -1,9 +1,9 @@
 // The plugin-management presenters (E8 execution document, M2): what the confirm sheet shows for one request (the
 // binary and the exact argument list from M1's `commandLine`, the files from its `writesOf`, what follows), a row's
 // operation line in the engine's own words with the reload report beside it, the marketplace-declared command a
-// refusal carries, and the available catalogue grouped per marketplace. Pure: the components and the tests read these.
+// refusal carries. Pure: the components and the tests read these.
 import { commandLine, writesOf, type PluginsAction, type PluginsActionInputs, type PluginsInstallation, type PluginsScope } from '@shared/plugins/cli';
-import type { AvailablePlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
+import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { OPERATION, PLUGIN_MANAGEMENT as W } from '../copy';
 
 // What a request knows beyond the CLI's input: for a marketplace removal, the installations it uninstalls.
@@ -153,27 +153,4 @@ export function declaredOf(event: PluginsOperationEvent | null, action: PluginsA
   if (sha256 === null || !SHA256.test(sha256)) return null;
   const command = Array.isArray(shown.command) && shown.command.every((part) => typeof part === 'string') ? shown.command.join(' ') : (str(shown.command) ?? JSON.stringify(shown.command ?? shown));
   return { sha256, command };
-}
-
-// ---- the available catalogue ----------------------------------------------------------------------------------------
-
-export interface AvailableGroup {
-  marketplace: string;
-  plugins: AvailablePlugin[];
-}
-
-const byName = (a: string, b: string) => a.localeCompare(b, 'en');
-
-// Per marketplace in name order, each plugin list in name order, keeping only what the filter names (case-insensitive,
-// over the name, the id and the description); a marketplace with nothing left is dropped.
-export function availableGroups(plugins: readonly AvailablePlugin[], filter: string): AvailableGroup[] {
-  const needle = filter.trim().toLowerCase();
-  const groups = new Map<string, AvailablePlugin[]>();
-  for (const plugin of plugins) {
-    if (needle !== '' && ![plugin.name, plugin.pluginId, plugin.description ?? ''].some((text) => text.toLowerCase().includes(needle))) continue;
-    groups.set(plugin.marketplaceName, [...(groups.get(plugin.marketplaceName) ?? []), plugin]);
-  }
-  return [...groups]
-    .sort(([a], [b]) => byName(a, b))
-    .map(([marketplace, list]) => ({ marketplace, plugins: list.sort((a, b) => byName(a.name, b.name)) }));
 }

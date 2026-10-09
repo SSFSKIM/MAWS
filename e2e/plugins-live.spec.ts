@@ -1,8 +1,9 @@
 // E8's live run (E8 execution document, M3 "The live run"; Acceptance G1 to G4): the built app against the owner's
 // installed engine behind ClaudeUsage's relay, through Playwright only (no desktop automation), in a scratch root under
 // /tmp whose config home the engine and its plugin CLI write (support/plugins-live.ts). A session is created through
-// "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` and the panel,
-// every management action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
+// "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` (P2-B's
+// library: My items, Browse, the Add menu's Add marketplace and Manage marketplaces) and the panel, every management
+// action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
 // `e8-probe@e8-scratch` installed and reflected in the running session before any new turn, the panel's Reload plugins and
 // Reload skills, Refresh, a real Update to 0.2.0, `/skills` after the next turn, disable, enable, uninstall, the
@@ -98,7 +99,7 @@ async function audited(before: Tree, startedAt: number, manifest: Manifest | nul
   expect(audit.unannounced, `${what}: configuration writes the sheet did not announce`).toEqual([]);
   expect(audit.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
 }
-// A listing the widget runs (its opening reads, the Available section's expansion), audited as one.
+// A listing the widget runs (its opening reads, Browse's first showing), audited as one.
 async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
   scratch.log(`--- listing: ${what}`);
   await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 }); // the baseline after any earlier read has landed
@@ -114,7 +115,7 @@ async function openPlugins(page: Page): Promise<Locator> {
   return listing('opening /plugins (plugin list --json, plugin marketplace list --json)', async () => {
     const w = await openWidget(page, 'plugins');
     await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible({ timeout: 30_000 }); // P2-B M3: the library's My items
-    await expect(w.locator('[data-plugins-section="marketplaces"]')).not.toContainText('Reading', { timeout: 30_000 });
+    await expect(w.locator('[data-plugins-section="my-items"] > *').first()).toBeVisible({ timeout: 30_000 }); // its read answered
     return w;
   });
 }
@@ -122,20 +123,45 @@ async function openPlugins(page: Page): Promise<Locator> {
 // loaded is Show › "Loaded in this session" (installed plugins as their rows, the engine's own and a folder's as plain
 // rows), and the loaded line under the head counts them.
 const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"]`);
-const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
+// P2-B M5: the marketplaces live in the Add menu's two dialogs, sheets beside the frame under which E8's confirm sheet
+// stacks; Browse (its `--available` read on the switch's click, audited as a listing) lists cards, one per plugin.
+async function openDialog(w: Locator, item: 'Add marketplace' | 'Manage marketplaces'): Promise<Locator> {
+  await w.getByRole('button', { name: 'Add', exact: true }).click();
+  await w.page().getByRole('menuitem', { name: item, exact: true }).click();
+  const dialog = w.page().locator(`[data-marketplaces-dialog="${item === 'Add marketplace' ? 'add' : 'manage'}"]`);
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+async function closeDialog(dialog: Locator): Promise<void> {
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog).toBeHidden();
+}
+const marketplaceRow = (dialog: Locator, name: string) => dialog.locator(`[data-marketplace-row="${name}"]`);
+async function marketplaceAction(row: Locator, item: 'Check for updates' | 'Remove…'): Promise<void> {
+  await row.getByRole('button', { name: /^More actions for / }).click();
+  await row.page().getByRole('menuitem', { name: item, exact: true }).click();
+}
+async function toMyItems(w: Locator): Promise<void> {
+  await w.getByRole('radio', { name: 'My items' }).click();
+  await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
+}
 const disabledBadge = (row: Locator) => row.getByText('Disabled', { exact: true });
 // P2-B M4: a row's click opens its detail in place of the list; its switch, Update and overflow (Uninstall…) act at the
 // chosen chip's scope, and a change's line sits under the chips (`data-plugin-op` per scope). Back returns to the list.
 const detailOf = (w: Locator) => w.locator('[data-plugin-detail]');
 async function openDetail(w: Locator, id = PLUGIN): Promise<Locator> {
-  if ((await detailOf(w).count()) === 0) await installedRow(w, id).click();
+  if ((await detailOf(w).count()) === 0) {
+    await toMyItems(w);
+    await installedRow(w, id).click();
+  }
   await expect(detailOf(w)).toHaveAttribute('data-plugin-detail', id);
   return detailOf(w);
 }
 async function backToList(w: Locator): Promise<void> {
-  const back = w.getByRole('button', { name: 'Back to My items' });
+  const back = w.getByRole('button', { name: /^Back to / });
   if ((await back.count()) > 0) await back.click();
   await expect(detailOf(w)).toHaveCount(0);
+  await toMyItems(w);
 }
 const opLineOf = (detail: Locator, scope = 'user') => detail.locator(`[data-plugin-op="${scope}"]`);
 const enableSwitch = (detail: Locator) => detail.getByRole('switch', { name: 'Enable plugin' });
@@ -153,9 +179,9 @@ async function loadedIds(w: Locator): Promise<string[]> {
   await show(w, 'All plugins');
   return ids;
 }
-// An Available plugin's line: on its row, or beneath the groups once the engine's `--available` stops offering it (it
-// leaves out what is installed).
-const availableLine = (w: Locator, id: string) => w.locator(`[data-plugins-section="available"] [data-plugin-row="${id}"], [data-plugins-section="available"] [data-plugin-result="${id}"]`);
+// A Browse card's line: on its card (which, once installed, is the installed plugin's), or above the grid once the
+// engine's `--available` stops offering it and nothing installed it.
+const browseLine = (w: Locator, id: string) => w.locator(`[data-plugins-section="browse"] [data-browse-card="${id}"], [data-plugins-section="browse"] [data-plugin-result="${id}"]`);
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
 const panelPlugins = (page: Page) => page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
 
@@ -172,19 +198,20 @@ async function ended(scope: Locator, timeout = DONE_TIMEOUT): Promise<{ text: st
     .toBe(true);
   return { text: (await line.innerText()).trim(), failed: ((await line.getAttribute('class')) ?? '').includes('text-danger') };
 }
-// The Available section opened (its `plugin list --json --available` read audited as a listing) and one group expanded.
-async function openAvailableGroup(w: Locator, marketplace: string): Promise<Locator> {
-  const section = w.locator('[data-plugins-section="available"]');
-  const group = section.locator('details details').filter({ has: w.page().locator('summary', { hasText: new RegExp(`^${marketplace} · \\d+ plugins?$`) }) });
-  if ((await section.locator('details').first().getAttribute('open')) === null) {
-    await listing('expanding Available (plugin list --json --available)', async () => {
-      await section.locator('summary').first().click();
-      await expect(group).toHaveCount(1, { timeout: 120_000 }); // the catalogue read lists the built-in directory too
+// Browse shown (its `plugin list --json --available` read, when it runs, audited as a listing) and one card found by
+// Browse's search: the grid is virtualised and the built-in directory alone lists thousands.
+async function browseCard(w: Locator, id: string): Promise<Locator> {
+  const browse = w.locator('[data-plugins-section="browse"]');
+  if ((await browse.count()) === 0) {
+    await listing('opening Browse (plugin list --json --available)', async () => {
+      await w.getByRole('radio', { name: 'Browse' }).click();
+      await expect(browse.locator('[data-browse-card]').first()).toBeVisible({ timeout: 120_000 }); // the catalogue read lists the built-in directory too
     });
   }
-  await expect(group).toHaveCount(1, { timeout: 120_000 });
-  if ((await group.getAttribute('open')) === null) await group.locator('summary').click();
-  return group;
+  await w.getByRole('searchbox', { name: 'Search plugins' }).fill(id);
+  const card = browse.locator(`[data-browse-card="${id}"]`);
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  return card;
 }
 
 // ---- the run ---------------------------------------------------------------------------------------------------
@@ -246,7 +273,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
 
   try {
     scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_BIN} (${ENGINE_VERSION}) · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
-    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, the Available expansion). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
+    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, Browse\'s catalogue read). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     let id = '';
     let builtin = 0; // the plugins the engine loads with an empty home (its own `@builtin` ones)
@@ -275,28 +302,36 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const text = await w.innerText();
       scratch.log(`installed: ${(await w.locator('[data-plugins-section="my-items"]').innerText()).replaceAll('\n', ' · ')}`);
       scratch.log(`loaded line: ${await w.locator('[data-plugins-loaded]').innerText()}`);
-      scratch.log(`marketplaces: ${(await w.locator('[data-plugins-section="marketplaces"]').innerText()).replaceAll('\n', ' · ')}`);
+      const manage = await openDialog(w, 'Manage marketplaces'); // no read of its own: the opening's listing
+      scratch.log(`marketplaces: ${(await manage.innerText()).replaceAll('\n', ' · ')}`);
+      await closeDialog(manage);
       scratch.observe('plugins', text);
       await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: the sheet names the scratch home a change writes
     });
 
-    const addLine = (w: Locator) => w.getByRole('textbox', { name: 'Add marketplace' }).locator('xpath=ancestor::form[1]');
-    await step('add-folder', 'Add marketplace: the scratch folder', async () => {
+    const addLine = (dialog: Locator) => dialog.locator('[data-marketplace-add-line]');
+    await step('add-folder', 'Add › Add marketplace: the scratch folder', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const result = await action({ name: 'add-folder', action: 'marketplace-add', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-add', submit: 'Add', line: () => addLine(w) }, async () => {
-        await w.getByRole('textbox', { name: 'Add marketplace' }).fill(scratch.market);
-        await w.getByRole('button', { name: 'Add…' }).click();
+      const dialog = await openDialog(w, 'Add marketplace');
+      const result = await action({ name: 'add-folder', action: 'marketplace-add', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-add', submit: 'Add', line: () => addLine(dialog) }, async () => {
+        await dialog.getByRole('textbox', { name: 'Source' }).fill(scratch.market);
+        await dialog.getByRole('button', { name: 'Add', exact: true }).click();
       });
       expect(result.text).toBe('Successfully added marketplace: e8-scratch (declared in user settings)');
-      await expect(marketplaceRow(w, 'e8-scratch')).toContainText(scratch.market);
+      await closeDialog(dialog);
+      const manage = await openDialog(w, 'Manage marketplaces');
+      await expect(marketplaceRow(manage, 'e8-scratch')).toContainText(scratch.market);
+      await closeDialog(manage);
     });
 
     await step('add-repo', `Add marketplace: ${REPO_SOURCE} from GitHub (network-dependent), then Remove…`, async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const result = await action({ name: 'add-repo', action: 'marketplace-add', scope: 'user', source: null, fill: { name: 'claude-plugins-official' }, sheet: 'marketplace-add', submit: 'Add', line: () => addLine(w), timeout: CLONE_TIMEOUT }, async () => {
-        await w.getByRole('textbox', { name: 'Add marketplace' }).fill(REPO_SOURCE);
-        await w.getByRole('button', { name: 'Add…' }).click();
+      const dialog = await openDialog(w, 'Add marketplace');
+      const result = await action({ name: 'add-repo', action: 'marketplace-add', scope: 'user', source: null, fill: { name: 'claude-plugins-official' }, sheet: 'marketplace-add', submit: 'Add', line: () => addLine(dialog), timeout: CLONE_TIMEOUT }, async () => {
+        await dialog.getByRole('textbox', { name: 'Source' }).fill(REPO_SOURCE);
+        await dialog.getByRole('button', { name: 'Add', exact: true }).click();
       });
+      await closeDialog(dialog);
       if (result.failed) {
         // only a refusal by the network is tolerated (the architect's ruling); any other failure is the run's
         expect(result.text, 'a repository-source failure other than a network refusal').toMatch(NETWORK_REFUSAL);
@@ -304,22 +339,25 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
         scratch.observe('add-repo.networkRefusal', result.text);
         return;
       }
-      const row = marketplaceRow(w, 'claude-plugins-official');
+      const manage = await openDialog(w, 'Manage marketplaces');
+      const row = marketplaceRow(manage, 'claude-plugins-official');
       await expect(row).toContainText(REPO_SOURCE);
       scratch.log(`row: ${(await row.innerText()).replaceAll('\n', ' · ')}`);
-      const removed = await action({ name: 'remove-repo', action: 'marketplace-remove', scope: 'user', source: 'github', fill: { name: 'claude-plugins-official' }, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => w.locator('[data-marketplace-result="claude-plugins-official"]') }, () =>
-        row.getByRole('button', { name: 'Remove…' }).click(),
+      const removed = await action({ name: 'remove-repo', action: 'marketplace-remove', scope: 'user', source: 'github', fill: { name: 'claude-plugins-official' }, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => manage.locator('[data-marketplace-result="claude-plugins-official"]') }, () =>
+        marketplaceAction(row, 'Remove…'),
       );
       expect(removed.text).toContain('Successfully removed marketplace: claude-plugins-official');
       await expect(row).toHaveCount(0);
+      await closeDialog(manage);
     });
 
-    await step('install', `Install ${PLUGIN} from Available at user scope: reflected, the Loaded list and the panel before any new turn`, async () => {
+    await step('install', `Install ${PLUGIN} from its Browse card at user scope: reflected, the Loaded list and the panel before any new turn`, async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const group = await openAvailableGroup(w, 'e8-scratch');
-      const row = group.locator(`[data-plugin-row="${PLUGIN}"]`);
-      const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => availableLine(w, PLUGIN) }, () => row.getByRole('button', { name: 'Install…' }).click());
+      const card = await browseCard(w, PLUGIN);
+      const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => browseLine(w, PLUGIN) }, () => card.getByRole('button', { name: 'Install', exact: true }).click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
+      await expect(card).toHaveAttribute('data-installed', 'here'); // the installed plugin's card keeps the result
+      await toMyItems(w);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
       await expect(disabledBadge(installedRow(w))).toHaveCount(0);
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
@@ -344,12 +382,14 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       scratch.observe('panel', await panel.innerText());
     });
 
-    await step('refresh', 'Refresh e8-scratch', async () => {
+    await step('refresh', 'Manage marketplaces › Check for updates on e8-scratch', async () => {
       const w = await openPlugins(page);
-      const row = marketplaceRow(w, 'e8-scratch');
-      const result = await action({ name: 'refresh', action: 'marketplace-update', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-update', submit: 'Refresh', line: () => row }, () => row.getByRole('button', { name: 'Refresh' }).click());
+      const manage = await openDialog(w, 'Manage marketplaces');
+      const row = marketplaceRow(manage, 'e8-scratch');
+      const result = await action({ name: 'refresh', action: 'marketplace-update', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-update', submit: 'Refresh', line: () => row }, () => marketplaceAction(row, 'Check for updates'));
       expect(result.text).toContain('Successfully updated marketplace: e8-scratch');
       expect(result.failed).toBe(false);
+      await closeDialog(manage);
     });
 
     await step('update', 'plugin.json rewritten to 0.2.0, then Update: 0.1.0 → 0.2.0', async () => {
@@ -409,25 +449,26 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
-    await step('offer-nope', 'the marketplace offers `nope`: Refresh reads it in, and Available lists it', async () => {
+    await step('offer-nope', 'the marketplace offers `nope`: Check for updates reads it in, and Browse lists it', async () => {
       const w = page.locator('[data-widget="plugins"]');
       scratch.offerNope(true);
-      const market = marketplaceRow(w, 'e8-scratch');
+      const manage = await openDialog(w, 'Manage marketplaces');
+      const market = marketplaceRow(manage, 'e8-scratch');
       const result = await action({ name: 'offer-nope-refresh', action: 'marketplace-update', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-update', submit: 'Refresh', line: () => market }, () =>
-        market.getByRole('button', { name: 'Refresh' }).click(),
+        marketplaceAction(market, 'Check for updates'),
       );
       expect(result.text).toContain('Successfully updated marketplace: e8-scratch');
-      const group = await openAvailableGroup(w, 'e8-scratch');
-      await expect(group.locator('[data-plugin-row="nope@e8-scratch"]')).toBeVisible({ timeout: 60_000 });
+      await closeDialog(manage);
+      await browseCard(w, 'nope@e8-scratch');
     });
 
     await step('error', 'install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const row = w.locator('[data-plugins-section="available"] [data-plugin-row="nope@e8-scratch"]');
-      // the marketplace withdraws it, and the owner installs from the list they read
+      const card = await browseCard(w, 'nope@e8-scratch');
+      // the marketplace withdraws it, and the owner installs from the cards they read
       scratch.offerNope(false);
-      const result = await action({ name: 'error', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'nope', id: 'nope@e8-scratch' }, sheet: 'install', submit: 'Install', line: () => availableLine(w, 'nope@e8-scratch') }, () =>
-        row.getByRole('button', { name: 'Install…' }).click(),
+      const result = await action({ name: 'error', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'nope', id: 'nope@e8-scratch' }, sheet: 'install', submit: 'Install', line: () => browseLine(w, 'nope@e8-scratch') }, () =>
+        card.getByRole('button', { name: 'Install', exact: true }).click(),
       );
       expect(result.failed).toBe(true);
       expect(result.text).toBe(NOT_FOUND);
@@ -436,25 +477,27 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
 
     await step('reinstall', `Install ${PLUGIN} again, so the marketplace is removed with a plugin still installed`, async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const group = await openAvailableGroup(w, 'e8-scratch');
-      const row = group.locator(`[data-plugin-row="${PLUGIN}"]`);
-      const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => availableLine(w, PLUGIN) }, () => row.getByRole('button', { name: 'Install…' }).click());
+      const card = await browseCard(w, PLUGIN);
+      const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => browseLine(w, PLUGIN) }, () => card.getByRole('button', { name: 'Install', exact: true }).click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
+      await toMyItems(w);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
       await expect(disabledBadge(installedRow(w))).toHaveCount(0);
     });
 
     await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const row = marketplaceRow(w, 'e8-scratch');
+      const manage = await openDialog(w, 'Manage marketplaces');
+      const row = marketplaceRow(manage, 'e8-scratch');
       const uninstalls = [{ id: PLUGIN, scope: 'user', projectPath: null }];
-      const result = await action({ name: 'remove-folder', action: 'marketplace-remove', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, uninstalls, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => w.locator('[data-marketplace-result="e8-scratch"]') }, () =>
-        row.getByRole('button', { name: 'Remove…' }).click(),
+      const result = await action({ name: 'remove-folder', action: 'marketplace-remove', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, uninstalls, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => manage.locator('[data-marketplace-result="e8-scratch"]') }, () =>
+        marketplaceAction(row, 'Remove…'),
       );
       expect(result.uninstalls).toBe(`Also uninstalls 1 plugin: ${PLUGIN} (user)`);
       expect(result.text).toContain('Successfully removed marketplace: e8-scratch');
       await expect(row).toHaveCount(0);
-      await expect(w.locator('[data-plugins-section="marketplaces"]')).toContainText('No marketplaces configured');
+      await expect(manage).toContainText('No marketplaces added yet.');
+      await closeDialog(manage);
       await expect(installedRow(w)).toHaveCount(0); // the engine uninstalled it with its marketplace
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN); // and the reload after the removal dropped it
       scratch.log(`loaded after the removal's reload: ${(await loadedIds(w)).join(' · ')}`);

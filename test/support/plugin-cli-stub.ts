@@ -49,6 +49,7 @@ export interface StubFailure {
 export interface StubState {
   version?: string;
   marketplaces: StubMarketplace[];
+  directory?: StubPlugin[]; // P2-B (M5): the engine's built-in directory, listed by `--available` only (each `source` an object)
   installed: StubInstallation[];
   fail: Partial<Record<string, StubFailure>>;
 }

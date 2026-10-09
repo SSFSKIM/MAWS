@@ -20,6 +20,7 @@ const { homedir } = require('node:os');
 const { basename, dirname, isAbsolute, join, resolve, sep } = require('node:path');
 
 const json = (value) => JSON.stringify(value);
+const DIRECTORY = 'anthropic-plugin-directory'; // P2-B (M5): the engine's built-in directory
 const pretty = (value) => JSON.stringify(value, null, 2);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -194,12 +195,32 @@ function run(argv, input, ctx) {
   // the engine's `--available` leaves out what is installed (the E8 live run on 2.1.291); a row carries the entry's
   // source and, for the one marketplace the engine's catalog counts (U3), the plugin's install count
   const installedIds = new Set(state.installed.map((p) => p.id));
-  const available = () =>
-    state.marketplaces.flatMap((m) =>
+  // P2-B (M5): the engine's built-in directory, which `--available` lists as `anthropic-plugin-directory` with no count
+  // and which is never a marketplace row (U3 3a, 3d); an entry whose source is an installed plugin's is left out with
+  // it (U3 3e). Sources compare as `host/repo#path`, enough for the stub's GitHub shapes.
+  const keyOfSource = (source, market) => {
+    if (typeof source === 'string') return market && market.source === 'github' ? `github.com/${market.repo}#${source.replace(/^\.\//, '')}` : null;
+    return source && source.url ? `${source.url.replace(/^https:\/\//, '').replace(/\.git$/, '')}#${(source.path || '').replace(/^\.\//, '')}` : null;
+  };
+  const installedSources = new Set(
+    state.installed.map((p) => {
+      const named = splitId(p.id);
+      const m = state.marketplaces.find((x) => x.name === named.marketplace);
+      const plugin = m && m.plugins.find((q) => q.name === named.name);
+      return plugin ? keyOfSource(entryOf(plugin).source, m) : null;
+    }),
+  );
+  const directory = (state.directory || [])
+    .filter((p) => !installedIds.has(`${p.name}@${DIRECTORY}`) && !installedSources.has(keyOfSource(entryOf(p).source, null)))
+    .map((p) => ({ pluginId: `${p.name}@${DIRECTORY}`, name: p.name, description: p.description, marketplaceName: DIRECTORY, ...(p.version ? { version: p.version } : {}), source: entryOf(p).source }));
+  const available = () => [
+    ...directory,
+    ...state.marketplaces.flatMap((m) =>
       m.plugins
         .filter((p) => !installedIds.has(`${p.name}@${m.name}`))
         .map((p) => ({ pluginId: `${p.name}@${m.name}`, name: p.name, description: p.description, marketplaceName: m.name, ...(p.version ? { version: p.version } : {}), source: entryOf(p).source, ...(m.countsInstalls && typeof p.installCount === 'number' ? { installCount: p.installCount } : {}) })),
-    );
+    ),
+  ];
 
   // the reads
   if (!marketplaceVerb && verb === 'list') {
@@ -271,7 +292,7 @@ function run(argv, input, ctx) {
     say(json({ command, outcome: 'ok', plugin: target, pluginId: target, scope, ...extra, message }));
     return out;
   };
-  const offered = () => state.marketplaces.find((m) => m.name === marketplace)?.plugins.find((p) => p.name === name);
+  const offered = () => (marketplace === DIRECTORY ? state.directory || [] : state.marketplaces.find((m) => m.name === marketplace)?.plugins || []).find((p) => p.name === name);
   switch (verb) {
     case 'install': {
       const plugin = offered();

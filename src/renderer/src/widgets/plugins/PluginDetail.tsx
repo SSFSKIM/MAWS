@@ -9,14 +9,14 @@
 // "Loaded in this session", from the session's loaded list, with its freshness), the last init's problems for this
 // plugin, and What's inside; a tab per non-empty kind lists it. A chip that is not here or the user's offers no change
 // and says where the plugin is managed.
-import { DropdownMenu, Tabs } from 'radix-ui';
-import { useEffect, useRef, useState } from 'react';
+import { DropdownMenu } from 'radix-ui';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ChevronLeftIcon } from '../../app/IconButton';
 import { useNow } from '../../app/use-now';
 import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
-import { chipLabel, chipManagedWords, chipsOf, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, updateOffer, type InsideKind } from './detail';
+import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, updateOffer } from './detail';
 import { MoreIcon, PluginGlyph } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
 import { FRESHNESS, type AcquireOutcome, type LoadedPlugins } from './loaded';
@@ -28,7 +28,7 @@ import { INSTALLED_PREFIX, installationOf, installedKey } from './PluginRow';
 import { requestFor } from './present';
 import type { Reloads } from './reload';
 import { OtherProjects, ScopeChips } from './ScopeChips';
-import { InsideList, InsideSummary } from './WhatsInside';
+import { InsideSummary, InsideTabs } from './WhatsInside';
 
 export interface PluginDetailProps {
   identity: PluginIdentity;
@@ -37,6 +37,7 @@ export interface PluginDetailProps {
   reloads: Reloads | null; // on a ready process
   refresh: (() => Promise<AcquireOutcome>) | null; // A's `useLoadedPlugins().refresh`; null until A's M3
   listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
+  backTo?: string; // the view Back returns to: My items, or Browse for an installed card opened there
   onBack(): void;
 }
 
@@ -44,11 +45,10 @@ const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui 
 const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent`;
 const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90 disabled:bg-bg-active disabled:text-fg-faint`;
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
-const TAB = 'inline-flex h-8 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-1 text-ui text-fg-muted outline-accent hover:text-fg focus-visible:outline-2 data-[state=active]:border-fg data-[state=active]:text-fg';
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, listManifests, onBack }: PluginDetailProps) {
+export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, listManifests, backTo = L.myItems, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -84,11 +84,6 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, li
   const update = updateOffer(installation.version, view?.marketplaceVersion ?? null);
   const change = (action: Change) => chip && ask(chip.key, requestFor(action, { plugin: identity.id, scope: chip.installation.scope as PluginsScope }, null));
 
-  // the tab: Overview, or a kind the chosen installation still has
-  const tabs = view?.state === 'read' ? insideTabs(view.components) : [];
-  const [tab, setTab] = useState<'overview' | InsideKind>('overview');
-  const shownTab = tab === 'overview' || tabs.some((t) => t.kind === tab) ? tab : 'overview';
-
   // the results of changes whose installation left the list, for this plugin
   const listed = new Set(identity.installations.map(installedKey));
   const gone = [...ops.entries.keys()].filter((key) => key.startsWith(INSTALLED_PREFIX) && !listed.has(key) && installationOf(key).id === identity.id);
@@ -100,18 +95,10 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, li
       data-plugin-detail={identity.id}
       data-plugin-scope={chip?.installation.scope ?? OTHER_PROJECTS}
       className="flex min-h-0 flex-1 flex-col outline-none"
-      onKeyDown={(event) => {
-        if (event.key === '[' && event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey) {
-          event.preventDefault();
-          onBack();
-        }
-      }}
+      onKeyDown={backOnChord(onBack)}
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-border px-3 pb-3">
-        <button type="button" onClick={onBack} aria-label={L.backTo(L.myItems)} className="-ml-1 inline-flex h-6 items-center gap-1 self-start rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
-          <ChevronLeftIcon className="size-3.5" />
-          {L.myItems}
-        </button>
+        <BackButton to={backTo} onBack={onBack} />
         <div className="flex min-w-0 items-start gap-3">
           <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-active text-fg-muted">
             <PluginGlyph className="size-5" />
@@ -178,20 +165,11 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, li
         ))}
       </div>
 
-      <Tabs.Root value={shownTab} onValueChange={(next) => setTab(next as typeof tab)} className="flex min-h-0 flex-1 flex-col">
-        <Tabs.List aria-label={name} className="flex shrink-0 items-center gap-4 overflow-x-auto border-b border-border px-3 [scrollbar-width:none]">
-          <Tabs.Trigger value="overview" className={TAB}>
-            {L.overview}
-          </Tabs.Trigger>
-          {tabs.map((t) => (
-            <Tabs.Trigger key={t.kind} value={t.kind} className={TAB}>
-              {L.kind[t.kind]}
-              <span className="text-ui-sm text-fg-faint tabular-nums">{t.count}</span>
-            </Tabs.Trigger>
-          ))}
-        </Tabs.List>
-        <div data-plugin-detail-body className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <Tabs.Content value="overview" className="flex max-w-[640px] flex-col gap-4 outline-none">
+      <InsideTabs
+        label={name}
+        view={view}
+        overview={(openTab) => (
+          <>
             {selected === OTHER_PROJECTS && <OtherProjects installations={others} />}
             {view?.description && <p className="m-0 text-ui text-fg [overflow-wrap:anywhere] whitespace-pre-line">{view.description}</p>}
             <Facts identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} refresh={refresh} now={now} />
@@ -204,28 +182,45 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, li
                 ))}
               </ul>
             )}
-            {read.error !== null && (
-              <p role="status" className="m-0 flex flex-wrap items-baseline gap-x-2 text-ui-sm text-warning">
-                <span>{L.detailsFailed}</span>
-                <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{read.error}</span>
-                <button type="button" className="rounded-sm text-fg outline-accent hover:underline focus-visible:outline-2" onClick={read.retry}>
-                  {L.retry}
-                </button>
-              </p>
-            )}
-            <InsideSummary view={view} onOpen={setTab} />
-          </Tabs.Content>
-          {view?.state === 'read' &&
-            tabs.map((t) => (
-              <Tabs.Content key={t.kind} value={t.kind} className="max-w-[640px] outline-none">
-                <InsideList components={view.components} kind={t.kind} />
-              </Tabs.Content>
-            ))}
-        </div>
-      </Tabs.Root>
+            {read.error !== null && <ReadFailed words={read.error} onRetry={read.retry} />}
+            <InsideSummary view={view} onOpen={openTab} />
+          </>
+        )}
+      />
     </div>
   );
 }
+
+// A refused read of a plugin's files: nonfatal, the listing's controls and facts stay, and it says so with Retry.
+export function ReadFailed({ words, onRetry }: { words: string; onRetry(): void }) {
+  return (
+    <p role="status" className="m-0 flex flex-wrap items-baseline gap-x-2 text-ui-sm text-warning">
+      <span>{L.detailsFailed}</span>
+      <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{words}</span>
+      <button type="button" className="rounded-sm text-fg outline-accent hover:underline focus-visible:outline-2" onClick={onRetry}>
+        {L.retry}
+      </button>
+    </p>
+  );
+}
+
+// The head of a detail: Back (‹ with the library's view it returns to), which ⌘[ also takes.
+export function BackButton({ to, onBack }: { to: string; onBack(): void }) {
+  return (
+    <button type="button" onClick={onBack} aria-label={L.backTo(to)} className="-ml-1 inline-flex h-6 items-center gap-1 self-start rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      <ChevronLeftIcon className="size-3.5" />
+      {to}
+    </button>
+  );
+}
+
+// ⌘[ on a detail: back to the list it came from.
+export const backOnChord = (onBack: () => void) => (event: KeyboardEvent<HTMLElement>) => {
+  if (event.key === '[' && event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey) {
+    event.preventDefault();
+    onBack();
+  }
+};
 
 // A result whose installation left the list (while the plugin stays listed), named with the scope it acted at.
 const goneName = (key: string): string => {
@@ -237,7 +232,7 @@ const goneName = (key: string): string => {
 // session's loaded list with its freshness ("Loaded now", "Loaded last time, <relative>"; none when the list says no
 // time); a known list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload
 // plugins (ready) or Refresh; no list reads "Not observed yet". The last init's problems for this plugin beneath.
-function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests'> & { now: number }) {
+function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number }) {
   const fact = loadedFactOf(identity.id, loaded, loadedIds);
   const { pending, refusal, run } = useRefresh(refresh);
   const problems = present(loaded).problems.filter((p) => p.plugin === identity.name || p.plugin === identity.id);

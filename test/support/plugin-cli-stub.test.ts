@@ -152,6 +152,34 @@ describe('the plugin CLI stub', () => {
   });
   // P2-B end
 
+  it('lists the built-in directory with no count, leaves out its twin of an installed plugin, and records an install for a second project (P2-B M5; U3 3a, 3e)', () => {
+    const twin = { name: 'pr-review', version: '1.0.0', description: 'Reviews pull requests' };
+    const state: StubState = {
+      marketplaces: [{ name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', countsInstalls: true, plugins: [{ ...twin, installCount: 210_500 }, { name: 'supabase', version: '0.1.15', description: 'Supabase', installCount: 140_000 }] }],
+      directory: [
+        { ...twin, source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', path: 'plugins/pr-review' } },
+        { name: 'supabase', version: null, description: 'Supabase', source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: 'plugins/supabase' } },
+        { name: 'acme-only', version: null, description: 'Only in the directory', source: { source: 'url', url: 'https://github.com/acme/only.git' } },
+      ],
+      installed: [{ id: 'supabase@claude-plugins-official', version: '0.1.15', scope: 'local', enabled: true, projectPath: '/tmp/e8/other' }],
+      fail: {},
+    };
+    const offered = availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout);
+    expect(offered.map((p) => [p.pluginId, p.installCount])).toEqual([
+      ['pr-review@anthropic-plugin-directory', null],
+      ['acme-only@anthropic-plugin-directory', null],
+      ['pr-review@claude-plugins-official', 210_500],
+    ]); // supabase is installed somewhere: both its id and its directory twin are left out
+    expect(offered[0].source).toEqual({ kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', repo: null, path: 'plugins/pr-review', ref: null });
+    const again = run(['plugin', 'install', 'supabase@claude-plugins-official', '--scope', 'project', '--json'], state);
+    expect(again.code).toBe(0);
+    expect(again.state.installed.filter((p) => p.id === 'supabase@claude-plugins-official').map((p) => [p.scope, p.projectPath])).toEqual([
+      ['local', '/tmp/e8/other'],
+      ['project', ctx.cwd],
+    ]);
+    expect(run(['plugin', 'install', 'acme-only@anthropic-plugin-directory', '--scope', 'user', '--json'], state).code).toBe(0); // a directory plugin installs
+  });
+
   it('installs, disables, enables, updates and uninstalls as the engine words it, at the scope asked', () => {
     let state = base();
     const step = (argv: string[]) => {

@@ -1,14 +1,16 @@
-// `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.6): the plugin library, Claude Desktop's
+// `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.9): the plugin library, Claude Desktop's
 // grouped plugin library as its 2.16120.0 bundle ships it, over E8's management through the engine's own CLI. A
-// library-sized dialog (X19) whose head carries the title and, at the right, Search, Show and Sort; under it the loaded
-// line about this session; then My items, one row per plugin in Desktop's source groups, each change through E8's
-// confirm sheet. Selecting a row opens its detail in place of the list (§5.7): the list stays mounted beneath it,
-// hidden, so Back returns to it with its search, filter, scroll and focus as they were; the head's search, Show and Sort
-// and the loaded line belong to the list and leave with it. The selection is this open's own, never kept (§5.4). E8's
-// Marketplaces and Available sections stay mounted beneath My items until Browse and the marketplace dialogs replace
-// them (M5). The CLI needs no engine process, so a session that is not running still manages
-// plugins: the frame's states never stand in for the list, which says its own read's states, and A's session states
-// reach `/plugins` only through the loaded line.
+// library-sized dialog (X19) whose head carries the title and the My items | Browse switch at the left and, at the right,
+// the open view's Search, Show or Filter, and Sort, and the Add menu (Add marketplace, Manage marketplaces). Every open
+// starts on My items with no selection, so Browse's catalogue read runs only on the click that opens it (E8 D-7: the
+// listing refreshes the engine's catalogue caches), and is kept while the dialog stays open. My items: the loaded line
+// about this session, then one row per plugin in Desktop's source groups. Selecting a row or a card opens its detail in
+// place of its list (§5.7, §5.8): the list stays mounted beneath it, hidden, so Back returns to it with its search,
+// filter, scroll and focus as they were; the head's controls and the loaded line belong to the list and leave with it.
+// An installed card opens the plugin's My items detail, whose Back returns to Browse. The two marketplace dialogs are
+// sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
+// sheet. The CLI needs no engine process, so a session that is not running still manages plugins: the frame's states
+// never stand in for the list, and A's session states reach `/plugins` only through the loaded line.
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -16,17 +18,21 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { useSessions } from '../stores/sessions';
-import { PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
-import { AvailableSection } from './plugins/Available';
+import { LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
+import { AddMarketplaceDialog } from './plugins/AddMarketplaceDialog';
+import { AddMenu, type MarketplaceDialog } from './plugins/AddMenu';
+import { BrowsePane } from './plugins/BrowsePane';
+import { browseCards, browseView, isInstalledHere, type BrowseCard } from './plugins/browse';
+import { BrowseDetail } from './plugins/BrowseDetail';
 import type { EngineResolution } from './plugins/ConfirmSheet';
-import { PluginsToolbar } from './plugins/LibraryHeader';
+import { BrowseToolbar, LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
 import { useAvailability, useLoadedPlugins } from './plugins/loaded';
 import { LoadedLine } from './plugins/LoadedLine';
 import { ManageProvider, useManageState } from './plugins/manage';
+import { ManageMarketplaces } from './plugins/ManageMarketplaces';
 import { usePluginManifests } from './plugins/manifests';
-import { MarketplacesSection } from './plugins/Marketplaces';
 import { MyItems } from './plugins/MyItems';
 import { PluginDetail } from './plugins/PluginDetail';
 import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins/read';
@@ -80,7 +86,17 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const { views } = manifests;
   const identities = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], views, loadedIds), [plugins, markets, views, loadedIds]);
 
-  // the detail: the plugin selected in this open, while it is listed (one uninstalled everywhere returns to the list)
+  // the view: My items or Browse, this open's own; Browse's catalogue is read from its first click until the dialog closes
+  const [tab, setTab] = useState<LibraryTab>('myItems');
+  const [browsed, setBrowsed] = useState(false);
+  const available = usePluginsRead('plugins.available', cwd, browsed, tab === 'browse');
+  const offers = available.data?.plugins;
+  const cards = useMemo(() => browseCards(offers ?? [], identities, markets ?? []), [offers, identities, markets]);
+  const choices = useLibraryStore((s) => s.browse);
+  const shown = useMemo(() => browseView(cards, choices), [cards, choices]);
+  const [dialog, setDialog] = useState<MarketplaceDialog | null>(null);
+
+  // My items' detail: the plugin selected in this open, while it is listed (one uninstalled everywhere returns to the list)
   const [selected, setSelected] = useState<string | null>(null);
   const detail = selected === null ? null : (identities.find((i) => i.id === selected) ?? null);
   const pane = useRef<HTMLDivElement>(null);
@@ -101,40 +117,73 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
     target?.focus();
   }, [showing]);
 
+  // Browse's detail: the card opened, as it is now (an installed card whose plugin left the list returns to the grid);
+  // a card installed for the user or here opens its My items detail
+  const [picked, setPicked] = useState<{ pluginId: string; installed: boolean } | null>(null);
+  const card: BrowseCard | null = picked === null ? null : (cards.find((c) => c.pluginId === picked.pluginId) ?? null);
+  const pickedIdentity = picked?.installed ? (identities.find((i) => i.id === picked.pluginId) ?? null) : null;
+  const browseDetail = picked === null ? null : picked.installed ? pickedIdentity : card;
+  const pick = useCallback((c: BrowseCard) => setPicked({ pluginId: c.pluginId, installed: isInstalledHere(c) }), []);
+  if (picked !== null && browseDetail === null) setPicked(null); // a card or plugin that left is not opened again by its return
+
+  // a view's switch: to the other view, or (the view already shown) back to its list
+  const switchTo = (next: LibraryTab) => {
+    if (next === 'browse') setBrowsed(true);
+    if (next === tab) {
+      if (next === 'myItems') setSelected(null);
+      else setPicked(null);
+    }
+    setTab(next);
+  };
+
+  const inDetail = tab === 'myItems' ? showing : browseDetail !== null;
+  const add = <AddMenu onOpen={setDialog} />;
+  const toolbar = inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
+  const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
+    <PluginDetail key={identity.id} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} refresh={null} listManifests={manifests} backTo={backTo} onBack={onBack} />
+  );
+
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close} size="library" toolbar={showing ? null : <PluginsToolbar />}>
-        {detail && <PluginDetail key={detail.id} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} refresh={null} listManifests={manifests} onBack={() => setSelected(null)} />}
-        <div className={showing ? 'hidden' : 'contents'}>
-          <LoadedLine
-            appSessionId={appSessionId}
-            availability={availability}
-            loaded={loaded}
-            refresh={null}
-            reloads={ready ? reloads : null}
-            onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
-          />
-          <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-            <MyItems
-              appSessionId={appSessionId}
-              installed={installed}
-              identities={identities}
-              loaded={loaded}
-              loadedIds={loadedIds}
-              onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] })}
-              manifestError={manifests.error}
-              onRetryManifests={manifests.retry}
-              onOpen={open}
-            />
-            {cwd !== null && (
-              <div className="mt-4 border-t border-border px-1 pt-2">
-                <MarketplacesSection cwd={cwd} installed={plugins ?? []} />
-                <AvailableSection cwd={cwd} />
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} />} toolbar={toolbar}>
+        {tab === 'myItems' && (
+          <>
+            {detail && pluginDetail(detail, L.myItems, () => setSelected(null))}
+            <div className={showing ? 'hidden' : 'contents'}>
+              <LoadedLine
+                appSessionId={appSessionId}
+                availability={availability}
+                loaded={loaded}
+                refresh={null}
+                reloads={ready ? reloads : null}
+                onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
+              />
+              <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
+                <MyItems
+                  appSessionId={appSessionId}
+                  installed={installed}
+                  identities={identities}
+                  loaded={loaded}
+                  loadedIds={loadedIds}
+                  onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] })}
+                  manifestError={manifests.error}
+                  onRetryManifests={manifests.retry}
+                  onOpen={open}
+                />
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </>
+        )}
+        {tab === 'browse' && (
+          <>
+            {picked !== null && pickedIdentity !== null && pluginDetail(pickedIdentity, L.browse, () => setPicked(null))}
+            {picked !== null && !picked.installed && card !== null && <BrowseDetail key={card.pluginId} card={card} onBack={() => setPicked(null)} />}
+            <BrowsePane read={available} cards={cards} view={shown} hidden={browseDetail !== null} onOpen={pick} onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.available', { cwd }] })} />
+          </>
+        )}
       </WidgetFrame>
+      {dialog === 'manage' && <ManageMarketplaces marketplaces={marketplaces} installed={plugins ?? []} onClose={() => setDialog(null)} />}
+      {dialog === 'add' && <AddMarketplaceDialog onClose={() => setDialog(null)} />}
       {sheet}
     </ManageProvider>
   );

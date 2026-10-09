@@ -359,25 +359,9 @@ const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
   reloadSkills: 'Reload skills',
-  // Installed: P2-B's library (`LIBRARY`) draws the installed plugins
-  // Marketplaces
-  marketplaces: 'Marketplaces',
-  marketplaceList: 'Known marketplaces',
-  noMarketplaces: 'No marketplaces configured',
-  refresh: 'Refresh',
-  remove: 'Remove…',
-  addMarketplace: 'Add marketplace',
+  // Installed, Available and Marketplaces: P2-B's library (`LIBRARY`) draws them; Add marketplace keeps E8's field words
   addPlaceholder: 'owner/repo, URL or folder',
-  add: 'Add…',
   chooseFolder: 'Choose folder…',
-  // Available
-  available: 'Available',
-  filterPlaceholder: 'Filter available plugins',
-  availableIn: (marketplace: string, n: number) => `${marketplace} · ${n} plugin${n === 1 ? '' : 's'}`,
-  availableList: (marketplace: string) => `Available in ${marketplace}`,
-  noAvailable: 'No plugins available to install',
-  noMatch: 'No available plugin matches the filter',
-  install: 'Install…',
   // the confirm sheet
   verb: {
     install: 'Install',
@@ -552,5 +536,38 @@ export const LIBRARY = {
   missing: 'This plugin’s files are not on disk.',
   unread: 'What’s inside could not be read.',
   detailsFailed: "Couldn't read this plugin's details.", // the detail's `plugins.manifest` refused: the controls and facts stay
+  // the switch, Browse and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
+  library: 'Library',
+  browse: 'Browse',
+  filterBy: 'Filter',
+  status: 'Status',
+  statusWords: { installed: 'Installed', notInstalled: 'Not installed' } as const,
+  source: 'Source',
+  allSources: 'All sources',
+  browseSort: { popular: 'Most popular', name: 'Name' } as const,
+  install: 'Install',
+  installed: 'Installed',
+  installedElsewhere: 'Installed in other projects',
+  installs: (count: string) => `${count} installs`,
+  from: (marketplace: string) => `from ${marketplace}`,
+  alsoListedIn: (marketplace: string) => `Also listed in ${marketplace}`,
+  insideOnceInstalled: 'What’s inside is listed once it is installed.',
+  noDescription: 'No description provided.',
+  browseFailed: "Couldn't load the plugins to browse.",
+  noOffers: 'Nothing to browse yet. Add a marketplace to see what it offers.',
+  add: 'Add',
+  addMarketplace: 'Add marketplace',
+  manageMarketplaces: 'Manage marketplaces',
+  manageLine: 'Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins.',
+  noMarketplaces: 'No marketplaces added yet.',
+  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'} installed`,
+  checkForUpdates: 'Check for updates',
+  remove: 'Remove…',
+  done: 'Done',
+  cancel: 'Cancel',
+  sourceField: 'Source',
+  sourceHelper: 'A GitHub owner/repo, a Git repository URL or a folder on this Mac.',
+  trustWarning:
+    'Make sure you trust a plugin before installing, updating, or using it. Plugins installed from marketplaces are not controlled by Anthropic, and Anthropic cannot verify that they will work as intended or that they won’t change. See each plugin’s homepage for more information.',
 };
 // P2-B end

@@ -2,11 +2,11 @@
 // three CLI reads, the manifest read (P2-B), the operations' receipts, and `plugins.operation` / `plugins.changed`
 // emitted by the test as the engine host would emit them. Nothing here runs a CLI or touches a config home. P2-B M3:
 // the library (My items' rows by plugin, the row overflow's Turn on or off, Update and Uninstall…, the loaded line);
-// E8's Marketplaces and Available sections stay mounted beneath My items until M5.
+// M5: Browse (its catalogue read on its click; cards, Install, the installed join) and the Add menu's two marketplace dialogs.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
@@ -128,7 +128,7 @@ const menuItems = (id: string) => {
   fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Escape' });
   return items;
 };
-const sheet = () => screen.getByRole('dialog');
+const sheet = () => document.querySelector<HTMLElement>('[data-plugins-sheet]')!; // E8's confirm sheet, above a marketplace dialog when one is open
 const argvShown = () => JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
 // Every sheet reads plugins.env again on opening and names its command once that read answered.
 const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
@@ -137,8 +137,43 @@ const ready = async () => {
   useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
   mount();
   await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-  await waitFor(() => expect(section('marketplaces').querySelector('[data-marketplace-row="e8-scratch"]')).toBeTruthy());
+  await waitFor(() => expect(invoked('marketplaces.list').length).toBeGreaterThan(0));
+  await act(async () => {}); // its answer drawn
 };
+// P2-B M5: Browse (its catalogue read on its click), its cards, the Add menu and the two marketplace dialogs.
+const toBrowse = async () => {
+  fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
+  await waitFor(() => expect(section('browse').querySelector('[data-browse-card]')).toBeTruthy());
+};
+const card = (id: string) => section('browse').querySelector<HTMLElement>(`[data-browse-card="${id}"]`)!;
+const openAdd = (item: 'Add marketplace' | 'Manage marketplaces') => {
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Add' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name: item }));
+};
+const addDialog = () => document.querySelector<HTMLElement>('[data-marketplaces-dialog="add"]')!;
+const manageDialog = () => document.querySelector<HTMLElement>('[data-marketplaces-dialog="manage"]')!;
+const marketRow = (name: string) => manageDialog().querySelector<HTMLElement>(`[data-marketplace-row="${name}"]`)!;
+const marketMenu = (name: string, item: string) => {
+  fireEvent.keyDown(within(marketRow(name)).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name: item }));
+};
+const marketItems = (name: string) => {
+  fireEvent.keyDown(within(marketRow(name)).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+  const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+  fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Escape' });
+  return items;
+};
+// happy-dom has no layout: give Browse's scroller a viewport so the virtualised grid mounts its rows.
+const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.hasAttribute('data-browse-scroller') ? 600 : 0;
+    },
+  });
+});
+afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 describe('plugins widget: loaded in this session and the reloads', () => {
   it('says how many plugins a ready process loaded, now; its count shows them, credited, beside the installed rows', async () => {
@@ -239,7 +274,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 });
 
 describe('plugins widget: management', () => {
-  it('lists installed plugins and marketplaces, and reads the catalogue only when Available opens', async () => {
+  it('lists installed plugins; Browse reads the catalogue only on its click, never on opening, and rereads it on a change only while it shows', async () => {
     await ready();
     const probe = row('e8-probe@e8-scratch');
     expect(probe.getAttribute('data-plugin-scope')).toBe('user');
@@ -248,40 +283,49 @@ describe('plugins widget: management', () => {
     expect(probe.textContent).toContain('0.1.0');
     await waitFor(() => expect(probe.textContent).toContain('by E8 · One skill and one command, for the probe'));
     expect(probe.textContent).not.toContain('Disabled');
-    expect(section('marketplaces').querySelector('[data-marketplace-row="e8-scratch"]')!.textContent).toContain('/tmp/e8-scratch/market');
-    expect(invoked('plugins.available')).toEqual([]);
-    fireEvent.click(within(section('available')).getByText('Available'));
-    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
+    expect(screen.getByRole('radio', { name: 'My items' }).getAttribute('aria-checked')).toBe('true');
+    expect(invoked('plugins.available')).toEqual([]); // never on opening /plugins
+    await toBrowse();
     expect(invoked('plugins.available')).toEqual([{ cwd }]);
-    fireEvent.change(within(section('available')).getByRole('textbox', { name: 'Filter available plugins' }), { target: { value: 'review' } });
-    expect(within(section('available')).getByRole('list', { name: 'Available in anthropic-plugin-directory' })).toBeTruthy();
-    expect(within(section('available')).queryByText('e8-scratch · 2 plugins')).toBeNull();
-    // a change rereads the lists, and the catalogue only while its section is open
+    // sections: Anthropic & Partners first, then each other marketplace; the installed e8-probe joined back in, Installed
+    expect([...section('browse').querySelectorAll('[data-browse-section]')].map((s) => s.getAttribute('data-browse-section'))).toEqual(['anthropic', 'e8-scratch']);
+    expect(card('review@anthropic-plugin-directory').getAttribute('data-section')).toBe('anthropic');
+    expect(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' })).toBeTruthy();
+    expect(within(card('e8-other@e8-scratch')).getByText('from e8-scratch')).toBeTruthy();
+    expect(within(card('e8-probe@e8-scratch')).queryByRole('button', { name: 'Install' })).toBeNull();
+    expect(within(card('e8-probe@e8-scratch')).getByText('Installed')).toBeTruthy();
+    expect(section('browse').querySelector('[data-install-count]')).toBeNull(); // no row carries a count
+    // Browse's own search
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'review' } });
+    expect([...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'))).toEqual(['review@anthropic-plugin-directory']);
+    // a change rereads the lists, and the catalogue while Browse shows
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(invoked('plugins.available')).toHaveLength(2));
     expect(invoked('plugins.list')).toHaveLength(2);
     expect(invoked('marketplaces.list')).toHaveLength(2);
-    fireEvent.click(within(section('available')).getByText('Available'));
+    // on My items, the catalogue keeps its answer; the change it missed is read once Browse shows again
+    fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(invoked('plugins.list')).toHaveLength(3));
     expect(invoked('plugins.available')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
+    await waitFor(() => expect(invoked('plugins.available')).toHaveLength(3));
   });
 
-  it('Cancel on the confirm sheet runs nothing; a confirmed install runs the argument list the sheet showed, at the scope chosen', async () => {
+  it('Cancel on the confirm sheet runs nothing; a card’s Install runs the argument list the sheet showed, at the scope chosen', async () => {
     await ready();
-    fireEvent.click(within(section('available')).getByText('Available'));
-    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
-    fireEvent.click(within(section('available')).getByText('e8-scratch · 2 plugins'));
-    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
+    await toBrowse();
+    const other = () => card('e8-other@e8-scratch');
 
-    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    fireEvent.click(within(other()).getByRole('button', { name: 'Install' }));
     expect(sheet().getAttribute('data-plugins-sheet')).toBe('install');
     expect(within(sheet()).getByRole('heading', { name: 'Install e8-other@e8-scratch?' })).toBeTruthy();
+    expect(section('browse').querySelector('[data-browse-detail]')).toBeNull(); // Install keeps its own click
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(invoked('plugins.install')).toEqual([]);
 
-    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    fireEvent.click(within(other()).getByRole('button', { name: 'Install' }));
     await resolved();
     expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'user' }));
     expect(within(sheet()).getByText('2.1.290 plugin install e8-other@e8-scratch --scope user --json')).toBeTruthy();
@@ -296,16 +340,22 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
     expect(screen.queryByRole('dialog')).toBeNull();
 
-    await waitFor(() => expect(within(other).getByRole('status').textContent).toBe('Working…'));
+    await waitFor(() => expect(within(other()).getByRole('status').textContent).toBe('Working…'));
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'started' })));
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'output', line: 'Cloning e8-other…' })));
-    expect(within(other).getByRole('status').textContent).toBe('Cloning e8-other…');
+    expect(within(other()).getByRole('status').textContent).toBe('Cloning e8-other…');
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'reloading' })));
-    expect(within(other).getByRole('status').textContent).toBe('Reloading running sessions…');
+    expect(within(other()).getByRole('status').textContent).toBe('Reloading running sessions…');
     act(() =>
       emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully installed plugin: e8-other@e8-scratch (scope: project)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'reflected', error: null }] } })),
     );
-    expect(within(other).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
+    expect(within(other()).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
+    // the engine's listing leaves it out once installed; the installed identity's card keeps the result
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-other@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true })];
+    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'review@anthropic-plugin-directory', name: 'review', marketplaceName: 'anthropic-plugin-directory', description: 'Code review', version: '1.0.0', source: null, installCount: null }] }));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(other().getAttribute('data-installed')).toBe('here'));
+    expect(within(other()).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
   });
 
   it('Turn off asks first, and the row stands where the next read puts it, never where the outcome suggests', async () => {
@@ -379,68 +429,93 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
   });
 
-  it('adds a chosen folder as a marketplace and shows the engine’s failure in red with its code', async () => {
+  it('Add marketplace: Desktop’s trust warning and one Source field; a chosen folder, E8’s sheet, and the engine’s failure in red with its code', async () => {
     backend.script('layout.pickFiles', () => ({ files: [{ path: '/tmp/e8-does-not-exist', name: 'e8-does-not-exist', bytes: 0, mediaType: 'inode/directory', data: null }] }));
     await ready();
-    fireEvent.click(within(section('marketplaces')).getByRole('button', { name: 'Choose folder…' }));
-    await waitFor(() => expect(within(section('marketplaces')).getByRole('textbox', { name: 'Add marketplace' })).toHaveProperty('value', '/tmp/e8-does-not-exist'));
+    openAdd('Add marketplace');
+    const dialog = addDialog();
+    expect(within(dialog).getByRole('heading', { name: 'Add marketplace' })).toBeTruthy();
+    expect(within(dialog).getByRole('note').textContent).toContain('Make sure you trust a plugin before installing, updating, or using it.');
+    const field = within(dialog).getByRole('textbox', { name: 'Source' });
+    expect(field.getAttribute('placeholder')).toBe('owner/repo, URL or folder');
+    expect(within(dialog).getByText('A GitHub owner/repo, a Git repository URL or a folder on this Mac.')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toHaveProperty('disabled', true); // nothing typed
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose folder…' }));
+    await waitFor(() => expect(field).toHaveProperty('value', '/tmp/e8-does-not-exist'));
     expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
-    fireEvent.click(within(section('marketplaces')).getByRole('button', { name: 'Add…' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--json']);
     expect(within(sheet()).getByText('Nothing to reload: an added marketplace loads no plugin')).toBeTruthy();
     expect(within(sheet()).queryByRole('radio')).toBeNull();
+    expect(invoked('marketplaces.add')).toEqual([]); // nothing before the sheet's confirm
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist' }]));
     act(() =>
       emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-add', target: '/tmp/e8-does-not-exist', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'Path does not exist: /tmp/e8-does-not-exist', failureCode: 'invalid_source', shownCommand: null } } })),
     );
-    const line = within(section('marketplaces')).getByRole('status');
+    const line = within(addDialog()).getByRole('status');
     expect(line.textContent).toBe('Path does not exist: /tmp/e8-does-not-exist · invalid_source');
     expect(line.className).toContain('text-danger');
+    expect(within(addDialog()).getByRole('button', { name: 'Done' })).toBeTruthy(); // the dialog stays for another source
   });
 
-  it('an install whose plugin left the catalogue keeps the engine’s failure under Available after the row leaves (M3: the widgets gate)', async () => {
+  it('an install whose plugin left the catalogue keeps the engine’s failure above the grid after its card leaves (M3: the widgets gate)', async () => {
     await ready();
-    fireEvent.click(within(section('available')).getByText('Available'));
-    fireEvent.click(await waitFor(() => within(section('available')).getByText('e8-scratch · 2 plugins')));
-    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
-    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    await toBrowse();
+    fireEvent.click(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' }));
     await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
     // the catalogue read again after the CLI ended no longer offers it (a folder marketplace is read in place)
     backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0', source: null, installCount: null }] }));
     act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 1 plugin')).toBeTruthy());
-    expect(section('available').querySelector('[data-plugin-row="e8-other@e8-scratch"]')).toBeNull();
+    await waitFor(() => expect(section('browse').querySelector('[data-browse-card="e8-other@e8-scratch"]')).toBeNull());
     const message = 'Plugin "e8-other" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.';
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message, failureCode: 'not_found', shownCommand: null } } })));
-    const gone = section('available').querySelector<HTMLElement>('[data-plugin-result="e8-other@e8-scratch"]')!;
+    const gone = section('browse').querySelector<HTMLElement>('[data-plugin-result="e8-other@e8-scratch"]')!;
     expect(gone).toBeTruthy();
     const line = within(gone).getByRole('status');
     expect(line.textContent).toBe(`${message} · not_found`);
     expect(line.className).toContain('text-danger');
   });
 
-  it('refreshes and removes a marketplace through its sheet, the removal behind the acknowledgement', async () => {
+  it('Manage marketplaces: Desktop’s copy, a row per marketplace with its source; Check for updates and Remove… through E8’s sheets; Done', async () => {
     await ready();
-    const market = () => section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
-    fireEvent.click(within(market()).getByRole('button', { name: 'Refresh' }));
+    openAdd('Manage marketplaces');
+    await waitFor(() => expect(marketRow('e8-scratch')).toBeTruthy());
+    const dialog = manageDialog();
+    expect(within(dialog).getByRole('heading', { name: 'Manage marketplaces' })).toBeTruthy();
+    expect(within(dialog).getByText('Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins.')).toBeTruthy();
+    expect([...dialog.querySelectorAll('[data-marketplace-row]')].map((r) => r.getAttribute('data-marketplace-row'))).toEqual(['e8-scratch']); // never the built-in directory
+    expect(marketRow('e8-scratch').textContent).toContain('/tmp/e8-scratch/market');
+    expect(marketRow('e8-scratch').textContent).toContain('1 plugin installed');
+    expect(marketItems('e8-scratch')).toEqual(['Check for updates', 'Remove…']);
+    marketMenu('e8-scratch', 'Check for updates');
     await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'update', 'e8-scratch', '--json']);
     expect(within(sheet()).getByText(`${HOME}/plugins/known_marketplaces.json`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(invoked('marketplaces.update')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
     act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-update', target: 'e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Validating local marketplace\nSuccessfully updated marketplace: e8-scratch' } }, reload: { sessions: [] } })));
-    expect(within(market()).getByRole('status').textContent).toBe('Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · No running session to reload');
-    fireEvent.click(within(market()).getByRole('button', { name: 'Remove…' }));
+    expect(within(marketRow('e8-scratch')).getByRole('status').textContent).toBe('Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · No running session to reload');
+    marketMenu('e8-scratch', 'Remove…');
     await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'e8-scratch', '--json']);
+    expect(within(sheet()).getByText('Also uninstalls 1 plugin: e8-probe@e8-scratch (user)')).toBeTruthy();
     expect(within(sheet()).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(invoked('marketplaces.remove')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
+    // the marketplace leaves the next read; its result stays, and an empty list says so
+    backend.script('marketplaces.list', () => ({ marketplaces: [] }));
+    installed = [];
+    act(() => emit('plugins.changed', {}));
+    act(() => emit('plugins.operation', event({ opId: 'pop-2', action: 'marketplace-remove', target: 'e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully removed marketplace: e8-scratch' } }, reload: { sessions: [] } })));
+    await waitFor(() => expect(within(manageDialog()).getByText('No marketplaces added yet.')).toBeTruthy());
+    expect(manageDialog().querySelector('[data-marketplace-result="e8-scratch"]')!.textContent).toContain('Successfully removed marketplace: e8-scratch');
+    fireEvent.click(within(manageDialog()).getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(document.querySelector('[data-marketplaces-dialog]')).toBeNull());
   });
 
   it('Stop asks the host to cancel the running CLI', async () => {
@@ -605,8 +680,9 @@ describe('plugins widget: whole-branch review fixes', () => {
   it('removing a marketplace names the installed plugins it uninstalls and the files that writes, behind the acknowledgement', async () => {
     installed = [plugin('e8-probe@e8-scratch'), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: '/work/other' }), plugin('review@anthropic-plugin-directory')];
     await ready();
-    const market = section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
-    fireEvent.click(within(market).getByRole('button', { name: 'Remove…' }));
+    openAdd('Manage marketplaces');
+    await waitFor(() => expect(marketRow('e8-scratch')).toBeTruthy());
+    marketMenu('e8-scratch', 'Remove…');
     await waitFor(() => expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'e8-scratch', '--json']));
     expect(within(sheet()).getByText('Also uninstalls 2 plugins: e8-probe@e8-scratch (user), e8-tools@e8-scratch (project, /work/other)')).toBeTruthy();
     const writes = within(within(sheet()).getByRole('list', { name: "The engine's CLI writes:" })).getAllByRole('listitem').map((item) => item.textContent);
@@ -992,5 +1068,148 @@ describe('plugins widget: the detail', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await resolved();
     expect(detail()).toBeNull();
+  });
+});
+
+// ---- P2-B M5: Browse ---------------------------------------------------------------------------------------------------
+// The engine's configured sources as the host lists them: the built-in directory, the official marketplace (which alone
+// carries counts), a third party; the installed identities joined back in; the card's detail and its What's inside.
+describe('plugins widget: Browse', () => {
+  const OFFICIAL_LOCATION = '/tmp/e8-scratch/claude-config/plugins/marketplaces/claude-plugins-official';
+  const official = { name: 'claude-plugins-official', source: 'github', locator: 'anthropics/claude-plugins-official', installLocation: OFFICIAL_LOCATION };
+  const directory = (name: string, over: Record<string, unknown> = {}) => ({ pluginId: `${name}@anthropic-plugin-directory`, name, marketplaceName: 'anthropic-plugin-directory', description: `${name} from the directory`, version: null, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: `plugins/${name}` }, installCount: null, ...over });
+  const offered = (name: string, installCount: number | null) => ({ pluginId: `${name}@claude-plugins-official`, name, marketplaceName: 'claude-plugins-official', description: `${name} from the marketplace`, version: '1.2.0', source: `./plugins/${name}`, installCount });
+  beforeEach(() => {
+    backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }, official] }));
+    backend.script('plugins.available', () => ({
+      plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only'), offered('counted-none', null)],
+    }));
+    installed = [
+      plugin('e8-probe@e8-scratch'),
+      plugin('supabase@claude-plugins-official', { scope: 'local', projectPath: '/work/other', enabled: false }), // only another project has it
+      plugin('code-review@claude-plugins-official'), // installed for the user
+    ];
+  });
+
+  it('folds a directory entry with its official twin into one card with the official count; counts only where the engine gives one; Most popular first', async () => {
+    await ready();
+    await toBrowse();
+    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
+    // Anthropic & Partners: counted cards by count, then the rest by name; then e8-scratch
+    expect(ids()).toEqual([
+      'frontend-design@anthropic-plugin-directory',
+      'code-simplifier@claude-plugins-official',
+      'code-review@claude-plugins-official',
+      'counted-none@claude-plugins-official',
+      'dir-only@anthropic-plugin-directory',
+      'supabase@claude-plugins-official',
+      'e8-probe@e8-scratch',
+    ]);
+    expect(card('frontend-design@anthropic-plugin-directory').querySelector('[data-install-count]')!.textContent).toBe('1.3M installs');
+    expect(card('code-simplifier@claude-plugins-official').querySelector('[data-install-count]')!.textContent).toBe('3.4K installs');
+    for (const id of ['dir-only@anthropic-plugin-directory', 'counted-none@claude-plugins-official', 'code-review@claude-plugins-official']) expect(card(id).querySelector('[data-install-count]')).toBeNull();
+    expect(card('code-review@claude-plugins-official').getAttribute('data-installed')).toBe('here');
+    expect(card('supabase@claude-plugins-official').getAttribute('data-installed')).toBe('otherProjects');
+    expect(within(card('supabase@claude-plugins-official')).getByText('Installed in other projects')).toBeTruthy();
+    // Sort by: Most popular is offered, and chosen; Name orders by name
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
+    expect(screen.getAllByRole('menuitemradio').map((i) => [i.textContent, i.getAttribute('aria-checked')])).toEqual([
+      ['●Most popular', 'true'],
+      ['Name', 'false'],
+    ]);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Name' }));
+    expect(ids()[0]).toBe('code-review@claude-plugins-official');
+  });
+
+  it('with no count anywhere, Most popular is not offered and Name orders the cards', async () => {
+    backend.script('plugins.available', () => ({ plugins: [directory('zeta'), directory('alpha')] }));
+    await ready();
+    await toBrowse();
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
+    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent)).toEqual(['●Name']);
+  });
+
+  it('Filter: Status keeps one checked; Source narrows to a section; nothing left offers Reset filters', async () => {
+    await ready();
+    await toBrowse();
+    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Not installed' }));
+    expect(ids()).toEqual(['code-review@claude-plugins-official', 'e8-probe@e8-scratch']); // installed for the user or here
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Installed' })); // the last one checked stays
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Installed' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'e8-scratch' }));
+    expect(ids()).toEqual(['e8-probe@e8-scratch']);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'nothing like it' } });
+    expect(within(section('browse')).getByText('Nothing matches these filters.')).toBeTruthy();
+    fireEvent.click(within(section('browse')).getByRole('button', { name: 'Reset filters' }));
+    expect(ids()).toHaveLength(7);
+  });
+
+  it('a card installed only for other projects still offers Install here, at the scope its sheet chooses', async () => {
+    await ready();
+    await toBrowse();
+    fireEvent.click(within(card('supabase@claude-plugins-official')).getByRole('button', { name: 'Install' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
+    expect(argvShown()).toEqual(['plugin', 'install', 'supabase@claude-plugins-official', '--scope', 'project', '--json']);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'supabase@claude-plugins-official', scope: 'project' }]));
+  });
+
+  it('a card’s detail: the credit, the count, Also listed in, What’s inside from the marketplace’s clone, and Install; Back returns to the grid', async () => {
+    backend.script('plugins.manifest', (input) => ({
+      manifests: (input as { items: ManifestItemRef[] }).items.map((key) => (key.kind === 'available' && key.pluginId === 'frontend-design@claude-plugins-official' ? { ...manifestOf(key), components: { ...manifestOf(key).components, skills: [{ name: 'frontend-design', description: 'Distinctive interfaces' }] } } : manifestOf(key))),
+    }));
+    await ready();
+    await toBrowse();
+    fireEvent.click(within(card('frontend-design@anthropic-plugin-directory')).getByRole('button', { name: 'View Frontend design' }));
+    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]')!;
+    expect(detail().getAttribute('data-browse-detail')).toBe('frontend-design@anthropic-plugin-directory');
+    expect(section('browse').className).toContain('hidden'); // the grid stays beneath
+    expect(screen.queryByRole('searchbox')).toBeNull(); // the grid's controls leave with it
+    expect(within(detail()).getByRole('heading', { name: 'Frontend design' })).toBeTruthy();
+    expect(within(detail()).getByText('from anthropic-plugin-directory · 1.2.0 · 1.3M installs')).toBeTruthy();
+    expect(within(detail()).getByText('Also listed in claude-plugins-official')).toBeTruthy();
+    // the directory entry's own source is not on disk; its official twin's files sit in that marketplace's clone
+    await waitFor(() => expect(invoked('plugins.manifest')).toContainEqual({ cwd, items: [{ kind: 'available', pluginId: 'frontend-design@claude-plugins-official' }] }));
+    await waitFor(() => expect(within(detail()).getByRole('button', { name: 'Skills · 1' })).toBeTruthy());
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Install' }));
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'install', 'frontend-design@anthropic-plugin-directory', '--scope', 'user', '--json']); // the card's own id
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(document.querySelector('[data-plugins-sheet]')).toBeNull());
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Back to Browse' }));
+    expect(document.querySelector('[data-browse-detail]')).toBeNull();
+    expect(section('browse').className).not.toContain('hidden');
+    expect(document.activeElement?.closest('[data-browse-card]')?.getAttribute('data-browse-card')).toBe('frontend-design@anthropic-plugin-directory');
+  });
+
+  it('a directory-only card says what’s inside is listed once installed, asking nothing; an installed card opens its My items detail, whose Back returns to Browse', async () => {
+    await ready();
+    await toBrowse();
+    const asked = invoked('plugins.manifest').length;
+    fireEvent.click(within(card('dir-only@anthropic-plugin-directory')).getByRole('button', { name: 'View Dir only' }));
+    expect(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByText('What’s inside is listed once it is installed.')).toBeTruthy();
+    expect(invoked('plugins.manifest')).toHaveLength(asked);
+    fireEvent.keyDown(document.querySelector<HTMLElement>('[data-browse-detail]')!, { key: '[', metaKey: true });
+    expect(document.querySelector('[data-browse-detail]')).toBeNull();
+    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
+    expect(document.querySelector('[data-plugin-detail]')!.getAttribute('data-plugin-detail')).toBe('code-review@claude-plugins-official');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
+    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('every open starts on My items with no catalogue read, whatever the last open showed', async () => {
+    await ready();
+    await toBrowse();
+    expect(invoked('plugins.available')).toHaveLength(1);
+    cleanup();
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(screen.getByRole('radio', { name: 'My items' }).getAttribute('aria-checked')).toBe('true');
+    expect(section('browse')).toBeNull();
+    expect(invoked('plugins.available')).toHaveLength(1);
   });
 });

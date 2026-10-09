@@ -4,9 +4,11 @@
 // N more", one line on what the kind is), each opening its tab; and a tab's list, each item's name and description.
 // Everything drawn is plain text from the host's redacted answer (names, kinds and counts; §5.5), so a plugin's words
 // can never become a link or an action. No README (Desktop renders none).
+import { Tabs } from 'radix-ui';
+import { useState, type ReactNode } from 'react';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { LIBRARY as L } from '../copy';
-import { insideItems, insideSummary, type InsideKind } from './detail';
+import { insideItems, insideSummary, insideTabs, type InsideKind } from './detail';
 
 type Components = PluginManifestView['components'];
 
@@ -60,3 +62,40 @@ export function InsideList({ components, kind }: { components: Components; kind:
 }
 
 const Note = ({ children }: { children: string }) => <p className="m-0 text-ui-sm text-fg-muted">{children}</p>;
+
+const TAB = 'inline-flex h-8 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-1 text-ui text-fg-muted outline-accent hover:text-fg focus-visible:outline-2 data-[state=active]:border-fg data-[state=active]:text-fg';
+
+// A detail's tabs (Desktop's, c24c8737b-BY-86Rbf.js:2887-3042): Overview, whose content the detail draws (`overview`,
+// handed the opener its summary's kinds use), then one tab per non-empty kind the view read, listing it. A kind the view
+// no longer has falls back to Overview. The body scrolls; the dialog keeps its size.
+export function InsideTabs({ label, view, overview }: { label: string; view: PluginManifestView | null; overview(open: (kind: InsideKind) => void): ReactNode }) {
+  const tabs = view?.state === 'read' ? insideTabs(view.components) : [];
+  const [tab, setTab] = useState<'overview' | InsideKind>('overview');
+  const shown = tab === 'overview' || tabs.some((t) => t.kind === tab) ? tab : 'overview';
+  return (
+    <Tabs.Root value={shown} onValueChange={(next) => setTab(next as typeof tab)} className="flex min-h-0 flex-1 flex-col">
+      <Tabs.List aria-label={label} className="flex shrink-0 items-center gap-4 overflow-x-auto border-b border-border px-3 [scrollbar-width:none]">
+        <Tabs.Trigger value="overview" className={TAB}>
+          {L.overview}
+        </Tabs.Trigger>
+        {tabs.map((t) => (
+          <Tabs.Trigger key={t.kind} value={t.kind} className={TAB}>
+            {L.kind[t.kind]}
+            <span className="text-ui-sm text-fg-faint tabular-nums">{t.count}</span>
+          </Tabs.Trigger>
+        ))}
+      </Tabs.List>
+      <div data-plugin-detail-body className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <Tabs.Content value="overview" className="flex max-w-[640px] flex-col gap-4 outline-none">
+          {overview(setTab)}
+        </Tabs.Content>
+        {view?.state === 'read' &&
+          tabs.map((t) => (
+            <Tabs.Content key={t.kind} value={t.kind} className="max-w-[640px] outline-none">
+              <InsideList components={view.components} kind={t.kind} />
+            </Tabs.Content>
+          ))}
+      </div>
+    </Tabs.Root>
+  );
+}
