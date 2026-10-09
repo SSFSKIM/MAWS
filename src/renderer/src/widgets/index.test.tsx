@@ -53,13 +53,13 @@ describe('every widget renders its fixture response', () => {
     permissions: 'Bash(git log --oneline)',
     usage: '$0.0208',
     config: 'dialogExpiry',
-    plugins: 'doperpowers',
+    plugins: '11 plugins loaded in this session', // P2-B: the library's loaded line
     mcp: 'openaiDeveloperDocs',
     sandbox: 'Sandbox off',
     'reload-plugins': 'Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors', // E11 §2.2: it reloads on opening
     hooks: 'echo MAWS_POSTHOOK',
     memory: 'Project instructions',
-    skills: '/deep-research',
+    skills: 'deep-research', // P2-B M6: the skills library's row names the skill
     agents: 'Fast read-only search agent for locating code',
     status: 'http://127.0.0.1:8641',
     context: '30,433 of 200,000 · 15% · autocompact at 167,000',

@@ -204,7 +204,6 @@ export const HOOKS = {
 export const MEMORY = { missing: 'does not exist yet', files: 'Files', fileList: 'Memory files', folders: 'Folders', folderList: 'Memory folders', autoMemory: (status: string) => `Auto memory · ${status}`, addNote: 'Add a note' };
 
 // Skills and agents.
-export const SKILLS = { use: 'Use', none: 'No skills in the catalogue', list: 'Skills' };
 export const AGENTS = { mention: 'Mention', none: 'No agents in the catalogue', list: 'Agents' };
 
 // Diff.
@@ -371,33 +370,9 @@ const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
   reloadSkills: 'Reload skills',
-  // Installed
-  installed: 'Installed',
-  installedList: 'Installed plugins',
-  noInstalled: 'No plugins installed',
-  enabled: 'enabled',
-  disabled: 'disabled',
-  enabledSwitch: (id: string) => `Enabled: ${id}`,
-  update: 'Update',
-  uninstall: 'Uninstall…',
-  // Marketplaces
-  marketplaces: 'Marketplaces',
-  marketplaceList: 'Known marketplaces',
-  noMarketplaces: 'No marketplaces configured',
-  refresh: 'Refresh',
-  remove: 'Remove…',
-  addMarketplace: 'Add marketplace',
+  // Installed, Available and Marketplaces: P2-B's library (`LIBRARY`) draws them; Add marketplace keeps E8's field words
   addPlaceholder: 'owner/repo, URL or folder',
-  add: 'Add…',
   chooseFolder: 'Choose folder…',
-  // Available
-  available: 'Available',
-  filterPlaceholder: 'Filter available plugins',
-  availableIn: (marketplace: string, n: number) => `${marketplace} · ${n} plugin${n === 1 ? '' : 's'}`,
-  availableList: (marketplace: string) => `Available in ${marketplace}`,
-  noAvailable: 'No plugins available to install',
-  noMatch: 'No available plugin matches the filter',
-  install: 'Install…',
   // the confirm sheet
   verb: {
     install: 'Install',
@@ -418,7 +393,6 @@ export const PLUGIN_MANAGEMENT = {
   records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
   dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',
   overrides: 'and any enable or disable override for them in these settings files',
-  elsewhere: (path: string) => `In ${path} · manage it from a session there`, // another project's installation, read-only here
   alsoUninstalls: (plugins: string[]) => `Also uninstalls ${plugins.length} plugin${plugins.length === 1 ? '' : 's'}: ${plugins.join(', ')}`,
   resolving: 'Resolving the engine…',
   unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words
@@ -474,3 +448,143 @@ export const RENAME = {
 };
 
 // Resume: P2-D's chooser has its words in resume/copy.ts.
+
+// P2-B start (2026-10-09): the plugin library (the P2-B execution document §5.4 to §5.12; Claude Desktop's words where
+// it has them, §10 Q9). The person's words; no provenance.
+export const LIBRARY = {
+  searchPlugins: 'Search plugins',
+  show: 'Show',
+  filter: { all: 'All plugins', enabled: 'Enabled', disabled: 'Disabled', loaded: 'Loaded in this session', otherProjects: 'Other projects' } as const,
+  sortBy: 'Sort by',
+  sort: { updated: 'Last updated', name: 'Name' } as const,
+  group: {
+    here: 'In this project',
+    yours: 'Created by you',
+    synced: 'Synced from claude.ai',
+    anthropic: 'From Anthropic & Partners',
+    added: 'From marketplaces you added',
+    otherProjects: 'Other projects',
+    builtIn: 'MAWS mods · Built in',
+  } as const,
+  list: 'Plugins',
+  noneHere: 'No plugins installed for this project yet.',
+  firstTitle: 'Add your first plugins',
+  firstBody: 'Give Claude role-level expertise with plugins. Add them from Browse.',
+  noMatch: 'Nothing matches these filters.',
+  resetFilters: 'Reset filters',
+  failed: "Couldn't load your plugins.",
+  retry: 'Retry',
+  manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
+  // a row
+  isNew: 'New',
+  newTooltip: 'Added or updated in the last 14 days',
+  disabled: 'Disabled',
+  by: (author: string) => `by ${author}`,
+  skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`,
+  moreActions: (name: string) => `More actions for ${name}`,
+  turnOn: 'Turn on',
+  turnOff: 'Turn off',
+  update: 'Update',
+  uninstall: 'Uninstall…',
+  managedIn: (project: string) => `In ${project} · manage it from a session there`,
+  managedInMany: (n: number) => `In ${n} other projects · manage it from a session there`,
+  // the loaded line
+  loadedCount: (n: number) => `${n} plugin${n === 1 ? '' : 's'} loaded in this session`,
+  problems: (n: number) => `${n} problem${n === 1 ? '' : 's'}`,
+  refresh: 'Refresh',
+  missingDirectory: (directory: string) => `Directory not found: ${directory}`, // A's words for the state
+  builtIntoClaudeCode: 'Built into Claude Code',
+  loadedFromFolder: 'Loaded from a folder',
+  // MAWS mods · Built in (X20)
+  builtIn: 'Built in',
+  throughStyle: 'Through your output style',
+  thisSession: (on: boolean) => `This session: ${on ? 'on' : 'off'}`,
+  modSwitch: (name: string) => `Turn ${name} on or off`,
+  // the detail (§5.7; Desktop's words where it has them, c24c8737b-BY-86Rbf.js)
+  view: (name: string) => `View ${name}`,
+  myItems: 'My items',
+  backTo: (library: string) => `Back to ${library}`,
+  versionNotReported: 'Version not reported',
+  updated: (when: string) => `updated ${when}`,
+  enablePlugin: 'Enable plugin',
+  updateTo: (version: string) => `Update to ${version}`,
+  onLatest: 'On latest version',
+  installedAt: 'Installed for',
+  chip: { local: 'This project · only you', project: 'This project', user: 'User', yours: 'Created by you', synced: 'Synced' } as const,
+  onlyYou: 'only you',
+  otherProjects: (n: number) => `${n} other project${n === 1 ? '' : 's'}`,
+  manageThere: 'manage it from a session there',
+  syncedThere: 'Synced from claude.ai · change it there',
+  yoursThere: 'From your own folder · change it there',
+  enabledHere: 'Enabled for this project',
+  notEnabledHere: 'Not enabled for this project',
+  loadedHere: 'Loaded in this session',
+  notLoadedHere: 'Not loaded in this session',
+  overview: 'Overview',
+  whatsInside: 'What’s inside',
+  more: (n: number) => `and ${n} more`,
+  kind: { mcpServers: 'MCP servers', agents: 'Agents', hooks: 'Hooks', monitors: 'Monitors', lspServers: 'Language servers', commands: 'Commands', skills: 'Skills' } as const,
+  kindLine: {
+    mcpServers: 'Services and tools Claude can reach.',
+    agents: 'Helpers Claude can hand a longer job to.',
+    hooks: 'Run on their own during a session.',
+    monitors: 'Keep watch in the background during a session.',
+    lspServers: 'Help Claude read and check code in a language.',
+    commands: 'Shortcuts you type with a slash.',
+    skills: 'Things Claude can do when you ask.',
+  } as const,
+  skillsHelper: 'Invoke by typing / in chat, or let Claude use them automatically for relevant tasks.',
+  bundles: (n: number) => `${n} MCP bundle${n === 1 ? '' : 's'}`,
+  hookModules: (n: number) => `${n} hooks module${n === 1 ? '' : 's'}`,
+  partial: 'Some of this plugin’s files could not be read, so what’s inside may not all be listed.',
+  missing: 'This plugin’s files are not on disk.',
+  unread: 'What’s inside could not be read.',
+  detailsFailed: "Couldn't read this plugin's details.", // the detail's `plugins.manifest` refused: the controls and facts stay
+  // the switch, Browse and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
+  library: 'Library',
+  browse: 'Browse',
+  filterBy: 'Filter',
+  status: 'Status',
+  statusWords: { installed: 'Installed', notInstalled: 'Not installed' } as const,
+  source: 'Source',
+  allSources: 'All sources',
+  browseSort: { popular: 'Most popular', name: 'Name' } as const,
+  install: 'Install',
+  installed: 'Installed',
+  installedElsewhere: 'Installed in other projects',
+  installs: (count: string) => `${count} installs`,
+  from: (marketplace: string) => `from ${marketplace}`,
+  alsoListedIn: (marketplace: string) => `Also listed in ${marketplace}`,
+  insideOnceInstalled: 'What’s inside is listed once it is installed.',
+  noDescription: 'No description provided.',
+  browseFailed: "Couldn't load the plugins to browse.",
+  noOffers: 'Nothing to browse yet. Add a marketplace to see what it offers.',
+  add: 'Add',
+  addMarketplace: 'Add marketplace',
+  manageMarketplaces: 'Manage marketplaces',
+  manageLine: 'Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins.',
+  noMarketplaces: 'No marketplaces added yet.',
+  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'} installed`,
+  checkForUpdates: 'Check for updates',
+  remove: 'Remove…',
+  done: 'Done',
+  cancel: 'Cancel',
+  sourceField: 'Source',
+  sourceHelper: 'A GitHub owner/repo, a Git repository URL or a folder on this Mac.',
+  trustWarning:
+    'Make sure you trust a plugin before installing, updating, or using it. Plugins installed from marketplaces are not controlled by Anthropic, and Anthropic cannot verify that they will work as intended or that they won’t change. See each plugin’s homepage for more information.',
+};
+// M6: the skills library (§5.10; Desktop's Skills section where it has words). Its groups are My items' (`LIBRARY.group`).
+export const SKILLS_LIBRARY = {
+  list: 'Skills',
+  search: 'Search skills',
+  sort: { name: 'Name', plugin: 'Plugin name' } as const,
+  useInChat: 'Use in chat',
+  firstTitle: 'Add your first skills',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Browse in /plugins lists what your marketplaces offer.',
+  failed: "Couldn't load your skills.",
+  invoke: 'Type',
+  plugin: 'Plugin',
+  source: 'Source',
+};
+// P2-B end

@@ -42,6 +42,8 @@ export const WIDGET_DIALOG_BOX: Record<WidgetSize, string> = {
 // (@radix-ui/react-dismissable-layer 1.1.19, dist/index.mjs:91-105): in a search field that holds text (marked
 // `data-escape-clears`), the dialog stays and the field, which sees the same event next, clears itself.
 const clearsFirst = (target: EventTarget | null): boolean => target instanceof HTMLInputElement && target.matches('[data-escape-clears]') && target.value !== '';
+// An Escape an input method is composing with (Korean, Japanese, Chinese) cancels the composition, not the dialog; the
+// field's own `isComposing` guard runs too late, after this capture listener (P2-B M6, from P2-D's review of this hunk).
 // P2-B end
 
 export function WidgetDialogHost() {
@@ -63,7 +65,7 @@ export function WidgetDialogHost() {
           }}
           // P2-B start (2026-10-09)
           onEscapeKeyDown={(event) => {
-            if (clearsFirst(event.target)) event.preventDefault();
+            if (event.isComposing || clearsFirst(event.target)) event.preventDefault();
           }}
           data-widget-size={widget.size ?? 'utility'}
           className={`fixed top-1/2 left-1/2 z-50 flex ${WIDGET_DIALOG_BOX[widget.size ?? 'utility']} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border-strong bg-bg-overlay p-3 text-ui text-fg shadow-composer outline-none`}

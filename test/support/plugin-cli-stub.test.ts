@@ -2,14 +2,15 @@
 // (`cli-result.ts`, written from G0's probe), so the `widgets` e2e drives the product's own parsing; its mutations move
 // its state as the engine's registry would; its errors are the engine's words; it never takes `-y`.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { availableOf, installedOf, marketplacesOf, mutationOutcome } from '../../src/engine-host/plugins/cli-result';
+import { availableOf, installedOf, marketplacesOf, mutationOutcome, pluginRowsOf } from '../../src/engine-host/plugins/cli-result';
+import { readManifestView } from '../../src/engine-host/plugins/manifest';
 import { commandLine } from '../../src/shared/plugins/cli';
 import { FIXTURE_ENGINE_VERSION } from './engine-pin';
-import { runPluginCli, scratchMarketplace, stubCalls, writePluginCliStub, type StubState } from './plugin-cli-stub';
+import { materialisePluginCli, ownerShapedState, runPluginCli, scratchMarketplace, stubCalls, writePluginCliStub, type StubState } from './plugin-cli-stub';
 
 const SHA = 'a'.repeat(64);
 const dirs: string[] = [];
@@ -29,19 +30,154 @@ const ctx = { cwd: '/tmp/e8/project', configHome: '/tmp/e8/config' };
 const run = (argv: string[], state: StubState) => runPluginCli(argv, state, ctx);
 
 describe('the plugin CLI stub', () => {
-  it('lists in the shapes the host parses', () => {
+  it('lists in the shapes the host parses', async () => {
     const state = base();
     state.installed.push({ id: 'e8-probe@e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null });
     const installed = run(['plugin', 'list', '--json'], state);
     expect(installed.code).toBe(0);
-    expect(installedOf(installed.stdout)).toEqual([
-      { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/tmp/e8/config/plugins/cache/e8-scratch/e8-probe/0.1.0', errors: [], notes: [] },
+    expect(await installedOf(pluginRowsOf(installed.stdout), ctx.cwd)).toEqual([
+      { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/tmp/e8/config/plugins/cache/e8-scratch/e8-probe/0.1.0', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false },
     ]);
-    expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', installLocation: '/tmp/e8/market' }]);
+    expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', ref: null, installLocation: '/tmp/e8/market' }]);
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout)).toEqual([]); // the engine leaves out what is installed
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], base()).stdout)).toEqual([
-      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: '0.1.0' },
+      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: '0.1.0', source: './plugins/e8-probe', installCount: null },
     ]);
+  });
+
+  // P2-B start (2026-10-09)
+  it('records the times of an install and an update, and lists projectEnabled from the directory it runs in (P2-B)', () => {
+    let state = base();
+    const at = (now: string, argv: string[], cwd = ctx.cwd) => {
+      const out = runPluginCli(argv, state, { ...ctx, cwd, now });
+      state = out.state;
+      return out;
+    };
+    at('2026-10-01T00:00:00.000Z', commandLine('install', { plugin: 'e8-probe@e8-scratch', scope: 'project' }));
+    state.marketplaces[0].plugins[0].version = '0.2.0';
+    at('2026-10-05T00:00:00.000Z', commandLine('update', { plugin: 'e8-probe@e8-scratch', scope: 'project' }));
+    const rows = pluginRowsOf(at('2026-10-06T00:00:00.000Z', ['plugin', 'list', '--json']).stdout);
+    expect(rows).toMatchObject([{ installedAt: '2026-10-01T00:00:00.000Z', lastUpdated: '2026-10-05T00:00:00.000Z', projectEnabled: true, projectPath: ctx.cwd }]);
+    expect(pluginRowsOf(at('2026-10-06T00:00:00.000Z', ['plugin', 'list', '--json'], '/tmp/e8/other').stdout)).toMatchObject([{ projectEnabled: false }]);
+  });
+
+  it('lists an entry’s source, and an install count only for a marketplace the engine’s catalog counts (P2-B)', () => {
+    const state = base();
+    state.marketplaces.push({ name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', countsInstalls: true, plugins: [{ name: 'frontend-design', version: null, description: 'Design', installCount: 1_290_640 }, { name: 'quiet', version: null, description: null }] });
+    state.marketplaces.push({ name: 'third', source: 'github', repo: 'acme/third', plugins: [{ name: 'x', version: '1.0.0', description: null, installCount: 5, source: { source: 'url', url: 'https://example.com/x.git' } }] });
+    expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout).map((p) => [p.pluginId, p.source, p.installCount])).toEqual([
+      ['e8-probe@e8-scratch', './plugins/e8-probe', null],
+      ['frontend-design@claude-plugins-official', './plugins/frontend-design', 1_290_640],
+      ['quiet@claude-plugins-official', './plugins/quiet', null],
+      ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null, ref: null }, null],
+    ]);
+  });
+
+  it('lists the branch or tag a repository marketplace is pinned to, as the engine does: only when it has one (P2-B)', () => {
+    const state = base();
+    state.marketplaces.push({ name: 'pinned', source: 'github', repo: 'acme/pinned', ref: 'v2', plugins: [] }, { name: 'tip', source: 'git', url: 'https://example.com/tip.git', plugins: [] });
+    const printed = JSON.parse(run(['plugin', 'marketplace', 'list', '--json'], state).stdout) as Record<string, unknown>[];
+    expect(printed.map((m) => m.ref)).toEqual([undefined, 'v2', undefined]);
+    expect(marketplacesOf(JSON.stringify(printed)).map((m) => [m.name, m.ref])).toEqual([['e8-scratch', null], ['pinned', 'v2'], ['tip', null]]);
+  });
+
+  it('writes each installation’s tree and each cloned marketplace’s catalogue inside CLAUDE_CONFIG_DIR, which the manifest reader reads (P2-B)', async () => {
+    const root = scratch();
+    const configHome = join(root, 'claude-config');
+    const state = base();
+    state.marketplaces.push({ name: 'gh', source: 'github', repo: 'acme/gh', plugins: [{ name: 'tool', version: '2.0.0', description: 'A tool', author: 'Acme' }, { name: 'ts-lsp', version: '1.0.0', description: 'TypeScript', manifest: false, lspServers: { typescript: { command: 'typescript-language-server', extensionToLanguage: { '.ts': 'typescript' } } } }] });
+    state.installed.push({ id: 'tool@gh', version: '2.0.0', scope: 'user', enabled: true, projectPath: null }, { id: 'ts-lsp@gh', version: '1.0.0', scope: 'user', enabled: true, projectPath: null });
+    const local = { cwd: join(root, 'project'), configHome };
+    materialisePluginCli(state, local, { CLAUDE_CONFIG_DIR: configHome });
+    const rows = pluginRowsOf(runPluginCli(['plugin', 'list', '--json'], state, local).stdout);
+    const [location] = marketplacesOf(runPluginCli(['plugin', 'marketplace', 'list', '--json'], state, local).stdout).filter((m) => m.name === 'gh').map((m) => m.installLocation);
+    expect(existsSync(join(location!, '.claude-plugin', 'marketplace.json'))).toBe(true);
+
+    const tool = await readManifestView({ kind: 'installation', id: 'tool@gh', scope: 'user', projectPath: null }, { root: rows[0].installPath, marketplaceRoot: location, entryName: 'tool' });
+    expect(tool).toMatchObject({ state: 'read', name: 'tool', version: '2.0.0', author: 'Acme', problems: [] });
+    expect(tool.components).toMatchObject({ commands: [{ name: 'tool-hello' }], skills: [{ name: 'tool-skill' }], agents: [{ name: 'tool-helper' }], hooks: [{ event: 'PostToolUse', matcher: 'Write' }], mcpServers: [{ name: 'tool-server', transport: 'stdio' }] });
+    expect(JSON.stringify(tool)).not.toContain('stub-secret'); // the tree's MCP argument and environment values
+    expect(JSON.stringify(tool)).not.toContain('stub-hook-command');
+    const lsp = await readManifestView({ kind: 'installation', id: 'ts-lsp@gh', scope: 'user', projectPath: null }, { root: rows[1].installPath, marketplaceRoot: location, entryName: 'ts-lsp' });
+    expect(lsp).toMatchObject({ state: 'read', description: 'TypeScript', components: { lspServers: [{ name: 'typescript' }], commands: [] } });
+    const available = await readManifestView({ kind: 'available', pluginId: 'tool@gh' }, { root: null, marketplaceRoot: location, entryName: 'tool' });
+    expect(available.components.skills).toEqual([{ name: 'tool-skill', description: 'The skill tool brings' }]);
+  });
+
+  it('writes nothing without an explicit CLAUDE_CONFIG_DIR, and never into $HOME/.claude (P2-B)', () => {
+    // a scratch HOME stands in for the owner's: the test itself must never risk a write into the real ~/.claude
+    const home = scratch();
+    const state = base();
+    state.marketplaces.push({ name: 'gh', source: 'github', repo: 'acme/gh', plugins: [{ name: 'tool', version: '2.0.0', description: null }] });
+    state.installed.push({ id: 'tool@gh', version: '2.0.0', scope: 'user', enabled: true, projectPath: null });
+    const owned = join(home, '.claude');
+    materialisePluginCli(state, { cwd: home, configHome: owned }, { HOME: home });
+    materialisePluginCli(state, { cwd: home, configHome: owned }, { HOME: home, CLAUDE_CONFIG_DIR: owned });
+    materialisePluginCli(state, { cwd: home, configHome: join(owned, 'nested') }, { HOME: home, CLAUDE_CONFIG_DIR: join(owned, 'nested') });
+    materialisePluginCli(state, { cwd: home, configHome: 'relative' }, { HOME: home, CLAUDE_CONFIG_DIR: 'relative' });
+    expect(existsSync(owned)).toBe(false);
+    const scratchHome = join(home, 'scratch-config');
+    materialisePluginCli(state, { cwd: home, configHome: scratchHome }, { HOME: home, CLAUDE_CONFIG_DIR: scratchHome });
+    expect(existsSync(join(scratchHome, 'plugins', 'cache', 'gh', 'tool', '2.0.0', '.claude-plugin', 'plugin.json'))).toBe(true);
+  });
+
+  it('the owner-shaped registry: 29 plugins, 130 installations over 50 projects, 10 unknown versions, four with no plugin.json (P2-B)', async () => {
+    const project = '/tmp/p2b/project';
+    const state = ownerShapedState(project, '/tmp/p2b/elsewhere', new Date('2026-10-09T12:00:00Z'));
+    const rows = pluginRowsOf(run(['plugin', 'list', '--json'], state).stdout);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(29);
+    expect(rows).toHaveLength(130);
+    const scopes = rows.reduce<Record<string, number>>((n, r) => ({ ...n, [r.scope]: (n[r.scope] ?? 0) + 1 }), {});
+    expect(scopes).toEqual({ project: 71, local: 46, user: 13 });
+    expect(new Set(rows.flatMap((r) => (r.projectPath ? [r.projectPath] : []))).size).toBe(50);
+    expect(rows.filter((r) => r.version === 'unknown')).toHaveLength(10);
+    expect(rows.filter((r) => r.id === 'doperpowers@doperpowers')).toHaveLength(47);
+    expect(rows.filter((r) => r.id === 'supabase@claude-plugins-official')).toHaveLength(46);
+    expect(rows.filter((r) => r.id === 'supabase@claude-plugins-official' && r.projectPath === project)).toEqual([]); // other projects only
+    expect(state.marketplaces.flatMap((m) => m.plugins).filter((p) => p.manifest === false).map((p) => p.name)).toEqual(['pyright-lsp', 'rust-analyzer-lsp', 'swift-lsp', 'typescript-lsp']);
+    expect(rows.every((r) => r.installedAt !== null && r.lastUpdated !== null)).toBe(true);
+  });
+
+  it('lists each row enabled as the listing directory sees the id, as the engine does (P2-B M3; U3 F1)', () => {
+    const project = '/tmp/p2b/project';
+    const state = ownerShapedState(project, '/tmp/p2b/elsewhere', new Date('2026-10-09T12:00:00Z'));
+    const listed = (cwd: string) => pluginRowsOf(runPluginCli(['plugin', 'list', '--json'], state, { ...ctx, cwd }).stdout);
+    const enabledOf = (rows: ReturnType<typeof listed>, id: string) => [...new Set(rows.filter((r) => r.id === id).map((r) => r.enabled))];
+    const here = listed(project);
+    expect(enabledOf(here, 'supabase@claude-plugins-official')).toEqual([false]); // installed for other projects only
+    expect(enabledOf(here, 'context7@claude-plugins-official')).toEqual([false]); // disabled here
+    expect(enabledOf(here, 'doperpowers@doperpowers')).toEqual([true]); // every one of its 47 rows reads this directory's state
+    expect(enabledOf(here, 'chrome-devtools-mcp@claude-plugins-official')).toEqual([true]); // the user's
+    expect(enabledOf(listed('/tmp/p2b/elsewhere/e1'), 'supabase@claude-plugins-official')).toEqual([true]);
+  });
+  // P2-B end
+
+  it('lists the built-in directory with no count, leaves out its twin of an installed plugin, and records an install for a second project (P2-B M5; U3 3a, 3e)', () => {
+    const twin = { name: 'pr-review', version: '1.0.0', description: 'Reviews pull requests' };
+    const state: StubState = {
+      marketplaces: [{ name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', countsInstalls: true, plugins: [{ ...twin, installCount: 210_500 }, { name: 'supabase', version: '0.1.15', description: 'Supabase', installCount: 140_000 }] }],
+      directory: [
+        { ...twin, source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', path: 'plugins/pr-review' } },
+        { name: 'supabase', version: null, description: 'Supabase', source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: 'plugins/supabase' } },
+        { name: 'acme-only', version: null, description: 'Only in the directory', source: { source: 'url', url: 'https://github.com/acme/only.git' } },
+      ],
+      installed: [{ id: 'supabase@claude-plugins-official', version: '0.1.15', scope: 'local', enabled: true, projectPath: '/tmp/e8/other' }],
+      fail: {},
+    };
+    const offered = availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout);
+    expect(offered.map((p) => [p.pluginId, p.installCount])).toEqual([
+      ['pr-review@anthropic-plugin-directory', null],
+      ['acme-only@anthropic-plugin-directory', null],
+      ['pr-review@claude-plugins-official', 210_500],
+    ]); // supabase is installed somewhere: both its id and its directory twin are left out
+    expect(offered[0].source).toEqual({ kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', repo: null, path: 'plugins/pr-review', ref: null });
+    const again = run(['plugin', 'install', 'supabase@claude-plugins-official', '--scope', 'project', '--json'], state);
+    expect(again.code).toBe(0);
+    expect(again.state.installed.filter((p) => p.id === 'supabase@claude-plugins-official').map((p) => [p.scope, p.projectPath])).toEqual([
+      ['local', '/tmp/e8/other'],
+      ['project', ctx.cwd],
+    ]);
+    expect(run(['plugin', 'install', 'acme-only@anthropic-plugin-directory', '--scope', 'user', '--json'], state).code).toBe(0); // a directory plugin installs
   });
 
   it('installs, disables, enables, updates and uninstalls as the engine words it, at the scope asked', () => {
@@ -96,10 +232,10 @@ describe('the plugin CLI stub', () => {
     expect(step(commandLine('marketplace-add', { source: 'acme/tools' }))).toMatchObject({ ok: true, result: { marketplace: 'tools' } });
     expect(step(commandLine('marketplace-add', { source: 'https://example.com/acme/more.git' }))).toMatchObject({ ok: true, result: { marketplace: 'more' } });
     expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([
-      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', installLocation: '/tmp/e8/market' },
-      { name: 'e8-other', source: 'directory', locator: market, installLocation: market },
-      { name: 'tools', source: 'github', locator: 'acme/tools', installLocation: '/tmp/e8/config/plugins/marketplaces/tools' },
-      { name: 'more', source: 'git', locator: 'https://example.com/acme/more.git', installLocation: '/tmp/e8/config/plugins/marketplaces/more' },
+      { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', ref: null, installLocation: '/tmp/e8/market' },
+      { name: 'e8-other', source: 'directory', locator: market, ref: null, installLocation: market },
+      { name: 'tools', source: 'github', locator: 'acme/tools', ref: null, installLocation: '/tmp/e8/config/plugins/marketplaces/tools' },
+      { name: 'more', source: 'git', locator: 'https://example.com/acme/more.git', ref: null, installLocation: '/tmp/e8/config/plugins/marketplaces/more' },
     ]);
     expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout).map((p) => p.pluginId)).toEqual(['e8-probe@e8-scratch', 'e8-extra@e8-other']);
     expect(step(commandLine('marketplace-add', { source: join(root, 'missing') }))).toMatchObject({ ok: false, error: { message: `Path does not exist: ${join(root, 'missing')}`, failureCode: 'invalid_source' } });

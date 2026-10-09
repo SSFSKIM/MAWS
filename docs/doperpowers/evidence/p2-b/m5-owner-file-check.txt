@@ -1,0 +1,10 @@
+P2-B M5 live run (e2e/plugins-live.spec.ts on the library, 2026-10-09, scratch root /tmp/maws-e8-live-JX0WhI)
+Owner-file check (the execution document §6.3): the /tmp and /private/tmp project keys of ~/.claude.json, read before
+the electron-vite build and after the Playwright run, every inherited CLAUDE_* variable dropped from the run's shell.
+
+before: /tmp/p2b-ownerfile-before.txt (1,031 bytes)
+after:  /tmp/p2b-ownerfile-after.txt
+diff:   identical
+
+Playwright: 1 passed (1.2m); live-run.txt: "result: every step passed", "console errors: []", no "verdict: FAILED".
+The repository-source step (anthropics/claude-plugins-official from GitHub) cloned and was removed (no network refusal).

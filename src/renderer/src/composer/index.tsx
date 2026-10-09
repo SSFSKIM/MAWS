@@ -19,6 +19,7 @@ export { insertComposerText, prefillComposer, useComposerStore, type Prefill } f
 export { renderInlineRequest, renderSessionRequest } from '../request-card/inline';
 export { registerSlashWidget, WIDGET_COMMANDS, type SlashWidget, type WidgetCommandName } from './mentions/widgets'; // M3
 export { closeWidgetDialog, openWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3 (C6): the widgets' floating dialog
+export { WIDGET_DIALOG_BOX, type WidgetSize } from './WidgetDialog'; // P2-B (2026-10-09): X19's sizes
 export { editAndResubmitRow, editPromptRow, registerResubmitProvider, type ResubmitProvider } from './resubmit-seam'; // M4b; editPromptRow: W1
 export { registerSetupIntentHook, type SetupIntent, type SetupIntentHook, type SetupIntentPatch, type Location, type ModelInfo, type FirstMessage } from './setup-intent';
 

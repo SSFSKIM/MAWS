@@ -13,6 +13,10 @@ export const MarketplaceSchema = z.strictObject({
   name: z.string(),
   source: z.string(), // the source kind: directory, github, git, url, file, claudeai, …
   locator: z.string().nullable(), // the repository, URL or path, whichever the row carries
+  // P2-B start (2026-10-09): the branch or tag a repository marketplace is pinned to (P2-B execution document §5.3,
+  // §5.4): its relative entries have no fold key; optional, so a producer that omits it names none
+  ref: z.string().nullable().optional(),
+  // P2-B end
   installLocation: z.string().nullable(),
 });
 export type Marketplace = z.infer<typeof MarketplaceSchema>;

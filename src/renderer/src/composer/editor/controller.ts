@@ -43,7 +43,7 @@ export interface DraftPort {
 export interface EditorHandle {
   focus(): void;
   submit(): void; // the submit control: as a key would (refused while one is in flight)
-  insertText(text: string): void; // at the caret when focused, else at the end (C11's insertComposerText)
+  insertText(text: string): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
   clear(): void;
@@ -154,6 +154,10 @@ export class EditorController {
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
   private dictation: Dictation | null = null; // E9: the open sink, if any
+  // P2-B M6: whether the selection is a caret the human left: the editor lost focus since its document was last set
+  // while unfocused. A dialog widget's insertion (C11's insertComposerText, "Use in chat") runs while the dialog holds
+  // the keyboard, and lands there, not at the end.
+  private caretLeft = false;
 
   constructor(
     private readonly client: MawsBridge,
@@ -199,6 +203,10 @@ export class EditorController {
   }
 
   // ---- Tiptap's callbacks ---------------------------------------------------------------------------------------
+
+  blurred(): void {
+    this.caretLeft = true; // ProseMirror keeps the selection across the blur
+  }
 
   updated(editor: TiptapEditor, transaction: Transaction): void {
     // E9: the human edited inside the interim words: they stay as typed over, and the sink ends
@@ -412,7 +420,10 @@ export class EditorController {
     } finally {
       this.silent = false;
     }
-    if (options.caret === null) return;
+    if (options.caret === null) {
+      if (!editor.isFocused) this.caretLeft = false; // a document set behind the human's back has no caret of theirs
+      return;
+    }
     editor.commands.focus(options.caret);
     editor.view.focus();
   }
@@ -572,7 +583,7 @@ export class EditorController {
       insertText: (text) => {
         if (this.busy) return;
         if (editor().isFocused) editor().chain().insertContent(text).run();
-        else editor().chain().focus('end').insertContent(text).run();
+        else editor().chain().focus(this.caretLeft ? null : 'end').insertContent(text).run(); // `null`: the kept selection
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),

@@ -2,8 +2,8 @@
 // module, so the sheet cannot drift from the runner), the reload words, and a row's operation line in the engine's words.
 import { describe, expect, it } from 'vitest';
 import { commandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, writesOf, type PluginsAction } from '@shared/plugins/cli';
-import type { AvailablePlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import { argvOf, availableGroups, commandWords, declaredOf, dependencyWords, operationWords, overridesWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
+import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
+import { argvOf, commandWords, declaredOf, dependencyWords, operationWords, overridesWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
 
 const HOME = '/tmp/scratch/claude-config';
 const CWD = '/work/app';
@@ -189,16 +189,3 @@ describe('a marketplace-declared command', () => {
   });
 });
 
-describe('the available catalogue', () => {
-  const plugin = (name: string, marketplaceName: string, description: string | null = null): AvailablePlugin => ({ pluginId: `${name}@${marketplaceName}`, name, marketplaceName, description, version: null });
-  const all = [plugin('zeta', 'anthropic-plugin-directory', 'Code review'), plugin('e8-probe', 'e8-scratch', 'The probe'), plugin('alpha', 'anthropic-plugin-directory')];
-  it('groups by marketplace in name order and filters by name, id or description', () => {
-    expect(availableGroups(all, '').map((g) => [g.marketplace, g.plugins.map((p) => p.name)])).toEqual([
-      ['anthropic-plugin-directory', ['alpha', 'zeta']],
-      ['e8-scratch', ['e8-probe']],
-    ]);
-    expect(availableGroups(all, 'REVIEW').map((g) => [g.marketplace, g.plugins.map((p) => p.name)])).toEqual([['anthropic-plugin-directory', ['zeta']]]);
-    expect(availableGroups(all, 'e8-scratch').map((g) => g.marketplace)).toEqual(['e8-scratch']);
-    expect(availableGroups(all, 'nothing')).toEqual([]);
-  });
-});

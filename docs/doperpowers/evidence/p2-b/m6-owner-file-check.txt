@@ -1,0 +1,14 @@
+P2-B M6 live runs (2026-10-09): the acceptance run e2e/plugins-library-live.spec.ts (scratch root /tmp/maws-e8-live-SDLYM9)
+and the re-run of e2e/plugins-live.spec.ts on the library after M5's fix waves (scratch root /tmp/maws-e8-live-NzEWNu).
+Owner-file check (the execution document §6.3): the /tmp and /private/tmp project keys of ~/.claude.json, read before
+the electron-vite build and after each Playwright run, every inherited CLAUDE_* variable dropped from the run's shell
+("inherited CLAUDE_* left: 0"). The setup's CLI ran with env -i, HOME and CLAUDE_CONFIG_DIR inside the scratch root.
+
+acceptance run:  before 1,031 bytes; after: identical. Playwright: 1 passed (40.6s); acceptance-run.txt: "result: every
+                 step passed", "console errors: []". One one-line Haiku turn; the session was then stopped and resumed
+                 with no turn (session.start with no message).
+plugins-live:    before 1,031 bytes; after: identical. Playwright: 1 passed (1.3m); live-run.txt: "result: every step
+                 passed", "console errors: []", no "verdict: FAILED"; the repository source cloned and was removed.
+
+The live-* files are this re-run's (they replace M5's run of the same spec, which stays in git history); the
+acceptance-* files are the acceptance run's, its library shots in light and dark.

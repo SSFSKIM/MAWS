@@ -27,9 +27,9 @@ import * as Hooks from './HooksWidget';
 import * as Mcp from './McpWidget';
 import * as Memory from './MemoryWidget';
 import * as Permissions from './PermissionsWidget';
-import * as Plugins from './PluginsWidget';
+import * as Plugins from './plugins/LoadedView';
 import * as Sandbox from './SandboxWidget';
-import * as Skills from './SkillsWidget';
+import { skillGroups } from './skills/skills';
 import * as Status from './StatusWidget';
 import * as Usage from './UsageWidget';
 
@@ -187,11 +187,11 @@ describe('every widget renders its fixture response', () => {
   it('plugins: the eleven loaded plugins with their versions', () => {
     const init = line<{ plugins: { name: string; path: string; source: string; version?: string }[] }>('pass2/real-settings', 15);
     const plugins = init.plugins.map((p) => ({ name: p.name, path: p.path, source: p.source, version: p.version ?? null }));
-    const view = Plugins.present({ plugins, pluginErrors: [], pluginWarnings: [] });
+    const view = Plugins.present({ plugins, errors: [], warnings: [] });
     expect(view.plugins).toHaveLength(11);
     expect(view.plugins[0]).toEqual({ name: 'designer', version: '2.1.0', source: 'designer@designer', path: '/Users/new/.claude/plugins/cache/designer/designer/2.1.0' });
     expect(view.plugins[8]).toMatchObject({ name: 'agents-md', version: null, path: 'builtin' });
-    const failing = Plugins.present({ plugins: [], pluginErrors: [{ plugin: 'x', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [{ plugin: 'y', type: 'deprecated', message: 'old' }] });
+    const failing = Plugins.present({ plugins: [], errors: [{ plugin: 'x', type: 'load', message: 'bad manifest', path: null }], warnings: [{ plugin: 'y', type: 'deprecated', message: 'old' }] });
     expect(failing.problems).toEqual([
       { plugin: 'x', level: 'error', text: 'load · bad manifest' },
       { plugin: 'y', level: 'warning', text: 'deprecated · old' },
@@ -210,13 +210,13 @@ describe('every widget renders its fixture response', () => {
     const initialize = line<{ commands: unknown[]; agents: unknown[] }>('pass2/auto-routed', 4);
     const init = line<{ skills: unknown[]; terminal_slash_commands: unknown[] }>('pass2/auto-routed', 9);
     const catalog = projectCatalog('l1', { commands: initialize.commands, agents: initialize.agents, skills: init.skills, terminalSlashCommands: init.terminal_slash_commands, revision: 1 });
-    const view = Skills.present(line<{ skills: unknown[] }>('reads', 72), catalog);
-    expect(view.source).toBe('catalogue');
-    expect(view.skills).toHaveLength(18);
-    expect(view.skills[0].name).toBe('deep-research');
-    expect(view.skills[0].description).toMatch(/^Deep research harness/);
-    const fromDialog = Skills.present({ skills: [{ name: 'mine', description: 'My skill' }, { bogus: true }] }, catalog);
-    expect(fromDialog).toEqual({ source: 'dialog', skills: [{ name: 'mine', description: 'My skill' }] });
+    // P2-B M6: the skills library's model (`skills/skills.ts`), the catalogue's skills in one list
+    const [view] = skillGroups(line<{ skills: unknown[] }>('reads', 72), catalog, [], []);
+    expect(view.group).toBeNull();
+    expect(view.rows).toHaveLength(18);
+    const research = view.rows.find((r) => r.name === 'deep-research')!;
+    expect(research.description).toMatch(/^Deep research harness/);
+    expect(skillGroups({ skills: [{ name: 'mine', description: 'My skill', source: 'user' }, { bogus: true }] }, catalog, [], [])).toEqual([{ group: 'yours', rows: [{ name: 'mine', plugin: null, description: 'My skill', source: 'user' }] }]);
 
     const agents = Agents.present(catalog); // the initialize response's five agents (seq 4), in its order
     expect(agents.map((a) => a.name)).toEqual(['claude', 'Explore', 'general-purpose', 'Plan', 'statusline-setup']);

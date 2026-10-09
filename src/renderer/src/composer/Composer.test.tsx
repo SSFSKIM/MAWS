@@ -29,7 +29,7 @@ import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, paragraph, textNode } from './editor/doc';
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
-import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
+import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { currentSet } from '../stores/layout-model';
 import { useSetup } from '../sessions/store'; // P2-A
@@ -372,21 +372,68 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('still here');
   });
 
-  it('inserts text for C11 at the caret without replacing the document, and at the end when the editor is not focused', async () => {
+  it('inserts text for C11 at the caret without replacing the document, at the caret it left when focus went elsewhere, and at the end when it never had one', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await type('one three');
     act(() => {
       editorOf().editor.commands.setTextSelection(5); // after `one `
     });
+    // never focused since the document was set: no caret of the human's, so the end
+    act(() => insertComposerText(A, ' four'));
+    expect(editorOf().editor.getText()).toBe('one three four');
+    act(() => {
+      editorOf().editor.commands.setTextSelection(5);
+    });
     act(() => editorOf().focus());
     await waitFor(() => expect(editorOf().editor.isFocused).toBe(true));
     act(() => insertComposerText(A, 'two '));
-    expect(editorOf().editor.getText()).toBe('one two three');
-    act(() => primary().focus()); // focus leaves the editor
-    await waitFor(() => expect(editorOf().editor.isFocused).toBe(false));
-    act(() => insertComposerText(A, ' four'));
     expect(editorOf().editor.getText()).toBe('one two three four');
+    act(() => primary().focus()); // focus leaves the editor, the caret after `two `
+    await waitFor(() => expect(editorOf().editor.isFocused).toBe(false));
+    act(() => insertComposerText(A, 'and '));
+    expect(editorOf().editor.getText()).toBe('one two and three four');
+  });
+
+  // P2-B M6 (§5.10): "Use in chat" from a dialog widget closes it and inserts at the composer's caret, the text after the
+  // caret kept after the insertion, though the dialog holds the keyboard when the widget asks
+  it('a dialog widget’s insertion lands at the caret the editor had when the dialog opened', async () => {
+    const off = registerSlashWidget('skills', {
+      title: 'Skills',
+      component: ({ appSessionId, close }) => (
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            insertComposerText(appSessionId, '/frontend-design:frontend-design ');
+          }}
+        >
+          Use in chat
+        </button>
+      ),
+    });
+    try {
+      live(A);
+      mount([{ index: 0, id: A }], <WidgetDialogHost />);
+      await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+      await type('make the landing page calmer');
+      const editor = editorOf(); // the dialog hides the rest of the page from queries by role
+      act(() => editor.focus());
+      await waitFor(() => expect(editor.editor.isFocused).toBe(true));
+      act(() => {
+        editor.editor.commands.setTextSelection(6); // after `make ` (the paragraph opens at 1)
+      });
+      act(() => openWidgetDialog(A, 'skills', ''));
+      const use = await screen.findByRole('button', { name: 'Use in chat' });
+      await waitFor(() => expect(editor.editor.isFocused).toBe(false)); // the dialog holds the keyboard
+      fireEvent.click(use);
+      expect(editor.editor.getText()).toBe('make /frontend-design:frontend-design the landing page calmer');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(invoked('session.send')).toEqual([]); // inserted, not sent
+    } finally {
+      off();
+      closeWidgetDialog();
+    }
   });
 
   it('the model chip names its model from the route’s engine.models catalogue before any menu opens, and never lists models on mount', async () => {

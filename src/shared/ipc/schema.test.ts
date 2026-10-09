@@ -780,7 +780,7 @@ describe('ipc schema validates both directions', () => {
   describe('E8 entries', () => {
     const cwd = '/r';
     it('adds plugins.* and marketplaces.*, every command owned by the engine host, and session.reloadSkills as an operation', () => {
-      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel']);
+      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'plugins.manifest' /* P2-B */]);
       expect(Object.keys(plugins.events)).toEqual(['plugins.operation', 'plugins.changed']);
       expect(Object.keys(marketplaces.commands)).toEqual(['marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove']);
       expect(Object.keys(marketplaces.events)).toEqual([]);
@@ -822,12 +822,53 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ...failure, error: { ...failure.error, code: 'refused' } } }).ok).toBe(false);
       expect(validateEventPayload('plugins.operation', { ...base, action: 'marketplace-sync', phase: 'started' }).ok).toBe(false);
       expect(validateEventPayload('plugins.changed', {}).ok).toBe(true);
-      const row = { id: 'p@m', name: 'p', marketplace: 'm', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [] };
+      const row = { id: 'p@m', name: 'p', marketplace: 'm', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false /* P2-B */ };
       expect(validateCommandOutput('plugins.list', { plugins: [row] }).ok).toBe(true);
       expect(validateCommandOutput('marketplaces.list', { marketplaces: [{ name: 'm', source: 'directory', locator: '/m', installLocation: '/m' }] }).ok).toBe(true);
     });
   });
   // E8 end
+  // P2-B start (2026-10-09): the additive plugin fields and `plugins.manifest` (P2-B execution document §7)
+  describe('P2-B entries', () => {
+    const cwd = '/r';
+    const emptyComponents = { mcpServers: [], mcpBundles: 0, agents: [], hooks: [], hookModules: 0, monitors: [], lspServers: [], commands: [], skills: [] };
+    const view = { key: { kind: 'installation', id: 'p@m', scope: 'user', projectPath: null }, state: 'read', name: 'p', displayName: null, version: '1.0.0', marketplaceVersion: null, description: null, author: null, license: null, keywords: [], components: emptyComponents, partial: false, problems: [] };
+
+    it('plugins.manifest is an engine-host read named in the bridge’s list', () => {
+      expect(plugins.commands['plugins.manifest'].owner).toBe('engine-host');
+      expect(NAMES.plugins.commands).toContain('plugins.manifest');
+    });
+
+    it('takes a cwd and at most 256 items, each an installation or an available entry, never a path or an option', () => {
+      const installation = { kind: 'installation', id: 'p@m', scope: 'project', projectPath: '/r' };
+      expect(validateCommandInput('plugins.manifest', { cwd, items: [installation, { kind: 'available', pluginId: 'q@m' }] }).ok).toBe(true);
+      expect(validateCommandInput('plugins.manifest', { cwd, items: Array.from({ length: 257 }, () => installation) }).ok).toBe(false);
+      expect(validateCommandInput('plugins.manifest', { cwd, items: [{ kind: 'available', pluginId: '-y' }] }).ok).toBe(false);
+      expect(validateCommandInput('plugins.manifest', { cwd, items: [{ kind: 'path', path: '/etc' }] }).ok).toBe(false);
+      expect(validateCommandInput('plugins.manifest', { cwd, items: [{ ...installation, installPath: '/etc' }] }).ok).toBe(false);
+      expect(validateCommandInput('plugins.manifest', { cwd: 'relative', items: [] }).ok).toBe(false);
+    });
+
+    it('answers views of names, kinds and counts; nothing else crosses', () => {
+      expect(validateCommandOutput('plugins.manifest', { manifests: [view] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.manifest', { manifests: [{ ...view, state: 'unknown', components: { ...emptyComponents, mcpServers: [{ name: 's', transport: 'stdio' }] } }] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.manifest', { manifests: [{ ...view, components: { ...emptyComponents, mcpServers: [{ name: 's', transport: 'stdio', command: 'npx' }] } }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.manifest', { manifests: [{ ...view, icon: 'x.png' }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.manifest', { manifests: [{ ...view, state: 'stale' }] }).ok).toBe(false);
+    });
+
+    it('an available row carries its source reduced and the CLI’s own install count, always said', () => {
+      const row = { pluginId: 'p@m', name: 'p', marketplaceName: 'm', description: null, version: null };
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: './plugins/p', installCount: 1290640 }] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'git-subdir', url: 'https://github.com/a/b', repo: null, path: 'plugins/p' }, installCount: null }] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, sha: 'f' }, installCount: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2' }, installCount: null }] }).ok).toBe(true); // the architect's ref
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 7 }, installCount: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: null, installCount: -1 }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [row] }).ok).toBe(false);
+    });
+  });
+  // P2-B end
   // E5 start: the quit guard names unsaved files (E5 execution document, Interfaces "The quit guard and unsaved files (M5)")
   describe('E5 layout entries', () => {
     it('layout.unsavedFiles and layout.saveAllDone are main’s bridged commands and layout.saveAll an event; the busy report always names the unsaved files', () => {
