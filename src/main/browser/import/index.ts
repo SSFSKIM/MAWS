@@ -8,7 +8,7 @@
 // `browser.bookmarks.*`.
 // Under MAWS_E2E=1 it exposes `globalThis.__maws_browser_import`. `stop` (at will-quit) cancels a running import as far
 // as can be done synchronously and deletes every staging directory.
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow, dialog, nativeImage } from 'electron';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import { openDialogFor } from '../../files/e2e-pick';
@@ -79,6 +79,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
     createImportView,
     extensions: extensions.importExtensions,
     bookmarks: index.browserBookmarks, // cua #90
+    decodeImage: (bytes) => nativeImage.createFromBuffer(bytes), // cua #90: the avatar's picture
   });
   // cua #90: a removal under way refuses a bookmarks sync, as an import does
   let removals = 0;

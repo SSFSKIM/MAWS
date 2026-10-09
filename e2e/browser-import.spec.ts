@@ -36,7 +36,7 @@ const REPORT_DONE =
   "4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported";
 const FAILS_STATUS = 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS';
 
-const pill = (view: Locator) => view.locator('[data-browser-partition]');
+const pill = (view: Locator) => view.locator('[data-browser-partition] [data-browser-partition-name]'); // cua #90: the name, beside the avatar
 
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {

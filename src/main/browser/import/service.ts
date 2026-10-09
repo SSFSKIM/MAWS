@@ -1,7 +1,8 @@
 // The import service (E4b Design §1, §4 to §10, §13, §14): the inspection the consent sheet shows, and the run the
 // owner confirmed. One inspection and one run at a time, app-wide. The inspection stages Chrome's two stores into
 // `<userData>/browser/import/<uuid>/`, counts them and lists the profile's extensions in place; the run takes that
-// staging over and walks its phases in order: copying (the partition opened, its storage directory recorded), history,
+// staging over and walks its phases in order: copying (the partition opened, its storage directory recorded; cua board
+// #90: the profile's picture written as its avatar), history,
 // keychain, cookies, verifying (the partitioned rows confirmed), bookmarks (cua board #90: read in place from the profile,
 // as every later sync reads it), extensions, cleaning. Each phase checks the abort
 // signal between rows, batches and extensions. A `done` run writes the profile's record once, at its end; a cancelled
@@ -11,7 +12,7 @@
 // view's factory, and the extensions phase (extensions-loader.ts, Task 2.4).
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Session } from 'electron';
@@ -26,12 +27,13 @@ import {
   type ImportPhase,
   type ImportReport,
 } from '@shared/browser/import';
-import { partitionDirName, type ImportedBookmarks, type ImportedProfile } from '@shared/browser/profiles';
+import { partitionDirName, type ImportedBookmarks, type ImportedProfile, type ProfileAvatar } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
 import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
 import type { BrowserHistoryStore } from '../../index/browser-history';
 import type { Partitions } from '../partition';
 import type { BrowserEmit } from '../tabs';
+import { AVATAR_FILE, avatarPng, readChromePicture, type AvatarImage, type PictureRead } from './avatar';
 import { importPartitionedCookies, type CreateImportView } from './chips-import';
 import { classifyHistoryRow, historyStoreCounts, readHistoryRows, type ImportedHistoryRow } from './chrome/history';
 import { cookieStoreCounts, readCookieRows } from './chrome/cookies';
@@ -77,6 +79,10 @@ export interface BrowserImportDeps {
   // cua #90: the mirror's store and its in-place read (chrome/bookmarks.ts by default)
   bookmarks: Pick<BrowserBookmarksStore, 'replace' | 'removePartition'>;
   readBookmarks?: (userDataDir: string, profileDir: string) => Promise<BookmarksRead>;
+  // cua #90: the avatar's picture decoder (Electron's `nativeImage.createFromBuffer`; without one the initial stands and
+  // nothing is read) and its in-place read (avatar.ts by default)
+  decodeImage?: (bytes: Buffer) => AvatarImage;
+  readPicture?: (userDataDir: string, profileDir: string) => Promise<PictureRead>;
   now?: () => number;
 }
 
@@ -164,10 +170,12 @@ export class BrowserImportService {
   private current: Run | null = null;
   private readonly now: () => number;
   private readonly readBookmarks: (userDataDir: string, profileDir: string) => Promise<BookmarksRead>;
+  private readonly readPicture: (userDataDir: string, profileDir: string) => Promise<PictureRead>;
 
   constructor(private readonly deps: BrowserImportDeps) {
     this.now = deps.now ?? Date.now;
     this.readBookmarks = deps.readBookmarks ?? readChromeBookmarks;
+    this.readPicture = deps.readPicture ?? readChromePicture;
   }
 
   // The run under way and its last phase, for `browser.import.list` (a window reloaded mid-run), the e2e seam and for
@@ -288,6 +296,7 @@ export class BrowserImportService {
       bookmarks: null,
     };
     let bookmarks: ImportedBookmarks | null = null; // cua #90: the record's mirror state, once the phase ran
+    let avatar: ProfileAvatar = { kind: 'initials' }; // cua #90: the picture, once copying wrote it
     let ses: Session | null = null;
     let storageDirName = '';
     await nextTurn(); // `start` answers `{ importId }` before any event of the run
@@ -303,6 +312,7 @@ export class BrowserImportService {
         ses = null; // a session the guard refused is never rolled back: it may not be this profile's
         throw new RunFailure('partitionUnavailable');
       }
+      avatar = await this.importAvatar(inspection, partitionFolder); // cua #90
       progress('copying', 1, 1);
 
       if (categories.history && !signal.aborted) report.history = await this.importHistory(inspection.history, partition, signal, progress);
@@ -336,7 +346,7 @@ export class BrowserImportService {
       report.finishedAt = this.iso();
       if (report.outcome === 'done') {
         try {
-          await this.deps.profiles.put(this.recordOf(report, inspection, storageDirName, bookmarks));
+          await this.deps.profiles.put(this.recordOf(report, inspection, storageDirName, bookmarks, avatar));
         } catch (error) {
           report.outcome = 'failed';
           report.failure = 'recordUnwritable';
@@ -424,6 +434,30 @@ export class BrowserImportService {
     })();
     progress('bookmarks', 1, 1);
     return outcome;
+  }
+
+  // cua #90: the profile's Google picture, read in place and written as the partition folder's 64 px avatar.png (the
+  // rollback and the removal delete that folder whole). Any failure leaves the initial and never fails the run; one that
+  // is not the plain absence of a picture logs its code.
+  private async importAvatar(inspection: Inspection, partitionFolder: string): Promise<ProfileAvatar> {
+    const initials: ProfileAvatar = { kind: 'initials' };
+    const decode = this.deps.decodeImage;
+    if (!decode) return initials;
+    const failed = (code: string) => {
+      this.log({ kind: 'error', where: 'avatar', code });
+      return initials;
+    };
+    try {
+      const read = await this.readPicture(inspection.userDataDir, inspection.answer.profile.profileDir);
+      if (!read.ok) return read.error === 'none' || read.error === 'missing' ? initials : failed(read.error);
+      const png = avatarPng(read.bytes, decode);
+      if (png === null) return failed('undecodable');
+      await mkdir(partitionFolder, { recursive: true });
+      await writeFile(join(partitionFolder, AVATAR_FILE), png);
+      return { kind: 'picture' };
+    } catch (error) {
+      return failed(errorCode(error));
+    }
   }
 
   // Cookies (Design §5, §7, §8): the staged copy read, the Keychain asked once, every row decoded with the key, the key
@@ -539,7 +573,7 @@ export class BrowserImportService {
     if (categories.bookmarks && report.bookmarks === null) report.bookmarks = { imported: 0, skipped: 0, error: null }; // cua #90
   }
 
-  private recordOf(report: ImportReport, inspection: Inspection, storageDirName: string, bookmarks: ImportedBookmarks | null): ImportedProfile {
+  private recordOf(report: ImportReport, inspection: Inspection, storageDirName: string, bookmarks: ImportedBookmarks | null, avatar: ProfileAvatar): ImportedProfile {
     const { gaiaName, userName } = inspection.answer.profile;
     return {
       profileDir: report.profileDir,
@@ -550,11 +584,11 @@ export class BrowserImportService {
       userDataDir: inspection.userDataDir,
       extensions: report.extensions ?? [],
       report,
-      // cua #90: profiles.json version 2's fields. The avatar is the initial until the picture is imported (the spec's M2).
+      // cua #90: profiles.json version 2's fields
       bookmarks,
       gaiaName,
       userName,
-      avatar: { kind: 'initials' },
+      avatar,
     };
   }
 

@@ -3,7 +3,7 @@
 // row through the import view's debugger only and verified, the unverified count, a wrong key, the Keychain outcomes,
 // cancel and failure rolling back whole with no record, the staging deleted on every exit, and the refusals at start.
 // The Electron session, the import view, the Keychain and the extensions phase are fakes; the index is a real one.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,6 +14,7 @@ import { ImportReportSchema } from '@shared/browser/import';
 import { summaryWords } from '@shared/browser/import-summary';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
 import { Index } from '../../index/index';
+import type { AvatarImage } from './avatar';
 import { readChromeBookmarks } from './chrome/bookmarks';
 import { deriveKey } from './chrome/crypto';
 import type { NetworkSetCookieParams } from './chrome/cookies';
@@ -551,6 +552,84 @@ describe('BrowserImportService', () => {
       expect(barNames()).toEqual([]);
       expect(index.browserBookmarks.tree(PARTITION).other.children).toEqual([]);
       expect(profiles.get('Default')).toBeNull();
+    });
+
+    // the profile's avatar: the Google picture as a 64 px PNG beside the partition, else the initial; never a failure
+    describe('avatar', () => {
+      const avatarFile = () => join(userData, 'browser', 'maws-chrome-Default', 'avatar.png');
+      const decoded: Buffer[] = [];
+      const image = (side: number): AvatarImage => ({
+        isEmpty: () => side === 0,
+        getSize: () => ({ width: side, height: side }),
+        crop: () => image(side),
+        resize: ({ width }) => image(width),
+        toPNG: () => Buffer.from(`avatar ${side}`),
+      });
+      const decodeImage = (bytes: Buffer) => {
+        decoded.push(bytes);
+        return image(bytes.subarray(1, 4).toString('ascii') === 'PNG' ? 64 : 0);
+      };
+      beforeEach(() => void (decoded.length = 0));
+      // every line the import logs, through the logger's own e2e mirror
+      const logFile = () => join(userData, 'import-log.txt');
+      const env = () => ({ MAWS_E2E: '1', MAWS_E2E_IMPORT_LOG: logFile() });
+      const logged = () => (existsSync(logFile()) ? readFileSync(logFile(), 'utf8').split('\n').filter(Boolean) : []);
+
+      it('writes the picture Local State names as avatar.png in the partition folder, and the record says picture', async () => {
+        const { report } = await importAll(service({ decodeImage, env: env() }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(report.outcome).toBe('done');
+        expect(decoded.map((bytes) => bytes.equals(readFileSync(fixture.profiles.Default.picture!)))).toEqual([true]);
+        expect(readFileSync(avatarFile(), 'utf8')).toBe('avatar 64');
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'picture' });
+      });
+
+      it('a profile with no picture is drawn by its initial and has no file', async () => {
+        await importAll(service({ decodeImage, env: env() }), { profileDir: 'Profile 1', categories: { ...ALL, bookmarks: false, extensions: false }, extensionIds: [] });
+        expect(decoded).toEqual([]);
+        expect(profiles.get('Profile 1')!.avatar).toEqual({ kind: 'initials' });
+        expect(existsSync(join(userData, 'browser', 'maws-chrome-Profile 1', 'avatar.png'))).toBe(false);
+      });
+
+      it.each([
+        ['missing', { ok: false, error: 'missing' } as const, null],
+        ['over the cap', { ok: false, error: 'tooLarge' } as const, 'error avatar tooLarge'],
+        ['a symlink', { ok: false, error: 'unreadable' } as const, 'error avatar unreadable'],
+        ['bytes that are no image', { ok: true, bytes: Buffer.from('not an image') } as const, 'error avatar undecodable'],
+      ])('a picture %s leaves the initial, the import done, and logs at most its code', async (_case, read, line) => {
+        const { report } = await importAll(service({ decodeImage, readPicture: async () => read, env: env() }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(report.outcome).toBe('done');
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'initials' });
+        expect(existsSync(avatarFile())).toBe(false);
+        expect(logged().filter((text) => text.includes('avatar'))).toEqual(line === null ? [] : [`[browser-import] ${line}`]);
+      });
+
+      it('without an image decoder (no Electron) nothing is read and the initial stands', async () => {
+        const readPicture = vi.fn();
+        await importAll(service({ readPicture }), { categories: { ...ALL, extensions: false }, extensionIds: [] });
+        expect(readPicture).not.toHaveBeenCalled();
+        expect(profiles.get('Default')!.avatar).toEqual({ kind: 'initials' });
+      });
+
+      it('a run cancelled after copying removes avatar.png with the partition folder', async () => {
+        extensions = fakeExtensions(session.loaded, { waitForAbortAfter: 1 });
+        const svc = service({ decodeImage, env: env() });
+        onEmit = (event) => {
+          if (event.payload.phase === 'extensions' && event.payload.done === 1) {
+            expect(existsSync(avatarFile())).toBe(true);
+            svc.cancel(svc.running()!.importId);
+          }
+        };
+        const { report } = await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
+        expect(report.outcome).toBe('cancelled');
+        expect(existsSync(avatarFile())).toBe(false);
+      });
+
+      it('the Chrome account’s names reach the record only: never the report, its summary or a log line', async () => {
+        const { report } = await importAll(service({ decodeImage, env: env() }));
+        expect(profiles.get('Default')).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test' });
+        const surfaces = [JSON.stringify(report), summaryWords(report), ...logged(), ...emitted.filter((e) => e.name !== 'browser.import.changed').map((e) => JSON.stringify(e.payload))];
+        for (const text of surfaces) expect(text).not.toMatch(/Probe Owner|probe@example\.test/);
+      });
     });
   });
   // cua #90 end

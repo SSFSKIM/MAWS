@@ -17,9 +17,18 @@
 // focused shows it again, Settings › Browser's switch mirrors it; (5, the visible half) an edited file synced shows at
 // once, a deleted one keeps the bar; (6) `f1` suggests F1 with the bookmark star above history, a history-only title as
 // before. Native menus go through main's seam (support/native-menu.ts).
+//
+// M2 (the avatar and the popover) proves: (7) the pill shows Default's Google picture as the avatar main wrote at 64 px
+// and Work's initial, and opens the profile popover with the name, the signed-in account (Work: not signed in), Switch
+// profile, Sync bookmarks now with its line, Re-import this profile… and Browser settings, the main area keeping its
+// Browser tab, a click on the chrome outside closing it; (5, the popover half) Sync bookmarks now shows an edited file at
+// once, and a deleted one's "읽지 못함" line; (8) Switch profile → Work opens a new selected tab in Work's partition, the
+// first tab staying in its own; Re-import from the popover runs the removal and the import sheet at app level and the
+// active profile is active again after it; (10, the avatar) removal takes avatar.png with the partition folder. The
+// Chrome account's names reach no log line, console message or the e2e seam.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
-import { rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -32,9 +41,9 @@ import {
   closeSheet, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard, recordOf, recordPhases,
   settingsFile, suggest, type ImportScene, type ImportSeams,
 } from './support/browser-import-scene';
-import { address, addressOf, browserIn, chipsIn, openBrowser, overflow, paneIn, paneRect, resizeWindow, tabAt, tabsOf } from './support/browser-scene';
+import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, paneIn, paneRect, resizeWindow, tabAt, tabsOf } from './support/browser-scene';
 import { invoke, value } from './support/c7-replay';
-import { closeScene, show, type Scratch } from './support/maws-tools';
+import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
 import { menuAfter, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
 
 test.describe.configure({ timeout: 240_000 });
@@ -432,3 +441,156 @@ test('4, 6: ⌘⇧B in the page hides the bar and the page grows by 28 px; a rel
   }
 });
 
+
+// ---- (5, 7, 8, 10) the avatar and the profile popover ----------------------------------------------------------------
+
+const ACCOUNT = /Probe Owner|probe@example\.test/; // the fixture's Chrome account, which only the popover and the picker show
+const avatarFile = (userData: string, profileDir: string) => join(userData, 'browser', `maws-chrome-${profileDir}`, 'avatar.png');
+// A PNG's width and height, from its IHDR chunk.
+const pngSize = (file: string) => {
+  const bytes = readFileSync(file);
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+};
+const pillIn = (view: Locator) => view.locator('[data-browser-partition]');
+const popoverOf = (s: ImportScene) => s.page.locator('[data-profile-popover]');
+async function openPopover(s: ImportScene, view: Locator): Promise<Locator> {
+  await pillIn(view).click();
+  const popover = popoverOf(s);
+  await expect(popover).toBeVisible();
+  return popover;
+}
+
+test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmarks now, Switch profile into a new tab, Re-import at app level, the avatar gone with the profile', async () => {
+  const server = await startBrowserServer();
+  const { scratch, chrome } = importScratch(['cua #90: the popover'], { bookmarksOrigin: server.origin });
+  const bookmarks = chrome.profiles.Default.bookmarks!;
+  try {
+    const s = await launchBarScene(scratch, server, chrome, { keychain: `file:${chrome.passwordFile}` });
+    const [id] = s.ids as [AppSessionId];
+    const userData = s.maws.userData;
+    try {
+      // Default (Person 1, signed in, with a picture and bookmarks) and Work (Profile 1, neither)
+      await importThrough(s, { history: false, cookies: false, extensions: false });
+      await closeSheet(s);
+      await importThrough(s, { profileDir: 'Profile 1', cookies: false, extensions: false });
+      await closeSheet(s);
+      // (10, the avatar) the import wrote Default's picture at 64 px beside its partition; Work has none
+      expect(pngSize(avatarFile(userData, 'Default'))).toEqual([64, 64]);
+      expect(existsSync(avatarFile(userData, 'Profile 1'))).toBe(false);
+      expect((await recordOf(s, 'Default'))!.avatar).toEqual({ kind: 'picture' });
+      expect((await recordOf(s, 'Profile 1'))!.avatar).toEqual({ kind: 'initials' });
+      expect([(await recordOf(s, 'Default'))!.gaiaName, (await recordOf(s, 'Default'))!.userName]).toEqual([null, null]); // the seam keeps no names
+
+      // (7) a Default tab in a main tab: the pill shows the picture
+      value(await invoke(s.page, 'settings.set', { browser: { profile: 'Default' } }));
+      const panel = await browserPanel(s, id);
+      await address(panel, server.url('/a.html'));
+      const first = await tabAt(s, id, server.url('/a.html'));
+      await overflow(s, panel, 'Open in tab');
+      const main = browserIn(s, 'main');
+      await expect(pillIn(main)).toContainText('Person 1');
+      await expect(pillIn(main).locator('img[data-profile-avatar="picture"]')).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+      // the popover: the name, the account, Switch profile, Sync with its line, Re-import, Browser settings
+      let popover = await openPopover(s, main);
+      await expect(popover).toHaveAttribute('data-profile-popover', 'profile');
+      await expect(popover.locator('header')).toContainText('Person 1');
+      await expect(popover.locator('[data-profile-account]')).toHaveText('로그인: Probe Owner · probe@example.test');
+      await expect(popover.getByRole('region', { name: 'Switch profile' })).toContainText('새 탭에 적용');
+      expect(await popover.locator('[data-profile-switch]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-profile-switch')))).toEqual(['Profile 1', 'default']);
+      await expect(popover.locator('[data-profile-switch="Profile 1"] [data-profile-avatar="initials"]')).toHaveText('W');
+      await expect(popover.locator('[data-profile-sync]')).toContainText('Sync bookmarks now');
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^마지막 동기화 (just now|\d+ minutes? ago)$/);
+      await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import this profile…');
+      await expect(popover.locator('[data-profile-settings]')).toHaveText('Browser settings');
+      // the main area keeps the Browser tab: no Settings tab opened
+      await expect(main).toBeVisible();
+      await expect(s.page.getByRole('navigation', { name: 'Settings sections' })).toHaveCount(0);
+      // a click on the chrome outside closes it
+      await addressOf(main).click();
+      await expect(popover).toHaveCount(0);
+      await addressOf(main).press('Escape');
+
+      // (5, the popover half) Chrome renames A: Sync bookmarks now shows A2 at once, the popover open meanwhile
+      writeChromeBookmarks(bookmarks.file, { ...bookmarks.roots, bar: [{ name: 'A2', url: server.url('/a2') }, ...bookmarks.roots.bar.slice(1)] });
+      popover = await openPopover(s, main);
+      await popover.locator('[data-profile-sync]').click();
+      await expect(chipNamed(main, 'A2')).toBeVisible();
+      await expect(popover.locator('[data-profile-sync]')).not.toHaveAttribute('aria-disabled', 'true');
+      // the file deleted: the bar kept, the 읽지 못함 line with the last good sync, a toast
+      rmSync(bookmarks.file);
+      await popover.locator('[data-profile-sync]').click();
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Chrome의 북마크 파일을 읽지 못함 · 마지막 동기화 (just now|\d+ minutes? ago)$/);
+      await expect(s.page.getByText('Bookmarks could not be synced: Chrome의 북마크 파일을 읽지 못함', { exact: true })).toBeVisible();
+      await expect(chipNamed(main, 'A2')).toBeVisible();
+      await s.page.keyboard.press('Escape'); // the toast is the top layer: Esc dismisses it first, then the popover
+      await s.page.keyboard.press('Escape');
+      await expect(popover).toHaveCount(0);
+      await clearToasts(s.page);
+      writeChromeBookmarks(bookmarks.file, bookmarks.roots); // back, for the re-import below
+
+      // (8) Switch profile → Work: a new selected tab in Work's partition, its own main tab; the first stays as it was
+      popover = await openPopover(s, main);
+      await popover.locator('[data-profile-switch="Profile 1"]').click();
+      await expect(popover).toHaveCount(0);
+      await expect.poll(async () => (await tabsOf(s, id)).tabs.length).toBe(2);
+      const { tabs, selected } = await tabsOf(s, id);
+      const work = tabs.find((tab) => tab.tabId !== first)!;
+      expect(work.partition).toBe(profilePartition('Profile 1'));
+      expect(selected).toBe(work.tabId);
+      expect(tabs.find((tab) => tab.tabId === first)).toMatchObject({ partition: DEFAULT, url: server.url('/a.html') });
+      expect(settingsFile(userData).browser.profile).toBe('Profile 1');
+      await expect(pillIn(main)).toContainText('Work');
+      await expect(pillIn(main).locator('[data-profile-avatar="initials"]')).toHaveText('W');
+      // Work's popover: not signed in, no Sync row (its bookmarks were not imported)
+      popover = await openPopover(s, main);
+      await expect(popover.locator('[data-profile-account]')).toHaveText('Chrome에 로그인되지 않은 프로필');
+      await expect(popover.locator('[data-profile-sync]')).toHaveCount(0);
+      await s.page.keyboard.press('Escape');
+      await expect(popover).toHaveCount(0);
+
+      // Re-import from the popover of the first tab, the active profile's: the removal closes the tab, the sheets carry on
+      value(await invoke(s.page, 'settings.set', { browser: { profile: 'Default' } }));
+      await chipOf(main, first).click();
+      await expect(pillIn(main)).toContainText('Person 1');
+      popover = await openPopover(s, main);
+      await popover.locator('[data-profile-reimport]').click();
+      await expect(popover).toHaveCount(0);
+      const remove = s.page.locator('[data-browser-import-remove="Default"]');
+      await expect(remove).toBeVisible();
+      await remove.getByRole('checkbox', { name: 'Remove everything MAWS imported from Person 1' }).check();
+      await remove.getByRole('button', { name: 'Remove', exact: true }).click();
+      const sheet = s.page.locator('[data-browser-import]');
+      await expect(sheet).toHaveAttribute('data-browser-import', 'pick', { timeout: 30_000 }); // once main has emptied the partition
+      await expect(sheet.locator('[data-chrome-profile="Default"]').getByRole('radio')).toBeChecked();
+      expect((await tabsOf(s, id)).tabs.map((tab) => tab.tabId)).toEqual([work.tabId]); // its tab closed with it
+      expect(settingsFile(userData).browser.profile).toBeNull(); // meanwhile, new tabs browse as Default
+      expect(existsSync(avatarFile(userData, 'Default'))).toBe(false); // (10, the avatar) gone with the partition folder
+      await sheet.getByRole('button', { name: 'Continue' }).click();
+      await expect(sheet).toHaveAttribute('data-browser-import', 'consent');
+      for (const name of ['History', 'Cookies', 'Extensions']) await sheet.getByRole('checkbox', { name, exact: true }).setChecked(false);
+      await sheet.getByRole('button', { name: 'Import', exact: true }).click();
+      await expect(sheet).toHaveAttribute('data-browser-import', 'report', { timeout: 30_000 });
+      await expect.poll(() => settingsFile(userData).browser.profile).toBe('Default'); // the active profile again
+      expect(pngSize(avatarFile(userData, 'Default'))).toEqual([64, 64]);
+      await sheet.getByRole('button', { name: /^(Done|Close)$/ }).first().click();
+      await expect(sheet).toHaveCount(0);
+
+      // (10, the avatar) Remove imported profile: avatar.png goes with the partition folder
+      value(await invoke(s.page, 'browser.import.remove', { profileDir: 'Default' }));
+      expect(existsSync(avatarFile(userData, 'Default'))).toBe(false);
+
+      // the account's names never reach a log line, the app's console or the import's log
+      await expectNothingLogged(s);
+      const importLog = existsSync(s.importLog) ? readFileSync(s.importLog, 'utf8') : '';
+      for (const [where, text] of Object.entries({ main: s.mainOutput(), console: s.appConsole().join('\n'), importLog })) expect(text, where).not.toMatch(ACCOUNT);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+  } finally {
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+});

@@ -9,7 +9,11 @@ import { ipc } from '../../../ipc/client';
 import { useNotices } from '../../../stores/notices';
 import { useSettings } from '../../../stores/settings';
 import { CHROME, DONE, IMPORT_ID, importBridge, INSPECTION, OTHER_IMPORT_ID, RECORD, type ImportBridge } from '../../../test-support/browser-import';
-import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, reportShown, resetBrowserImport, setExtension, showReport, start } from './store';
+import { BROWSER_COPY } from '../copy';
+import {
+  browserImport, cancel, connectBrowserImport, discard, endReimport, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, reimportRemoved, removeProfile, reportShown, resetBrowserImport, setExtension, showReport, start,
+  startReimport, syncBookmarks,
+} from './store';
 
 let b: ImportBridge;
 let queries: QueryClient;
@@ -289,5 +293,54 @@ describe('the records', () => {
     expect(await removeProfile('Default')).toBeNull();
     expect(b.sets).toEqual([{ browser: { profile: null } }]);
     expect(browserImport.getState().records).toEqual([]);
+  });
+});
+
+// cua #90: the popover's Sync bookmarks now and Re-import this profile…
+describe('Sync bookmarks now', () => {
+  it('asks main to sync the profile and answers what it said; a failure is a toast in words', async () => {
+    const answers: unknown[] = [{ syncedAt: '2026-10-09T12:00:00.000Z', count: 46 }, { error: 'missing' }, { error: 'refused', reason: 'an import is running' }, { error: 'indexUnavailable' }];
+    connect({ 'browser.bookmarks.sync': () => answers.shift() });
+    expect(await syncBookmarks('Default')).toEqual({ syncedAt: '2026-10-09T12:00:00.000Z', count: 46 });
+    expect(useNotices.getState().notices).toEqual([]);
+    for (let k = 0; k < 3; k++) await syncBookmarks('Default');
+    expect(b.calls.filter((c) => c.name === 'browser.bookmarks.sync').map((c) => c.input)).toEqual(Array(4).fill({ profileDir: 'Default' }));
+    expect(useNotices.getState().notices.map((notice) => notice.text)).toEqual([
+      BROWSER_COPY.profile.syncFailed('Chrome의 북마크 파일을 읽지 못함'),
+      BROWSER_COPY.profile.syncFailed('an import is running'),
+      BROWSER_COPY.profile.syncFailed('Unavailable in this build'),
+    ]);
+  });
+});
+
+describe('Re-import this profile…', () => {
+  const ACTIVE = (profile: string | null) =>
+    useSettings.setState({ state: { settings: { ...useSettings.getState().state!.settings, browser: { ...useSettings.getState().state!.settings.browser, profile } }, resolvedTheme: 'light' } });
+
+  it('removes, then opens the import at the picker; the done import makes the active profile active again', async () => {
+    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }), 'browser.import.remove': () => ({ removed: { tabs: 1, historyRows: 4, extensions: 3 } }) });
+    await expect.poll(() => browserImport.getState().records).toHaveLength(1);
+    await expect.poll(() => useSettings.getState().state).not.toBeNull();
+    ACTIVE('Default');
+    startReimport('Default');
+    expect(browserImport.getState().reimport).toEqual({ record: RECORD, step: 'remove' });
+    expect(await removeProfile('Default')).toBeNull();
+    reimportRemoved();
+    expect(browserImport.getState().reimport).toEqual({ record: RECORD, step: 'import' });
+    expect(stage()).toEqual({ kind: 'pick' });
+    expect(b.sets).toEqual([{ browser: { profile: null } }]); // between the two, new tabs browse as Default
+    b.emit('browser.import.finished', { importId: IMPORT_ID, report: DONE });
+    await expect.poll(() => b.sets).toEqual([{ browser: { profile: null } }, { browser: { profile: 'Default' } }]);
+    endReimport();
+    expect(browserImport.getState().reimport).toBeNull();
+  });
+
+  it('starts nothing for a profile with no record, or while an import runs', async () => {
+    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: { importId: IMPORT_ID, profileDir: 'Profile 1', phase: 'history' } }) });
+    startReimport('Profile 9');
+    expect(browserImport.getState().reimport).toBeNull();
+    await expect.poll(() => stage().kind).toBe('running');
+    startReimport('Default');
+    expect(browserImport.getState().reimport).toBeNull();
   });
 });

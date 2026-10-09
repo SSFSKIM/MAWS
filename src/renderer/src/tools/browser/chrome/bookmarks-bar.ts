@@ -12,7 +12,8 @@ export function barShown(record: Pick<ImportedProfile, 'bookmarks'> | undefined,
 }
 
 // Whether a tab of `partition` can show a bar, shown or hidden: an imported profile's whose bookmarks were imported.
-// ⌘⇧B is the bar's there only; anywhere else it stays Toggle right panel's (the owner's decision of 2026-10-09).
+// ⌘⇧B is the bar's there only; anywhere else it stays Toggle right panel's (the spec's Decision Log, 2026-10-09: the
+// chord narrowed to tabs that can show a bar).
 export const canShowBar = (records: readonly Pick<ImportedProfile, 'partition' | 'bookmarks'>[], partition: string): boolean =>
   records.some((record) => record.partition === partition && record.bookmarks != null);
 

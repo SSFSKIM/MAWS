@@ -48,8 +48,8 @@ beforeEach(() => {
         return ok({ zoom: 1 });
       case 'browser.tabs.open':
         return ok({ tab: browserTab(T2, A, { url: '' }), reused: false });
-      case 'browser.profiles.list':
-        return ok({ profiles: [{ profileDir: 'Profile1', name: 'Work' }] });
+      case 'browser.profiles.list': // cua #90: with the account's names and the avatar
+        return ok({ profiles: [{ profileDir: 'Profile1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] });
       case 'browser.tabs.revealDownload':
         return ok({ revealed: true });
       default:
@@ -85,8 +85,9 @@ describe('the control slot', () => {
 });
 
 describe('the partition pill', () => {
-  it('names the default profile, or the imported one as listed, and opens Settings › Browser', async () => {
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
+  // cua #90: the click opens the profile popover over the chrome; the main area keeps its tabs (no Settings tab)
+  it('names the default profile, or the imported one as listed with its initial, and opens the profile popover, the main area unchanged', async () => {
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
     const pill = () => document.querySelector<HTMLButtonElement>('[data-browser-partition]')!;
     const { rerender } = show({ tab: tab() });
     expect([pill().textContent, pill().title]).toEqual(['Default', 'Browsing as Default']);
@@ -97,9 +98,15 @@ describe('the partition pill', () => {
       </QueryClientProvider>,
     );
     expect(pill().textContent).toBe('Profile1'); // its directory until the list answers
-    await vi.waitFor(() => expect([pill().textContent, pill().title]).toEqual(['Work', 'Browsing as Work']));
+    await vi.waitFor(() => expect([pill().textContent, pill().title]).toEqual(['WWork', 'Browsing as Work'])); // the initial, then the name
+    const before = useLayout.getState().main;
     fireEvent.click(pill());
-    expect(openTab).toHaveBeenCalledWith({ kind: 'settings', section: 'browser' });
+    const popover = await screen.findByRole('dialog', { name: 'Profile: Work' });
+    expect(popover.dataset.profilePopover).toBe('profile');
+    expect(openTab).not.toHaveBeenCalled();
+    expect(useLayout.getState().main).toBe(before);
+    fireEvent.keyDown(popover, { key: 'Escape' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
 

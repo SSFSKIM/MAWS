@@ -8,7 +8,8 @@
 // cua #90: ⇧⌘B, Chrome's bookmarks bar chord, is told to the chrome (`toggleBookmarksBar`), which flips the setting; like
 // ⌘L it shadows a MAWS chord (`panel.toggle`) inside the page only, and leaves the focus where it is. It is taken only in
 // a tab whose partition can show a bar (an imported profile with its bookmarks consented, the bar shown or hidden):
-// anywhere else it passes, so Toggle right panel still answers it (the owner's decision of 2026-10-09).
+// anywhere else it passes, so Toggle right panel still answers it (the spec's Decision Log, 2026-10-09: the chord
+// narrowed to tabs that can show a bar).
 import type { Input } from 'electron';
 import type { BrowserChromeCommand } from '@shared/ipc/schema/browser';
 import type { Navigator } from './navigation';

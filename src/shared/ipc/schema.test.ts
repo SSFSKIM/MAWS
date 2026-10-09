@@ -1220,7 +1220,12 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null, kind: 'history' }] }).ok).toBe(true); // cua #90: `kind`
       expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(false);
       expect(validateCommandInput('browser.profiles.list', undefined).ok).toBe(true);
-      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(true);
+      // cua #90: the account's names and the avatar, a PNG data URL or an initial
+      const item = { profileDir: 'Default', name: 'Work', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'picture', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' } };
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [item, { ...item, gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(false);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ ...item, avatar: { kind: 'picture', dataUrl: 'https://a.test/x.png' } }] }).ok).toBe(false);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ ...item, avatar: { kind: 'picture', dataUrl: `data:image/png;base64,${'A'.repeat(400_000)}` } }] }).ok).toBe(false);
     });
 
     it('takes a placement as an integer rect of at least one pixel, or null, from a named pane', () => {

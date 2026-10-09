@@ -48,7 +48,7 @@ beforeEach(() => {
       case 'browser.tabs.list':
         return ok({ tabs: [], selected: {} });
       case 'browser.profiles.list':
-        return ok({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
+        return ok({ profiles: [{ profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] });
       case 'browser.import.list':
         return ok({ profiles: [record()], fileBroken: false, running: null });
       case 'browser.bookmarks.tree':
@@ -213,7 +213,7 @@ describe('⌘⇧B: the bookmarks bar\'s chord', () => {
     await vi.waitFor(() => expect(main.callsOf('settings.set')).toEqual([{ browser: { bookmarksBar: 'hidden' } }, { browser: { bookmarksBar: 'shown' } }]));
   });
 
-  // the owner's decision of 2026-10-09: the chord toggles the bar where there is one, and is Toggle right panel's elsewhere
+  // the spec's Decision Log, 2026-10-09: the chord narrowed to tabs that can show a bar, and Toggle right panel's elsewhere
   it('passes ⌘⇧B on, unprevented and unwritten, in a Default tab and in a profile imported without bookmarks', async () => {
     const def = show(browserTab(T1, A));
     const field = () => screen.getByRole('combobox', { name: 'Address' });

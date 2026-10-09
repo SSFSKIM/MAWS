@@ -1,6 +1,7 @@
 // The sheet's pick state (E4b Design §2): the profiles Chrome's `Local State` names in the default folder, or in one the
 // owner points at ("Choose another Chrome folder…"), the last-used one preselected; a profile already imported shows
-// when and cannot be chosen until removed (Decision Log 2). Continue inspects the chosen profile.
+// when and cannot be chosen until removed (Decision Log 2). Continue inspects the chosen profile. cua board #90: a
+// re-import opens it on the removed record's Chrome folder with that profile chosen (`preselect`).
 import { useState } from 'react';
 import type { ChromeProfile } from '@shared/browser/import';
 import { ipc } from '../../../ipc/client';
@@ -13,9 +14,14 @@ import { inspect, useBrowserImport } from './store';
 const firstChoice = (profiles: ChromeProfile[]): string | null =>
   (profiles.find((p) => p.lastUsed && !p.imported) ?? profiles.find((p) => !p.imported))?.profileDir ?? null;
 
-export function ProfilePicker() {
-  const [folder, setFolder] = useState<string | null>(null); // null: Chrome's default folder
-  const [chosen, setChosen] = useState<string | null>(null);
+export interface PickerPreselect {
+  userDataDir: string;
+  profileDir: string;
+}
+
+export function ProfilePicker({ preselect }: { preselect?: PickerPreselect }) {
+  const [folder, setFolder] = useState<string | null>(preselect?.userDataDir ?? null); // null: Chrome's default folder
+  const [chosen, setChosen] = useState<string | null>(preselect?.profileDir ?? null);
   const [chooseError, setChooseError] = useState<string | null>(null);
   const query = useCommand('browser.import.profiles', { userDataDir: folder });
   const answer = query.data;

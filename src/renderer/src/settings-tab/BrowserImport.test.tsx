@@ -156,6 +156,22 @@ describe('an imported profile', () => {
     expect(dialog().dataset.browserImport).toBe('report');
     expect(within(dialog()).getByText('Imported from Person 1')).toBeTruthy();
   });
+
+  // cua #90: beside Show report, for a profile whose bookmarks were imported
+  it('Sync bookmarks now asks main for the profile, with the last sync’s time beside it; none without bookmarks', async () => {
+    const syncedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const consented = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt, count: 46, error: null, errorAt: null } };
+    renderBlock({ 'browser.import.list': () => ({ profiles: [consented], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt, count: 46 }) });
+    const region = await screen.findByRole('region', { name: 'Person 1' });
+    expect(within(region).getByText('마지막 동기화 2 hours ago')).toBeTruthy();
+    fireEvent.click(within(region).getByRole('button', { name: 'Sync bookmarks now' }));
+    await vi.waitFor(() => expect(calls('browser.bookmarks.sync')).toEqual([{ profileDir: 'Default' }]));
+    cleanup();
+    disconnect();
+    resetBrowserImport();
+    renderBlock(withRecord);
+    expect(within(await screen.findByRole('region', { name: 'Person 1' })).queryByRole('button', { name: 'Sync bookmarks now' })).toBeNull();
+  });
 });
 
 describe('Remove imported profile', () => {

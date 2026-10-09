@@ -44,6 +44,7 @@ import { AbsolutePathSchema } from './settings';
 // E4b end
 // cua #90 start
 import { BOOKMARK_FAVICON_ORIGINS_MAX, BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
+import { BrowserProfileListItemSchema } from '../../browser/profiles';
 
 const BookmarkNodeIdSchema = z.number().int().min(1); // an index row's id (the empty tree's roots, 0, are never acted on)
 // cua #90 end
@@ -197,7 +198,7 @@ export const commands = {
   },
   'browser.profiles.list': {
     input: z.void(),
-    output: z.strictObject({ profiles: z.array(z.strictObject({ profileDir: z.string(), name: z.string() })) }),
+    output: z.strictObject({ profiles: z.array(BrowserProfileListItemSchema) }), // cua #90: the names and the avatar
     owner: 'main',
   },
   // E4d start

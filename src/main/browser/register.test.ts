@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -12,6 +14,7 @@ const { mergeSuggestions, registerBrowserHandlers } = await import('./register')
 const { ViewManager } = await import('./view');
 const { Navigator } = await import('./navigation');
 const { BookmarkBar } = await import('./bookmarks/bar'); // cua #90
+const { ProfileAvatars } = await import('./profile-avatars'); // cua #90
 
 const A = 'App-A' as AppSessionId;
 
@@ -45,7 +48,11 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
     bar,
     favicons,
     windowOf: windowOf as never,
-    profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
+    profiles: () => [
+      { profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', gaiaName: null, userName: null, avatar: { kind: 'initials' } },
+      { profileDir: 'Default', name: 'Person 1', partition: 'persist:maws-chrome-Default', importedAt: 't', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'picture' } },
+    ],
+    avatars: new ProfileAvatars(join(tmpdir(), 'maws-cua90-no-such-user-data')), // cua #90: no avatar.png anywhere
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
@@ -147,6 +154,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       favicons: { forOrigins: vi.fn() },
       windowOf: () => ({}) as never,
       profiles: () => [],
+      avatars: { list: () => [] },
       register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
     });
     const tabId = 'b_ffffffffffff';
@@ -277,7 +285,13 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(thrown?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
-  it('lists the imported profiles by directory and name', () => {
-    expect(setup().call('browser.profiles.list', undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
+  // cua #90: with the account's names and the avatar (a picture whose file is gone falls back to the initial)
+  it('lists the imported profiles by directory and name, with the account’s names and the avatar', () => {
+    expect(setup().call('browser.profiles.list', undefined)).toEqual({
+      profiles: [
+        { profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } },
+        { profileDir: 'Default', name: 'Person 1', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'initials', letter: 'P' } },
+      ],
+    });
   });
 });

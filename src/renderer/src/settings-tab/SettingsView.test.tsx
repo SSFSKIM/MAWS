@@ -452,7 +452,8 @@ describe('settings view lists Voice', () => {
 // Default first and the imported profiles by name (a saved one the list lost stays, marked), the search template written
 // only when it is an http(s) address with %s, and the link target, each one field of `settings.browser`.
 describe('settings view lists Browser', () => {
-  const profiles = { 'browser.profiles.list': () => ({ profiles: [{ profileDir: 'Profile 2', name: 'Work' }, { profileDir: 'Default', name: 'Home' }] }) };
+  const listed = (profileDir: string, name: string) => ({ profileDir, name, gaiaName: null, userName: null, avatar: { kind: 'initials', letter: name[0]! } }); // cua #90
+  const profiles = { 'browser.profiles.list': () => ({ profiles: [listed('Profile 2', 'Work'), listed('Default', 'Home')] }) };
   const select = () => within(row('Profile')).getByRole('combobox', { name: 'Profile' }) as HTMLSelectElement;
   const search = () => within(row('Search engine')).getByRole('textbox', { name: 'Search engine' }) as HTMLInputElement;
 

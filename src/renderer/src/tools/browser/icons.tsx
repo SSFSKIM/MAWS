@@ -115,4 +115,24 @@ export const BookmarkIcon = ({ className }: Glyph) => (
     <path d="m8 2.5 1.7 3.5 3.8.5-2.8 2.6.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z" />
   </Icon>
 );
+
+// the profile popover's: the Default profile's person, Sync bookmarks now's two arrows, Re-import's arrow into a tray
+export const PersonIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <circle cx="8" cy="5.75" r="2.75" />
+    <path d="M3 13.5c.6-2.6 2.6-4 5-4s4.4 1.4 5 4" />
+  </Icon>
+);
+
+export const SyncIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M12.5 6.5A4.75 4.75 0 0 0 4 5M3.5 9.5A4.75 4.75 0 0 0 12 11M4 2.5V5h2.5M12 13.5V11H9.5" />
+  </Icon>
+);
+
+export const ImportIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M8 2.5v7M5 6.5l3 3 3-3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />
+  </Icon>
+);
 // cua #90 end

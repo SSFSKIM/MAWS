@@ -19,6 +19,7 @@ import type { ViewManager } from './view';
 // cua #90 start
 import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
 import type { Favicons } from './favicon';
+import type { ProfileAvatars } from './profile-avatars';
 // cua #90 end
 
 export interface BrowserHandlerDeps {
@@ -32,6 +33,7 @@ export interface BrowserHandlerDeps {
   bar: Pick<BookmarkBar, 'open' | 'menu'>;
   windowOf(sender: WebContents): BrowserWindow | null;
   favicons: Pick<Favicons, 'forOrigins'>;
+  avatars: Pick<ProfileAvatars, 'list'>; // the profiles list's names and avatars
   // cua #90 end
   profiles(): BrowserProfile[];
   register: typeof registerMainHandler;
@@ -74,7 +76,7 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, profiles, register }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register }: BrowserHandlerDeps): void {
   register('browser.tabs.list', ({ appSessionId }) => store.list(appSessionId === undefined ? undefined : session(appSessionId)));
   register('browser.tabs.open', (request) => store.open({ ...request, appSessionId: session(request.appSessionId) }));
   register('browser.tabs.close', knownTabs(({ tabId }) => store.close(tabId)));
@@ -93,7 +95,7 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
       suggestionsOr(() => history.suggest(partition, query), 'history'),
     ),
   }));
-  register('browser.profiles.list', () => ({ profiles: profiles().map(({ profileDir, name }) => ({ profileDir, name })) }));
+  register('browser.profiles.list', () => ({ profiles: avatars.list(profiles()) })); // cua #90: with the names and the avatar
   // The sender's window places and covers; the cover answers at once, its placeholders follow as browser.view.covered.
   register('browser.view.place', knownTabs((input, { sender }) => views.place(input, sender)));
   register('browser.view.cover', ({ covered }, { sender }) => {

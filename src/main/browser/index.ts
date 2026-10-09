@@ -46,6 +46,7 @@ import { AgentCursor } from './agent/cursor';
 // cua #90 start: the bookmarks bar's commands and native menus
 import { BookmarkBar, openAllConfirmation } from './bookmarks/bar';
 import { NativeMenus } from './bookmarks/menu';
+import { ProfileAvatars } from './profile-avatars';
 // cua #90 end
 
 export interface BrowserDeps {
@@ -152,7 +153,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // cua #90 end
   registerBrowserHandlers({
     store, views, navigator, downloads, history: index.browserHistory, profiles, register,
-    bookmarks: index.browserBookmarks, bar, windowOf, favicons, // cua #90
+    bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
   });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its

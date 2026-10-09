@@ -6,6 +6,7 @@ import { UNKNOWN_BROWSER_TAB, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
+import { writeSettings } from '../../settings-tab/parts';
 import { useLayout } from '../../stores/layout';
 import { tabOpened } from './store';
 
@@ -73,6 +74,16 @@ export function revealDownload(tabId: string): void {
 
 export function handBack(tabId: string): void {
   void ipc.invoke('browser.control.handBack', { tabId }).then(quietly('handing the page back'));
+}
+
+// cua #90: the profile popover's Switch profile. `browser.profile` (app-wide: the profile every session's new tabs open
+// in) is written first, then a new selected tab of this session opens in it; a main tab moves to the new tab's own main
+// tab, as "+" does. The tab the popover was opened from keeps its partition (a tab's is fixed when it opens).
+export async function switchProfile(appSessionId: AppSessionId, surface: 'panel' | 'main', profileDir: string | null): Promise<BrowserTab | null> {
+  if (!(await writeSettings({ browser: { profile: profileDir } }))) return null;
+  const tab = await openTab(appSessionId, null);
+  if (tab && surface === 'main') openMainTab(appSessionId, tab.tabId);
+  return tab;
 }
 
 export function openExternal(url: string): void {

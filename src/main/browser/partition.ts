@@ -22,6 +22,10 @@ export const BrowserProfileSchema = z.looseObject({
   partition: BrowserPartitionSchema,
   importedAt: z.string(),
   bookmarks: z.looseObject({}).nullable().optional(), // cua #90: the bookmarks consent (version 2; absent in version 1)
+  // cua #90: the Chrome account's names and how the avatar is drawn, for `browser.profiles.list` (version 2)
+  gaiaName: z.string().nullable().optional(),
+  userName: z.string().nullable().optional(),
+  avatar: z.looseObject({ kind: z.string() }).optional(),
 });
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
 const ProfilesFileSchema = z.looseObject({ version: z.union([z.literal(1), z.literal(2) /* cua #90: profiles.json version 2 */]), profiles: z.array(BrowserProfileSchema) });

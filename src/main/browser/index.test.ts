@@ -207,7 +207,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
       settings: () => ({ ...SETTINGS_DEFAULTS_V12.browser, profile: 'Profile 1' }),
       register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
     });
-    expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
+    expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }); // cua #90
     expect(browser.store.open({ appSessionId: A, url: null, select: true }).tab.partition).toBe('persist:maws-chrome-Profile 1');
     expect(profiles).toHaveBeenCalledTimes(2);
     browser.stop();

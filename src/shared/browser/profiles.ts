@@ -59,6 +59,7 @@ export const ImportedBookmarksSchema = z.strictObject({
 });
 export type ImportedBookmarks = z.infer<typeof ImportedBookmarksSchema>;
 export const ProfileAvatarSchema = z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('picture') }), z.strictObject({ kind: z.literal('initials') })]);
+export type ProfileAvatar = z.infer<typeof ProfileAvatarSchema>;
 
 export const ImportedProfileSchema = ownRecord(
   z.strictObject({
@@ -80,6 +81,23 @@ export type ImportedProfilesFile = z.infer<typeof ImportedProfilesFileSchema>;
 export const ImportedProfileV1Schema = ownRecord(z.strictObject({ ...RECORD_FIELDS, report: ImportReportV1Schema }));
 export type ImportedProfileV1 = z.infer<typeof ImportedProfileV1Schema>;
 export const ImportedProfilesFileV1Schema = z.strictObject({ version: z.literal(1), profiles: z.array(ImportedProfileV1Schema) }).refine(unique, uniqueProfiles);
+
+// An imported profile as the chrome's pill, its popover and Switch profile draw it (`browser.profiles.list`; the spec's
+// "Profiles list item"): the Chrome account's names, shown in the popover and the picker only, and the avatar, the 64 px
+// PNG as a data URL or the profile's initial. The Default partition is never listed; the renderer draws its own glyph.
+export const PROFILE_AVATAR_MAX_BYTES = 256 * 1024;
+export const PROFILE_AVATAR_URL_PREFIX = 'data:image/png;base64,';
+export const BrowserProfileListItemSchema = z.strictObject({
+  profileDir: z.string(),
+  name: z.string(),
+  gaiaName: z.string().nullable(),
+  userName: z.string().nullable(),
+  avatar: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('picture'), dataUrl: z.string().startsWith(PROFILE_AVATAR_URL_PREFIX).max(PROFILE_AVATAR_URL_PREFIX.length + Math.ceil(PROFILE_AVATAR_MAX_BYTES / 3) * 4) }),
+    z.strictObject({ kind: z.literal('initials'), letter: z.string().max(16) }), // one grapheme, upper-cased
+  ]),
+});
+export type BrowserProfileListItem = z.infer<typeof BrowserProfileListItemSchema>;
 
 // A version-1 record as version 2 reads it: no bookmarks imported, no account names kept, the initial for its avatar.
 export function upgradeProfileV1(record: ImportedProfileV1): ImportedProfile {

@@ -105,6 +105,9 @@ import { registerTranscriptActions as registerBrowserTranscriptActions } from '.
 // E4b start
 import { connectBrowserImport } from './tools/browser/import/store';
 // E4b end
+// cua #90 start
+import { ProfileSheets } from './tools/browser/import/ProfileSheets';
+// cua #90 end
 // E4c start
 import { openBrowserTab } from './tools/browser/agent/actions';
 import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
@@ -304,6 +307,8 @@ export function App() {
       {/* E3 start: the comment composer's sheet, opened through E5's seam */}
       <CommentComposerHost />
       {/* E3 end */}
+      {/* cua #90: the profile popover's Re-import this profile…, the removal's then the import's sheet */}
+      <ProfileSheets />
     </QueryClientProvider>
   );
 }

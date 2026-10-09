@@ -35,7 +35,7 @@ describe('keyAction: the chords taken inside the page (E4a Design §4, Decision 
   });
 
   // cua #90: Chrome's chord for the bookmarks bar; it shadows MAWS's ⌘⇧B (Toggle right panel) inside the page only, and
-  // only in a tab that can show a bar (the owner's decision of 2026-10-09: "it toggles the bookmarks bar where there is one")
+  // only in a tab that can show a bar (the spec's Decision Log, 2026-10-09: the chord narrowed to tabs that can show a bar)
   it('takes ⇧⌘B as the bookmarks bar toggle in a tab that can show a bar, and ⌘B, ⌥⇧⌘B, ⌃⇧⌘B not', () => {
     const withBar = { ...idle, bookmarksBar: true };
     expect(keyAction(cmd('B', { shift: true }), withBar)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
