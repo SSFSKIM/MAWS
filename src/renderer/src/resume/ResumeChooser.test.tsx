@@ -8,6 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { project, record } from '../../../../test/support/builders';
+import { formatDateTime } from '../app/date-format';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { clearPreviewCache, SETTLE_MS } from './preview';
@@ -130,6 +131,15 @@ describe('the resume chooser', () => {
     const turns = screen.getByTestId('resume-turns');
     expect(await within(turns).findByText(RESUME_COPY.earlier)).toBeTruthy();
     expect(turns.textContent).not.toContain(RESUME_COPY.empty);
+  });
+
+  it('a row’s time and the preview’s last activity carry the date and time in the system locale, as the rest of MAWS', () => {
+    fill(base);
+    mount();
+    const full = formatDateTime(Date.parse(at(9)));
+    const alpha = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'alpha')!;
+    expect(alpha.querySelector(`[title="${full}"]`)).not.toBeNull();
+    expect(within(screen.getByTestId('resume-preview')).getByTitle(full)).toBeTruthy();
   });
 
   it('badges the opened project’s rows only once All projects widens past it', async () => {

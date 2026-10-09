@@ -20,7 +20,8 @@ import { useRowSession } from '../context';
 // E4d end
 import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
-import { Chevron, clockTime, copyText } from './parts';
+import { formatClock } from '../../../app/date-format';
+import { Chevron, copyText } from './parts';
 import { AnchorIcon } from './icons'; // E3
 
 type UserRowData = Extract<Row, { kind: 'user' }>;
@@ -100,7 +101,7 @@ export function UserRow({ row }: { row: UserRowData }) {
         )}
       </div>
       <div className="transcript-user-actions">
-        <span>{clockTime(row.at)}</span>
+        <span>{formatClock(Date.parse(row.at))}</span>
         <button type="button" onClick={() => copyText(copiedUserText(row))}>
           Copy
         </button>

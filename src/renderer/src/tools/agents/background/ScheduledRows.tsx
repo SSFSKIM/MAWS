@@ -8,6 +8,7 @@
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { formatClock, formatShortDate, formatWeekdayClock } from '../../../app/date-format';
 import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { SCHEDULED_COPY } from '../copy';
@@ -19,17 +20,14 @@ import { useScheduledFile } from './scheduled-file';
 import { ACTION } from './TaskRows';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const WEEKDAY_TIME = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const DATE_TIME = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const DATE = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
 // A next run in local time: the time alone today, with the weekday within a week, else with the date.
 function localTime(at: number, now: number): string {
-  if (sameDay(at, now)) return TIME.format(at);
-  return at - now < 6 * DAY_MS ? WEEKDAY_TIME.format(at) : DATE_TIME.format(at);
+  if (sameDay(at, now)) return formatClock(at);
+  return at - now < 6 * DAY_MS ? formatWeekdayClock(at) : DATE_TIME.format(at);
 }
 
 interface Props {
@@ -74,7 +72,7 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
 function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; onOpen: (row: ScheduledRow) => void }) {
   const kind = `${row.recurring ? SCHEDULED_COPY.recurring : SCHEDULED_COPY.oneShot} · ${SCHEDULED_COPY.store[row.store]}`;
   const after = [
-    row.expiresAt !== null && (row.expiresAt > now ? SCHEDULED_COPY.expires(DATE.format(row.expiresAt)) : SCHEDULED_COPY.expired(DATE.format(row.expiresAt))),
+    row.expiresAt !== null && (row.expiresAt > now ? SCHEDULED_COPY.expires(formatShortDate(row.expiresAt, now)) : SCHEDULED_COPY.expired(formatShortDate(row.expiresAt, now))),
     row.lastFiredAt !== null && SCHEDULED_COPY.lastRan(formatAgo(now - row.lastFiredAt)),
   ].filter((part): part is string => part !== false);
   return (

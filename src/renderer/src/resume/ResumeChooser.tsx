@@ -11,6 +11,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { RecentTurn } from '@shared/ipc/schema/session';
+import { formatDateTime } from '../app/date-format';
 import { relativeAge } from '../app/relative-age';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
@@ -34,7 +35,6 @@ import {
   type ChooserRow,
   type ChooserToggles,
   type GroupKind,
-  LOCALE,
 } from './model';
 import { useRecentTurns } from './preview';
 
@@ -292,7 +292,7 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: st
           {badge}
         </span>
       )}
-      <span title={new Date(row.at).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
+      <span title={formatDateTime(row.at)} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
         {rowTime(row.at, kind, now)}
       </span>
     </div>
@@ -353,7 +353,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
         </Fact>
         {branch && <Fact label={COPY.facts.branch}>⎇ {branch}</Fact>}
         {projectName && <Fact label={COPY.facts.project}>{projectName}</Fact>}
-        <Fact label={COPY.facts.lastActive} title={new Date(row.at).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })}>
+        <Fact label={COPY.facts.lastActive} title={formatDateTime(row.at)}>
           {capitalised(relativeAge(Math.max(0, now - row.at)))}
         </Fact>
         {digest?.lastAssistantLine && (

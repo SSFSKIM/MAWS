@@ -11,6 +11,7 @@
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import { formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
 import { lastActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title';
@@ -84,8 +85,6 @@ export interface ChooserGroup {
   rows: ChooserRow[];
 }
 
-// The chooser's words are English (the app has no other copy yet), so its dates and times are too, whatever the system locale.
-export const LOCALE = 'en-US';
 const DAY = 24 * 60 * 60 * 1000;
 const midnight = (ms: number): number => {
   const d = new Date(ms);
@@ -100,8 +99,6 @@ const weekStart = (ms: number): number => {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
-const shortDate = (ms: number, now: number): string =>
-  new Date(ms).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() !== new Date(now).getFullYear() && { year: 'numeric' }) });
 
 // The group a time falls in, by local calendar: Today, Yesterday, the earlier days of this week, last week, then one
 // group per week ("Week of Sep 14"). A time in the future (a clock moved back) counts as today.
@@ -116,7 +113,7 @@ export function groupOf(at: number, now: number): { key: string; kind: GroupKind
   const lastWeek = weekStart(thisWeek - DAY / 2);
   if (at >= lastWeek) return { key: 'lastWeek', kind: 'lastWeek', label: 'Last week' };
   const week = weekStart(at);
-  return { key: `week:${week}`, kind: 'week', label: `Week of ${shortDate(week, now)}` };
+  return { key: `week:${week}`, kind: 'week', label: `Week of ${formatShortDate(week, now)}` };
 }
 
 // Rows (already newest first) in their groups, newest group first.
@@ -132,12 +129,11 @@ export function chooserGroups(rows: readonly ChooserRow[], now: number): Chooser
 }
 
 // What a row says of its time inside its group: the clock time for Today and Yesterday, the weekday and the clock for
-// the rest of this week, the date for the weeks before.
+// the rest of this week, the date for the weeks before; in the system locale, as the rest of MAWS (`app/date-format.ts`).
 export function rowTime(at: number, kind: GroupKind, now: number): string {
-  const clock = new Date(at).toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
-  if (kind === 'today' || kind === 'yesterday') return clock;
-  if (kind === 'thisWeek') return `${new Date(at).toLocaleDateString(LOCALE, { weekday: 'short' })} ${clock}`;
-  return shortDate(at, now);
+  if (kind === 'today' || kind === 'yesterday') return formatClock(at);
+  if (kind === 'thisWeek') return formatWeekdayClock(at);
+  return formatShortDate(at, now);
 }
 
 // The row's folder badge: a worktree's folder name, else the project's name (a session without one: its folder's name);
