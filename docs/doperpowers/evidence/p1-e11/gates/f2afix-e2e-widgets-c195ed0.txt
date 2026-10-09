@@ -1,0 +1,8 @@
+Command: pnpm e2e:widgets (through /tmp/maws-review/waitload20.sh && with-slot.sh)
+head: c195ed04
+== e2e-widgets head c195ed04 start 2026-10-08T23:57:40Z load { 47.50 32.77 23.21 }
+== e2e-widgets exit 0 end 2026-10-09T00:00:46Z
+--- summary lines
+  ✓  21 e2e/widgets.spec.ts:990:3 › plugin management (E8) › an engine error is the engine’s words and code in red; a marketplace-declared command opens a second sheet and Run it accepts it by its sha256, never -y (1.5s)
+  24 passed (37.0s)
+--- exit code: 0

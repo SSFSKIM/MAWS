@@ -1,0 +1,8 @@
+Command: pnpm e2e:transcript (through /tmp/maws-review/waitload20.sh && with-slot.sh)
+head: c195ed04
+== e2e-transcript head c195ed04 start 2026-10-09T00:00:50Z load { 12.68 23.59 21.33 }
+== e2e-transcript exit 0 end 2026-10-09T00:04:24Z
+--- summary lines
+expanded fixtures: {"fixtures":161,"kinds":{"agent_list":4,"agent_message":19,"artifact":3,"ask":3,"assistant_text":225,"bash":4,"boundary":7,"browser_action":7,"cell":99,"delivery":1,"divider":156,"error":190,"group":27,"local_command":1,"plan":6,"question":6,"receipt":11,"subagent":20,"thinking":64,"time":162,"user":209}}
+  31 passed (3.1m)
+--- exit code: 0

@@ -1,0 +1,9 @@
+Command: pnpm exec vitest run src/renderer/src/widgets src/renderer/src/transcript src/renderer/src/tools/code src/renderer/src/sessions (through /tmp/maws-review/waitload20.sh && with-slot.sh)
+head: c195ed04
+== units head c195ed04 start 2026-10-08T23:56:32Z load { 20.20 26.97 20.63 }
+== units exit 0 end 2026-10-08T23:57:33Z
+--- summary lines
+ Test Files  97 passed | 1 skipped (98)
+      Tests  1646 passed | 1 skipped (1647)
+Type Errors  no errors
+--- exit code: 0
