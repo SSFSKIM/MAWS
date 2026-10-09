@@ -19,13 +19,26 @@ type Gateway = Omit<EngineSessionStatus['gateway'], 'mode'>;
 export type TrackedStatus = Pick<
   EngineSessionStatus,
   'engineState' | 'activity' | 'permissionMode' | 'prePlanMode' | 'fastMode' | 'plugins' | 'pluginErrors' | 'pluginWarnings' | 'backgroundTasks' | 'mcpServers' | 'heldPeerMessages' | 'memory'
+  | 'pluginsObservedAt' /* P2-A */
 > & { gateway: Gateway; resolvedModel: string | null; engineVersion: string | null };
 
 const FAST_MODE_STATES = ['off', 'cooldown', 'on'] as const;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
 // system/init's and reload_plugins' plugin items alike: `name`, `path`, `source`, `version` (E8: pass3/e8-plugins-reload seq 26, 31)
-const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+export const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+// P2-A start (2026-10-09): a main-lane system/init's plugins with their load errors and warnings (omitted by the engine
+// when empty, SPEC 45 §45.10.2), read the same way by the tracker and by X17's observed facts (observed-facts.ts)
+export function initPluginsOf(frame: Record<string, unknown>): Pick<EngineSessionStatus, 'plugins' | 'pluginErrors' | 'pluginWarnings'> {
+  return {
+    plugins: pluginsOf(frame.plugins),
+    pluginErrors: list(frame.plugin_errors).map((e) => ({ plugin: String(e.plugin ?? ''), type: String(e.type ?? ''), message: String(e.message ?? ''), path: str(e.path) })),
+    pluginWarnings: list(frame.plugin_warnings).map((w) => ({ plugin: String(w.plugin ?? ''), type: String(w.type ?? ''), message: String(w.message ?? '') })),
+  };
+}
+// a system/init from a subagent's lane carries its tool use id and is not the session's
+export const isSubagentFrame = (frame: Record<string, unknown>): boolean => typeof frame.parent_tool_use_id === 'string' && frame.parent_tool_use_id.length > 0;
+// P2-A end
 
 export function isPermissionMode(mode: string): mode is PermissionMode {
   return (PERMISSION_MODES as readonly string[]).includes(mode);
@@ -46,6 +59,7 @@ export class SessionStatusTracker {
   plugins: EngineSessionStatus['plugins'] = [];
   pluginErrors: EngineSessionStatus['pluginErrors'] = [];
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
+  pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet)
   mcpServers: EngineSessionStatus['mcpServers'] = [];
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
@@ -73,7 +87,7 @@ export class SessionStatusTracker {
       engineState: this.engineState, activity: this.activity,
       permissionMode: { requested: this.requestedMode, effective: this.effectiveMode, refusal: this.refusal }, prePlanMode: this.prePlanMode,
       gateway: { ...this.gateway, localLane: this.gateway.localLane && { ...this.gateway.localLane } }, resolvedModel: this.resolvedModel, engineVersion: this.engineVersion,
-      fastMode: { ...this.fastMode }, plugins: this.plugins.map((p) => ({ ...p })), pluginErrors: this.pluginErrors.map((e) => ({ ...e })), pluginWarnings: this.pluginWarnings.map((w) => ({ ...w })),
+      fastMode: { ...this.fastMode }, pluginsObservedAt: this.pluginsObservedAt /* P2-A */, plugins: this.plugins.map((p) => ({ ...p })), pluginErrors: this.pluginErrors.map((e) => ({ ...e })), pluginWarnings: this.pluginWarnings.map((w) => ({ ...w })),
       backgroundTasks: this.backgroundTasks.map((t) => ({ ...t })), mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: this.heldPeerMessages.map((m) => ({ ...m })), memory: { ...this.memory },
     };
   }
@@ -127,6 +141,7 @@ export class SessionStatusTracker {
   // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9).
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
+    this.pluginsObservedAt = new Date().toISOString(); // P2-A
     const names = new Set(list(answer.commands).map((command) => command.name));
     this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
   }
@@ -157,8 +172,8 @@ export class SessionStatusTracker {
     if (frame.type !== 'system') return;
     switch (frame.subtype) {
       case 'init':
-        if (typeof frame.parent_tool_use_id === 'string' && frame.parent_tool_use_id.length > 0) return;
-        this.systemInit(frame);
+        if (isSubagentFrame(frame)) return;
+        this.systemInit(frame, at);
         return;
       case 'status':
         this.activity = frame.status === 'compacting' || frame.status === 'requesting' ? frame.status : null;
@@ -182,17 +197,15 @@ export class SessionStatusTracker {
     }
   }
 
-  private systemInit(frame: Frame): void {
+  private systemInit(frame: Frame, at: string): void {
     if (typeof frame.model === 'string') this.resolvedModel = frame.model;
     if (typeof frame.claude_code_version === 'string') this.engineVersion = frame.claude_code_version;
     if (typeof frame.cwd === 'string') this.engineCwd = frame.cwd;
     if (typeof frame.permissionMode === 'string') this.setMode(frame.permissionMode);
     if (Array.isArray(frame.mcp_servers)) this.mcpServers = list(frame.mcp_servers).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
     this.setFastMode(frame);
-    this.plugins = pluginsOf(frame.plugins);
-    // omitted by the engine when empty (SPEC 45 §45.10.2)
-    this.pluginErrors = list(frame.plugin_errors).map((e) => ({ plugin: String(e.plugin ?? ''), type: String(e.type ?? ''), message: String(e.message ?? ''), path: str(e.path) }));
-    this.pluginWarnings = list(frame.plugin_warnings).map((w) => ({ plugin: String(w.plugin ?? ''), type: String(w.type ?? ''), message: String(w.message ?? '') }));
+    ({ plugins: this.plugins, pluginErrors: this.pluginErrors, pluginWarnings: this.pluginWarnings } = initPluginsOf(frame));
+    this.pluginsObservedAt = at; // P2-A
     this.setCatalog({ skills: Array.isArray(frame.skills) ? frame.skills : [], terminalSlashCommands: Array.isArray(frame.terminal_slash_commands) ? frame.terminal_slash_commands : [] });
   }
 

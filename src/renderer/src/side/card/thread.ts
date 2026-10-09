@@ -4,6 +4,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import { waitingItem } from '../../attention/derive';
 import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { RELAY_FIRST, TRUST_FIRST } from '../../sessions/acquire'; // P2-A
 import { holderWords } from '../../sessions/holder-words';
 import type { WaitingCard } from '../../sessions/store';
 import type { Row } from '../../transcript/model/rows';
@@ -60,16 +61,17 @@ export function needsYouOf({ card, failed, holder, pending }: { card: WaitingCar
 // the user row, the pending steer or the held bubble), starting (the field clears; a pending bubble until the resumed
 // thread delivers it), or refused (the field keeps the text, the reason under it). The one place that reads the seam's
 // answer: P2-A's shape (`started: boolean` beside a `held` disposition) changes this function only, a started send or
-// queue read by its disposition and `held` like a refusal.
+// queue read by its disposition and `held` like a refusal. Since P2-A (2026-10-09) the seam starts a thread before it
+// sends, so it answers no reply that waits on a start: `starting` is no longer produced.
 export type ReplyOutcome = { kind: 'delivered' } | { kind: 'starting' } | { kind: 'refused'; reason: string };
 export function replyOutcomeOf(result: HumanPromptResult): ReplyOutcome {
   switch (result.disposition) {
     case 'sent':
     case 'steered':
     case 'queued':
-      return { kind: 'delivered' };
-    case 'started':
-      return { kind: 'starting' };
+      return { kind: 'delivered' }; // P2-A: `started` or not, the seam sent it once the thread was ready
+    case 'held': // P2-A: a trust or relay card took the text (only a composer send's; the card's are refused)
+      return { kind: 'refused', reason: result.reason === 'trust' ? TRUST_FIRST : result.reason === 'relay' ? RELAY_FIRST : SIDE_COPY.card.replyRefused };
     case 'refused':
       return { kind: 'refused', reason: result.reason ?? SIDE_COPY.card.replyRefused };
   }

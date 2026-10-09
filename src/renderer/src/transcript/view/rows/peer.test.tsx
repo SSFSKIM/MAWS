@@ -3,7 +3,8 @@
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { record, status } from '../../../../../../test/support/builders';
+import { digest, record, status } from '../../../../../../test/support/builders';
+import { fakeClient } from '../../../../../../test/support/fake-client';
 import { useSessions } from '../../../stores/sessions';
 import { rowsOf, withAllExpanded } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
@@ -49,7 +50,7 @@ function replies() {
 
 const live = () => useSessions.setState({ engine: new Map([[A, status(A)]]), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
 
-beforeEach(() => useSessions.setState({ engine: new Map(), records: new Map() }));
+beforeEach(() => useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() }));
 afterEach(cleanup);
 
 describe('a message from another session', () => {
@@ -75,6 +76,48 @@ describe('a message from another session', () => {
     const box = screen.getByRole('textbox');
     expect((box as HTMLTextAreaElement).disabled).toBe(true);
     expect(box.getAttribute('placeholder')).toBe('Replying needs the session running here');
+  });
+
+  // P2-A (2026-10-09; the execution document §5.6): a reply on an exited session starts it (peer), then asks it once
+  it('on an exited session the box stays open; Send starts the session first, then asks it once', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client;
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
+    const actions: TranscriptActions = { ...spyActions(), peerReplies: replies().source };
+    renderRow(inbound(), { storeKey: A, actions });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    const box = screen.getByRole('textbox', { name: 'Reply via Session A' }) as HTMLTextAreaElement;
+    expect(box.disabled).toBe(false);
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    fireEvent.change(box, { target: { value: 'on it' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'peer' }]);
+    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(actions.replyToPeer).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: B, name: 'repo-b', mode: 'reply' }, 'on it');
+    expect(box.value).toBe('');
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  it('a refused start says why and keeps the text; a session a terminal holds is closed with the holder named', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client;
+    useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
+    const actions: TranscriptActions = { ...spyActions(), peerReplies: replies().source };
+    renderRow(inbound(), { storeKey: A, actions });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'on it' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
+    expect(actions.replyToPeer).not.toHaveBeenCalled();
+    expect(box.value).toBe('on it');
+    act(() => useSessions.setState((s) => ({ records: new Map([[A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 42 } }]]), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) })));
+    expect(box.disabled).toBe(true);
+    expect(screen.getByText('Held by terminal · 42')).toBeTruthy();
+    delete (window as { maws?: unknown }).maws;
   });
 
   it('walks the ask on the line: asked (and closed meanwhile), replying, replied; a failure puts the text back and an edit clears it', () => {

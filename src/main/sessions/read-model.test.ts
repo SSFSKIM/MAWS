@@ -497,11 +497,90 @@ describe('the released mark against seeds, launches and archive', () => {
     expect(current().released).toBeUndefined();
   });
 
-  it('an archive of a session that was not released leaves its digest alone', () => {
+  it('an archive of a session that was not released leaves its digest alone but for its availability (P2-A)', () => {
     src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'stop' } }));
-    const before = current();
+    const { revision: _r, availability: _a, ...before } = current();
     src.writer.observeRecord(record(A, { archived: true }));
-    expect(current()).toEqual(before);
+    const { revision: _r2, availability, ...after } = current();
+    void [_r, _a, _r2];
+    expect(after).toEqual(before);
+    expect(availability).toBe('archived');
   });
 });
 // C12 end
+
+// P2-A start (2026-10-09; X16, the execution document §5.2): the digest carries the session's availability, derived
+// at every commit from the record, the engine status and main's acquisition memory, so every change rides the digest's
+// own revision order.
+describe('the digest’s availability', () => {
+  let model: SessionReadModel;
+  let src: ReturnType<typeof source>;
+  let emitted: SessionDigest[];
+  const seedExited = () => {
+    const { revision: _r, availability: _a, ...d } = digest(A, { phase: 'exited' });
+    void _r;
+    void _a;
+    src.writer.setDigest(d);
+  };
+  const latest = () => emitted.filter((d) => d.appSessionId === A).at(-1)?.availability;
+
+  beforeEach(() => {
+    model = new SessionReadModel('index');
+    src = source();
+    model.register(src);
+    src.writer.observeRecord(record(A, { holder: { kind: 'none' } }));
+    emitted = [];
+    model.on('digest', (d) => emitted.push(d));
+  });
+
+  it('reads a seeded session with no process as resumable, and follows its process through launch and exit', () => {
+    seedExited();
+    expect(latest()).toBe('resumable');
+    src.writer.applyEngineStatus(status(A, { process: 'starting' }));
+    expect(latest()).toBe('starting');
+    src.writer.applyEngineStatus(status(A, { process: 'ready' }));
+    expect(latest()).toBe('usable');
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'crash' } }));
+    expect(latest()).toBe('resumable');
+  });
+
+  it('recommits when an acquisition starts and ends, and keeps the last attempt’s answer until the next one', () => {
+    seedExited();
+    const before = emitted.length;
+    model.observeAcquisition(A, { inFlight: true, last: null });
+    expect(emitted).toHaveLength(before + 1);
+    expect(latest()).toBe('starting');
+    model.observeAcquisition(A, { inFlight: false, last: { kind: 'needs_trust', at: '2026-10-09T00:00:00.000Z', message: null } });
+    expect(latest()).toBe('needs_trust');
+    model.observeAcquisition(A, { inFlight: false, last: { kind: 'needs_trust', at: '2026-10-09T00:00:00.000Z', message: null } });
+    expect(emitted, 'the same memory again changes nothing').toHaveLength(before + 2);
+    model.observeAcquisition(A, { inFlight: true, last: null });
+    expect(latest()).toBe('starting');
+    expect(model.digests().find((d) => d.appSessionId === A)!.availability).toBe('starting');
+  });
+
+  it('recommits when a record is archived or a terminal takes it, and when its status is forgotten', () => {
+    seedExited();
+    src.writer.observeRecord(record(A, { holder: { kind: 'terminal', pid: 42 } }));
+    expect(latest()).toBe('foreign_held');
+    src.writer.observeRecord(record(A, { holder: { kind: 'none' }, archived: true }));
+    expect(latest()).toBe('archived');
+    src.writer.observeRecord(record(A, { holder: { kind: 'none' } }));
+    src.writer.applyEngineStatus(status(A, { process: 'ready' }));
+    expect(latest()).toBe('usable');
+    src.writer.forgetEngineStatus(A);
+    expect(latest()).toBe('resumable');
+  });
+
+  it('an acquisition’s memory for a session with no digest yet waits for its first commit; a removed session forgets it', () => {
+    model.observeAcquisition(A, { inFlight: true, last: null });
+    expect(emitted).toEqual([]);
+    seedExited();
+    expect(latest()).toBe('starting');
+    src.writer.observeRemoved(A);
+    src.writer.observeRecord(record(A, { holder: { kind: 'none' } }));
+    seedExited();
+    expect(latest()).toBe('resumable');
+  });
+});
+// P2-A end

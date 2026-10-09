@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { digest } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
@@ -16,6 +17,9 @@ import { useUsage } from '../stores/usage';
 import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
+import { emptyObservedFacts } from '@shared/engine/observed-facts';
+
+const SELECTOR_BACK = 'Back to effort';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId; // routed, idle, sonnet, effective auto (pass2/auto-routed's catalogue, seq 143)
@@ -158,6 +162,61 @@ describe('the model view: Select model, Default with its recommendation, the cat
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Not available for this accountnot available'));
     expect(view()).toBe('model');
     expect(item(/^Sonnet/).getAttribute('aria-checked')).toBe('true');
+  });
+});
+
+// P2-A (2026-10-09; the execution document §5.6): a record with no ready process binds to its record; a choice is marked
+// pending, starts the session (`chip`), then applies; the live binding confirms it; a start that fails clears the mark.
+describe('a session with a record and no ready process', () => {
+  const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
+  const dormant = () => {
+    const record = scenario().sessions.find((s) => s.appId === ID)!;
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record]]) });
+    const facts = { ...emptyObservedFacts(ID, '2026-10-09T00:00:00.000Z', 'live'), model: { value: 'claude-opus-5-5', at: new Date(Date.now() - 2 * 86_400_000).toISOString(), launchId: 'l-1' }, complete: true };
+    backend.script('session.observedFacts', () => facts);
+  };
+  const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
+  afterEach(() => useSessions.setState({ records: new Map() }));
+
+  it('names the observed model, starts nothing on open, and a choice is pending through the start, then set_model', async () => {
+    dormant();
+    mount('model');
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(acquires()).toEqual([]);
+    expect(calls('list_models')).toHaveLength(0); // the catalogue is the host's, no engine read
+    fireEvent.click(screen.getByRole('button', { name: SELECTOR_BACK }));
+    await waitFor(() => expect(document.querySelector('[data-model-observed]')?.textContent).toMatch(/· Last observed 2 days ago$/));
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
+    fireEvent.click(item(/^Opus/));
+    expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // pending from the choice
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: ID, model: 'opus' }]));
+    expect(acquires()).toEqual([{ appSessionId: ID, reason: 'chip' }]);
+    expect(useSessions.getState().engine.get(ID)?.process).toBe('ready');
+    await waitFor(() => expect(view()).toBe('effort'));
+    expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // the live binding keeps it until an init confirms
+  });
+
+  it('a start that fails clears the pending mark, applies nothing and says why', async () => {
+    dormant();
+    backend.script('session.acquire', () => ({ status: 'failed', appSessionId: ID, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
+    mount('model');
+    await screen.findByRole('group', { name: 'Claude models' });
+    fireEvent.click(item(/^Opus/));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The session did not become ready.'));
+    expect(screen.queryByText('set · the next init frame confirms it')).toBeNull();
+    expect(calls('set_model')).toHaveLength(0);
+    expect(item(/^Sonnet/).getAttribute('aria-checked')).toBe('true'); // the record's requested model, still
+  });
+
+  it('a terminal holding the session refuses a choice in words, and starts nothing', async () => {
+    dormant();
+    const record = scenario().sessions.find((s) => s.appId === ID)!;
+    useSessions.setState({ records: new Map([[ID, { ...record, holder: { kind: 'terminal', pid: 4711 } }]]), digests: new Map([[ID, digest(ID, { availability: 'foreign_held' })]]) });
+    mount('model');
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect((item(/^Opus/) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText('Held by terminal · 4711').length).toBeGreaterThan(0);
+    expect(acquires()).toEqual([]);
   });
 });
 

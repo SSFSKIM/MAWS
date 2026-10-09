@@ -107,7 +107,7 @@ export function ConfigWidget({ appSessionId, close }: { appSessionId: AppSession
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
   const userFile = memory.data?.files.find((f) => f.kind === 'user')?.path;
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <ConfigBody view={present(read.data)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} close={close} />}
     </WidgetFrame>
   );

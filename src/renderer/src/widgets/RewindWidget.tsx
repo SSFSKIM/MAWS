@@ -16,6 +16,7 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { REWIND, WIDGET_TITLE } from './copy';
+import { useDormant } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 type What = 'conversation' | 'files' | 'both';
@@ -30,6 +31,7 @@ export function rewindTargets(rows: readonly { kind: string }[]): (UserRow & { m
 
 export function RewindWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
+  const dormant = useDormant(appSessionId); // P2-A: a rewind needs the engine; Load now starts it
   const rows = useTranscriptStore((s) => (s.entries[appSessionId]?.rows ?? NO_ROWS) as readonly { kind: string }[]);
   const targets = rewindTargets(rows);
   const [picked, pick] = useState<MessageUuid | null>(null);
@@ -67,7 +69,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rewind} command="rewind" state={status?.process === 'ready' ? 'ready' : 'not_running'} error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rewind} command="rewind" state={dormant?.state ?? 'ready'} error={dormant?.words ?? null} close={close}>
       <div className="flex flex-col gap-3">
         {targets.length === 0 ? (
           <p className="m-0 text-fg-muted">{REWIND.none}</p>

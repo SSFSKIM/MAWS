@@ -21,7 +21,7 @@ export const SUPERVISOR_NOTICE_IDS = { updated: 'supervisor.updated', incompatib
 // The renderer's commands that start or resume an engine process (a send resumes a released session, a fork launches
 // its new one, a take-over resumes the session here; `session.launch` is the dev-only Resume live launcher's): refused
 // while waiting, they bring the banner back.
-const LAUNCHES: ReadonlySet<CommandName> = new Set<CommandName>(['session.start', 'session.send', 'session.fork', 'session.takeOver', 'session.launch']);
+const LAUNCHES: ReadonlySet<CommandName> = new Set<CommandName>(['session.start', 'session.send', 'session.fork', 'session.takeOver', 'session.launch', 'session.acquire' /* P2-A */]);
 
 type Banner = 'updated' | 'incompatible';
 

@@ -15,8 +15,16 @@ import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
-import { resumeSession, startIntent } from './setup-actions';
-import { connectSetup, useSetup } from './store';
+import { continueSetup, isContinuing, releaseMessage, resumeSession, startIntent } from './setup-actions';
+// P2-A start
+import { record, status } from '../../../../test/support/builders';
+import { RELAY_POLL_MS } from './SetupCard';
+import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
+import { resetComposerStore, useComposerStore } from '../stores/composer';
+import { useSessions } from '../stores/sessions';
+import { acquireSession } from './acquire';
+// P2-A end
+import { connectSetup, isStarting, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -50,6 +58,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 
 beforeEach(() => {
   resetSetupStore();
+  useSessions.setState({ records: new Map(), engine: new Map(), digests: new Map() }); // P2-A: a record's card is told by its record
   useNotices.setState({ notices: [] });
   returned = [];
   offReturn = registerMessageReturn((_id, message) => returned.push(message));
@@ -157,12 +166,15 @@ describe('trust card', () => {
     }
   });
 
-  it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
-    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+  it("Cancel on a resume's card only undocks it, quietly: an acquisition retains nothing in main (P2-A)", async () => {
+    withMain({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+    useSessions.setState({ records: new Map([[ID, record(ID)]]) });
     render(<Docked />);
-    await act(() => resumeSession(ID));
+    expect(await act(() => resumeSession(ID))).toBe(true);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
-    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.intent.release')).toEqual([]);
     expect(returned).toEqual([]);
     expect(useNotices.getState().notices).toEqual([]);
   });
@@ -221,6 +233,22 @@ describe('relay card', () => {
 
 // C11 start: the docked card as C11 feeds it (C11's Asks of C10 (2) and (7)): the policy from settings v3, the hand-off
 // action once registered, and Run direct on a gateway model asking for a Claude model first.
+// P2-A (M1's re-review): an intent's relay card shares the path: a Recheck pending when it is cancelled starts nothing
+describe('relay card, a Recheck outliving its card', () => {
+  it('an intent’s card cancelled while its Recheck is out starts nothing once the relay answers', async () => {
+    withMain({ 'session.intent.release': () => intent() });
+    putIntent(intent({ message: MESSAGE }));
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(useSetup.getState().cards.has(ID)).toBe(false));
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.start')).toEqual([]);
+  });
+});
+
 describe('relay card, with C11', () => {
   let relayUp = false;
   const docked = async (over: Parameters<typeof intent>[0] = {}) => {
@@ -391,24 +419,15 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
-  it("a resume that fails after it started returns its message to the editor; C3's relay answer docks the card with it instead", async () => {
-    withMain({ 'session.start': answer(starting), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }), 'engine.relayHealth': () => health() });
+  it('a failed acquisition is told once: the row’s Resume names it from the reply; its run’s tagged failure toasts nothing (P2-A)', async () => {
+    withMain({ 'session.acquire': () => ({ status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    render(<Docked />);
-    await act(() => resumeSession(ID, MESSAGE));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
-    expect(returned).toEqual([MESSAGE]);
-    // a resume that became ready sent it: nothing comes back
-    await act(() => resumeSession(ID, MESSAGE));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
-    expect(returned).toEqual([MESSAGE]);
-    // C3's relay answer: the card holds the message, and its Cancel returns it
-    await act(() => resumeSession(ID, MESSAGE));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } }));
-    expect(returned).toEqual([MESSAGE]);
-    expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay', message: MESSAGE });
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true }));
+    expect(await act(() => resumeSession(ID))).toBe(false);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    expect(returned, 'an acquisition holds no message to hand back').toEqual([]);
     connection.disconnect();
   });
 
@@ -522,6 +541,316 @@ describe('failure card', () => {
 // While a failed attempt's checkout is still the intent's, `session.intent.patch` refuses every location change
 // (`retained_worktree`) until "Keep the worktree" or "Discard changes and remove" resolves it; once the card that offers
 // them is dismissed, the empty state above the composer offers them instead.
+// P2-A start (2026-10-09; the execution document §5.3 and §5.4): a record's card. The composer's message stays in its
+// draft while a trust or relay card shows it; the card's continuation acquires with the owner's choice, sends the
+// message through the human seam and clears the composer only once the host accepted it.
+describe('a record’s trust card and its continuation', () => {
+  const TRUST = trustState();
+  const ACCEPTED = { status: 'ready', appSessionId: ID, launched: true, joined: false };
+  const NEEDS_TRUST = { status: 'needs_trust', appSessionId: ID, trust: TRUST };
+  // `session.acquire` answers in turn: each call takes the next outcome (the last repeats)
+  const acquiring = (...outcomes: unknown[]) => {
+    let n = 0;
+    return () => outcomes[Math.min(n++, outcomes.length - 1)];
+  };
+  const known = () => useSessions.setState({ records: new Map([[ID, record(ID)]]), engine: new Map(), digests: new Map() });
+  const composerSend = () => sendHumanPrompt(ID, MESSAGE.content, { origin: 'composer', display: MESSAGE.display });
+
+  beforeEach(() => {
+    known();
+    resetComposerStore();
+  });
+
+  it('a Send then a Load now on an untrusted session: the docked card still shows the message', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST) });
+    render(<Docked />);
+    expect(await act(composerSend)).toEqual({ disposition: 'held', started: false, reason: 'trust' });
+    expect(await act(() => acquireSession(ID, 'read'))).toMatchObject({ status: 'needs_trust' });
+    expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'trust', trust: TRUST, message: MESSAGE });
+    expect(dockedIds()).toBe('c10:trust');
+  });
+
+  it('Trust and start acquires with the decision, sends the docked message with its display, then clears the composer', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED), 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]));
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { trust: 'accepted' } });
+    await waitFor(() => expect(useComposerStore.getState().prefills.get(ID)).toEqual({ text: '' }));
+    expect(dockedIds()).toBe('');
+    expect(fake.invoked('session.intent.release')).toEqual([]);
+  });
+
+  it('a refused continuation undocks the card and says why; the composer keeps the text (nothing is handed back or cleared)', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: ID, directory: '/gone' }) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Directory not found: /gone']);
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(returned).toEqual([]);
+  });
+
+  it('a host error on the send undocks the card and keeps the text', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    await act(() => fake.fail('session.send', 'write failed'));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['write failed']);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('Cancel (Back to editing) only undocks: no hand-back to main, the text stays where it was typed', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST) });
+    render(<Docked />);
+    await act(composerSend);
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.intent.release')).toEqual([]);
+    expect(returned).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('a widget’s card (no message) only starts the session on Trust and start', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED) });
+    render(<Docked />);
+    await act(() => acquireSession(ID, 'read'));
+    expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'trust', trust: TRUST, message: null });
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'resume', options: { trust: 'accepted' } });
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  // M1's review: one continuation per card, held until its message is accepted or refused
+  it('a Resume joined to the continuation cannot unlock the card mid-send; a second continuation meanwhile sends nothing', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    const READY_AGAIN = { ...ACCEPTED, joined: true };
+    const first = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
+    const rowResume = resumeSession(ID);
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(2));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await act(() => fake.reply('session.acquire', READY_AGAIN));
+    expect(await rowResume).toBe(true);
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    expect(isStarting(useSetup.getState(), ID), 'the card stays busy while its message is on its way').toBe(true);
+    expect(await continueSetup(ID, { trust: 'accepted' }, MESSAGE)).toMatchObject({ ok: false });
+    expect(fake.invoked('session.acquire')).toHaveLength(2);
+    await act(() => fake.reply('session.send', { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }));
+    expect(await first).toEqual({ ok: true });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+    expect(isStarting(useSetup.getState(), ID)).toBe(false);
+  });
+
+  it('the relay card’s poll waits while a manual Run direct continues the card: one continuation, one send', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      withMain({
+        'engine.relayHealth': () => health({ ok: true, status: 200, error: null }), // the relay answers again
+        'session.queue.list': { entries: [], paused: false },
+        'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' },
+      });
+      render(<Docked />);
+      const sending = composerSend();
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: ID, health: health() }));
+      expect(await sending).toMatchObject({ disposition: 'held', reason: 'relay' });
+      await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      expect(isContinuing(ID)).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // the poll finds the relay up while Run direct is in flight
+      expect(fake.pending('session.acquire'), 'the poll started no second continuation').toBe(1);
+      expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { gateway: 'direct' } });
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+      await act(() => fake.reply('session.acquire', ACCEPTED));
+      await waitFor(() => expect(dockedIds()).toBe(''));
+      expect(fake.invoked('session.acquire')).toHaveLength(2);
+      expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // M1's round-3 review: Cancel on a card whose continuation is active is honoured; the session may still start, but the
+  // dismissed card's message is not sent and the draft is left alone
+  it('a card cancelled while its continuation acquires: the session starts, nothing is sent, the composer is not cleared', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  // M1's round-4 review: a late answer of a dismissed card's acquisition docks nothing and says nothing
+  it.each([
+    ['relay_unreachable', { status: 'relay_unreachable', appSessionId: ID, health: health() }],
+    ['needs_trust', { status: 'needs_trust', appSessionId: ID, trust: trustState() }],
+    ['missing_directory', { status: 'missing_directory', appSessionId: ID, directory: '/gone' }],
+    ['failed', { status: 'failed', appSessionId: ID, message: 'the model is not available', resources: { worktree: null, record: 'kept', transcript: 'kept' } }],
+  ])('a card cancelled while its acquisition is out: a late %s docks no card and says nothing', async (_kind, outcome) => {
+    withMain({ 'engine.relayHealth': () => health({ ok: true, status: 200, error: null }) });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+      render(<Docked />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await act(() => fake.reply('session.acquire', outcome));
+      await waitFor(() => expect(isContinuing(ID)).toBe(false));
+      expect(useSetup.getState().cards.has(ID)).toBe(false);
+      expect(useNotices.getState().notices).toEqual([]);
+      await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // no recreated card, so no poll resumes the wait
+      expect(fake.invoked('session.acquire')).toHaveLength(1);
+      expect(fake.invoked('session.send')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a host error on a dismissed card’s acquisition says nothing either', async () => {
+    withMain();
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.fail('session.acquire', 'main is gone'));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(useNotices.getState().notices).toEqual([]);
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+  });
+
+  it('a relay card cancelled while its Run direct acquires sends nothing either', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('a card cancelled while its message is being sent leaves the draft alone', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.reply('session.send', { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  // M1's re-review: the continuation dies with its card; a Recheck whose read was out when the card went starts nothing
+  it('a Recheck pending when the card is cancelled continues nothing once the relay answers', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    expect(fake.invoked('session.send')).toEqual([]);
+  });
+
+  it('a Recheck pending when another answer replaces the card continues nothing for the replaced card', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: null })); // a new card, its own wait
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.acquire')).toEqual([]);
+  });
+
+  // The whole-branch review: an acquisition's own run streams its phases tagged `acquisition`, and its end reaches the
+  // caller in the `session.acquire` reply, which Electron delivers on another transport in no fixed order with the
+  // events; the reply alone decides the card and tells the failure, whichever arrives first
+  describe('with the setup stream connected, in either delivery order', () => {
+    const RELAY_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() }, acquisition: true } as const;
+    const RELAY_ANSWER = { status: 'relay_unreachable', appSessionId: ID, health: health() };
+    const ERROR_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true } as const;
+    const ERROR_ANSWER = { status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) };
+    const ORDERS = ['event first', 'reply first'] as const;
+    let connection: { disconnect(): void };
+    beforeEach(() => {
+      withMain({ 'session.intent.list': { intents: [] }, 'session.deletions.list': { manifests: [] } });
+      connection = connectSetup(fake.client);
+      act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    });
+    afterEach(() => connection.disconnect());
+
+    // The run's `failed` event and the acquisition's reply in the order given; answers what the continuation answered.
+    const deliver = async (order: (typeof ORDERS)[number], event: unknown, answer: unknown, continuing: Promise<unknown>) => {
+      if (order === 'event first') act(() => fake.event('session.setup', event));
+      await act(() => fake.reply('session.acquire', answer));
+      const ended = await continuing;
+      if (order === 'reply first') act(() => fake.event('session.setup', event));
+      return ended;
+    };
+
+    it.each(ORDERS)('a relay failure during Trust and start (%s) leaves the relay card carrying the message', async (order) => {
+      const continuing = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
+      expect(await deliver(order, RELAY_FAILED, RELAY_ANSWER, continuing)).toEqual({ ok: true });
+      expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'relay', health: health(), message: MESSAGE });
+      expect(useSetup.getState().phases.get(ID)?.phase, 'phase readers still see the run end').toBe('failed');
+    });
+
+    it.each(ORDERS)('a relay failure after Cancel (%s) recreates no card', async (order) => {
+      const continuing = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
+      await act(() => releaseMessage(ID, MESSAGE));
+      await deliver(order, RELAY_FAILED, RELAY_ANSWER, continuing);
+      expect(useSetup.getState().cards.has(ID)).toBe(false);
+    });
+
+    it.each(ORDERS)('a failure after Cancel (%s) says nothing; one the card still waits on is told once', async (order) => {
+      const cancelled = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
+      await act(() => releaseMessage(ID, MESSAGE));
+      await deliver(order, ERROR_FAILED, ERROR_ANSWER, cancelled);
+      expect(useNotices.getState().notices).toEqual([]);
+      act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+      await deliver(order, ERROR_FAILED, ERROR_ANSWER, continueSetup(ID, { trust: 'accepted' }, MESSAGE));
+      expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    });
+
+    it('an untagged run (a record’s own start) still docks its relay card and tells its failure', () => {
+      act(() => useSetup.getState().undock(ID));
+      act(() => fake.event('session.setup', { ...RELAY_FAILED, acquisition: undefined }));
+      expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay' });
+      act(() => fake.event('session.setup', { ...ERROR_FAILED, acquisition: undefined }));
+      expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    });
+  });
+});
+// P2-A end
+
 describe('a retained worktree with its card dismissed', () => {
   const path = `${REPO}/.claude/worktrees/accept-fail`;
   const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'accept-fail', branch: { kind: 'new' as const, name: 'worktree-accept-fail', base: 'HEAD' } };

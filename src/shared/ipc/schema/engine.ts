@@ -15,6 +15,7 @@ import { HardReasonSchema } from '../../engine/status';
 // C11 start
 import { AbsolutePathSchema } from './settings';
 // C11 end
+import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
@@ -85,6 +86,12 @@ const c12Commands = {
   'engine.budget': { input: z.void(), output: BudgetStateSchema, owner: 'engine-host' },
 } as const;
 // C12 end
+// P2-A start (2026-10-09; X17, the P2 interface ledger §1): the observed facts of one session, owner engine-host and
+// called by main only (`session.observedFacts` relays it); a deadline shape `bounded` (src/engine-host/ipc.ts)
+const p2aCommands = {
+  'engine.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'engine-host' },
+} as const;
+// P2-A end
 
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
@@ -94,6 +101,7 @@ export const commands = {
   ...c10Commands, // C10
   ...c11Commands, // C11
   ...c12Commands, // C12
+  ...p2aCommands, // P2-A
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

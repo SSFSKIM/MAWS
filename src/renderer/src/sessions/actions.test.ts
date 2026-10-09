@@ -75,8 +75,8 @@ describe('the session and project entries', () => {
     await waitFor(() => expect(created).toEqual([P2]));
   });
 
-  it('Resume opens the session’s tab, so a card its start docks is on screen', async () => {
-    fake = fakeClient({ 'session.start': () => ({ status: 'needs_trust', appSessionId: A, trust: trustState() }) });
+  it('Resume opens the session’s tab, so a card its acquisition docks is on screen', async () => {
+    fake = fakeClient({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: A, trust: trustState() }) }); // P2-A: Resume acquires
     window.maws = fake.client;
     useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'none' } })]]) });
     act(() => runSessionAction('resume', A));
@@ -86,6 +86,7 @@ describe('the session and project entries', () => {
     };
     expect(active()).toMatchObject({ kind: 'session', appSessionId: A });
     await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust' }));
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resume' }]);
   });
 
   it('the per-session entries open their sheets', () => {

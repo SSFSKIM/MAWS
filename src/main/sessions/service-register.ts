@@ -10,6 +10,7 @@ import type { HostState } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { CommandFailure, registerMainHandler } from '../ipc/router';
 import { IntentRefused, type SessionService } from './service';
+import { HostError } from './context'; // P2-A
 import { InvalidSideInput } from '../side/invalid'; // E3
 
 // The runtime hands a handler the schema's parsed value; the ids in it passed the branded id schemas, which is what the
@@ -25,6 +26,9 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   registerMainHandler('session.intent.discard', ({ appSessionId }) => relay(() => service.discard(id(appSessionId))));
   registerMainHandler('session.intent.resolveWorktree', ({ appSessionId, resolution }) => relay(() => service.resolveRetainedWorktree(id(appSessionId), resolution)));
   registerMainHandler('session.start', ({ appSessionId, message, options }) => relay(() => service.startSession(id(appSessionId), { message, options })));
+  // P2-A (X16): the one acquisition entry; a host that cannot answer is `host_unavailable`, so the supervisor's banner
+  // returns for it as for the other launches (LAUNCHES in supervisor-notices.ts)
+  registerMainHandler('session.acquire', ({ appSessionId, reason, options }) => relayHost(() => service.acquire(id(appSessionId), reason, options)));
   registerMainHandler('session.fork', ({ appSessionId, target, message, rewindTo }) =>
     relay(() => service.fork(id(appSessionId), target, { message, rewindTo: rewindTo as MessageUuid | null })),
   );
@@ -69,6 +73,16 @@ async function relaySide<T>(at: string[], call: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (!(error instanceof InvalidSideInput)) throw error;
     throw new CommandFailure(ipcError('invalid_input', error.message, [{ path: [...at, ...error.path], message: error.message }]));
+  }
+}
+
+// P2-A: the engine host's own `host_unavailable` keeps its code across main's handler; every other throw is `internal`.
+async function relayHost<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof HostError && error.code === 'host_unavailable') throw new CommandFailure(ipcError('host_unavailable', error.message));
+    throw error;
   }
 }
 

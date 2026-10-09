@@ -31,7 +31,7 @@ export function StatusBody({ view }: { view: StatusView }) {
 export function StatusWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getStatus', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.status} command="status" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.status} command="status" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <StatusBody view={present(read.data)} />}
     </WidgetFrame>
   );

@@ -1,12 +1,15 @@
 // The comment form's logic, shared by its two presentations (P2-E1 document, D5): E3's sheet and P2-E1's card call this
 // one hook, so their phases and sends cannot drift. The form takes a comment, a destination (Side thread by default;
-// Send to main only while the parent's process is ready) and a producer's screenshot the person may remove; Enter sends,
+// Send to main while the parent is ready or, P2-A, the Send can start it) and a producer's screenshot the person may remove; Enter sends,
 // Shift+Enter breaks a line, an input method's composition keeps its Enter. While a side thread starts the form is
-// disabled; a refusal stays in the form with Retry and, while the parent runs, Send to main instead; a refusal arriving
+// disabled; a refusal stays in the form with Retry and, while Send to main is offered, Send to main instead; a refusal arriving
 // after the presentation went (closed or replaced: `gone`) is a toast, so the comment is never lost unseen.
 import { useState, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { STARTS } from '../composer/submit/submit-state'; // P2-A
+import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
+import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { sendComment, type CommentDestination } from './actions';
@@ -36,8 +39,15 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal }: Comment
   const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
   const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
   const ready = status?.process === 'ready';
+  // P2-A start (2026-10-09; the execution document §5.6): Send to main is offered for every parent it can start (a
+  // record with no ready process starts on the Send); a terminal or job holding it, or an archive, says why
+  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const availability = useAvailability(parent);
+  const mainBlocked = availabilityRefusal(availability, holder, COPY.mainNotRunning);
+  const mainEnabled = ready || mainBlocked === null;
+  // P2-A end
   const sending = phase.kind === 'sending';
-  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' || ready);
+  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' || mainEnabled);
 
   const send = async (to: CommentDestination) => {
     if (!canSend(to)) return;
@@ -45,6 +55,24 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal }: Comment
     setPhase({ kind: 'sending', destination: to });
     // Send to main's acquisition of a parent that is not ready (P2-A, A's §5.6) runs here, before sendComment's
     // `side.sendToMain`, so the sheet and the card inherit it alike.
+    // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
+    // first, the Send being the gesture (`acquireSession(parent, 'side')`, then the existing `side.sendToMain` through
+    // sendComment); a refused start stays in the form in its words (a card's, when one docked), the comment kept, and
+    // after the presentation went it is a toast.
+    if (to === 'main' && useSessions.getState().engine.get(parent)?.process !== 'ready') {
+      let refusal: string | null;
+      try {
+        refusal = refusalWords(await acquireSession(parent, 'side'));
+      } catch (error) {
+        refusal = error instanceof Error ? error.message : String(error);
+      }
+      if (refusal !== null) {
+        if (gone()) toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
+        else setPhase({ kind: 'refused', destination: to, error: refusal });
+        return;
+      }
+    }
+    // P2-A end
     const sent = text.trim();
     const result = await sendComment(to, { parent, anchor, text: sent, screenshot }, reveal ? { reveal } : {});
     if (gone()) {
@@ -70,12 +98,14 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal }: Comment
     removeScreenshot: () => setScreenshot(null),
     phase,
     ready,
+    mainEnabled, // P2-A: Send to main is offered (ready, or a parent the Send can start)
     sending,
     canSend,
     send,
     onKeyDown,
-    submitLabel: sending ? (phase.destination === 'thread' ? COPY.starting : COPY.sending) : COPY.send,
-    mainCaption: !ready ? COPY.mainNotRunning : status?.turn ? COPY.mainBusy : COPY.mainIdle,
+    // P2-A: Send to main reads Starting… while its parent starts
+    submitLabel: sending ? (phase.destination === 'thread' || !ready ? COPY.starting : COPY.sending) : COPY.send,
+    mainCaption: ready ? (status?.turn ? COPY.mainBusy : COPY.mainIdle) : (mainBlocked ?? STARTS), // P2-A
   };
 }
 

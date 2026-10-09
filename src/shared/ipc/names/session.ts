@@ -27,6 +27,10 @@ export const commands = [
   // P2-C start (2026-10-09): the host queue's steer cancel and the prompt record's read
   'session.steer.cancel', 'session.promptHistory',
   // P2-C end
+  // P2-A start (2026-10-09)
+  'session.observedFacts',
+  'session.acquire',
+  // P2-A end
 ] as const;
 
 export const events = [

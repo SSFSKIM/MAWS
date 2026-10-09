@@ -6,26 +6,33 @@ import { useState } from 'react';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { toast } from '../../stores/notices';
-import type { ChipBinding } from './bindings';
+import { STARTING_SESSION } from '../../sessions/acquire'; // P2-A
+import type { ChipBinding, ChipPhase } from './bindings';
 
 export const ADD_DIRECTORY = 'Add directory…';
 
-export function useAddDirectory(directories: ChipBinding<string[]>, cwd: string, client: MawsBridge = ipc): { add(): Promise<void>; disabled: string | null } {
-  const [busy, setBusy] = useState(false);
-  const disabled = directories.disabled ?? (busy ? 'Choosing a directory…' : null);
+// P2-A (2026-10-09; the execution document §5.6, acceptance 5): on a session with no ready process the choice starts it
+// first; `phase` says so after the picker returns ("Starting…" beside the "+"), then while the directory is applied.
+export type AddDirectoryPhase = 'idle' | 'choosing' | ChipPhase;
+export const ADDING_DIRECTORY = 'Adding the directory…';
+
+export function useAddDirectory(directories: ChipBinding<string[]>, cwd: string, client: MawsBridge = ipc): { add(): Promise<void>; disabled: string | null; phase: AddDirectoryPhase } {
+  const [phase, setPhase] = useState<AddDirectoryPhase>('idle');
+  const disabled = directories.disabled ?? (phase === 'choosing' ? 'Choosing a directory…' : phase === 'starting' ? STARTING_SESSION : phase === 'applying' ? ADDING_DIRECTORY : null);
   const add = async () => {
     if (disabled !== null) return;
-    setBusy(true);
+    setPhase('choosing');
     try {
       const picked = await client.invoke('layout.pickFiles', { kind: 'directory', directory: cwd === '' ? null : cwd, multiple: false });
       if (!picked.ok) return void toast({ level: 'warning', text: picked.error.message, actions: [], dismissible: true });
       const dir = picked.value.files[0]?.path;
       if (!dir || directories.value.includes(dir)) return;
-      const result = await directories.set([...directories.value, dir]);
+      setPhase('applying');
+      const result = await directories.set([...directories.value, dir], setPhase);
       if (!result.ok) toast({ level: 'warning', text: result.error, actions: [], dismissible: true });
     } finally {
-      setBusy(false);
+      setPhase('idle');
     }
   };
-  return { add, disabled };
+  return { add, disabled, phase };
 }

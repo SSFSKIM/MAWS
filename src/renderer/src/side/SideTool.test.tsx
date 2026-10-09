@@ -10,7 +10,7 @@ import { promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SideExchange } from '@shared/side/question';
-import { record, status } from '../../../../test/support/builders';
+import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
@@ -272,16 +272,54 @@ describe('the Side pane’s question view', () => {
     expect(screen.getByRole('alert').textContent).toContain('Side question cancelled');
   });
 
-  it('without a ready process, Ask and Retry are disabled and it says why; continuing as a thread stays possible', async () => {
-    listing([exchange({}), exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
+  // P2-A (2026-10-09; the execution document §5.6): Ask and Retry on an exited session start it (side), then ask
+  it('on an exited session, Ask starts the session first and then asks once; nothing is acquired by opening the view', async () => {
+    listing([exchange({})]);
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]) });
     act(() => setSideView(A, { kind: 'btw' }));
     mount();
     await screen.findByText('ZEBRA');
-    expect(screen.getByText('Start the session to ask a side question')).toBeTruthy();
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    expect(screen.getByText('Starts this session')).toBeTruthy();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?{Enter}');
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(fake.invoked('session.sideQuestion')).toEqual([]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'More?' }]);
+    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  it('on an exited session, Retry starts it first; a refused start says why and asks nothing, the question kept', async () => {
+    listing([exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]) });
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word?', retryOf: 'op-2' }]);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'Again?{Enter}');
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
+    expect(fake.invoked('session.sideQuestion')).toHaveLength(1);
+    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('Again?');
+  });
+
+  it('a session a terminal holds: Ask and Retry are disabled with the holder named; continuing as a thread stays possible', async () => {
+    listing([exchange({}), exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...record(A), holder: { kind: 'terminal', pid: 42 } }), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) }));
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await screen.findByText('ZEBRA');
+    expect(screen.getByText('Held by terminal · 42')).toBeTruthy();
     await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?');
     expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(fake.invoked('session.acquire')).toEqual([]);
   });
 
   it('with a ready process, Enter asks the field’s question; with nothing answered, continuing is disabled', async () => {

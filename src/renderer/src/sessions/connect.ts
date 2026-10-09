@@ -11,7 +11,6 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { Location } from '@shared/sessions/intent';
 import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
-import { registerReleasedResume } from '../composer/resume-seam'; // C12
 import { ipc } from '../ipc/client';
 import { NEW_CHAT, registerCloseGuard, registerReplaceVerdict, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
@@ -24,7 +23,7 @@ import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
-import { beforeCloseUnstarted, resumeSession, unstartedReplaceVerdict } from './setup-actions'; // C12: resumeSession; E11 F2b: unstartedReplaceVerdict
+import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict
 import { connectSetup, useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
 
@@ -96,7 +95,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
       connectSetupDock(),
       registerMessageReturn((appSessionId, message) => prefillComposer(appSessionId, messagePrefill(message))),
       registerResubmitProvider(resubmitProvider),
-      registerReleasedResume(resumeSession), // C12: Send on a session released under the memory budget resumes it
+      // P2-A: C12's send-to-resume registration is retired; the human send seam acquires every eligible record itself
     );
   });
   return () => {

@@ -121,13 +121,62 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('refuses a model the engine refused, and every write while no process is ready', async () => {
+  it('refuses a model the engine refused', async () => {
     const { client } = bridge({ 'session.setModel': { ok: true, value: { ok: false, error: 'unknown model', code: 'invalid' } } });
     const b = liveBindings(status(APP), record(APP), {}, client);
     expect(await b.model.set({ model: 'nope', effort: null })).toEqual({ ok: false, error: 'unknown model' });
-    const exited = liveBindings(status(APP, { process: 'exited' }), record(APP), {}, client);
-    expect([exited.model.disabled, exited.mode.disabled, exited.directories.disabled]).toEqual(['The session is not running', 'The session is not running', 'The session is not running']);
-    expect(liveBindings(null, record(APP), {}, client).model.disabled).toBe('The session is not running');
+  });
+
+  // P2-A (2026-10-09; the execution document §5.6): with no ready process the chips follow the session's availability
+  describe('a record with no ready process', () => {
+    const ACQUIRED = { ok: true, value: { status: 'ready', appSessionId: APP, launched: true, joined: false } };
+    const terminal = record(APP, { holder: { kind: 'terminal', pid: 4711 } });
+    it.each([
+      ['resumable', record(APP), null],
+      ['failed', record(APP), null],
+      ['needs_trust', record(APP), null],
+      ['missing_directory', record(APP), null],
+      ['starting', record(APP), null],
+      ['foreign_held', terminal, 'Held by terminal · 4711'],
+      ['archived', record(APP, { archived: true }), 'Archived · unarchive it to continue'],
+    ] as const)('%s: every chip is %s', (availability, r, words) => {
+      for (const s of [status(APP, { process: 'exited' }), null]) {
+        const b = liveBindings(s, r, {}, bridge().client, availability);
+        expect([b.model.disabled, b.mode.disabled, b.directories.disabled]).toEqual([words, words, words]);
+      }
+    });
+
+    it('a model, mode or directory choice starts the session (chip), then applies as a live one does', async () => {
+      const rulesAnswer = { ok: true, value: { state: { rules: [], workspaceDirectories: ['/a'], originalCwd: '/work/app-1', managedOnly: false } } };
+      const { client, invoke } = bridge({ 'session.acquire': ACQUIRED, 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } }, 'session.setPermissionMode': { ok: true, value: { refusal: null, error: null } }, 'session.listPermissionRules': rulesAnswer });
+      const b = liveBindings(status(APP, { process: 'exited' }), record(APP), {}, client, 'resumable');
+      expect(await b.model.set({ model: 'haiku', effort: null })).toEqual({ ok: true });
+      expect(await b.mode.set('plan')).toEqual({ ok: true });
+      expect(await b.directories.set(['/b'])).toEqual({ ok: true });
+      expect(invoke.mock.calls.map((call) => [call[0], ((call as unknown[])[1] as { reason?: string }).reason ?? null])).toEqual([
+        ['session.acquire', 'chip'],
+        ['session.setModel', null],
+        ['session.acquire', 'chip'],
+        ['session.setPermissionMode', null],
+        ['session.acquire', 'chip'],
+        ['session.listPermissionRules', null],
+        ['session.applyFlagSettings', null],
+      ]);
+    });
+
+    it('an attempt that does not end ready applies nothing and says why; a holder or an archive asks nothing', async () => {
+      const { client, invoke } = bridge({ 'session.acquire': { ok: true, value: { status: 'missing_directory', appSessionId: APP, directory: '/gone' } } });
+      const b = liveBindings(null, record(APP), {}, client, 'resumable');
+      expect(await b.model.set({ model: 'haiku', effort: null })).toEqual({ ok: false, error: 'Directory not found: /gone' });
+      expect(await b.mode.set('plan')).toEqual({ ok: false, error: 'Directory not found: /gone' });
+      expect(await b.directories.set(['/b'])).toEqual({ ok: false, error: 'Directory not found: /gone' });
+      expect(invoke.mock.calls.map(([name]) => name)).toEqual(['session.acquire', 'session.acquire', 'session.acquire']);
+      invoke.mockClear();
+      const held = liveBindings(null, terminal, {}, client, 'foreign_held');
+      expect(await held.model.set({ model: 'haiku', effort: null })).toEqual({ ok: false, error: 'Held by terminal · 4711' });
+      expect(await held.directories.set(['/b'])).toEqual({ ok: false, error: 'Held by terminal · 4711' });
+      expect(invoke).not.toHaveBeenCalled();
+    });
   });
 
   it('reads the workspace directories the engine lists as paths', () => {

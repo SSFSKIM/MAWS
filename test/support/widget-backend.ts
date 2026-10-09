@@ -19,7 +19,7 @@ import type { QueueEntry, QueuePauseReason } from '../../src/shared/engine/sessi
 import type { AutoModeRefusalCode, PermissionMode } from '../../src/shared/graph/enums';
 import type { SessionRecord } from '../../src/shared/graph/session';
 import type { StartOptions } from '../../src/shared/ipc/schema/session';
-import type { SetupEvent, StartOutcome } from '../../src/shared/sessions/setup';
+import type { AcquireOutcome, SetupEvent, StartOutcome } from '../../src/shared/sessions/setup'; // P2-A: AcquireOutcome
 import type { IpcError } from '../../src/shared/ipc/errors';
 import { EventIdSchema, type AppSessionId, type EventId } from '../../src/shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '../../src/shared/ipc/schema';
@@ -98,7 +98,7 @@ export const CATALOG_LINES = { initialize: 'pass2/auto-routed#4', init: 'pass2/a
 // `/compact`, a user message and no control), the app queue, and (M4, the route switch) the interrupt, the queue's
 // pause and the stop, each moving the status and the queue as C3's host does, C10's resume (`session.start`) and rename
 // (`session.rename`), and C10's model catalogue (`engine.models`, the recorded `list_models` answer as the host's cache).
-const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename', 'engine.models', 'engine.relayHealth'] as const satisfies readonly CommandName[];
+const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.acquire' /* P2-A */, 'session.rename', 'engine.models', 'engine.relayHealth'] as const satisfies readonly CommandName[];
 
 export const WIDGET_BACKEND_COMMANDS: readonly CommandName[] = [...LOCAL_COMMANDS, ...(Object.keys(SUBTYPE_OF) as CommandName[])];
 
@@ -380,6 +380,15 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     return { status: 'starting', appSessionId: id };
   }
 
+  // P2-A: `session.acquire` as main answers it: a ready session at once; otherwise the resume above, answered once ready.
+  async function acquire(appSessionId: AppSessionId | null, input: { options?: StartOptions }): Promise<AcquireOutcome> {
+    const started = start(appSessionId, { options: input.options ?? {} });
+    const id = started.appSessionId;
+    for (const deadline = Date.now() + 2_000; statusOf(id).process !== 'ready' && Date.now() < deadline; ) await new Promise((resolve) => setTimeout(resolve, 5));
+    if (statusOf(id).process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${id} did not become ready` });
+    return { status: 'ready', appSessionId: id, launched: started.status === 'starting', joined: false };
+  }
+
   // C10's rename: through the engine while the process is ready, the record's override otherwise; answers the record.
   function rename(appSessionId: AppSessionId | null, title: string): { record: SessionRecord; via: 'engine' | 'override' } {
     const record = appSessionId === null ? undefined : records.get(appSessionId);
@@ -414,6 +423,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
     if (command === 'session.rename') return rename(appSessionIdOf(input), (input as { title: string }).title);
     if (command === 'session.start') return start(appSessionIdOf(input), input as { options: StartOptions });
+    if (command === 'session.acquire') return acquire(appSessionIdOf(input), input as { options?: StartOptions }); // P2-A
     const status = statusOf(appSessionIdOf(input));
     if (command === 'session.catalog') return catalog;
     if (command === 'session.queue.list') {

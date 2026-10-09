@@ -43,6 +43,10 @@ export interface SetupState {
   // keeps the record and drops the intent, then fails: its message was neither sent nor handed back in main)
   resumes: Map<AppSessionId, FirstMessage>;
   followed: Set<AppSessionId>; // ids this window sent a start for or saw a setup phase of (their answers and events tell their story)
+  // P2-A: a record card's continuation in flight, from its acquisition until its message is accepted or refused; only
+  // the claim's holder releases it (a joined Resume ending meanwhile does not)
+  continuing: Map<AppSessionId, symbol>;
+  claimContinuation(appSessionId: AppSessionId): (() => void) | null; // null: one is already in flight
   applyIntents(intents: SetupIntent[]): void;
   applyIntentChanged(event: EventPayload<'session.intent.changed'>): void;
   applySetup(event: SetupEvent): void;
@@ -79,6 +83,15 @@ export function createSetupStore() {
     removed: new Set(),
     resumes: new Map(),
     followed: new Set(),
+    continuing: new Map(), // P2-A
+    claimContinuation(appSessionId) {
+      if (get().continuing.has(appSessionId)) return null;
+      const token = Symbol(appSessionId);
+      set((s) => ({ continuing: new Map(s.continuing).set(appSessionId, token) }));
+      return () => {
+        if (get().continuing.get(appSessionId) === token) set((s) => ({ continuing: without(s.continuing, appSessionId) }));
+      };
+    },
     applyIntents(intents) {
       const { removed } = get();
       const next = new Map(get().intents);
@@ -102,11 +115,15 @@ export function createSetupStore() {
       set((s) => ({ intents: new Map(s.intents).set(appSessionId, intent) }));
     },
     applySetup(event) {
-      // C3's own relay answer at launch docks the relay card, with the message the intent (or the resume) still retains
+      // C3's own relay answer at launch docks the relay card, with the message the intent (or the resume) still retains.
+      // P2-A: not from an acquisition's own run (tagged): its reply docks the card, with the message its caller carries,
+      // only while the caller still wants it, whichever of the reply and this event arrives first.
       const id = event.appSessionId;
       const message = get().intents.get(id)?.message ?? get().resumes.get(id) ?? null;
       const cards =
-        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' ? new Map(get().cards).set(id, { kind: 'relay', health: event.outcome.health, message }) : get().cards;
+        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' && event.acquisition !== true
+          ? new Map(get().cards).set(id, { kind: 'relay', health: event.outcome.health, message })
+          : get().cards;
       // a resume's message is the engine's at `ready`, the card's or the editor's at `failed` (connectSetup hands it back)
       const resumes = event.phase === 'ready' || event.phase === 'failed' ? without(get().resumes, id) : get().resumes;
       set((s) => ({ phases: new Map(s.phases).set(id, event), cards, resumes, followed: s.followed.has(id) ? s.followed : new Set(s.followed).add(id) }));
@@ -152,11 +169,11 @@ export const useSetup = createSetupStore();
 
 const RUNNING: ReadonlySet<SetupEvent['phase']> = new Set(['worktree', 'trusting', 'launching']);
 
-// Whether a start of the id is in flight: this window's command not answered yet, or main reporting a phase before
-// `ready` or `failed`.
-export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'>, appSessionId: AppSessionId): boolean {
+// Whether a start of the id is in flight: this window's command not answered yet, main reporting a phase before
+// `ready` or `failed`, or (P2-A) a record card's continuation still acquiring or sending.
+export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'> & Partial<Pick<SetupState, 'continuing'>>, appSessionId: AppSessionId): boolean {
   const phase = s.phases.get(appSessionId)?.phase;
-  return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase));
+  return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase)) || (s.continuing?.has(appSessionId) ?? false);
 }
 
 // What the tab shows for an intent that holds its first message with nothing failed and no card: the page reloaded
@@ -184,7 +201,11 @@ export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' 
 // this store's imports; without it the holder is still named.
 type SessionHolder = SessionRecord['holder'];
 export type HeldNotice = (appSessionId: AppSessionId, holder: SessionHolder, attach: { jobId: string; command: string } | null) => void;
-const nameHolder: HeldNotice = (_appSessionId, holder) => toastHeld(holder);
+const nameHolder: HeldNotice = (appSessionId, holder) => toastHeld(holder, [], startNoticeId(appSessionId)); // P2-A: the id
+
+// P2-A (2026-10-09): the one notice of a record's start that did not end ready, whoever tells it (this store's setup
+// failure, the row's Resume, the composer's refusal): a later telling replaces it rather than stacking a second.
+export const startNoticeId = (appSessionId: AppSessionId): string => `start:${appSessionId}`;
 
 // Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves once the intents are known
 // (answered or failed: a page with no answerer starts empty rather than holding hydration forever).
@@ -199,9 +220,12 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
       // a resume that failed after it started has no card: its message returns to the editor (main handed it back) and
       // its reason is a toast (the record stays, exited); the engine's own refusal (a job took the session after MAWS's
       // read) names the holder and offers its Attach. C3's relay answer docked the relay card with the message instead.
+      // P2-A: an acquisition's own run (tagged) is told by its callers from the reply (a card's continuation says nothing
+      // once its card was dismissed), so it is not told here.
       if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
         if (resumed !== null && e.outcome?.kind !== 'relay_unreachable') returnMessage(e.appSessionId, resumed);
-        if (e.outcome?.kind === 'error') toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
+        if (e.acquisition === true) return;
+        if (e.outcome?.kind === 'error') toast({ id: startNoticeId(e.appSessionId), level: 'danger', text: e.outcome.message, actions: [], dismissible: true }); // P2-A: the id
         else if (e.outcome?.kind === 'held') onHeld(e.appSessionId, e.outcome.holder, e.outcome.attach);
       }
     }),

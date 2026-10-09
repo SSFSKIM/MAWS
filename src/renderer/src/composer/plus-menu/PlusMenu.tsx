@@ -38,32 +38,40 @@ export function PlusMenu({ cwd, editor, directories }: PlusMenuProps) {
     </DropdownMenu.Item>
   );
   return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger aria-label="Add files, photos or commands" className="inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-        +
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-56 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          <DropdownMenu.Item onSelect={() => void pick('files')} className={ITEM}>
-            Files and folders…
-          </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={() => void pick('photos')} className={ITEM}>
-            Photos…
-          </DropdownMenu.Item>
-          {directories && (
-            <DropdownMenu.Item disabled={addDirectory.disabled !== null} onSelect={() => void addDirectory.add()} className={ITEM}>
-              <span>{ADD_DIRECTORY}</span>
-              {addDirectory.disabled !== null && <span className="text-ui-sm">{addDirectory.disabled}</span>}
+    <>
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger aria-label="Add files, photos or commands" className="inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+          +
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-56 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+            <DropdownMenu.Item onSelect={() => void pick('files')} className={ITEM}>
+              Files and folders…
             </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Item onSelect={() => editor.current?.openSlash()} className={ITEM}>
-            Slash commands
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator className="my-1 h-px bg-border" />
-          {widgetItem('Connectors', 'mcp')}
-          {widgetItem('Plugins', 'plugins')}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+            <DropdownMenu.Item onSelect={() => void pick('photos')} className={ITEM}>
+              Photos…
+            </DropdownMenu.Item>
+            {directories && (
+              <DropdownMenu.Item disabled={addDirectory.disabled !== null} onSelect={() => void addDirectory.add()} className={ITEM}>
+                <span>{ADD_DIRECTORY}</span>
+                {addDirectory.disabled !== null && <span className="text-ui-sm">{addDirectory.disabled}</span>}
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Item onSelect={() => editor.current?.openSlash()} className={ITEM}>
+              Slash commands
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator className="my-1 h-px bg-border" />
+            {widgetItem('Connectors', 'mcp')}
+            {widgetItem('Plugins', 'plugins')}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      {/* P2-A (2026-10-09): a directory chosen on a session with no ready process starts it first, said beside the "+" */}
+      {addDirectory.phase === 'starting' && (
+        <span role="status" data-add-directory-phase="starting" className="text-ui-sm whitespace-nowrap text-fg-muted">
+          {addDirectory.disabled}
+        </span>
+      )}
+    </>
   );
 }

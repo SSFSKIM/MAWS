@@ -8,6 +8,7 @@ import type { Lineage } from '@shared/graph/session';
 import { item, T0 } from '../../../../../test/support/builders';
 import type { Row } from '../../transcript/model/rows';
 import { needsYouOf, replyOutcomeOf, threadStartOf } from './thread';
+import { RELAY_FIRST, TRUST_FIRST } from '../../sessions/acquire'; // P2-A
 
 // P2-C may add its two kinds to the actionable set (and so may a later child add another): the card's strip must
 // still keep C's out, and name a tier-1 kind it has no words for generically.
@@ -120,17 +121,24 @@ describe('needsYouOf', () => {
 
 describe('replyOutcomeOf (X22’s answer as the card reads it)', () => {
   it('sent, steered and queued: delivered, the transcript draws the rest', () => {
-    expect(replyOutcomeOf({ disposition: 'sent', messageUuid: 'm' as never })).toEqual({ kind: 'delivered' });
-    expect(replyOutcomeOf({ disposition: 'steered' })).toEqual({ kind: 'delivered' });
-    expect(replyOutcomeOf({ disposition: 'queued', queueId: 'q1' })).toEqual({ kind: 'delivered' });
+    expect(replyOutcomeOf({ disposition: 'sent', started: false, messageUuid: 'm' as never })).toEqual({ kind: 'delivered' });
+    expect(replyOutcomeOf({ disposition: 'steered', started: false })).toEqual({ kind: 'delivered' });
+    expect(replyOutcomeOf({ disposition: 'queued', started: false, queueId: 'q1' })).toEqual({ kind: 'delivered' });
   });
 
-  it('started: a pending reply until the resumed thread delivers it', () => {
-    expect(replyOutcomeOf({ disposition: 'started' })).toEqual({ kind: 'starting' });
+  // P2-A's final shape: the seam starts the thread first and then sends, so a started reply is already with the host
+  it('a reply that started the thread reads by its disposition: delivered', () => {
+    expect(replyOutcomeOf({ disposition: 'sent', started: true, messageUuid: 'm' as never })).toEqual({ kind: 'delivered' });
+    expect(replyOutcomeOf({ disposition: 'queued', started: true, queueId: 'q1' })).toEqual({ kind: 'delivered' });
   });
 
   it('refused: the reason, kept for the field', () => {
-    expect(replyOutcomeOf({ disposition: 'refused', reason: 'The session has ended' })).toEqual({ kind: 'refused', reason: 'The session has ended' });
-    expect(replyOutcomeOf({ disposition: 'refused' })).toEqual({ kind: 'refused', reason: 'The reply was not sent' });
+    expect(replyOutcomeOf({ disposition: 'refused', started: false, reason: 'The session has ended' })).toEqual({ kind: 'refused', reason: 'The session has ended' });
+    expect(replyOutcomeOf({ disposition: 'refused', started: false })).toEqual({ kind: 'refused', reason: 'The reply was not sent' });
+  });
+
+  it('held (a card took the text, which only a composer send hands it) reads as a refusal naming the card', () => {
+    expect(replyOutcomeOf({ disposition: 'held', started: false, reason: 'trust' })).toEqual({ kind: 'refused', reason: TRUST_FIRST });
+    expect(replyOutcomeOf({ disposition: 'held', started: false, reason: 'relay' })).toEqual({ kind: 'refused', reason: RELAY_FIRST });
   });
 });

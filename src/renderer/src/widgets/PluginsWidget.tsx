@@ -9,8 +9,8 @@
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
-import { NOT_RUNNING } from '../statusline/mode-menu';
 import { useSessions } from '../stores/sessions';
+import { LoadedPluginsSection } from './LoadedPluginsSection'; // P2-A (2026-10-09; the ledger's §6 exception)
 import { PLUGIN_MANAGEMENT, PLUGINS, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { AvailableSection } from './plugins/Available';
@@ -109,8 +109,9 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
         {cwd !== null && <MarketplacesSection cwd={cwd} installed={plugins} />}
         {cwd !== null && <AvailableSection cwd={cwd} />}
         <section data-plugins-section="loaded" className="mt-3">
-          {status && !ready && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
-          {status ? <PluginsBody view={present(status)} /> : <p className="m-0 text-ui-sm text-fg-muted">{NOT_RUNNING}</p>}
+          {/* P2-A start (2026-10-09; the ledger's §6 exception, A's §10 Q2): the loaded list by freshness, with Refresh; B's rewrite absorbs it */}
+          <LoadedPluginsSection appSessionId={appSessionId} />
+          {/* P2-A end */}
         </section>
       </WidgetFrame>
       {sheet}

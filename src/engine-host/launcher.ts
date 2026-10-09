@@ -28,6 +28,7 @@ import { EngineSession } from './session';
 import { FileDeliverableStore, SessionChains } from './deliverables/store'; // E1; P2-E1: SessionChains
 import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
+import type { ObservedFactsService } from './observed-facts'; // P2-A
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
 
@@ -46,6 +47,7 @@ export interface LauncherDeps {
   log: (message: string) => void;
   wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
   hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
+  observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -110,6 +112,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten, chains /* P2-E1 */ }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
         unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
+        observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1
       });
       deps.wire(session, plan, spec);
