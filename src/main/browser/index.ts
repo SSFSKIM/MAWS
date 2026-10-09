@@ -49,7 +49,7 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory'>;
+  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
@@ -152,6 +152,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     store,
     ...(controls && cursor && { presence: { controls, cursor } }),
     emit,
+    activityStore: index.browserActivity, // cua board #93
     recordDownload: async (download) => {
       if (!hosts) return;
       const result = await hosts.dispatch('engine-host', 'maws.download.recorded', download);
@@ -166,7 +167,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     userData,
     version: app.getVersion(),
   });
-  // the session's agent activity kept for the app's life, which a transcript lists when it mounts (M3 fix wave)
+  // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts in the
+  // index since cua board #93
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
     if (status.process !== 'exited' && knownSession(index, appSessionId)) cua.socketPathFor(appSessionId); // never a trust bootstrap's id

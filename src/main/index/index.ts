@@ -1,6 +1,6 @@
 // The index (C4 execution document, Interfaces "Index"; charter §4.4 as amended): main's one SQLite file holding what
 // the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures,
-// and (E3) the side-thread rows — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the
+// (E3) the side-thread rows, (E4a) the browser's history and (cua board #93) the agent's browser activity — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the
 // session source, C3's attention service, C5's read model, C10) reaches it through these stores.
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, type Db } from './db';
@@ -11,6 +11,7 @@ import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionStore } from './sessions';
 import { SideThreadStore } from './side-threads'; // E3
 import { BrowserHistoryStore } from './browser-history'; // E4a
+import { BrowserActivityStore } from './browser-activity'; // cua board #93
 
 export class Index {
   readonly sessions: SessionStore;
@@ -20,6 +21,7 @@ export class Index {
   readonly fixtures: ReplayFixtureStore;
   readonly sideThreads: SideThreadStore; // E3
   readonly browserHistory: BrowserHistoryStore; // E4a
+  readonly browserActivity: BrowserActivityStore; // cua board #93: the agent's browser activity across restarts
   private readonly db: Db;
   private stamped = 0;
 
@@ -35,6 +37,7 @@ export class Index {
     this.fixtures = new ReplayFixtureStore(this.db);
     this.sideThreads = new SideThreadStore(this.db); // E3
     this.browserHistory = new BrowserHistoryStore(this.db); // E4a
+    this.browserActivity = new BrowserActivityStore(this.db, path); // cua board #93: writes over a connection of its own
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.
@@ -64,6 +67,7 @@ export class Index {
   }
 
   close(): void {
+    this.browserActivity.close();
     this.db.close();
   }
 }

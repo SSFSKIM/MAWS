@@ -15,15 +15,18 @@
 // MAWS_HARNESS=0 (the product app) and MAWS_E2E_QUIET=1, over a profile under /tmp (a Unix socket path is short).
 // The final fix wave's case (the owner's decision; P1 A-54, amended): the Browser panel follows the agent again. In a
 // window that shows a seeded session, a lease's reading commands open nothing, its first acting command opens the
-// session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection.
+// session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection. Then the
+// app restarts over the same profile (cua board #93): the session's activity lists the same as before the quit.
 // cua board #98's case: on a leased idle tab the person's own navigations are theirs, never an agent row: ⌘R in the page
 // (through the page's input hook) and the chrome's Reload over IPC (through none, which the Navigator now stamps).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
+import { invoke, value } from './support/c7-replay';
 import { browserIn, tabsOf } from './support/browser-scene';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { closeScene, launchScene, scratchProject, show } from './support/maws-tools';
@@ -267,7 +270,7 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
   }
 });
 
-test('the Browser panel follows the agent: a lease\'s first acting command opens the shown session\'s Browser tool, and the agent\'s tab is not selected', async () => {
+test('the Browser panel follows the agent: a lease\'s first acting command opens the shown session\'s Browser tool, and the agent\'s tab is not selected; after a restart the session\'s activity lists as before', async () => {
   const tmp = process.env.TMPDIR;
   process.env.TMPDIR = '/tmp'; // the scratch profile under /tmp: a Unix socket path is short
   const scratch = scratchProject({ titles: ['E13: the panel follows the agent'], label: 'cua-panel' });
@@ -275,6 +278,8 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
   else process.env.TMPDIR = tmp;
   const pages = await startPages();
   let host: FakeHost | undefined;
+  const listed = async (page: Page, id: AppSessionId) => value(await invoke(page, 'browser.agent.activities.list', { appSessionId: id })).activities;
+  let before: BrowserAgentActivity[] | undefined;
   try {
     const s = await launchScene(scratch);
     try {
@@ -305,8 +310,19 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
       expect(selected).toBe(person); // the agent's tab is not selected
       await host.close();
       host = undefined;
+      await expect.poll(async () => (await listed(s.page, id)).map((a) => a.activity.kind)).toEqual(['tabOpened', 'navigated']);
+      before = await listed(s.page, id);
     } finally {
       await closeScene(s);
+    }
+    // cua board #93: what the agent did outlives the app; a restart lists the session's activity as the quit left it
+    const again = await launchScene(scratch, s.ids);
+    try {
+      const [id] = again.ids as [AppSessionId];
+      expect(before).toBeDefined();
+      expect(await listed(again.page, id)).toEqual(before);
+    } finally {
+      await closeScene(again);
     }
   } finally {
     await host?.close();
