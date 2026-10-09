@@ -1,0 +1,34 @@
+F2b review 3 RED proof: the 2.1 fix sources (extensions.ts, AtMenu.tsx, SlashPalette.tsx, popup.tsx, app.css) reverted to 6b365380^ in the working tree, pnpm build, sources restored (never committed); then pnpm e2e e2e/shell.spec.ts e2e/sessions.spec.ts -g "slash palette" through the slot
+--- red-0: the assertions as they were before 7ba8672f
+  ✘  1 e2e/sessions.spec.ts:658:7 › sessions › the slash palette opens above an unstarted New chat’s centred composer and moves nothing (1.7s)
+  ✓  2 e2e/shell.spec.ts:191:5 › the slash palette opens above a started session’s composer and moves nothing (1.4s)
+    Error: an unstarted New chat: the list starts inside the window
+    Received:    -10
+  1 failed
+  1 passed (3.7s)
+[ELIFECYCLE] Command failed with exit code 1.
+--- red-1: with the scroll recorder (7ba8672f)
+  ✘  1 e2e/sessions.spec.ts:658:7 › sessions › the slash palette opens above an unstarted New chat’s centred composer and moves nothing (2.5s)
+  ✘  2 e2e/shell.spec.ts:191:5 › the slash palette opens above a started session’s composer and moves nothing (1.3s)
+    Error: an unstarted New chat: opening moves nothing
+    - Expected  - 1
+    + Received  + 4
+    -   "scrolledSinceLastLook": Array [],
+    +   "scrolledSinceLastLook": Array [
+    +     "document",
+    +     "document",
+    +   ],
+    Error: a started session: opening moves nothing
+    - Expected  - 1
+    + Received  + 4
+    -   "scrolledSinceLastLook": Array [],
+    +   "scrolledSinceLastLook": Array [
+    +     "document",
+    +     "document",
+    +   ],
+  2 failed
+[ELIFECYCLE] Command failed with exit code 1.
+--- green: fix restored, rebuilt
+  ✓  1 e2e/sessions.spec.ts:658:7 › sessions › the slash palette opens above an unstarted New chat’s centred composer and moves nothing (1.9s)
+  ✓  2 e2e/shell.spec.ts:191:5 › the slash palette opens above a started session’s composer and moves nothing (1.4s)
+  2 passed (3.7s)

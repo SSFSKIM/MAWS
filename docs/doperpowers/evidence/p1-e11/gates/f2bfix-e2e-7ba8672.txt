@@ -1,0 +1,4 @@
+Command: pnpm build && pnpm e2e (through /tmp/maws-review/waitload20.sh && with-slot.sh)
+head: 7ba8672f
+  52 passed (3.7m)
+exit 0

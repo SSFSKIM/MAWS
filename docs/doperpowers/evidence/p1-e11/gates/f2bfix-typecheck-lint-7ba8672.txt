@@ -1,0 +1,4 @@
+Command: pnpm typecheck; pnpm lint
+head: 7ba8672f (written 2026-10-09T00:25:38Z)
+typecheck exit 0
+lint exit 0 (eslint . printed no findings)
