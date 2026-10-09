@@ -86,6 +86,13 @@ describe('browser.extensions.* (cua #90)', () => {
     expect(s.reveals()).toEqual([{ tabId: s.tabId, show: { kind: 'tab', tab: s.optionsTab } }]);
   });
 
+  it('tells the chrome nothing when the options tab could not open (the cap had no room; its notice said so)', () => {
+    const s = setup();
+    s.pages.openOptions.mockImplementationOnce(() => null as never);
+    s.call('browser.extensions.action.options', { tabId: s.tabId, extensionId: PROBE });
+    expect(s.reveals()).toEqual([]);
+  });
+
   it('answers invalid_input for an unknown tab or an extension the tab\'s partition has not loaded', () => {
     const s = setup();
     expect(refusal(() => s.call('browser.extensions.action.click', { tabId: 'b_ffffffffffff', extensionId: PROBE, anchor: RECT }))).toMatchObject({ code: 'invalid_input' });

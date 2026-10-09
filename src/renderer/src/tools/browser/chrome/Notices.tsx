@@ -65,6 +65,7 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
 export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' | /* E4c */ 'dialogType' | 'excerpt'>): string {
   switch (notice.kind) {
     case 'tabsCap':
+      if (notice.count !== undefined && notice.name !== undefined) return BROWSER_COPY.tabsCapOptions(notice.count, notice.name); // cua #90
       return notice.count === undefined ? BROWSER_COPY.tabsCapMemory : BROWSER_COPY.tabsCap(notice.count);
     case 'profileMissing':
       return BROWSER_COPY.profileMissing(notice.name);

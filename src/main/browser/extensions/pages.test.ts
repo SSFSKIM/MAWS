@@ -2,9 +2,10 @@ import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { BROWSER_LOADED_TABS_MAX } from '@shared/browser/tab';
 import { TabStore } from '../tabs';
 import type { LoadedAction } from './actions';
-import { ExtensionPages, UnknownExtensionError } from './pages';
+import { ExtensionPages, extensionPagesRule, UnknownExtensionError } from './pages';
 
 const A = 'App-A' as AppSessionId;
 const B = 'App-B' as AppSessionId;
@@ -52,7 +53,7 @@ describe('ExtensionPages: the options tab', () => {
   it('opens the extension\'s options page as a new selected internal tab of the tab\'s session and partition, its icon the action\'s', async () => {
     const h = harness();
     const from = h.page();
-    const tab = h.pages.openOptions(from, PROBE);
+    const tab = h.pages.openOptions(from, PROBE)!;
     expect(tab).toMatchObject({
       appSessionId: A,
       partition: PART,
@@ -68,12 +69,21 @@ describe('ExtensionPages: the options tab', () => {
   it('selects the session\'s open options tab of that extension rather than opening a second', () => {
     const h = harness();
     const from = h.page();
-    const first = h.pages.openOptions(from, PROBE);
+    const first = h.pages.openOptions(from, PROBE)!;
     h.store.select(A, from);
-    expect(h.pages.openOptions(from, PROBE).tabId).toBe(first.tabId);
+    expect(h.pages.openOptions(from, PROBE)!.tabId).toBe(first.tabId);
     expect(h.store.list(A).selected[A]).toBe(first.tabId);
     expect(h.store.all()).toHaveLength(2);
-    expect(h.pages.openOptions(h.page(B), PROBE).tabId).not.toBe(first.tabId); // another session's is its own
+    expect(h.pages.openOptions(h.page(B), PROBE)!.tabId).not.toBe(first.tabId); // another session's is its own
+  });
+
+  it('opens nothing when the loaded-tab cap has no tab to unload for it, and says so naming the extension', () => {
+    const h = harness();
+    const from = h.page();
+    for (let i = 1; i < BROWSER_LOADED_TABS_MAX; i++) h.page(); // twelve loaded, every one still loading: no victim
+    expect(h.pages.openOptions(from, PROBE)).toBeNull();
+    expect(h.store.all().some((entry) => entry.tab.internal !== null)).toBe(false);
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: from, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX, name: 'MAWS probe extension' }]);
   });
 
   it('refuses an extension with no options page, not loaded in the tab\'s partition, or an unknown tab', () => {
@@ -86,8 +96,8 @@ describe('ExtensionPages: the options tab', () => {
   it('closes an extension\'s options tabs with a notice naming it, in that partition only; or every one of a partition', () => {
     const h = harness();
     const from = h.page();
-    const probe = h.pages.openOptions(from, PROBE).tabId;
-    const other = h.pages.openOptions(h.page(B), PROBE).tabId;
+    const probe = h.pages.openOptions(from, PROBE)!.tabId;
+    const other = h.pages.openOptions(h.page(B), PROBE)!.tabId;
     h.pages.close(WORK, PROBE);
     h.pages.close(PART, OTHER);
     expect(h.store.all()).toHaveLength(4);
@@ -102,5 +112,44 @@ describe('ExtensionPages: the options tab', () => {
     h.pages.openOptions(from, PROBE);
     h.pages.close(PART, null); // the profile's removal
     expect(h.store.all().filter((entry) => entry.tab.internal)).toHaveLength(0);
+  });
+});
+
+// The request rule: Back, an agent's Page.navigate, a restored URL, a redirect all make a main-frame request first.
+describe('extensionPagesRule: what a tab\'s main frame may load', () => {
+  const OPTIONS = `chrome-extension://${PROBE}/options.html`;
+  function ruled() {
+    const h = harness();
+    const left: [string, string][] = [];
+    const rule = extensionPagesRule({ entryOf: (wc) => h.store.entryOf(wc), leave: (entry, url) => void left.push([entry.tab.tabId, url]) });
+    const ask = (tabId: string | null, url: string, resourceType = 'mainFrame') =>
+      rule({ url, resourceType, webContents: tabId === null ? ({} as never) : h.store.entry(tabId)!.view!.webContents } as never, PART);
+    return { h, left, ask };
+  }
+
+  it('an ordinary tab never loads an extension page (Back to one included); its web pages and every subframe pass', () => {
+    const { h, ask } = ruled();
+    const page = h.page();
+    expect(ask(page, OPTIONS)).toEqual({ cancel: true });
+    expect(ask(page, `chrome-extension://${OTHER}/x.html`)).toEqual({ cancel: true });
+    expect(ask(page, 'https://a.test/b')).toBeUndefined();
+    expect(ask(page, OPTIONS, 'subFrame')).toBeUndefined(); // an extension's frame in a page (web_accessible_resources)
+  });
+
+  it('an internal tab loads its own extension\'s pages; another extension\'s is refused; a web page is refused there and left for', async () => {
+    const { h, left, ask } = ruled();
+    const tab = h.pages.openOptions(h.page(), PROBE)!;
+    expect(ask(tab.tabId, `chrome-extension://${PROBE}/advanced.html`)).toBeUndefined();
+    expect(ask(tab.tabId, `chrome-extension://${OTHER}/options.html`)).toEqual({ cancel: true });
+    expect(ask(tab.tabId, 'file:///etc/hosts')).toEqual({ cancel: true });
+    expect(ask(tab.tabId, 'https://docs.test/x')).toEqual({ cancel: true });
+    expect(left).toEqual([]); // after the cancel is answered
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(left).toEqual([[tab.tabId, 'https://docs.test/x']]);
+  });
+
+  it('leaves anything not a tab\'s main frame alone: a popup, a background page', () => {
+    const { ask } = ruled();
+    expect(ask(null, OPTIONS)).toBeUndefined();
   });
 });

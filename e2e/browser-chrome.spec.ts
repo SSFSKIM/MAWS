@@ -834,6 +834,22 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       await expect.poll(() => optionsPage.evaluate(() => document.title)).toBe('MAWS probe options');
       expect(await optionsPage.evaluate(() => (window as unknown as { __optionsResult: unknown }).__optionsResult)).toEqual({ name: 'MAWS probe extension', href: optionsUrl });
       expect((await preloadRunsAt(s, optionsUrl)).map((runs) => runs.main)).toEqual([0]);
+
+      // leaving the options tab (the person's navigation, as a bookmark chip's): it closes, and the page opens as a new
+      // ordinary tab the main tab moves to, with no Back into the options page
+      value(await invoke(s.page, 'browser.tabs.navigate', { tabId: optionsTab, to: { url: server.url('/b.html'), typed: false } }));
+      await expect.poll(async () => (await tabsOf(s, id)).tabs.some((tab) => tab.tabId === optionsTab)).toBe(false);
+      const left = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
+      expect(left).toMatchObject({ url: server.url('/b.html'), internal: null, partition: DEFAULT });
+      expect((await tabsOf(s, id)).selected).toBe(left.tabId);
+      await expect(chipOf(main, left.tabId).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
+      await expect.poll(async () => (await viewOf(s, left.tabId))?.visible).toBe(true);
+      expect(value(await invoke(s.page, 'browser.tabs.navigate', { tabId: left.tabId, to: 'back' })).accepted).toBe(false);
+      value(await invoke(s.page, 'browser.tabs.close', { tabId: left.tabId }));
+      // the options tab again, open at the quit below
+      value(await invoke(s.page, 'browser.extensions.action.options', { tabId: pageTab, extensionId: probeId }));
+      await expect.poll(async () => (await tabsOf(s, id)).tabs.find((tab) => tab.url === optionsUrl)?.tabId).toBeDefined();
+      optionsTab = (await tabsOf(s, id)).tabs.find((tab) => tab.url === optionsUrl)!.tabId;
       await expectNothingLogged(s);
     } catch (error) {
       await s.maws.cleanup();

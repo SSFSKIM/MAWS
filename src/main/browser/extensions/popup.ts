@@ -7,7 +7,8 @@
 // not float over that), and is raised again whenever a page view is added to its window after it (a place, a view
 // created for a placed tab, a page back from the cover's staging window), which would otherwise rise above it.
 //
-// One popup per window, owned by the tab it was opened from. It closes on its blur (a click anywhere else, the window
+// One popup per window, owned by the tab it was opened from. A popup holding the native focus hands it on as it closes
+// (`handFocus`). It closes on its blur (a click anywhere else, the window
 // losing the focus), Esc in its page or its page's own `window.close()` (an extension's usual way to dismiss its popup,
 // which destroys the view's webContents), a second click on the same action, its tab leaving the pane it was opened in (the
 // pane showing another tab, the tab moving to another surface, the tab closing), the cover, its extension unloading, its
@@ -57,7 +58,10 @@ export function createPopupView(partition: string): WebContentsView {
 }
 
 type View = Pick<WebContentsView, 'setBounds'> & { webContents: WebContents };
-type Window = Pick<BrowserWindow, 'id' | 'isDestroyed' | 'getContentSize' | 'on' | 'off'> & { contentView: Pick<BrowserWindow['contentView'], 'addChildView' | 'removeChildView'> };
+type Window = Pick<BrowserWindow, 'id' | 'isDestroyed' | 'getContentSize' | 'on' | 'off'> & {
+  contentView: Pick<BrowserWindow['contentView'], 'addChildView' | 'removeChildView'>;
+  webContents: Pick<WebContents, 'focus' | 'isDestroyed'>;
+};
 
 interface Popup {
   entry: TabEntry;
@@ -164,11 +168,24 @@ export class ExtensionPopups {
     if (!popup) return;
     this.popups.delete(windowId);
     popup.unhook();
+    // a popup that held the native focus hands it on before it goes, or the keys reach nothing until a click
+    if (popup.focused && (popup.contents.isDestroyed() || popup.contents.isFocused())) this.handFocus(popup, reason);
     if (reason === 'blur') this.blurred.set(windowId, { tabId: popup.tabId, extensionId: popup.extensionId, at: this.now() });
     if (!popup.window.isDestroyed()) popup.window.contentView.removeChildView(popup.view as unknown as WebContentsView);
     if (!popup.contents.isDestroyed()) popup.contents.close();
     if (reason === 'load-failed') this.deps.emit('browser.notice', { appSessionId: popup.entry.tab.appSessionId, tabId: popup.tabId, kind: 'extensionPopupFailed', name: popup.name });
     this.tell(windowId, null);
+  }
+
+  // Where the focus goes from a closing popup that held it: the app's own page when a layer covers the window (the palette
+  // or sheet takes the keys) or anything else closed it from outside; the originating tab's page when the person
+  // dismissed it (Esc, its own window.close(), a second click), as in Chrome; nowhere when the window itself closes.
+  private handFocus(popup: Popup, reason: PopupCloseReason): void {
+    if (reason === 'window' || popup.window.isDestroyed()) return;
+    const page = popup.entry.view?.webContents;
+    const toPage = (reason === 'escape' || reason === 'toggle') && this.deps.store.entry(popup.tabId) === popup.entry && page && !page.isDestroyed();
+    if (toPage) page.focus();
+    else if (!popup.window.webContents.isDestroyed()) popup.window.webContents.focus();
   }
 
   // A profile's removal: its popups closed in every window.

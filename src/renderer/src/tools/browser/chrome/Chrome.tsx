@@ -4,9 +4,10 @@
 //
 // Main's `browser.chrome.command` (⌘L, ⌘F, and Esc pressed inside a page) goes to the chrome whose pane holds the page's
 // view (`owns`), for the tab it names: `focusAddress` focuses the address field, `openFind` opens the find bar (or takes
-// the keyboard back to it), `closeFind` closes it (main already stopped finding). cua #90: so does an extensions menu's
-// choice made in main (`browser.extensions.reveal`): the options tab main opened is shown (a main tab moves to it; the
-// panel shows the session's selected tab already), and Manage extensions… opens Settings › Browser.
+// the keyboard back to it), `closeFind` closes it (main already stopped finding). cua #90: an extensions menu's choice
+// made in main, or an options tab main replaced with a page (`browser.extensions.reveal`), goes to every chrome showing
+// the tab: the tab main opened is shown (a main tab moves to it; the panel shows the session's selected tab already),
+// and Manage extensions… opens Settings › Browser.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -61,16 +62,17 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
     });
   }, [owns, tabId, barCapable]);
 
-  // cua #90: what an extensions menu chose for this chrome's tab
+  // cua #90: what an extensions menu chose, or the options tab main replaced, for this chrome's tab: every chrome showing
+  // the tab follows (a main tab and the panel may both show it while only one pane holds its view)
   useEffect(() => {
-    if (!owns || tabId === null) return;
+    if (tabId === null) return;
     return onExtensionReveal(({ tabId: from, show }) => {
       if (from !== tabId) return;
       if (show.kind === 'settings') return useLayout.getState().openTab({ kind: 'settings', section: 'browser' });
       tabOpened(show.tab);
       if (surface === 'main') openMainTab(appSessionId, show.tab.tabId);
     });
-  }, [owns, tabId, surface, appSessionId]);
+  }, [tabId, surface, appSessionId]);
 
   // cua #90: ⌘⇧B with the chrome focused (inside the page, keys.ts takes it)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

@@ -7,7 +7,7 @@
 // extension's options page) shows "<extension name> · Options", read-only, with no suggestions; its URL is never drawn. ↑ and ↓ move, Enter runs the
 // highlighted row (the typed address by default), Esc puts the URL back and leaves. What goes to main is always a parsed
 // URL, never the typed text; a refused scheme raises the chrome's line and keeps the text. A tab-less surface opens a tab for the address.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { displayUrl, resolveAddress } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,7 +28,7 @@ export interface AddressFieldProps {
   surface: 'panel' | 'main';
   tab: BrowserTab | null;
   inputRef: RefObject<HTMLInputElement | null>;
-  boxRef?: RefObject<HTMLDivElement | null>; // cua #90: the field's slot, which the action bar measures
+  boxRef?: Ref<HTMLDivElement>; // cua #90: the field's slot, which the action bar measures
 }
 
 export function AddressField(props: AddressFieldProps) {

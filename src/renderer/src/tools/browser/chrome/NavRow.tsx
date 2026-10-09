@@ -3,7 +3,7 @@
 // popover), the control slot, later children's
 // extras (E4d's Comment toggle), and the overflow menu. While the page loads a thin bar runs along the row's foot, as Codex's toolbar shows it; it sits
 // over the row's border, so the row keeps its height.
-import { useRef, type RefObject } from 'react';
+import { useState, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { IconButton } from '../../../app/IconButton';
@@ -29,7 +29,9 @@ export interface NavRowProps {
 export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }: NavRowProps) {
   const extras = useChromeExtras();
   const loading = tab?.loading ?? false;
-  const addressBox = useRef<HTMLDivElement>(null); // cua #90: the action bar folds by the address field's width
+  // cua #90: the address field's slot, whose width folds the action bar; held in state (a callback ref), since the field
+  // swaps its root element between an internal tab's and a page's, and the bar must measure the one on screen
+  const [addressBox, setAddressBox] = useState<HTMLDivElement | null>(null);
   return (
     <div className="relative flex h-9 shrink-0 items-center gap-0.5 px-1">
       <IconButton label={BROWSER_COPY.back} disabled={!tab?.canGoBack} onClick={() => tab && navigate(tab.tabId, 'back')}>
@@ -47,7 +49,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }:
           <ReloadIcon />
         </IconButton>
       )}
-      <AddressField appSessionId={appSessionId} surface={surface} tab={tab} inputRef={addressRef} boxRef={addressBox} />
+      <AddressField appSessionId={appSessionId} surface={surface} tab={tab} inputRef={addressRef} boxRef={setAddressBox} />
       {tab && <ActionBar tab={tab} addressBox={addressBox} /> /* cua #90 */}
       <PartitionPill appSessionId={appSessionId} surface={surface} partition={tab?.partition ?? DEFAULT_PARTITION} />
       {tab && <ControlSlot tab={tab} />}

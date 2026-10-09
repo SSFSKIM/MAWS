@@ -656,7 +656,10 @@ describe('navigation: the page\'s own navigations and handlers (E4a Design §8, 
       internal: { kind: 'extension', extensionId: PROBE, title: 'MAWS probe · Options' },
     }).tab.tabId;
 
-  it('cua #90: an internal tab admits its own extension\'s pages; another extension\'s is refused like any scheme; the web opens as a new tab of its session after an activation', () => {
+  const reveals = (h: ReturnType<typeof harness>) => h.emitted.filter((e) => e.name === 'browser.extensions.reveal').map((e) => e.payload);
+  const others = (h: ReturnType<typeof harness>, id: string) => h.store.all().filter((entry) => entry.tab.tabId !== id);
+
+  it('cua #90: an internal tab admits its own extension\'s pages; another extension\'s is refused like any scheme; a web link without an activation is a blocked pop-up', () => {
     const h = harness();
     const id = openInternal(h);
     const wc = h.wc(id);
@@ -667,24 +670,66 @@ describe('navigation: the page\'s own navigations and handlers (E4a Design §8, 
     wc.emit('will-navigate', other);
     expect(other.preventDefault).toHaveBeenCalled();
     expect(h.notices()).toEqual([{ appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'chrome-extension:' }]);
-    // a link to the web: refused as a navigation (the tab stays the options page); with no activation, nothing opens
     const early = cancellable({ url: 'https://docs.test/help' });
     wc.emit('will-navigate', early);
     expect(early.preventDefault).toHaveBeenCalled();
     expect(h.store.all()).toHaveLength(1);
-    expect(h.tab(id).blockedPopups).toBe(1);
-    // after a click in the page, it opens as a new selected tab of the session, in the internal tab's partition
-    h.entry(id).input.emit({ kind: 'mouse', source: 'human', at: 1_000_000 });
-    const link = cancellable({ url: 'https://docs.test/help' });
-    wc.emit('will-navigate', link);
-    expect(link.preventDefault).toHaveBeenCalled();
-    const opened = h.store.all().find((entry) => entry.tab.tabId !== id)!.tab;
-    expect(opened).toMatchObject({ appSessionId: A, url: 'https://docs.test/help', partition: 'persist:maws-chrome-Default', internal: null });
-    expect(h.store.list(A).selected[A]).toBe(opened.tabId);
-    expect(h.tab(id)).toMatchObject({ url: `chrome-extension://${PROBE}/options.html`, internal: { extensionId: PROBE } });
+    expect(h.tab(id)).toMatchObject({ blockedPopups: 1, internal: { extensionId: PROBE } });
   });
 
-  it('cua #90: an internal tab keeps the extension\'s title and favicon through its page\'s own, and visits no history', async () => {
+  // The author session's ruling (M3 review): whatever takes an options tab outside its extension closes it and opens the
+  // page as a new ordinary tab, with no history to go back into.
+  const leaves: [string, (h: ReturnType<typeof harness>, id: string) => void][] = [
+    ['the person\'s navigation (a bookmark chip, how current)', (h, id) => expect(h.navigator.navigate(id, { url: 'https://docs.test/help', typed: false })).toBe(true)],
+    ['a link after an activation', (h, id) => {
+      h.entry(id).input.emit({ kind: 'mouse', source: 'human', at: 1_000_000 });
+      const link = cancellable({ url: 'https://docs.test/help' });
+      h.wc(id).emit('will-navigate', link);
+      expect(link.preventDefault).toHaveBeenCalled();
+    }],
+    ['the partition\'s request rule (an agent\'s Page.navigate, a redirect)', (h, id) => void h.navigator.leaveInternal(h.entry(id), 'https://docs.test/help')],
+  ];
+  for (const [route, leave] of leaves) {
+    it(`cua #90: ${route} closes the options tab and opens the page as a new ordinary tab in its place`, () => {
+      const h = harness();
+      const page = h.open('https://a.test/');
+      const id = openInternal(h);
+      const optionsContents = h.wc(id);
+      leave(h, id);
+      expect(h.store.entry(id)).toBeUndefined();
+      expect(optionsContents.close).toHaveBeenCalled();
+      expect(optionsContents.loadURL).not.toHaveBeenCalledWith('https://docs.test/help'); // never loaded in the options tab
+      const [opened] = others(h, page);
+      expect(opened!.tab).toMatchObject({ appSessionId: A, url: 'https://docs.test/help', partition: 'persist:maws-chrome-Default', internal: null });
+      expect(opened!.openerTabId).toBeNull(); // no opener relation to the options document
+      expect(h.store.list(A).selected[A]).toBe(opened!.tab.tabId);
+      expect(reveals(h)).toEqual([{ tabId: id, show: { kind: 'tab', tab: expect.objectContaining({ tabId: opened!.tab.tabId }) } }]);
+      // its own page, with a fresh history: Back has nothing to return to, least of all the options page
+      const fresh = h.wc(opened!.tab.tabId);
+      expect(fresh).not.toBe(optionsContents);
+      commit(fresh, 'https://docs.test/help');
+      expect(h.tab(opened!.tab.tabId).canGoBack).toBe(false);
+      expect(h.navigator.navigate(opened!.tab.tabId, 'back')).toBe(false);
+      // and the full ordinary treatment: history, the snapshot, the cap's suspension
+      expect(h.history.visit).toHaveBeenCalledWith('persist:maws-chrome-Default', 'https://docs.test/help', expect.objectContaining({ typed: false }));
+      expect(h.store.snapshot().tabs.map((tab) => tab.tabId)).toContain(opened!.tab.tabId);
+      expect(h.store.evict(opened!.tab.tabId)).toBe('suspended');
+    });
+  }
+
+  it('cua #90: a leaving options tab that was not selected leaves its new tab unselected; a closed one leaves nothing', () => {
+    const h = harness();
+    const id = openInternal(h);
+    const page = h.open('https://a.test/');
+    expect(h.navigator.leaveInternal(h.entry(id), 'https://docs.test/')).toMatchObject({ url: 'https://docs.test/' });
+    expect(h.store.list(A).selected[A]).toBe(page);
+    const gone = openInternal(h);
+    const entry = h.entry(gone);
+    h.store.close(gone);
+    expect(h.navigator.leaveInternal(entry, 'https://docs.test/')).toBeNull();
+  });
+
+  it('cua #90: an internal tab keeps the extension\'s title and favicon through its page\'s own, and visits no history; a document committed outside (about:blank) leaves it', async () => {
     const h = harness();
     const id = openInternal(h);
     const wc = h.wc(id);
@@ -696,10 +741,9 @@ describe('navigation: the page\'s own navigations and handlers (E4a Design §8, 
     expect(h.favicons.resolve).not.toHaveBeenCalled();
     expect(h.tab(id)).toMatchObject({ title: 'MAWS probe · Options', favicon: 'data:image/png;base64,QUJD' });
     expect(h.history.visit).not.toHaveBeenCalled();
-    // a page elsewhere makes it an ordinary tab, titled by its page again
-    wc.entryTitle = 'Docs';
-    commit(wc, 'https://docs.test/');
-    expect(h.tab(id)).toMatchObject({ internal: null, title: 'Docs' });
+    commit(wc, 'about:blank'); // a document the request rule cannot see
+    expect(h.store.entry(id)).toBeUndefined();
+    expect(h.store.all().map((entry) => entry.tab)).toEqual([expect.objectContaining({ url: '', internal: null })]);
   });
 
   it('a page that closes itself (window.close()) drops its tab as a close does; a view the store closed or suspended changes nothing', () => {

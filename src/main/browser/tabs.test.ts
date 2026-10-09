@@ -457,14 +457,15 @@ describe('TabStore: internal tabs (cua #90)', () => {
     expect(h.store.snapshot().selected).toEqual({ [A]: null }); // no ordinary tab left
   });
 
-  it('keeps its mark while it moves between its own extension\'s pages; a page elsewhere makes it an ordinary tab', () => {
+  it('with no tab the cap could unload, an internal tab is not kept, never left suspended on its extension\'s URL', () => {
     const h = harness();
+    for (let i = 0; i < BROWSER_LOADED_TABS_MAX; i++) open(h, `https://${i}.test/`); // all still loading: no victim
+    const before = h.store.list(A).selected[A];
     const t = openOptions(h);
-    h.store.navigationCommitted(t.tabId, { url: `chrome-extension://${PROBE}/other.html`, canGoBack: true, canGoForward: false });
-    expect(h.store.entry(t.tabId)!.tab.internal).toEqual(internal);
-    h.store.navigationCommitted(t.tabId, { url: 'https://a.test/', canGoBack: true, canGoForward: false });
-    expect(h.store.entry(t.tabId)!.tab.internal).toBeNull();
-    expect(h.store.snapshot().tabs.map((tab) => tab.tabId)).toEqual([t.tabId]);
+    expect(h.store.entry(t.tabId)).toBeUndefined();
+    expect(h.store.all().some((entry) => entry.tab.internal !== null || entry.tab.url.startsWith('chrome-extension:'))).toBe(false);
+    expect(h.store.list(A).selected[A]).toBe(before);
+    expect(h.notices().at(-1)).toEqual({ appSessionId: A, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
   });
 
   it('the cap closes an internal tab rather than suspending it: no empty-state tab is left', () => {

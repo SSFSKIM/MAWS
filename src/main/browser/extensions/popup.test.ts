@@ -21,8 +21,16 @@ type Rect = { x: number; y: number; width: number; height: number };
 
 class FakeContents extends EventEmitter {
   destroyed = false;
+  focused = false;
   readonly loadURL = vi.fn(() => Promise.resolve());
-  readonly focus = vi.fn(() => void this.emit('focus'));
+  readonly focus = vi.fn(() => {
+    this.focused = true;
+    this.emit('focus');
+  });
+  isFocused = () => {
+    if (this.destroyed) throw new TypeError('Object has been destroyed');
+    return this.focused;
+  };
   readonly close = vi.fn(() => {
     this.destroyed = true;
   });
@@ -66,6 +74,7 @@ class FakeWindow extends EventEmitter {
   };
   isDestroyed = () => this.destroyed;
   getContentSize = () => [1000, 700];
+  readonly webContents = { focus: vi.fn(), isDestroyed: () => false }; // the app's own page
 }
 
 const probeAction: LoadedAction = {
@@ -347,6 +356,59 @@ describe('ExtensionPopups: closing (a state table over a fake view)', () => {
     sized(first, 50, 50);
     expect(h.popups.current(h.w.id)?.extensionId).toBe(OTHER);
     expect(h.notices()).toEqual([]);
+  });
+});
+
+// M3 review: a popup holding the native focus hands it on as it goes (the palette's ⌘K cover, Esc, a second click, its
+// own window.close()), or the keys reach nothing until a click.
+describe('ExtensionPopups: the focus a closing popup held', () => {
+  const opened = () => {
+    const h = harness();
+    const entry = h.placedTab();
+    h.popups.open(entry, PROBE, ANCHOR);
+    const view = h.views[0]!;
+    loaded(view); // focused at its load
+    const page = entry.view!.webContents as unknown as FakeContents;
+    return { h, entry, view, page };
+  };
+
+  it('goes to the app\'s own page when the cover closes it, so the palette or sheet takes the keys', () => {
+    const { h, page } = opened();
+    h.popups.close(h.w.id, 'cover');
+    expect(h.w.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(page.focus).not.toHaveBeenCalled();
+  });
+
+  for (const [how, dismiss] of [
+    ['Esc', (h: ReturnType<typeof harness>, view: FakePopupView) => view.webContents.emit('before-input-event', { preventDefault: vi.fn() }, { type: 'keyDown', key: 'Escape' })],
+    ['a second click', (h: ReturnType<typeof harness>) => h.popups.open(h.store.all()[0]!, PROBE, ANCHOR)],
+    ['its own window.close()', (_h: ReturnType<typeof harness>, view: FakePopupView) => {
+      view.webContents.destroyed = true;
+      view.webContents.emit('destroyed');
+    }],
+  ] as const) {
+    it(`goes back to the originating tab's page after ${how}, as in Chrome`, () => {
+      const { h, view, page } = opened();
+      dismiss(h, view);
+      expect(h.popups.current(h.w.id)).toBeNull();
+      expect(page.focus).toHaveBeenCalledTimes(1);
+      expect(h.w.webContents.focus).not.toHaveBeenCalled();
+    });
+  }
+
+  it('is not moved when the popup did not hold it: its blur, an unfocused popup, the window closing', () => {
+    const blurred = opened();
+    blurred.view.webContents.focused = false;
+    blurred.view.webContents.emit('blur');
+    const unfocused = opened();
+    unfocused.view.webContents.focused = false; // the person clicked elsewhere in its window before any blur reached main
+    unfocused.h.popups.close(unfocused.h.w.id, 'cover');
+    const closing = opened();
+    closing.h.w.emit('closed');
+    for (const { h, page } of [blurred, unfocused, closing]) {
+      expect(page.focus).not.toHaveBeenCalled();
+      expect(h.w.webContents.focus).not.toHaveBeenCalled();
+    }
   });
 });
 

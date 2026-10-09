@@ -10,11 +10,11 @@ import { importLog } from '../import/log';
 import type { MenuPresenter } from '../bookmarks/menu';
 import type { Partitions } from '../partition';
 import type { BrowserSeam } from '../seam';
-import type { BrowserEmit, TabStore } from '../tabs';
+import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { ViewManager } from '../view';
 import type { LinkTarget } from '../window-open';
 import { ExtensionActions, type ActionRecord } from './actions';
-import { ExtensionPages } from './pages';
+import { ExtensionPages, extensionPagesRule } from './pages';
 import { createPopupView, ExtensionPopups, type Rect } from './popup';
 import { registerExtensionHandlers } from './register';
 
@@ -27,7 +27,8 @@ export interface ExtensionsInspector {
 export interface ExtensionUiDeps {
   store: TabStore;
   views: Pick<ViewManager, 'onViewAdded' | 'onCovered' | 'isCovered'>;
-  partitions: Pick<Partitions, 'registerPreparer'>;
+  partitions: Pick<Partitions, 'registerPreparer' | 'registerRequestRule'>;
+  leaveInternal(entry: TabEntry, url: string): void; // navigation.ts: an internal tab leaves for a web page
   records(): readonly ActionRecord[];
   menus: MenuPresenter;
   windowOf(sender: WebContents): BrowserWindow | null;
@@ -44,7 +45,7 @@ export interface ExtensionUi {
   stop(): void;
 }
 
-export function startExtensionUi({ store, views, partitions, records, menus, windowOf, emit, register, linkTarget, seam, env }: ExtensionUiDeps): ExtensionUi {
+export function startExtensionUi({ store, views, partitions, leaveInternal, records, menus, windowOf, emit, register, linkTarget, seam, env }: ExtensionUiDeps): ExtensionUi {
   const actions = new ExtensionActions({ records, emit });
   const popups = new ExtensionPopups({
     store,
@@ -61,6 +62,7 @@ export function startExtensionUi({ store, views, partitions, records, menus, win
   const pressed = new Map<number, string>();
   const unhook = [
     partitions.registerPreparer((ses, partition) => actions.attach(ses, partition)),
+    partitions.registerRequestRule(extensionPagesRule({ entryOf: (webContents) => store.entryOf(webContents), leave: leaveInternal })),
     views.onViewAdded((win) => popups.raise(win.id)),
     views.onCovered((win) => popups.close(win.id, 'cover')),
     actions.onUnloaded((partition, extensionId) => pages.close(partition, extensionId)),

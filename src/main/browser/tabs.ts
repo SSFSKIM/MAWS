@@ -18,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import type { BrowserWindow, LoadURLOptions, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
-import { BROWSER_LOADED_TABS_MAX, isExtensionPage, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabDebugger } from './debugger';
@@ -418,9 +418,7 @@ export class TabStore {
     entry.committed = true;
     entry.committedUrl = url;
     entry.pending = null;
-    // cua #90: an internal tab that left its extension's pages (a bookmark, an agent's navigation) is an ordinary tab now
-    const internal = entry.tab.internal !== null && !isExtensionPage(url, entry.tab.internal.extensionId) ? { internal: null } : {};
-    this.update(tabId, { url, canGoBack, canGoForward, loadError: null, crashed: null, denied: [], blockedPopups: 0, ...internal });
+    this.update(tabId, { url, canGoBack, canGoForward, loadError: null, crashed: null, denied: [], blockedPopups: 0 });
   }
 
   // A main-frame `did-navigate-in-page` (a fragment, `history.pushState`, Back or Forward within the document): the same
@@ -504,6 +502,13 @@ export class TabStore {
   private ensureView(entry: TabEntry, url: string, opener?: TabEntry): boolean {
     if (entry.view) return true;
     if (!this.makeRoom(entry, opener)) {
+      if (entry.tab.internal) {
+        // cua #90: an internal tab is never left suspended (it would be an empty-state tab on an extension's URL): it is
+        // not kept, and its session is told without it (ExtensionPages checks the room first, so this is the backstop)
+        this.drop(entry, { close: true, selectNext: null });
+        this.deps.emit('browser.notice', { appSessionId: entry.tab.appSessionId, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
+        return false;
+      }
       this.update(entry.tab.tabId, { suspended: true, url, loading: false });
       this.capNotice(entry);
       return false;

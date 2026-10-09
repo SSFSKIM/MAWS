@@ -105,6 +105,7 @@ export const BROWSER_COPY = {
   refusedScheme: (scheme: string) => `Can’t open ${scheme || 'that'} addresses here; the browser opens http and https only`,
   // main's transient notices (`browser.notice`) and the chrome's own `urlCopied` (Decision Log 37, 44 (b))
   tabsCap: (n: number) => `At most ${n} pages stay loaded at once, so a tab was left unloaded`,
+  tabsCapOptions: (n: number, name: string) => `At most ${n} pages stay loaded at once, so the options of ${name} could not open`, // cua #90
   tabsCapMemory: 'Loaded pages passed the browser’s memory limit, so a tab was unloaded',
   profileMissing: (name: string | undefined) => `${profileNamed(name)} was not found; this tab browses with the default profile`,
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,

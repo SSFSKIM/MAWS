@@ -8,7 +8,7 @@
 // When the inline icons would leave the address field under 160 px (the session panel), they fold into one puzzle
 // button whose native menu lists every action, Options per extension, and Manage extensions…; a wide main tab shows
 // them all. Every command names the tab, from which main reads the partition and the window.
-import { useLayoutEffect, useState, type MouseEvent, type RefObject } from 'react';
+import { useLayoutEffect, useState, type MouseEvent } from 'react';
 import type { ExtensionAction } from '@shared/browser/extensions';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { ipc } from '../../../ipc/client';
@@ -33,7 +33,7 @@ const warned = (what: string) => (result: { ok: boolean; error?: { message: stri
 
 export interface ActionBarProps {
   tab: BrowserTab;
-  addressBox: RefObject<HTMLElement | null>; // the address field's slot, whose width decides the fold
+  addressBox: HTMLElement | null; // the address field's slot on screen, whose width decides the fold
 }
 
 // The bar for a tab of an imported profile with extensions loaded; nothing otherwise (the Default partition has none,
@@ -53,9 +53,10 @@ function Bar({ tab, actions, addressBox }: ActionBarProps & { actions: Extension
   const [folded, setFolded] = useState(false);
   const count = actions.length;
 
-  // The fold follows the address field's width on every layout that moves it (the window, the panel, the icons).
+  // The fold follows the address field's width on every layout that moves it (the window, the panel, the icons), and
+  // the slot itself: a new element (an internal tab's field for a page's, or back) is measured and observed in its stead.
   useLayoutEffect(() => {
-    const element = addressBox.current;
+    const element = addressBox;
     if (!element) return;
     const measure = () => setFolded((was) => foldsActions(element.getBoundingClientRect().width, was, count));
     measure();

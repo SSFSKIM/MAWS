@@ -54,7 +54,8 @@ export function registerExtensionHandlers({ store, actions, popups, pages, menus
     },
     options: (extensionId) => {
       try {
-        emit('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab: pages.openOptions(tabId, extensionId) } });
+        const tab = pages.openOptions(tabId, extensionId);
+        if (tab) emit('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab } });
       } catch (error) {
         if (!(error instanceof UnknownTabError || error instanceof UnknownExtensionError)) throw error;
       }
@@ -72,7 +73,10 @@ export function registerExtensionHandlers({ store, actions, popups, pages, menus
   );
   register(
     'browser.extensions.action.options',
-    known(({ tabId, extensionId }) => void emit('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab: pages.openOptions(tabId, extensionId) } })),
+    known(({ tabId, extensionId }) => {
+      const tab = pages.openOptions(tabId, extensionId);
+      if (tab) emit('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab } });
+    }),
   );
   register(
     'browser.extensions.action.menu',

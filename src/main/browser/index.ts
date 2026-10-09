@@ -158,7 +158,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
-  const extensionUi = startExtensionUi({ store, views, partitions, records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
+  const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record

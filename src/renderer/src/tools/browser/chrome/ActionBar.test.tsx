@@ -16,6 +16,7 @@ import { useLayout } from '../../../stores/layout';
 import { browserImport, connectBrowserImport, resetBrowserImport } from '../import/store';
 import { connectBrowser, resetBrowser } from '../store';
 import { Chrome } from './Chrome';
+import { noticeText } from './Notices';
 
 const A = 'app-a' as AppSessionId;
 const WORK = profilePartition('Profile 1');
@@ -164,6 +165,50 @@ describe('the extensions action bar', () => {
     expect(openTab).toHaveBeenLastCalledWith({ kind: 'browser', appSessionId: A, browserTabId: T2 });
     act(() => main.emit('browser.extensions.reveal', { tabId: T1, show: { kind: 'settings' } }));
     expect(openTab).toHaveBeenLastCalledWith({ kind: 'settings', section: 'browser' });
+  });
+});
+
+describe('the fold follows the address field on screen (M3 review)', () => {
+  it('re-observes the field when it swaps its element (an options tab\'s for a page\'s), never folding on a detached one', async () => {
+    const observers: { callback: () => void; targets: Element[] }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      readonly targets: Element[] = [];
+      constructor(readonly callback: () => void) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.push(target);
+      }
+      disconnect() {
+        observers.splice(observers.indexOf(this), 1);
+      }
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.matches('[data-address-box]') ? (this.isConnected ? 400 : 0) : 24; // a detached element measures 0
+      return DOMRect.fromRect({ x: 100, y: 30, width, height: 24 });
+    });
+    const options = browserTab(T1, A, { partition: WORK, url: `chrome-extension://${PROBE}/options.html`, internal: { kind: 'extension', extensionId: PROBE, title: 'MAWS probe extension · Options' } });
+    const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const shown = (tab: BrowserTab) => (
+      <QueryClientProvider client={queries}>
+        <Chrome appSessionId={A} surface="main" tab={tab} tabs={[tab]} owns />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(shown(options));
+    await vi.waitFor(() => expect(bar()).not.toBeNull());
+    rerender(shown(browserTab(T1, A, { partition: WORK }))); // the options tab left for a page: the field's root swapped
+    act(() => observers.forEach((observer) => observer.callback()));
+    expect(observers.flatMap((observer) => observer.targets).every((target) => target.isConnected)).toBe(true);
+    expect(bar()).not.toBeNull();
+    expect(puzzle()).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('the cap\'s notice for an options tab it could not open (M3 review)', () => {
+  it('names the extension', () => {
+    expect(noticeText({ kind: 'tabsCap', count: 12, name: 'MAWS probe extension' })).toBe('At most 12 pages stay loaded at once, so the options of MAWS probe extension could not open');
+    expect(noticeText({ kind: 'tabsCap', count: 12 })).toBe('At most 12 pages stay loaded at once, so a tab was left unloaded');
   });
 });
 
