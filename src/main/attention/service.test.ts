@@ -42,7 +42,8 @@ function item(over: Partial<AttentionItem> & Pick<AttentionItem, 'kind' | 'state
 let seq = 0;
 function event(kind: string, payload: Record<string, unknown> = {}): SessionEvent {
   seq += 1;
-  return { id: `${APP}:L:${seq}:0`, sessionId: SID, at: AT, seq, agentId: null, parentToolUseId: null, kind, ...payload } as unknown as SessionEvent;
+  // each event a moment after the last, as a session's own are (a turn retires only what was raised before it)
+  return { id: `${APP}:L:${seq}:0`, sessionId: SID, at: new Date(Date.parse(AT) + seq).toISOString(), seq, agentId: null, parentToolUseId: null, kind, ...payload } as unknown as SessionEvent;
 }
 
 function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch'] } = {}) {
@@ -95,7 +96,7 @@ describe('attention service merges broker items with the derived kinds', () => {
     const exited = event('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 2 });
     batch(exited);
     expect(last()).toEqual([
-      { id: `${APP}:interrupted:${exited.id}`, appSessionId: APP, sessionId: SID, kind: 'interrupted', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, summary: 'Session interrupted, 2 approvals lost', createdAt: AT, state: 'pending', stateChangedAt: AT, expiresAt: null },
+      { id: `${APP}:interrupted:${exited.id}`, appSessionId: APP, sessionId: SID, kind: 'interrupted', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, summary: 'Session interrupted, 2 approvals lost', createdAt: exited.at, state: 'pending', stateChangedAt: exited.at, expiresAt: null },
     ]);
     expect(interruptedSummary(1)).toBe('Session interrupted, 1 approval lost');
     // E1 M5 fix: the blocking `maws` asks among the lost are questions
@@ -256,6 +257,42 @@ describe('attention service merges broker items with the derived kinds', () => {
       release();
       await before.service.ready;
       expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, 'confirmed']]);
+    });
+
+    // F2b review 1: a fresh follower's backfill replays every old prompt as a null-origin turn.started, each carrying its
+    // record's timestamp; only a turn newer than the failure is the next human turn.
+    it('a backfill replaying the failed turn’s own turn.started keeps the acknowledged error (before or after the load); a newer human turn retires it', async () => {
+      const PROMPT_AT = '2026-09-28T09:59:00.000Z';
+      const FAILED_AT = '2026-09-28T09:59:30.000Z';
+      for (const how of ['confirmed', 'retired'] as const) {
+        const prompt = event('turn.started', { userMessageUuid: 'u-old', origin: null, at: PROMPT_AT });
+        const failure = failedTurn({ at: FAILED_AT });
+        const id = `${APP}:error:${failure.id}`;
+        const persisted = item({ kind: 'error', state: how, id: id as never, createdAt: FAILED_AT, stateChangedAt: AT, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+
+        const after = setup({ store: new FakeStore([persisted]) });
+        await after.service.ready;
+        after.batch(prompt, failure);
+        expect(after.last().map((i) => [i.id, i.state])).toEqual([[id, how]]);
+
+        let release!: () => void;
+        const store = new FakeStore([persisted]);
+        const list = store.list.bind(store);
+        store.list = async () => {
+          await new Promise<void>((r) => (release = r));
+          return list();
+        };
+        const before = setup({ store });
+        before.batch(prompt, failure); // replayed while the load is outstanding
+        release();
+        await before.service.ready;
+        expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, how]]);
+        await before.service.settled();
+        expect(store.sessions.get(APP)?.map((i) => [i.id, i.state])).toEqual([[id, how]]);
+
+        before.batch(event('turn.started', { userMessageUuid: 'u-new', origin: null, at: '2026-09-28T10:01:00.000Z' }));
+        expect(before.last()).toEqual([]);
+      }
     });
 
     it('rewrites a persisted item’s raw "Turn failed: <code>" summary in words on load', async () => {

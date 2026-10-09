@@ -5,7 +5,7 @@
 // hard-failure terminal reason, SPEC 45.25.4's set) or a failed background task, `auto_mode_unavailable` from a tool
 // result denied that way, `interrupted` from an exit that lost approvals (the summary string is the contract), and
 // `held_peer_message` from the status's held messages. Error-like items retire when the session's next human turn
-// starts (a prompt read back from disk included) or the session is stopped; an archive (`session.forgotten`, or an
+// starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it; an archive (`session.forgotten`, or an
 // archive exit) retires everything. E11 F2b: an error seen in its opened session or dismissed stays as the session's
 // "ended with an error" fact, out of Needs you (`attention.acknowledge`). Each change
 // is persisted through the AttentionStore (a failed write is owed and retried, never taken as saved)
@@ -90,7 +90,8 @@ interface SessionState {
   broker: AttentionItem[];
   derived: Map<string, AttentionItem>;
   signature: string;
-  retiredKinds: Set<AttentionItem['kind']>; // retired live since this run started: a persisted item of the kind stays retired
+  // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
+  retiredBefore: Map<AttentionItem['kind'], number>;
 }
 
 export const PERSIST_RETRY_MS = 5_000;
@@ -105,7 +106,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), signature: '[]', retiredKinds: new Set() }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), signature: '[]', retiredBefore: new Map() }));
     return state;
   };
   const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values()];
@@ -168,10 +169,15 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     if (state.derived.has(itemId)) return;
     state.derived.set(itemId, { id: itemId, appSessionId: id, request: noRequest, state: 'pending', stateChangedAt: fields.createdAt, expiresAt: null, ...fields });
   };
-  const retireDerived = (state: SessionState, kinds: ReadonlySet<AttentionItem['kind']>) => {
-    for (const kind of kinds) state.retiredKinds.add(kind);
-    for (const [itemId, item] of state.derived) if (kinds.has(item.kind)) state.derived.delete(itemId);
+  // F2b review 1: a turn or a stop retires what was raised before it (`at`). A fresh follower's backfill replays every
+  // old prompt as a null-origin turn.started at its record's timestamp, so the failed turn's own replayed prompt must
+  // not retire, and so re-raise, the failure that turn ended with.
+  const retireDerived = (state: SessionState, kinds: ReadonlySet<AttentionItem['kind']>, at: string | null = null) => {
+    const before = at === null ? Infinity : Date.parse(at);
+    for (const kind of kinds) state.retiredBefore.set(kind, Math.max(before, state.retiredBefore.get(kind) ?? -Infinity));
+    for (const [itemId, item] of state.derived) if (kinds.has(item.kind) && Date.parse(item.createdAt) < before) state.derived.delete(itemId);
   };
+  const retiredByThisRun = (state: SessionState, item: AttentionItem) => Date.parse(item.createdAt) < (state.retiredBefore.get(item.kind) ?? -Infinity);
 
   const onEvents = (id: AppSessionId, events: SessionEvent[]) => {
     const state = stateOf(id);
@@ -180,7 +186,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const base = { sessionId: event.sessionId, createdAt: event.at };
       switch (event.kind) {
         case 'turn.started':
-          if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN);
+          if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN, event.at);
           break;
         case 'turn.ended':
           // a user abort is not a failure: the wire marks every abort is_error: true (M6 review; pass3/plan-outcomes seq 510)
@@ -202,7 +208,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           }
           state.broker = []; // the broker retired its items at the exit; a held message cannot be released by a dead process
           retireDerived(state, new Set(['held_peer_message']));
-          if (event.reason === 'stop') retireDerived(state, RETIRED_BY_NEXT_TURN);
+          if (event.reason === 'stop') retireDerived(state, RETIRED_BY_NEXT_TURN, event.at);
           if (event.lostAttentionCount > 0) {
             const questions = event.lostAskCount ?? 0; // E1: the blocking asks among them
             derive(id, state, event.id, { ...base, kind: 'interrupted', summary: interruptedSummary(event.lostAttentionCount - questions, questions) });
@@ -269,7 +275,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   });
 
   // The previous run's items, merged with what this run already knows (M5 review): its broker and held-message items
-  // died with its processes (D-16); a derived item stays unless this run retired its kind or the session was archived.
+  // died with its processes (D-16); a derived item stays unless this run retired its kind after it was raised or the session was archived.
   const merge = (persisted: AttentionItem[]) => {
     const loaded = new Map<AppSessionId, AttentionItem[]>();
     for (const item of persisted) loaded.set(item.appSessionId, [...(loaded.get(item.appSessionId) ?? []), item]);
@@ -278,7 +284,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const state = stateOf(id);
       for (const stored of items) {
         const item = inWords(stored);
-        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind)) continue;
+        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || retiredByThisRun(state, item)) continue;
         // a failure the transcript replayed before the load is the same occurrence: the stored acknowledgement stands
         const live = state.derived.get(item.id);
         if (live && !(live.state === 'pending' && item.state !== 'pending')) continue;
