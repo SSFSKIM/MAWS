@@ -51,6 +51,7 @@ import { SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../.
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
 // R2 start
 import { PaneRosterSchema, RenderAnswerSchema, ScrollSiteSchema, SURFACE_SITES, SurfaceAnswerSchema, SurfaceElementSchema, SurfaceViewportSchema } from '../../engine/surface';
 // R2 end
@@ -549,6 +550,15 @@ const e8Commands = {
 export const E8_SESSION_COMMANDS = Object.keys(e8Commands) as (keyof typeof e8Commands)[];
 // E8 end ----------------------------------------------------------------------------------------------------------------
 
+// P2-A start (2026-10-09; X17, the P2 interface ledger §1) --------------------------------------------------------------
+// What the engine last reported for a session (model, effort, mode, output style, plugins, context, engine version),
+// each fact with when and in which launch; null for a session MAWS never ran. Owner main, beside `session.digests`:
+// it relays the host's `engine.observedFacts` and answers null when the host cannot (src/main/sessions/observed.ts).
+const p2aCommands = {
+  'session.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'main' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P2-A end --------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -558,6 +568,7 @@ export const commands = {
   ...newChatCommands, // New chat
   ...r2Commands, // R2
   ...e8Commands, // E8
+  ...p2aCommands, // P2-A
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

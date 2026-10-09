@@ -88,7 +88,7 @@ export class JournalWriter {
 const LAUNCH_FILE = /^([A-Za-z0-9_-]+?)(?:\.(\d+))?\.jsonl$/;
 const FIRST_ROW_PROBE_BYTES = 256 * 1024;
 
-interface LaunchFiles {
+export interface LaunchFiles {
   launchId: string;
   startedAt: number; // epoch ms of the first row's `at` (spawn), else the base file's mtime
   files: string[]; // base file then rotations in order
@@ -151,6 +151,11 @@ export class JournalReader {
   // its base file. Empty for a missing directory.
   static forSession(dir: string): string[] {
     return launchesIn(dir).flatMap((launch) => launch.files);
+  }
+
+  // P2-A (2026-10-09): the same listing by launch (X17's recovery folds launch by launch, newest first).
+  static launches(dir: string): LaunchFiles[] {
+    return launchesIn(dir);
   }
 }
 

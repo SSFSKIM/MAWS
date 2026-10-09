@@ -151,6 +151,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     plugins: [],
     pluginErrors: [],
     pluginWarnings: [],
+    pluginsObservedAt: compact.process === 'starting' || compact.process === 'initializing' ? null : times.launchedAt, // P2-A: a scripted launch past its handshake has reported its plugins
     backgroundTasks: compact.backgroundTasks ?? [], // C12
     grants: [],
     mcpServers: compact.mcpServers ?? [], // C12

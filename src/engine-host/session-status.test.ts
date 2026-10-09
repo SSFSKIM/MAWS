@@ -59,3 +59,23 @@ describe('SessionStatusTracker.applyReload', () => {
     expect(tracker.catalog().skills).toEqual(initSkills.filter((skill) => skill !== 'e8-probe:e8-hello'));
   });
 });
+
+// P2-A start (2026-10-09; X17): `pluginsObservedAt` says when this launch's plugins were reported, so an empty list
+// before an init or a reload reads "not reported yet" (a no-prompt start sees no system/init: U1)
+describe('SessionStatusTracker.pluginsObservedAt', () => {
+  it('is null until a main-lane init or a reload reports the plugins; a subagent’s init does not count', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    expect(tracker.snapshot()).toMatchObject({ plugins: [], pluginsObservedAt: null });
+    tracker.observe({ type: 'system', subtype: 'init', parent_tool_use_id: 'toolu_1', plugins: [{ name: 'sub', path: '/s' }] }, '2026-10-09T10:00:00.000Z');
+    expect(tracker.snapshot().pluginsObservedAt).toBeNull();
+    tracker.observe({ type: 'system', subtype: 'init', plugins: [] }, '2026-10-09T10:00:01.000Z');
+    expect(tracker.snapshot()).toMatchObject({ plugins: [], pluginsObservedAt: '2026-10-09T10:00:01.000Z' });
+  });
+
+  it('a reload with no init before it sets it', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.applyReload(ReloadPluginsResponseSchema.parse((fixtureRow(31).response as { response: unknown }).response));
+    expect(tracker.snapshot().pluginsObservedAt).not.toBeNull();
+  });
+});
+// P2-A end

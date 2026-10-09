@@ -96,7 +96,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // E4c start: M4's browser tools recorded live through MAWS's own host, main played by the stand-in
     const e4c = ['p1-maws-browser'];
     // E4c end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c].sort());
+    // P2-A start (2026-10-09): M0's U1 probe on the installed 2.1.295, a session resumed with no prompt and its first launch
+    const p2a = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup'];
+    // P2-A end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2a /* P2-A */].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -643,6 +646,10 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E4c start: M4's pass3/p1-maws-browser (open, two snapshots, two fills, a click, a screenshot)
       'maws.browser.action',
       // E4c end
+      // P2-A start (2026-10-09): pass3/p2-no-prompt-resume-1, the host's reconnect rows around a resume (the first fixture
+      // recorded through MAWS's own host on a resume)
+      'session.reconnect',
+      // P2-A end
     ].sort());
     void kinds;
   });

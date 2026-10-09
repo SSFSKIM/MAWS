@@ -44,6 +44,11 @@ export const EngineSessionStatusSchema = z.strictObject({
   plugins: z.array(z.strictObject({ name: z.string(), path: z.string(), source: z.string().nullable(), version: z.string().nullable() })), // system/init.plugins (real-settings lists eleven)
   pluginErrors: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string(), path: z.string().nullable() })), // system/init.plugin_errors (SPEC 45 §45.10.2; absent when empty)
   pluginWarnings: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string() })), // system/init.plugin_warnings; all three empty before the first frame
+  // P2-A start (2026-10-09; X17): when this launch's system/init or a reload_plugins answer last reported the plugins;
+  // null until one did, so an empty list before it is "not reported yet", never "the engine loaded no plugins" (a
+  // no-prompt start sees no system/init: findings-pass3-p2-a-u1.txt)
+  pluginsObservedAt: z.string().nullable(),
+  // P2-A end
   backgroundTasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean() })),
   grants: z.array(z.string()), // the snapshot's rule strings
   mcpServers: z.array(z.strictObject({ name: z.string(), status: z.string(), source: z.string().nullable() })),

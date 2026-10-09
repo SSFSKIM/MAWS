@@ -62,6 +62,10 @@ import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli
 import { PluginsRunner, SHUTDOWN_KILL_GRACE_MS, type Timers } from './plugins/runner';
 import { READ_LINES } from '@shared/plugins/cli';
 // E8 end
+// P2-A start (2026-10-09; X17)
+import { ObservedFactsService } from './observed-facts';
+import { FileObservedFactsStore, type ObservedFactsStore } from './store/observed-facts-store';
+// P2-A end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -107,6 +111,9 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 // engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
 export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' };
+// P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
+// budget (observed-facts.ts), inside the bridge's 10 s
+export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
@@ -138,6 +145,7 @@ export interface EngineIpcDeps {
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
+  observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
 }
 
 export interface EngineIpc {
@@ -212,6 +220,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     if (key !== undefined) void Promise.all([key, modelsLoaded]).then(([resolved]) => models.update(resolved, list));
   };
   // C10 end
+  // P2-A (X17): the observed facts, written by each launch's recorder and recovered from the journal on a read
+  const observed = new ObservedFactsService({ store: deps.observedStore ?? new FileObservedFactsStore(deps.userData), journalRoot: join(deps.userData, 'engine-host', 'journal'), log });
 
   const launch = createLauncher({
     userData: deps.userData,
@@ -227,6 +237,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     appVersion: deps.appVersion ?? 'unknown',
     log,
     hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
+    observedFacts: observed, // P2-A
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
@@ -593,9 +604,20 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     specs.delete(id);
     modelKeys.delete(id);
     await store.forget(id);
+    await observed.forget(id); // P2-A: the observed facts go with the conversation (an archive keeps them)
     emit('session.forgotten', { appSessionId: id });
   });
   // C10 end -------------------------------------------------------------------------------------------------------------
+
+  // P2-A start (2026-10-09; X17) ---------------------------------------------------------------------------------------
+  // What the engine last reported for a session: a row in the table (live or exited) answers its recorder's facts;
+  // otherwise the file, recovered from the journal for launches it has not folded. Null for a session MAWS never ran.
+  on('engine.observedFacts', async ({ appSessionId }) => {
+    assertSafeAppSessionId(appSessionId);
+    const id = appSessionId as AppSessionId;
+    return (await table.get(id)?.observedFacts()) ?? observed.read(id);
+  });
+  // P2-A end ------------------------------------------------------------------------------------------------------------
 
   // R2 start: the renderer's asks of the engine's remote surface (shared/ipc/schema/session.ts, the R2 block). Bounded:
   // one control round trip each on the session's attached client, the host adding the surface and the client id;
