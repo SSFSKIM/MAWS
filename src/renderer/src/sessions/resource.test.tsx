@@ -46,6 +46,7 @@ let records: SessionRecord[];
 const starts = () => backend.calls.filter((c) => STARTS.includes(c.command));
 
 beforeEach(() => {
+  unmounted.clear();
   const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
   backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
   backend.script('plugins.list', () => ({ plugins: [] }));
@@ -174,6 +175,7 @@ describe('mounted surfaces on exited sessions start nothing (G5)', () => {
     await act(async () => void vi.advanceTimersByTime(INFO_REFRESH_MS * 2 + 1_000));
     await settle();
     expect(starts()).toEqual([]);
+    expect([...unmounted], 'tools that cannot mount in this DOM').toEqual([]);
     const engineReads = backend.calls.slice(reads).filter((c) => c.subtype !== null);
     expect(engineReads).toEqual([]); // and no engine read issued over the released session
   });
@@ -187,5 +189,6 @@ describe('mounted surfaces on exited sessions start nothing (G5)', () => {
     }
     await settle();
     expect(starts()).toEqual([]);
+    expect([...unmounted], 'tools that cannot mount in this DOM').toEqual([]);
   });
 });
