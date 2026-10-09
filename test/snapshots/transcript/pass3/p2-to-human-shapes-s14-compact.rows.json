@@ -1,0 +1,79 @@
+[
+  {
+    "at": "2026-10-09T07:37:15.115Z",
+    "id": "time:turn:b419bb9e-86f7-42e5-8a58-be37cffaf299",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:37 AM",
+    "turnId": "turn:b419bb9e-86f7-42e5-8a58-be37cffaf299"
+  },
+  {
+    "at": "2026-10-09T07:37:15.115Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:b419bb9e-86f7-42e5-8a58-be37cffaf299",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "b419bb9e-86f7-42e5-8a58-be37cffaf299",
+    "placeholders": [],
+    "steer": false,
+    "text": "/compact",
+    "turnId": "turn:b419bb9e-86f7-42e5-8a58-be37cffaf299"
+  },
+  {
+    "at": "2026-10-09T07:37:19.227Z",
+    "boundaryKind": "compaction",
+    "detail": "1f3840a6-af01-4560-ad16-c6da6ddf2bc6",
+    "hiddenRows": 0,
+    "id": "boundary:replay:journal:13:0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Context compacted · 19k → 1k tokens · manual",
+    "turnId": "turn:b419bb9e-86f7-42e5-8a58-be37cffaf299"
+  },
+  {
+    "at": "2026-10-09T07:37:19.322Z",
+    "id": "local:4194a117-b167-4658-991e-2536efa4bc23",
+    "kind": "local_command",
+    "messageUuid": "4194a117-b167-4658-991e-2536efa4bc23",
+    "text": "Compacted",
+    "turnId": "turn:b419bb9e-86f7-42e5-8a58-be37cffaf299"
+  },
+  {
+    "at": "2026-10-09T07:37:19.228Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:87fd1974-f66f-4cc0-9769-e03ef4b0d7f6",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "87fd1974-f66f-4cc0-9769-e03ef4b0d7f6",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly OK.",
+    "turnId": "turn:87fd1974-f66f-4cc0-9769-e03ef4b0d7f6"
+  },
+  {
+    "at": "2026-10-09T07:37:19.945Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfrHE9AR2duY1TLL7T84C:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "<to-human>OK</to-human>",
+    "messageUuid": "9cc6d728-6d5b-4ba1-a552-8cfe756137c7",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:87fd1974-f66f-4cc0-9769-e03ef4b0d7f6"
+  },
+  {
+    "at": "2026-10-09T07:37:20.471Z",
+    "attempt": null,
+    "id": "error:replay:journal:42:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

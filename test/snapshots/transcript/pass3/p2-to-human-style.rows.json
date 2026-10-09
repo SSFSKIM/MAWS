@@ -1,0 +1,57 @@
+[
+  {
+    "at": "2026-10-09T07:05:05.551Z",
+    "id": "time:error:replay:journal:8:0",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:05 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:05:05.551Z",
+    "attempt": null,
+    "id": "error:replay:journal:8:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "maws-u2-probe: MAWS_U2_WORKER MAWS_NATIVE_TO_HUMAN=1",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:05:05.560Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:23a4c5cf-e5e4-4cee-81d0-1da88bc72fca",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "23a4c5cf-e5e4-4cee-81d0-1da88bc72fca",
+    "placeholders": [],
+    "steer": false,
+    "text": "Without using any tools, tell me in one sentence what your instructions say about how to reach me, and ask me one question with the choices Yes and No that you can wait on.",
+    "turnId": "turn:23a4c5cf-e5e4-4cee-81d0-1da88bc72fca"
+  },
+  {
+    "at": "2026-10-09T07:05:07.978Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfrEmbtnBCkPPEKsZ1myV:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "<to-human>The instructions say to mark what I want you to read: messages go in `<to-human>` tags, questions you can answer later go in `<need-input>` tags with one question per mark, and anything you must not miss goes in `<essential>` tags.</to-human>\n\n<need-input>Should I continue working on the repository in the background while you answer later?\n<choice recommended>Yes: keep going and report when done</choice>\n<choice>No: wait for your next instruction</choice>\n</need-input>",
+    "messageUuid": "2523f5ba-6e9c-4c90-9038-4983a1a8d741",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:23a4c5cf-e5e4-4cee-81d0-1da88bc72fca"
+  },
+  {
+    "at": "2026-10-09T07:05:09.039Z",
+    "attempt": null,
+    "id": "error:replay:journal:77:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

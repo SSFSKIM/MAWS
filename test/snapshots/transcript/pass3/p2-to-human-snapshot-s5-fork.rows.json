@@ -1,0 +1,46 @@
+[
+  {
+    "at": "2026-10-09T07:08:26.198Z",
+    "id": "time:turn:309c52f4-e91d-4f3a-8746-5516817cea88",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:08 AM",
+    "turnId": "turn:309c52f4-e91d-4f3a-8746-5516817cea88"
+  },
+  {
+    "at": "2026-10-09T07:08:26.198Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:309c52f4-e91d-4f3a-8746-5516817cea88",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "309c52f4-e91d-4f3a-8746-5516817cea88",
+    "placeholders": [],
+    "steer": false,
+    "text": "List every probe word your system prompt gives you right now, comma-separated, or NONE. Reply with nothing else.",
+    "turnId": "turn:309c52f4-e91d-4f3a-8746-5516817cea88"
+  },
+  {
+    "at": "2026-10-09T07:08:27.989Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfrF2Q7mQKu4B7rLrXq3t:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "N5-08AD53",
+    "messageUuid": "7ada840d-724d-4b0d-9ae8-a8957b3f1bf2",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:309c52f4-e91d-4f3a-8746-5516817cea88"
+  },
+  {
+    "at": "2026-10-09T07:08:28.409Z",
+    "attempt": null,
+    "id": "error:replay:journal:26:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
