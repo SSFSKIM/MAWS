@@ -579,10 +579,17 @@ export class SessionService {
   async startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
     await this.ready();
     // P2-A start: a record's start with no message joins a run in flight (an acquisition's, another start's) and answers
-    // what its guards answered; one carrying a message stays refused `starting` (no message is dropped), as does every
-    // start while a take-over runs
+    // what its guards answered, when it asks with no options or the same ones; with other options (C11's route switch)
+    // it waits for that run to settle and then runs its own start, since a joined switch would report a route its launch
+    // never took. One carrying a message stays refused `starting` (no message is dropped), as does every start while a
+    // take-over runs.
     const joinable = this.inflight.get(appSessionId);
-    if (joinable !== undefined && joinable.kind !== 'take-over' && args.message === null && this.deps.intents.get(appSessionId) === null) return joinable.guarded;
+    if (joinable !== undefined && joinable.kind !== 'take-over' && args.message === null && this.deps.intents.get(appSessionId) === null) {
+      const own = canonicalOptions(args.options);
+      if (own === '{}' || own === joinable.options) return joinable.guarded;
+      const settled = () => this.startSession(appSessionId, args);
+      return joinable.done.then(settled, settled);
+    }
     if (joinable !== undefined) throw new IntentRefused('starting', `starting: a start is in flight for ${appSessionId}`);
     // P2-A end
     // Marked synchronously, before the guards' first await: a second start, a patch or a release of this id is refused
@@ -707,17 +714,27 @@ export class SessionService {
 
   private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
     const entry = this.inflight.get(appSessionId);
-    if (entry === undefined) return this.deps.index.sessions.get(appSessionId) === null ? this.refuseUnknown(appSessionId) : this.acquireOnce(appSessionId, options);
+    if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
     const own = canonicalOptions(options);
     if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
     const settled = () => this.acquireOrJoin(appSessionId, options);
     return entry.done.then(settled, settled);
   }
 
-  // No record and nothing in flight: refused without registering, so a start of an unstarted intent is never refused
-  // `starting` for it. Acquisition never runs C10's setup: an unstarted session starts with its first message.
+  // A durable record no intent owns. An intent's provisional record (a failed or interrupted setup keeps both) is C10's:
+  // it starts with its first message, never by acquisition.
+  private acquirable(appSessionId: AppSessionId): boolean {
+    return this.deps.index.sessions.get(appSessionId) !== null && this.deps.intents.get(appSessionId) === null;
+  }
+
+  // No durable record and nothing in flight: refused without registering, so a start of an unstarted intent is never
+  // refused `starting` for it. Acquisition never runs C10's setup.
   private async refuseUnknown(appSessionId: AppSessionId): Promise<AcquireOutcome> {
     await this.ready();
+    return this.refusal(appSessionId);
+  }
+
+  private refusal(appSessionId: AppSessionId): AcquireOutcome {
     const message = this.deps.intents.get(appSessionId) !== null ? 'an unstarted session starts with its first message' : `no session record for ${appSessionId}`;
     return { status: 'refused', appSessionId, reason: 'unknown_session', message };
   }
@@ -743,6 +760,7 @@ export class SessionService {
 
   private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
     const s = await this.ready();
+    if (!this.acquirable(appSessionId)) return this.refusal(appSessionId); // the intents are loaded only once ready
     // the watch before the reservation read, so a ready status landing between the two is not missed
     const watch = new LaunchWatch(s, appSessionId);
     try {
@@ -773,7 +791,7 @@ export class SessionService {
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
     try {
       const record = this.deps.index.sessions.get(appSessionId);
-      if (record === null) return { status: 'refused', appSessionId, reason: 'unknown_session', message: `no session record for ${appSessionId}` };
+      if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
       const captured = capturingSetup(this.s, appSessionId);
       const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
       registration.guard(guard);

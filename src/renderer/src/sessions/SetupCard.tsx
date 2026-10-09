@@ -16,7 +16,7 @@ import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { FAILURE_CARD_TITLE, FailureCard } from './FailureCard';
 import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
-import { continueSetup, reclaimMessage, releaseMessage, resolveWorktree, type WorktreeResource } from './setup-actions';
+import { continueSetup, isContinuing, reclaimMessage, releaseMessage, resolveWorktree, type WorktreeResource } from './setup-actions'; // P2-A: isContinuing
 import { failureOf, isStarting, UNSENT, useSetup, type SetupFailure, type SetupState, type WaitingCard } from './store';
 import { TRUST_CARD_TITLE, TrustCard } from './TrustCard';
 
@@ -119,6 +119,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
       setNow(Date.now());
       if (!result.ok) return;
       setHealth(result.value);
+      if (isContinuing(appSessionId)) return; // P2-A: a continuation of this card is in flight; it answers for the card
       if (result.value.ok) {
         live = false;
         void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);

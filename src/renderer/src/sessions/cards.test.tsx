@@ -15,15 +15,16 @@ import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
-import { resumeSession, startIntent } from './setup-actions';
+import { continueSetup, isContinuing, resumeSession, startIntent } from './setup-actions';
 // P2-A start
-import { record } from '../../../../test/support/builders';
+import { record, status } from '../../../../test/support/builders';
+import { RELAY_POLL_MS } from './SetupCard';
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { acquireSession } from './acquire';
 // P2-A end
-import { connectSetup, useSetup } from './store';
+import { connectSetup, isStarting, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -610,6 +611,56 @@ describe('a record’s trust card and its continuation', () => {
     expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'resume', options: { trust: 'accepted' } });
     expect(fake.invoked('session.send')).toEqual([]);
     expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  // M1's review: one continuation per card, held until its message is accepted or refused
+  it('a Resume joined to the continuation cannot unlock the card mid-send; a second continuation meanwhile sends nothing', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    const READY_AGAIN = { ...ACCEPTED, joined: true };
+    const first = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
+    const rowResume = resumeSession(ID);
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(2));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await act(() => fake.reply('session.acquire', READY_AGAIN));
+    expect(await rowResume).toBe(true);
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    expect(isStarting(useSetup.getState(), ID), 'the card stays busy while its message is on its way').toBe(true);
+    expect(await continueSetup(ID, { trust: 'accepted' }, MESSAGE)).toMatchObject({ ok: false });
+    expect(fake.invoked('session.acquire')).toHaveLength(2);
+    await act(() => fake.reply('session.send', { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }));
+    expect(await first).toEqual({ ok: true });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+    expect(isStarting(useSetup.getState(), ID)).toBe(false);
+  });
+
+  it('the relay card’s poll waits while a manual Run direct continues the card: one continuation, one send', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      withMain({
+        'engine.relayHealth': () => health({ ok: true, status: 200, error: null }), // the relay answers again
+        'session.queue.list': { entries: [], paused: false },
+        'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' },
+      });
+      render(<Docked />);
+      const sending = composerSend();
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: ID, health: health() }));
+      expect(await sending).toMatchObject({ disposition: 'held', reason: 'relay' });
+      await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+      expect(isContinuing(ID)).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // the poll finds the relay up while Run direct is in flight
+      expect(fake.pending('session.acquire'), 'the poll started no second continuation').toBe(1);
+      expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { gateway: 'direct' } });
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+      await act(() => fake.reply('session.acquire', ACCEPTED));
+      await waitFor(() => expect(dockedIds()).toBe(''));
+      expect(fake.invoked('session.acquire')).toHaveLength(2);
+      expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 // P2-A end

@@ -125,9 +125,11 @@ export async function continueSetup(appSessionId: AppSessionId, options: StartOp
 // option the owner chose, then the docked composer message is sent through the human seam, and the composer clears
 // only once the host accepted it: until then the text stays in the composer's draft, so a refusal or a host error only
 // undocks the card and says why. A card a surface docked without a message only starts the session.
+// One continuation per card at a time: a second (a manual Continue racing the relay card's poll, a double press) does
+// nothing while the first holds the session's claim, which only it releases, once its message is accepted or refused.
 async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
-  const store = useSetup.getState();
-  store.setInvoking(appSessionId, true);
+  const release = useSetup.getState().claimContinuation(appSessionId);
+  if (release === null) return { ok: false, error: 'This session is already continuing' };
   const refuse = (words: string): HookResult => {
     useSetup.getState().undock(appSessionId);
     toast({ id: startNoticeId(appSessionId), level: 'danger', text: words, actions: [], dismissible: true });
@@ -147,9 +149,12 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   } finally {
-    useSetup.getState().setInvoking(appSessionId, false);
+    release();
   }
 }
+
+// Whether a record card's continuation is in flight (the relay card's poll waits rather than starting a second).
+export const isContinuing = (appSessionId: AppSessionId): boolean => useSetup.getState().continuing.has(appSessionId);
 // P2-A end
 
 // Cancel and "Back to editing": the retained message back to the editor, then main's hand-back, which clears

@@ -43,6 +43,10 @@ export interface SetupState {
   // keeps the record and drops the intent, then fails: its message was neither sent nor handed back in main)
   resumes: Map<AppSessionId, FirstMessage>;
   followed: Set<AppSessionId>; // ids this window sent a start for or saw a setup phase of (their answers and events tell their story)
+  // P2-A: a record card's continuation in flight, from its acquisition until its message is accepted or refused; only
+  // the claim's holder releases it (a joined Resume ending meanwhile does not)
+  continuing: Map<AppSessionId, symbol>;
+  claimContinuation(appSessionId: AppSessionId): (() => void) | null; // null: one is already in flight
   applyIntents(intents: SetupIntent[]): void;
   applyIntentChanged(event: EventPayload<'session.intent.changed'>): void;
   applySetup(event: SetupEvent): void;
@@ -79,6 +83,15 @@ export function createSetupStore() {
     removed: new Set(),
     resumes: new Map(),
     followed: new Set(),
+    continuing: new Map(), // P2-A
+    claimContinuation(appSessionId) {
+      if (get().continuing.has(appSessionId)) return null;
+      const token = Symbol(appSessionId);
+      set((s) => ({ continuing: new Map(s.continuing).set(appSessionId, token) }));
+      return () => {
+        if (get().continuing.get(appSessionId) === token) set((s) => ({ continuing: without(s.continuing, appSessionId) }));
+      };
+    },
     applyIntents(intents) {
       const { removed } = get();
       const next = new Map(get().intents);
@@ -152,11 +165,11 @@ export const useSetup = createSetupStore();
 
 const RUNNING: ReadonlySet<SetupEvent['phase']> = new Set(['worktree', 'trusting', 'launching']);
 
-// Whether a start of the id is in flight: this window's command not answered yet, or main reporting a phase before
-// `ready` or `failed`.
-export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'>, appSessionId: AppSessionId): boolean {
+// Whether a start of the id is in flight: this window's command not answered yet, main reporting a phase before
+// `ready` or `failed`, or (P2-A) a record card's continuation still acquiring or sending.
+export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'> & Partial<Pick<SetupState, 'continuing'>>, appSessionId: AppSessionId): boolean {
   const phase = s.phases.get(appSessionId)?.phase;
-  return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase));
+  return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase)) || (s.continuing?.has(appSessionId) ?? false);
 }
 
 // What the tab shows for an intent that holds its first message with nothing failed and no card: the page reloaded

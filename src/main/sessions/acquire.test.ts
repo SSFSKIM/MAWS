@@ -225,6 +225,8 @@ describe('session.acquire: the lifecycle table', () => {
     expect(h.host.calledWith('session.queue.promote')).toEqual([]);
   });
 
+  // X4's other half (a permission pending at exit stays retired in the acquired launch) is pinned on the real host:
+  // src/engine-host/ipc.test.ts, 'a permission pending at exit stays retired after the session is acquired again'
   it('launches with the explicit Resume’s own spec: nothing of the exited launch (its requests) is carried (X4)', async () => {
     const a = recordAt();
     const b = recordAt();
@@ -264,6 +266,54 @@ describe('session.acquire: joins and races', () => {
     expect(await h.service.startSession(record.appId, { message: null, options: {} })).toMatchObject({ status: 'starting' });
     expect(await h.service.acquire(record.appId, 'send')).toEqual({ status: 'ready', appSessionId: record.appId, launched: true, joined: true });
     expect(launchesOf(record.appId)).toHaveLength(1);
+  });
+
+  // §5.3's table, amended at M1's review: C11's route switch must not be answered from a launch on another route
+  it('a record’s start with different options waits for the acquisition in flight, then runs its own start under its own guards', async () => {
+    const record = recordAt();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.host.script = () => ({ onReady: () => gate });
+    const acquiring = h.service.acquire(record.appId, 'read');
+    await h.until(() => launchesOf(record.appId).length === 1);
+    let answered = false;
+    const switching = h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } }).then((outcome) => ((answered = true), outcome));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(answered, 'not answered from the launch on the other route').toBe(false);
+    release();
+    expect(await acquiring).toMatchObject({ status: 'ready', launched: true });
+    // its own guards, once the acquisition ended: the session is live now, so the switch is told so (C11 stops a live
+    // session before it starts it on the other route), never the joined launch's `starting`
+    expect(await switching).toEqual({ status: 'already_live', appSessionId: record.appId });
+    expect(launchesOf(record.appId).map((spec) => spec.gateway)).toEqual(['gateway']);
+  });
+
+  it('a record’s start with different options that waited starts on its own route when the session is no longer live', async () => {
+    const record = recordAt();
+    let launch = 0;
+    h.host.script = () => (launch++ === 0 ? { exit: { error: 'the model is not available' } } : {}); // the first launch fails
+    const acquiring = h.service.acquire(record.appId, 'read');
+    const switching = h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } });
+    expect(await acquiring).toMatchObject({ status: 'failed' });
+    expect(await switching).toEqual({ status: 'starting', appSessionId: record.appId });
+    expect(await h.settled(record.appId, 2)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(record.appId).map((spec) => spec.gateway)).toEqual(['gateway', 'direct']);
+  });
+
+  it('a record’s start with the same options as the acquisition in flight joins it', async () => {
+    const record = recordAt();
+    const acquiring = h.service.acquire(record.appId, 'send', { gateway: 'direct' });
+    expect(await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } })).toEqual({ status: 'starting', appSessionId: record.appId });
+    await acquiring;
+    expect(launchesOf(record.appId)).toHaveLength(1);
+  });
+
+  it('an intent’s provisional record (a failed or interrupted setup keeps both) is never acquired: refused, nothing launched', async () => {
+    const { appSessionId } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    h.index.sessions.createForLaunch({ appSessionId, directory: h.work, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null }, firstPrompt: 'first', lineage: null });
+    expect(await h.service.acquire(appSessionId, 'read')).toEqual({ status: 'refused', appSessionId, reason: 'unknown_session', message: 'an unstarted session starts with its first message' });
+    expect(h.host.launches).toEqual([]);
+    expect(h.memory.get(appSessionId), 'nothing registered for it').toBeUndefined();
   });
 
   it('a record’s start carrying a message is still refused while an acquisition runs (no message is dropped)', async () => {

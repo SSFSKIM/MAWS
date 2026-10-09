@@ -361,6 +361,27 @@ describe('engine host X2 surface', () => {
     expect((await store.loadLaunchSpec(id as AppSessionId))?.appSessionId).toBe(id);
   });
 
+  // P2-A M1 (X4 across an acquisition): an acquisition launches the record's resume through the same `session.launch`;
+  // a permission pending when the session exited stays retired in the new launch, and nothing re-asks it
+  it('a permission pending at exit stays retired after the session is acquired again (X4): its id answers not_pending', async () => {
+    const host = engineHost();
+    const id = 'app-x4';
+    await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.send', { appSessionId: id as AppSessionId, content: 'Use Bash to run exactly git log --oneline. Then say DONE.' });
+    await until(() => host.events(id).some((e) => e.kind === 'permission.requested'), 'permission.requested');
+    const requested = host.events(id).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+    const resumed = spec({ appSessionId: id as AppSessionId, replay: 'spikes/protocol-probe/fixtures/init.jsonl', resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false } });
+    const second = await host.call('session.launch', { spec: resumed });
+    const secondLaunch = (second as { session: EngineSessionStatus }).session.launchId;
+    await until(() => host.statuses(id).some((s) => s.launchId === secondLaunch && s.process === 'ready'), 'the acquired launch ready');
+    expect(await host.call('session.pendingRequest', { appSessionId: id as AppSessionId, requestId: requested.requestId })).toEqual({ event: null });
+    expect(await host.call('session.answer', { appSessionId: id as AppSessionId, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } })).toEqual({ outcome: 'not_pending' });
+    expect(host.events(id).filter((e) => e.kind === 'permission.requested' && e.id.includes(`:${secondLaunch}:`)), 'the new launch asks nothing again').toEqual([]);
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+  });
+
   it('a relaunch replaces the exited launch\'s row and stream: engine.sessions lists the id once, session.events answers the new launch only', async () => {
     const host = engineHost();
     const id = 'app-relaunch';
