@@ -1,6 +1,6 @@
 {
   "start": {
-    "id": "73db459e-90d1-433f-bcfc-6f95155821ad",
+    "id": "90f8aef9-0a47-486d-a08b-c4341f046fd0",
     "model": "claude-haiku-5-5[1m]",
     "plugins": [
       "code-review@claude-plugins-official",
@@ -20,8 +20,9 @@
       "height": 765
     }
   },
-  "detail.loaded": "Loaded in this session",
-  "loadedLine": "5 plugins loaded in this session",
+  "detail.loaded": "Loaded in this session · Loaded last time, just now",
+  "loadedLine": "5 plugins loaded in this session·Loaded last time, just nowRefresh",
+  "refresh": "5 plugins loaded in this session·Loaded nowReload pluginsReload skillsReloaded · 52 commands · 5 agents · 5 plugins · 0 errors",
   "skills": [
     "here: frontend-design:frontend-design, p2b-project, supabase:supabase, supabase:supabase-postgres-best-practices",
     "yours: p2b-user"

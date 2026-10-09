@@ -1,0 +1,18 @@
+P2-B integration with P2-A, live runs (2026-10-10): the acceptance run e2e/plugins-library-live.spec.ts against P2-A's
+behaviour (scratch root /tmp/maws-e8-live-Gr6OIP) and the re-run of e2e/plugins-live.spec.ts (scratch root
+/tmp/maws-e8-live-Tx1PnD). Owner-file check (the execution document §6.3): the /tmp and /private/tmp project keys of
+~/.claude.json, read before the electron-vite build and after each Playwright run, every inherited CLAUDE_* variable
+dropped from the run's shell ("inherited CLAUDE_* left: 0"). The setup's CLI ran with env -i, HOME and
+CLAUDE_CONFIG_DIR inside the scratch root.
+
+acceptance run:  before 1,031 bytes; after: identical. Playwright: 1 passed (33.5s); acceptance-run.txt: "result: every
+                 step passed", "console errors: []". One one-line Haiku turn; then, with the session stopped, /plugins'
+                 loaded line read "Loaded last time" with Refresh and started nothing; /skills read "Not read yet." with
+                 Load now, which started the session with no turn; the session was stopped again and the loaded line's
+                 Refresh started it with no turn ("Starting…", then "Loaded now"). An earlier attempt (scratch root
+                 /tmp/maws-e8-live-NkYjrL) failed one step on the spec's own timing (the install's result read while
+                 the running session reloaded), fixed in the spec; its owner file was identical too.
+plugins-live:    before 1,031 bytes; after: identical. Playwright: 1 passed (1.3m); live-run.txt: "result: every step
+                 passed", "console errors: []", sixteen steps.
+
+The acceptance-* and live-* files replace M6's runs of the same specs (which stay in git history).
