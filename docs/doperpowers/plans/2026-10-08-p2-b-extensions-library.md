@@ -397,7 +397,7 @@ export function loadedOnly(loaded: readonly ObservedPlugin[], identities: readon
 // src/renderer/src/widgets/plugins/library-store.ts
 export const useLibraryStore: UseBoundStore<StoreApi<{ plugins: { search: string; filter: LibraryFilter; sort: LibrarySort }; skills: { search: string; sort: 'name' | 'plugin' } }>>; // per app run; tab, selection and scroll are component state
 // src/renderer/src/widgets/plugins/manifests.ts
-export function usePluginManifests(cwd: string | null, items: readonly ManifestItemRef[]): { views: ReadonlyMap<string, PluginManifestView>; loading: boolean };
+export function usePluginManifests(cwd: string | null, items: readonly ManifestItemRef[]): { views: ReadonlyMap<string, PluginManifestView>; loading: boolean; error: string | null; retry: () => void }; // items may carry `lastUpdated` (the cache key, stripped before the call); error and retry added in M3's fix wave
 // src/renderer/src/widgets/plugins/builtin-mods.ts
 export interface BuiltInModRow { id: string; name: string; description: string; enabled: boolean; source: 'maws-contract' | 'external-compatible-style' | 'off'; perSession: 'inherit' | 'on' | 'off' | null }
 export function useBuiltInMods(appSessionId: AppSessionId): { rows: BuiltInModRow[]; setEnabled: ((id: string, enabled: boolean) => Promise<void>) | null };
