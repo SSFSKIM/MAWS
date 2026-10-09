@@ -78,6 +78,10 @@ describe('the reads', () => {
     const rows = pluginRowsOf(stdout);
     expect((await installedOf(rows, '/nowhere')).map((p) => p.version)).toEqual(['1.2.0', '1.0.0', '1.0.0']);
     expect(rows.map((r) => r.readFromFolder)).toEqual(['/m/plugins/a', null, '/m/plugins/c']); // the copy that loads: the manifest reader's anchor
+    // an empty folder is none: never a path, and never a folder version
+    const empty = pluginRowsOf(JSON.stringify([{ id: 'd@dir', version: '1.0.0', scope: 'user', enabled: true, installPath: '/c/d', readFromFolder: '', folderVersion: '9.9.9' }]));
+    expect(empty[0].readFromFolder).toBeNull();
+    expect((await installedOf(empty, '/nowhere'))[0].version).toBe('1.0.0');
   });
 
   describe('here and coversHere, through realpaths', () => {
@@ -116,6 +120,8 @@ describe('the reads', () => {
         { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', description: 'Figma', marketplaceName: 'anthropic-plugin-directory', version: '2.2.108', source: { source: 'url', url: 'https://x', sha: 'f'.repeat(40) }, installCount: 9 },
         { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: 'plugins/frontend-design', ref: 'main' } },
         { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', source: { source: 'github', repo: 'a/b' }, installCount: 1290640 },
+        { pluginId: 'pinned@o', name: 'pinned', marketplaceName: 'o', source: { source: 'github', repo: 'a/b', ref: 'v2' } },
+        { pluginId: 'shaed@o', name: 'shaed', marketplaceName: 'o', source: { source: 'github', repo: 'a/b', ref: 'v2', sha: 'a'.repeat(40) } },
         { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', source: { url: 7 }, installCount: 1.5 },
         { pluginId: 'neg@o', name: 'neg', marketplaceName: 'o', source: 42, installCount: -3 },
         { pluginId: 'str@o', name: 'str', marketplaceName: 'o', installCount: '12' },
@@ -124,10 +130,13 @@ describe('the reads', () => {
     const none = { description: null, version: null };
     expect(availableOf(stdout)).toEqual([
       { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: null, source: './plugins/e8-probe', installCount: null },
-      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108', source: { kind: 'url', url: 'https://x', repo: null, path: null }, installCount: 9 },
-      { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', ...none, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design' }, installCount: null },
-      { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null }, installCount: 1290640 },
-      { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', ...none, source: { kind: 'unknown', url: null, repo: null, path: null }, installCount: null },
+      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108', source: { kind: 'url', url: 'https://x', repo: null, path: null, ref: null }, installCount: 9 },
+      { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', ...none, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design', ref: 'main' }, installCount: null },
+      { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: null }, installCount: 1290640 },
+      // a ref is kept only where it decides the engine's key: a full commit sha beside it pins the code instead
+      { pluginId: 'pinned@o', name: 'pinned', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2' }, installCount: null },
+      { pluginId: 'shaed@o', name: 'shaed', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: null }, installCount: null },
+      { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', ...none, source: { kind: 'unknown', url: null, repo: null, path: null, ref: null }, installCount: null },
       { pluginId: 'neg@o', name: 'neg', marketplaceName: 'o', ...none, source: null, installCount: null },
       { pluginId: 'str@o', name: 'str', marketplaceName: 'o', ...none, source: null, installCount: null },
     ]);
@@ -139,12 +148,14 @@ describe('the reads', () => {
       { name: 'gh', source: 'github', repo: 'owner/repo', ref: 'main', installLocation: '/c/plugins/marketplaces/gh' },
       { name: 'u', source: 'url', url: 'https://example.com/m.json', installLocation: '/c/plugins/marketplaces/u' },
       { name: 'org', source: 'claudeai', marketplaceId: 'mk', organizationUuid: 'o', status: 'ok' },
+      { name: 'blank', source: 'github', repo: 'o/b', installLocation: '' },
     ]);
     expect(marketplacesOf(stdout)).toEqual([
       { name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-g0/run1/market', installLocation: '/tmp/e8-g0/run1/market' },
       { name: 'gh', source: 'github', locator: 'owner/repo', installLocation: '/c/plugins/marketplaces/gh' },
       { name: 'u', source: 'url', locator: 'https://example.com/m.json', installLocation: '/c/plugins/marketplaces/u' },
       { name: 'org', source: 'claudeai', locator: null, installLocation: null },
+      { name: 'blank', source: 'github', locator: 'o/b', installLocation: null }, // P2-B: an empty location is none
     ]);
   });
 

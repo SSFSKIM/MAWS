@@ -113,7 +113,7 @@ export function pluginRowsOf(stdout: string): PluginListRow[] {
     projectPath: row.projectPath ?? null,
     errors: row.errors ?? [],
     notes: row.notes ?? [],
-    readFromFolder: row.readFromFolder ?? null,
+    readFromFolder: row.readFromFolder || null, // an empty folder is none
     folderVersion: row.folderVersion ?? null,
     installedAt: row.installedAt ?? null,
     lastUpdated: row.lastUpdated ?? null,
@@ -164,11 +164,14 @@ export async function installedOf(rows: readonly PluginListRow[], cwd: string, r
 }
 
 // An entry's source as the marketplace declares it, reduced (P2-B §5.3): the relative path an in-repository entry has,
-// or the object's kind (`source`) and locators; anything else is none.
+// or the object's kind (`source`) and locators; anything else is none. Its `ref` is kept only where it decides the
+// engine's fold key: the engine keys a source pinned to a branch or tag only when a full commit sha pins it as well
+// (2.1.292 `Sb` :832435-832446), so beside such a sha the ref reads as none.
 function sourceRefOf(source: unknown): PluginSourceRef | null {
   if (typeof source === 'string') return source;
   if (!isRecord(source)) return null;
-  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path) };
+  const pinnedBySha = typeof source.sha === 'string' && /^[a-f0-9]{40}$/.test(source.sha);
+  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path), ref: pinnedBySha ? null : str(source.ref) };
 }
 
 const AvailableSchema = z.looseObject({
@@ -195,6 +198,6 @@ export function marketplacesOf(stdout: string): Marketplace[] {
     name: m.name,
     source: m.source,
     locator: m.repo ?? m.url ?? m.path ?? null,
-    installLocation: m.installLocation ?? null,
+    installLocation: m.installLocation || null, // P2-B: an empty location is none
   }));
 }

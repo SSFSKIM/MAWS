@@ -23,6 +23,26 @@ describe('sourceKey', () => {
     expect(sourceKey('./plugins/x', { source: 'git', locator: 'https://github.com/anthropics/claude-plugins-official.git' })).toBe(key);
   });
 
+  it('normalises as the engine’s URL reading does: the default HTTPS port, unreserved percent escapes', () => {
+    const key = sourceKey(subdir('https://github.com/anthropics/claude-plugins-official', 'plugins/x'), null);
+    expect(sourceKey(subdir('https://github.com:443/anthropics/claude-plugins-official', 'plugins/x'), null)).toBe(key);
+    expect(sourceKey(subdir('https://github.com/%61nthropics/claude-plugins-official', 'plugins/x'), null)).toBe(key);
+    expect(sourceKey(subdir('https://user@github.com/anthropics/claude-plugins-official', 'plugins/x'), null)).toBe(key);
+    expect(sourceKey(subdir('https://www.github.com/anthropics/claude-plugins-official', 'plugins/x'), null)).toBe(key);
+    // another port is another place, and keeps the path's case
+    expect(sourceKey(subdir('https://github.com:8443/anthropics/claude-plugins-official', 'plugins/x'), null)).toBe('github.com:8443/anthropics/claude-plugins-official#plugins/x');
+  });
+
+  it('refuses what the engine refuses: a reserved escape, an escaped dot segment, ssh.github.com over https, a ref that pins a branch', () => {
+    expect(sourceKey(subdir('https://github.com/a%2Fb/c', 'p'), null)).toBeNull();
+    expect(sourceKey(subdir('https://github.com/a/%2e%2e/c', 'p'), null)).toBeNull();
+    expect(sourceKey(subdir('https://ssh.github.com/a/b', 'p'), null)).toBeNull();
+    expect(sourceKey(subdir('https://github.com/a/b', 'p\\q'), null)).toBeNull();
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'main' }, null)).toBeNull();
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: null }, null)).toBe('github.com/a/b#p');
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'f'.repeat(40) }, null)).toBe('github.com/a/b#p');
+  });
+
   it('keeps apart what is not the same code', () => {
     const key = sourceKey(subdir('https://github.com/anthropics/claude-plugins-official', 'plugins/x'), null);
     expect(sourceKey(subdir('https://github.com/anthropics/claude-plugins-official', 'plugins/y'), null)).not.toBe(key);

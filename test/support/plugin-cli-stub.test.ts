@@ -69,7 +69,7 @@ describe('the plugin CLI stub', () => {
       ['e8-probe@e8-scratch', './plugins/e8-probe', null],
       ['frontend-design@claude-plugins-official', './plugins/frontend-design', 1_290_640],
       ['quiet@claude-plugins-official', './plugins/quiet', null],
-      ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null }, null],
+      ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null, ref: null }, null],
     ]);
   });
 

@@ -81,12 +81,13 @@ export async function manifestsFor(cwd: string, items: readonly ManifestItemRef[
   const anchorsOf = (key: ManifestItemRef): ManifestAnchors => {
     if (key.kind === 'available') {
       const { name, marketplace } = nameOf(key.pluginId);
-      return { root: null, marketplaceRoot: marketplaceOf(marketplaces, marketplace)?.installLocation ?? null, entryName: name };
+      return { root: null, marketplaceRoot: marketplaceOf(marketplaces, marketplace)?.installLocation || null, entryName: name };
     }
     const { name, marketplace } = nameOf(key.id);
     const row = rowOf(plugins, key);
     if (row === null) return { root: null, marketplaceRoot: null, entryName: name };
-    return { root: row.readFromFolder ?? (row.installPath === '' ? null : row.installPath), marketplaceRoot: marketplaceOf(marketplaces, marketplace)?.installLocation ?? null, entryName: name };
+    // an empty optional path from the CLI is none, never a path (`path.resolve('')` is the host's own cwd)
+    return { root: row.readFromFolder || row.installPath || null, marketplaceRoot: marketplaceOf(marketplaces, marketplace)?.installLocation || null, entryName: name };
   };
 
   const read = deps.read ?? readManifestView;

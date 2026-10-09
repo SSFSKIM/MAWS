@@ -72,6 +72,18 @@ describe('manifestsFor', () => {
     expect(cli.calls).toEqual({ plugins: 0, marketplaces: 0 }); // every item was named: nothing listed again
   });
 
+  it('an empty readFromFolder or installLocation reads as absent, never as a path', async () => {
+    const listings = new LastListings();
+    listings.keepPlugins('/w', [row('p@m', { readFromFolder: '', installPath: '/c/p' })]);
+    listings.keepMarketplaces('/w', [market('m', '')]);
+    const { seen, read } = recorder();
+    await manifestsFor('/w', [user('p@m'), { kind: 'available', pluginId: 'q@m' }], { listings, ...lists([[]], [[]]), read });
+    expect(seen.map((s) => s.anchors)).toEqual([
+      { root: '/c/p', marketplaceRoot: null, entryName: 'p' },
+      { root: null, marketplaceRoot: null, entryName: 'q' },
+    ]);
+  });
+
   it('a row with no installPath has no root (never the host’s own cwd)', async () => {
     const listings = new LastListings();
     listings.keepPlugins('/w', [row('s@skills-dir', { installPath: '' })]);

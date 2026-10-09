@@ -858,6 +858,8 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: './plugins/p', installCount: 1290640 }] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'git-subdir', url: 'https://github.com/a/b', repo: null, path: 'plugins/p' }, installCount: null }] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, sha: 'f' }, installCount: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2' }, installCount: null }] }).ok).toBe(true); // the architect's ref
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 7 }, installCount: null }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: null, installCount: -1 }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.available', { plugins: [row] }).ok).toBe(false);
     });

@@ -41,8 +41,9 @@ export const InstalledPluginSchema = z.strictObject({
 export type InstalledPlugin = z.infer<typeof InstalledPluginSchema>;
 
 // P2-B start (2026-10-09): a marketplace entry's source reduced (P2-B execution document §5.3): the relative path an
-// in-repository entry has, or the object's kind and locators; nothing else of it crosses
-export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable() })]);
+// in-repository entry has, or the object's kind and locators, and the branch or tag it is pinned to where that pin
+// decides the engine's fold key (the architect's ruling, M2's fix wave); nothing else of it crosses
+export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable(), ref: z.string().nullable().optional() })]);
 export type PluginSourceRef = z.infer<typeof PluginSourceRefSchema>;
 // P2-B end
 

@@ -5,6 +5,7 @@
 // installed plugins' (code-review, supabase, an LSP plugin with no plugin.json), read once, read-only.
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import * as fsp from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -98,7 +99,9 @@ describe('what it contains, per kind by the engine’s rules', () => {
       'commands/notes.txt': 'not a command',
       'agents/reviewer.md': md({ name: 'code-reviewer', description: 'Reviews code' }),
       'agents/plain.md': '# No front matter',
-      'agents/deep/nested.md': md({ name: 'not-read' }),
+      'agents/deep/nested.md': md({ name: 'nested-agent', description: 'Nested' }),
+      'agents/Loud.MD': md({ name: 'loud-agent' }),
+      'agents/notes.txt': 'not an agent',
       'skills/writing/SKILL.md': md({ name: 'writing-well', description: 'Writes' }),
       'skills/bare/SKILL.md': 'No front matter at all',
       'skills/empty/README.md': 'no skill here',
@@ -110,7 +113,8 @@ describe('what it contains, per kind by the engine’s rules', () => {
     const { components, problems } = await view({ root: plugin });
     expect(problems).toEqual([]);
     expect(components.commands).toEqual([{ name: 'git:commit', description: 'Commits' }, { name: 'hello', description: 'Says hello' }]);
-    expect(components.agents).toEqual([{ name: 'plain', description: null }, { name: 'code-reviewer', description: 'Reviews code' }]);
+    // agents/**/*.md, recursively (2.1.292 `HH` :729782-729814), a nested agent named through its folders as commands are
+    expect(components.agents).toEqual([{ name: 'loud-agent', description: null }, { name: 'deep:nested-agent', description: 'Nested' }, { name: 'plain', description: null }, { name: 'code-reviewer', description: 'Reviews code' }]);
     expect(components.skills).toEqual([{ name: 'bare', description: null }, { name: 'writing-well', description: 'Writes' }]);
     expect(components.hooks).toEqual([{ event: 'PreToolUse', matcher: 'Bash' }, { event: 'PreToolUse', matcher: null }, { event: 'SessionStart', matcher: 'startup|resume' }]);
     expect(components.hookModules).toBe(0);
@@ -168,6 +172,22 @@ describe('what it contains, per kind by the engine’s rules', () => {
     expect(names(components.lspServers)).toEqual(['python', 'go', 'rust']);
   });
 
+  it('a declared agents folder is scanned recursively and replaces the default; a declared file must be Markdown', async () => {
+    const plugin = await tree(join(root, 'p'), {
+      '.claude-plugin/plugin.json': { name: 'p', agents: ['./roles', './extra/one.md', './extra/notes.txt'] },
+      'roles/a.md': md({ name: 'worker', description: 'Works' }),
+      'roles/sub/b.md': md({ description: 'B' }),
+      'extra/one.md': md({ name: 'one' }),
+      'extra/notes.txt': 'not an agent',
+      'agents/default.md': md({ name: 'not-read' }),
+    });
+    const { components, problems } = await view({ root: plugin });
+    expect(problems).toEqual([]);
+    expect(components.agents).toEqual([{ name: 'worker', description: 'Works' }, { name: 'sub:b', description: 'B' }, { name: 'one', description: null }]);
+    const single = await tree(join(root, 'single'), { '.claude-plugin/plugin.json': { name: 'p', agents: './roles' }, 'roles/a.md': md({ name: 'worker', description: 'Works' }) });
+    expect((await view({ root: single })).components.agents).toEqual([{ name: 'worker', description: 'Works' }]);
+  });
+
   it('reads a component field under experimental beside the top-level one', async () => {
     const plugin = await tree(join(root, 'p'), {
       '.claude-plugin/plugin.json': { name: 'p', skills: './a', experimental: { skills: './b', monitors: './watch.json' } },
@@ -186,8 +206,10 @@ describe('what it contains, per kind by the engine’s rules', () => {
       'hooks/hooks.json': { description: 'mods', modules: ['./mods/register.tsx'], hooks: { SessionStart: [{ matcher: 'startup', hooks: [] }] } },
       'server.mcpb': 'binary',
     });
-    const { components, problems } = await view({ root: plugin }, INSTALLATION, { fs: spy(['server.mcpb', 'register.tsx']) });
+    const recorded = recording();
+    const { components, problems } = await view({ root: plugin }, INSTALLATION, { fs: recorded.fs });
     expect(problems).toEqual([]);
+    expect(recorded.touched().filter((path) => /server\.mcpb|register\.tsx|tool\.dxt/.test(path))).toEqual([]); // neither opened, resolved nor stated
     expect(components.hookModules).toBe(1);
     expect(components.mcpBundles).toBe(2);
     expect(components.mcpServers).toEqual([]);
@@ -233,6 +255,15 @@ describe('confinement and regular files', () => {
     expect(JSON.stringify(answer)).not.toContain('sk-secret');
   });
 
+  it('a declared file reached through a linked folder that leaves the plugin is refused', async () => {
+    const outside = await tree(join(root, 'outside'), { 'a.md': md({ name: 'escaped', description: 'sk-secret-outside' }) });
+    const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p', agents: './roles/a.md' }, roles: { link: outside } });
+    const answer = await view({ root: plugin });
+    expect(answer.components.agents).toEqual([]);
+    expect(answer.problems).toEqual(['roles/a.md: outside the plugin']);
+    expect(JSON.stringify(answer)).not.toContain('sk-secret');
+  });
+
   it('a link inside the plugin to another of its files is read; the anchor itself may be a link', async () => {
     const plugin = await tree(join(root, 'real'), { '.claude-plugin/plugin.json': { name: 'p' }, 'shared/review.md': md({ description: 'Shared' }), 'commands/review.md': { link: '../shared/review.md' } });
     await symlink(plugin, join(root, 'alias'));
@@ -250,10 +281,21 @@ describe('confinement and regular files', () => {
       '.mcp.json': JSON.stringify({ mcpServers: { big: { command: 'x', pad: 'x'.repeat(300 * 1024) } } }),
       'commands/long.md': md({ description: 'Long' }, 'x'.repeat(400 * 1024)),
     });
-    const answer = await view({ root: plugin });
+    const recorded = recording();
+    const answer = await view({ root: plugin }, INSTALLATION, { fs: recorded.fs });
     expect(answer.problems).toEqual(['.mcp.json: too large']);
+    expect(answer.partial).toBe(true); // a bound excluded a file: never a complete view, never cached
     expect(answer.components.mcpServers).toEqual([]);
     expect(answer.components.commands).toEqual([{ name: 'long', description: 'Long' }]);
+    expect(recorded.bytesOf('commands/long.md')).toBeLessThanOrEqual(8 * 1024); // the head only, never the whole file
+    expect(recorded.bytesOf('.mcp.json')).toBeLessThanOrEqual(256 * 1024 + 1); // stopped one byte past the bound
+  });
+
+  it('a marketplace.json past 8 MiB is `too large` and the view partial', async () => {
+    const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p' } });
+    const marketplace = await tree(join(root, 'mk'), market([{ name: 'p', source: './p', pad: 'x'.repeat(8 * 1024 * 1024) }]));
+    const answer = await view({ root: plugin, marketplaceRoot: marketplace });
+    expect(answer).toMatchObject({ state: 'read', partial: true, problems: ['.claude-plugin/marketplace.json: too large'] });
   });
 
   it('reads a marketplace.json up to 8 MiB', async () => {
@@ -303,6 +345,19 @@ describe('redaction', () => {
     expect(answer.components.hooks).toEqual([{ event: 'PostToolUse', matcher: 'Write' }]);
     expect(answer.components.monitors).toEqual([{ name: 'tail', description: 'Tails the log' }]);
     free(answer);
+  });
+
+  it('a URL where a path is declared is `unknown shape` under the declaring file, never echoed (monitors, a command map’s source, skills)', async () => {
+    const url = 'https://monitor.example/config?token=sk-secret-review';
+    const plugin = await tree(join(root, 'p'), {
+      '.claude-plugin/plugin.json': { name: 'p', monitors: url, commands: { remote: { source: url } }, skills: [url], hooks: url, lspServers: url },
+    });
+    const recorded = recording();
+    const answer = await view({ root: plugin }, INSTALLATION, { fs: recorded.fs });
+    expect(answer.problems).toEqual(['.claude-plugin/plugin.json: unknown shape']);
+    expect(JSON.stringify(answer)).not.toContain('sk-secret');
+    expect(JSON.stringify(answer)).not.toContain('monitor.example');
+    expect(recorded.touched().filter((path) => path.includes('monitor.example'))).toEqual([]);
   });
 
   it('a file that cannot be read says `could not be read`, never the error’s message', async () => {
@@ -361,6 +416,13 @@ describe('an available entry', () => {
     expect(Object.values(answer.components).every((v) => (Array.isArray(v) ? v.length === 0 : v === 0))).toBe(true);
   });
 
+  it('a string source that is a URL is `unknown shape` under marketplace.json, never echoed or read', async () => {
+    const marketplace = await tree(join(root, 'mk'), market([{ name: 'p', description: 'Remote', source: 'https://example.com/p.git?token=sk-secret-source' }]));
+    const answer = await view({ marketplaceRoot: marketplace }, AVAILABLE);
+    expect(answer).toMatchObject({ state: 'read', description: 'Remote', problems: ['.claude-plugin/marketplace.json: unknown shape'] });
+    expect(JSON.stringify(answer)).not.toContain('sk-secret');
+  });
+
   it('a relative source that climbs out of the marketplace is `outside the plugin`', async () => {
     await tree(join(root, 'secret'), { '.claude-plugin/plugin.json': { name: 'p', description: 'sk-secret-climb' } });
     const marketplace = await tree(join(root, 'mk'), market([{ name: 'p', source: '../secret' }]));
@@ -386,11 +448,55 @@ describe('the bounds', () => {
     expect(answer.components.commands).toHaveLength(200);
   });
 
-  it('past 1,000 files of one plugin the view is partial', async () => {
+  it('past 1,000 files of one plugin the view is partial, and scanning stopped there', async () => {
     const files: Tree = { '.claude-plugin/plugin.json': { name: 'p' } };
-    for (let i = 0; i < 1005; i += 1) files[`commands/notes/n${i}.txt`] = 'x';
-    const answer = await view({ root: await tree(join(root, 'p'), files) });
+    for (let i = 0; i < 1005; i += 1) files[`commands/notes/n${String(i).padStart(4, '0')}.txt`] = 'x';
+    const recorded = recording();
+    const answer = await view({ root: await tree(join(root, 'p'), files) }, INSTALLATION, { fs: recorded.fs });
     expect(answer.partial).toBe(true);
+    expect(recorded.resolved()).toBeLessThanOrEqual(1_000); // no entry past the bound was even resolved
+    expect(recorded.touched().some((path) => path.endsWith('n1004.txt'))).toBe(false);
+  });
+
+  it('MCP bundles and hook modules are bounded like items: 200 is complete, 201 is partial at 200', async () => {
+    const bundles = (n: number) => tree(join(root, `b${n}`), { '.claude-plugin/plugin.json': { name: 'p', mcpServers: Array.from({ length: n }, (_, i) => `./b${i}.mcpb`) } });
+    const modules = (n: number) => tree(join(root, `m${n}`), { '.claude-plugin/plugin.json': { name: 'p' }, 'hooks/hooks.json': { modules: Array.from({ length: n }, (_, i) => `./m${i}.ts`) } });
+    expect(await view({ root: await bundles(200) })).toMatchObject({ partial: false, components: { mcpBundles: 200 } });
+    expect(await view({ root: await bundles(201) })).toMatchObject({ partial: true, components: { mcpBundles: 200 } });
+    expect(await view({ root: await modules(200) })).toMatchObject({ partial: false, components: { hookModules: 200 } });
+    expect(await view({ root: await modules(201) })).toMatchObject({ partial: true, components: { hookModules: 200 } });
+  });
+
+  it('a filesystem call that stalls past the deadline ends the read: partial, at once, no message', async () => {
+    const stalled = { ...fsp, realpath: (async () => new Promise<string>(() => undefined)) as unknown as typeof fsp.realpath };
+    const started = Date.now();
+    const answer = await view({ root: '/stalled' }, INSTALLATION, { fs: stalled, deadline: Date.now() + 30 });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(answer).toMatchObject({ state: 'unknown', partial: true, problems: [] });
+  });
+
+  it('a read that stalls mid-file ends at the deadline with what was read, and its file handle is closed', async () => {
+    const plugin = await tree(join(root, 'p'), {
+      '.claude-plugin/plugin.json': { name: 'p', description: 'Read before the stall' },
+      '.mcp.json': { mcpServers: { s: { command: 'x' } } },
+      'commands/slow.md': md({ description: 'Never finishes' }),
+    });
+    let closed = 0;
+    const slow: ManifestReaderDeps['fs'] = {
+      ...fsp,
+      open: (async (path: Parameters<typeof fsp.open>[0], ...rest: unknown[]) => {
+        const handle = (await (fsp.open as (...a: unknown[]) => Promise<FileHandle>)(path, ...rest)) as FileHandle;
+        const stall = String(path).endsWith('slow.md');
+        return { read: stall ? () => new Promise(() => undefined) : handle.read.bind(handle), close: async () => ((closed += 1), handle.close()) } as unknown as FileHandle;
+      }) as typeof fsp.open,
+    };
+    const started = Date.now();
+    const answer = await view({ root: plugin }, INSTALLATION, { fs: slow, deadline: Date.now() + 300 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(answer).toMatchObject({ state: 'read', partial: true, description: 'Read before the stall', components: { mcpServers: [{ name: 's', transport: 'stdio' }], commands: [] } });
+    expect(answer.problems).toEqual([]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(closed).toBe(3); // plugin.json, .mcp.json and the stalled file's handle
   });
 
   it('past the call’s deadline the view is partial with what it read; one begun past it reads nothing', async () => {
@@ -402,6 +508,38 @@ describe('the bounds', () => {
     expect(never).toMatchObject({ state: 'unknown', partial: true, name: null });
   });
 });
+
+// The real fs, recording every path it resolved, stated or opened and the bytes each file handle read.
+function recording() {
+  const touched: string[] = [];
+  const bytes = new Map<string, number>();
+  let resolved = 0;
+  const fs: ManifestReaderDeps['fs'] = {
+    ...fsp,
+    realpath: (async (path: Parameters<typeof fsp.realpath>[0], ...rest: unknown[]) => {
+      resolved += 1;
+      touched.push(String(path));
+      return (fsp.realpath as (...a: unknown[]) => unknown)(path, ...rest);
+    }) as typeof fsp.realpath,
+    lstat: (async (path: Parameters<typeof fsp.lstat>[0], ...rest: unknown[]) => {
+      touched.push(String(path));
+      return (fsp.lstat as (...a: unknown[]) => unknown)(path, ...rest);
+    }) as typeof fsp.lstat,
+    open: (async (path: Parameters<typeof fsp.open>[0], ...rest: unknown[]) => {
+      touched.push(String(path));
+      const handle = (await (fsp.open as (...a: unknown[]) => Promise<FileHandle>)(path, ...rest)) as FileHandle;
+      return {
+        read: async (...args: unknown[]) => {
+          const result = await (handle.read as (...a: unknown[]) => Promise<{ bytesRead: number }>)(...args);
+          bytes.set(String(path), (bytes.get(String(path)) ?? 0) + result.bytesRead);
+          return result;
+        },
+        close: () => handle.close(),
+      } as unknown as FileHandle;
+    }) as typeof fsp.open,
+  };
+  return { fs, touched: () => touched, resolved: () => resolved, bytesOf: (suffix: string) => [...bytes].filter(([path]) => path.endsWith(suffix)).reduce((n, [, b]) => n + b, 0) };
+}
 
 // The real fs, refusing any path that contains one of `forbidden` (proves a bundle, module or URL is never opened).
 function spy(forbidden: string[]): ManifestReaderDeps['fs'] {

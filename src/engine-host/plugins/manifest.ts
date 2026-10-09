@@ -59,6 +59,11 @@ const codeOf = (error: unknown): string | null => (isRecord(error) && typeof err
 
 // The reading stopped at a bound; what it read stands.
 class Stop extends Error {}
+const passStop = (error: unknown): void => {
+  if (error instanceof Stop) throw error;
+};
+const isUrl = (value: string) => /^[a-z][a-z\d+.-]*:/i.test(value);
+const ignore = () => undefined;
 
 // A directory every read is confined to, by its realpath.
 interface Anchor {
@@ -86,12 +91,35 @@ class Reading {
     if (!this.problems.includes(line)) this.problems.push(line);
   }
 
+  private stop(): never {
+    this.partial = true;
+    throw new Stop();
+  }
+
   // One more filesystem entry, inside the plugin's bound and the call's time; past either, stop.
   private tick(): void {
     this.entries += 1;
-    if (this.now() > this.deadline || this.entries > MANIFEST_BOUNDS.files) {
-      this.partial = true;
-      throw new Stop();
+    if (this.now() > this.deadline || this.entries > MANIFEST_BOUNDS.files) this.stop();
+  }
+
+  // An awaited filesystem operation, bounded by the call's deadline: past it the reading stops at once, and what the
+  // operation answers late is released (a file handle closed) and otherwise dropped, its error included.
+  private async bounded<T>(operation: Promise<T>, release: (late: T) => unknown = ignore): Promise<T> {
+    if (!Number.isFinite(this.deadline)) return operation;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Stop()), Math.max(0, this.deadline - this.now()));
+    });
+    try {
+      return await Promise.race([operation, expired]);
+    } catch (error) {
+      if (error instanceof Stop) {
+        operation.then(release, ignore);
+        this.stop();
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -100,21 +128,33 @@ class Reading {
     else list.push(item);
   }
 
+  // A count of things never read (MCP bundles, hook modules), under the same bound as a kind's items.
+  count(components: Components, field: 'mcpBundles' | 'hookModules'): void {
+    if (components[field] >= MANIFEST_BOUNDS.itemsPerKind) this.partial = true;
+    else components[field] += 1;
+  }
+
   // An anchor directory: `missing` when it is absent, `unknown` when it is not a directory or cannot be resolved.
   async anchor(path: string): Promise<Anchor | 'missing' | 'unknown'> {
     this.tick();
     try {
-      const real = await this.fs.realpath(path);
-      return (await this.fs.lstat(real)).isDirectory() ? { real } : 'unknown';
+      const real = await this.bounded(this.fs.realpath(path));
+      return (await this.bounded(this.fs.lstat(real))).isDirectory() ? { real } : 'unknown';
     } catch (error) {
+      passStop(error);
       return ABSENT.has(codeOf(error) ?? '') ? 'missing' : 'unknown';
     }
   }
 
-  // A path inside `anchor`, as declared (`./x`, `x/y`) or as listed; `declaredBy` labels a declaration that leaves the
-  // anchor before any file is touched, so the answer never repeats the path it declared. Null when it is absent (a
-  // declared path's absence says `could not be read`; a default folder's is silent) or was refused (refusals say so).
-  async find(anchor: Anchor, path: string, declaredBy: string, declared = false): Promise<Found | null> {
+  // A path inside `anchor`, as declared (`./x`, `x/y`) or as listed; `declaredBy` labels a declaration that is a URL or
+  // leaves the anchor before any file is touched, so the answer never repeats such a value. Null when it is absent (a
+  // required declaration's absence says `could not be read`; a default folder's is silent) or was refused (refusals
+  // say so).
+  async find(anchor: Anchor, path: string, declaredBy: string, as: { declared?: boolean; required?: boolean } = {}): Promise<Found | null> {
+    if (as.declared && isUrl(path)) {
+      this.problem(declaredBy, 'unknown shape'); // a URL where a path belongs: never read, never echoed
+      return null;
+    }
     const lexical = resolve(anchor.real, path);
     if (path.includes('\0') || !under(anchor.real, lexical)) {
       this.problem(declaredBy, 'outside the plugin');
@@ -124,9 +164,10 @@ class Reading {
     this.tick();
     let real: string;
     try {
-      real = await this.fs.realpath(lexical);
+      real = await this.bounded(this.fs.realpath(lexical));
     } catch (error) {
-      if (declared || !ABSENT.has(codeOf(error) ?? '')) this.problem(label, 'could not be read');
+      passStop(error);
+      if (as.required || !ABSENT.has(codeOf(error) ?? '')) this.problem(label, 'could not be read');
       return null;
     }
     if (!under(anchor.real, real)) {
@@ -138,9 +179,10 @@ class Reading {
 
   async kind(found: Found): Promise<'file' | 'directory' | 'other' | null> {
     try {
-      const stat = await this.fs.lstat(found.real);
+      const stat = await this.bounded(this.fs.lstat(found.real));
       return stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other';
-    } catch {
+    } catch (error) {
+      passStop(error);
       this.problem(found.label, 'could not be read');
       return null;
     }
@@ -149,14 +191,16 @@ class Reading {
   // A directory's entry names, sorted; none when it cannot be listed.
   async list(found: Found): Promise<string[]> {
     try {
-      return (await this.fs.readdir(found.real)).map(String).sort();
-    } catch {
+      return (await this.bounded(this.fs.readdir(found.real))).map(String).sort();
+    } catch (error) {
+      passStop(error);
       this.problem(found.label, 'could not be read');
       return [];
     }
   }
 
-  // A regular file's text: the whole of it within `limit` bytes (else `too large`), or its head.
+  // A regular file's text: the whole of it within `limit` bytes (else `too large`, and the view partial: a bound left a
+  // file out), or its head.
   async read(found: Found, limit: number, whole: boolean): Promise<string | null> {
     const kind = await this.kind(found);
     if (kind === null) return null;
@@ -165,24 +209,26 @@ class Reading {
       return null;
     }
     try {
-      const handle = await this.fs.open(found.real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const handle = await this.bounded(this.fs.open(found.real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK), (late) => late.close().catch(ignore));
       try {
         const buffer = Buffer.alloc(whole ? limit + 1 : limit);
         let filled = 0;
         while (filled < buffer.length) {
-          const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+          const { bytesRead } = await this.bounded(handle.read(buffer, filled, buffer.length - filled, filled));
           if (bytesRead === 0) break;
           filled += bytesRead;
         }
         if (whole && filled > limit) {
           this.problem(found.label, 'too large');
+          this.partial = true;
           return null;
         }
         return buffer.subarray(0, filled).toString('utf8');
       } finally {
-        await handle.close();
+        handle.close().catch(ignore); // not awaited: a close that stalls never holds the answer
       }
-    } catch {
+    } catch (error) {
+      passStop(error);
       this.problem(found.label, 'could not be read');
       return null;
     }
@@ -241,7 +287,6 @@ function declarations(manifest: Json | null, field: string, by: string, inline: 
   return [manifest[field], experimental[field]].filter((value) => value !== undefined).map((value) => ({ value, by, inline }));
 }
 const pathsOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
-const isUrl = (value: string) => /^[a-z][a-z\d+.-]*:/i.test(value);
 
 const emptyComponents = (): Components => ({ mcpServers: [], mcpBundles: 0, agents: [], hooks: [], hookModules: 0, monitors: [], lspServers: [], commands: [], skills: [] });
 
@@ -261,7 +306,7 @@ class Inventory {
     return this.r.find(this.plugin, path, by);
   }
   private declared(path: string, by: string) {
-    return this.r.find(this.plugin, path, by, true);
+    return this.r.find(this.plugin, path, by, { declared: true, required: true });
   }
   private child(dir: Found, name: string) {
     return this.at(join(dir.label, name), dir.label);
@@ -299,7 +344,7 @@ class Inventory {
     await this.serversFile('.mcp.json', '.mcp.json', true);
     for (const { value, by } of declared) {
       for (const spec of pathsOf(value)) {
-        if (typeof spec === 'string' && /\.(mcpb|dxt)$/i.test(spec)) this.components.mcpBundles += 1; // counted, never read or fetched
+        if (typeof spec === 'string' && /\.(mcpb|dxt)$/i.test(spec)) this.r.count(this.components, 'mcpBundles'); // counted, never read or fetched
         else if (typeof spec === 'string' && !isUrl(spec)) await this.serversFile(spec, by, false);
         else if (isRecord(spec)) this.serversOf(spec, by);
         else this.r.problem(by, 'unknown shape');
@@ -307,17 +352,28 @@ class Inventory {
     }
   }
 
-  // -- agents: `agents/*.md`, replaced by plugin.json's paths; an entry's add
+  // -- agents: `agents/**/*.md` (recursive, any case of `.md`; a nested agent named through its folders as commands
+  // are, 2.1.292 `HH` :729782-729814), replaced by plugin.json's files or folders; an entry's add. A declared file is
+  // read only when it ends `.md` (:753347-753359).
+  private async walkAgents(dir: Found, prefix: string[], seen: Set<string>): Promise<void> {
+    if (seen.has(dir.real)) return;
+    seen.add(dir.real);
+    for (const name of await this.r.list(dir)) {
+      const child = await this.child(dir, name);
+      if (child === null) continue;
+      const kind = await this.r.kind(child);
+      if (kind === 'directory') await this.walkAgents(child, [...prefix, name], seen);
+      else if (kind === 'file' && name.toLowerCase().endsWith('.md')) await this.agent(child, prefix, name.slice(0, -3));
+    }
+  }
+  private async agent(file: Found, prefix: string[], fallback: string): Promise<void> {
+    const item = await this.item(file, fallback, true);
+    this.r.add(this.components.agents, { name: [...prefix, item.name].join(':'), description: item.description });
+  }
   async agents(declared: Declaration[], readDefault: boolean): Promise<void> {
     if (readDefault) {
       const dir = await this.at('agents', 'agents');
-      if (dir !== null && (await this.r.kind(dir)) === 'directory') {
-        for (const name of await this.r.list(dir)) {
-          if (!name.endsWith('.md')) continue;
-          const file = await this.child(dir, name);
-          if (file !== null && (await this.r.kind(file)) === 'file') this.r.add(this.components.agents, await this.item(file, name.slice(0, -3), true));
-        }
-      }
+      if (dir !== null && (await this.r.kind(dir)) === 'directory') await this.walkAgents(dir, [], new Set());
     }
     for (const { value, by } of declared) {
       if (typeof value !== 'string' && !Array.isArray(value)) {
@@ -325,12 +381,14 @@ class Inventory {
         continue;
       }
       for (const spec of pathsOf(value)) {
-        if (typeof spec !== 'string' || isUrl(spec)) {
+        if (typeof spec !== 'string') {
           this.r.problem(by, 'unknown shape');
           continue;
         }
-        const file = await this.declared(spec, by);
-        if (file !== null && (await this.r.kind(file)) === 'file') this.r.add(this.components.agents, await this.item(file, basename(file.label).replace(/\.md$/, ''), true));
+        const found = await this.declared(spec, by);
+        const kind = found === null ? null : await this.r.kind(found);
+        if (found !== null && kind === 'directory') await this.walkAgents(found, [], new Set());
+        else if (found !== null && kind === 'file' && found.label.endsWith('.md')) await this.agent(found, [], basename(found.label).replace(/\.md$/, ''));
       }
     }
   }
@@ -357,7 +415,7 @@ class Inventory {
       this.r.problem(by, 'unknown shape');
       return;
     }
-    if (Array.isArray(value.modules)) this.components.hookModules += value.modules.filter((m) => typeof m === 'string').length; // counted, never read
+    if (Array.isArray(value.modules)) for (const module of value.modules) if (typeof module === 'string') this.r.count(this.components, 'hookModules'); // counted, never read
     else if (value.modules !== undefined) this.r.problem(by, 'unknown shape');
     if (value.hooks !== undefined) this.eventsOf(value.hooks, by);
   }
@@ -516,7 +574,7 @@ class Inventory {
         continue;
       }
       for (const spec of pathsOf(value)) {
-        if (typeof spec !== 'string' || isUrl(spec)) {
+        if (typeof spec !== 'string') {
           this.r.problem(by, 'unknown shape');
           continue;
         }
@@ -571,7 +629,7 @@ export async function readManifestView(key: ManifestItemRef, anchors: ManifestAn
       if (entry === null || typeof marketplace !== 'object' || marketplace === null) return { ...view, partial: r.partial, problems: r.problems };
       // an entry whose plugin sits in the marketplace's own clone (`./plugins/x`); any other source is not on disk
       if (typeof entry.source === 'string') {
-        const found = await r.find(marketplace, entry.source, MARKETPLACE_JSON);
+        const found = await r.find(marketplace, entry.source, MARKETPLACE_JSON, { declared: true });
         if (found !== null && (await r.kind(found)) === 'directory') plugin = { real: found.real };
       }
     }
