@@ -1,6 +1,6 @@
 // The rename and resume widgets (C11 execution document, the widget table; M3 refresh task "rename and resume through
-// C10's landed actions"): `/rename <title>` through C10's `session.rename`, the dialog and Resume through C5's registry
-// where C10 registers them.
+// C10's landed actions"): `/rename <title>` through C10's `session.rename` and the dialog through C5's registry where
+// C10 registers it; `/resume` is P2-D's chooser.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -13,6 +13,7 @@ import { registerSessionAction } from '../app/session-actions';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { RenameWidget } from './RenameWidget';
+import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { ResumeWidget } from './ResumeWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -24,11 +25,11 @@ beforeEach(() => {
   const s = scenario();
   backend = createWidgetBackend({ root: ROOT, statuses: s.engine, records: s.sessions });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map(s.engine.map((st) => [st.appSessionId, backend.status(st.appSessionId)])), records: new Map(s.sessions.map((r) => [r.appId, r])), digests: new Map(s.digests.map((d) => [d.appSessionId, d as unknown as SessionDigest])) });
+  useSessions.setState({ engine: new Map(s.engine.map((st) => [st.appSessionId, backend.status(st.appSessionId)])), records: new Map(s.sessions.map((r) => [r.appId, r])), digests: new Map(s.digests.map((d) => [d.appSessionId, d as unknown as SessionDigest])), projects: new Map(s.projects.map((p) => [p.id, p])) /* P2-D */ });
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map(), projects: new Map() });
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -80,46 +81,41 @@ describe('rename widget', () => {
   });
 });
 
+// P2-D (the P2 spec, child P2-D, G1 and G5): `/resume` is the resume chooser the sidebar opens too, scoped to this
+// session's project and listing the others; Enter opens in the current tab, ⌘Enter in a new one; nothing resumes here.
 describe('resume widget', () => {
-  it("lists the project's other sessions, newest first, with the foreign-live one's Resume disabled and its holder named", () => {
+  beforeEach(() => clearPreviewCache());
+  const titles = () => screen.getAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent);
+
+  it("is the chooser over this session's project, without this session, newest first, the terminal-held one marked", () => {
     mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
-    const rows = within(screen.getByRole('list', { name: 'Sessions of this project' })).getAllByRole('listitem');
-    expect(rows.map((r) => r.querySelector('[data-title]')?.textContent)).toEqual(['Somersault terminal run', 'Trace stream reconnects']);
-    const foreign = within(rows[0]).getByRole('button', { name: 'Resume' });
-    expect(foreign).toHaveProperty('disabled', true);
-    expect(foreign.title).toBe('Live in terminal');
-    const exited = within(rows[1]).getByRole('button', { name: 'Resume' });
-    expect(exited).toHaveProperty('disabled', true); // no resume action registered
+    expect(screen.getByTestId('resume-scope').textContent).toBe('codex_somersault');
+    expect(titles()).toEqual(['Somersault terminal run', 'Trace stream reconnects']);
+    expect(within(screen.getAllByRole('option')[0]).getByRole('img').getAttribute('aria-label')).toBe('Live in terminal');
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull(); // opening is the action; the first Send continues it
   });
 
-  it("resumes an exited session through C10's registered resume action and closes", () => {
-    const resume = vi.fn();
-    const off = registerSessionAction('resume', resume);
-    const close = mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
-    const rows = within(screen.getByRole('list', { name: 'Sessions of this project' })).getAllByRole('listitem');
-    expect(within(rows[0]).getByRole('button', { name: 'Resume' })).toHaveProperty('disabled', true); // foreign-live stays refused
-    const exited = within(rows[1]).getByRole('button', { name: 'Resume' });
-    expect(exited).toHaveProperty('disabled', false);
-    fireEvent.click(exited);
-    expect(resume).toHaveBeenCalledWith('app-bdb23713');
-    expect(close).toHaveBeenCalledTimes(1);
-    off();
-  });
-
-  it('opens a listed session in its tab and closes', () => {
+  it('opens the selected session in the current tab on Enter and in a new tab on ⌘Enter, and closes', () => {
     const openSession = vi.fn();
+    const openTab = vi.fn();
     const layout = useLayout.getState();
-    useLayout.setState({ openSession });
+    useLayout.setState({ openSession, openTab });
     const close = mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
-    const rows = within(screen.getByRole('list', { name: 'Sessions of this project' })).getAllByRole('listitem');
-    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Open' }));
+    const search = screen.getByRole('combobox');
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    fireEvent.keyDown(search, { key: 'Enter' });
     expect(openSession).toHaveBeenCalledWith('app-bdb23713');
     expect(close).toHaveBeenCalledTimes(1);
-    useLayout.setState({ openSession: layout.openSession });
+    fireEvent.keyDown(search, { key: 'Enter', metaKey: true });
+    expect(openTab).toHaveBeenCalledWith({ kind: 'session', appSessionId: 'app-bdb23713' });
+    useLayout.setState({ openSession: layout.openSession, openTab: layout.openTab });
   });
 
-  it('says when the project has no other session', () => {
+  it('a session without a project opens on every project', () => {
     mount(ResumeWidget, 'app-3d334c38' as AppSessionId); // no project
-    expect(screen.getByText('No other sessions in this project')).toBeTruthy();
+    expect(screen.getByTestId('resume-scope').textContent).toBe('All projects');
+    expect(screen.getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(titles()).not.toContain(useSessions.getState().records.get('app-3d334c38' as AppSessionId)!.title.text);
+    expect(titles().length).toBeGreaterThan(2);
   });
 });
