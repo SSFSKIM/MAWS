@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { menu, openInViewer, otherThemeColours, withProduct, type Product } from './support/code-product';
 import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
+import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
 
@@ -306,9 +307,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const mark = viewer.locator('.cm-comment-mark[aria-label="Comment on line 3"]');
       await expect(mark).toBeAttached();
       await expect(mark, 'hidden until its line’s gutter is hovered').toBeHidden();
-      await mark.locator('xpath=..').hover();
-      await expect(mark).toBeVisible();
-      await mark.click();
+      await clickRevealed(mark.locator('xpath=..'), mark);
 
       const path = p.scratch.path(APP);
       const sheet = p.page.getByRole('dialog', { name: 'Comment on app.ts:3' });

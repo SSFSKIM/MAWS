@@ -21,6 +21,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
 import { invoke, launchReady, queueInterruptJournal, rewindJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -618,8 +619,7 @@ async function startEdit(page: Page, id: string, replay: RewindReplay): Promise<
     await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
   }
   const bubble = pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' });
-  await bubble.hover();
-  await bubble.getByRole('button', { name: 'Edit' }).click();
+  await clickRevealed(bubble, bubble.getByRole('button', { name: 'Edit' }));
   const field = inlineEditor(page).getByRole('textbox', { name: 'Edited message' });
   await expect(field).toHaveValue('turn two');
   await expect(field).toBeFocused();
@@ -712,8 +712,7 @@ test('edit in place: Cancel and Esc put the bubble back, and nothing is written'
   await inlineEditor(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(inlineEditor(page)).toHaveCount(0);
   const bubble = pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' });
-  await bubble.hover();
-  await bubble.getByRole('button', { name: 'Edit' }).click();
+  await clickRevealed(bubble, bubble.getByRole('button', { name: 'Edit' }));
   await expect(inlineEditor(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(inlineEditor(page)).toHaveCount(0);
