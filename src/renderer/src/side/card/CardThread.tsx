@@ -17,6 +17,7 @@ import { failureOf, useSetup } from '../../sessions/store';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
+import { useQueueStore } from '../../stores/queue';
 import { isOpen } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { deliverables, lookupKey } from '../../tools/deliverables/store';
@@ -29,6 +30,7 @@ import { hostedInSidePane, useSidePane } from '../store';
 import type { CardFrame } from './CardHost';
 import { closeCard, hideCardThread, showCardThread, type OpenCard } from './store';
 import { needsYouOf, replyOutcomeOf, threadStartOf } from './thread';
+import './card.css';
 
 const COPY = SIDE_COPY.card;
 
@@ -187,10 +189,12 @@ function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptAct
 }
 
 // The Reply field: Enter sends (Shift+Enter breaks a line, a composition keeps its Enter), through the seam; a host
-// error thrown by the send reads as a refusal with its message. A started reply waits as a pending bubble until a user
-// row of the thread newer than it arrives; while it waits the card claims the thread's returned message, so a failed
-// start puts the text back here (with the failure in the strip), never into the thread's unseen composer draft. No
-// other send is taken meanwhile.
+// error thrown by the send reads as a refusal with its message. A started reply waits as a pending bubble until the
+// thread's transcript draws it: a user row of the thread newer than it, or (a resume whose host queue is paused) a queue
+// entry newer than it, drawn as the held bubble. The card claims the thread's returned message from the press on, so a
+// start that fails, even before its answer is applied, puts the text back here (with the failure in the strip), never
+// into the thread's unseen composer draft; any answer but `started` drops the claim, and so does the reply drawn or the
+// card gone. No other send is taken meanwhile.
 function useReply(child: AppSessionId) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -198,18 +202,19 @@ function useReply(child: AppSessionId) {
   const [waiting, setWaiting] = useState<{ text: string; at: number } | null>(null);
   const [startFailed, setStartFailed] = useState(false);
   const delivered = useTranscriptStore((s) => waiting !== null && (s.entries[child]?.rows ?? []).some((row) => row.kind === 'user' && row.pending === undefined && Date.parse(row.at) >= waiting.at));
-  const pending = delivered ? null : waiting;
+  const held = useQueueStore((s) => waiting !== null && (s.bySession.get(child)?.entries ?? []).some((entry) => Date.parse(entry.createdAt) >= waiting.at));
+  const pending = delivered || held ? null : waiting;
 
+  // the claim on the thread's returned message: taken at the press, dropped once nothing can hand the reply back
+  const claim = useRef<(() => void) | null>(null);
+  const drop = () => {
+    claim.current?.();
+    claim.current = null;
+  };
   useEffect(() => {
-    if (pending === null) return;
-    const release = holdMessageReturn(child, (_appSessionId, message) => {
-      release();
-      setWaiting(null);
-      setText(message.display);
-      setStartFailed(true);
-    });
-    return release;
-  }, [pending, child]);
+    if (pending === null && !sending) drop();
+  }, [pending, sending]);
+  useEffect(() => drop, []);
 
   const canSend = text.trim() !== '' && !sending && pending === null;
   const send = async () => {
@@ -219,6 +224,16 @@ function useReply(child: AppSessionId) {
     setSending(true);
     setRefusal(null);
     setStartFailed(false);
+    let returned = false;
+    drop();
+    const release = holdMessageReturn(child, (_appSessionId, message) => {
+      returned = true;
+      drop();
+      setWaiting(null);
+      setText(message.display);
+      setStartFailed(true);
+    });
+    claim.current = release;
     let result: HumanPromptResult;
     try {
       result = await sendHumanPrompt(child, content, { origin: 'comment' });
@@ -227,6 +242,8 @@ function useReply(child: AppSessionId) {
     }
     const outcome = replyOutcomeOf(result);
     setSending(false);
+    if (outcome.kind !== 'starting' && claim.current === release) drop();
+    if (returned) return; // the start already failed and handed the text back
     if (outcome.kind === 'refused') {
       setRefusal(outcome.reason);
       return;

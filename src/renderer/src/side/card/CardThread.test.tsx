@@ -318,6 +318,56 @@ describe('Reply through the human send seam', () => {
     act(() => returnMessage(child, { content: 'later', display: 'later' }));
     expect(registered).toHaveBeenCalledTimes(1); // the claim went with its reply
   });
+
+  // Whole-branch review (fix wave): the claim stands from the press, so a start that fails before the card has drawn the
+  // pending reply still hands the text back here, and the later `started` does not wait on a reply already returned
+  it.each([
+    ['during the send, before its answer is applied', (send: () => void) => send()],
+    ['right after the `started` answer, before any render', (send: () => void) => void Promise.resolve().then().then().then(send)],
+  ])('a start that fails %s puts the reply back in the field, never into the registered return', async (_when, schedule) => {
+    const registered = vi.fn();
+    offs.push(registerMessageReturn(registered));
+    await ready();
+    seam.mockImplementationOnce(async () => {
+      schedule(() => returnMessage(child, { content: 'Wake up and do it', display: 'Wake up and do it' }));
+      return { disposition: 'started' };
+    });
+    await userEvent.type(replyField(), 'Wake up and do it{Enter}');
+    await waitFor(() => expect(replyField().value).toBe('Wake up and do it'));
+    await act(async () => {}); // every later render and effect settled
+    expect(registered).not.toHaveBeenCalled();
+    expect(card()!.querySelector('[data-card-pending]')).toBeNull();
+    expect(replyField().disabled).toBe(false);
+    expect(replyField().value).toBe('Wake up and do it');
+    expect(card()!.querySelector('[data-needs-you]')?.textContent).toContain('Could not start');
+    act(() => returnMessage(child, { content: 'later', display: 'later' }));
+    expect(registered).toHaveBeenCalledTimes(1); // no claim left behind
+  });
+
+  it('any answer but `started` leaves no claim: a later returned message takes the registered way', async () => {
+    const registered = vi.fn();
+    offs.push(registerMessageReturn(registered));
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'sent' });
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await waitFor(() => expect(replyField().value).toBe(''));
+    act(() => returnMessage(child, { content: 'other', display: 'other' }));
+    expect(registered).toHaveBeenCalledTimes(1);
+  });
+
+  // Whole-branch review (fix wave): a released thread whose host queue is paused resumes with the reply queued; the held
+  // bubble then draws it, so the card's own pending bubble goes and the field is free
+  it('started, then the reply held by the host queue: one bubble (the held one) and Reply enabled', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'started' });
+    await userEvent.type(replyField(), 'Wake up and do it{Enter}');
+    await waitFor(() => expect(card()!.querySelector('[data-card-pending]')).not.toBeNull());
+    const held = { queueId: 'q2', appSessionId: child, content: 'Wake up and do it', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, paused: true, pauseReason: 'user', entries: [held] }));
+    await waitFor(() => expect(card()!.querySelector('[data-pending="held"]')?.textContent).toContain('Wake up and do it'));
+    expect(card()!.querySelector('[data-card-pending]')).toBeNull();
+    expect(replyField().disabled).toBe(false);
+  });
 });
 
 describe('needs you', () => {
