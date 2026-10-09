@@ -13,9 +13,11 @@ import { GrantSnapshotSchema, QueueStateSchema, type GrantSnapshot, type QueueSt
 
 // C10 start: a launch spec stored before C10's additive `inheritGrantsFrom` (X6) still parses, and reads as null there;
 // without this a state file from an earlier build would be moved aside as unreadable, taking its queue and grants
-const StoredLaunchSpecSchema = LaunchSpecSchema.extend({ inheritGrantsFrom: LaunchSpecSchema.shape.inheritGrantsFrom.optional() });
+const StoredLaunchSpecSchema = LaunchSpecSchema.extend({ inheritGrantsFrom: LaunchSpecSchema.shape.inheritGrantsFrom.optional() }).strip();
 // C10 end
-const StateFileSchema = z.strictObject({ version: z.literal(1), queue: QueueStateSchema, grants: GrantSnapshotSchema, launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */ });
+// P2-0 (X6): ignore a later build's state/spec keys on read, rather than moving its queue and grants aside. Strip,
+// not passthrough: an update still writes only this build's shape; saveLaunchSpec keeps the strict IPC/write schema.
+const StateFileSchema = z.object({ version: z.literal(1), queue: QueueStateSchema, grants: GrantSnapshotSchema, launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });

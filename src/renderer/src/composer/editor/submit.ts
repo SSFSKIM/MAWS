@@ -11,6 +11,7 @@ import { DEFAULT_MEMORY_TARGET, type MemoryTarget } from '../../stores/composer'
 import { toast, useNotices } from '../../stores/notices';
 import { runBash } from '../modes/bash';
 import { appendMemory } from '../modes/memory';
+import { dispatchHumanPrompt, sendHumanPrompt } from '../submit/send-human-prompt';
 import { sendSizeRefusal } from './attachments';
 import type { Serialized } from './serialize';
 
@@ -47,10 +48,7 @@ export async function dispatchByMode(client: MawsBridge, appSessionId: AppSessio
     toast({ level: 'info', text: `Saved to ${saved.path}`, actions: [], dismissible: true });
     return null;
   }
-  const result =
-    how === 'steer'
-      ? await client.invoke('session.steer', { appSessionId, content: s.content, priority: 'next' })
-      : await client.invoke('session.send', { appSessionId, content: s.content });
+  const result = await dispatchHumanPrompt(client, appSessionId, s.content, how);
   return result.ok ? null : result.error.message;
 }
 
@@ -61,6 +59,21 @@ export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s:
   void client.invoke('session.history.append', input).then((result) => {
     if (!result.ok) console.warn('[composer] session.history.append failed', result.error);
   });
+}
+
+// P2-0: the live/released composer's human prompt goes through X22, with its existing pre-check, history and Retry
+// notice. State refusals keep the text quietly, as before; C10's released resume already says why it declined.
+export async function submitHumanSerialized(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
+  if (!precheck(s)) return false;
+  try {
+    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display }, client);
+    if (result.disposition === 'refused') return false;
+  } catch (error) {
+    warn(error instanceof Error ? error.message : String(error), retry);
+    return false;
+  }
+  afterAccepted(client, appSessionId, s);
+  return true;
 }
 
 // Whether the host accepted it (the editor then clears and the draft goes); on false the text stays where it was.

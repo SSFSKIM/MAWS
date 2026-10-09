@@ -51,6 +51,29 @@ describe('FileSessionStateStore', () => {
     expect(file.version).toBe(1);
   });
 
+  it('loads a newer build’s unknown state and launch keys without losing the queue or grants, and writes only the current shape', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    const path = join(dir, `${ID}.json`);
+    await mkdir(dir, { recursive: true });
+    const queue = { entries: [entry()], paused: true, pauseReason: 'user' as const };
+    const grants = { allow: ['Bash(touch granted.txt)'] };
+    const text = JSON.stringify({ version: 1, queue, grants, launchSpec: { ...spec, futureLaunchKey: { version: 2 } }, futureStateKey: true });
+    await writeFile(path, text);
+    const warnings: string[] = [];
+    const store = new FileSessionStateStore(userData, { warn: (m) => warnings.push(m) });
+
+    expect(await store.loadGrants(ID)).toEqual(grants); // a launch reads grants first
+    expect(await store.loadQueue(ID)).toEqual({ ...queue, corrupt: null });
+    expect(await store.loadLaunchSpec(ID)).toEqual(spec);
+    expect(warnings).toEqual([]);
+    expect(await readdir(dir)).toEqual([`${ID}.json`]);
+    expect(await readFile(path, 'utf8')).toBe(text); // reads neither rewrite nor move the file
+
+    await store.saveQueue(ID, queue);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 1, queue, grants, launchSpec: spec });
+    await expect(store.saveLaunchSpec(ID, { ...spec, futureLaunchKey: true } as typeof spec)).rejects.toThrow(); // writes remain strict
+  });
+
   it('exists answers whether a state file exists; loadQueue on it shows the persisted queue untouched (no recovery transition)', async () => {
     const store = new FileSessionStateStore(userData);
     expect(await store.exists(ID)).toBe(false);
