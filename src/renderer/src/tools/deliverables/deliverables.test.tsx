@@ -16,7 +16,7 @@ import { activeTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { fail, installFakeMain, ok } from '../../test-support/code';
 import { openComment } from '../../side/register';
-import { CLAIM_DEADLINE_MS, openCard, useCommentCard } from '../../side/card/store';
+import { CLAIM_DEADLINE_MS, enterThread, openCard, useCommentCard } from '../../side/card/store';
 import { registerCommentComposer, type CommentContext } from '../code/anchor/anchor';
 import { useFiles } from '../code/files/store';
 import { useViewer } from '../code/viewer/viewer-store';
@@ -667,6 +667,25 @@ describe('the comment card in the viewer', () => {
     pickIn(panel); // a new pick replaces it
     expect(cardIn(panel)).not.toBeNull();
     expect(cardIn(tab)).toBeNull();
+  });
+
+  // Whole-branch review (fix wave): a maximized panel covers the main region (kept mounted, inert), so a tab's card is
+  // not on screen there: its thread is not published as shown (read state, request toasts)
+  it('a deliverable tab’s card stops publishing its thread while a maximized panel covers the main region', async () => {
+    const regions = useLayout.getState().regions;
+    onTestFinished(() => useLayout.setState({ regions }));
+    useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, collapsed: false, maximized: false } } });
+    render(<DeliverableTab tab={{ id: `deliverable:${A}:${ART.id}`, kind: 'deliverable', appSessionId: A, deliverableId: ART.id, pinned: false }} />);
+    await settle();
+    pickIn(document.body);
+    const child = 'c6666666-6666-4666-8666-000000000001' as AppSessionId;
+    act(() => enterThread(useCommentCard.getState().open!.serial, child, 'Make it larger'));
+    expect(useCommentCard.getState().shownThread).toEqual({ parent: A, child });
+    act(() => useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, collapsed: false, maximized: true } } }));
+    expect(cardIn(document.body)).not.toBeNull(); // the card stays, offscreen with its region
+    expect(useCommentCard.getState().shownThread).toBeNull();
+    act(() => useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, collapsed: false, maximized: false } } }));
+    expect(useCommentCard.getState().shownThread).toEqual({ parent: A, child });
   });
 
   it('an unhosted card is claimed by the viewer of its record in its mode alone', async () => {
