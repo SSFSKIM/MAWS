@@ -19,6 +19,7 @@ export const MODS = {
   builtIn: 'Built in',
   version: (n: number) => `Version ${n}`,
   unavailable: (reason: string) => `MAWS mods can’t be read right now: ${reason}`,
+  refused: (reason: string) => `Not saved: ${reason}`,
   appSwitch: (name: string) => `${name} in every session`,
   session: 'This session',
   override: (appOn: boolean): { value: LaneOverride; label: string }[] => [
@@ -38,7 +39,7 @@ export const MODS = {
 };
 
 export function BuiltInModsContent({ appSessionId, search = '' }: { appSessionId: AppSessionId; search?: string }) {
-  const { read, setEnabled, setOverride } = useModRows(appSessionId);
+  const { read, failure, setEnabled, setOverride } = useModRows(appSessionId);
   if (read.state === 'loading') return null;
   if (read.state === 'unavailable')
     return (
@@ -78,6 +79,7 @@ export function BuiltInModsContent({ appSessionId, search = '' }: { appSessionId
                 )}
                 {row.pending !== undefined && <span data-mod-pending={row.pending}>{MODS.pending[row.pending]}</span>}
                 {row.mismatch !== undefined && <span role="note">{REPORT.mismatch(row.mismatch.observed, row.mismatch.resolved)}</span>}
+                {failure !== null && <span role="alert" className="text-danger">{MODS.refused(failure)}</span>}
               </span>
             }
           />

@@ -72,6 +72,16 @@ describe('the built-in mods section', () => {
     expect(screen.getByRole('radio', { name: 'Default (Off)' })).toBeTruthy();
   });
 
+  it('a refused write says so in main’s words, and the rows read again show what holds', async () => {
+    render(<BuiltInModsContent appSessionId={APP} />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    fireEvent.click(screen.getByRole('radio', { name: 'Off' }));
+    await act(() => fake.fail('mods.setSessionOverride', 'unknown session: app-mods'));
+    await act(() => fake.reply('mods.list', [ROW]));
+    expect(within(section()).getByRole('alert').textContent).toBe('Not saved: unknown session: app-mods');
+    expect((screen.getByRole('radio', { name: 'Default (On)' }) as HTMLInputElement).checked).toBe(true);
+  });
+
   it('a registry main cannot read says so; an empty one, or a search matching nothing, draws nothing', async () => {
     render(<BuiltInModsContent appSessionId={APP} />);
     await act(() => fake.fail('mods.list', 'index unavailable: locked by another build'));

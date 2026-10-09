@@ -841,24 +841,25 @@ test.describe('replay conformance', () => {
 });
 
 // ---- P2-C (M6; the P2-C document, G7): MAWS's built-in mods in /plugins ---------------------------------------------
-// The section draws `mods.list` for the session (main's index); the scenario's session has never been launched, so its
-// source is what its next launch would do, and switching the lane back on for it waits for that launch.
-test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its source and this session’s override; no Uninstall', async ({ backend }) => {
+// The section draws `mods.list` for the session. The scenario's session is the read model's, not the index's, so its
+// override cannot be written here (the unit tests and main's own cover that write); the app's switch is the settings
+// file's, and a new launch's source follows it.
+test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its source, the app switch and this session’s override; no Uninstall', async ({ backend }) => {
   const w = await openPlugins(backend);
   const row = w.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
   await expect(row).toContainText('To-human');
   await expect(row).toContainText('Built in');
   await expect(row).toContainText('Version 1');
   await expect(row).toContainText('MAWS gives the agent its instructions');
-  await expect(row.getByRole('switch', { name: 'To-human in every session' })).toHaveAttribute('aria-checked', 'true');
+  await expect(row.getByRole('radiogroup', { name: 'To-human in this session' }).getByRole('radio')).toHaveCount(3);
   await expect(row.getByRole('radio', { name: 'Default (On)' })).toBeChecked();
-  await row.locator('label').filter({ hasText: /^Off$/ }).click();
-  await expect(row.getByRole('radio', { name: 'Off' })).toBeChecked();
+  const appSwitch = row.getByRole('switch', { name: 'To-human in every session' });
+  await expect(appSwitch).toHaveAttribute('aria-checked', 'true');
+  await appSwitch.click();
+  await expect(appSwitch).toHaveAttribute('aria-checked', 'false');
   await expect(row).toContainText('Off: the agent is not asked to mark anything');
-  await row.locator('label').filter({ hasText: /^On$/ }).click();
-  await expect(row.getByRole('radio', { name: 'On' })).toBeChecked();
-  await expect(row).toContainText('Applies the next time this session starts');
-  await expect(w.getByRole('button', { name: /Uninstall/ })).toHaveCount(0);
+  await expect(row.getByRole('radio', { name: 'Default (Off)' })).toBeChecked();
+  await expect(w.getByRole('region', { name: 'MAWS mods · Built in' }).getByRole('button', { name: /Uninstall/ })).toHaveCount(0); // the installed plugins above have theirs
   expect(backend.consoleErrors()).toEqual([]);
 });
 

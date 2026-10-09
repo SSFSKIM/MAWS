@@ -3,7 +3,8 @@
 // override, or a launch that applied it), and after this surface's own write. Main answers `internal` when it cannot
 // (the index unavailable), which reads as `unavailable` with main's words: that is the registry's own state, not an
 // engine read's (a session with no ready process still has its mods). Writes: the app's switch is `settings.set` on
-// `mods.toHuman.enabled`, a session's override `mods.setSessionOverride`.
+// `mods.toHuman.enabled`, a session's override `mods.setSessionOverride`; a refused write is kept in main's words for the
+// section to say, and the rows read again show what holds.
 import { useCallback, useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -15,6 +16,7 @@ export type ModRowsRead = { state: 'loading' } | { state: 'ready'; rows: ModRow[
 
 export interface ModRows {
   read: ModRowsRead;
+  failure: string | null; // why this surface's last write was refused (main's words); cleared by the next write
   setEnabled(id: ModId, enabled: boolean): Promise<void>; // the app's switch
   setOverride(id: ModId, value: LaneOverride): Promise<void>; // this session's
 }
@@ -22,6 +24,7 @@ export interface ModRows {
 export function useModRows(appSessionId: AppSessionId, client: MawsBridge = ipc): ModRows {
   const [read, setRead] = useState<ModRowsRead>({ state: 'loading' });
   const [asked, setAsked] = useState(0); // bumped to read again
+  const [failure, setFailure] = useState<string | null>(null);
   const again = useCallback(() => setAsked((n) => n + 1), []);
 
   useEffect(() => {
@@ -46,19 +49,21 @@ export function useModRows(appSessionId: AppSessionId, client: MawsBridge = ipc)
   const setEnabled = useCallback(
     async (id: ModId, enabled: boolean) => {
       void id; // one mod today: the to-human lane's switch
+      setFailure(null);
       const result = await client.invoke('settings.set', { mods: { toHuman: { enabled } } });
-      if (!result.ok) console.warn('[mods] settings.set failed', result.error);
+      if (!result.ok) setFailure(result.error.message);
       again();
     },
     [again, client],
   );
   const setOverride = useCallback(
     async (id: ModId, value: LaneOverride) => {
+      setFailure(null);
       const result = await client.invoke('mods.setSessionOverride', { appSessionId, id, value });
-      if (!result.ok) console.warn('[mods] mods.setSessionOverride failed', result.error);
+      if (!result.ok) setFailure(result.error.message);
       again();
     },
     [again, appSessionId, client],
   );
-  return { read, setEnabled, setOverride };
+  return { read, failure, setEnabled, setOverride };
 }
