@@ -321,6 +321,33 @@ describe('answers follow their members (Design §6)', () => {
     t.report(q, { disposition: 'refused', started: false, reason: 'Trust this folder in the session to continue' });
     expect(t.question(q)).toEqual({ state: 'unanswered', failed: { reason: 'Trust this folder in the session to continue' } });
   });
+
+  // X22's five dispositions mirrored (the architect's ruling, M6's fix wave): a card held the message until a
+  // continuation, so nothing went out; never a refusal, never an answer on its way
+  it('a held send leaves the question unanswered and says it is held, with no answer to follow and the item kept', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.report(q, { disposition: 'refused', reason: 'The session has ended' });
+    t.report(q, { disposition: 'held', reason: 'trust' });
+    expect(t.question(q)).toEqual({ state: 'unanswered', held: { reason: 'trust' } }); // not `unconfirmed`: no prompt went out
+    expect(t.mark(q).question).not.toHaveProperty('failed');
+    expect(t.items().filter((i) => i.kind === 'async_input')).toHaveLength(1);
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! }); // the retry once the card was answered
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: entry.messageUuid, life: 'alive' }]) });
+    t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered' });
+  });
+
+  it('a held follow-up on an answered question leaves it answered', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! });
+    t.sim.engine(entry.messageUuid!, 'started');
+    t.report(q, { disposition: 'held', reason: 'relay' });
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres') } });
+  });
 });
 
 describe('the recovery read (Design §6, "Restarts and reconnects")', () => {

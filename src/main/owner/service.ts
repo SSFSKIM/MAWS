@@ -69,11 +69,18 @@ export interface OwnerChannelServiceDeps {
   recoveryRetryMs?: number; // the first retry's delay after a failed recovery read
 }
 
+// A send of a question's answer that did not go out, as the seam said (X22): refused in its words, or held by a trust or
+// relay card until its continuation (the seam's 'trust' | 'relay'). In memory only (Design §6's table).
+interface Unsent {
+  disposition: 'refused' | 'held';
+  reason: string;
+}
+
 interface SessionLive {
   log: { event: PromptEvent; at: number }[];
   // per question with an answer on its way (queued or unconfirmed, superseded or not), all its answers, oldest first
   answers: Map<MarkId, Answer[]>;
-  failures: Map<MarkId, string>; // the last refused send of an unanswered question
+  unsent: Map<MarkId, Unsent>; // the last send of an unanswered question that did not go out (refused or held)
   prompts: Map<MessageUuid, { text: string; at: string }>; // human prompts carrying an answer line, written and not yet taken
   userAt: Map<MessageUuid, string>; // when each human prompt was written or read back (a rewind's target)
   checking: Set<MessageUuid>; // uuids whose transcript evidence is being read
@@ -192,9 +199,11 @@ export class OwnerChannelService {
     if (row === null || row.appSessionId !== appSessionId || row.kind !== 'need-input') throw new Error(`unknown question: ${markId}`);
     if (row.state === 'retired') return;
     const live = this.liveOf(appSessionId);
-    live.failures.delete(markId);
-    if (input.disposition === 'refused') {
-      live.failures.set(markId, input.reason ?? 'refused');
+    live.unsent.delete(markId);
+    // nothing went out: a refusal, or a card holding the message until its continuation (never an answer to follow, so
+    // never the identifier-free `unconfirmed`); the question keeps its state and says why
+    if (input.disposition === 'refused' || input.disposition === 'held') {
+      live.unsent.set(markId, { disposition: input.disposition, reason: input.reason ?? input.disposition });
       this.changed(appSessionId);
       return;
     }
@@ -270,14 +279,14 @@ export class OwnerChannelService {
     const row = this.deps.store.session(appSessionId);
     const override = row?.override ?? 'inherit';
     const on = laneOn(this.deps.appEnabled(), override);
-    const failures = this.live.get(appSessionId)?.failures;
+    const unsent = this.live.get(appSessionId)?.unsent;
     return {
       appSessionId,
       lane: {
         on, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
       },
-      marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, failures?.get(mark.id as MarkId))),
+      marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId))),
     };
   }
 
@@ -298,7 +307,7 @@ export class OwnerChannelService {
 
   private liveOf(appSessionId: AppSessionId): SessionLive {
     let live = this.live.get(appSessionId);
-    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), failures: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), heldPrompts: [] }));
+    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), unsent: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), heldPrompts: [] }));
     return live;
   }
 
@@ -437,7 +446,7 @@ export class OwnerChannelService {
       const markId = asked[0]!.id as MarkId;
       const taken = newAnswer({ text: answerText(head, answer), origin: 'legacy', members: [{ kind: 'uuid', id: uuid, life: 'alive' }], unconfirmed: false, reportedAt: this.now(), deliveredAt: at });
       live.answers.set(markId, [...this.answersOf(live, asked[0]!), taken]);
-      live.failures.delete(markId);
+      live.unsent.delete(markId);
       this.persist(appSessionId, markId);
       settled = true;
     }
@@ -464,7 +473,7 @@ export class OwnerChannelService {
     const shown = open.at(-1);
     update.state = shown !== undefined ? statusOf(shown) : delivered !== null || row.answerText !== null ? 'delivered' : 'unanswered';
     this.deps.store.updateMark(markId, update);
-    if (update.state === 'unanswered') for (const answer of dead) if (answer.failed !== null) live.failures.set(markId, answer.failed.reason);
+    if (update.state === 'unanswered') for (const answer of dead) if (answer.failed !== null) live.unsent.set(markId, { disposition: 'refused', reason: answer.failed.reason });
     const followed = kept.filter(onItsWay);
     if (followed.length === 0) live.answers.delete(markId);
     else live.answers.set(markId, kept);
@@ -608,7 +617,7 @@ export class OwnerChannelService {
 }
 
 // A question's state as main reports it (src/shared/owner/state.ts).
-function ownerMarkOf(mark: OwnerMarkRow, failure: string | undefined): OwnerMark {
+function ownerMarkOf(mark: OwnerMarkRow, unsent: Unsent | undefined): OwnerMark {
   const base = { id: mark.id as MarkId, kind: mark.kind, anchor: { messageUuid: mark.messageUuid as MessageUuid, blockIndex: mark.blockIndex, span: mark.span }, head: mark.head, at: mark.at, item: mark.item };
   if (mark.kind === 'essential') return { ...base, essential: { state: mark.state === 'read' || mark.state === 'retired' ? mark.state : 'unread', readAt: mark.readAt } };
   let question: QuestionState;
@@ -626,7 +635,9 @@ function ownerMarkOf(mark: OwnerMarkRow, failure: string | undefined): OwnerMark
       question = { state: 'retired' };
       break;
     default:
-      question = { state: 'unanswered', ...(failure === undefined ? {} : { failed: { reason: failure } }) };
+      question = { state: 'unanswered' };
+      if (unsent?.disposition === 'refused') question.failed = { reason: unsent.reason };
+      if (unsent?.disposition === 'held') question.held = { reason: unsent.reason };
   }
   return { ...base, question };
 }

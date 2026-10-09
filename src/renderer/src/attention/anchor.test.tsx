@@ -16,7 +16,8 @@ import { RequestCard } from '../request-card/RequestCard';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, allTabs } from '../stores/layout-model';
+import { tabId } from '@shared/ipc/schema/layout';
 import { useTranscriptStore } from '../stores/transcript';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { BASH_RESULT, builder, uuid } from '../transcript/model/test-events';
@@ -108,6 +109,24 @@ describe('the surfaces', () => {
     expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
   });
 
+  // every activation of an owner row goes through the anchor opener, and keeps its way of opening the session
+  it.each([
+    ['a click takes the focused pane’s place', (row: HTMLElement) => fireEvent.click(row), false],
+    ['⌘-click opens a tab of its own', (row: HTMLElement) => fireEvent.click(row, { metaKey: true }), true],
+    ['a middle click opens a tab of its own', (row: HTMLElement) => fireEvent(row, new MouseEvent('auxclick', { bubbles: true, button: 1 })), true],
+  ] as const)('the Needs-you row: %s and still lands on the mark', async (_name, activate, kept) => {
+    const other = nine.sessions.find((r) => r.appId !== APP)!.appId as AppSessionId;
+    act(() => useLayout.getState().openSession(other));
+    await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
+    useTranscriptStore.getState().setOwnerLane(APP, true);
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }));
+    render(<Sidebar />);
+    activate(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!);
+    expect(active()).toMatchObject({ appSessionId: APP });
+    expect(allTabs(useLayout.getState().main).some((t) => t.id === tabId({ kind: 'session', appSessionId: other }))).toBe(kept);
+    expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
+  });
+
   it('the Overview card offers Mark read for a must-read, and nothing to answer for a question', () => {
     const must = owner('essential_unread', 'Must read — Mind the migration.');
     render(<RequestCard item={must} request={null} placement="card" paneIndex={0} />);
@@ -117,6 +136,20 @@ describe('the surfaces', () => {
     cleanup();
     render(<RequestCard item={owner('async_input', 'Question — Which backend?')} request={null} placement="card" paneIndex={0} />);
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Open session']);
+  });
+
+  it.each(['envelope', 'reject'] as const)('the Overview card’s Mark read that failed says so on the card, which keeps it (%s)', async (how) => {
+    window.maws = {
+      ...fake.client,
+      invoke: (name: string, input: unknown) =>
+        name !== 'ownerChannel.markRead' ? fake.client.invoke(name as never, input as never)
+          : how === 'reject' ? Promise.reject(new Error('the bridge is gone')) : Promise.resolve({ ok: false, error: { code: 'internal', message: 'the bridge is gone' } }),
+    } as typeof fake.client;
+    render(<RequestCard item={owner('essential_unread', 'Must read — Mind the migration.')} request={null} placement="card" paneIndex={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.getByRole('alert').textContent).toBe('Not marked read: the bridge is gone');
+    expect(screen.getByRole('button', { name: 'Mark read' })).toBeTruthy();
   });
 
   it('the composer neither docks nor shows a notice for either kind', () => {

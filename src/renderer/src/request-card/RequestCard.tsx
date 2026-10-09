@@ -48,7 +48,7 @@ import { displayTitle } from '../sessions/title';
 // P2-C start (2026-10-10)
 import { isOpen } from '@shared/attention/kinds';
 import { markIdOf } from '@shared/owner/marks';
-import { openAnchor, ownerAnchorOf } from '../attention/anchor';
+import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
 import { markRead } from '../owner/report/answering';
 import { ESSENTIAL } from '../owner/report/copy';
 // P2-C end
@@ -374,7 +374,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           </CardButton>
           {/* P2-C start (2026-10-10) */}
           {item.kind === 'essential_unread' && anchor !== null && isOpen(item) && (
-            <CardButton onClick={() => markRead(item.appSessionId, [markIdOf(item.appSessionId, 'essential', anchor)])}>{ESSENTIAL.markRead}</CardButton>
+            <MarkRead appSessionId={item.appSessionId} anchor={anchor} />
           )}
           {/* P2-C end */}
           {canAnswerHover && !collapsed && request?.kind === 'permission.requested' && (
@@ -410,3 +410,24 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     </DockedCardFrame>
   );
 }
+
+// P2-C start (2026-10-10; M6's fix wave): a must-read's Mark read; one that failed is said on the card beside it, the
+// button staying to try again
+function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSessionId']; anchor: ItemAnchor }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const read = async () => {
+    setFailed(null);
+    setFailed(await markRead(appSessionId, [markIdOf(appSessionId, 'essential', anchor)]));
+  };
+  return (
+    <>
+      {failed !== null && (
+        <span role="alert" className="text-danger">
+          {ESSENTIAL.notMarked(failed)}
+        </span>
+      )}
+      <CardButton onClick={() => void read()}>{ESSENTIAL.markRead}</CardButton>
+    </>
+  );
+}
+// P2-C end

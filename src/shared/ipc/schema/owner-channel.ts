@@ -14,13 +14,14 @@ export const OwnerChannelAnsweredSchema = z.strictObject({
   markId: MarkIdSchema,
   text: z.string(), // the prompt the seam sent (`answerText(head, answer)`)
   origin: AnswerOriginSchema,
-  // the seam's result in X22's final shape (P2-A; 2026-10-10): `held` is the composer's alone, so a card's send the
-  // session could not take is `refused` with the card's words; `started` says the send acquired the session first
-  disposition: z.enum(['sent', 'steered', 'queued', 'refused']),
+  // the seam's result in X22's final shape (P2-A; 2026-10-10), its five dispositions mirrored: `held` (a trust or relay
+  // card holds the message until its continuation; nothing went out) is neither a send nor a refusal; `started` says
+  // the send acquired the session first
+  disposition: z.enum(['sent', 'steered', 'queued', 'held', 'refused']),
   started: z.boolean(),
   messageUuid: MessageUuidSchema.optional(), // `sent`, `steered`; a result with neither id reads unconfirmed (Design §6)
   queueId: z.string().optional(), // `queued`
-  reason: z.string().optional(), // `refused`
+  reason: z.string().optional(), // `refused`: the words; `held`: the card holding it ('trust' | 'relay')
 });
 
 export const commands = {

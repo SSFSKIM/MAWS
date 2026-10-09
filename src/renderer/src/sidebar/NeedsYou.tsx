@@ -2,10 +2,12 @@
 // The attention store supplies one wait-ordered row per session; the existing hover card supplies the request preview.
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import type { AppSessionId } from '@shared/graph/ids'; // P2-C
 import { openAnchor, ownerAnchorOf } from '../attention/anchor'; // P2-C
 import type { NeedsYouRow } from '../attention/derive';
 import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
+import type { OpenSessionOptions } from '../stores/layout-model'; // P2-C
 import { useSessions } from '../stores/sessions';
 import { SessionHoverCard } from './HoverCard';
 import { SectionHeading } from './SectionHeading';
@@ -50,6 +52,13 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
           const title = displayTitle(record);
           const anchor = ownerAnchorOf(row.oldest); // P2-C: a question left or a must-read reads its summary and opens at its mark
           const reason = anchor !== null ? row.oldest.summary : ATTENTION_HEADINGS[row.oldest.kind].text;
+          // every activation opens the session its way (a click takes the focused pane's place; ⌘-click and a middle
+          // click give it a tab of its own), and an owner item's lands on its mark (P2-C)
+          const open = (how: OpenSessionOptions) => {
+            const openSession = (id: AppSessionId) => useLayout.getState().openSession(id, how);
+            if (anchor !== null) openAnchor(row.appSessionId, anchor, openSession);
+            else openSession(row.appSessionId);
+          };
           return (
             <li key={row.appSessionId}>
               <SessionHoverCard record={record}>
@@ -66,8 +75,8 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
                   }}
                   onBlur={() => { focusOwner.current = null; }}
                   onKeyDown={(event) => onKeyDown(event, index)}
-                  onClick={(event) => (anchor !== null && !event.metaKey ? openAnchor(row.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(row.appSessionId, event.metaKey ? { how: 'tab' } : {}))}
-                  onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(row.appSessionId, { how: 'tab' })}
+                  onClick={(event) => open(event.metaKey ? { how: 'tab' } : {})}
+                  onAuxClick={(event) => event.button === 1 && open({ how: 'tab' })}
                   className={`flex w-full cursor-default flex-col rounded-sm px-[9px] py-1.5 text-left outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected === row.appSessionId ? 'bg-bg-active' : ''}`}
                 >
                   <span className="w-full truncate text-ui-sm text-fg-muted">{project}</span>

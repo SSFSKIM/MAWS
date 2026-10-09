@@ -1,10 +1,11 @@
 // The cards' actions (the P2-C document, Design §6 and §8; M6): a choice and a Reply through a fake seam per
 // disposition, each result reported to main whatever it was; Sending… and Starting…; Reply's field, its keys and the
-// composer's focus after it; Cancel's outcomes; Retry; Answer again; Take over; Mark read and Mark all read.
+// composer's focus after it; Cancel's outcomes; Retry; Answer again; Take over; Mark read and Mark all read; a held
+// send in the held words; a report or a command that fails, as an envelope or a rejected invoke, said where it was asked.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import type { CommandInput } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, MawsBridge } from '@shared/ipc/schema';
 import { markIdOf } from '@shared/owner/marks';
 import type { OwnerChannelState, OwnerMark, QuestionState } from '@shared/owner/state';
 import { fakeClient } from '../../../../../test/support/fake-client';
@@ -12,8 +13,10 @@ import { record } from '../../../../../test/support/builders';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { resetOwnerChannelStore, useOwnerChannelStore } from '../../stores/owner-channel';
 import { useComposerStore } from '../../stores/composer';
+import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
+import { TRUST_FIRST } from '../../sessions/acquire';
 import { OwnerReport } from './OwnerReport';
 import { ReportBar } from './ReportBar';
 import { reportOf } from './answering';
@@ -54,6 +57,7 @@ afterEach(() => {
   resetOwnerChannelStore();
   useSessions.setState({ records: new Map(), engine: new Map() });
   useComposerStore.setState({ focusTargets: new Map() });
+  useNotices.setState({ notices: [] });
 });
 
 const question = (state: QuestionState, id = Q): OwnerMark => ({ id, kind: 'need-input', anchor: { ...anchor, span: 0 }, head: 'Which backend?', at: '2026-10-09T10:00:00.000Z', item: true, question: state });
@@ -71,6 +75,19 @@ function seam(result: HumanPromptResult | (() => Promise<HumanPromptResult>)) {
 const draw = (text = QUESTION) => render(<OwnerReport appSessionId={APP} text={text} live={false} showRecord recordKey="k" anchor={anchor} />);
 const reports = () => fake.invoked('ownerChannel.answered') as CommandInput<'ownerChannel.answered'>[];
 const choice = (name: RegExp) => within(screen.getByRole('group', { name: 'Choices' })).getByRole('button', { name });
+// The next `times` invocations of `name` fail: main's failure envelope, or the bridge's rejected invoke.
+function failing(name: CommandName, how: 'envelope' | 'reject', message = 'the index is unavailable', times = 1) {
+  let left = times;
+  hold.client = {
+    ...fake.client,
+    invoke: (n: CommandName, input: unknown) => {
+      const answered = (fake.client.invoke as (n: CommandName, i: unknown) => Promise<unknown>)(n, input);
+      if (n !== name || left <= 0) return answered;
+      left -= 1;
+      return how === 'reject' ? Promise.reject(new Error(message)) : Promise.resolve({ ok: false, error: { code: 'internal', message } });
+    },
+  } as MawsBridge;
+}
 
 describe('a choice is sent through the seam and its result reported to main, whatever it was', () => {
   const cases: [string, HumanPromptResult, Partial<CommandInput<'ownerChannel.answered'>>][] = [
@@ -79,6 +96,7 @@ describe('a choice is sent through the seam and its result reported to main, wha
     ['queued', { disposition: 'queued', started: false, queueId: 'q-1' }, { disposition: 'queued', queueId: 'q-1' }],
     ['started (a send that acquired the session)', { disposition: 'sent', started: true, messageUuid: 'u-3' as MessageUuid }, { disposition: 'sent', started: true, messageUuid: 'u-3' as MessageUuid }],
     ['refused', { disposition: 'refused', started: false, reason: 'Held by a terminal' }, { disposition: 'refused', reason: 'Held by a terminal' }],
+    ['held', { disposition: 'held', started: false, reason: 'trust' }, { disposition: 'held', reason: 'trust' }],
   ];
   it.each(cases)('%s', async (_name, result, reported) => {
     withMarks([question({ state: 'unanswered' })]);
@@ -90,14 +108,31 @@ describe('a choice is sent through the seam and its result reported to main, wha
     expect(reports()).toEqual([{ appSessionId: APP, markId: Q, text: 'Answering "Which backend?": Postgres', origin: 'answer', ...{ started: false }, ...reported }]);
   });
 
-  it('a seam that throws is reported as a refusal in its words; `held`, the composer’s alone, reads as one too', async () => {
+  it('a seam that throws is reported as a refusal in its words; `held` is reported as held, never as a refusal', async () => {
     withMarks([question({ state: 'unanswered' })]);
     seam(() => Promise.reject(new Error('main is unreachable')));
     draw();
     fireEvent.click(choice(/^SQLite/));
     await settle();
     expect(reports()[0]).toMatchObject({ disposition: 'refused', started: false, reason: 'main is unreachable', text: 'Answering "Which backend?": SQLite' });
-    expect(reportOf(APP, Q, { text: 't', origin: 'answer' }, { disposition: 'held', started: false, reason: 'trust' })).toMatchObject({ disposition: 'refused', reason: 'trust' });
+    expect(reportOf(APP, Q, { text: 't', origin: 'answer' }, { disposition: 'held', started: false, reason: 'trust' })).toMatchObject({ disposition: 'held', reason: 'trust' });
+  });
+
+  it('a held send says the card holding it, in its words, with Retry, and never reads as sent', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    seam({ disposition: 'held', started: false, reason: 'trust' });
+    const view = draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    expect(screen.getByText(TRUST_FIRST)).toBeTruthy(); // the card's own note until main's state arrives
+    withMarks([question({ state: 'unanswered', held: { reason: 'trust' } })]);
+    view.rerender(<OwnerReport appSessionId={APP} text={QUESTION} live={false} showRecord recordKey="k" anchor={anchor} />);
+    expect(screen.getAllByText(TRUST_FIRST)).toHaveLength(1); // said once, on the state line
+    expect(screen.queryByText('Sent — not confirmed')).toBeNull();
+    seam({ disposition: 'sent', started: true, messageUuid: 'u-7' as MessageUuid });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await settle();
+    expect(reports().map((r) => r.disposition)).toEqual(['held', 'sent']);
   });
 
   it('reads Sending… while the seam answers, offers nothing meanwhile, and one click is one answer', async () => {
@@ -155,6 +190,21 @@ describe('Reply', () => {
     expect(insertText).not.toHaveBeenCalled(); // the composer's draft is never written
   });
 
+  it('Escape and Close each close the field and give the keyboard back to the card’s Reply', () => {
+    withMarks([question({ state: 'unanswered' })]);
+    draw();
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Your answer' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    const close = screen.getByRole('button', { name: 'Close' });
+    close.focus();
+    fireEvent.click(close);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reply' }));
+  });
+
   it('a refused reply keeps the field and its text, and says why; Escape closes the field', async () => {
     withMarks([question({ state: 'delivered', answer: { text: 'Answering "Which backend?": Postgres', origin: 'answer', at: '2026-10-09T10:02:00.000Z' } })]);
     seam({ disposition: 'refused', started: false, reason: 'Trust this folder in the session to continue' });
@@ -170,6 +220,52 @@ describe('Reply', () => {
     expect(focusFrame).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Your answer' }), { key: 'Escape' });
     expect(screen.queryByRole('textbox')).toBeNull();
+  });
+});
+
+describe('a report main never got is said on the card and can be made again, without sending the prompt again', () => {
+  it.each(['envelope', 'reject'] as const)('a choice whose report failed (%s)', async (how) => {
+    withMarks([question({ state: 'unanswered', failed: { reason: 'The relay is unreachable' } })]);
+    seam({ disposition: 'sent', started: false, messageUuid: 'u-8' as MessageUuid });
+    failing('ownerChannel.answered', how);
+    draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Sent, but MAWS couldn’t record it: the index is unavailable');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull(); // the answer went out: nothing to resend
+    fireEvent.click(within(alert).getByRole('button', { name: 'Record again' }));
+    await settle();
+    expect(sends).toHaveLength(1); // the prompt is never sent again
+    expect(reports()).toHaveLength(2);
+    expect(reports()[1]).toEqual(reports()[0]);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a reply whose report failed closes its field (the prompt left) and keeps the keyboard on the card', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    seam({ disposition: 'steered', started: false, messageUuid: 'u-9' as MessageUuid });
+    failing('ownerChannel.answered', 'reject', 'the bridge is gone');
+    draw();
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'SQLite' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Your answer' }), { key: 'Enter' });
+    await settle();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(focusFrame).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reply' }));
+    expect(screen.getByRole('alert').textContent).toContain('Sent, but MAWS couldn’t record it: the bridge is gone');
+  });
+
+  it('a refusal whose report failed is still said on the card, with nothing to record', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    seam({ disposition: 'refused', started: false, reason: 'The session has ended' });
+    failing('ownerChannel.answered', 'envelope');
+    draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    expect(screen.getByText('The session has ended')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Record again' })).toBeNull();
   });
 });
 
@@ -223,6 +319,15 @@ describe('the other actions', () => {
     expect(screen.getByText(/Queued — sends when the agent reaches a pause/)).toBeTruthy();
   });
 
+  it('a Cancel whose invoke is rejected says why', async () => {
+    withMarks([question({ state: 'queued', text: 'Answering "Which backend?": Postgres', origin: 'answer', members: [] })]);
+    failing('ownerChannel.cancel', 'reject', 'the bridge is gone');
+    draw();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await settle();
+    expect(screen.getByText('the bridge is gone')).toBeTruthy();
+  });
+
   it('a session held in a terminal offers Take over and nothing to answer', () => {
     const holder = { kind: 'terminal', pid: 42 } as const;
     useSessions.setState({ records: new Map([[APP, record(APP, { holder } as never)]]) });
@@ -244,6 +349,38 @@ describe('the other actions', () => {
     render(<ReportBar appSessionId={APP} />);
     fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
     expect(fake.invoked('ownerChannel.markRead').at(-1)).toEqual({ appSessionId: APP, markIds: 'all' });
+    useTranscriptStore.setState({ entries: {} });
+  });
+});
+
+describe('a Mark read that failed says so', () => {
+  const essential: OwnerMark = { id: markIdOf(APP, 'essential', { ...anchor, span: 0 }), kind: 'essential', anchor: { ...anchor, span: 0 }, head: 'x', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'unread', readAt: null } };
+
+  it.each(['envelope', 'reject'] as const)('on the card, which keeps Mark read (%s)', async (how) => {
+    withMarks([essential]);
+    failing('ownerChannel.markRead', how);
+    draw('<essential>One.</essential>');
+    fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('Not marked read: the index is unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Mark read' })); // the action is the retry
+    await settle();
+    expect(fake.invoked('ownerChannel.markRead')).toHaveLength(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it.each(['envelope', 'reject'] as const)('Mark all read, which has no card, as a toast with Retry (%s)', async (how) => {
+    withMarks([essential, { ...essential, id: markIdOf(APP, 'essential', { ...anchor, span: 1 }), anchor: { ...anchor, span: 1 } }]);
+    useTranscriptStore.setState({ entries: { [APP]: { state: { ui: { ownerLane: true } } } as never } });
+    failing('ownerChannel.markRead', how);
+    render(<ReportBar appSessionId={APP} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
+    await settle();
+    const [notice] = useNotices.getState().notices;
+    expect(notice).toMatchObject({ kind: 'toast', text: 'Must-reads not marked read: the index is unavailable', actions: [{ label: 'Retry' }] });
+    await act(async () => notice!.actions[0]!.run());
+    await settle();
+    expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: APP, markIds: 'all' }, { appSessionId: APP, markIds: 'all' }]);
     useTranscriptStore.setState({ entries: {} });
   });
 });

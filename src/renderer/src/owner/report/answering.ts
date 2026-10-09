@@ -1,11 +1,14 @@
 // The cards' actions (the P2-C document, Design §6 "The card's send" and "Cancel", §8; M6). A choice or a Reply is
 // `answerText(head, answer)` sent through the one human-prompt seam (X22) with origin `answer` or `reply`, and the
 // seam's result, whatever it is, is reported to main with `ownerChannel.answered`: main owns the question's state from
-// there (queued, delivered, unconfirmed, or unanswered with the refusal's words), because only main persists and sees
-// every event. A seam that throws (main or the host unreachable) is reported as a refusal in its words, so the card
-// shows it with Retry like any other. While the seam answers the card says Sending…, or Starting… when the session has
-// no ready process and the send acquires it first (P2-A). After a Reply the session's composer takes the keyboard,
-// its draft untouched. Cancel and Mark read are main's commands.
+// there (queued, delivered, unconfirmed, or unanswered with what kept it from going out), because only main persists
+// and sees every event. A seam that throws (main or the host unreachable) is reported as a refusal in its words, so the
+// card shows it with Retry like any other; a send a trust or relay card holds (X22's `held`) is reported as held, and
+// the card says that card's words with Retry. While the seam answers the card says Sending…, or Starting… when the
+// session has no ready process and the send acquires it first (P2-A). After a Reply the session's composer takes the
+// keyboard, its draft untouched. Cancel and Mark read are main's commands. No action's failure escapes or goes unsaid:
+// a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is said where it was asked,
+// and a sent answer whose report failed is kept so that the report alone can be made again, never the prompt.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, MawsBridge } from '@shared/ipc/schema';
@@ -26,41 +29,63 @@ export interface AnswerSend { text: string; origin: AnswerOrigin }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// The seam's result as main takes it. `held` is the composer's alone (the seam answers a card's send it could not
-// start with `refused` and the card's words), so it is read as a refusal should it ever arrive.
+// A command's failure in its words, null when it succeeded: main's failure envelope, or the invoke rejected.
+async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error: { message: string } }>): Promise<string | null> {
+  try {
+    const result = await invoke();
+    return result.ok ? null : result.error.message;
+  } catch (error) {
+    return messageOf(error);
+  }
+}
+
+// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing.
+const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued';
+
+// The seam's result as main takes it: X22's five dispositions, as the seam said them.
 export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult): AnswerReport {
   const { disposition, started, messageUuid, queueId, reason } = result;
   return {
-    appSessionId, markId, text: send.text, origin: send.origin, disposition: disposition === 'held' ? 'refused' : disposition, started,
+    appSessionId, markId, text: send.text, origin: send.origin, disposition, started,
     ...(messageUuid !== undefined && { messageUuid }), ...(queueId !== undefined && { queueId }), ...(reason !== undefined && { reason }),
   };
 }
 
+// The report made to main: null when main took it, else the failure's words.
+export const reportAnswer = (report: AnswerReport, client: MawsBridge = ipc): Promise<string | null> => failureOf(() => client.invoke('ownerChannel.answered', report));
+
+export interface AnswerOutcome {
+  result: HumanPromptResult;
+  report: AnswerReport;
+  unreported: string | null; // the report's failure in its words; null: main has it
+}
+
 // One answer: the seam, then the report of whatever it answered.
-export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, client: MawsBridge = ipc): Promise<HumanPromptResult> {
+export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, client: MawsBridge = ipc): Promise<AnswerOutcome> {
   let result: HumanPromptResult;
   try {
     result = await sendHumanPrompt(appSessionId, send.text, { origin: send.origin }, client);
   } catch (error) {
     result = { disposition: 'refused', started: false, reason: messageOf(error) };
   }
-  const reported = await client.invoke('ownerChannel.answered', reportOf(appSessionId, markId, send, result));
-  if (!reported.ok) console.warn('[owner] ownerChannel.answered failed', reported.error);
-  return result;
+  const report = reportOf(appSessionId, markId, send, result);
+  return { result, report, unreported: await reportAnswer(report, client) };
 }
 
-export function markRead(appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): void {
-  void client.invoke('ownerChannel.markRead', { appSessionId, markIds }).then((result) => {
-    if (!result.ok) console.warn('[owner] ownerChannel.markRead failed', result.error);
-  });
-}
+// Null when main read them, else the failure's words, for the caller to say where it was asked.
+export const markRead = (appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): Promise<string | null> =>
+  failureOf(() => client.invoke('ownerChannel.markRead', { appSessionId, markIds }));
 
-// What the card shows while its own send or cancel runs, and what a cancel answered.
+// What the card shows while its own send or cancel runs, what its last send or cancel answered, and the failure of a
+// sent answer's report still to be made.
 export interface Answering {
   actions: QuestionActions;
   busy: 'sending' | 'starting' | null;
   note: string | null;
+  unreported: string | null;
 }
+
+interface Unreported { report: AnswerReport; error: string }
 
 // A question's actions for its card: null without a mark main knows (a block still streaming, or not derived yet),
 // since main can follow only a question it has.
@@ -69,43 +94,63 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
   const [busy, setBusy] = useState<Answering['busy']>(null);
   const [note, setNote] = useState<string | null>(null);
   const [last, setLast] = useState<AnswerSend | null>(null);
-  if (markId === null) return { actions: {}, busy: null, note: null };
+  const [unreported, setUnreported] = useState<Unreported | null>(null);
+  if (markId === null) return { actions: {}, busy: null, note: null, unreported: null };
 
-  const send = async (answer: AnswerSend): Promise<HumanPromptResult | null> => {
+  const send = async (answer: AnswerSend): Promise<AnswerOutcome | null> => {
     if (busy !== null) return null; // the same answer clicked twice: one send
     const sessions = useSessions.getState();
     setBusy(sessions.engine.get(appSessionId)?.process !== 'ready' && sessions.records.has(appSessionId) ? 'starting' : 'sending');
     setNote(null);
     setLast(answer);
     try {
-      const result = await sendAnswer(appSessionId, markId, answer, client);
-      // main shows a refusal on an unanswered question; a refused follow-up on an answered one is said here
-      if (result.disposition === 'refused' || result.disposition === 'held') setNote(result.reason ?? null);
-      return result;
+      const outcome = await sendAnswer(appSessionId, markId, answer, client);
+      const { result } = outcome;
+      // main says what kept an unanswered question's answer from going out; a follow-up's on an answered question, and
+      // one main never heard of, the card says itself
+      if (result.disposition === 'refused') setNote(result.reason ?? null);
+      if (result.disposition === 'held') setNote(QUESTION.held(result.reason));
+      // a sent answer main never heard of is kept until its report is made; a newer sent answer's report supersedes it
+      // (the older prompt is still the engine's, and main's legacy recognition reads it, Design §6)
+      if (wentOut(result)) setUnreported(outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported });
+      return outcome;
     } finally {
       setBusy(null);
     }
+  };
+  // the kept report made again; the prompt is never sent again
+  const recordAgain = async (pending: Unreported) => {
+    setUnreported(null);
+    const error = await reportAnswer(pending.report, client);
+    if (error !== null) setUnreported((now) => now ?? { report: pending.report, error });
   };
   const foreign = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holder : null;
 
   return {
     busy,
     note,
+    unreported: unreported?.error ?? null,
     actions: {
       choose: (choice: Choice) => void send({ text: answerText(head, choice.text), origin: 'answer' }),
       reply: async (text: string) => {
-        const result = await send({ text: answerText(head, text), origin: 'reply' });
-        if (result === null || result.disposition === 'refused' || result.disposition === 'held') return false;
-        useComposerStore.getState().focusTargets.get(appSessionId)?.focusFrame(); // the composer's own focus action
+        const outcome = await send({ text: answerText(head, text), origin: 'reply' });
+        if (outcome === null || !wentOut(outcome.result)) return false;
+        // the composer's own focus action; a report main never got keeps the keyboard on the card that says so
+        if (outcome.unreported === null) useComposerStore.getState().focusTargets.get(appSessionId)?.focusFrame();
         return true;
       },
-      ...(last !== null && { retry: () => void send(last) }),
+      // Retry sends the last answer again, so never while a sent answer's report is still to be made
+      ...(last !== null && unreported === null && { retry: () => void send(last) }),
+      ...(unreported !== null && { recordAgain: () => void recordAgain(unreported) }),
       cancel: () => {
         setNote(null);
-        void client.invoke('ownerChannel.cancel', { appSessionId, markId }).then((result) => {
-          if (!result.ok) setNote(result.error.message);
-          else if (result.value.outcome === 'already_delivering') setNote(QUESTION.alreadyOnItsWay);
-        });
+        void client.invoke('ownerChannel.cancel', { appSessionId, markId }).then(
+          (result) => {
+            if (!result.ok) setNote(result.error.message);
+            else if (result.value.outcome === 'already_delivering') setNote(QUESTION.alreadyOnItsWay);
+          },
+          (error: unknown) => setNote(messageOf(error)),
+        );
       },
       ...(foreign !== null && canTakeOver(foreign) && { takeOver: () => void takeOverSession(appSessionId, foreign) }),
     },

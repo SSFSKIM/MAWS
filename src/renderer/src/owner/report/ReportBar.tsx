@@ -6,6 +6,7 @@
 // `toggleReportView` is the unbound action `transcript.toggleReport`, on the focused pane's session.
 import type { AppSessionId } from '@shared/graph/ids';
 import { focusedSession } from '../../composer/ComposerAppKeys';
+import { toast } from '../../stores/notices';
 import { useOwnerChannelStore } from '../../stores/owner-channel';
 import { useTranscriptStore } from '../../stores/transcript';
 import { markRead } from './answering';
@@ -13,7 +14,13 @@ import { REPORT } from './copy';
 import { reportViewOf } from './project';
 import './report.css';
 
-export function ReportBar({ appSessionId, markAllRead = () => markRead(appSessionId, 'all') }: { appSessionId: AppSessionId; markAllRead?: () => void }) {
+// Mark all read has no card to say a failure on: a toast says it, with Retry.
+async function markAllReadOrSay(appSessionId: AppSessionId): Promise<void> {
+  const failed = await markRead(appSessionId, 'all');
+  if (failed !== null) toast({ level: 'danger', text: REPORT.notMarkedAll(failed), actions: [{ label: REPORT.retry, run: () => void markAllReadOrSay(appSessionId) }], dismissible: true });
+}
+
+export function ReportBar({ appSessionId, markAllRead = () => void markAllReadOrSay(appSessionId) }: { appSessionId: AppSessionId; markAllRead?: () => void }) {
   const owner = useOwnerChannelStore((s) => s.bySession.get(appSessionId) ?? null); // the session's transcript slot follows it
   const key = appSessionId; // the session transcript's store key (`ipcSource`)
   const report = useTranscriptStore((s) => reportViewOf(s.entries[key]?.state?.ui));

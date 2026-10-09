@@ -1,12 +1,14 @@
 // A question the agent left for the person (a `need-input` mark; the P2-C document, Design §6 and §8): its Markdown,
 // its choices as buttons in order (the recommended one marked, never preselected) in a labelled group, Reply, and the
-// state main reports for it: unanswered (with the last refused send's reason and Retry), queued with Cancel, sent but
-// not confirmed with Answer again, answered with Reply kept for a follow-up, or retired. While the card's own send runs
-// it says Sending… (Starting… when the send starts the session first) and offers nothing, so one click is one answer.
-// Reply opens a text field on the card: Enter sends, Shift-Enter breaks the line, Escape closes it. A session held in a
-// terminal or as a background job answers nowhere here: the card says where it is, with Take over. Every action is the
-// caller's (`answering.ts`): a control without its handler draws disabled.
-import { useId, useState, type KeyboardEvent } from 'react';
+// state main reports for it: unanswered (with the last refused send's reason, or the words of the trust or relay card
+// holding it, and Retry), queued with Cancel, sent but not confirmed with Answer again, answered with Reply kept for a
+// follow-up, or retired. While the card's own send runs it says Sending… (Starting… when the send starts the session
+// first) and offers nothing, so one click is one answer. A sent answer main never heard of is said with Record again.
+// Reply opens a text field on the card: Enter sends, Shift-Enter breaks the line, Escape or Close closes it and gives
+// the keyboard back to Reply. A session held in a terminal or as a background job answers nowhere here: the card says
+// where it is, with Take over. Every action is the caller's (`answering.ts`): a control without its handler draws
+// disabled.
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Choice } from '@shared/owner/to-human-parser';
 import type { QuestionState } from '@shared/owner/state';
 import { Markdown } from '../../transcript/view/markdown/Markdown';
@@ -16,6 +18,7 @@ export interface QuestionActions {
   choose?(choice: Choice): void;
   reply?(text: string): Promise<boolean>; // true: the reply left (the field closes); false: it stays, with its text
   retry?(): void; // the last send again
+  recordAgain?(): void; // a sent answer's report main never got, made again (the prompt is not sent again)
   cancel?(): void;
   takeOver?(): void;
 }
@@ -28,25 +31,39 @@ export interface QuestionCardProps {
   held: 'terminal' | 'background_job' | null; // the session is open elsewhere: nothing to answer here
   actions?: QuestionActions;
   busy?: 'sending' | 'starting' | null; // the card's own send is running
-  note?: string | null; // what the card's last cancel answered ("Already on its way", or its failure)
+  note?: string | null; // what the card's last send or cancel answered ("Already on its way", or a failure's words)
+  unreported?: string | null; // a sent answer's report main never got: the failure's words
 }
 
-export function QuestionCard({ text, choices, state, live, held, actions = {}, busy = null, note = null }: QuestionCardProps) {
+export function QuestionCard({ text, choices, state, live, held, actions = {}, busy = null, note = null, unreported = null }: QuestionCardProps) {
   const current = state ?? { state: 'unanswered' as const };
   const [again, setAgain] = useState(false); // "Answer again" on an unconfirmed answer offers the choices again
   const [replying, setReplying] = useState(false);
   const [draft, setDraft] = useState('');
   const fieldId = useId();
+  const card = useRef<HTMLElement>(null);
+  const replyButton = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
   const reopened = again && current.state === 'unconfirmed';
   const asking = current.state === 'unanswered' || reopened;
   const offered = held === null && (asking || current.state === 'delivered');
   const idle = busy === null;
 
+  // The field closes; the keyboard goes back to Reply when it was on the card (a Reply that left gave it to the composer)
+  const closeReply = () => {
+    refocus.current = card.current?.contains(document.activeElement) ?? false;
+    setReplying(false);
+  };
+  useLayoutEffect(() => {
+    if (replying || !refocus.current) return;
+    refocus.current = false;
+    replyButton.current?.focus();
+  }, [replying]);
   const sendReply = async () => {
     if (!actions.reply || draft.trim() === '' || !idle) return;
     if (await actions.reply(draft)) {
       setDraft('');
-      setReplying(false);
+      closeReply();
       setAgain(false);
     }
   };
@@ -57,7 +74,7 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
     } else if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      setReplying(false);
+      closeReply();
     }
   };
   const choose = (choice: Choice) => {
@@ -66,7 +83,7 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
   };
 
   return (
-    <section className="owner-card" data-owner-card="need-input" data-state={current.state} aria-label={LABEL['need-input']} aria-busy={!idle}>
+    <section ref={card} className="owner-card" data-owner-card="need-input" data-state={current.state} aria-label={LABEL['need-input']} aria-busy={!idle}>
       <div className="owner-card-label">{LABEL['need-input']}</div>
       <div className="owner-card-body">
         <Markdown markdown={text} live={live} />
@@ -85,7 +102,17 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
         ) : (
           !reopened && <StateLine state={current} held={held} actions={actions} answerAgain={() => setAgain(true)} />
         )}
-        {note !== null && !(current.state === 'unanswered' && current.failed?.reason === note) && <p role="status" className="owner-card-state">{note}</p>}
+        {note !== null && note !== unsentWords(current) && <p role="status" className="owner-card-state">{note}</p>}
+        {unreported !== null && (
+          <p role="alert" className="owner-card-state" data-failed="">
+            {QUESTION.notRecorded(unreported)}
+            {actions.recordAgain && (
+              <button type="button" className="owner-card-button" onClick={() => actions.recordAgain?.()}>
+                {QUESTION.recordAgain}
+              </button>
+            )}
+          </p>
+        )}
         {offered && replying && (
           <div className="owner-question-reply">
             <label htmlFor={fieldId} className="owner-question-reply-label">{QUESTION.replyLabel}</label>
@@ -108,12 +135,12 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
                 <button type="button" className="owner-card-button" disabled={!actions.reply || !idle || draft.trim() === ''} onClick={() => void sendReply()}>
                   {QUESTION.send}
                 </button>
-                <button type="button" className="owner-card-button" onClick={() => setReplying(false)}>
+                <button type="button" className="owner-card-button" onClick={closeReply}>
                   {QUESTION.close}
                 </button>
               </>
             ) : (
-              <button type="button" className="owner-card-button" disabled={!actions.reply || !idle} onClick={() => setReplying(true)}>
+              <button ref={replyButton} type="button" className="owner-card-button" disabled={!actions.reply || !idle} onClick={() => setReplying(true)}>
                 {QUESTION.reply}
               </button>
             )}
@@ -137,10 +164,11 @@ function StateLine({ state, held, actions, answerAgain }: { state: QuestionState
       </p>
     );
   switch (state.state) {
-    case 'unanswered':
-      return state.failed ? (
-        <p className="owner-card-state" data-failed="">
-          {state.failed.reason}
+    case 'unanswered': {
+      const words = unsentWords(state);
+      return words !== null ? (
+        <p className="owner-card-state" data-failed={state.failed ? '' : undefined} data-held={state.held ? '' : undefined}>
+          {words}
           {actions.retry && (
             <button type="button" className="owner-card-button" onClick={() => actions.retry?.()}>
               {QUESTION.retry}
@@ -148,6 +176,7 @@ function StateLine({ state, held, actions, answerAgain }: { state: QuestionState
           )}
         </p>
       ) : null;
+    }
     case 'queued':
       return (
         <p className="owner-card-state">
@@ -175,6 +204,14 @@ function StateLine({ state, held, actions, answerAgain }: { state: QuestionState
     case 'retired':
       return null;
   }
+}
+
+// What kept an unanswered question's last send from going out, as main reports it: a refusal in its words, or the
+// words of the trust or relay card holding it (X22's `held`; never a refusal, never "sent").
+function unsentWords(state: QuestionState): string | null {
+  if (state.state !== 'unanswered') return null;
+  if (state.held) return QUESTION.held(state.held.reason);
+  return state.failed?.reason ?? null;
 }
 
 // The answer as the person gave it: the prompt's text after its `Answering "<head>": ` header.

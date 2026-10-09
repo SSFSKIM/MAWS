@@ -92,8 +92,8 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
 
 // M6: a question card with its actions, once main knows the mark (a block still streaming answers nothing yet).
 function AnsweredQuestion({ appSessionId, text, choices, mark, live, held }: { appSessionId: AppSessionId; text: string; choices: Choice[]; mark: OwnerMark | null; live: boolean; held: QuestionCardProps['held'] }) {
-  const { actions, busy, note } = useQuestionAnswering(appSessionId, mark === null ? null : (mark.id as MarkId), mark?.head ?? questionHead(text));
-  return <QuestionCard text={text} choices={choices} state={mark?.question ?? null} live={live} held={held} actions={actions} busy={busy} note={note} />;
+  const { actions, busy, note, unreported } = useQuestionAnswering(appSessionId, mark === null ? null : (mark.id as MarkId), mark?.head ?? questionHead(text));
+  return <QuestionCard text={text} choices={choices} state={mark?.question ?? null} live={live} held={held} actions={actions} busy={busy} note={note} unreported={unreported} />;
 }
 
 function MessageCard({ text, live }: { text: string; live: boolean }) {

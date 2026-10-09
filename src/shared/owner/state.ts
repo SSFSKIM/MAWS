@@ -26,8 +26,9 @@ export const AnswerOriginSchema = z.enum(['answer', 'reply']);
 export type AnswerOrigin = z.infer<typeof AnswerOriginSchema>;
 
 export const QuestionStateSchema = z.discriminatedUnion('state', [
-  // `failed` is main's in-memory note of the last refused send; it is not persisted.
-  z.strictObject({ state: z.literal('unanswered'), failed: z.strictObject({ reason: z.string() }).optional() }),
+  // main's in-memory note of the last send that did not go out, never persisted: `failed` (refused, in its words) or
+  // `held` (a trust or relay card holds it until its continuation: the seam's reason, 'trust' | 'relay')
+  z.strictObject({ state: z.literal('unanswered'), failed: z.strictObject({ reason: z.string() }).optional(), held: z.strictObject({ reason: z.string() }).optional() }),
   z.strictObject({ state: z.enum(['queued', 'unconfirmed']), text: z.string(), origin: AnswerOriginSchema, members: z.array(AnswerMemberSchema) }),
   z.strictObject({ state: z.literal('delivered'), answer: z.strictObject({ text: z.string(), origin: z.enum(['answer', 'reply', 'legacy']), at: z.string() }) }),
   z.strictObject({ state: z.literal('retired') }),
