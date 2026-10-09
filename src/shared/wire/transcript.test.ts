@@ -149,3 +149,28 @@ describe('a parallel response regains its siblings', () => {
     expect(recovered(window)).toEqual(expected);
   });
 });
+
+describe('a malformed transcript with a parent cycle never hangs the recovery', () => {
+  // a cycle record is not recovered: the replay ends on the chain's leaf and returns the walk as it is
+  const recover = (rows: Record<string, unknown>[]) => {
+    const window = rows.map((row) => parseTranscriptRecord(row));
+    const { chain } = currentChain(window);
+    return { walk: uuids(chain), recovered: uuids(withResponseGroups(chain, window, deliveryOf)) };
+  };
+  const user = (uuid: string, parentUuid: string | null) => ({ type: 'user', uuid, parentUuid, message: { role: 'user', content: 'go' } });
+  const progress = (uuid: string, parentUuid: string) => ({ type: 'progress', uuid, parentUuid });
+
+  it('a progress row that is its own parent, under a user record', () => {
+    expect(recover([progress('g', 'g'), user('u', 'g')])).toEqual({ walk: ['g', 'u'], recovered: ['g', 'u'] });
+  });
+
+  it('two progress rows parented on each other, under a user record', () => {
+    expect(recover([progress('g1', 'g2'), progress('g2', 'g1'), user('u', 'g1')])).toEqual({ walk: ['g2', 'g1', 'u'], recovered: ['g2', 'g1', 'u'] });
+  });
+
+  it('a two-record cycle through a progress row, between two conversation records, and a record its own parent', () => {
+    expect(recover([user('x', 'g'), progress('g', 'x'), user('y', 'g')])).toEqual({ walk: ['x', 'g', 'y'], recovered: ['x', 'g', 'y'] });
+    expect(recover([user('a', 'b'), user('b', 'a'), user('c', 'b')])).toEqual({ walk: ['a', 'b', 'c'], recovered: ['a', 'b', 'c'] });
+    expect(recover([user('s', 's'), user('t', 's')])).toEqual({ walk: ['s', 't'], recovered: ['s', 't'] });
+  });
+});

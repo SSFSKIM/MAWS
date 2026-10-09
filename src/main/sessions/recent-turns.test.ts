@@ -120,6 +120,21 @@ describe('recentTurnsOf', () => {
     expect(answer.turns.map((t) => [t.prompt?.text, t.answer?.text, t.toolCalls])).toEqual([['first', 'listed', 1], ['second', 'done', 0]]);
   });
 
+  it('a progress row parented on itself (a malformed transcript) neither hangs the read nor loses the turns after it', () => {
+    const answer = recentTurnsOf(
+      records(
+        user('p1', null, 'first'),
+        assistant('a1', 'p1', [{ type: 'text', text: 'one' }]),
+        { type: 'progress', uuid: 'g', parentUuid: 'g', data: { type: 'hook_progress' } },
+        user('p2', 'g', 'second'),
+        assistant('a2', 'p2', [{ type: 'text', text: 'two' }]),
+      ),
+      5,
+      false,
+    );
+    expect(answer.turns.map((t) => [t.prompt?.text, t.answer?.text])).toEqual([['second', 'two']]);
+  });
+
   it('a command’s output is never a prompt: a window starting after /compact shows no <local-command-stdout>', () => {
     const answer = recentTurnsOf(lines('w1-compact', 32), 20, true);
     expect(prompts(answer)).toEqual(['Reply TWO']);

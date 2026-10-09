@@ -152,8 +152,14 @@ export function withResponseGroups(chain: readonly TranscriptRecord[], records: 
     const node: Node = { record, index, delivery: deliveryOf(record), owner: null };
     nodes.set(uuid, node);
     if (record.type === 'progress') return; // never the leaf; a child naming it walks through it
+    // through progress rows, each once: a malformed transcript can parent them in a cycle (the follower's `throughProgress`
+    // bounds the same walk), which then ends on a progress row and branches to this record alone
     let parent = parentOf(uuid);
-    while (parent !== null && nodes.get(parent)?.record.type === 'progress') parent = parentOf(parent);
+    const passed = new Set<string>();
+    while (parent !== null && !passed.has(parent) && nodes.get(parent)?.record.type === 'progress') {
+      passed.add(parent);
+      parent = parentOf(parent);
+    }
     const extend = () => {
       kept.push(uuid);
       onChain.add(uuid);
