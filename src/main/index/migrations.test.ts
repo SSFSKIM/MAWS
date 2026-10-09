@@ -13,6 +13,7 @@ const RELEASED: readonly { version: number; sha256: string }[] = [
   { version: 3, sha256: '50620e8146f069fd67d0e384808a742abd674cd386b677a60a40c1168cd78ead' },
   { version: 4, sha256: 'aadd6abf8c3c55fbaa37cf57fd26bfd8346c521d671780a168dab80b7a11215e' }, // E3: lineage, side threads (X15)
   { version: 5, sha256: '95c75547a8bc8a48c9ddfe17aa4dbdbe26cd1608ec91270050c63c78811abb31' }, // E4a: browser history (X15)
+  { version: 6, sha256: '261027e33d3c4806180a8b704ba75169d06b86fb1ed63c172de608c967fb6390' }, // cua board #93: the agent's browser activity (X15)
 ];
 
 const digest = (sql: string) => createHash('sha256').update(sql).digest('hex');
