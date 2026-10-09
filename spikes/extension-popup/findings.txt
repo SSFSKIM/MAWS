@@ -1,0 +1,126 @@
+S1 of board #90 — an extension popup in a MAWS-hosted view (Electron 44.4.5, Chrome 152.0.7977.130)
+Spec: cua docs/doperpowers/specs/2026-10-08-maws-browser-chrome-design.md, Plan of Work S1. Run 2026-10-08 on the
+owner's Mac from the MAWS worktree on branch 90-browser-chrome.
+
+How: `node spikes/extension-popup/run.mjs` (hidden window) and `node spikes/extension-popup/run.mjs --show` (window on
+screen, as MAWS's would be). run.mjs builds three variants of the fixture probe extension in scratch/ (gitignored):
+mv3 = spikes/browser-probe/ext/test-ext copied unchanged plus pages/popup.* and pages/options.* (action.default_popup,
+options_ui.page), its sw.js gaining one onConnect answerer; mv3-nopopup = the same without a popup, its sw.js gaining a
+chrome.action.onClicked listener that records clicks in storage; mv2 = mv2/ (a persistent background page) plus the same
+pages (browser_action.default_popup, options_page). It fetches Dark Reader 4.9.133 (chrome-mv3 and chrome MV2 zips)
+and Refined GitHub 26.10 by pinned release URL into scratch/, then launches node_modules/.bin/electron on main.mjs with
+user data in scratch/userData (fresh each run). main.mjs: one persist: partition, a frame preload registered on its
+session (MAWS's registration), an http page view standing in for a tab, every extension loaded with
+allowFileAccess:false, then each default_popup in a WebContentsView of that session { sandbox, contextIsolation,
+enablePreferredSizeMode } laid over the window and resized to each preferred-size-changed (clamped 25-800 x 25-600).
+Full output: results/run.txt (hidden) and results/run-show.txt (on screen); the lines below are quoted from them.
+
+VERDICT: promote. The spec's criteria, literally: the fixture popup loads (yes, MV3 and MV2), gets the ping's reply
+(yes, from the MV3 service worker and from the MV2 background page, by sendMessage and by connect), and sizes itself
+(yes, preferred-size-changed fires and the view takes the size). M3 builds the popup view as designed.
+
+== The fixture, MV3 (service worker) ==
+[spike] [mv3] loadExtension: ok id nenbjdahllkkbfanbpfmmdacjencdfpg
+[spike] [mv3] loaded: yes url=chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html
+[spike] [mv3] ping reply: {"value":{"echo":{"ping":1},"fromTab":6,"swSawMessage":true}}
+[spike] [mv3] connect reply: {"value":{"pong":1,"from":"service-worker","via":"port"}}
+[spike] [mv3] tabs.query: {"value":[]}
+[spike] [mv3] popup sees: {"action":"object","browserAction":"undefined","tabs":"object","windows":"undefined","openOptionsPage":"function"}
+[spike] [mv3] preferred size: 344x104 (events: 344x104; view bounds {"x":640,"y":44,"width":344,"height":104})
+[spike] [mv3] preload ran: yes
+on screen (run-show.txt):
+[spike] [mv3] tabs.query: {"value":[{"id":6,"windowId":0,"active":true,"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html"}]}
+[spike] [mv3] preferred size: 344x179 (events: 344x104 344x179; view bounds {"x":640,"y":44,"width":344,"height":179})
+
+== The fixture, MV2 (background page). Electron 44 loads MV2: the background page runs as a 'backgroundPage'
+webContents; stderr only warns "Manifest version 2 is deprecated, and support will be removed in 2025." ==
+[spike] [mv2] loadExtension: ok id ofmpefonpiifpjlopbcacdiahhnegimn
+[spike] background pages: ["chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html"]
+[spike] [mv2] loaded: yes url=chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html
+[spike] [mv2] ping reply: {"value":{"pong":1,"from":"background-page","fromTab":8}}
+[spike] [mv2] connect reply: {"value":{"pong":1,"from":"background-page","via":"port"}}
+[spike] [mv2] tabs.query: {"value":[]}
+[spike] [mv2] popup sees: {"action":"undefined","browserAction":"undefined","tabs":"object","windows":"undefined","openOptionsPage":"function"}
+[spike] [mv2] preferred size: 344x104 (events: 344x104; view bounds {"x":640,"y":44,"width":344,"height":104})
+[spike] [mv2] preload ran: yes
+on screen (run-show.txt):
+[spike] [mv2] tabs.query: {"value":[{"id":8,"windowId":0,"active":true,"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html"}]}
+[spike] [mv2] preferred size: 344x179 (events: 344x104 344x179; view bounds {"x":640,"y":44,"width":344,"height":179})
+
+== chrome.action.onClicked ==
+[spike] [mv3-nopopup] session.extensions members: ["addListener","emit","eventNames","getAllExtensions","getExtension","getMaxListeners","listenerCount","listeners","loadExtension","off","on","once","prependListener","prependOnceListener","rawListeners","removeAllListeners","removeExtension","removeListener","setMaxListeners"]
+[spike] [mv3-nopopup] ServiceWorkerMain for the extension: yes; members ["ipc","isDestroyed","scope","scriptURL","send","startTask","versionId"]
+[spike] [mv3-nopopup] CDP Extensions.triggerAction: error: 'Extensions.triggerAction' wasn't found
+[spike] [mv3-nopopup] sw sees chrome.action.onClicked.addListener as: "function"; clicks recorded: []
+[spike] [mv3-nopopup] onClicked: no API
+
+== For M3: links, window.open and options pages from a popup view ==
+[spike] [mv3] setWindowOpenHandler saw: [{"url":"http://127.0.0.1:62301/from-popup?via=window.open","disposition":"foreground-tab"},{"url":"http://127.0.0.1:62301/from-popup?via=target-blank","disposition":"foreground-tab"},{"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html","disposition":"foreground-tab"}]
+[spike] [mv3] will-navigate saw: ["http://127.0.0.1:62301/from-popup?via=same-frame-link"]
+[spike] [mv3] openOptionsPage: lastError: Could not create an options page.; new webContents: []; opener view handler saw since: []
+[spike] [mv3] options page in a view: loaded yes; title "MAWS probe options"; page says {"name":"MAWS probe extension","href":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html"}; preload ran: yes
+[spike] [mv2] setWindowOpenHandler saw: [{"url":"http://127.0.0.1:62301/from-popup?via=window.open","disposition":"foreground-tab"},{"url":"http://127.0.0.1:62301/from-popup?via=target-blank","disposition":"foreground-tab"},{"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html","disposition":"foreground-tab"}]
+[spike] [mv2] openOptionsPage: lastError: Could not create an options page.; new webContents: []; opener view handler saw since: []
+[spike] [mv2] options page in a view: loaded yes; title "MAWS probe options"; page says {"name":"MAWS probe extension (MV2)","href":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html"}; preload ran: yes
+
+== The frame preload in extension documents ==
+[spike] preload documents (all): ["http://127.0.0.1:62301/tab","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html","chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/offscreen.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/offscreen.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html","chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/ui/popup/index.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/ui/popup/index.html","chrome-extension://mgolgdppcgfbmmncohkepaemhibcbdnd/assets/options.html","chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/options.html"]
+
+== Public extensions (fetched; none blocked by the network) ==
+[spike] [darkreader-mv3] loaded: yes url=chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/ui/popup/index.html
+[spike] [darkreader-mv3] page: Dark Reader settings | body text 20 chars
+[spike] [darkreader-mv3] preferred size: 276x516 (events: 276x516; view bounds {"x":640,"y":44,"width":276,"height":516})
+[spike] [darkreader-mv3] console (1): error: Unrecognized Content-Security-Policy directive 'navigate-to'.
+[spike] [darkreader-mv2] loaded: yes url=chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/ui/popup/index.html
+[spike] [darkreader-mv2] page: Dark Reader settings | body text 20 chars
+[spike] [darkreader-mv2] preferred size: 276x516 (events: 276x516; view bounds {"x":640,"y":44,"width":276,"height":516})
+[spike] [refined-github] loaded: n/a (no default_popup in the manifest)
+[spike] [refined-github] options page in a view: loaded yes; title "Refined GitHub options"; page says "Refined GitHub options"; preload ran: yes
+[spike] [refined-github] options console (4): error: Uncaught ElementNotFoundError: Expected element not found: details || error: Uncaught (in promise) Error: "sync" is not available in this instance of Chrome || error: Uncaught (in promise) Error: "sync" is not available in this instance of Chrome
+Electron's stderr in the same run (scratch/stderr.txt, not committed):
+  Source:  chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/background/index.js
+  Message: Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'onRemoved')
+  Source:  chrome-extension://mgolgdppcgfbmmncohkepaemhibcbdnd/assets/npm/webext-dynamic-content-scripts-lib.js
+  Message: Uncaught TypeError: Cannot read properties of undefined (reading 'onRemoved')
+  Message: Service worker registration failed. Status code: 15     (ID mgolgdppcgfbmmncohkepaemhibcbdnd, Refined GitHub)
+Both read chrome.permissions.onRemoved (darkreader-mv3 background/index.js:6452, refined-github
+webext-dynamic-content-scripts-lib.js:67); chrome.permissions is absent in Electron 44 (E0b findings.txt S1 (d)).
+The on-screen still of both Dark Reader popups (scratch/shots/) shows its dark panel with "Loading, please wait" and
+nothing else after 4 s: the popup hosts fine; its background never answers.
+
+== Reading ==
+1. Popups host. A default_popup page in a WebContentsView of the partition session loads, runs chrome.runtime, reaches
+   its background both ways, and reports its preferred size; MV2 and MV3 alike.
+2. chrome.tabs.query({ active: true, currentWindow: true }) never answers the page tab. Hidden window: []. On screen:
+   [the popup itself] (id of the popup's webContents, active: true, windowId 0), because Electron's "active" follows
+   the focused webContents. tabs.query({}) lists every webContents of the session as a tab, all windowId 0: the page,
+   the popup, MV2 background pages, offscreen documents. So an extension whose popup acts on "the current tab" sees
+   nothing or acts on itself. Settings copy candidate: "Popups that act on the current page can't see it here."
+3. The background sees the popup as a tab: sender.tab is set for the popup's messages (fromTab = the popup's id).
+   Chrome leaves sender.tab unset for popups; an extension that branches on it treats its popup as a content script.
+4. chrome.windows is undefined in popups; chrome.action exists in an MV3 popup; in an MV2 popup neither
+   chrome.browserAction nor chrome.action exists, so an MV2 popup calling browserAction.* throws.
+5. Preferred size: the first preferred-size-changed fires with the page's first layout (344x104, "running…"), later
+   ones as content grows (344x179 on screen). In a never-shown window only the first arrives. M3 must keep resizing on
+   every event, not take the first. Dark Reader: 276x516 in one event.
+6. onClicked: no API. session.extensions offers load/remove/get only; ServiceWorkerMain offers ipc/send/startTask
+   (main-to-preload IPC, no extension event dispatch); CDP Extensions.triggerAction is not implemented. The worker's
+   chrome.action.onClicked.addListener exists, so extensions register without error, and nothing ever fires it. M3
+   draws an action without a popup as present-but-inert with the tooltip.
+7. window.open and target=_blank in the popup reach setWindowOpenHandler on the popup view's own webContents
+   (disposition foreground-tab); a same-frame link reaches will-navigate on that webContents. window.open('options.html')
+   arrives there too, as a chrome-extension:// URL. M3's gating (activation, linkTarget, http(s) only) sits on those two
+   hooks.
+8. chrome.runtime.openOptionsPage() fails with lastError "Could not create an options page." and creates no
+   webContents; an extension's own "settings" button that calls it does nothing. Loading options.html directly in a
+   view works (title, chrome.runtime.getManifest()), so MAWS's own "Options" entry (openExtensionPage) is sound.
+9. The session's frame preload runs in every extension document: popups, options pages, MV2 background pages and
+   offscreen documents (the "preload documents" line). MAWS's browser preload therefore already runs today in the
+   background pages and offscreen documents of imported extensions, not only in the popups M3 adds; M3's early return
+   for non-http(s) covers all of them.
+10. Public extensions: their popups host as well as the fixture's; what fails is their backgrounds on Electron's API
+   gaps (chrome.permissions here), which E0b already measured. A public extension's popup is useful exactly when its
+   background runs.
+11. Incidental: service workers listed by getAllRunning() 1.5 s after load varied by run (three in the hidden runs,
+   none on screen); the popup's first message starts the worker either way. capturePage on a view in a never-shown
+   window rejects with UnknownVizError (stills were taken from the on-screen run).
