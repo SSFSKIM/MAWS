@@ -1,0 +1,702 @@
+U2 — P2-C's M0 probe: the contract's delivery and the advertisement's transport (2026-10-09)
+
+Parent: docs/doperpowers/plans/2026-10-08-p2-daily-driver.md (child P2-C, §4.10 U2), parent pin 8814d733db1b3c50798b9d3ec766985b29e05420.
+Execution document: docs/doperpowers/plans/2026-10-08-p2-c-to-human.md (M0; Design §2 and §3 rest on these verdicts).
+Engine: the installed Claude Code 2.1.295 (/Users/new/.local/share/claude/versions/2.1.295), unmodified, by absolute path.
+Fixtures: spikes/protocol-probe/fixtures/pass3/p2-to-human-*.jsonl (32 launches; provenance child P2-C, spec and document as above).
+Recorded by the P2-C author on its worktree branch; nothing outside the worktree's fixtures and this file was written.
+
+SAFETY RECORD (P1's live-harness rules, through E0a's helpers in scenarios/pass3/p1-common.mjs and c10-common.mjs)
+
+- Every launch ran under a fresh scratch CLAUDE_CONFIG_DIR under /tmp, refused before spawning if it resolved to the
+  owner's (assertScratch); the environment was rebuilt from the base keys (clearEngineEnvironment: PATH, HOME, USER,
+  LOGNAME, SHELL, TMPDIR, LANG, LC_*), then MAWS's constants and the relay's two variables; every other CLAUDE_* dropped.
+- The relay answered GET /api/hello 200 before each launch (relayReady); it was used as a client only.
+- The owner's ~/.claude.json /tmp project keys were read before and after every launch: 32 of 32 "same": true.
+- --max-budget-usd 0.5 (run 2) or 0.3 (runs 3 to 5) per launch; Haiku; the summed per-launch result costs are under
+  US$0.07 (resumed launches report the conversation's cumulative cost, so the sum over-counts).
+- The plugin in runs 2 and the style arm was a scratch plugin written into the scratch root and loaded with
+  --plugin-dir; the owner's doperpowers was never loaded. The scratch roots were removed after the verdicts were read.
+- The scenarios ran from /tmp/maws-p2c-u2/ (outside the repository; their full text is Appendix B, their sha256 in each
+  fixture's provenance row). The admission test passes: `node --test spikes/protocol-probe/fixtures.test.mjs`, 198 of 198.
+- A first run (2026-10-09 07:01 UTC, four launches) is not kept: its plugin declared two hook modules, which the engine
+  refuses ("hooks.json `modules` names one hooks module per plugin"), so its worker reading was void, and its prompt
+  questions were confounded by the conversation's history. Its one clean observation (a launch without the flag knew a
+  word only the previous launch's appended prompt carried, never written in the conversation) led to runs 3 to 5.
+
+QUESTIONS (spec §4.10 U2) AND VERDICTS
+
+1. Does --append-system-prompt reach a new session, a resumed one and a fork, and survive compaction; is the off state
+   honoured at the next launch?
+   VERDICT: the flag reaches a session only when the engine renders its system prompt live. 2.1.295 records each
+   rendered system prompt in the transcript as an `attachment` of type `prompt_snapshot` (the appended text its last
+   segment, `attachment.systemPrompt[11]` here), written at the launch's first turn, and a later launch reuses the last
+   snapshot after the last compact boundary instead of rendering (2.1.292's `cl`/`Swe`/`DB`: the recorded systemPrompt
+   replaces the live one). Hence:
+   - a new session: the appended prompt is in effect (S13, run 2's new);
+   - a resume or a fork with a different prompt: the earlier prompt stays, the new flag is ignored (S1 → N1; S5 → N5);
+   - a resume of a session recorded without a prompt, now passed one: not in effect (S2 → NONE);
+   - a resume with no flag after one with a prompt: the earlier prompt stays in effect (S3 → N3): the off state is NOT
+     honoured by omission;
+   - compaction: the next turn after the boundary renders live and records a new snapshot, so the prompt of the launch
+     that turn runs in takes effect (S4 → Y4; run 2's compaction word known after /compact);
+   - `--system-prompt-snapshot off` (declared by the binary as `--system-prompt-snapshot <on|off>`): that launch renders
+     live, so its own prompt, or its absence, is in effect (S12 → R12 replacing N12; S8 → X8 for a session recorded
+     without one; S7 → NONE, the off state honoured; S11 → F11 for a fork); it records no snapshot (S6: a plain resume
+     after it reverts to N6), and a compaction under it records nothing either (S10: the next plain launch rendered live
+     and recorded what that launch passed). A fork under the flag answered NONE once (S9) and F11 on the retry (S11);
+     read as a model miss, not an engine rule.
+   The engine never appended twice: each snapshot has one appended segment, the current launch's or the recorded one.
+2. Which transport of MAWS_NATIVE_TO_HUMAN does the function-hook worker's `$.env.get` see?
+   VERDICT: both. `--settings` JSON `env` (MAWS's `extraSettings.env` seam) → `MAWS_U2_WORKER MAWS_NATIVE_TO_HUMAN=1`
+   (run 2 new, style); the constructed process environment alone → `=1` (run 2 resume); neither → `<unset>` (run 2 off,
+   fork). A SessionStart command hook sees the same (shell log: startup 1, resume 1, compact 1, then <unset> twice). The
+   value is per launch (no snapshot), so set or omitted, it takes effect at the next launch. (2.1.292's `env.get` reads
+   process.env; settings env, the flag's included, is applied to process.env at startup.)
+3. The last resort: what does a session.attach hook see? `MAWS_U2_ATTACH surface=desktop clientId=maws-main
+   keys=clientId,surface,viewport` (run 2 new, after MAWS's ui_attach). Not needed (verdict 2).
+4. A plugin output style whose front matter carries `maws-to-human-contract: 1`: loads, is selected by the user
+   settings' `outputStyle: "maws-u2-probe:to-human"`, and system/init reports `output_style: "maws-u2-probe:to-human"`
+   (run 2 style); the model followed it (a to-human message and a need-input with two choices). `claude plugin validate`
+   on that plugin passes with no remark on the key (the engine's style loader reads front-matter fields by name; its
+   strict front-matter schema is a telemetry shadow only, 2.1.292 `PA`); validate lists the module's env reads
+   (`MAWS_NATIVE_TO_HUMAN`), so the doperpowers module's literal `$.env.get('MAWS_NATIVE_TO_HUMAN')` is declared.
+5. Contract wording. The draft (Appendix A, runs 2 to 4) left the model's main answer outside any mark (run 2 new: the
+   README outline plain, the insight, essential and question marked). The final text (Appendix A, run 5 S13) adds "Only
+   what you mark reaches them, so anything you want them to read, your answers included, goes inside a mark": S13 put
+   the whole reply in marks (0 unmarked characters; the essential, insight and question nested inside one to-human).
+
+WHAT THIS CHANGES FOR P2-C (the execution document's Design §2 carries the rule; spec §4.5 assumed a per-launch append)
+
+- MAWS passes `--append-system-prompt <contract>` on every MAWS-owned launch whose desired state carries the contract
+  (it takes effect whenever the prompt renders: a new session, after a compaction, or under the flag below), and never
+  on others.
+- Before a resume or a fork, MAWS reads the session's (or the parent's) last prompt_snapshot after its last compact
+  boundary and classifies it: unrecorded, the MAWS contract n (its header line), to-human semantics from another source
+  (all four tag names in one segment), or none. When the recorded state differs from the desired one (the lane turned on
+  for a session recorded without the semantics, turned off for one recorded with MAWS's contract, or a contract version
+  change), the launch also passes `--system-prompt-snapshot off`; it does so on each launch while they differ, which
+  ends at the session's next compaction (the next plain launch then records the desired prompt).
+- The variable travels in `extraSettings.env` (verdict 2); the constructed environment and the client id stay unused.
+- The cost of the flag is the snapshot's purpose (a stable system prompt across resumes, for the prompt cache): a launch
+  under it re-renders the prompt and may miss the cache. MAWS passes it only while the recorded state differs.
+- The flag is undocumented in the CLI's help: MAWS passes it only when the resolved binary declares it (the literal
+  `--system-prompt-snapshot <on|off>` in the binary, read once per binary), else the change waits for a compaction and
+  says so.
+
+RESULTS IN DETAIL (fixture, what was asked, the answer)
+
+Run 2 (scenario p2-to-human.mjs; one scratch home A for new, resume, off and fork; home D for style)
+- p2-to-human-new: new, draft contract + word N, env via --settings, ui_attach as maws-main. Marks: essential, insight,
+  need-input with choices; no to-human (the outline plain). Worker =1; attach clientId=maws-main; shell startup=1. Disk:
+  prompt_snapshot at lines 16 and 22, segment 11 the appended prompt.
+- p2-to-human-resume: resume, prompt R + compaction word C, env via the process; /compact, then the list question → R;
+  the compaction word known. Worker =1; shell resume=1, compact=1. Disk: a new snapshot (R) after the boundary.
+- p2-to-human-off: resume, no prompt, no variable → R (in the history since the resume's answer; superseded by run 3).
+  Worker <unset>; shell resume=<unset>.
+- p2-to-human-fork: fork with prompt F, no variable → R (history again; superseded by runs 3 and 5). Worker <unset>.
+- p2-to-human-style: home D's settings select the scratch plugin's style declaring the contract; no append; env via
+  --settings. init output_style "maws-u2-probe:to-human"; to-human and need-input with choices; validate passed.
+Run 3 (p2-to-human-snapshot.mjs; one home per case; first launch a neutral "OK" turn; one question in the later launch)
+- s1 new N1 → resume R1: N1.  s2 new none → resume X2: NONE.  s3 new N3 → resume none: N3.
+- s4 new none → resume Y4, /compact, ask: Y4 (snapshots: 11 segments before, 12 with Y4 after the boundary).
+- s5 new N5 → fork F5: N5 (the fork's file copies the parent's snapshots; none carries F5).
+Run 4 (p2-to-human-snapoff.mjs; the later launch with --system-prompt-snapshot off)
+- s6 new N6 → resume R6 off (neutral turn) → plain resume asked: N6 (the off launch recorded nothing).
+- s7 new N7 → resume none off: NONE.  s8 new none → resume X8 off: X8.  s9 new N9 → fork F9 off: NONE (see s11).
+Run 5 (p2-to-human-converge.mjs)
+- s10 new N10 → resume R10 off, /compact, neutral turn → plain resume asked: NONE (snapshots: N10 before the boundary,
+  the plain launch's own after it).  s11 new N11 → fork F11 off: F11.  s12 new N12 → resume R12 off: R12.
+- s13 new with the final contract: every part of the reply inside marks.
+
+APPENDIX A — the contract texts
+
+A.1 Draft, appended in runs 2 to 4 (sha256 54f1d957ad72d59ba7d02b334db41d80249b88ed7d47bf9d8e0c618e2b217ede): identical
+to A.2 except its third sentence, which read "What reaches them is what you mark:".
+
+A.2 Final, contract 1 (run 5; sha256 eeb20ad6daa3465c53e81e9af675cbc39c8df5b61903ea94d632ac3042e22409; the execution
+document's Design §1 carries it as the module constant):
+
+# Messages to the human (MAWS to-human contract 1)
+
+The human who runs this session reads a report of it, not the transcript. Your prose, your tool calls and their results stay in the session as your working record, which they open only when they go looking. Only what you mark reaches them, so anything you want them to read, your answers included, goes inside a mark:
+
+- `<to-human>…</to-human>`: a message delivered to them, wherever you write it, written as you would write to someone away from the screen.
+- `<essential>…</essential>`: what they must not miss. It stays in front of them until they mark it read.
+- `<need-input>…</need-input>`: a question you can wait on while you go on with other work, one question per mark, the question on the mark's first line. Its options, when it has any, go inside the mark under the question, one `<choice>…</choice>` line each, with `<choice recommended>…</choice>` on the one you would pick. Their answer arrives later as their next message, beginning `Answering "<the question's first line>":`. Input you cannot continue without is not a mark: ask for it with AskUserQuestion.
+- `<insight>…</insight>`: before and after you write code, a brief explanation of two or three implementation choices specific to this codebase. It is shown beside your messages.
+
+For example, a question with two options:
+
+<need-input>Which backend should the board use?
+<choice recommended>Postgres: already running for the board</choice>
+<choice>SQLite: one file, no daemon</choice>
+</need-input>
+
+Write marks as plain text in your reply, never inside code blocks or inline code, where they are shown as code. Say what you mean directly and literally, without metaphor or flourish.
+
+APPENDIX B — the scenarios, verbatim (each run as `node /tmp/maws-p2c-u2/<file> <worktree>`, beside contract-v1.md)
+
+B.1 p2-to-human.mjs (run 2; sha256 6cb1cca89f4eaa53e87149d2a7ed844e13d6712d1006955c6a6135f5edc3b6e6)
+
+// U2, P2-C's M0 probe, second run (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U2; execution document
+// docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M0; parent pin 8814d733db1b3c50798b9d3ec766985b29e05420).
+// Questions: (1) does `--append-system-prompt` reach a new session, a resumed one, a fork, and survive compaction;
+// (2) what the engine keeps of an appended prompt on disk, and whether a later launch that passes a different prompt, or
+// none, still carries an earlier one; (3) which transport of MAWS_NATIVE_TO_HUMAN the function-hook worker's `$.env.get`
+// sees (`--settings` env, the constructed process environment, neither), and what a command hook sees; (4) what a
+// session.attach hook sees of the attaching client; (5) whether a plugin output style whose front matter carries
+// `maws-to-human-contract: 1` loads, is reported by system/init, and passes `claude plugin validate`.
+// Each launch's prompt carries words found nowhere else: a probe word asked in a later launch only, never in its own,
+// so a word in an answer can only have come from a system prompt, never from the conversation's history.
+// Safety (P1's live-harness rules, E0a's helpers): a scratch CLAUDE_CONFIG_DIR under /tmp (refused when it resolves to
+// the owner's), the environment rebuilt from the base keys, the relay's /api/hello gate, the owner's ~/.claude.json
+// /tmp project keys compared before and after every launch, --max-budget-usd 0.5 per launch, a scratch plugin loaded
+// with --plugin-dir (never the owner's doperpowers), Haiku. The scratch roots are kept for inspection and removed by
+// hand. Run from outside the repository:  node /tmp/maws-p2c-u2/p2-to-human.mjs <worktree>
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,realpathSync,chmodSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {run:harnessRun,scratch,delay}=await import(join(P,'harness.mjs'));
+const {assertScratch,RELAY_ENV,slug}=await import(join(P,'scenarios/pass3/c10-common.mjs'));
+const {clearEngineEnvironment}=await import(join(P,'scenarios/pass3/mods-environment.mjs'));
+const {BIN,ENGINE_VERSION,relayReady,ownerTmpKeys,initPayload,success,endAsStop,initFrame,lastResult,resultSummary}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const HERE=fileURLToPath(new URL('.',import.meta.url));
+const SELF=fileURLToPath(import.meta.url);
+const SCENARIO_SHA256=createHash('sha256').update(readFileSync(SELF)).digest('hex');
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'8814d733db1b3c50798b9d3ec766985b29e05420',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'U2',run:2,engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:SCENARIO_SHA256};
+const SPEND_CAP='0.5';
+const digest=keys=>createHash('sha1').update(keys.join('\n')).digest('hex').slice(0,12);
+
+// The contract draft (execution document, Design §1), version 1, verbatim.
+const CONTRACT=readFileSync(join(HERE,'contract-v1.md'),'utf8').trim();
+const word=tag=>tag+randomUUID().slice(0,6).toUpperCase();
+// One probe word per launch's prompt, plus a compaction word in the resume's prompt; each is asked only in a later step.
+const WORDS={new:word('N'),resume:word('R'),fork:word('F'),compact:word('C')};
+const SENTINEL={new:'U2-SENTINEL-NEW-'+randomUUID(),resume:'U2-SENTINEL-RESUME-'+randomUUID(),fork:'U2-SENTINEL-FORK-'+randomUUID()};
+const appendFor=label=>`${CONTRACT}\n\nProbe (MAWS U2, launch ${label}): this launch's probe word is ${WORDS[label]}.${label==='resume'?` The compaction word is ${WORDS.compact}.`:''} Never write a probe word, or the compaction word, unless the human asks for it. Internal marker, never to be repeated: ${SENTINEL[label]}.`;
+const LIST='List every probe word your system prompt gives you right now (not words from this conversation\'s earlier messages), comma-separated, or NONE. Reply with nothing else.';
+
+function writePlugin(dir,logFile){
+ const files={
+  '.claude-plugin/plugin.json':JSON.stringify({name:'maws-u2-probe',version:'0.1.0',description:'MAWS P2-C U2 probe',author:{name:'MAWS U2 probe'}},null,1)+'\n',
+  'hooks/hooks.json':JSON.stringify({modules:['./register.tsx'],hooks:{SessionStart:[{hooks:[{type:'command',command:'"${CLAUDE_PLUGIN_ROOT}/hooks/shell-env.sh"'}]}]}},null,1)+'\n',
+  'hooks/register.tsx':`// MAWS U2 probe (P2-C): what the function-hook worker's $.env.get sees, and what session.attach carries
+export const register = on => {
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    const value = await $.env.get('MAWS_NATIVE_TO_HUMAN')
+    $.ui.log(\`MAWS_U2_WORKER MAWS_NATIVE_TO_HUMAN=\${value === undefined ? '<unset>' : value}\`)
+    return result
+  })
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+    $.ui.log(\`MAWS_U2_ATTACH surface=\${String(e.surface)} clientId=\${String(e.clientId)} keys=\${Object.keys(e).sort().join(',')}\`)
+    return result
+  })
+}
+`,
+  'hooks/shell-env.sh':`#!/bin/sh
+# MAWS U2 probe (P2-C): what a command hook's environment carries
+input=$(cat)
+src=$(printf '%s' "$input" | sed -n 's/.*"source":"\\([a-z]*\\)".*/\\1/p')
+printf 'source=%s MAWS_NATIVE_TO_HUMAN=%s\\n' "\${src:-?}" "\${MAWS_NATIVE_TO_HUMAN-<unset>}" >> "${logFile}"
+exit 0
+`,
+  'output-styles/to-human.md':`---\nname: to-human\ndescription: MAWS U2 probe style declaring the MAWS to-human contract\nkeep-coding-instructions: true\nmaws-to-human-contract: 1\n---\n\n${CONTRACT}\n`,
+ };
+ for(const [rel,text] of Object.entries(files)){mkdirSync(join(dir,rel,'..'),{recursive:true});writeFileSync(join(dir,rel),text);}
+ chmodSync(join(dir,'hooks/shell-env.sh'),0o755);
+ return dir;
+}
+
+function scratchRun(label,{settings={}}={}){
+ const root=realpathSync(mkdtempSync(`/tmp/maws-p2c-u2-${label}-`));
+ const home=join(root,'config');mkdirSync(home);
+ const cwd=realpathSync(scratch(join(root,'repo-')));
+ writeFileSync(join(home,'settings.json'),JSON.stringify(settings)+'\n');
+ writeFileSync(join(home,'.claude.json'),JSON.stringify({hasCompletedOnboarding:true,projects:{[cwd]:{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}}})+'\n');
+ const shellLog=join(root,'shell-env.log');
+ const plugin=writePlugin(join(root,'plugin'),shellLog);
+ return {root,home,cwd,plugin,shellLog,debugFile:join(root,'debug.log')};
+}
+
+// MAWS's environment (engine-host/launch.ts buildEnvironment, gateway route) from the base keys; `vars` added.
+function engineEnv(home,vars){
+ clearEngineEnvironment();
+ return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1',...vars};
+}
+
+// What the engine wrote to disk that carries any sentinel: per transcript file, the records (type, subtype, the key
+// paths holding the text), never the text itself.
+function diskTrace(run){
+ const dir=join(run.home,'projects',slug(run.cwd));
+ const files=existsSync(dir)?readdirSync(dir).filter(f=>f.endsWith('.jsonl')):[];
+ const paths=(v,needle,at='')=>typeof v==='string'?(v.includes(needle)?[at||'.']:[]):Array.isArray(v)?v.flatMap((x,i)=>paths(x,needle,`${at}[${i}]`)):v&&typeof v==='object'?Object.entries(v).flatMap(([k,x])=>paths(x,needle,at?`${at}.${k}`:k)):[];
+ const out={};
+ for(const f of files){
+  const rows=readFileSync(join(dir,f),'utf8').trim().split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}});
+  out[f]={records:rows.length,types:[...new Set(rows.filter(Boolean).map(r=>r.type+(r.subtype?'/'+r.subtype:'')))].sort(),hits:Object.fromEntries(Object.entries(SENTINEL).map(([k,s])=>[k,rows.flatMap((r,i)=>r?paths(r,s).map(p=>({line:i+1,type:r.type,subtype:r.subtype??null,path:p})):[])]))};
+ }
+ // anything else under the config home that holds a sentinel (session metadata, caches), by relative path
+ const others=[];const walk=d=>{for(const e of readdirSync(d,{withFileTypes:true})){const p=join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&!p.endsWith('.jsonl')){try{const t=readFileSync(p,'utf8');for(const [k,s] of Object.entries(SENTINEL))if(t.includes(s))others.push({file:p.slice(run.home.length+1),sentinel:k});}catch{}}}};
+ walk(run.home);
+ return {dir:dir.slice(run.root.length+1),files:out,otherFiles:others};
+}
+
+async function launch(name,run,{vars={},settingsEnv=null,append=null,sessionId=randomUUID(),resume=null,fork=false,question},body){
+ const env=engineEnv(run.home,vars);
+ const {configHome,globalConfig}=assertScratch(env);
+ await relayReady();
+ const before=ownerTmpKeys();
+ const flagSettings={dialogExpiry:'never',...(settingsEnv?{env:settingsEnv}:{})};
+ const pinned=!resume||fork;
+ const flags=['--forward-subagent-text','--replay-user-messages','--include-hook-events',...(resume?['--resume',resume,...(fork?['--fork-session']:[])]:[]),...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--settings',JSON.stringify(flagSettings),'--plugin-dir',run.plugin,...(append?['--append-system-prompt',append]:[]),'--debug-file',run.debugFile];
+ let failure;
+ const p=await harnessRun(name,async p=>{
+  p.note({event:'provenance',...PROVENANCE,question,model:'haiku',configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,resumed:resume,fork,envKeys:Object.keys(env).sort(),processEnvMawsNativeToHuman:env.MAWS_NATIVE_TO_HUMAN??null,flagSettings,appendChars:append?.length??0,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8'))});
+  p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
+  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+  p.on('elicitation',()=>({action:'decline'}));
+  p.on('ui_copy',()=>({copied:false}));
+  p.on('ui_prompt_read',()=>({text:'',cursor:0}));
+  p.on('ui_prompt_fill',()=>({filled:false}));
+  p.on('ui_prompt_suggest',()=>({shown:false}));
+  try{await body(p,{sessionId});}catch(e){failure=e;throw e;}
+  finally{p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model:'haiku',settingSources:'user,project,local',strictMcp:false,mode:'default',flags});
+ await p.closed;
+ const after=ownerTmpKeys();
+ const same=JSON.stringify(after)===JSON.stringify(before);
+ p.note({event:'owner_file_check',phase:'after',count:after.length,digest:digest(after),same});
+ if(!same)throw new Error(name+": the owner's ~/.claude.json /tmp project keys changed");
+ if(failure)throw failure;
+ return p;
+}
+
+const logs=p=>p.frames.filter(r=>r.frame.type==='system'&&r.frame.subtype==='ui_log').map(r=>String(r.frame.text??r.frame.message??JSON.stringify(r.frame)));
+const texts=p=>p.frames.filter(r=>r.frame.type==='assistant'&&!r.frame.parent_tool_use_id).flatMap(r=>(r.frame.message?.content||[]).filter(b=>b.type==='text').map(b=>b.text));
+const ask=async(p,prompt)=>{const result=await p.turn(prompt);p.note({event:'turn_text',prompt,result:result.result??null});return result.result??'';};
+const wordsIn=answer=>Object.fromEntries(Object.entries(WORDS).map(([k,w])=>[k,answer.includes(w)]));
+const attach=async p=>{const a=await p.request('ui_attach',{surface:'desktop',client_id:'maws-main',viewport:{columns:100,rows:30,isFullscreen:true},answers:['ui_copy','ui_prompt_read','ui_prompt_fill','ui_prompt_suggest']});p.note({event:'ui_attach_answer',subtype:a.subtype});};
+const shellLines=run=>existsSync(run.shellLog)?readFileSync(run.shellLog,'utf8').trim().split('\n').filter(Boolean):[];
+const verdicts={words:WORDS};
+const observe=(p,run,label,extra={})=>{const init=initFrame(p);const o={label,output_style:init?.output_style??null,worker:logs(p).filter(l=>l.includes('MAWS_U2_')),shell:shellLines(run),...extra,disk:diskTrace(run)};p.note({event:'u2_observation',...o});verdicts[label]=o;console.log(label,JSON.stringify(o));return o;};
+
+const A=scratchRun('a');
+let sessionA;
+// 1. New: the contract appended with the new launch's word (not asked here); the variable through --settings env only.
+try{
+ const p=await launch('p2-to-human-new',A,{settingsEnv:{MAWS_NATIVE_TO_HUMAN:'1'},append:appendFor('new'),question:'U2 run 2: --append-system-prompt on a new session; MAWS_NATIVE_TO_HUMAN through --settings env only; session.attach as maws-main; what the engine writes to disk of the prompt'},async(p,{sessionId})=>{
+  sessionA=sessionId;
+  success(await p.init(initPayload(A.cwd)),'initialize');
+  await attach(p);
+  const answer=await ask(p,'Without using any tools: tell me in a message what you would put in a README for this repository, give one insight about it, flag one thing I must not miss, and ask me one question with two choices about the README\'s tone that you can wait on.');
+  await delay(1500);
+  const said=texts(p).join('\n---\n');
+  observe(p,A,'new',{marks:{toHuman:/<to-human>/.test(said),essential:/<essential>/.test(said),needInput:/<need-input>/.test(said),choice:/<choice( recommended)?>/.test(said),insight:/<insight>/.test(said)},wordsInAnswers:wordsIn(said),answer:answer.slice(0,1500)});
+  await endAsStop(p);
+ });
+}catch(e){console.error('new',e.message);verdicts.newError=e.message;}
+
+// 2. Resume with a different prompt (the resume's word and the compaction word); the variable through the process
+// environment only. Compaction first, then the list question: every word in the answer came from a system prompt.
+try{
+ const p=await launch('p2-to-human-resume',A,{vars:{MAWS_NATIVE_TO_HUMAN:'1'},append:appendFor('resume'),resume:sessionA,question:'U2 run 2: a resumed launch with a different appended prompt; which prompts are in effect after /compact; MAWS_NATIVE_TO_HUMAN through the process environment only'},async p=>{
+  success(await p.init(initPayload(A.cwd)),'initialize');
+  const compact=await ask(p,'/compact');
+  const answer=await ask(p,LIST);
+  const compactWord=await ask(p,'What is the compaction word? Reply with only the word, or NONE.');
+  observe(p,A,'resume',{compactBoundary:p.frames.some(r=>r.frame.type==='system'&&r.frame.subtype==='compact_boundary'),compactResult:compact.slice(0,200),answer,wordsInAnswer:wordsIn(answer),compactWord,compactWordKnown:compactWord.includes(WORDS.compact)});
+  await endAsStop(p);
+ });
+}catch(e){console.error('resume',e.message);verdicts.resumeError=e.message;}
+
+// 3. Off: resumed with neither the prompt nor the variable.
+try{
+ const p=await launch('p2-to-human-off',A,{resume:sessionA,question:'U2 run 2: the next launch with no --append-system-prompt and no MAWS_NATIVE_TO_HUMAN; which earlier prompt, if any, is still in effect'},async p=>{
+  success(await p.init(initPayload(A.cwd)),'initialize');
+  const answer=await ask(p,LIST);
+  observe(p,A,'off',{answer,wordsInAnswer:wordsIn(answer)});
+  await endAsStop(p);
+ });
+}catch(e){console.error('off',e.message);verdicts.offError=e.message;}
+
+// 4. Fork of the same session with its own prompt and no variable.
+try{
+ const p=await launch('p2-to-human-fork',A,{resume:sessionA,fork:true,append:appendFor('fork'),question:'U2 run 2: a fork (--resume --fork-session --session-id) with its own appended prompt; which prompts are in effect; no MAWS_NATIVE_TO_HUMAN'},async p=>{
+  success(await p.init(initPayload(A.cwd)),'initialize');
+  const answer=await ask(p,LIST);
+  observe(p,A,'fork',{answer,wordsInAnswer:wordsIn(answer)});
+  await endAsStop(p);
+ });
+}catch(e){console.error('fork',e.message);verdicts.forkError=e.message;}
+
+// 5. A style declaring the contract, selected by the user's settings; no append; plugin validate's verdict on the key.
+const D=scratchRun('d',{settings:{outputStyle:'maws-u2-probe:to-human'}});
+try{
+ let validate;
+ try{validate={code:0,out:execFileSync(BIN,['plugin','validate',D.plugin],{env:engineEnv(D.home,{}),encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']})};}
+ catch(e){validate={code:e.status??null,out:String(e.stdout??''),err:String(e.stderr??'').slice(0,2000)};}
+ const p=await launch('p2-to-human-style',D,{settingsEnv:{MAWS_NATIVE_TO_HUMAN:'1'},question:'U2 run 2: a plugin output style declaring maws-to-human-contract: 1, selected by the user settings, loads and is reported by system/init; claude plugin validate on it'},async p=>{
+  p.note({event:'plugin_validate',code:validate.code,out:validate.out.slice(0,4000),err:validate.err??''});
+  success(await p.init(initPayload(D.cwd)),'initialize');
+  const answer=await ask(p,'Without using any tools, tell me in one sentence what your instructions say about how to reach me, and ask me one question with the choices Yes and No that you can wait on.');
+  const said=texts(p).join('\n---\n');
+  observe(p,D,'style',{answer,marks:{toHuman:/<to-human>/.test(said),needInput:/<need-input>/.test(said),choice:/<choice( recommended)?>/.test(said)},validate:{code:validate.code,out:validate.out.slice(0,800)}});
+  await endAsStop(p);
+ });
+}catch(e){console.error('style',e.message);verdicts.styleError=e.message;}
+
+verdicts.roots={A:A.root,D:D.root};
+writeFileSync(join(HERE,'verdicts-2.json'),JSON.stringify(verdicts,null,1)+'\n');
+console.log('DONE');
+
+B.2 p2-to-human-snapshot.mjs (run 3; sha256 375e676b86e8d6acf60d9c9a83ff89169c7ae00001742784026c17b10b246e0d)
+
+// U2, P2-C's M0 probe, third run (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U2; execution document
+// docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M0; parent pin 8814d733db1b3c50798b9d3ec766985b29e05420).
+// The second run found the engine writing each launch's system prompt into the transcript as a `prompt_snapshot`
+// attachment (the appended prompt its last segment), and a launch without the flag still knowing an earlier launch's
+// word. This run separates that from the conversation's history: five sessions, each created by one launch that asks a
+// neutral question (no probe word ever reaches the history), then one later launch that asks, once, which probe words
+// its system prompt gives. The answer can only come from a system prompt.
+//   S1 new with prompt N1, resume with prompt R1          (a resume with a different prompt)
+//   S2 new without a prompt, resume with prompt X2       (the lane turned on for an existing session)
+//   S3 new with prompt N3, resume without a prompt       (the lane turned off)
+//   S4 new without a prompt, resume with prompt Y4, /compact, then ask   (does compaction refresh it)
+//   S5 new with prompt N5, fork with prompt F5           (a fork)
+// After every launch, the transcript's prompt_snapshot records are listed (line, segment count, whose sentinel the
+// last segment carries). Safety as the first two runs: scratch CLAUDE_CONFIG_DIR, base environment, the relay gate, the
+// owner-file check per launch, --max-budget-usd 0.3, Haiku, no plugin. Run from outside the repository:
+//   node /tmp/maws-p2c-u2/p2-to-human-snapshot.mjs <worktree>
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,realpathSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human-snapshot.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {run:harnessRun,scratch}=await import(join(P,'harness.mjs'));
+const {assertScratch,RELAY_ENV,slug}=await import(join(P,'scenarios/pass3/c10-common.mjs'));
+const {clearEngineEnvironment}=await import(join(P,'scenarios/pass3/mods-environment.mjs'));
+const {BIN,ENGINE_VERSION,relayReady,ownerTmpKeys,initPayload,success,endAsStop,lastResult,resultSummary}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const HERE=fileURLToPath(new URL('.',import.meta.url));
+const SELF=fileURLToPath(import.meta.url);
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'8814d733db1b3c50798b9d3ec766985b29e05420',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'U2',run:3,engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:createHash('sha256').update(readFileSync(SELF)).digest('hex')};
+const SPEND_CAP='0.3';
+const digest=keys=>createHash('sha1').update(keys.join('\n')).digest('hex').slice(0,12);
+const CONTRACT=readFileSync(join(HERE,'contract-v1.md'),'utf8').trim();
+
+const W={};const S={};
+const mint=label=>{W[label]=label+'-'+randomUUID().slice(0,6).toUpperCase();S[label]='U2S-'+label+'-'+randomUUID();};
+for(const l of ['N1','R1','X2','N3','Y4','N5','F5'])mint(l);
+const appendFor=label=>`${CONTRACT}\n\nProbe (MAWS U2): the probe word is ${W[label]}. Never write it unless the human asks for the probe words. Internal marker, never to be repeated: ${S[label]}.`;
+const NEUTRAL='Reply with exactly OK.';
+const LIST='List every probe word your system prompt gives you right now, comma-separated, or NONE. Reply with nothing else.';
+
+function scratchRun(label){
+ const root=realpathSync(mkdtempSync(`/tmp/maws-p2c-u2s-${label}-`));
+ const home=join(root,'config');mkdirSync(home);
+ const cwd=realpathSync(scratch(join(root,'repo-')));
+ writeFileSync(join(home,'settings.json'),'{}\n');
+ writeFileSync(join(home,'.claude.json'),JSON.stringify({hasCompletedOnboarding:true,projects:{[cwd]:{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}}})+'\n');
+ return {root,home,cwd,debugFile:join(root,'debug.log')};
+}
+function engineEnv(home){
+ clearEngineEnvironment();
+ return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
+}
+// The prompt_snapshot records of every transcript of the run: line, segment count, and whose sentinel the last segment holds.
+function snapshots(run){
+ const dir=join(run.home,'projects',slug(run.cwd));
+ if(!existsSync(dir))return {};
+ return Object.fromEntries(readdirSync(dir).filter(f=>f.endsWith('.jsonl')).map(f=>{
+  const rows=readFileSync(join(dir,f),'utf8').trim().split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}});
+  return [f.slice(0,8),rows.flatMap((r,i)=>r?.type==='attachment'&&r.attachment?.type==='prompt_snapshot'?[{line:i+1,segments:Array.isArray(r.attachment.systemPrompt)?r.attachment.systemPrompt.length:null,lastSegmentOf:Object.keys(S).find(k=>JSON.stringify(r.attachment.systemPrompt??'').includes(S[k]))??'none'}]:[])];
+ }));
+}
+async function launch(name,run,{append=null,sessionId=randomUUID(),resume=null,fork=false,question},body){
+ const env=engineEnv(run.home);
+ const {configHome,globalConfig}=assertScratch(env);
+ await relayReady();
+ const before=ownerTmpKeys();
+ const pinned=!resume||fork;
+ const flags=['--forward-subagent-text','--replay-user-messages','--include-hook-events',...(resume?['--resume',resume,...(fork?['--fork-session']:[])]:[]),...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--settings',JSON.stringify({dialogExpiry:'never'}),...(append?['--append-system-prompt',append]:[]),'--debug-file',run.debugFile];
+ let failure;
+ const p=await harnessRun(name,async p=>{
+  p.note({event:'provenance',...PROVENANCE,question,model:'haiku',configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,resumed:resume,fork,envKeys:Object.keys(env).sort(),appendChars:append?.length??0,appendWord:append?Object.keys(W).find(k=>append.includes(W[k])):null});
+  p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
+  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+  p.on('elicitation',()=>({action:'decline'}));
+  try{success(await p.init(initPayload(run.cwd)),'initialize');await body(p,{sessionId});}catch(e){failure=e;throw e;}
+  finally{p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model:'haiku',settingSources:'user,project,local',strictMcp:false,mode:'default',flags});
+ await p.closed;
+ const after=ownerTmpKeys();
+ const same=JSON.stringify(after)===JSON.stringify(before);
+ p.note({event:'owner_file_check',phase:'after',count:after.length,digest:digest(after),same});
+ p.note({event:'prompt_snapshots',after:name,snapshots:snapshots(run)});
+ if(!same)throw new Error(name+": the owner's ~/.claude.json /tmp project keys changed");
+ if(failure)throw failure;
+ return p;
+}
+const ask=async(p,prompt)=>{const r=await p.turn(prompt);p.note({event:'turn_text',prompt,result:r.result??null});return r.result??'';};
+const wordsIn=a=>Object.keys(W).filter(k=>a.includes(W[k]));
+const verdicts={words:W};
+async function kase(label,{first,second,compact=false,fork=false,question}){
+ const run=scratchRun(label);
+ try{
+  let id;
+  await launch(`p2-to-human-snapshot-${label}-new`,run,{append:first?appendFor(first):null,question:`${question}: the session's first launch (${first?'prompt '+first:'no prompt'}), a neutral turn`},async(p,{sessionId})=>{id=sessionId;await ask(p,NEUTRAL);await endAsStop(p);});
+  const forkId=randomUUID();
+  let answer,answerBefore=null;
+  const p=await launch(`p2-to-human-snapshot-${label}-${fork?'fork':'resume'}`,run,{append:second?appendFor(second):null,resume:id,fork,sessionId:forkId,question:`${question}: the later launch (${second?'prompt '+second:'no prompt'}${fork?', a fork':''}${compact?', /compact first':''}), asked once`},async p=>{
+   if(compact)await ask(p,'/compact');
+   answer=await ask(p,LIST);
+   await endAsStop(p);
+  });
+  verdicts[label]={first,second,fork,compact,answer,wordsInAnswer:wordsIn(answer),snapshots:snapshots(run),root:run.root};
+  console.log(label,JSON.stringify(verdicts[label]));
+ }catch(e){console.error(label,e.message);verdicts[label+'Error']=e.message;}
+}
+await kase('s1',{first:'N1',second:'R1',question:'U2 run 3 S1, a resume with a different prompt'});
+await kase('s2',{first:null,second:'X2',question:'U2 run 3 S2, the lane turned on for an existing session'});
+await kase('s3',{first:'N3',second:null,question:'U2 run 3 S3, the lane turned off'});
+await kase('s4',{first:null,second:'Y4',compact:true,question:'U2 run 3 S4, the lane turned on and the session compacted'});
+await kase('s5',{first:'N5',second:'F5',fork:true,question:'U2 run 3 S5, a fork with its own prompt'});
+writeFileSync(join(HERE,'verdicts-3.json'),JSON.stringify(verdicts,null,1)+'\n');
+console.log('DONE');
+
+B.3 p2-to-human-snapoff.mjs (run 4; sha256 f4b77fa599fd46f9d6ec4c11ba2855530bd3abd32ce42bc30ee463253d91d837)
+
+// U2, P2-C's M0 probe, fourth run (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U2; execution document
+// docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M0; parent pin 8814d733db1b3c50798b9d3ec766985b29e05420).
+// The third run found that a resume or a fork reuses the session's recorded `prompt_snapshot`: a new
+// `--append-system-prompt` is ignored and an omitted one persists, until compaction re-renders the prompt. The installed
+// binary declares `--system-prompt-snapshot <on|off>`. This run asks, with the third run's history-free design (a
+// neutral first launch, one question in the later launch), whether `off` makes that later launch render the live prompt,
+// and whether the prompt it rendered is what a plain resume after it keeps:
+//   S6 new with prompt N6, resume with prompt R6 and the flag off, then a plain resume (no prompt, no flag)
+//   S7 new with prompt N7, resume with no prompt and the flag off      (the lane turned off)
+//   S8 new without a prompt, resume with prompt X8 and the flag off    (the lane turned on for an existing session)
+//   S9 new with prompt N9, fork with prompt F9 and the flag off        (a fork)
+// Safety as the earlier runs: scratch CLAUDE_CONFIG_DIR, base environment, the relay gate, the owner-file check per
+// launch, --max-budget-usd 0.3, Haiku, no plugin. Run from outside the repository:
+//   node /tmp/maws-p2c-u2/p2-to-human-snapoff.mjs <worktree>
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,realpathSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human-snapoff.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {run:harnessRun,scratch}=await import(join(P,'harness.mjs'));
+const {assertScratch,RELAY_ENV,slug}=await import(join(P,'scenarios/pass3/c10-common.mjs'));
+const {clearEngineEnvironment}=await import(join(P,'scenarios/pass3/mods-environment.mjs'));
+const {BIN,ENGINE_VERSION,relayReady,ownerTmpKeys,initPayload,success,endAsStop,lastResult,resultSummary}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const HERE=fileURLToPath(new URL('.',import.meta.url));
+const SELF=fileURLToPath(import.meta.url);
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'8814d733db1b3c50798b9d3ec766985b29e05420',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'U2',run:4,engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:createHash('sha256').update(readFileSync(SELF)).digest('hex')};
+const SPEND_CAP='0.3';
+const digest=keys=>createHash('sha1').update(keys.join('\n')).digest('hex').slice(0,12);
+const CONTRACT=readFileSync(join(HERE,'contract-v1.md'),'utf8').trim();
+
+const W={};const S={};
+const mint=label=>{W[label]=label+'-'+randomUUID().slice(0,6).toUpperCase();S[label]='U2S-'+label+'-'+randomUUID();};
+for(const l of ['N6','R6','N7','X8','N9','F9'])mint(l);
+const appendFor=label=>`${CONTRACT}\n\nProbe (MAWS U2): the probe word is ${W[label]}. Never write it unless the human asks for the probe words. Internal marker, never to be repeated: ${S[label]}.`;
+const NEUTRAL='Reply with exactly OK.';
+const LIST='List every probe word your system prompt gives you right now, comma-separated, or NONE. Reply with nothing else.';
+
+function scratchRun(label){
+ const root=realpathSync(mkdtempSync(`/tmp/maws-p2c-u2s-${label}-`));
+ const home=join(root,'config');mkdirSync(home);
+ const cwd=realpathSync(scratch(join(root,'repo-')));
+ writeFileSync(join(home,'settings.json'),'{}\n');
+ writeFileSync(join(home,'.claude.json'),JSON.stringify({hasCompletedOnboarding:true,projects:{[cwd]:{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}}})+'\n');
+ return {root,home,cwd,debugFile:join(root,'debug.log')};
+}
+function engineEnv(home){
+ clearEngineEnvironment();
+ return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
+}
+function snapshots(run){
+ const dir=join(run.home,'projects',slug(run.cwd));
+ if(!existsSync(dir))return {};
+ return Object.fromEntries(readdirSync(dir).filter(f=>f.endsWith('.jsonl')).map(f=>{
+  const rows=readFileSync(join(dir,f),'utf8').trim().split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}});
+  return [f.slice(0,8),rows.flatMap((r,i)=>r?.type==='attachment'&&r.attachment?.type==='prompt_snapshot'?[{line:i+1,segments:Array.isArray(r.attachment.systemPrompt)?r.attachment.systemPrompt.length:null,lastSegmentOf:Object.keys(S).find(k=>JSON.stringify(r.attachment.systemPrompt??'').includes(S[k]))??'none'}]:r?.type==='attachment'&&r.attachment?.type==='prompt_render_point'?[{line:i+1,renderPoint:r.attachment.cause??null}]:[])];
+ }));
+}
+async function launch(name,run,{append=null,sessionId=randomUUID(),resume=null,fork=false,snapshotOff=false,question},body){
+ const env=engineEnv(run.home);
+ const {configHome,globalConfig}=assertScratch(env);
+ await relayReady();
+ const before=ownerTmpKeys();
+ const pinned=!resume||fork;
+ const flags=['--forward-subagent-text','--replay-user-messages','--include-hook-events',...(resume?['--resume',resume,...(fork?['--fork-session']:[])]:[]),...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--settings',JSON.stringify({dialogExpiry:'never'}),...(append?['--append-system-prompt',append]:[]),...(snapshotOff?['--system-prompt-snapshot','off']:[]),'--debug-file',run.debugFile];
+ let failure;
+ const p=await harnessRun(name,async p=>{
+  p.note({event:'provenance',...PROVENANCE,question,model:'haiku',configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,resumed:resume,fork,snapshotOff,envKeys:Object.keys(env).sort(),appendChars:append?.length??0,appendWord:append?Object.keys(W).find(k=>append.includes(W[k])):null});
+  p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
+  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+  p.on('elicitation',()=>({action:'decline'}));
+  try{success(await p.init(initPayload(run.cwd)),'initialize');await body(p,{sessionId});}catch(e){failure=e;throw e;}
+  finally{p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model:'haiku',settingSources:'user,project,local',strictMcp:false,mode:'default',flags});
+ await p.closed;
+ const after=ownerTmpKeys();
+ const same=JSON.stringify(after)===JSON.stringify(before);
+ p.note({event:'owner_file_check',phase:'after',count:after.length,digest:digest(after),same});
+ p.note({event:'prompt_snapshots',after:name,snapshots:snapshots(run)});
+ if(!same)throw new Error(name+": the owner's ~/.claude.json /tmp project keys changed");
+ if(failure)throw failure;
+ return p;
+}
+const ask=async(p,prompt)=>{const r=await p.turn(prompt);p.note({event:'turn_text',prompt,result:r.result??null});return r.result??'';};
+const wordsIn=a=>Object.keys(W).filter(k=>a.includes(W[k]));
+const verdicts={words:W};
+async function kase(label,{first,second,fork=false,then=false,question}){
+ const run=scratchRun(label);
+ try{
+  let id;
+  await launch(`p2-to-human-snapoff-${label}-new`,run,{append:first?appendFor(first):null,question:`${question}: the session's first launch (${first?'prompt '+first:'no prompt'}), a neutral turn`},async(p,{sessionId})=>{id=sessionId;await ask(p,NEUTRAL);await endAsStop(p);});
+  const forkId=randomUUID();
+  let answer,answerThen=null;
+  // with a plain resume to follow, this launch asks only the neutral question, so the follow-up's answer has no history
+  await launch(`p2-to-human-snapoff-${label}-${fork?'fork':'resume'}`,run,{append:second?appendFor(second):null,resume:id,fork,sessionId:forkId,snapshotOff:true,question:`${question}: the later launch (${second?'prompt '+second:'no prompt'}${fork?', a fork':''}) with --system-prompt-snapshot off, ${then?'a neutral turn':'asked once'}`},async p=>{answer=await ask(p,then?NEUTRAL:LIST);await endAsStop(p);});
+  if(then)await launch(`p2-to-human-snapoff-${label}-then`,run,{resume:id,question:`${question}: a plain resume after the snapshot-off launch (no prompt, no flag), asked once more`},async p=>{answerThen=await ask(p,LIST);await endAsStop(p);});
+  verdicts[label]={first,second,fork,answer,wordsInAnswer:wordsIn(answer),answerThen,wordsThen:answerThen===null?null:wordsIn(answerThen),snapshots:snapshots(run),root:run.root};
+  console.log(label,JSON.stringify(verdicts[label]));
+ }catch(e){console.error(label,e.message);verdicts[label+'Error']=e.message;}
+}
+await kase('s6',{first:'N6',second:'R6',then:true,question:'U2 run 4 S6, a resume with a different prompt and --system-prompt-snapshot off, then a plain resume'});
+await kase('s7',{first:'N7',second:null,question:'U2 run 4 S7, the lane turned off with --system-prompt-snapshot off'});
+await kase('s8',{first:null,second:'X8',question:'U2 run 4 S8, the lane turned on for an existing session with --system-prompt-snapshot off'});
+await kase('s9',{first:'N9',second:'F9',fork:true,question:'U2 run 4 S9, a fork with its own prompt and --system-prompt-snapshot off'});
+writeFileSync(join(HERE,'verdicts-4.json'),JSON.stringify(verdicts,null,1)+'\n');
+console.log('DONE');
+
+B.4 p2-to-human-converge.mjs (run 5; sha256 b54b246035b0d1e04a74d411682b7603ae0e0b7660106678e073ce6f3d05a0f0)
+
+// U2, P2-C's M0 probe, fifth run (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md §4.10 U2; execution document
+// docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M0; parent pin 8814d733db1b3c50798b9d3ec766985b29e05420).
+// The fourth run found that `--system-prompt-snapshot off` renders the live prompt for that launch but records no
+// snapshot, so the next plain resume reverts; and a fork with the flag off answered NONE although it carried its own
+// prompt. This run, with the same history-free design, asks:
+//   S10 new N10; resume with R10 and the flag off, /compact, a neutral turn; then a plain resume asked once
+//       (does a compaction under the flag record the live prompt, so later plain launches keep it)
+//   S11 new N11; fork with F11 and the flag off, asked once     (the fourth run's S9 again)
+//   S12 new N12; resume with R12 and the flag off, asked once   (a resume replacing an earlier prompt)
+//   S13 new with the final contract text, one turn asking for a README plan, a note, a must-not-miss and a question
+//       (does the final wording put the answer itself inside a mark)
+// Safety as the earlier runs. Run from outside the repository:  node /tmp/maws-p2c-u2/p2-to-human-converge.mjs <worktree>
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,realpathSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human-converge.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {run:harnessRun,scratch}=await import(join(P,'harness.mjs'));
+const {assertScratch,RELAY_ENV,slug}=await import(join(P,'scenarios/pass3/c10-common.mjs'));
+const {clearEngineEnvironment}=await import(join(P,'scenarios/pass3/mods-environment.mjs'));
+const {BIN,ENGINE_VERSION,relayReady,ownerTmpKeys,initPayload,success,endAsStop,lastResult,resultSummary}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const HERE=fileURLToPath(new URL('.',import.meta.url));
+const SELF=fileURLToPath(import.meta.url);
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'8814d733db1b3c50798b9d3ec766985b29e05420',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'U2',run:5,engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:createHash('sha256').update(readFileSync(SELF)).digest('hex')};
+const SPEND_CAP='0.3';
+const digest=keys=>createHash('sha1').update(keys.join('\n')).digest('hex').slice(0,12);
+const CONTRACT=readFileSync(join(HERE,'contract-v1.md'),'utf8').trim();
+
+const W={};const S={};
+const mint=label=>{W[label]=label+'-'+randomUUID().slice(0,6).toUpperCase();S[label]='U2S-'+label+'-'+randomUUID();};
+for(const l of ['N10','R10','N11','F11','N12','R12'])mint(l);
+const appendFor=label=>`${CONTRACT}\n\nProbe (MAWS U2): the probe word is ${W[label]}. Never write it unless the human asks for the probe words. Internal marker, never to be repeated: ${S[label]}.`;
+const NEUTRAL='Reply with exactly OK.';
+const LIST='List every probe word your system prompt gives you right now, comma-separated, or NONE. Reply with nothing else.';
+
+function scratchRun(label){
+ const root=realpathSync(mkdtempSync(`/tmp/maws-p2c-u2s-${label}-`));
+ const home=join(root,'config');mkdirSync(home);
+ const cwd=realpathSync(scratch(join(root,'repo-')));
+ writeFileSync(join(home,'settings.json'),'{}\n');
+ writeFileSync(join(home,'.claude.json'),JSON.stringify({hasCompletedOnboarding:true,projects:{[cwd]:{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}}})+'\n');
+ return {root,home,cwd,debugFile:join(root,'debug.log')};
+}
+function engineEnv(home){
+ clearEngineEnvironment();
+ return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',TERM:'dumb',DISABLE_AUTOUPDATER:'1'};
+}
+function snapshots(run){
+ const dir=join(run.home,'projects',slug(run.cwd));
+ if(!existsSync(dir))return {};
+ return Object.fromEntries(readdirSync(dir).filter(f=>f.endsWith('.jsonl')).map(f=>{
+  const rows=readFileSync(join(dir,f),'utf8').trim().split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}});
+  return [f.slice(0,8),rows.flatMap((r,i)=>r?.type==='attachment'&&r.attachment?.type==='prompt_snapshot'?[{line:i+1,segments:Array.isArray(r.attachment.systemPrompt)?r.attachment.systemPrompt.length:null,lastSegmentOf:Object.keys(S).find(k=>JSON.stringify(r.attachment.systemPrompt??'').includes(S[k]))??(JSON.stringify(r.attachment.systemPrompt??'').includes('MAWS to-human contract 1')?'contract':'none')}]:r?.type==='system'&&r.subtype==='compact_boundary'?[{line:i+1,compactBoundary:true}]:[])];
+ }));
+}
+async function launch(name,run,{append=null,sessionId=randomUUID(),resume=null,fork=false,snapshotOff=false,question},body){
+ const env=engineEnv(run.home);
+ const {configHome,globalConfig}=assertScratch(env);
+ await relayReady();
+ const before=ownerTmpKeys();
+ const pinned=!resume||fork;
+ const flags=['--forward-subagent-text','--replay-user-messages','--include-hook-events',...(resume?['--resume',resume,...(fork?['--fork-session']:[])]:[]),...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--settings',JSON.stringify({dialogExpiry:'never'}),...(append?['--append-system-prompt',append]:[]),...(snapshotOff?['--system-prompt-snapshot','off']:[]),'--debug-file',run.debugFile];
+ let failure;
+ const p=await harnessRun(name,async p=>{
+  p.note({event:'provenance',...PROVENANCE,question,model:'haiku',configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,resumed:resume,fork,snapshotOff,envKeys:Object.keys(env).sort(),appendChars:append?.length??0,appendWord:append?(Object.keys(W).find(k=>append.includes(W[k]))??'contract only'):null});
+  p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
+  p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
+  p.on('elicitation',()=>({action:'decline'}));
+  try{success(await p.init(initPayload(run.cwd)),'initialize');await body(p,{sessionId});}catch(e){failure=e;throw e;}
+  finally{p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model:'haiku',settingSources:'user,project,local',strictMcp:false,mode:'default',flags});
+ await p.closed;
+ const after=ownerTmpKeys();
+ const same=JSON.stringify(after)===JSON.stringify(before);
+ p.note({event:'owner_file_check',phase:'after',count:after.length,digest:digest(after),same});
+ p.note({event:'prompt_snapshots',after:name,snapshots:snapshots(run)});
+ if(!same)throw new Error(name+": the owner's ~/.claude.json /tmp project keys changed");
+ if(failure)throw failure;
+ return p;
+}
+const ask=async(p,prompt)=>{const r=await p.turn(prompt);p.note({event:'turn_text',prompt,result:r.result??null});return r.result??'';};
+const wordsIn=a=>Object.keys(W).filter(k=>a.includes(W[k]));
+const texts=p=>p.frames.filter(r=>r.frame.type==='assistant'&&!r.frame.parent_tool_use_id).flatMap(r=>(r.frame.message?.content||[]).filter(b=>b.type==='text').map(b=>b.text));
+const verdicts={words:W};
+const out=(label,v)=>{verdicts[label]=v;console.log(label,JSON.stringify(v));};
+
+// S10
+{const run=scratchRun('s10');try{let id;
+ await launch('p2-to-human-converge-s10-new',run,{append:appendFor('N10'),question:'U2 run 5 S10: the first launch (prompt N10), a neutral turn'},async(p,{sessionId})=>{id=sessionId;await ask(p,NEUTRAL);await endAsStop(p);});
+ await launch('p2-to-human-converge-s10-resume',run,{append:appendFor('R10'),resume:id,snapshotOff:true,question:'U2 run 5 S10: a resume with prompt R10 and --system-prompt-snapshot off, /compact, a neutral turn'},async p=>{await ask(p,'/compact');await ask(p,NEUTRAL);await endAsStop(p);});
+ let answer;await launch('p2-to-human-converge-s10-then',run,{resume:id,question:'U2 run 5 S10: a plain resume after the compaction under the flag (no prompt, no flag), asked once'},async p=>{answer=await ask(p,LIST);await endAsStop(p);});
+ out('s10',{answer,wordsInAnswer:wordsIn(answer),snapshots:snapshots(run),root:run.root});
+}catch(e){console.error('s10',e.message);verdicts.s10Error=e.message;}}
+// S11 and S12
+for(const [label,second,fork] of [['s11','F11',true],['s12','R12',false]]){const first=label==='s11'?'N11':'N12';const run=scratchRun(label);try{let id;
+ await launch(`p2-to-human-converge-${label}-new`,run,{append:appendFor(first),question:`U2 run 5 ${label.toUpperCase()}: the first launch (prompt ${first}), a neutral turn`},async(p,{sessionId})=>{id=sessionId;await ask(p,NEUTRAL);await endAsStop(p);});
+ let answer;await launch(`p2-to-human-converge-${label}-${fork?'fork':'resume'}`,run,{append:appendFor(second),resume:id,fork,snapshotOff:true,question:`U2 run 5 ${label.toUpperCase()}: a ${fork?'fork':'resume'} with prompt ${second} and --system-prompt-snapshot off, asked once`},async p=>{answer=await ask(p,LIST);await endAsStop(p);});
+ out(label,{answer,wordsInAnswer:wordsIn(answer),snapshots:snapshots(run),root:run.root});
+}catch(e){console.error(label,e.message);verdicts[label+'Error']=e.message;}}
+// S13
+{const run=scratchRun('s13');try{
+ let answer,said;await launch('p2-to-human-converge-s13-new',run,{append:CONTRACT,question:'U2 run 5 S13: the final contract text on a new session; one turn asking for a README plan, a note, a must-not-miss and a question'},async p=>{
+  answer=await ask(p,'Without using any tools: tell me what you would put in a README for this repository, give one insight about it, flag one thing I must not miss, and ask me one question with two choices about the README\'s tone that you can wait on.');
+  said=texts(p).join('\n---\n');await endAsStop(p);});
+ const outside=said.replace(/<(to-human|essential|need-input|insight)>[\s\S]*?<\/\1>/g,'').trim();
+ out('s13',{marks:{toHuman:/<to-human>/.test(said),essential:/<essential>/.test(said),needInput:/<need-input>/.test(said),choice:/<choice( recommended)?>/.test(said),insight:/<insight>/.test(said)},unmarkedChars:outside.length,unmarkedHead:outside.slice(0,300),answer:answer.slice(0,2500),snapshots:snapshots(run)});
+}catch(e){console.error('s13',e.message);verdicts.s13Error=e.message;}}
+writeFileSync(join(HERE,'verdicts-5.json'),JSON.stringify(verdicts,null,1)+'\n');
+console.log('DONE');
