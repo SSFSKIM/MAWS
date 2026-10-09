@@ -3,7 +3,7 @@
 // orders, over hand-built rows and views shaped as the host answers them.
 import { describe, expect, it } from 'vitest';
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
-import { chipLabel, chipsOf, insideItems, insideSummary, insideTabs, loadedFactOf, OTHER_PROJECTS, updateOffer } from './detail';
+import { chipLabel, chipsOf, insideItems, insideSummary, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, projectLabels, updateOffer } from './detail';
 import { identitiesOf } from './library';
 import type { LoadedPlugins } from './loaded';
 
@@ -57,6 +57,25 @@ describe('the detail: scope chips', () => {
   it('a skills-directory plugin and a session folder read Created by you, never actionable', () => {
     expect(chipsOf(identity([inst('notes@skills-dir')])).chips.map((c) => [chipLabel(c), c.actionable])).toEqual([['Created by you', false]]);
     expect(chipsOf(identity([inst('local-thing@inline', { scope: 'session' })])).chips.map((c) => [chipLabel(c), c.actionable])).toEqual([['Created by you', false]]);
+  });
+});
+
+describe('the detail: other projects', () => {
+  it('counts projects, not installation records: a project and a local installation in one folder are one other project', () => {
+    const p = 'e8-probe@e8-scratch';
+    const { others } = chipsOf(identity([inst(p), project(p, '/work/other'), project(p, '/work/other', { scope: 'local' })]));
+    expect(others).toHaveLength(2); // the list keeps a row per installation
+    expect(projectCount(others)).toBe(1);
+    expect(projectCount([...others, project(p, '/work/third')])).toBe(2);
+  });
+
+  it('names a project by its folder, and by its parent and folder only when two share a name; never an absolute path', () => {
+    expect([...projectLabels(['/Users/me/MAWS/.claude/worktrees/agent-x', '/Users/me/other/agent-x', '/work/solo', '/work/solo/'])]).toEqual([
+      ['/Users/me/MAWS/.claude/worktrees/agent-x', 'worktrees/agent-x'],
+      ['/Users/me/other/agent-x', 'other/agent-x'],
+      ['/work/solo', 'solo'],
+      ['/work/solo/', 'solo'],
+    ]);
   });
 });
 

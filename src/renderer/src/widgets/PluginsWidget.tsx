@@ -104,7 +104,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   return (
     <ManageProvider value={manage}>
       <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close} size="library" toolbar={showing ? null : <PluginsToolbar />}>
-        {detail && <PluginDetail key={detail.id} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} refresh={null} onBack={() => setSelected(null)} />}
+        {detail && <PluginDetail key={detail.id} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} refresh={null} listManifests={manifests} onBack={() => setSelected(null)} />}
         <div className={showing ? 'hidden' : 'contents'}>
           <LoadedLine
             appSessionId={appSessionId}

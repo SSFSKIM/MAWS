@@ -921,6 +921,51 @@ describe('plugins widget: the detail', () => {
     expect(invoked('plugins.disable')).toEqual([]);
   });
 
+  it('other projects: counted by folder, each installation a row, named without a path in text or tooltip', async () => {
+    installed = [
+      plugin('e8-probe@e8-scratch'),
+      plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/alpha/agent-x' }),
+      plugin('e8-probe@e8-scratch', { scope: 'local', projectPath: '/work/alpha/agent-x' }),
+      plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/srv/beta/agent-x' }),
+    ];
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    fireEvent.click(within(detail()!).getByRole('radio', { name: '2 other projects' }));
+    const others = within(detail()!).getByRole('list', { name: 'Other projects' });
+    expect(within(others).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'alpha/agent-x0.1.0manage it from a session there',
+      'alpha/agent-xonly you0.1.0manage it from a session there',
+      'beta/agent-x0.1.0manage it from a session there',
+    ]);
+    expect(detail()!.outerHTML).not.toMatch(/\/work\/|\/srv\//); // neither words nor any attribute (a tooltip) holds a path
+  });
+
+  it('a refused read of a chosen chip’s files says so with the read’s words and Retry, keeping the controls and facts', async () => {
+    let refuse = true;
+    backend.script('plugins.manifest', (input) => {
+      const items = (input as { items: ManifestItemRef[] }).items;
+      if (refuse && items.some((key) => key.kind === 'installation' && key.scope === 'user')) throw new WidgetBackendError({ code: 'timeout', message: 'plugins.manifest unanswered after 10 s' });
+      return { manifests: items.map((key) => manifestOf(key)) };
+    });
+    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true }), plugin('e8-probe@e8-scratch')];
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toContain('by E8')); // this project's, read with the list
+    expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
+    // the user's installation is the detail's own read, refused
+    fireEvent.click(within(detail()!).getByRole('radio', { name: 'User' }));
+    const notice = await waitFor(() => within(detail()!).getByText(/Couldn.t read this plugin.s details/).closest<HTMLElement>('[role="status"]')!);
+    expect(notice.textContent).toContain('plugins.manifest unanswered after 10 s');
+    expect(switchOf()).toHaveProperty('disabled', false); // the listing's controls and facts stay
+    expect(within(detail()!).getByRole('button', { name: 'Update' })).toBeTruthy();
+    expect(within(detail()!).getByText('Enabled for this project')).toBeTruthy();
+    expect(detail()!.querySelector('h3 + p')!.textContent).not.toContain('by E8');
+    refuse = false;
+    fireEvent.click(within(notice).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toContain('by E8'));
+    expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
+  });
+
   it('Update names the marketplace’s newer version; an uninstall of the last installation returns to the list with its result', async () => {
     backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => ({ ...manifestOf(key), marketplaceVersion: '0.2.0' })) }));
     await ready();

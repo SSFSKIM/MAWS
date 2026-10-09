@@ -47,7 +47,7 @@ function show(identity: PluginDetailProps['identity'], props: Partial<PluginDeta
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ManageProvider value={manage}>
-        <PluginDetail identity={identity} loaded={loadedWith([], { kind: 'unknown' })} loadedIds={null} reloads={null} refresh={null} onBack={() => {}} {...props} />
+        <PluginDetail identity={identity} loaded={loadedWith([], { kind: 'unknown' })} loadedIds={null} reloads={null} refresh={null} listManifests={{ error: null, retry: () => {} }} onBack={() => {}} {...props} />
       </ManageProvider>
     </QueryClientProvider>,
   );

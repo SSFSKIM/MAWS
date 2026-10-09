@@ -57,6 +57,26 @@ export function chipsOf(identity: PluginIdentity): { chips: ScopeChip[]; others:
   return { chips, others, defaultKey: chips.some((c) => c.key === representative) ? representative : (chips[0]?.key ?? OTHER_PROJECTS) };
 }
 
+// How many other projects hold the plugin: folders, not installation records (a project and a local installation in one
+// folder are one project).
+export const projectCount = (installations: readonly InstalledPlugin[]): number => new Set(installations.map((p) => (p.projectPath ?? '').replace(/\/+$/, ''))).size;
+
+// What a project is named by, never its absolute path: its folder's name, or its parent's and its own when another
+// project shares the folder's name (worktrees often do), e.g. `MAWS/agent-x`.
+export function projectLabels(paths: readonly string[]): Map<string, string> {
+  const trimmed = (path: string) => path.replace(/\/+$/, '');
+  const folders = new Map<string, Set<string>>(); // folder name → the distinct projects so named
+  for (const path of paths) folders.set(basename(path), (folders.get(basename(path)) ?? new Set()).add(trimmed(path)));
+  return new Map(
+    paths.map((path) => {
+      const name = basename(path);
+      if ((folders.get(name)?.size ?? 0) < 2) return [path, name];
+      const parent = trimmed(path).slice(0, trimmed(path).lastIndexOf('/'));
+      return [path, `${basename(parent)}/${name}`];
+    }),
+  );
+}
+
 // Why a chip offers no change: E8's words for another project's installation; the pseudo-scopes' own.
 export function chipManagedWords(chip: ScopeChip): string | null {
   if (chip.actionable) return null;

@@ -16,7 +16,7 @@ import { ChevronLeftIcon } from '../../app/IconButton';
 import { useNow } from '../../app/use-now';
 import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
-import { chipLabel, chipManagedWords, chipsOf, insideTabs, loadedFactOf, OTHER_PROJECTS, updateOffer, type InsideKind } from './detail';
+import { chipLabel, chipManagedWords, chipsOf, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, updateOffer, type InsideKind } from './detail';
 import { MoreIcon, PluginGlyph } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
 import { FRESHNESS, type AcquireOutcome, type LoadedPlugins } from './loaded';
@@ -36,6 +36,7 @@ export interface PluginDetailProps {
   loadedIds: ReadonlySet<string> | null; // the loaded list's ids; null when none was observed
   reloads: Reloads | null; // on a ready process
   refresh: (() => Promise<AcquireOutcome>) | null; // A's `useLoadedPlugins().refresh`; null until A's M3
+  listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
   onBack(): void;
 }
 
@@ -47,7 +48,7 @@ const TAB = 'inline-flex h-8 shrink-0 items-center gap-1.5 border-b-2 border-tra
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, onBack }: PluginDetailProps) {
+export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, listManifests, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -63,8 +64,11 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, on
   // what the chips' other installations say about themselves (the representative's is the list's, already read)
   const representative = installedKey(identity.representative);
   const requests = chips.filter((c) => c.key !== representative).map(({ installation }) => ({ ...installationRef(installation), lastUpdated: installation.lastUpdated })); // the hook keys on the request's content
-  const { views } = usePluginManifests(cwd === '' ? null : cwd, requests);
-  const view = chip && chip.key !== representative ? (views.get(manifestKeyOf(installationRef(chip.installation))) ?? null) : identity.manifest;
+  const own = usePluginManifests(cwd === '' ? null : cwd, requests);
+  const ownRead = chip !== null && chip.key !== representative;
+  const view = ownRead ? (own.views.get(manifestKeyOf(installationRef(chip.installation))) ?? null) : identity.manifest;
+  // a refused read of the shown installation's files is nonfatal: the listing's controls and facts stay, and it says so
+  const read = ownRead ? own : listManifests;
 
   const name = displayNameOf(identity.name, view ?? identity.manifest);
   const installation = chip?.installation ?? identity.representative;
@@ -76,7 +80,7 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, on
   const offered = identity.actionable.length > 0; // a switch, Update and Uninstall… only where this session can change it
   const actionable = chip?.actionable ?? false;
   const busy = chip !== null && ops.entries.get(chip.key)?.state.phase === 'working';
-  const managed = chip === null ? (others.length === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(others.length)) : chipManagedWords(chip);
+  const managed = chip === null ? (projectCount(others) === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(projectCount(others))) : chipManagedWords(chip);
   const update = updateOffer(installation.version, view?.marketplaceVersion ?? null);
   const change = (action: Change) => chip && ask(chip.key, requestFor(action, { plugin: identity.id, scope: chip.installation.scope as PluginsScope }, null));
 
@@ -200,6 +204,15 @@ export function PluginDetail({ identity, loaded, loadedIds, reloads, refresh, on
                 ))}
               </ul>
             )}
+            {read.error !== null && (
+              <p role="status" className="m-0 flex flex-wrap items-baseline gap-x-2 text-ui-sm text-warning">
+                <span>{L.detailsFailed}</span>
+                <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{read.error}</span>
+                <button type="button" className="rounded-sm text-fg outline-accent hover:underline focus-visible:outline-2" onClick={read.retry}>
+                  {L.retry}
+                </button>
+              </p>
+            )}
             <InsideSummary view={view} onOpen={setTab} />
           </Tabs.Content>
           {view?.state === 'read' &&
@@ -224,7 +237,7 @@ const goneName = (key: string): string => {
 // session's loaded list with its freshness ("Loaded now", "Loaded last time, <relative>"; none when the list says no
 // time); a known list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload
 // plugins (ready) or Refresh; no list reads "Not observed yet". The last init's problems for this plugin beneath.
-function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<PluginDetailProps, 'onBack'> & { now: number }) {
+function Facts({ identity, loaded, loadedIds, reloads, refresh, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests'> & { now: number }) {
   const fact = loadedFactOf(identity.id, loaded, loadedIds);
   const { pending, refusal, run } = useRefresh(refresh);
   const problems = present(loaded).problems.filter((p) => p.plugin === identity.name || p.plugin === identity.id);

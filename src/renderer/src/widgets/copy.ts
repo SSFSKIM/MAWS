@@ -551,5 +551,6 @@ export const LIBRARY = {
   partial: 'Some of this plugin’s files could not be read, so what’s inside may not all be listed.',
   missing: 'This plugin’s files are not on disk.',
   unread: 'What’s inside could not be read.',
+  detailsFailed: "Couldn't read this plugin's details.", // the detail's `plugins.manifest` refused: the controls and facts stay
 };
 // P2-B end
