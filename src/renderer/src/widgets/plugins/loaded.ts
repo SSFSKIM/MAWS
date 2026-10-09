@@ -5,10 +5,10 @@
 // `useAvailability` and `Availability` (`sessions/availability.ts`, `src/shared/ipc/schema/session.ts`), and
 // `acquisitionWords` and `AcquireOutcome` (`sessions/acquire.ts`, `src/shared/sessions/setup.ts`). What they answer
 // is the engine status only (no observed facts file before A): the loaded list is the status's whenever there is one,
-// "now" when its process is ready; a status that outlived its process keeps the list it last reported, as E8 drew it,
-// with freshness `unknown` because the status says no time (so the line names none, never an invented one; the
-// architect's ruling of 2026-10-09: no stand-in draws less than master did). Availability is usable or resumable, and
-// there is no `refresh` (A's M3 adds it).
+// "now" when its process is ready and the list says something; a status that outlived its process keeps the list it
+// last reported, as E8 drew it, with freshness `unknown` because the status says no time (so the line names none,
+// never an invented one; the architect's ruling of 2026-10-09: no stand-in draws less than master did). Availability
+// is usable or resumable, and there is no `refresh` (A's M3 adds it).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { StartOutcome } from '@shared/sessions/setup';
@@ -40,9 +40,15 @@ export interface LoadedPlugins {
 
 const UNKNOWN: LoadedPlugins = { plugins: [], errors: [], warnings: [], freshness: { kind: 'unknown' } };
 
+// A ready process's list is fresh only once it says something: the engine reports no plugins until its first
+// `system/init`, so an empty, problem-free list is no observation (the architect's ruling of 2026-10-10) and reads as
+// "Not observed yet", never "0 plugins loaded · Loaded now".
+const freshnessOf = (status: EngineSessionStatus): Freshness =>
+  status.process === 'ready' && status.plugins.length + status.pluginErrors.length + status.pluginWarnings.length > 0 ? { kind: 'now' } : { kind: 'unknown' };
+
 export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins {
   const status = useSessions(useShallow((s) => s.engine.get(appSessionId) ?? null));
-  return useMemo(() => (status ? { plugins: status.plugins, errors: status.pluginErrors, warnings: status.pluginWarnings, freshness: status.process === 'ready' ? { kind: 'now' } : { kind: 'unknown' } } : UNKNOWN), [status]);
+  return useMemo(() => (status ? { plugins: status.plugins, errors: status.pluginErrors, warnings: status.pluginWarnings, freshness: freshnessOf(status) } : UNKNOWN), [status]);
 }
 
 export type Availability = 'usable' | 'starting' | 'resumable' | 'foreign_held' | 'archived' | 'missing_directory' | 'needs_trust' | 'failed';

@@ -28,8 +28,15 @@ export type SkillsSort = 'name' | 'plugin';
 
 const DialogSkillSchema = z.looseObject({ name: z.string(), description: z.string().optional(), source: z.string().optional() });
 
-// The sources the groups say for themselves; any other word is the row's credit.
-const GROUPED: Readonly<Record<string, SourceGroup>> = { project: 'here', 'project, gitignored': 'here', user: 'yours', 'built-in': 'anthropic', 'claude.ai sync': 'synced' };
+// The sources the groups say for themselves; any other word is the row's credit. A Map, so a word an object inherits
+// (`constructor`, `__proto__`) is as unknown as any other.
+const GROUPED: ReadonlyMap<string, SourceGroup> = new Map([
+  ['project', 'here'],
+  ['project, gitignored', 'here'],
+  ['user', 'yours'],
+  ['built-in', 'anthropic'],
+  ['claude.ai sync', 'synced'],
+]);
 
 const prefixOf = (name: string): string | null => (name.includes(':') ? name.slice(0, name.indexOf(':')) : null);
 
@@ -49,7 +56,7 @@ export const labelOf = (row: SkillRow): string => {
 };
 
 // The row's badge: its plugin, else the engine's word for a source no group says.
-export const badgeOf = (row: SkillRow): string | null => row.plugin ?? (row.source !== '' && row.source !== 'plugin' && !(row.source in GROUPED) ? row.source : null);
+export const badgeOf = (row: SkillRow): string | null => row.plugin ?? (row.source !== '' && row.source !== 'plugin' && !GROUPED.has(row.source) ? row.source : null);
 
 const compare = (a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' });
 const byLabel = (a: SkillRow, b: SkillRow) => compare(labelOf(a), labelOf(b)) || compare(a.name, b.name);
@@ -69,7 +76,7 @@ export function skillGroups(dialog: GetSkillsDialogResponse, catalog: SessionCat
       const { plugin, group } = pluginOf(prefix, loaded, identities);
       return { group, row: { name: s.name, plugin, description, source } };
     }
-    return { group: GROUPED[source] ?? 'added', row: { name: s.name, plugin: null, description, source } };
+    return { group: GROUPED.get(source) ?? 'added', row: { name: s.name, plugin: null, description, source } };
   });
   return GROUP_ORDER.map((group) => ({ group, rows: placed.filter((p) => p.group === group).map((p) => p.row).sort(byLabel) })).filter((g) => g.rows.length > 0);
 }

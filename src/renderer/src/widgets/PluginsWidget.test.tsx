@@ -247,6 +247,28 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command))).toEqual([]);
   });
 
+  it('a ready process whose status lists nothing yet (a start with no turn) says Not observed yet, in the line and the detail', async () => {
+    // the engine's list is empty until its first system/init: nothing was observed, so nothing reads as loaded now
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [] }]]) });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(loadedLine().textContent).toContain('Not observed yet');
+    expect(loadedLine().textContent).not.toContain('loaded in this session');
+    expect(loadedLine().textContent).not.toContain('Loaded now');
+    expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy(); // the process is ready: its reloads stay
+    fireEvent.click(within(section('my-items')).getByRole('button', { name: 'View E8 probe' }));
+    expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not observed yet');
+  });
+
+  it('a ready process whose status lists only a problem still counts it, loaded now', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [] }]]) });
+    mount();
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(loadedLine().textContent).toContain('0 plugins loaded in this session');
+    expect(loadedLine().textContent).toContain('Loaded now');
+    expect(loadedLine().textContent).toContain('1 problem');
+  });
+
   it('with no status for the session says Not observed yet, and still lists its plugins from its directory', async () => {
     useSessions.setState({ records: new Map([[ID, { appId: ID, directory: cwd } as SessionRecord]]) });
     mount();

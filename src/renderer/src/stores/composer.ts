@@ -43,7 +43,7 @@ export interface InlineEdit {
 export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
-  insertText(text: string): void; // at the editor's caret, at the end when it is not focused (C11's insertComposerText)
+  insertText(text: string): void; // at the editor's caret, the one it left when not focused, else at the end (C11's insertComposerText)
   openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
   // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts): the box as it stands, a fill taken
   // or refused (a card holds the box, the editor is read-only), a suggestion shown or refused (the box holds text, a
@@ -253,7 +253,8 @@ export function setResubmit(appSessionId: AppSessionId, next: ResubmitState | (P
   });
 }
 
-// C11's ask: text at the caret of the session's mounted composer (at the end when it is not focused), the document kept.
+// C11's ask: text at the caret of the session's mounted composer, the document kept. Unfocused (a dialog widget holds the
+// keyboard), at the caret the editor left when it lost focus; at the end when it has had none since its document was set.
 export function insertComposerText(appSessionId: AppSessionId, text: string): void {
   const target = useComposerStore.getState().focusTargets.get(appSessionId);
   if (target) target.insertText(text);

@@ -98,7 +98,7 @@ export function Editor(props: EditorProps) {
       handleKeyDown: (view: EditorView, event: KeyboardEvent) => controller.keyDown(view, event),
     },
   }));
-  const editor = useEditor({ ...options, onUpdate: ({ editor: e, transaction }) => controller.updated(e, transaction) });
+  const editor = useEditor({ ...options, onUpdate: ({ editor: e, transaction }) => controller.updated(e, transaction), onBlur: () => controller.blurred() });
   useLayoutEffect(() => controller.attach(editor), [controller, editor]);
   useEffect(() => controller.mount(), [controller, editor]);
   useEffect(() => controller.setDisabled(disabled), [controller, editor, disabled]);

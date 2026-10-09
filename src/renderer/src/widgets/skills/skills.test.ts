@@ -58,9 +58,10 @@ describe('the skills library: groups', () => {
   });
 
   it('credits a skill of any other source with the engine’s own word, and keeps a source it does not know', () => {
-    const groups = skillGroups({ skills: [skill('lookup', 'mcp'), skill('odd', 'a source from a later engine')] }, EMPTY_CATALOG, [], identities);
-    expect(flat(groups)).toEqual([['added', ['lookup', 'odd']]]);
-    expect(groups[0].rows.map(badgeOf)).toEqual(['mcp', 'a source from a later engine']);
+    const groups = skillGroups({ skills: [skill('lookup', 'mcp'), skill('odd', 'a source from a later engine'), skill('p', 'constructor'), skill('q', 'toString'), skill('r', '__proto__'), skill('s', 'hasOwnProperty')] }, EMPTY_CATALOG, [], identities);
+    // a word an object inherits is still an unknown word: credited, never dropped
+    expect(flat(groups)).toEqual([['added', ['lookup', 'odd', 'p', 'q', 'r', 's']]]);
+    expect(groups[0].rows.map(badgeOf)).toEqual(['mcp', 'a source from a later engine', 'constructor', 'toString', '__proto__', 'hasOwnProperty']);
     expect(labelOf(groups[0].rows[0])).toBe('lookup');
     // the grouped sources carry no credit of their own
     const mapped = skillGroups(DIALOG, EMPTY_CATALOG, [], identities).flatMap((g) => g.rows).filter((r) => ['project', 'user', 'built-in', 'project, gitignored', 'claude.ai sync'].includes(r.source));
