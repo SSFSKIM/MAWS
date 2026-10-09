@@ -62,6 +62,10 @@ import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli
 import { PluginsRunner, SHUTDOWN_KILL_GRACE_MS, type Timers } from './plugins/runner';
 import { READ_LINES } from '@shared/plugins/cli';
 // E8 end
+// P2-B start (2026-10-09)
+import { pluginRowsOf } from './plugins/cli-result';
+import { LastListings, manifestsFor } from './plugins/listings';
+// P2-B end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -202,6 +206,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       }),
   });
   // E8 end
+  // P2-B start (2026-10-09): the host's own last plugin and marketplace listings per cwd (P2-B §5.5's admission)
+  const listings = new LastListings();
+  const listPlugins = async (cwd: string) => listing(await plugins.read(READ_LINES.installed, cwd), pluginRowsOf);
+  const listMarketplaces = async (cwd: string) => listing(await plugins.read(READ_LINES.marketplaces, cwd), marketplacesOf);
+  // P2-B end
   // C10 start: the model catalogue, updated from every initialize response and every list_models answer, each under
   // its launch's key (binary version and route: debt wave 3; and the model environment its settings set: debt wave 5)
   const models = new ModelsCache(deps.userData, { warn: log });
@@ -698,9 +707,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     // a failed probe answers its refusal in its own words, so the sheet names why it cannot run (M2 review, round two)
     return { binary: check.ok ? check.path : null, binaryError: check.ok ? null : (check.error ?? null), configHome: env.CLAUDE_CONFIG_DIR || join(home, '.claude'), globalConfig };
   });
-  on('plugins.list', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.installed, cwd), installedOf) }));
+  // P2-B: the two listings are kept per cwd (`listings`, below), the manifest service's admission
+  on('plugins.list', async ({ cwd }) => ({ plugins: await installedOf(listings.keepPlugins(cwd, await listPlugins(cwd)), cwd) }));
   on('plugins.available', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.available, cwd), availableOf) }));
-  on('marketplaces.list', async ({ cwd }) => ({ marketplaces: listing(await plugins.read(READ_LINES.marketplaces, cwd), marketplacesOf) }));
+  on('marketplaces.list', async ({ cwd }) => ({ marketplaces: listings.keepMarketplaces(cwd, await listMarketplaces(cwd)) }));
   on('plugins.install', async ({ cwd, binary, plugin, scope, acceptCommand }) => plugins.start('install', { plugin, scope, acceptCommand }, cwd, binary));
   on('plugins.update', async ({ cwd, binary, plugin, scope, acceptCommand }) => plugins.start('update', { plugin, scope, acceptCommand }, cwd, binary));
   on('plugins.uninstall', async ({ cwd, binary, plugin, scope, keepData }) => plugins.start('uninstall', { plugin, scope, keepData }, cwd, binary));
@@ -715,6 +725,12 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     return operations.start(id, 'session.reloadSkills', client, 'reload_skills', {});
   });
   // E8 end
+
+  // P2-B start (2026-10-09): `plugins.manifest` (P2-B execution document §5.5): the views of the installations and
+  // available entries the renderer names, read from files under the folders this host's own last listings for the cwd
+  // named (one more listing for an item they do not name), nothing executed or fetched; a read like E8's, one bridge call
+  on('plugins.manifest', async ({ cwd, items }) => ({ manifests: await manifestsFor(cwd, items, { listings, listPlugins: () => listPlugins(cwd), listMarketplaces: () => listMarketplaces(cwd) }) }));
+  // P2-B end
 
   // E1 start: the `maws` tool server's commands. A session this host does not hold has no ask and nothing pending;
   // answers that do not fit the ask's questions are invalid input, never written.

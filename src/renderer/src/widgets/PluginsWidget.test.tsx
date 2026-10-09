@@ -28,7 +28,7 @@ let opSeq: number;
 
 const plugin = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin => {
   const [name, marketplace] = id.split('@');
-  return { id, name, marketplace, version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/${marketplace}/${name}/0.1.0`, errors: [], notes: [], ...over };
+  return { id, name, marketplace, version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/${marketplace}/${name}/0.1.0`, errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false, ...over };
 };
 
 // The plugin CLI's answers as the engine host gives them, and its events delivered to the widget's listeners.
@@ -40,9 +40,9 @@ function standIn() {
   backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }] }));
   backend.script('plugins.available', () => ({
     plugins: [
-      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0' },
-      { pluginId: 'e8-other@e8-scratch', name: 'e8-other', marketplaceName: 'e8-scratch', description: 'Another', version: null },
-      { pluginId: 'review@anthropic-plugin-directory', name: 'review', marketplaceName: 'anthropic-plugin-directory', description: 'Code review', version: '1.0.0' },
+      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0', source: null, installCount: null },
+      { pluginId: 'e8-other@e8-scratch', name: 'e8-other', marketplaceName: 'e8-scratch', description: 'Another', version: null, source: null, installCount: null },
+      { pluginId: 'review@anthropic-plugin-directory', name: 'review', marketplaceName: 'anthropic-plugin-directory', description: 'Code review', version: '1.0.0', source: null, installCount: null },
     ],
   }));
   for (const command of ['plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove'] as const) backend.script(command, () => ({ opId: `pop-${++opSeq}` }));
@@ -332,7 +332,7 @@ describe('plugins widget: management', () => {
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
     // the catalogue read again after the CLI ended no longer offers it (a folder marketplace is read in place)
-    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0' }] }));
+    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0', source: null, installCount: null }] }));
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 1 plugin')).toBeTruthy());
     expect(section('available').querySelector('[data-plugin-row="e8-other@e8-scratch"]')).toBeNull();

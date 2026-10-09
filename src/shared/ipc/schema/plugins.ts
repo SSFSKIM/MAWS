@@ -30,8 +30,21 @@ export const InstalledPluginSchema = z.strictObject({
   installPath: z.string(),
   errors: z.array(z.string()),
   notes: z.array(z.string()),
+  // P2-B start (2026-10-09): the row's times and project facts (P2-B execution document §5.3, §5.1)
+  installedAt: z.string().nullable(), // ISO, as the CLI prints it
+  lastUpdated: z.string().nullable(),
+  projectEnabled: z.boolean(), // the session directory's `.claude/settings.json` enables it (false when the row says nothing)
+  here: z.boolean(), // its project is the session directory (realpaths compared in the host)
+  coversHere: z.boolean(), // its project is the session directory or an ancestor of it
+  // P2-B end
 });
 export type InstalledPlugin = z.infer<typeof InstalledPluginSchema>;
+
+// P2-B start (2026-10-09): a marketplace entry's source reduced (P2-B execution document §5.3): the relative path an
+// in-repository entry has, or the object's kind and locators; nothing else of it crosses
+export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable() })]);
+export type PluginSourceRef = z.infer<typeof PluginSourceRefSchema>;
+// P2-B end
 
 export const AvailablePluginSchema = z.strictObject({
   pluginId: z.string(),
@@ -39,6 +52,10 @@ export const AvailablePluginSchema = z.strictObject({
   marketplaceName: z.string(),
   description: z.string().nullable(),
   version: z.string().nullable(),
+  // P2-B start (2026-10-09)
+  source: PluginSourceRefSchema.nullable(),
+  installCount: z.number().int().nonnegative().nullable(), // only the CLI's own number (U3: one marketplace has them)
+  // P2-B end
 });
 export type AvailablePlugin = z.infer<typeof AvailablePluginSchema>;
 
@@ -77,6 +94,35 @@ export const PluginsOperationEventSchema = z.strictObject({
 });
 export type PluginsOperationEvent = z.infer<typeof PluginsOperationEventSchema>;
 
+// P2-B start (2026-10-09): `plugins.manifest` (P2-B execution document §5.5): what a plugin says about itself and what
+// it contains, read from the files the host's own last listings for the cwd name, nothing executed or fetched; names,
+// descriptions, kinds and counts only
+export const ManifestItemRefSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('installation'), id: PluginsArgumentSchema, scope: z.string(), projectPath: z.string().nullable() }),
+  z.strictObject({ kind: z.literal('available'), pluginId: PluginsArgumentSchema }),
+]);
+export type ManifestItemRef = z.infer<typeof ManifestItemRefSchema>;
+const ManifestItemSchema = z.strictObject({ name: z.string(), description: z.string().nullable() });
+export const PluginManifestViewSchema = z.strictObject({
+  key: ManifestItemRefSchema,
+  state: z.enum(['read', 'missing', 'unknown']), // missing: only the anchor directory is absent
+  name: z.string().nullable(), displayName: z.string().nullable(), version: z.string().nullable(), marketplaceVersion: z.string().nullable(),
+  description: z.string().nullable(), author: z.string().nullable(), license: z.string().nullable(), keywords: z.array(z.string()),
+  components: z.strictObject({
+    mcpServers: z.array(z.strictObject({ name: z.string(), transport: z.enum(['stdio', 'http', 'sse', 'ws', 'unknown']) })), mcpBundles: z.number().int().nonnegative(),
+    agents: z.array(ManifestItemSchema),
+    hooks: z.array(z.strictObject({ event: z.string(), matcher: z.string().nullable() })), hookModules: z.number().int().nonnegative(),
+    monitors: z.array(ManifestItemSchema),
+    lspServers: z.array(z.strictObject({ name: z.string() })),
+    commands: z.array(ManifestItemSchema),
+    skills: z.array(ManifestItemSchema),
+  }),
+  partial: z.boolean(),
+  problems: z.array(z.string()), // `<relative path>: not valid JSON | too large | outside the plugin | not a regular file | could not be read | unknown shape`; never an exception message or a file's value
+});
+export type PluginManifestView = z.infer<typeof PluginManifestViewSchema>;
+// P2-B end
+
 const cwd = { cwd: PluginsCwdSchema };
 const plugin = { ...cwd, binary: PluginsBinarySchema, plugin: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() };
 
@@ -92,6 +138,9 @@ export const commands = {
   'plugins.enable': host(z.strictObject(plugin), OperationReceiptSchema),
   'plugins.disable': host(z.strictObject(plugin), OperationReceiptSchema),
   'plugins.cancel': host(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
+  // P2-B start (2026-10-09): a read of files only, admitted by the host's own last listings for the cwd
+  'plugins.manifest': host(z.strictObject({ cwd: PluginsCwdSchema, items: z.array(ManifestItemRefSchema).max(256) }), z.strictObject({ manifests: z.array(PluginManifestViewSchema) })),
+  // P2-B end
 } as const satisfies Record<`plugins.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

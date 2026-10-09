@@ -190,7 +190,7 @@ describe('a marketplace-declared command', () => {
 });
 
 describe('the available catalogue', () => {
-  const plugin = (name: string, marketplaceName: string, description: string | null = null): AvailablePlugin => ({ pluginId: `${name}@${marketplaceName}`, name, marketplaceName, description, version: null });
+  const plugin = (name: string, marketplaceName: string, description: string | null = null): AvailablePlugin => ({ pluginId: `${name}@${marketplaceName}`, name, marketplaceName, description, version: null, source: null, installCount: null });
   const all = [plugin('zeta', 'anthropic-plugin-directory', 'Code review'), plugin('e8-probe', 'e8-scratch', 'The probe'), plugin('alpha', 'anthropic-plugin-directory')];
   it('groups by marketplace in name order and filters by name, id or description', () => {
     expect(availableGroups(all, '').map((g) => [g.marketplace, g.plugins.map((p) => p.name)])).toEqual([

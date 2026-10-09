@@ -117,8 +117,8 @@ describe('E8 reads', () => {
 esac
 `);
     const host = engineHost();
-    expect(await host.call('plugins.list', { cwd: project })).toEqual({ plugins: [{ id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [] }] });
-    expect(await host.call('plugins.available', { cwd: project })).toEqual({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'd', version: null }] });
+    expect(await host.call('plugins.list', { cwd: project })).toEqual({ plugins: [{ id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, here: false, coversHere: false }] });
+    expect(await host.call('plugins.available', { cwd: project })).toEqual({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'd', version: null, source: './p', installCount: null }] });
     expect(await host.call('marketplaces.list', { cwd: project })).toEqual({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/m', installLocation: '/m' }] });
     expect(calls()).toEqual(['plugin list --json', 'plugin list --json --available', 'plugin marketplace list --json']);
   });
@@ -228,3 +228,69 @@ describe('the session reloads', () => {
     await stopping;
   });
 });
+
+// P2-B start (2026-10-09): `plugins.manifest` through the host's handlers (P2-B execution document §5.5): the views read
+// only under the folders this host's own last listings for the cwd named, one more listing for an item they do not name
+describe('plugins.manifest (P2-B)', () => {
+  const listingFrom = () =>
+    behave(`case "$*" in
+  "plugin list --json") cat "${fake}/rows.json";;
+  "plugin marketplace list --json") cat "${fake}/markets.json";;
+esac
+`);
+  const rows = (value: unknown) => writeFileSync(join(fake, 'rows.json'), JSON.stringify(value));
+  let plugin: string;
+  let market: string;
+  beforeEach(() => {
+    plugin = join(root, 'cache', 'p', '1.0.0');
+    market = join(root, 'market');
+    mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
+    mkdirSync(join(plugin, 'commands'));
+    writeFileSync(join(plugin, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'p', version: '1.0.0', description: 'Read from its folder' }));
+    writeFileSync(join(plugin, 'commands', 'hi.md'), '---\ndescription: Says hi\n---\n');
+    writeFileSync(join(plugin, '.mcp.json'), JSON.stringify({ mcpServers: { s: { command: 'node', env: { TOKEN: 'sk-secret-ipc' } } } }));
+    mkdirSync(join(market, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(market, '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: 'm', plugins: [{ name: 'p', source: './p', version: '1.1.0' }, { name: 'q', source: './q', description: 'Offered' }] }));
+    writeFileSync(join(fake, 'markets.json'), JSON.stringify([{ name: 'm', source: 'directory', path: market, installLocation: market }]));
+    rows([{ id: 'p@m', version: '1.0.0', scope: 'user', enabled: true, installPath: plugin, mcpServers: { s: { env: { TOKEN: 'sk-secret-row' } } } }]);
+    listingFrom();
+  });
+  const P = { kind: 'installation', id: 'p@m', scope: 'user', projectPath: null } as const;
+
+  it('answers views of what the last listings named, and lists once more for an item they do not name', async () => {
+    const host = engineHost();
+    await host.call('plugins.list', { cwd: project });
+    await host.call('marketplaces.list', { cwd: project });
+    const before = calls().length;
+    const { manifests } = await host.call('plugins.manifest', { cwd: project, items: [P, { kind: 'installation', id: 'nope@m', scope: 'user', projectPath: null }, { kind: 'available', pluginId: 'q@m' }] });
+    expect(manifests.map((m) => m.state)).toEqual(['read', 'unknown', 'read']);
+    expect(manifests[0]).toMatchObject({ key: P, name: 'p', version: '1.0.0', marketplaceVersion: '1.1.0', description: 'Read from its folder', components: { commands: [{ name: 'hi', description: 'Says hi' }], mcpServers: [{ name: 's', transport: 'stdio' }] } });
+    expect(manifests[2]).toMatchObject({ name: 'q', description: 'Offered' });
+    expect(calls().slice(before)).toEqual(['plugin list --json']); // one more plugin listing for the whole call, none of the marketplaces
+    expect(JSON.stringify(manifests)).not.toContain('sk-secret');
+  });
+
+  it('the next listing replaces the memory: an uninstalled plugin’s folder is no longer read', async () => {
+    const host = engineHost();
+    await host.call('plugins.list', { cwd: project });
+    expect((await host.call('plugins.manifest', { cwd: project, items: [P] })).manifests[0].state).toBe('read');
+    rows([]);
+    await host.call('plugins.list', { cwd: project });
+    expect((await host.call('plugins.manifest', { cwd: project, items: [P] })).manifests[0].state).toBe('unknown');
+    // and the memory is the cwd's: another directory's listing admits nothing here
+    rows([{ id: 'p@m', version: '1.0.0', scope: 'user', enabled: true, installPath: plugin }]);
+    const other = join(root, 'other');
+    mkdirSync(other);
+    await host.call('plugins.list', { cwd: other });
+    rows([]);
+    expect((await host.call('plugins.manifest', { cwd: project, items: [P] })).manifests[0].state).toBe('unknown');
+  });
+
+  it('a cwd never listed is listed first', async () => {
+    const host = engineHost();
+    const { manifests } = await host.call('plugins.manifest', { cwd: project, items: [P] });
+    expect(manifests[0]).toMatchObject({ state: 'read', marketplaceVersion: '1.1.0' });
+    expect(calls()).toEqual(['plugin list --json', 'plugin marketplace list --json']);
+  });
+});
+// P2-B end

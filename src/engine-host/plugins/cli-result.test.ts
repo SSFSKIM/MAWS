@@ -1,7 +1,10 @@
 // E8 M1: the CLI's `--json` answers as the runner reads them, in the shapes G0's probe recorded on 2.1.290
 // (`docs/doperpowers/evidence/p1-e8/g0-cli-probe.txt`) and SPEC 30 §25.3a describes.
-import { describe, expect, it } from 'vitest';
-import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome } from './cli-result';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, pluginRowsOf } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
 const NOT_FOUND = '{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \\"nope\\" not found in marketplace \\"e8-scratch\\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}';
@@ -40,35 +43,93 @@ describe('mutationOutcome', () => {
 });
 
 describe('the reads', () => {
-  it('reduces plugin list rows to the widget’s fields', () => {
+  it('reduces plugin list rows to the widget’s fields, keeping the times and projectEnabled (P2-B)', async () => {
     const stdout = JSON.stringify(
       [
-        { id: 'e8-probe@e8-scratch', version: '0.1.0', scope: 'user', enabled: true, installPath: '/c/e8-probe/0.1.0', readFromFolder: '/m/plugins/e8-probe', installedAt: 'x', projectEnabled: false },
-        { id: 'p@m', version: 'unknown', scope: 'project', enabled: false, installPath: '', projectPath: '/r', errors: ['broken manifest'], notes: ['shadowed'], errorDetails: [{ type: 'manifest' }] },
+        { id: 'e8-probe@e8-scratch', version: '0.1.0', scope: 'user', enabled: true, installPath: '/c/e8-probe/0.1.0', installedAt: '2026-10-09T07:35:54.762Z', lastUpdated: '2026-10-09T08:00:00.000Z', projectEnabled: true },
+        { id: 'p@m', version: 'unknown', scope: 'project', enabled: false, installPath: '', projectPath: '/nowhere/r', errors: ['broken manifest'], notes: ['shadowed'], errorDetails: [{ type: 'manifest' }] },
         { id: 'loose', version: '1', scope: 'session', enabled: true, installPath: '/l' },
       ],
       null,
       2,
     );
-    expect(installedOf(stdout)).toEqual([
-      { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c/e8-probe/0.1.0', errors: [], notes: [] },
-      { id: 'p@m', name: 'p', marketplace: 'm', version: 'unknown', scope: 'project', enabled: false, projectPath: '/r', installPath: '', errors: ['broken manifest'], notes: ['shadowed'] },
-      { id: 'loose', name: 'loose', marketplace: '', version: '1', scope: 'session', enabled: true, projectPath: null, installPath: '/l', errors: [], notes: [] },
+    const placed = { here: false, coversHere: false };
+    expect(await installedOf(pluginRowsOf(stdout), '/nowhere/cwd')).toEqual([
+      { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c/e8-probe/0.1.0', errors: [], notes: [], installedAt: '2026-10-09T07:35:54.762Z', lastUpdated: '2026-10-09T08:00:00.000Z', projectEnabled: true, ...placed },
+      { id: 'p@m', name: 'p', marketplace: 'm', version: 'unknown', scope: 'project', enabled: false, projectPath: '/nowhere/r', installPath: '', errors: ['broken manifest'], notes: ['shadowed'], installedAt: null, lastUpdated: null, projectEnabled: false, ...placed },
+      { id: 'loose', name: 'loose', marketplace: '', version: '1', scope: 'session', enabled: true, projectPath: null, installPath: '/l', errors: [], notes: [], installedAt: null, lastUpdated: null, projectEnabled: false, ...placed },
     ]);
-    expect(installedOf('[]')).toEqual([]);
+    expect(await installedOf(pluginRowsOf('[]'), '/nowhere')).toEqual([]);
   });
 
-  it('reduces list --available to five fields per plugin', () => {
+  it('never carries a row’s mcpServers, whose headers and environment values are verbatim (U3 F1)', async () => {
+    const stdout = JSON.stringify([{ id: 'supabase@o', version: '0.1.15', scope: 'user', enabled: true, installPath: '/c/s', mcpServers: { supabase: { type: 'http', url: 'https://mcp.example/mcp?token=sk-secret-url', headers: { Authorization: 'Bearer sk-secret-header' }, env: { KEY: 'sk-secret-env' } } }, hasUserConfig: true }]);
+    const rows = pluginRowsOf(stdout);
+    expect(JSON.stringify(rows)).not.toContain('sk-secret'); // not even in what the host keeps
+    expect(JSON.stringify(await installedOf(rows, '/nowhere'))).not.toContain('sk-secret');
+  });
+
+  it('reads the version of a folder-loaded plugin from its folder, and only for one', async () => {
+    const stdout = JSON.stringify([
+      { id: 'a@dir', version: '1.0.0', scope: 'user', enabled: true, installPath: '/c/a/1.0.0', readFromFolder: '/m/plugins/a', folderVersion: '1.2.0' },
+      { id: 'b@dir', version: '1.0.0', scope: 'user', enabled: true, installPath: '/c/b/1.0.0', folderVersion: '9.9.9' },
+      { id: 'c@dir', version: '1.0.0', scope: 'user', enabled: true, installPath: '/c/c/1.0.0', readFromFolder: '/m/plugins/c' },
+    ]);
+    const rows = pluginRowsOf(stdout);
+    expect((await installedOf(rows, '/nowhere')).map((p) => p.version)).toEqual(['1.2.0', '1.0.0', '1.0.0']);
+    expect(rows.map((r) => r.readFromFolder)).toEqual(['/m/plugins/a', null, '/m/plugins/c']); // the copy that loads: the manifest reader's anchor
+  });
+
+  describe('here and coversHere, through realpaths', () => {
+    let root: string;
+    beforeEach(async () => {
+      root = await mkdtemp(join(tmpdir(), 'maws-p2b-places-'));
+      for (const dir of ['proj/worktrees/w', 'proj2']) await mkdir(join(root, dir), { recursive: true });
+      await symlink(join(root, 'proj'), join(root, 'alias'));
+    });
+    afterEach(() => rm(root, { recursive: true, force: true }));
+    const row = (projectPath: string | null) => ({ id: 'p@m', version: '1', scope: projectPath === null ? 'user' : 'project', enabled: true, installPath: '/c', ...(projectPath === null ? {} : { projectPath }) });
+    const placesOf = async (cwd: string, ...paths: (string | null)[]) => (await installedOf(pluginRowsOf(JSON.stringify(paths.map(row))), cwd)).map((p) => [p.here, p.coversHere]);
+
+    it('one project however it is spelled: a link (as /tmp is to /private/tmp) and the realpath the CLI prints', async () => {
+      const real = await realpath(join(root, 'proj'));
+      expect(await placesOf(join(root, 'alias'), real, join(root, 'proj'))).toEqual([[true, true], [true, true]]);
+    });
+
+    it('a worktree under the project is covered by it, not here; a sibling sharing a prefix is neither', async () => {
+      const cwd = join(root, 'proj', 'worktrees', 'w');
+      expect(await placesOf(cwd, join(root, 'proj'), join(root, 'proj', 'worktrees', 'w'), join(root, 'proj2'))).toEqual([[false, true], [true, true], [false, false]]);
+      expect(await placesOf(join(root, 'proj2'), join(root, 'proj'))).toEqual([[false, false]]); // `/proj2` is not under `/proj`
+    });
+
+    it('a user installation and a project that no longer exists are neither; so is everything from a cwd that does not resolve', async () => {
+      expect(await placesOf(join(root, 'proj'), null, join(root, 'gone'))).toEqual([[false, false], [false, false]]);
+      expect(await placesOf(join(root, 'gone'), join(root, 'proj'))).toEqual([[false, false]]);
+    });
+  });
+
+  it('reduces list --available to its fields, the source reduced and the CLI’s own install count (P2-B)', () => {
     const stdout = JSON.stringify({
       installed: [],
       available: [
         { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', description: 'One skill and one command, for the probe', marketplaceName: 'e8-scratch', source: './plugins/e8-probe' },
-        { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', description: 'Figma', marketplaceName: 'anthropic-plugin-directory', version: '2.2.108', source: { source: 'url', url: 'https://x' }, installCount: 9 },
+        { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', description: 'Figma', marketplaceName: 'anthropic-plugin-directory', version: '2.2.108', source: { source: 'url', url: 'https://x', sha: 'f'.repeat(40) }, installCount: 9 },
+        { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: 'plugins/frontend-design', ref: 'main' } },
+        { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', source: { source: 'github', repo: 'a/b' }, installCount: 1290640 },
+        { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', source: { url: 7 }, installCount: 1.5 },
+        { pluginId: 'neg@o', name: 'neg', marketplaceName: 'o', source: 42, installCount: -3 },
+        { pluginId: 'str@o', name: 'str', marketplaceName: 'o', installCount: '12' },
       ],
     });
+    const none = { description: null, version: null };
     expect(availableOf(stdout)).toEqual([
-      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: null },
-      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108' },
+      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: null, source: './plugins/e8-probe', installCount: null },
+      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108', source: { kind: 'url', url: 'https://x', repo: null, path: null }, installCount: 9 },
+      { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', ...none, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design' }, installCount: null },
+      { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null }, installCount: 1290640 },
+      { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', ...none, source: { kind: 'unknown', url: null, repo: null, path: null }, installCount: null },
+      { pluginId: 'neg@o', name: 'neg', marketplaceName: 'o', ...none, source: null, installCount: null },
+      { pluginId: 'str@o', name: 'str', marketplaceName: 'o', ...none, source: null, installCount: null },
     ]);
   });
 
@@ -88,14 +149,14 @@ describe('the reads', () => {
   });
 
   it('answers a listing only from a CLI that exited 0, else with its own last words', () => {
-    expect(listing({ stdout: '[]', stderr: '', code: 0 }, installedOf)).toEqual([]);
-    expect(() => listing({ stdout: '', stderr: 'Error: settings.json is not valid JSON\n', code: 1 }, installedOf)).toThrow('Error: settings.json is not valid JSON');
-    expect(() => listing({ stdout: '', stderr: '', code: 2 }, installedOf)).toThrow('the CLI exited 2 without a listing');
+    expect(listing({ stdout: '[]', stderr: '', code: 0 }, pluginRowsOf)).toEqual([]);
+    expect(() => listing({ stdout: '', stderr: 'Error: settings.json is not valid JSON\n', code: 1 }, pluginRowsOf)).toThrow('Error: settings.json is not valid JSON');
+    expect(() => listing({ stdout: '', stderr: '', code: 2 }, pluginRowsOf)).toThrow('the CLI exited 2 without a listing');
   });
 
   it('refuses an answer that is not the documented document, naming what it read', () => {
-    expect(() => installedOf('not json')).toThrow(/plugin list --json/);
-    expect(() => installedOf('{"installed":[]}')).toThrow(/plugin list --json/);
+    expect(() => pluginRowsOf('not json')).toThrow(/plugin list --json/);
+    expect(() => pluginRowsOf('{"installed":[]}')).toThrow(/plugin list --json/);
     expect(() => availableOf('[]')).toThrow(/--available/);
     expect(() => marketplacesOf('{}')).toThrow(/marketplace list --json/);
   });
