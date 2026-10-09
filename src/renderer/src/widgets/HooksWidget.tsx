@@ -75,7 +75,7 @@ export function HooksBody({ view }: { view: HooksView }) {
 export function HooksWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getHooksListing', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.hooks} command="hooks" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.hooks} command="hooks" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <HooksBody view={present(read.data)} />}
     </WidgetFrame>
   );

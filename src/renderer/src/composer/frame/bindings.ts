@@ -18,7 +18,10 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../../ipc/client';
 import { branchLabel, recordBranch, type GitBranchAnswer } from '../../sessions/branch-label'; // W9 (H2)
-import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding } from '../../statusline';
+import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
+import type { Availability } from '@shared/ipc/schema/session'; // P2-A
+import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
+import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
 import { aliasOf, chipLabel, DEFAULT_ROW } from '@shared/sessions/model-label';
@@ -133,10 +136,24 @@ export function workspaceDirectoriesOf(raw: readonly unknown[]): string[] {
   return raw.flatMap((d) => (typeof d === 'string' ? [d] : typeof d === 'object' && d !== null && typeof (d as { path?: unknown }).path === 'string' ? [(d as { path: string }).path] : []));
 }
 
-export function liveBindings(status: EngineSessionStatus | null, record: SessionRecord | null, reads: LiveReads = {}, client: MawsBridge = ipc): FrameBindings {
+// P2-A (2026-10-09; the execution document §5.6): a record with no ready process is writable by its availability: a
+// model, effort, mode or directory choice starts the session (`chip`) and then applies as a live one's does; only a
+// terminal or a job holding it, or its archive, refuses, in words. Without an availability the status decides.
+export function liveBindings(status: EngineSessionStatus | null, record: SessionRecord | null, reads: LiveReads = {}, client: MawsBridge = ipc, availability?: Availability | null): FrameBindings {
   const appSessionId = status?.appSessionId ?? record!.appId;
   const ready = status?.process === 'ready';
-  const writable = ready ? null : NOT_RUNNING;
+  const writable = ready ? null : availabilityRefusal(availability === undefined ? 'resumable' : availability, record?.holder ?? null);
+  // P2-A: the acquisition a choice on a session with no ready process runs first; a refusal in words
+  const acquired = async (): Promise<HookResult | null> => {
+    if (ready) return null;
+    if (writable !== null) return { ok: false, error: writable };
+    try {
+      const outcome = await acquireSession(appSessionId, 'chip', {}, client);
+      return outcome.status === 'ready' ? null : { ok: false, error: refusalWords(outcome) ?? outcome.status };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
   const current: ModelChoice = { model: status?.model.resolved ?? status?.model.requested ?? record?.model.resolved ?? record?.model.requested ?? null, effort: status?.effort ?? null };
   // W3: named from the options this mount listed, else the route's catalogue; the effort the engine runs at, else the requested one
   const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
@@ -152,7 +169,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       options: [...(reads.models ?? [])],
       disabled: writable,
       set: async (next) => {
-        if (!ready) return { ok: false, error: NOT_RUNNING };
+        const refused = await acquired(); // P2-A
+        if (refused) return refused;
         const picked = reads.models?.find((m) => m.value === next.model);
         if (next.model !== current.model && !(picked && modelMatches(picked, current.model))) {
           const result = await client.invoke('session.setModel', { appSessionId, model: next.model });
@@ -166,7 +184,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
         return { ok: true };
       },
     },
-    mode: liveModeBinding({ appId: appSessionId, permissionMode: status?.permissionMode ?? record!.permissionMode, model: status?.model ?? record!.model }, status, reads.models ?? null, client),
+    mode: liveModeBinding({ appId: appSessionId, permissionMode: status?.permissionMode ?? record!.permissionMode, model: status?.model ?? record!.model }, status, reads.models ?? null, client, writable),
     directories: {
       value: directories,
       options: [],
@@ -174,7 +192,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       // The engine's own list is read at the moment of the change (the chip's value may be the record's, or stale), and
       // the new directories are added to it: flag settings replace the list, so nothing the engine holds is dropped.
       set: async (next) => {
-        if (!ready) return { ok: false, error: NOT_RUNNING };
+        const refused = await acquired(); // P2-A
+        if (refused) return refused;
         const rules = await client.invoke('session.listPermissionRules', { appSessionId });
         if (!rules.ok) return { ok: false, error: rules.error.message };
         const held = workspaceDirectoriesOf(rules.value.state.workspaceDirectories);

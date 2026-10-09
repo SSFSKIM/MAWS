@@ -54,6 +54,11 @@ export function acquisitionWords(outcome: AcquireOutcome): string | null {
 // What a surface that never hands its text to a card says when the attempt docked one.
 export const cardWords = (outcome: Extract<AcquireOutcome, { status: 'needs_trust' | 'relay_unreachable' }>): string => (outcome.status === 'needs_trust' ? TRUST_FIRST : RELAY_FIRST);
 
+// P2-A M3 (2026-10-09): what a surface other than the composer (a widget's Load now, a chip, a Refresh) says for an
+// attempt that did not end ready, the card included (it docks in the composer; this surface points at it); null: ready.
+export const refusalWords = (outcome: AcquireOutcome): string | null =>
+  outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : acquisitionWords(outcome);
+
 // Docks the card a start or an acquisition waits on, with the message its continuation will send (null: it only
 // starts the session). The store keeps one card per session, and every joiner of one attempt gets the same card
 // answer, so a card without a message never replaces a docked card of the same kind that carries one: the composer's

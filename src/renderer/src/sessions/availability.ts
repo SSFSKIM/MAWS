@@ -4,8 +4,11 @@
 // C10's setup owns) answers null.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { Availability } from '@shared/ipc/schema/session';
+import { ARCHIVED, NOT_YET } from '../composer/submit/submit-state';
 import { useSessions, type SessionsState } from '../stores/sessions';
+import { holderWords } from './holder-words';
 
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
 
@@ -20,4 +23,14 @@ export function availabilityIn(s: Pick<SessionsState, 'engine' | 'digests' | 're
 
 export function useAvailability(appSessionId: AppSessionId): Availability | null {
   return useSessions((s) => availabilityIn(s, appSessionId));
+}
+
+// P2-A M3 (2026-10-09; the execution document §5.6): why an owner's gesture cannot start this session, in words, or
+// null when it may (a chip choice, a Load now or a Refresh acquires it). A terminal or a job holding it is named; an
+// archive says how to continue; an id nothing has started (an unstarted tab's) waits for its first message.
+export function availabilityRefusal(availability: Availability | null, holder: SessionRecord['holder'] | null): string | null {
+  if (availability === 'archived') return ARCHIVED;
+  if (availability === 'foreign_held') return `Held by ${holderWords(holder ?? { kind: 'none' })}`;
+  if (availability === null) return NOT_YET;
+  return null;
 }

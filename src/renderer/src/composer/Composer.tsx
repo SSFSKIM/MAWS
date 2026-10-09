@@ -166,7 +166,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);
   // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
   const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
+  const availability = useAvailability(appSessionId); // P2-A: what the chips and the submit control may start
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client, availability) : endedBindings();
   // W3 (C5): the engine refused auto and the host set the fallback (requested auto, a refusal, another effective mode)
   const permission = status?.permissionMode ?? null;
   const modeNote = setup ? setup.options.autoModeNote : permission && permission.requested === 'auto' && permission.effective !== 'auto' && permission.refusal !== null ? autoFallbackNotice(permission.effective) : null;
@@ -177,7 +178,6 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const messageHeld = setup !== null && setup.intent.message !== null;
   // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
   // availability decides the control, and a terminal or job holding it is named
-  const availability = useAvailability(appSessionId);
   const holder = record?.holder ?? null;
   const heldBy = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holderWords(holder) : null;
   const decision = submitState({

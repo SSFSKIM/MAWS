@@ -3,7 +3,7 @@
 // and the fact reported in this launch) over observed ("Loaded last time, 2 days ago") over unknown ("Not observed
 // yet"); a record's requested or default values are never shown as observed. Reading the facts starts nothing.
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { Fact, ObservedFactsAnswer, ObservedPlugin, ObservedPluginError, ObservedPluginWarning } from '@shared/engine/observed-facts';
@@ -11,7 +11,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { relativeAge } from '../app/relative-age';
 import { ipc } from '../ipc/client';
 import { IpcCommandError } from '../ipc/query';
+import type { AcquireOutcome } from '@shared/sessions/setup';
 import { useSessions } from '../stores/sessions';
+import { useOperation } from '../widgets/operation'; // P2-A M3
+import { loadForRead } from '../widgets/read'; // P2-A M3
 
 export type Freshness = { kind: 'now' } | { kind: 'last'; at: string } | { kind: 'unknown' };
 
@@ -70,10 +73,20 @@ export function loadedPluginsOf(status: EngineSessionStatus | null, facts: Obser
   return last ? { plugins: last.plugins, errors: last.errors, warnings: last.warnings, freshness: { kind: 'last', at: last.at } } : UNKNOWN;
 }
 
-// P2-A M2: without `refresh`, which M3 adds (an acquisition, then reload_plugins).
-export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins {
+// P2-A M3 (2026-10-09; the execution document §5.7, branch Y): `refresh` is the owner's Refresh: it acquires the session
+// for a read (joining a launch in flight), then reloads its plugins (`reload_plugins` answers before any turn with the
+// loaded list, U1), so the list reads "Loaded now". It runs only from that gesture, never on open.
+export function useLoadedPlugins(appSessionId: AppSessionId): LoadedPlugins & { refresh(): Promise<AcquireOutcome> } {
   const status = useSessions(useShallow((s) => s.engine.get(appSessionId) ?? null));
   const liveNow = status?.process === 'ready' && status.pluginsObservedAt !== null;
   const { facts } = useObservedFacts(appSessionId, { enabled: !liveNow });
-  return useMemo(() => loadedPluginsOf(status, facts), [status, facts]);
+  const reload = useOperation(appSessionId, 'session.reloadPlugins');
+  const { run } = reload;
+  const refresh = useCallback(async () => {
+    const outcome = await loadForRead(appSessionId);
+    if (outcome.status === 'ready') await run({});
+    return outcome;
+  }, [appSessionId, run]);
+  const loaded = useMemo(() => loadedPluginsOf(status, facts), [status, facts]);
+  return useMemo(() => ({ ...loaded, refresh }), [loaded, refresh]);
 }

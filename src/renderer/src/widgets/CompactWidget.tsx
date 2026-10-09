@@ -13,7 +13,7 @@ import { ipc } from '../ipc/client';
 import { present as presentContext } from './ContextWidget';
 import { COMPACT, CONTEXT, FRAME, WIDGET_TITLE } from './copy';
 import { num } from './parts';
-import { MOVES_READS, useEngineRead } from './read';
+import { isDormant, MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export function CompactWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
@@ -45,7 +45,7 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" state={read.state === 'not_running' ? 'not_running' : 'ready'} error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" state={isDormant(read.state) ? read.state : 'ready'} error={isDormant(read.state) ? read.error : null} close={close}>
       <div className="flex flex-col gap-2">
         <p className="m-0 text-fg-muted">
           {sampled

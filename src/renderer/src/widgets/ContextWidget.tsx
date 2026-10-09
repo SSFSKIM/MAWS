@@ -94,7 +94,7 @@ export function ContextWidget({ appSessionId, close }: { appSessionId: AppSessio
     openComposerWidget(appSessionId, 'compact', '');
   };
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.context} command="context" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.context} command="context" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && (
         <>
           <ContextBody view={present(read.data)} />

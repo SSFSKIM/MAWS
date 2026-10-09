@@ -120,7 +120,7 @@ export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionI
   const read = useEngineRead('session.getUsage', { appSessionId });
   const route = useSessions((s) => (s.engine.get(appSessionId)?.gateway.mode === 'direct' ? 'direct' : 'gateway'));
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}
     </WidgetFrame>
   );

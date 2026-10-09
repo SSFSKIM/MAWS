@@ -22,6 +22,7 @@ import { rowOf } from '../../widgets/model';
 import { Group, KeyValues } from '../../widgets/parts';
 import { useEngineRead } from '../../widgets/read';
 import { useObservedFacts } from '../../sessions/observed'; // P2-A
+import { DormantRefresh } from '../../widgets/WidgetFrame'; // P2-A M3
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
@@ -110,6 +111,12 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
 
   return (
     <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
+      {/* P2-A M3: not live, the owner's Refresh starts the session; the 30 s reads follow at ready */}
+      {!live && !firstLaunch && (
+        <div className="mb-2">
+          <DormantRefresh appSessionId={appSessionId} />
+        </div>
+      )}
       {sections.map((section) => (
         <Group key={section.title} label={section.title}>
           <KeyValues label={section.title} rows={section.rows.map((row) => ({ label: row.label, value: <Value appSessionId={appSessionId} row={row} /> }))} />

@@ -4,7 +4,8 @@
 // until compaction, a segmented bar of what occupies the window with the threshold marked, the categories, and
 // `Compact now`, which sends `/compact` when the session's catalogue lists it as a headless command.
 // P2-A (X17): with no live process, the last reading the engine host kept for the session, labelled with when ("Last
-// reading, 3 hours ago"), else the digest's, else "Not observed yet"; nothing is read from the engine and nothing starts.
+// reading, 3 hours ago"), else the digest's, else "Not observed yet"; nothing is read from the engine and nothing starts
+// on open; its Refresh (M3) is the owner's gesture that starts the session.
 import type { SessionRecord } from '@shared/graph/session';
 import type { GetContextUsageResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
@@ -13,6 +14,7 @@ import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { useSessionCatalog } from '../stores/catalog';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { DormantRefresh } from '../widgets/WidgetFrame'; // P2-A
 import { tokens } from './format';
 
 const SEGMENT = ['bg-fg', 'bg-fg-muted', 'bg-accent', 'bg-fg-faint', 'bg-info'];
@@ -87,6 +89,8 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
       <h3 className="font-semibold">Context window</h3>
       {body}
       {live && usage.isError && digest === null && <p className="text-ui-sm text-fg-muted">{usage.error.message}</p>}
+      {/* P2-A M3: not live, the owner's Refresh starts the session; the host samples the context at ready and the full read follows */}
+      <DormantRefresh appSessionId={id} />{/* P2-A */}
       {compactable && (
         <button type="button" onClick={() => void compact()} className="self-start rounded-sm border border-border-strong px-2 py-0.5 outline-accent hover:bg-bg-hover focus-visible:outline-2">
           Compact now
