@@ -11,11 +11,8 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Availability } from '@shared/ipc/schema/session';
-import type { AcquireOutcome } from '@shared/sessions/setup';
-import { ARCHIVED } from '../composer/submit/submit-state';
-import { acquireSession, acquisitionWords, cardWords } from '../sessions/acquire';
-import { availabilityIn } from '../sessions/availability';
-import { holderWords } from '../sessions/holder-words';
+import { acquireSession, refusalWords } from '../sessions/acquire';
+import { availabilityIn, availabilityRefusal } from '../sessions/availability';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { revealSideQuestions } from './actions';
@@ -37,25 +34,15 @@ export function askSideQuestion(appSessionId: AppSessionId, question: string): v
 }
 
 // P2-A start (2026-10-09)
-export const SIDE_STARTING = 'Starting…';
-
 // Why no side question can be asked of the session now, or null when one can (a ready process, or a start the ask
 // begins): a terminal or job holds it, it is archived, or it has no record (an unstarted tab starts with its first message).
-export function sideBlock(availability: Availability | null, holder: SessionRecord['holder'] | null): string | null {
-  if (availability === null) return SIDE_COPY.btw.notRunning;
-  if (availability === 'foreign_held') return holder ? `Held by ${holderWords(holder)}` : SIDE_COPY.btw.notRunning;
-  if (availability === 'archived') return ARCHIVED;
-  return null;
-}
-
-const refusalOf = (outcome: AcquireOutcome): string | null =>
-  outcome.status === 'ready' ? null : outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : (acquisitionWords(outcome) ?? 'The session could not start');
+export const sideBlock = (availability: Availability | null, holder: SessionRecord['holder'] | null): string | null => availabilityRefusal(availability, holder, SIDE_COPY.btw.notRunning);
 
 // Starts the session for a side question when it has no ready process: null once it can be asked, else the words.
 export async function startForSide(appSessionId: AppSessionId): Promise<string | null> {
   if (canAskSide(appSessionId)) return null;
   try {
-    return refusalOf(await acquireSession(appSessionId, 'side'));
+    return refusalWords(await acquireSession(appSessionId, 'side'));
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }

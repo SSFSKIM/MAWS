@@ -27,10 +27,10 @@ export function useAvailability(appSessionId: AppSessionId): Availability | null
 
 // P2-A M3 (2026-10-09; the execution document §5.6): why an owner's gesture cannot start this session, in words, or
 // null when it may (a chip choice, a Load now or a Refresh acquires it). A terminal or a job holding it is named; an
-// archive says how to continue; an id nothing has started (an unstarted tab's) waits for its first message.
-export function availabilityRefusal(availability: Availability | null, holder: SessionRecord['holder'] | null): string | null {
+// archive says how to continue; an id with no record (an unstarted tab's) says `noRecord`, the surface's own words.
+export function availabilityRefusal(availability: Availability | null, holder: SessionRecord['holder'] | null, noRecord: string = NOT_YET): string | null {
   if (availability === 'archived') return ARCHIVED;
   if (availability === 'foreign_held') return `Held by ${holderWords(holder ?? { kind: 'none' })}`;
-  if (availability === null) return NOT_YET;
+  if (availability === null) return noRecord;
   return null;
 }

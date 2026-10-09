@@ -10,12 +10,10 @@
 // archive, closes the box with the reason. Opening the box starts nothing.
 import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ARCHIVED } from '../../../composer/submit/submit-state';
 import { useKeyChord } from '../../../keymap/useKeyChord';
 import { RELAY_LONG_WAIT_MS } from '../../../relay-wait'; // after this long asked, the long-wait clause (the drill-in relay's too)
-import { acquireSession, acquisitionWords, cardWords } from '../../../sessions/acquire';
-import { useAvailability } from '../../../sessions/availability';
-import { holderWords } from '../../../sessions/holder-words';
+import { acquireSession, refusalWords, STARTING_SESSION } from '../../../sessions/acquire';
+import { availabilityRefusal, useAvailability } from '../../../sessions/availability';
 import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
@@ -23,7 +21,6 @@ import { duration } from '../../model/time';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
 import { TickingStatus, useTicker } from './parts';
 
-const PEER_STARTING = 'Starting…'; // P2-A: the box's line while the session it asks is started
 
 
 // The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
@@ -55,7 +52,7 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   // P2-A start: a session with a record and no ready process is started by Send; the holder or the archive closes the box
   const availability = useAvailability(appSessionId ?? ('' as AppSessionId));
   const holder = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId)?.holder ?? null)));
-  const closed = ready ? null : availability === null ? peerMessageCopy.disabled.notRunningHere(target.mode) : availability === 'foreign_held' ? `Held by ${holder ? holderWords(holder) : 'another process'}` : availability === 'archived' ? ARCHIVED : null;
+  const closed = ready ? null : availabilityRefusal(availability, holder, peerMessageCopy.disabled.notRunningHere(target.mode));
   const [start, setStart] = useState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>({ kind: 'idle' });
   // P2-A end
   const session = displayTitle(useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null))));
@@ -86,7 +83,7 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
         let refusal: string | null;
         try {
           const outcome = await acquireSession(appSessionId, 'peer');
-          refusal = outcome.status === 'ready' ? null : outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : (acquisitionWords(outcome) ?? 'The session could not start');
+          refusal = refusalWords(outcome);
         } catch (error) {
           refusal = error instanceof Error ? error.message : String(error);
         }
@@ -117,7 +114,7 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
       {/* P2-A: this box's own start over the relay's line while it runs or was refused */}
       {start.kind !== 'idle' ? (
         <p role="status" data-part="peer-line" className="transcript-peer-line" data-failed={start.kind === 'refused' ? '' : undefined}>
-          {start.kind === 'starting' ? PEER_STARTING : start.words}
+          {start.kind === 'starting' ? STARTING_SESSION : start.words}
         </p>
       ) : (
         line !== null && <TickingStatus line={line.line} elapsed={line.elapsed} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />

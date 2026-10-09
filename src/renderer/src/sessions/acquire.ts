@@ -54,6 +54,9 @@ export function acquisitionWords(outcome: AcquireOutcome): string | null {
 // What a surface that never hands its text to a card says when the attempt docked one.
 export const cardWords = (outcome: Extract<AcquireOutcome, { status: 'needs_trust' | 'relay_unreachable' }>): string => (outcome.status === 'needs_trust' ? TRUST_FIRST : RELAY_FIRST);
 
+// P2-A M3 (2026-10-09): what a surface says, where it asked, while the owner's gesture starts the session.
+export const STARTING_SESSION = 'Starting…';
+
 // P2-A M3 (2026-10-09): what a surface other than the composer (a widget's Load now, a chip, a Refresh) says for an
 // attempt that did not end ready, the card included (it docks in the composer; this surface points at it); null: ready.
 export const refusalWords = (outcome: AcquireOutcome): string | null =>

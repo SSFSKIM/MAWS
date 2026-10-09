@@ -17,7 +17,8 @@ import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { useSessions } from '../stores/sessions';
 import { Markdown } from '../transcript/view/markdown/Markdown';
 import { promoteSide } from './actions';
-import { sideBlock, SIDE_STARTING, startForSide } from './btw';
+import { sideBlock, startForSide } from './btw';
+import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
 import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, useSidePane } from './store';
 
@@ -70,7 +71,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
     event.preventDefault();
     void ask();
   };
-  const note = blocked ?? (starting || availability === 'starting' ? SIDE_STARTING : ready ? null : STARTS);
+  const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
   const canPromote = !promoting && promotable(exchanges ?? []).length > 0;
   const promote = async () => {
     if (!canPromote) return;

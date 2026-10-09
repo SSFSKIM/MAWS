@@ -11,11 +11,9 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { useAvailability } from '../sessions/availability'; // P2-A
-import { holderWords } from '../sessions/holder-words'; // P2-A
+import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
-import { ARCHIVED } from './submit/submit-state'; // P2-A
 import type { UserRow } from './edit-prefill';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 
@@ -70,7 +68,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
   const ready = status?.process === 'ready';
   const availability = useAvailability(appSessionId);
   const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
-  const notStartable = ready ? null : availability === null ? NOT_STARTABLE : availability === 'foreign_held' ? `Held by ${holder ? holderWords(holder) : 'another process'}` : availability === 'archived' ? ARCHIVED : null;
+  const notStartable = ready ? null : availabilityRefusal(availability, holder, NOT_STARTABLE);
   const why = notStartable ?? (edit.kind === 'edit' && busy ? BUSY_REASON : null);
   // P2-A end
   const empty = edit.text.trim() === '' && edit.images.length === 0;

@@ -73,8 +73,7 @@ export interface ModeBinding {
 }
 
 export const NOT_RUNNING = 'The session is not running';
-// P2-A (2026-10-09): what a surface says while the owner's gesture starts the session (the execution document §5.6)
-export const STARTING_SESSION = 'Starting…';
+export { STARTING_SESSION } from '../sessions/acquire'; // P2-A: the menu's line while a choice starts the session
 
 // A started session's binding: the effective mode from C3's status (the record's when no process is live) and
 // `session.setPermissionMode` for a ready process.

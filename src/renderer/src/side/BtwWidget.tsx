@@ -11,7 +11,8 @@ import { useAvailability } from '../sessions/availability';
 import { useSessions } from '../stores/sessions';
 import { WIDGET_TITLE } from '../widgets/copy';
 import { WidgetFrame } from '../widgets/WidgetFrame';
-import { askSideQuestion, sideBlock, SIDE_STARTING, startForSide } from './btw';
+import { askSideQuestion, sideBlock, startForSide } from './btw';
+import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
 
 const COPY = SIDE_COPY.btw;
@@ -37,7 +38,7 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
     askSideQuestion(appSessionId, asked);
     close();
   };
-  const note = blocked ?? (starting || availability === 'starting' ? SIDE_STARTING : ready ? null : STARTS);
+  const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();

@@ -12,9 +12,8 @@ import { create } from 'zustand';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
-import { acquireSession, acquisitionWords, cardWords } from '../sessions/acquire'; // P2-A
-import { useAvailability } from '../sessions/availability'; // P2-A
-import { sideBlock } from './btw'; // P2-A
+import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
+import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { STARTS } from '../composer/submit/submit-state'; // P2-A
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
@@ -62,7 +61,7 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
   // record with no ready process starts on the Send); a terminal or job holding it, or an archive, says why
   const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
   const availability = useAvailability(parent);
-  const mainBlocked = availability === null ? COPY.mainNotRunning : sideBlock(availability, holder);
+  const mainBlocked = availabilityRefusal(availability, holder, COPY.mainNotRunning);
   const mainEnabled = ready || mainBlocked === null;
   // P2-A end
   const sending = phase.kind === 'sending';
@@ -77,13 +76,12 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
     // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
     // first, the Send being the gesture (`acquireSession(parent, 'side')`, then the existing `side.sendToMain` through
     // sendComment); a refused start stays in the form in its words (a card's, when one docked), the comment kept, and
-    // after the presentation went it is a toast. Needs: acquireSession, acquisitionWords, cardWords (sessions/acquire),
-    // useSessions, toast, COPY, and the form's `parent`, `to`, `gone()`, `setPhase`.
+    // after the presentation went it is a toast. Needs: acquireSession, refusalWords (sessions/acquire), useSessions,
+    // toast, COPY, and the form's `parent`, `to`, `gone()`, `setPhase`.
     if (to === 'main' && useSessions.getState().engine.get(parent)?.process !== 'ready') {
       let refusal: string | null;
       try {
-        const acquired = await acquireSession(parent, 'side');
-        refusal = acquired.status === 'ready' ? null : acquired.status === 'needs_trust' || acquired.status === 'relay_unreachable' ? cardWords(acquired) : (acquisitionWords(acquired) ?? 'The session could not start');
+        refusal = refusalWords(await acquireSession(parent, 'side'));
       } catch (error) {
         refusal = error instanceof Error ? error.message : String(error);
       }

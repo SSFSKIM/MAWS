@@ -27,7 +27,7 @@
 // An edit does not survive a reload (as Codex's does not): nothing in flight resumes on its own.
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { acquireSession, acquisitionWords, cardWords } from '../sessions/acquire'; // P2-A
+import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -268,7 +268,7 @@ async function startThenSend(client: MawsBridge, appSessionId: AppSessionId, how
   let refusal: string | null;
   try {
     const outcome = await acquireSession(appSessionId, 'resubmit', {}, client);
-    refusal = outcome.status === 'ready' ? null : outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : (acquisitionWords(outcome) ?? 'The session could not start');
+    refusal = refusalWords(outcome);
     if (refusal === null && !(await whenReady(appSessionId))) refusal = 'The session did not start';
   } catch (error) {
     refusal = error instanceof Error ? error.message : String(error);

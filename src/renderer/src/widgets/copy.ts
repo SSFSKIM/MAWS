@@ -5,7 +5,7 @@
 import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { WidgetCommandName } from '../composer';
-import { NOT_RUNNING, STARTING_SESSION } from '../statusline/mode-menu';
+import { STARTING_SESSION } from '../statusline/mode-menu';
 import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
 
 export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
@@ -143,7 +143,7 @@ export const CONFIG = {
 };
 
 // Plugins.
-export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
+export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
 // MCP.
 export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
