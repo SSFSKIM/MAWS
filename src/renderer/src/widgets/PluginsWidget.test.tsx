@@ -1262,6 +1262,33 @@ describe('plugins widget: Browse', () => {
     expect(section('browse').className).not.toContain('hidden');
   });
 
+  it('a card’s detail outlives a change whose catalogue answers before the installed list; a card that left closes it once both have answered', async () => {
+    await ready();
+    await toBrowse();
+    const id = 'counted-none@claude-plugins-official';
+    fireEvent.click(within(card(id)).getByRole('button', { name: 'View Counted none' }));
+    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]');
+    expect(detail()!.getAttribute('data-browse-detail')).toBe(id);
+    // the install of the card's plugin, as the engine answers it: --available leaves the plugin out at once, and the
+    // installed list that adds it back answers later
+    let listed!: (value: { plugins: InstalledPlugin[] }) => void;
+    backend.script('plugins.list', () => new Promise((resolve) => (listed = resolve)));
+    backend.script('plugins.available', () => ({ plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only')] }));
+    const asked = invoked('plugins.available').length;
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.available').length).toBe(asked + 1));
+    await act(async () => {}); // the catalogue's answer drawn, the installed list still in flight
+    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
+    await act(async () => listed({ plugins: [...installed, plugin(id)] }));
+    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
+    await waitFor(() => expect(within(detail()!).queryByRole('button', { name: 'Install' })).toBeNull()); // installed here now
+    // uninstalled and no longer offered: once both reads answer, the detail returns to the grid
+    backend.script('plugins.list', () => ({ plugins: installed }));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(detail()).toBeNull());
+    expect(section('browse').className).not.toContain('hidden');
+  });
+
   it('every open starts on My items with no catalogue read, whatever the last open showed', async () => {
     await ready();
     await toBrowse();

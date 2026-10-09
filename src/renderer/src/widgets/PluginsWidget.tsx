@@ -11,7 +11,7 @@
 // sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
 // sheet. The CLI needs no engine process, so a session that is not running still manages plugins: the frame's states
 // never stand in for the list, and A's session states reach `/plugins` only through the loaded line.
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -119,12 +119,16 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
 
   // Browse's detail: the card opened, as it is now (an installed card whose plugin left the list returns to the grid);
   // a card installed for the user or here opens its My items detail
-  const [picked, setPicked] = useState<{ pluginId: string; installed: boolean } | null>(null);
-  const card: BrowseCard | null = picked === null ? null : (cards.find((c) => c.pluginId === picked.pluginId) ?? null);
+  const [picked, setPicked] = useState<{ pluginId: string; installed: boolean; card: BrowseCard } | null>(null);
+  // A change's reads answer one by one: an install's catalogue leaves the plugin out before the installed list adds it
+  // back. While either read is in flight a card missing from the list stays as it was clicked; it has left only once
+  // both have answered.
+  const reading = useIsFetching({ queryKey: ['maws', 'plugins.list', { cwd }] }) + useIsFetching({ queryKey: ['maws', 'plugins.available', { cwd }] }) > 0;
+  const card: BrowseCard | null = picked === null ? null : (cards.find((c) => c.pluginId === picked.pluginId) ?? (reading ? picked.card : null));
   const pickedIdentity = picked?.installed ? (identities.find((i) => i.id === picked.pluginId) ?? null) : null;
   const browseDetail = picked === null ? null : picked.installed ? pickedIdentity : card;
-  const pick = useCallback((c: BrowseCard) => setPicked({ pluginId: c.pluginId, installed: isInstalledHere(c) }), []);
-  if (picked !== null && browseDetail === null) setPicked(null); // a card or plugin that left is not opened again by its return
+  const pick = useCallback((c: BrowseCard) => setPicked({ pluginId: c.pluginId, installed: isInstalledHere(c), card: c }), []);
+  if (picked !== null && browseDetail === null && !reading) setPicked(null); // a card or plugin that left is not opened again by its return
 
   // a view's switch: to the other view, or (the view already shown) back to its list
   const switchTo = (next: LibraryTab) => {
