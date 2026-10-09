@@ -6,11 +6,19 @@
 // swallowed so the page never sees half a keystroke. Every other chord passes: MAWS's menu accelerators (⌘K, ⌘W, ⌘0, …)
 // keep winning, and ⌘L stays `composer.focus` everywhere but inside a page. No keymap action is added.
 // cua #90: ⇧⌘B, Chrome's bookmarks bar chord, is told to the chrome (`toggleBookmarksBar`), which flips the setting; like
-// ⌘L it shadows a MAWS chord (`panel.toggle`) inside the page only, and leaves the focus where it is.
+// ⌘L it shadows a MAWS chord (`panel.toggle`) inside the page only, and leaves the focus where it is. It is taken only in
+// a tab whose partition can show a bar (an imported profile with its bookmarks consented, the bar shown or hidden):
+// anywhere else it passes, so Toggle right panel still answers it (the owner's decision of 2026-10-09).
 import type { Input } from 'electron';
 import type { BrowserChromeCommand } from '@shared/ipc/schema/browser';
 import type { Navigator } from './navigation';
+import type { BrowserProfile } from './partition';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
+
+// cua #90: whether a tab of `partition` can show a bookmarks bar: an imported profile's, with its bookmarks consented
+// (the Default partition never is; a profile imported without Bookmarks has `bookmarks: null`).
+export const canShowBookmarksBar = (profiles: readonly Pick<BrowserProfile, 'partition' | 'bookmarks'>[], partition: string): boolean =>
+  profiles.some((profile) => profile.partition === partition && profile.bookmarks != null);
 
 export type KeyAction =
   | { kind: 'navigate'; to: 'reload' | 'back' | 'forward' | 'stop' }
@@ -19,7 +27,8 @@ export type KeyAction =
 
 export type KeyInput = Pick<Input, 'type' | 'key' | 'meta' | 'control' | 'alt' | 'shift'>;
 
-export function keyAction(input: KeyInput, state: { findOpen: boolean; loading: boolean }): KeyAction | null {
+// `bookmarksBar`: the tab's partition can show a bookmarks bar (cua #90); absent, it cannot.
+export function keyAction(input: KeyInput, state: { findOpen: boolean; loading: boolean; bookmarksBar?: boolean }): KeyAction | null {
   if (input.type !== 'keyDown') return null;
   const { meta, control, alt, shift } = input;
   if (input.key === 'Escape') {
@@ -32,7 +41,7 @@ export function keyAction(input: KeyInput, state: { findOpen: boolean; loading: 
   if (key === 'r') return { kind: 'navigate', to: 'reload' }; // ⇧⌘R too
   if (key === '=' || key === '+') return { kind: 'zoom', action: 'in' };
   if (key === '-') return { kind: 'zoom', action: 'out' };
-  if (key === 'b' && shift) return { kind: 'chrome', command: 'toggleBookmarksBar' }; // cua #90
+  if (key === 'b' && shift) return state.bookmarksBar ? { kind: 'chrome', command: 'toggleBookmarksBar' } : null; // cua #90
   if (shift) return null;
   if (key === '[') return { kind: 'navigate', to: 'back' };
   if (key === ']') return { kind: 'navigate', to: 'forward' };
@@ -45,9 +54,10 @@ export interface KeysDeps {
   store: Pick<TabStore, 'entry'>;
   navigator: Pick<Navigator, 'navigate' | 'zoom' | 'find'>;
   emit: BrowserEmit;
+  bookmarksBar(partition: string): boolean; // cua #90: whether a tab of this partition can show a bookmarks bar
 }
 
-export function attachKeys(entry: TabEntry, { store, navigator, emit }: KeysDeps): void {
+export function attachKeys(entry: TabEntry, { store, navigator, emit, bookmarksBar }: KeysDeps): void {
   const view = entry.view!;
   const { tabId } = entry.tab;
   const taken = new Set<string>(); // the codes whose keyDown was taken: their keyUp is swallowed too
@@ -57,7 +67,7 @@ export function attachKeys(entry: TabEntry, { store, navigator, emit }: KeysDeps
       if (taken.delete(input.code)) event.preventDefault();
       return;
     }
-    const action = keyAction(input, { findOpen: entry.findOpen, loading: entry.tab.loading });
+    const action = keyAction(input, { findOpen: entry.findOpen, loading: entry.tab.loading, bookmarksBar: bookmarksBar(entry.tab.partition) });
     if (!action) {
       // a press of a key whose taken chord's keyUp went elsewhere (⌘L and ⌘F move the focus to the app's window): its
       // own keyUp now belongs to the page

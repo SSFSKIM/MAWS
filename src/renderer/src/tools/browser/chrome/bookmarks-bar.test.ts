@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyBookmarkTree, type BookmarkNode, type BookmarkTree } from '@shared/browser/bookmarks';
 import type { ImportedBookmarks } from '@shared/browser/profiles';
-import { barOrigins, barShown, chipHow, firstHidden } from './bookmarks-bar';
+import { barOrigins, barShown, canShowBar, chipHow, firstHidden } from './bookmarks-bar';
 
 const CONSENTED: ImportedBookmarks = { consentedAt: '2026-10-08T09:00:00.000Z', syncedAt: '2026-10-08T09:00:01.000Z', count: 1, error: null, errorAt: null };
 const url = (id: number, href: string): BookmarkNode => ({ kind: 'url', id, name: `n${id}`, url: href, addedAt: null });
@@ -52,5 +52,15 @@ describe('barOrigins', () => {
   it('lists the URL chips\' origins once each, in order, folders aside', () => {
     const folder: BookmarkNode = { kind: 'folder', id: 9, name: 'F', children: [url(10, 'https://inside.example/')] };
     expect(barOrigins([url(2, 'https://a.example/x'), folder, url(3, 'https://b.example:8443/'), url(4, 'https://a.example/y')])).toEqual(['https://a.example', 'https://b.example:8443']);
+  });
+});
+
+describe('canShowBar: where ⌘⇧B is the bar\'s', () => {
+  it('is a consented profile\'s partition, its bar shown or hidden; not the Default partition, an unconsented profile or an unknown one', () => {
+    const records = [{ partition: 'persist:maws-chrome-Default', bookmarks: CONSENTED }, { partition: 'persist:maws-chrome-Work', bookmarks: null }];
+    expect(canShowBar(records, 'persist:maws-chrome-Default')).toBe(true);
+    expect(canShowBar(records, 'persist:maws-browser')).toBe(false);
+    expect(canShowBar(records, 'persist:maws-chrome-Work')).toBe(false);
+    expect(canShowBar(records, 'persist:maws-chrome-Gone')).toBe(false);
   });
 });

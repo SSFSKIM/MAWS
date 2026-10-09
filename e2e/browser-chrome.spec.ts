@@ -324,6 +324,14 @@ test('2, 3, 5: the bar in an imported profile\'s tab: chips and », a chip in th
       await main.getByRole('button', { name: 'New tab', exact: true }).click();
       await expect(main.locator('[data-browser-partition]')).toHaveText('Default');
       await expect(barIn(main)).toHaveCount(0);
+      // and ⇧⌘B in its page is not the bar's: it passes on (Toggle right panel's) and the setting stays as it was
+      await address(main, server.url('/b.html'));
+      const defaultTab = await tabAt(s, id, server.url('/b.html'));
+      expect((await tabsOf(s, id)).tabs.find((tab) => tab.tabId === defaultTab)?.partition).toBe(DEFAULT_PARTITION);
+      expect(await sendInput(s, defaultTab, { type: 'keyDown', keyCode: 'B', modifiers: ['meta', 'shift'] })).toBe(true);
+      expect(await sendInput(s, defaultTab, { type: 'keyUp', keyCode: 'B', modifiers: ['meta', 'shift'] })).toBe(true);
+      await s.page.waitForTimeout(300);
+      expect((settingsFile(s.maws.userData).browser as { bookmarksBar?: string }).bookmarksBar).toBe('shown');
       await expectNothingLogged(s);
     } catch (error) {
       await s.maws.cleanup();
@@ -382,7 +390,7 @@ test('4, 6: ⌘⇧B in the page hides the bar and the page grows by 28 px; a rel
       expect(marks.slice(1, 1 + marks.filter(Boolean).length).every(Boolean)).toBe(true);
       const historyTitle = chrome.profiles.Default.history.entries.find((entry) => entry.expected === 'imported')!.title;
       await field.fill(historyTitle);
-      await expect(listbox.getByRole('option').filter({ hasText: historyTitle })).toHaveCount(1);
+      await expect(listbox.getByRole('option').filter({ hasText: new RegExp(`^${historyTitle}`) })).toHaveCount(1); // the history row (the typed search row quotes it too)
       await expect(listbox.locator('[data-suggestion-bookmark]')).toHaveCount(0);
       await field.press('Escape');
     } catch (error) {

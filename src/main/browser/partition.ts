@@ -16,7 +16,13 @@ import { BrowserPartitionSchema, DEFAULT_PARTITION, profilePartition } from '@sh
 
 // Loose: E4b owns the file and records more per profile (its storage directory, the source user-data directory, the
 // extensions, the import report); E4a reads only these keys and must not refuse E4b's.
-export const BrowserProfileSchema = z.looseObject({ profileDir: z.string().min(1), name: z.string(), partition: BrowserPartitionSchema, importedAt: z.string() });
+export const BrowserProfileSchema = z.looseObject({
+  profileDir: z.string().min(1),
+  name: z.string(),
+  partition: BrowserPartitionSchema,
+  importedAt: z.string(),
+  bookmarks: z.looseObject({}).nullable().optional(), // cua #90: the bookmarks consent (version 2; absent in version 1)
+});
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
 const ProfilesFileSchema = z.looseObject({ version: z.union([z.literal(1), z.literal(2) /* cua #90: profiles.json version 2 */]), profiles: z.array(BrowserProfileSchema) });
 

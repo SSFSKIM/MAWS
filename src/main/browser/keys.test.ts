@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
-import { attachKeys, keyAction } from './keys';
+import { attachKeys, canShowBookmarksBar, keyAction } from './keys';
 import { TabStore, type TabEntry } from './tabs';
 
 const A = 'App-A' as AppSessionId;
@@ -34,11 +34,18 @@ describe('keyAction: the chords taken inside the page (E4a Design §4, Decision 
     expect(keyAction(cmd('-'), idle)).toEqual({ kind: 'zoom', action: 'out' });
   });
 
-  // cua #90: Chrome's chord for the bookmarks bar; it shadows MAWS's ⌘⇧B (Toggle right panel) inside the page only
-  it('takes ⇧⌘B as the bookmarks bar toggle, and ⌘B, ⌥⇧⌘B, ⌃⇧⌘B not', () => {
-    expect(keyAction(cmd('B', { shift: true }), idle)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
-    expect(keyAction(cmd('b', { shift: true }), idle)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
-    for (const input of [cmd('b'), cmd('B', { shift: true, alt: true }), cmd('B', { shift: true, control: true }), key('B', { shift: true })]) expect(keyAction(input, idle)).toBeNull();
+  // cua #90: Chrome's chord for the bookmarks bar; it shadows MAWS's ⌘⇧B (Toggle right panel) inside the page only, and
+  // only in a tab that can show a bar (the owner's decision of 2026-10-09: "it toggles the bookmarks bar where there is one")
+  it('takes ⇧⌘B as the bookmarks bar toggle in a tab that can show a bar, and ⌘B, ⌥⇧⌘B, ⌃⇧⌘B not', () => {
+    const withBar = { ...idle, bookmarksBar: true };
+    expect(keyAction(cmd('B', { shift: true }), withBar)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
+    expect(keyAction(cmd('b', { shift: true }), withBar)).toEqual({ kind: 'chrome', command: 'toggleBookmarksBar' });
+    for (const input of [cmd('b'), cmd('B', { shift: true, alt: true }), cmd('B', { shift: true, control: true }), key('B', { shift: true })]) expect(keyAction(input, withBar)).toBeNull();
+  });
+
+  it('passes ⇧⌘B to the menu (Toggle right panel) in a tab that can show no bar', () => {
+    expect(keyAction(cmd('B', { shift: true }), idle)).toBeNull();
+    expect(keyAction(cmd('B', { shift: true }), { ...idle, bookmarksBar: false })).toBeNull();
   });
 
   it('acts on keyDown only', () => {
@@ -61,8 +68,24 @@ describe('keyAction: the chords taken inside the page (E4a Design §4, Decision 
   });
 });
 
+describe('canShowBookmarksBar (cua #90)', () => {
+  const consented = { consentedAt: '2026-10-09T00:00:00.000Z', syncedAt: null, count: 0, error: 'missing', errorAt: '2026-10-09T00:00:00.000Z' };
+  const profiles = [
+    { partition: 'persist:maws-chrome-Default', bookmarks: consented },
+    { partition: 'persist:maws-chrome-Profile%201', bookmarks: null },
+    { partition: 'persist:maws-chrome-Old' }, // a version 1 record, read loosely
+  ];
+  it('is true for a profile with its bookmarks consented (whatever its last sync did), and false for the Default partition, an unconsented or old record, and an unknown partition', () => {
+    expect(canShowBookmarksBar(profiles, 'persist:maws-chrome-Default')).toBe(true);
+    expect(canShowBookmarksBar(profiles, DEFAULT_PARTITION)).toBe(false);
+    expect(canShowBookmarksBar(profiles, 'persist:maws-chrome-Profile%201')).toBe(false);
+    expect(canShowBookmarksBar(profiles, 'persist:maws-chrome-Old')).toBe(false);
+    expect(canShowBookmarksBar(profiles, 'persist:maws-chrome-Gone')).toBe(false);
+  });
+});
+
 describe('attachKeys: before-input-event', () => {
-  function harness() {
+  function harness(barPartitions: string[] = [DEFAULT_PARTITION]) {
     const emitted: { name: EventName; payload: unknown }[] = [];
     const store = new TabStore({
       emit: <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload }),
@@ -75,7 +98,8 @@ describe('attachKeys: before-input-event', () => {
     const entry = store.entry(tabId) as TabEntry;
     const focus = vi.fn();
     entry.host = { webContents: { focus } } as never;
-    attachKeys(entry, { store, navigator, emit: <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload }) });
+    const bookmarksBar = vi.fn((partition: string) => barPartitions.includes(partition)); // cua #90
+    attachKeys(entry, { store, navigator, bookmarksBar, emit: <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload }) });
     const wc = entry.view!.webContents as unknown as EventEmitter;
     const press = (input: ReturnType<typeof key>) => {
       const event = { preventDefault: vi.fn() };
@@ -114,6 +138,13 @@ describe('attachKeys: before-input-event', () => {
       { tabId: h.tabId, command: 'openFind' },
       { tabId: h.tabId, command: 'closeFind' },
     ]);
+  });
+
+  it('⇧⌘B passes to the menu in a tab whose partition can show no bar (the Default partition, an unconsented profile) (cua #90)', () => {
+    const h = harness([]);
+    expect(h.press(cmd('B', { shift: true, code: 'KeyB' }))).toBe(false);
+    expect(h.press(cmd('B', { shift: true, type: 'keyUp', code: 'KeyB' }))).toBe(false);
+    expect(h.commands()).toEqual([]);
   });
 
   it('⇧⌘B tells the chrome to flip the bookmarks bar and leaves the focus in the page (cua #90)', () => {

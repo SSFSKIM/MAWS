@@ -212,4 +212,26 @@ describe('⌘⇧B: the bookmarks bar\'s chord', () => {
     act(() => main.emit('browser.chrome.command', { tabId: T1, command: 'toggleBookmarksBar' }));
     await vi.waitFor(() => expect(main.callsOf('settings.set')).toEqual([{ browser: { bookmarksBar: 'hidden' } }, { browser: { bookmarksBar: 'shown' } }]));
   });
+
+  // the owner's decision of 2026-10-09: the chord toggles the bar where there is one, and is Toggle right panel's elsewhere
+  it('passes ⌘⇧B on, unprevented and unwritten, in a Default tab and in a profile imported without bookmarks', async () => {
+    const def = show(browserTab(T1, A));
+    const field = () => screen.getByRole('combobox', { name: 'Address' });
+    expect(fireEvent.keyDown(field(), { key: 'B', metaKey: true, shiftKey: true })).toBe(true); // not prevented: the menu's
+    act(() => main.emit('browser.chrome.command', { tabId: T1, command: 'toggleBookmarksBar' }));
+    def.unmount();
+    browserImport.setState({ records: [record({ bookmarks: null })] });
+    show();
+    expect(fireEvent.keyDown(field(), { key: 'B', metaKey: true, shiftKey: true })).toBe(true);
+    act(() => main.emit('browser.chrome.command', { tabId: T1, command: 'toggleBookmarksBar' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(main.callsOf('settings.set')).toEqual([]);
+  });
+
+  it('takes ⌘⇧B in a consented profile\'s tab while its bar is hidden, so the chord brings it back', async () => {
+    setSettings({ bookmarksBar: 'hidden' });
+    show();
+    expect(fireEvent.keyDown(screen.getByRole('combobox', { name: 'Address' }), { key: 'B', metaKey: true, shiftKey: true })).toBe(false);
+    await vi.waitFor(() => expect(main.callsOf('settings.set')).toEqual([{ browser: { bookmarksBar: 'shown' } }]));
+  });
 });

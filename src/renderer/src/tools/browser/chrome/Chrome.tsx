@@ -8,9 +8,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
+import { useBrowserImport } from '../import/store';
 import { toggleBookmarksBar } from '../settings';
 import { onChromeCommand } from '../store';
 import { BookmarksBar } from './BookmarksBar';
+import { canShowBar } from './bookmarks-bar';
 import { FindBar } from './FindBar';
 import { NavRow } from './NavRow';
 import { Notices } from './Notices';
@@ -34,6 +36,8 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
   const addressRef = useRef<HTMLInputElement>(null);
   const [finding, setFinding] = useState<Finding | null>(null); // the open find bar
   const tabId = tab?.tabId ?? null;
+  const partition = tab?.partition ?? DEFAULT_PARTITION;
+  const barCapable = useBrowserImport((s) => canShowBar(s.records, partition)); // cua #90: ⌘⇧B is the bar's here
   if (finding !== null && finding.tabId !== tabId) setFinding(null); // another tab shown: its bar is closed
 
   const openFind = () => {
@@ -46,14 +50,16 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
       if (command.tabId !== tabId) return;
       if (command.command === 'focusAddress') addressRef.current?.focus();
       else if (command.command === 'openFind') setFinding(findOpened(tabId));
-      else if (command.command === 'toggleBookmarksBar') void toggleBookmarksBar(); // cua #90
+      else if (command.command === 'toggleBookmarksBar') {
+        if (barCapable) void toggleBookmarksBar(); // cua #90
+      }
       else setFinding(null);
     });
-  }, [owns, tabId]);
+  }, [owns, tabId, barCapable]);
 
   // cua #90: ⌘⇧B with the chrome focused (inside the page, keys.ts takes it)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!event.metaKey || !event.shiftKey || event.altKey || event.ctrlKey || event.key.toLowerCase() !== 'b') return;
+    if (!barCapable || !event.metaKey || !event.shiftKey || event.altKey || event.ctrlKey || event.key.toLowerCase() !== 'b') return;
     event.preventDefault();
     void toggleBookmarksBar();
   };

@@ -18,7 +18,7 @@ import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
 import { browserInspector } from './inspect';
 import { attachInputSeams } from './input';
-import { attachKeys } from './keys';
+import { attachKeys, canShowBookmarksBar } from './keys';
 import { MemorySampler } from './memory';
 import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
@@ -140,7 +140,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     guardPage(entry);
     attachWindowOpen(entry, { store, linkTarget: () => settings().linkTarget, seam, childPreferences });
     attachContextMenu(entry, { store, navigator, openExternal: seam.openExternal });
-    attachKeys(entry, { store, navigator, emit });
+    attachKeys(entry, { store, navigator, emit, bookmarksBar: (partition) => canShowBookmarksBar(profiles(), partition) /* cua #90 */ });
     attachInputSeams(entry);
     if (focusEmulation === 'on') attachFocusEmulation(entry, (tab) => views.focusEmulationWanted(tab));
   });

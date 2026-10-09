@@ -11,6 +11,11 @@ export function barShown(record: Pick<ImportedProfile, 'bookmarks'> | undefined,
   return record?.bookmarks != null && setting === 'shown' && tree !== undefined && tree.bar.children.length > 0;
 }
 
+// Whether a tab of `partition` can show a bar, shown or hidden: an imported profile's whose bookmarks were imported.
+// ⌘⇧B is the bar's there only; anywhere else it stays Toggle right panel's (the owner's decision of 2026-10-09).
+export const canShowBar = (records: readonly Pick<ImportedProfile, 'partition' | 'bookmarks'>[], partition: string): boolean =>
+  records.some((record) => record.partition === partition && record.bookmarks != null);
+
 // The first chip whose right edge passes the room the chips have (`rights`: each chip's right edge, measured from the
 // chips' own left edge, in order); null when every chip fits.
 export function firstHidden(rights: readonly number[], room: number): number | null {
