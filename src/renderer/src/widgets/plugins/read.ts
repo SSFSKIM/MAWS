@@ -31,6 +31,9 @@ const resultOf = <T,>(data: T | undefined, failed: IpcCommandError | null, isErr
   return { state: data !== undefined ? 'ready' : isError ? 'error' : 'loading', data, error };
 };
 
+// A read's place in the query client: one per command and directory, whoever reads it.
+export const pluginsReadKey = (command: PluginsRead, cwd: string | null) => ['maws', command, { cwd }] as const;
+
 // `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
 // rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.
 export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true): PluginsReadResult<CommandOutput<N>> {
@@ -38,7 +41,7 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
   const on = active && enabled && cwd !== null;
   const client = useQueryClient();
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
-    queryKey: ['maws', command, { cwd }],
+    queryKey: pluginsReadKey(command, cwd),
     queryFn: () => invokeRead(command, { cwd: cwd! } as never),
     enabled: on,
     staleTime: READ_STALE_MS,
@@ -51,7 +54,7 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
   useEffect(() => {
     if (!on) return;
     return ipc.on('plugins.changed', () => {
-      if (!shown || client.isFetching({ queryKey: ['maws', command, { cwd }] }) > 0) owed.current = true;
+      if (!shown || client.isFetching({ queryKey: pluginsReadKey(command, cwd) }) > 0) owed.current = true;
       else void refetch();
     });
   }, [on, shown, client, command, cwd, refetch]);

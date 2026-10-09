@@ -10,6 +10,7 @@ import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plu
 import { WidgetReadPolicyContext } from '../read';
 import { manifestKeyOf } from './library';
 import { usePluginManifests, type ManifestRequest } from './manifests';
+import { usePluginsRead } from './read';
 
 const CWD = '/work/maws';
 const view = (key: ManifestItemRef, over: Partial<PluginManifestView> = {}): PluginManifestView => ({
@@ -127,3 +128,104 @@ describe('usePluginManifests', () => {
     second.unmount();
   });
 });
+
+// A view carries its marketplace's entry (`marketplaceVersion`, the overlay), which a marketplace's add, update or removal
+// changes without moving the installation's `lastUpdated`: a kept view holds only while the listing it was read under is
+// the client's latest `marketplaces.list` answer for the cwd (the whole-branch review's regression).
+describe('usePluginManifests under the marketplace listing', () => {
+  let offered: string;
+  let listings: number;
+  let changed: Set<(payload: unknown) => void>;
+  let hold: { listing: Promise<void> | null; manifest: Promise<void> | null };
+  beforeEach(() => {
+    offered = '1.0.0';
+    listings = 0;
+    changed = new Set();
+    hold = { listing: null, manifest: null };
+    window.maws = {
+      invoke: vi.fn(async (command: string, input: { items: ManifestItemRef[] }) => {
+        if (command === 'marketplaces.list') {
+          listings += 1;
+          await hold.listing;
+          return { ok: true, value: { marketplaces: [{ name: 'm', source: 'directory', locator: '/m', installLocation: '/m' }] } };
+        }
+        asked.push(input.items);
+        const version = offered; // what the files say when the read starts
+        await hold.manifest;
+        return { ok: true, value: { manifests: input.items.map((key) => ({ ...answer(key), marketplaceVersion: version })) } };
+      }),
+      on: (name: string, listener: (payload: unknown) => void) => {
+        if (name !== 'plugins.changed') return () => {};
+        changed.add(listener);
+        return () => void changed.delete(listener);
+      },
+    } as unknown as MawsBridge;
+  });
+  // the hook as its callers hold it: beside their own read of the marketplace listing
+  const useCaller = (cwd: string, items: readonly ManifestRequest[]) => {
+    usePluginsRead('marketplaces.list', cwd);
+    return usePluginManifests(cwd, items);
+  };
+  const fresh = () => {
+    const own = new QueryClient();
+    return function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={own}>{children}</QueryClientProvider>;
+    };
+  };
+  const P: ManifestRequest = { kind: 'installation', id: 'p@m', scope: 'user', projectPath: null, lastUpdated: '2026-10-01T00:00:00Z' };
+  const offeredOf = (manifests: { views: ReadonlyMap<string, PluginManifestView> }) => manifests.views.get(manifestKeyOf(P))?.marketplaceVersion;
+
+  it('reads a kept view again once the listing after a marketplace change answers, showing the kept one meanwhile; a reopen reuses the new one', async () => {
+    const wrapper = fresh();
+    const hook = renderHook(() => useCaller(CWD, [P]), { wrapper });
+    await waitFor(() => expect(offeredOf(hook.result.current)).toBe('1.0.0'));
+    expect(asked).toHaveLength(1);
+    // Manage marketplaces › Check for updates pulled a newer entry; the installation's lastUpdated stays
+    offered = '2.0.0';
+    let release!: () => void;
+    hold.manifest = new Promise((resolve) => (release = resolve));
+    act(() => changed.forEach((listener) => listener({})));
+    await waitFor(() => expect(asked).toHaveLength(2));
+    expect(listings).toBe(2);
+    expect(offeredOf(hook.result.current)).toBe('1.0.0'); // the kept view stays drawn while it is read again
+    expect(hook.result.current.loading).toBe(false);
+    act(() => release());
+    await waitFor(() => expect(offeredOf(hook.result.current)).toBe('2.0.0'));
+    hook.unmount();
+    // the dialog opened again within the listing's freshness: the view kept under the new listing, nothing asked
+    const again = renderHook(() => useCaller(CWD, [{ ...P }]), { wrapper });
+    expect(offeredOf(again.result.current)).toBe('2.0.0');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toHaveLength(2);
+    again.unmount();
+  });
+
+  it('asks for nothing while the listing’s first answer is on its way, then asks once', async () => {
+    let release!: () => void;
+    hold.listing = new Promise((resolve) => (release = resolve));
+    const hook = renderHook(() => useCaller(CWD, [P]), { wrapper: fresh() });
+    await waitFor(() => expect(listings).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toEqual([]);
+    act(() => release());
+    await waitFor(() => expect(offeredOf(hook.result.current)).toBe('1.0.0'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toHaveLength(1);
+    hook.unmount();
+  });
+
+  it('a view read again partial replaces the kept one and is not kept', async () => {
+    const wrapper = fresh();
+    const hook = renderHook(() => useCaller(CWD, [P]), { wrapper });
+    await waitFor(() => expect(offeredOf(hook.result.current)).toBe('1.0.0'));
+    answer = (key) => view(key, { partial: true });
+    offered = '2.0.0';
+    act(() => changed.forEach((listener) => listener({})));
+    await waitFor(() => expect(hook.result.current.views.get(manifestKeyOf(P))?.partial).toBe(true));
+    hook.unmount();
+    const again = renderHook(() => useCaller(CWD, [P]), { wrapper });
+    await waitFor(() => expect(asked).toHaveLength(3)); // never kept: the next open asks again
+    again.unmount();
+  });
+});
+

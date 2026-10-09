@@ -1090,6 +1090,34 @@ describe('plugins widget: the detail', () => {
     expect(argvShown()).toEqual(['plugin', 'uninstall', 'e8-probe@e8-scratch', '--scope', 'project', '--json']);
   });
 
+  it('Update says On latest version until Check for updates pulls a newer marketplace entry, then offers it, the installation unchanged', async () => {
+    let offered = '0.1.0'; // the marketplace entry's version, as the host reads it from the clone
+    backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => ({ ...manifestOf(key), marketplaceVersion: offered })) }));
+    await ready();
+    const update = () => within(detail()!).getByRole('button', { name: 'Update' });
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    await waitFor(() => expect(update().parentElement!.title).toBe('On latest version'));
+    expect(update()).toHaveProperty('disabled', true);
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to My items' }));
+    openAdd('Manage marketplaces');
+    await waitFor(() => expect(marketRow('e8-scratch')).toBeTruthy());
+    marketMenu('e8-scratch', 'Check for updates');
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(invoked('marketplaces.update')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
+    offered = '0.2.0';
+    const reads = invoked('plugins.manifest').length;
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-update', target: 'e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully updated marketplace: e8-scratch' } }, reload: { sessions: [] } })));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.manifest').length).toBeGreaterThan(reads)); // read again once the listings answered
+    fireEvent.click(within(manageDialog()).getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(document.querySelector('[data-marketplaces-dialog]')).toBeNull());
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    await waitFor(() => expect(update().parentElement!.title).toBe('Update to 0.2.0'));
+    expect(update()).toHaveProperty('disabled', false);
+    expect(installed[0].lastUpdated).toBeNull(); // no reinstall: the listing's lastUpdated never moved
+  });
+
   it('a chip not here or the user’s offers no change and says where the plugin is managed; other projects list read-only', async () => {
     installed = [plugin('e8-probe@e8-scratch'), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work', coversHere: true }), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other' })];
     await ready();
