@@ -1,12 +1,12 @@
-P2-B acceptance run · 2026-10-09T17:50:48.224Z · engine 2.1.295 · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-Gr6OIP/claude-config · proj /private/tmp/maws-e8-live-Gr6OIP/e8-repo · other /private/tmp/maws-e8-live-Gr6OIP/other
+P2-B acceptance run · 2026-10-09T18:35:54.980Z · engine 2.1.295 · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-OUxNEh/claude-config · proj /private/tmp/maws-e8-live-OUxNEh/e8-repo · other /private/tmp/maws-e8-live-OUxNEh/other
 setup · plugin marketplace add anthropics/claude-plugins-official: ok · Cleaning up old marketplace cache… ⏎ ✔ Successfully added marketplace: claude-plugins-official (declared in user settings)
 setup · install code-review --scope user: ok · Installing plugin "code-review@claude-plugins-official"...✔ Successfully installed plugin: code-review@claude-plugins-official (scope: user)
 setup · install frontend-design --scope project (proj): ok · Installing plugin "frontend-design@claude-plugins-official"...✔ Successfully installed plugin: frontend-design@claude-plugins-official (scope: project)
 setup · install supabase --scope project (other): ok · Installing plugin "supabase@claude-plugins-official"...✔ Successfully installed plugin: supabase@claude-plugins-official (scope: project)
-setup · the catalogue: 313 official entries, 3229 directory entries; most popular not installed: superpowers (1153057; its directory entry uncounted or absent); a directory-only entry: productivity
+setup · the catalogue: 313 official entries, 3230 directory entries; most popular not installed: superpowers (1153057; its directory entry uncounted or absent); a directory-only entry: productivity
 
 === 01-start · a session in proj on Haiku, one turn ("Reply with OK"), then stopped
-session 90f8aef9-0a47-486d-a08b-c4341f046fd0: ready · model claude-haiku-5-5[1m] · gateway routed · plugins loaded: code-review@claude-plugins-official, frontend-design@claude-plugins-official, cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin
+session 0d60749d-370d-4dfd-9867-90adb229d293: ready · model claude-haiku-5-5[1m] · gateway routed · plugins loaded: code-review@claude-plugins-official, frontend-design@claude-plugins-official, cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin
 stopped: exited
 
 === 02-size · /plugins: the library box at a 1440 by 960 window; Esc closes it and the composer has the keyboard

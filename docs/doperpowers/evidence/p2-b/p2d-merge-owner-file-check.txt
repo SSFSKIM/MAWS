@@ -1,0 +1,18 @@
+P2-B after its merge with P2-D (bddfa14e), live runs (2026-10-09): the acceptance run e2e/plugins-library-live.spec.ts
+(scratch root /tmp/maws-e8-live-OUxNEh), the re-run of e2e/plugins-live.spec.ts (scratch root /tmp/maws-e8-live-OGVnGy)
+and P2-A's e2e/sessions-available-live.spec.ts with B's skills-row locator (scratch root /tmp/maws-p2a-live-Z3c0Fb).
+Owner-file check (the execution document §6.3): the /tmp and /private/tmp project keys of ~/.claude.json, read before
+each spec's electron-vite build and after its Playwright run, every inherited CLAUDE* variable dropped from the run's
+shell ("inherited CLAUDE* left: 0"). The acceptance setup's CLI ran with env -i, HOME and CLAUDE_CONFIG_DIR inside the
+scratch root.
+
+acceptance run:  before 1,031 bytes; after: identical. Playwright: 1 passed (34.5s); acceptance-run.txt: "result: every
+                 step passed", "console errors: []". The marketplace add from GitHub succeeded (313 official entries,
+                 3,230 directory entries), so the counts check ran.
+plugins-live:    before 1,031 bytes; after: identical. Playwright: 1 passed (1.2m); live-run.txt: "result: every step
+                 passed", "console errors: []", sixteen steps.
+P2-A live:       before 1,031 bytes; after: identical. Playwright: 1 passed (12.3s); its own A-15 line identical before
+                 and after, ~/.claude.json keys whose digest moved: [], spend US$0.00093. Its log and shots stay in its
+                 scratch root (P2-A's evidence is not refreshed here).
+
+The acceptance-* and live-* files replace the integration runs of the same specs (which stay in git history).
