@@ -35,6 +35,7 @@ const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
 const ECHOED = `${FIXTURES}/pass2/bash-context-echoed.jsonl`;
 const STEER_NEXT = `${FIXTURES}/pass3/steer-next.jsonl`;
 const SIDE_QUESTIONS = `${FIXTURES}/pass3/p1-side-question-session.jsonl`;
+const MAWS_ARTIFACTS = `${FIXTURES}/pass3/p1-maws-artifacts.jsonl`; // P2-E1 (M5)
 
 // The recorded ids each borrowed frame carries, re-addressed to the journal's.
 const RECORDED = {
@@ -42,6 +43,8 @@ const RECORDED = {
   echoed: { session: 'fd4c2f15-a381-402d-a125-a0f08a713e9c', prompt: 'a37362a6-a117-4985-b0f9-cae7bfad6114' },
   steer: { session: '4e220cb8-9e75-4d8a-b1a9-c37655666eac', prompt: 'fe091b0d-b28b-41a8-aed3-39585769623d' },
   side: { session: '9aa9686c-27a8-44cc-a068-58c1fe15f3ac' },
+  // P2-E1 (M5): the recording's `artifact_update` call (seq 357 to 369): its session, tool use and the engine's two requests
+  maws: { session: '2269c353-97d9-4e4f-a868-5aab4cf2b0c4', toolUse: 'toolu_01DDpRYFhNCCo2pJdJN3gNmg', permission: '7da4b64b-8f26-49fb-a725-9797b1f5bf38', call: '068847a0-9b35-4703-af19-3952813273c6' },
 } as const;
 
 const AT = '2026-10-06T12:00:00.000Z';
@@ -161,6 +164,29 @@ export class SideJournal {
     this.push('out', { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { behavior: 'allow' } } });
     const result = swapped(frameOf(STEER_NEXT, 44), { [RECORDED.steer.session]: this.sessionId }) as Frame & { message: Frame };
     this.push('in', { ...result, uuid: this.uuid(), message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: output, is_error: false }] }, tool_use_result: { stdout: output, stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+    return toolUseId;
+  }
+
+  // P2-E1 (M5): a call of the `maws` server's tool `name`, asked and allowed as `permission` asks, then served by the
+  // engine host itself: the assistant's `tool_use` of `mcp__maws__<name>` (seq 357), the engine's `can_use_tool` (seq
+  // 359) and the host's `allow` (seq 363), the engine's `mcp_message` `tools/call` (seq 366) and the host's answer the
+  // replay holds at (seq 367; matched by its request id only, so what the host answers is its own), then the engine's
+  // `tool_result` carrying `answer` as the tool's JSON text (seq 369). Answers the tool use id.
+  mawsToolCall(name: string, input: Record<string, unknown>, answer: Record<string, unknown>): string {
+    const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
+    const swap = { [RECORDED.maws.session]: this.sessionId, [RECORDED.maws.toolUse]: toolUseId, [RECORDED.maws.permission]: this.uuid(), [RECORDED.maws.call]: this.uuid() };
+    const tool = `mcp__maws__${name}`;
+    const assistant = swapped(frameOf(MAWS_ARTIFACTS, 357), swap) as Frame & { message: Frame & { content: Frame[] } };
+    this.push('in', { ...assistant, uuid: this.uuid(), message: { ...assistant.message, content: [{ ...assistant.message.content[0]!, name: tool, input }] } });
+    const ask = swapped(frameOf(MAWS_ARTIFACTS, 359), swap) as Frame & { request: Frame };
+    this.push('in', { ...ask, request: { ...ask.request, tool_name: tool, input, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: tool }], behavior: 'allow', destination: 'localSettings' }] } });
+    this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 363), swap));
+    const call = swapped(frameOf(MAWS_ARTIFACTS, 366), swap) as Frame & { request: Frame & { message: Frame & { params: Frame } } };
+    this.push('in', { ...call, request: { ...call.request, message: { ...call.request.message, params: { ...call.request.message.params, name, arguments: input } } } });
+    this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 367), swap));
+    const text = JSON.stringify(answer, null, 2);
+    const result = swapped(frameOf(MAWS_ARTIFACTS, 369), swap);
+    this.push('in', { ...result, uuid: this.uuid(), message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: [{ type: 'text', text }] }] }, tool_use_result: [{ type: 'text', text }] });
     return toolUseId;
   }
 

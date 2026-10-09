@@ -9,7 +9,7 @@
 // sheet. Where a producer's screenshot is needed (E5's gutter gives none), `side.sendToMain` is called with a PNG
 // written under `userData`, as E2's and E4's captures will be.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -22,8 +22,8 @@ import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
-import { deliverableUrl } from '../src/shared/maws/deliverable'; // P2-E1
-import { frameAt, seedArtifact } from './support/maws-tools'; // P2-E1
+import { deliverableUrl, type DeliverableRecord } from '../src/shared/maws/deliverable'; // P2-E1
+import { frameAt, mcpCalls, mcpResultOf, recordPath, resultText, seedArtifact } from './support/maws-tools'; // P2-E1
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
@@ -34,6 +34,7 @@ const SHOTS = process.env.MAWS_E3_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpow
 const PARENT = 'e3e30000-0000-4000-8000-000000000001';
 const CHILD = 'e3e30000-0000-4000-8000-000000000002';
 const PROMOTED = 'e3e30000-0000-4000-8000-000000000003';
+const CARD_CHILD = 'e3e30000-0000-4000-8000-000000000004'; // P2-E1 (M5): case 8's card thread
 
 const APP = 'src/app.ts';
 const APP_TEXT = Array.from({ length: 12 }, (_, i) => (i === 2 ? 'export const total = items.reduce((sum, item) => sum + item.price, 0);' : `export const v${i + 1} = ${i + 1};`)).join('\n') + '\n';
@@ -639,13 +640,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(second.consoleErrors()).toEqual([]);
   });
 
-  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting and the question view use tokens only', async () => {
+  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting, the question view and the comment card (composing, and its thread with the request card and the needs-you strip) use tokens only', async () => {
     test.setTimeout(180_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
       parent.turn('Read it: the total is recomputed on every call, by design.');
       parent.sideQuestions(SIDE_QUESTION_ROWS);
-      return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY]).write(dir, 'thread')];
+      // P2-E1 (M5): the card's thread, held at a permission it raises, for the card's shots
+      const card = new SideJournal(CARD_CHILD, cwd);
+      const prompt = card.prompt();
+      card.rename(HERO);
+      card.permission(prompt, 'Bash', { command: 'echo themed', description: 'Print a word' });
+      return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY]).write(dir, 'thread'), card.write(dir, 'card')];
     });
     const { page, maws, repo, parent } = c;
     const { child, viewer } = await openThreadFromGutter(c);
@@ -699,6 +705,21 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       await shoot(sidebarOf(page), 'sidebar-nesting');
     }
     await menu(maws, 'theme.light');
+
+    // P2-E1 (M5): the comment card in both themes: composing beside the heading; then its thread, with C7's request card
+    // inside it and the needs-you strip above Reply
+    const { card } = await commentOnHeading(c);
+    const deliverable = panelRegion(page).locator('[data-deliverable-viewer]');
+    await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
+    await shootCard(maws, deliverable, 'card-composing');
+    await card.getByRole('button', { name: 'Send' }).click();
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    await expect(card.locator('[data-request-card]')).toContainText('echo themed', { timeout: 20_000 });
+    await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
+    // the strip's words on one line at the card's width, its two buttons wrapping under them rather than squeezing them
+    const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
+    expect(stripLines, 'the needs-you text on one line').toBe(1);
+    await shootCard(maws, deliverable, 'card-thread-request');
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -859,7 +880,109 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(writtenUsers(maws, parent)).toHaveLength(1);
     expect(maws.consoleErrors()).toEqual([]);
   });
+
+  // ---- P2-E1 (M5): the thread updates the page it comments on (P2-E1 document, acceptance 7, with 3, 4 and 6) ---------
+
+  test('12. the thread updates the page it comments on: Allow in the card, the parent’s record one version longer and nothing under the thread, the viewer on v2 with the card open and pinned, and the thread’s “Updated artifact … · v2” row showing v2 in the same viewer', async () => {
+    test.setTimeout(150_000);
+    // the thread's journal is written again once the record and the parent's runtime id exist (its launch reads it then)
+    const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent'), updateJournal(cwd, {}).write(dir, 'thread')]);
+    const { page, maws, parent, repo } = c;
+    const { card, tools, record } = await commentOnHeading(c);
+    updateJournal(repo.root, { status: 'updated', id: 'dash', deliverableId: record.id, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: parent }).write(c.journals, 'thread');
+    await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
+    await card.getByRole('button', { name: 'Send' }).click();
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    const child = await sideThreadOf(page, parent, 'comment');
+
+    // the thread asks to update the page: C7's request card inside the card and the strip; the page rewritten in the
+    // repository, then Allow there
+    const request = card.locator('[data-request-card]');
+    await expect(request).toContainText('Approval needed', { timeout: 20_000 });
+    await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
+    writeFileSync(join(repo.root, 'dashboard.html'), HEADING_PAGE_V2);
+    await request.getByRole('radio', { name: 'Allow once' }).click();
+    await request.getByRole('button', { name: 'Allow', exact: true }).click();
+
+    // the host served the call against the parent's record: its v2 copied under the parent, the record two versions long,
+    // no deliverable under the thread
+    const rows = () => journal(maws, child) as unknown as Parameters<typeof mcpCalls>[0];
+    const served = () => {
+      const call = mcpCalls(rows()).find((entry) => entry.name === 'artifact_update');
+      const result = call ? mcpResultOf(rows(), call.requestId) : null;
+      return result ? (JSON.parse(resultText(result)) as Record<string, unknown>) : null;
+    };
+    await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'updated', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
+    const stored = JSON.parse(readFileSync(recordPath(maws.userData, record), 'utf8')) as DeliverableRecord;
+    expect(stored.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual([HEADING_PAGE, HEADING_PAGE_V2]);
+    expect(stored.versions[1]!.path).toBe(join(maws.userData, 'deliverables', parent, record.id, 'v2.html'));
+    expect(existsSync(join(maws.userData, 'deliverables', child)), 'no deliverable under the thread').toBe(false);
+
+    // the parent's viewer, on the latest, moves to v2; the card stays open in thread phase, pinned under the heading in the
+    // new frame, and the thread's reply arrives in it
+    const viewer = panelRegion(page).locator('[data-deliverable-viewer]');
+    const hero = viewer.frameLocator('[data-deliverable-frame="html"]').locator('#hero');
+    await expect(viewer).toHaveAttribute('data-version', '2', { timeout: 20_000 });
+    await expect(hero).toHaveText(HERO_V2);
+    await expect(card).toHaveAttribute('data-card-phase', 'thread');
+    await expect.poll(() => pinnedUnder(hero, card), { message: 'the card 4 px under the v2 heading, at its left', timeout: 10_000 }).toBe(true);
+    await expect(card.getByText(CARD_UPDATED)).toBeVisible({ timeout: 20_000 });
+
+    // the thread's row names v2; with the viewer switched back to v1 (the card re-pinned in that frame), the row's Open
+    // shows v2 in the same viewer
+    const row = card.locator('section.transcript-artifact');
+    await expect(row.locator('[data-artifact-heading]')).toHaveText('Updated artifact Dashboard · v2');
+    await viewer.getByRole('combobox', { name: 'Version' }).selectOption('1');
+    await expect(viewer).toHaveAttribute('data-version', '1');
+    await expect(hero).toHaveText('Sales overview');
+    await expect.poll(() => pinnedUnder(hero, card), { message: 'pinned under the v1 heading', timeout: 10_000 }).toBe(true);
+    await row.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(viewer).toHaveAttribute('data-version', '2');
+    await expect(hero).toHaveText(HERO_V2);
+    await expect(card).toHaveAttribute('data-card-phase', 'thread');
+    await expect.poll(() => pinnedUnder(hero, card), { message: 'pinned under the v2 heading again', timeout: 10_000 }).toBe(true);
+    await expect(tools.getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(tools.getByRole('tab', { name: /^Side/ })).toHaveCount(0);
+    expect(writtenUsers(maws, parent), 'the main conversation received nothing').toHaveLength(1);
+    await shootCard(maws, viewer, 'card-thread-updated');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
 });
+
+// P2-E1 (M5): a side thread that updates its parent's page: the anchored prompt, the rename, `artifact_update` of the
+// page's id from the repository's `dashboard.html` (asked, allowed, served by the host), the reply. `answer` is the JSON
+// the engine's tool result carries (the host's own answer is what the replay checks and the test reads).
+function updateJournal(cwd: string, answer: Record<string, unknown>): SideJournal {
+  const thread = new SideJournal(CHILD, cwd);
+  const prompt = thread.prompt();
+  thread.rename(HERO);
+  thread.mawsToolCall('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, answer);
+  thread.reply(prompt, CARD_UPDATED);
+  thread.completed(prompt);
+  return thread;
+}
+
+// P2-E1 (M5): the card's evidence shots, `docs/doperpowers/evidence/p2-e1/shots/<name>-<theme>.png`, written only under
+// MAWS_P2E1_SHOTS=1; in each theme the window holds no colour of the other's either way. Back to light after.
+const CARD_SHOTS = process.env.MAWS_P2E1_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p2-e1/shots') : null;
+async function shootCard(maws: MawsLaunch, target: Locator, name: string): Promise<void> {
+  if (CARD_SHOTS !== null) mkdirSync(CARD_SHOTS, { recursive: true });
+  for (const theme of ['light', 'dark'] as const) {
+    await menu(maws, `theme.${theme}`);
+    await expect(maws.page.locator('html')).toHaveAttribute('data-theme', theme);
+    await maws.page.mouse.move(1, 1);
+    expect(await otherThemeColours(maws.page), `${theme}: ${name}`).toEqual([]);
+    if (CARD_SHOTS !== null) await target.screenshot({ path: join(CARD_SHOTS, `${name}-${theme}.png`) });
+  }
+  await menu(maws, 'theme.light');
+  await expect(maws.page.locator('html')).toHaveAttribute('data-theme', 'light');
+}
+
+// The card 4 px under the element's bottom edge, at its left (D4's below placement).
+async function pinnedUnder(element: Locator, card: Locator): Promise<boolean> {
+  const [box, placed] = [await element.boundingBox(), await card.boundingBox()];
+  return box !== null && placed !== null && Math.abs(placed.y - (box.y + box.height + 4)) <= 1 && Math.abs(placed.x - box.x) <= 1;
+}
 
 // P2-E1: a delivered page whose heading a comment is made on, in the parent's Deliverables viewer.
 const HEADING_PAGE =
@@ -867,14 +990,17 @@ const HEADING_PAGE =
   '<h1 id="hero" style="margin:0;padding:32px 24px;background:#e3f2fd">Sales overview</h1>' +
   '<p class="lead" style="padding:0 24px">Revenue by region, third quarter.</p></body></html>';
 const HERO = 'Dashboard v1 › h1#hero “Sales overview”';
+const HERO_V2 = 'Sales overview, larger';
+const HEADING_PAGE_V2 = HEADING_PAGE.replace('padding:32px 24px;', 'padding:32px 24px;font-size:48px;').replace('>Sales overview<', `>${HERO_V2}<`);
 const CARD_COMMENT = 'Make the heading larger.';
 const CARD_REPLY = 'The heading is now 48 px, up from 32.';
 const CARD_FOLLOW_UP = 'And the subtitle?';
 const CARD_REPLY_2 = 'The subtitle stays at 16 px.';
+const CARD_UPDATED = 'The heading now reads “Sales overview, larger” at 48 px: version 2 of the page.';
 
 // The parent's page seeded as its artifact (the store's own layout), opened in the panel's Deliverables tool, Comment,
-// the heading clicked: answers the card (composing) and the panel's tool strip.
-async function commentOnHeading(c: Case & { parent: string }): Promise<{ card: Locator; tools: Locator }> {
+// the heading clicked: answers the card (composing), the panel's tool strip and the seeded record.
+async function commentOnHeading(c: Case & { parent: string }): Promise<{ card: Locator; tools: Locator; record: DeliverableRecord }> {
   const { page, maws, parent } = c;
   const record = seedArtifact(maws.userData, parent as AppSessionId, 'dash', 'Dashboard', [HEADING_PAGE]);
   const panel = panelRegion(page);
@@ -893,5 +1019,5 @@ async function commentOnHeading(c: Case & { parent: string }): Promise<{ card: L
   const card = viewer.locator('[data-comment-card]');
   await expect(card).toHaveAttribute('data-card-phase', 'composing');
   await expect(card).toHaveAttribute('data-anchor-locator', '#hero');
-  return { card, tools: panel.getByRole('tablist', { name: 'Panel tools' }) };
+  return { card, tools: panel.getByRole('tablist', { name: 'Panel tools' }), record };
 }
