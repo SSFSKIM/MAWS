@@ -50,6 +50,7 @@ Settings (`src/shared/settings/defaults.ts`, `migrateSettings`): version 8 today
 | 9 | E9 | `voice: { locale }`; `SETTINGS_DEFAULTS_V8` renamed `V9` across importers; keymap action `composer.dictate` with `ActionSpec.hold` | landed 2026-10-06 (75b352d2) |
 | 10 | E10 | `supervisor: { idleExitMinutes: 10, keepRunningDefault: true }`; `QuitAnswer 'keep'`; `MAWS_E2E_QUIT_ANSWER=keep` | named 2026-10-06 (author's document; E10 takes 10 so `migrateSettings` stays contiguous while E4 is uncut); landed (f2ccd239) |
 | 11 | E4a (E4b adds none: its per-profile state lives in `profiles.json`, A-36) | `browser: { profile: string | null, searchUrl: string, linkTarget: 'in-app' | 'external' }`; the settings TabRef section enum gains `browser`; lands after E10's 10 | landed 2026-10-07 (71b840f0) in E4a's Task 3.5 on E10's 10, read live (`BROWSER_SETTINGS_DEFAULTS` retired); `searchUrl` is `z.string().max(2048).refine(isSearchUrlTemplate)`, not `.url()`, since zod 4's `.url()` trims (A-41) |
+| 12 | cua board #90 (the in-app browser's Chrome-like top chrome, owned by the cua_repl session) | `browser.bookmarksBar: 'shown' \| 'hidden'` (default `shown`) and the keymap action `browser.toggleBookmarksBar` (⌘⇧B) | taken 2026-10-08 at the spec's commit (cua `docs/doperpowers/specs/2026-10-08-maws-browser-chrome-design.md` 8f0c1d3); lands with MAWS branch `90-browser-chrome` |
 
 A child that needs no setting releases its number back here in its hand-back; the architect renumbers before the next dispatch so migrations stay contiguous.
 
@@ -60,6 +61,9 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 b
 | 4 | E3 | `sessions.lineage`, `lineage_source ('intent'|'disk')`, `root_uuid`, `transcript_birthtime_ms`, index `sessions_root`, table `side_threads` (+ index), and a one-time `transcript_mtime_ms = -1` (size kept) on engine rows to re-summarise the store; measured once at about 10 s on the owner's 5,088 transcripts | landed 2026-10-06 (ba1e4b94) |
 | 5 | E4a | `browser_history (url, title, visit_count, typed_count, last_visit_ms, source, partition)` with an index on `(partition, last_visit_ms)` (E2 released 5 on 2026-10-06; E4's cut takes it) | taken by E4a's document 2026-10-06 (7e5bdef4); landed 2026-10-07 (71b840f0) |
 | 6 | cua board #93 (E13 follow-up) | `browser_activity (id, app_session_id → sessions ON DELETE CASCADE, tab_id, at, activity)` with an index on `(app_session_id, id)`: the agent's browser activity rows, each session's last 500, kept across app restarts | taken 2026-10-08 (branch `fix/93-activity-persist`) |
+| 7 | cua board #90 | `browser_bookmarks (id, partition, parent_id, root ('bar'\|'other'\|'mobile'), position, kind ('url'\|'folder'), name, url, added_at_ms)` with indexes on `(partition, parent_id, position)` and `(partition, url)`: an imported profile's Chrome bookmarks, replaced per partition at every sync | taken 2026-10-08 at the spec's commit (8f0c1d3); pinned by the merging PR |
+
+Imported profiles file (`<userData>/browser/profiles.json`, `ImportedProfilesFileSchema.version`; E4b's, A-36): version 1 today. Version 2 taken 2026-10-08 by cua board #90 (adds `bookmarks`, `gaiaName`, `userName`, `avatar` to each record; a version-1 file upgrades in memory; an older build opens a version-2 file read-only).
 
 ## 5. IPC command namespaces (`src/shared/ipc/names/`, `schema/`)
 
