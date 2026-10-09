@@ -215,6 +215,17 @@ Owner requirements and taste, verbatim where given:
   lets an agent use the owner's Chrome profile is already built. 3.E is therefore not a child of my P2 cut; the
   owner's browser requirements above (bookmarks import and bar, extensions bar, avatar, profile settings not in
   the main tab) were handed to that session to fold into its ticket.
+  Registered (cua_repl session, 2026-10-08 afternoon): the work is MAWS PR #1 (branch e13-cua-in-app-browser, 162
+  files: the six browser_* tools, the Playwright driver and bridge and playwright-core removed; a main-process
+  socket server for cua's host added; document docs/doperpowers/plans/2026-10-08-e13-cua-in-app-browser.md),
+  framed as P1's child E13 with amendment notes on P-5, A-19, A-42, A-43 and X9 and the A-rows A-51 to A-54.
+  Mergeable, held open until the owner runs its inside-MAWS sitting (cua docs/evidence/2026-10-08-maws-in-app-
+  browser.md, S1 to S7). Architect's rulings, sent to that session: the PR keeps A-51 to A-54; E11's M8 landing
+  records as A-55 with a reservation note; E13 is accepted as P1's thirteenth child (the architect adds its §9 and
+  §13 rows at the A-55 recording), so P1's recomposition and §15/§20 close at E13's landing, not at E11's; E11 M8
+  lands first and PR #1 rebases after it (conflict anchors named: the A-table after A-50, charter §19 and ledger §7
+  after the 2026-10-08 E11 lines, owner-script.txt, the tracker); the master gate's browser e2e groups are corrected
+  when the PR says which it removes.
 - Browser import (taste, P-n question): "'minhyeok' 크롬 프로필을 눌렀을때 설정이 메인탭에서 열리는건 아주 disruptive.
   either setting opens as a floating widget or a tab on sidebar": profile settings must not displace the main
   tab. Answered after the sitting: the floating popover anchored to the pill (§4 decision 6).
