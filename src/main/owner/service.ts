@@ -204,20 +204,19 @@ export class OwnerChannelService {
     if (row.state === 'retired') return;
     const live = this.liveOf(appSessionId);
     // a report made again (the card's Record again) or after the prompt's own answer is known: an id that already
-    // carries one of this question's answers (on its way, delivered, legacy recognition's) adds no answer and changes no
-    // state. Legacy recognition's answer only learns that it was the card's (the engine took the prompt before the
-    // report arrived), so the question's answer keeps the card's origin.
+    // carries one of this question's answers (on its way, delivered, legacy recognition's) adds no answer. The question's
+    // answers are written and stated again all the same (persisting is idempotent), so a report whose first write
+    // failed, its answer left in memory only, succeeds only once the table has it. Legacy recognition's answer only
+    // learns that it was the card's (the engine took the prompt before the report arrived): it keeps the card's origin.
     const ids = [input.messageUuid, input.queueId].filter((id) => id !== undefined);
     if (ids.length > 0) {
       const answers = this.answersOf(live, row);
       const known = answers.find((answer) => answer.members.some((m) => ids.includes(m.id)));
       if (known !== undefined) {
-        if (known.origin === 'legacy') {
-          known.origin = input.origin;
-          live.answers.set(markId, answers);
-          this.persist(appSessionId, markId);
-          this.changed(appSessionId);
-        }
+        if (known.origin === 'legacy') known.origin = input.origin;
+        live.answers.set(markId, answers);
+        this.persist(appSessionId, markId);
+        this.changed(appSessionId);
         return;
       }
     }

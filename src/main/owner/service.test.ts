@@ -361,6 +361,25 @@ describe('answers follow their members (Design §6)', () => {
     expect(index.ownerChannel.mark(q)!.answerAttempts).toHaveLength(1);
   });
 
+  it('a report whose write failed, made again, is written and stated then, still as one answer', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    const write = vi.spyOn(index.ownerChannel, 'updateMark').mockImplementationOnce(() => {
+      throw new Error('the index is unavailable');
+    });
+    expect(() => t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! })).toThrow('the index is unavailable');
+    write.mockRestore();
+    expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'unanswered', answerAttempts: [] }); // only memory has it
+    const emitted = t.states.length;
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! }); // Record again
+    expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'queued', answerAttempts: [{ members: expect.arrayContaining([{ kind: 'uuid', id: entry.messageUuid, life: 'alive' }]) }] });
+    expect(t.states.length).toBeGreaterThan(emitted);
+    expect(t.states.at(-1)!.marks.find((m) => m.id === q)!.question).toMatchObject({ state: 'queued' });
+    t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered' });
+  });
+
   it('a report of a prompt legacy recognition already delivered adds no answer: delivered, now as the card’s', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
