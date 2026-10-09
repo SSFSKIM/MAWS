@@ -41,4 +41,11 @@ describe('previewLine', () => {
   it('other markup stays as written', () => {
     expect(previewLine('Use <div> here', 160)).toBe('Use <div> here');
   });
+
+  it('grammar 2: never picks a mark quoted in code, and keeps the quoted tags as written', () => {
+    expect(previewLine('The form is `<need-input>Which?</need-input>`.\n<to-human>Done.</to-human>', 160)).toBe('Done.');
+    expect(previewLine('```\n<need-input>Quoted?</need-input>\n```\nPlain words', 160)).toBe('```');
+    expect(previewLine('Use `<to-human>` to mark a message.', 160)).toBe('Use `<to-human>` to mark a message.');
+  });
 });
+

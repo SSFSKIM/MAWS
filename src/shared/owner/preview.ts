@@ -4,16 +4,22 @@
 // Chosen from the whole text before any cap, through the owner's grammar (`to-human-parser.ts`): a question first (the
 // need-input's words, else its choices), then the essential text, then the to-human text, then the plain text, an
 // insight last. ANSI is stripped. The owner's own marks never show in a preview, even one a cap cut from its pair (a
-// summary stored before this read 200 raw characters); any other markup stays as written. Null when nothing is left.
+// summary stored before this read 200 raw characters); any other markup stays as written, and so do tags quoted in
+// inline code (grammar 2, P2-C). Null when nothing is left.
 import { stripAnsi } from '../wire/ansi';
-import { parse, type Kind, type Part } from './to-human-parser';
+import { codeRegions, parse, type Kind, type Part } from './to-human-parser';
 
 const OWNER_MARK = /<\/?(?:to-human|essential|need-input|insight)>|<choice(?: recommended)?>|<\/choice>/g;
+
+const withoutMarks = (line: string): string => {
+  const regions = codeRegions(line);
+  return line.replace(OWNER_MARK, (tag: string, at: number) => (regions.some(([start, end]) => at >= start && at < end) ? tag : ''));
+};
 
 const firstLine = (text: string): string | null =>
   text
     .split('\n')
-    .map((line) => line.replace(OWNER_MARK, '').trim())
+    .map((line) => withoutMarks(line).trim())
     .find((line) => line.length > 0) ?? null;
 
 export function previewLine(text: string, max: number): string | null {
