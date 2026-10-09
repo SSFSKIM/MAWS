@@ -1180,7 +1180,7 @@ test('M5 the report view folds a marked turn into its working record and draws t
     const question = report.locator('[data-owner-card="need-input"]');
     await expect(question).toContainText('Which tone should the README use?');
     await expect(question.getByRole('group', { name: 'Choices' }).getByRole('button')).toHaveText([/^Concise reference style.*Recommended$/, /^Friendly guide style/]);
-    await expect(question.getByRole('button', { name: 'Reply' })).toBeDisabled(); // M5 draws; M6 answers
+    await expect(question.getByRole('button', { name: 'Reply' })).toBeEnabled(); // M6: main knows the mark, so the card answers
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
     await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0); // the unmarked turn has no work: no divider either
     // the insight beside the message when the pane leaves a 240 px margin, else under it in reading order

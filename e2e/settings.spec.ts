@@ -132,6 +132,40 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
   }
 });
 
+// P2-C (M6; the P2-C document, G7): Settings › Notifications carries the to-human mod's app switch and the owner
+// channel's two groups, each written alone to the settings file.
+test('settings: the to-human switch and the two notification groups for an agent’s marks', async () => {
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-settings-')));
+  try {
+    const maws = await launchMaws({ userData });
+    try {
+      const { app, page } = maws;
+      await menu(app, 'settings.open');
+      const notifications = panel(page).getByRole('region', { name: 'Notifications' });
+      const toHuman = notifications.getByRole('group', { name: 'Messages to you' }).getByRole('switch', { name: 'To-human' });
+      await expect(toHuman).toHaveAttribute('aria-checked', 'true');
+      const kinds = notifications.getByRole('group', { name: 'For' });
+      await expect(kinds.getByRole('checkbox', { name: 'questions an agent left for you' })).toBeChecked();
+      await expect(kinds.getByRole('checkbox', { name: 'must-read messages' })).toBeChecked();
+      await toHuman.click();
+      await expect(toHuman).toHaveAttribute('aria-checked', 'false');
+      await kinds.getByRole('checkbox', { name: 'must-read messages' }).uncheck();
+      await expect(kinds.getByRole('checkbox', { name: 'must-read messages' })).not.toBeChecked();
+      await expect
+        .poll(() => {
+          const file = readSettings(userData) as unknown as { mods: { toHuman: { enabled: boolean } }; notifications: { kinds: { asyncInput: boolean; essential: boolean } } };
+          return [file.mods.toHuman.enabled, file.notifications.kinds.asyncInput, file.notifications.kinds.essential];
+        })
+        .toEqual([false, true, false]);
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
 test('settings: the monospace font applies to the root --font-mono and to the Appearance preview', async () => {
   const maws = await launchMaws();
   try {

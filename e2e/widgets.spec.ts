@@ -840,6 +840,28 @@ test.describe('replay conformance', () => {
   });
 });
 
+// ---- P2-C (M6; the P2-C document, G7): MAWS's built-in mods in /plugins ---------------------------------------------
+// The section draws `mods.list` for the session (main's index); the scenario's session has never been launched, so its
+// source is what its next launch would do, and switching the lane back on for it waits for that launch.
+test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its source and this session’s override; no Uninstall', async ({ backend }) => {
+  const w = await openPlugins(backend);
+  const row = w.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
+  await expect(row).toContainText('To-human');
+  await expect(row).toContainText('Built in');
+  await expect(row).toContainText('Version 1');
+  await expect(row).toContainText('MAWS gives the agent its instructions');
+  await expect(row.getByRole('switch', { name: 'To-human in every session' })).toHaveAttribute('aria-checked', 'true');
+  await expect(row.getByRole('radio', { name: 'Default (On)' })).toBeChecked();
+  await row.locator('label').filter({ hasText: /^Off$/ }).click();
+  await expect(row.getByRole('radio', { name: 'Off' })).toBeChecked();
+  await expect(row).toContainText('Off: the agent is not asked to mark anything');
+  await row.locator('label').filter({ hasText: /^On$/ }).click();
+  await expect(row.getByRole('radio', { name: 'On' })).toBeChecked();
+  await expect(row).toContainText('Applies the next time this session starts');
+  await expect(w.getByRole('button', { name: /Uninstall/ })).toHaveCount(0);
+  expect(backend.consoleErrors()).toEqual([]);
+});
+
 // ---- E8: plugins and marketplaces, managed through the engine's CLI ----------------------------------------------------
 // E8 execution document, M3's action-to-proof matrix, the stub e2e column. The host runs the plugin CLI stub as the
 // engine binary (MAWS_E2E_ENGINE_BIN), so the widget, the confirm sheet, the X2 surface, the host's runner and its result

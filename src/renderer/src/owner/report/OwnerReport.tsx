@@ -61,7 +61,10 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
       items.push({ main: <MessageCard key={index} text={part.text} live={live} />, insights: [] });
       return;
     }
-    const span = spans[part.kind]++;
+    // M6: never `spans[kind]++` here: the React Compiler (this build) emits a member postfix increment as a prefix one,
+    // which numbered every mark one past its ordinal in the app (unit tests, uncompiled, never saw it)
+    const span = spans[part.kind];
+    spans[part.kind] = span + 1;
     const mark = markOf(part.kind, span);
     items.push({
       main: part.kind === 'need-input'

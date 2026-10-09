@@ -29,7 +29,7 @@ export const MODS = {
   source: {
     'maws-contract': 'MAWS gives the agent its instructions',
     'external-compatible-style': 'The output style gives the agent its instructions',
-    off: 'Off',
+    off: 'Off: the agent is not asked to mark anything',
   } satisfies Record<ModRow['source'], string>,
   pending: {
     'next-launch': 'Applies the next time this session starts',

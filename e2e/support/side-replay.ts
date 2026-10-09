@@ -50,8 +50,8 @@ const RECORDED = {
 const AT = '2026-10-06T12:00:00.000Z';
 
 // The prelude's `get_status` answer (replay-handshake.jsonl seq 5) without the relay's rows (`Anthropic base URL`, `Auth token`).
-const PRELUDE_STATUS_ANSWER = 5;
-function directStatus(frame: Frame): Frame {
+export const PRELUDE_STATUS_ANSWER = 5; // P2-C M6: also e2e/support/to-human-replay.ts's
+export function directStatus(frame: Frame): Frame {
   type Status = { response: { response: { sections: { title: string; rows: { label: string; value: string }[] }[] } } };
   const status = structuredClone(frame) as unknown as Status;
   for (const section of status.response.response.sections) section.rows = section.rows.filter((row) => row.label !== 'Anthropic base URL' && row.label !== 'Auth token');
