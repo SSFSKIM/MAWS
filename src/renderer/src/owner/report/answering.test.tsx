@@ -105,7 +105,7 @@ describe('a choice is sent through the seam and its result reported to main, wha
     fireEvent.click(choice(/^Postgres/));
     await settle();
     expect(sends).toEqual([{ content: 'Answering "Which backend?": Postgres', options: { origin: 'answer' } }]);
-    expect(reports()).toEqual([{ appSessionId: APP, markId: Q, text: 'Answering "Which backend?": Postgres', origin: 'answer', ...{ started: false }, ...reported }]);
+    expect(reports()).toEqual([{ appSessionId: APP, markId: Q, text: 'Answering "Which backend?": Postgres', origin: 'answer', ...{ started: false }, ...reported, sentAt: expect.any(String) }]);
   });
 
   it('a seam that throws is reported as a refusal in its words; `held` is reported as held, never as a refusal', async () => {
@@ -240,6 +240,37 @@ describe('a report main never got is said on the card and can be made again, wit
     expect(reports()).toHaveLength(2);
     expect(reports()[1]).toEqual(reports()[0]);
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('while Record again is out, the failed state stays and nothing offers to send the answer again', async () => {
+    withMarks([question({ state: 'unanswered', failed: { reason: 'The relay is unreachable' } })]);
+    seam({ disposition: 'sent', started: false, messageUuid: 'u-10' as MessageUuid });
+    let release!: (result: unknown) => void;
+    let calls = 0;
+    hold.client = {
+      ...fake.client,
+      invoke: (n: CommandName, input: unknown) => {
+        const answered = (fake.client.invoke as (n: CommandName, i: unknown) => Promise<unknown>)(n, input);
+        if (n !== 'ownerChannel.answered') return answered;
+        calls += 1;
+        return calls === 1 ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'the index is unavailable' } }) : new Promise<unknown>((resolve) => (release = resolve));
+      },
+    } as MawsBridge;
+    draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    expect(reports()[0]!.sentAt).toMatch(/^\d{4}-\d\d-\d\dT/); // the seam's call time, for main to reach back to
+    fireEvent.click(screen.getByRole('button', { name: 'Record again' }));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull(); // the recording is still out
+    expect(screen.getByRole('button', { name: 'Record again' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Record again' }));
+    expect(reports()).toHaveLength(2);
+    await act(async () => release({ ok: true, value: undefined }));
+    await settle();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(sends).toHaveLength(1);
+    expect(reports()[1]).toEqual(reports()[0]); // the same report, its sentAt included
   });
 
   it('a reply whose report failed closes its field (the prompt left) and keeps the keyboard on the card', async () => {

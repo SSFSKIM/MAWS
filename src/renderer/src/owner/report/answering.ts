@@ -42,12 +42,14 @@ async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error
 // The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing.
 const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued';
 
-// The seam's result as main takes it: X22's five dispositions, as the seam said them.
-export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult): AnswerReport {
+// The seam's result as main takes it: X22's five dispositions, as the seam said them, and when the seam was called
+// (`sentAt`: a report made again later is read by main from the host's record since then).
+export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult, sentAt?: string): AnswerReport {
   const { disposition, started, messageUuid, queueId, reason } = result;
   return {
     appSessionId, markId, text: send.text, origin: send.origin, disposition, started,
     ...(messageUuid !== undefined && { messageUuid }), ...(queueId !== undefined && { queueId }), ...(reason !== undefined && { reason }),
+    ...(sentAt !== undefined && { sentAt }),
   };
 }
 
@@ -62,13 +64,14 @@ export interface AnswerOutcome {
 
 // One answer: the seam, then the report of whatever it answered.
 export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, client: MawsBridge = ipc): Promise<AnswerOutcome> {
+  const sentAt = new Date().toISOString();
   let result: HumanPromptResult;
   try {
     result = await sendHumanPrompt(appSessionId, send.text, { origin: send.origin }, client);
   } catch (error) {
     result = { disposition: 'refused', started: false, reason: messageOf(error) };
   }
-  const report = reportOf(appSessionId, markId, send, result);
+  const report = reportOf(appSessionId, markId, send, result, sentAt);
   return { result, report, unreported: await reportAnswer(report, client) };
 }
 
@@ -76,16 +79,17 @@ export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, sen
 export const markRead = (appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): Promise<string | null> =>
   failureOf(() => client.invoke('ownerChannel.markRead', { appSessionId, markIds }));
 
-// What the card shows while its own send or cancel runs, what its last send or cancel answered, and the failure of a
-// sent answer's report still to be made.
+// What the card shows while its own send or cancel runs, what its last send or cancel answered, and a sent answer's
+// report still to be made: its failure's words, and whether it is being made again now.
 export interface Answering {
   actions: QuestionActions;
   busy: 'sending' | 'starting' | null;
   note: string | null;
-  unreported: string | null;
+  unreported: { error: string; recording: boolean } | null;
 }
 
-interface Unreported { report: AnswerReport; error: string }
+// Kept until main has the report: through a Record again in flight too, so nothing offers to send the answer again
+interface Unreported { report: AnswerReport; error: string; recording: boolean }
 
 // A question's actions for its card: null without a mark main knows (a block still streaming, or not derived yet),
 // since main can follow only a question it has.
@@ -112,24 +116,27 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
       if (result.disposition === 'held') setNote(QUESTION.held(result.reason));
       // a sent answer main never heard of is kept until its report is made; a newer sent answer's report supersedes it
       // (the older prompt is still the engine's, and main's legacy recognition reads it, Design §6)
-      if (wentOut(result)) setUnreported(outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported });
+      if (wentOut(result)) setUnreported(outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported, recording: false });
       return outcome;
     } finally {
       setBusy(null);
     }
   };
-  // the kept report made again; the prompt is never sent again
+  // the kept report made again (the prompt never is); it is kept until main has it, and a newer sent answer's report
+  // that replaced it meanwhile is left alone
   const recordAgain = async (pending: Unreported) => {
-    setUnreported(null);
+    if (pending.recording) return;
+    const mine = (now: Unreported | null) => now?.report === pending.report;
+    setUnreported((now) => (mine(now) ? { ...pending, recording: true } : now));
     const error = await reportAnswer(pending.report, client);
-    if (error !== null) setUnreported((now) => now ?? { report: pending.report, error });
+    setUnreported((now) => (!mine(now) ? now : error === null ? null : { ...pending, error, recording: false }));
   };
   const foreign = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holder : null;
 
   return {
     busy,
     note,
-    unreported: unreported?.error ?? null,
+    unreported: unreported === null ? null : { error: unreported.error, recording: unreported.recording },
     actions: {
       choose: (choice: Choice) => void send({ text: answerText(head, choice.text), origin: 'answer' }),
       reply: async (text: string) => {

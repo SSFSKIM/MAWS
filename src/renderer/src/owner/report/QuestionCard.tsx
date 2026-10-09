@@ -32,7 +32,7 @@ export interface QuestionCardProps {
   actions?: QuestionActions;
   busy?: 'sending' | 'starting' | null; // the card's own send is running
   note?: string | null; // what the card's last send or cancel answered ("Already on its way", or a failure's words)
-  unreported?: string | null; // a sent answer's report main never got: the failure's words
+  unreported?: { error: string; recording: boolean } | null; // a sent answer's report main never got (being made again)
 }
 
 export function QuestionCard({ text, choices, state, live, held, actions = {}, busy = null, note = null, unreported = null }: QuestionCardProps) {
@@ -105,9 +105,9 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
         {note !== null && note !== unsentWords(current) && <p role="status" className="owner-card-state">{note}</p>}
         {unreported !== null && (
           <p role="alert" className="owner-card-state" data-failed="">
-            {QUESTION.notRecorded(unreported)}
+            {QUESTION.notRecorded(unreported.error)}
             {actions.recordAgain && (
-              <button type="button" className="owner-card-button" onClick={() => actions.recordAgain?.()}>
+              <button type="button" className="owner-card-button" disabled={unreported.recording} onClick={() => actions.recordAgain?.()}>
                 {QUESTION.recordAgain}
               </button>
             )}

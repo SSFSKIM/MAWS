@@ -22,6 +22,9 @@ export const OwnerChannelAnsweredSchema = z.strictObject({
   messageUuid: MessageUuidSchema.optional(), // `sent`, `steered`; a result with neither id reads unconfirmed (Design §6)
   queueId: z.string().optional(), // `queued`
   reason: z.string().optional(), // `refused`: the words; `held`: the card holding it ('trust' | 'relay')
+  // when the seam was called: a report later than main's late-report log reaches back (a Record again after a while)
+  // is reconciled through the recovery read since then (Design §6)
+  sentAt: z.iso.datetime().optional(),
 });
 
 export const commands = {

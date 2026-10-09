@@ -85,6 +85,8 @@ interface SessionLive {
   userAt: Map<MessageUuid, string>; // when each human prompt was written or read back (a rewind's target)
   checking: Set<MessageUuid>; // uuids whose transcript evidence is being read
   heldPrompts: { uuid: MessageUuid; text: string; at: string }[]; // taken while the recovery read was out (legacy recognition)
+  evictedAt: number; // when the last event the log let go had arrived: an event since then is still in the log
+  refold: boolean; // a report the log could not cover arrived: the recovery read folds again before the gate opens
 }
 
 const isForeign = (record: SessionRecord | null) => record !== null && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job');
@@ -95,6 +97,7 @@ export class OwnerChannelService {
   private readonly recovering = new Set<AppSessionId>(); // until its recovery read is folded, no event reaches its answers
   private connection = 0; // counts the host's departures: a read begun before one cannot open the gate after it
   private readonly reading = new Map<AppSessionId, number>(); // the connection each session's recovery read was begun in
+  private streamingSince = Number.POSITIVE_INFINITY; // since when the host has streamed without a break: every event since is heard
   private readonly retries = new Map<AppSessionId, { count: number; timer: ReturnType<typeof setTimeout> | null }>();
   private readonly held = new Map<AppSessionId, string>(); // the last holder and archive facts each session projected under
   private readonly pending = new Set<Promise<unknown>>();
@@ -147,6 +150,7 @@ export class OwnerChannelService {
   // begun in this connection is still out).
   async hostStreaming(): Promise<void> {
     this.streaming = true;
+    this.streamingSince = Date.parse(this.now());
     await Promise.all([...this.recovering].filter((appSessionId) => this.reading.get(appSessionId) !== this.connection).map((appSessionId) => this.recover(appSessionId)));
   }
 
@@ -199,6 +203,24 @@ export class OwnerChannelService {
     if (row === null || row.appSessionId !== appSessionId || row.kind !== 'need-input') throw new Error(`unknown question: ${markId}`);
     if (row.state === 'retired') return;
     const live = this.liveOf(appSessionId);
+    // a report made again (the card's Record again) or after the prompt's own answer is known: an id that already
+    // carries one of this question's answers (on its way, delivered, legacy recognition's) adds no answer and changes no
+    // state. Legacy recognition's answer only learns that it was the card's (the engine took the prompt before the
+    // report arrived), so the question's answer keeps the card's origin.
+    const ids = [input.messageUuid, input.queueId].filter((id) => id !== undefined);
+    if (ids.length > 0) {
+      const answers = this.answersOf(live, row);
+      const known = answers.find((answer) => answer.members.some((m) => ids.includes(m.id)));
+      if (known !== undefined) {
+        if (known.origin === 'legacy') {
+          known.origin = input.origin;
+          live.answers.set(markId, answers);
+          this.persist(appSessionId, markId);
+          this.changed(appSessionId);
+        }
+        return;
+      }
+    }
     live.unsent.delete(markId);
     // nothing went out: a refusal, or a card holding the message until its continuation (never an answer to follow, so
     // never the identifier-free `unconfirmed`); the question keeps its state and says why
@@ -214,14 +236,22 @@ export class OwnerChannelService {
     if (input.queueId !== undefined && input.disposition === 'queued') members.push({ kind: 'entry', id: input.queueId, life: 'alive' });
     // a new answer of its own: one sent before it (answered again while unconfirmed, or a delivered answer's follow-up)
     // keeps its own text and members, for its evidence to settle it alone
-    const answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: this.now() });
+    // the recovery read reaches back from when the prompt was sent (the seam's call), or else from now
+    const sent = input.sentAt === undefined ? Date.parse(this.now()) : Math.min(Date.parse(input.sentAt), Date.parse(this.now()));
+    const answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: new Date(sent).toISOString() });
     live.answers.set(markId, [...this.answersOf(live, row), answer]);
-    if (!this.streaming) this.recovering.add(appSessionId);
-    // the report reaches main after the seam answered: what happened since is in the log, replayed in order (a session
-    // still waiting for its recovery read folds it there, after the history)
+    // the report reaches main after the seam answered: what happened since is in the log, replayed in order, unless the
+    // prompt was sent before the log's reach (a report made again a while later; the host not streaming throughout).
+    // Such an answer, like a session still waiting for its recovery read, is folded from the host's prompt record
+    // since then, which is what §6's recovery read is for: nothing is concluded from the log's silence
+    const covered = input.sentAt === undefined || sent > Math.max(this.streamingSince, live.evictedAt);
+    if (!this.streaming || !covered) this.recovering.add(appSessionId);
     if (!this.recovering.has(appSessionId)) {
       const seen = live.log.map((entry) => entry.event);
       seen.forEach((event, i) => applyEvent(answer, event, () => seen.slice(0, i)));
+    } else if (!covered) {
+      live.refold = true;
+      if (this.streaming && this.reading.get(appSessionId) !== this.connection) this.track(this.recover(appSessionId));
     }
     this.persist(appSessionId, markId);
     this.changed(appSessionId);
@@ -307,7 +337,7 @@ export class OwnerChannelService {
 
   private liveOf(appSessionId: AppSessionId): SessionLive {
     let live = this.live.get(appSessionId);
-    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), unsent: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), heldPrompts: [] }));
+    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), unsent: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), heldPrompts: [], evictedAt: Number.NEGATIVE_INFINITY, refold: false }));
     return live;
   }
 
@@ -319,7 +349,7 @@ export class OwnerChannelService {
   private logEvent(live: SessionLive, event: PromptEvent): void {
     const now = Date.parse(this.now());
     live.log.push({ event, at: now });
-    while (live.log.length > LOG_MAX || (live.log.length > 0 && live.log[0]!.at < now - LOG_WINDOW_MS)) live.log.shift();
+    while (live.log.length > LOG_MAX || (live.log.length > 0 && live.log[0]!.at < now - LOG_WINDOW_MS)) live.evictedAt = live.log.shift()!.at;
   }
 
   // A holder or archive change re-projects the session, silently (a terminal took it over, or MAWS took it back).
@@ -506,7 +536,12 @@ export class OwnerChannelService {
     const live = this.liveOf(appSessionId);
     this.reading.set(appSessionId, connection);
     try {
-      if (live.answers.size > 0) await this.fold(appSessionId, live);
+      // folded again while a report the log could not cover arrived during the read (its window reaches back further)
+      while (live.answers.size > 0) {
+        live.refold = false;
+        await this.fold(appSessionId, live);
+        if (!live.refold) break;
+      }
     } catch (error) {
       this.log(`${appSessionId}: the recovery read failed; its answers wait for the next read: ${messageOf(error)}`);
       this.retryLater(appSessionId);

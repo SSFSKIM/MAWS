@@ -49,6 +49,11 @@ export class OwnerHostSim {
     return new Date(this.clock).toISOString();
   }
 
+  // Time passing with nothing written (a late report, main's late-report log ageing).
+  advance(ms: number): void {
+    this.clock += ms;
+  }
+
   // A new launch of the session's process: a fresh normaliser and queue over the same stored queue, recovered as the
   // session does before `ready` (the steers an earlier launch that died with its host left unstated, from its journal).
   async launch(): Promise<void> {

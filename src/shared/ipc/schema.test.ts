@@ -1472,6 +1472,9 @@ describe('ipc schema validates both directions', () => {
       // X22's final shape (P2-A): `started` is a field, never a disposition; all five dispositions mirrored, `held` included
       expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'started', started: true }).ok).toBe(false);
       expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'held', started: false, reason: 'trust' }).ok).toBe(true);
+      // the seam's call time, for a report main's late-report log no longer covers
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: false, queueId: 'q-1', sentAt: '2026-10-09T10:00:00.000Z' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: false, queueId: 'q-1', sentAt: 'yesterday' }).ok).toBe(false);
       expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(false);
       expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'delivered', started: false }).ok).toBe(false);
       expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'legacy', disposition: 'sent', started: false }).ok).toBe(false);

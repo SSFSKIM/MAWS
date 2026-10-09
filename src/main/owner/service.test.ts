@@ -4,12 +4,13 @@
 // queue answered, every row and lifecycle reaches main as the live stream carries it, and delivery is only ever the
 // engine's `command_lifecycle`, never a `user.message` standing in for it. The transcript's evidence is read by the real
 // reader from a transcript file the test writes as the engine would.
+import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, AttentionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { answerText } from '@shared/owner/answer';
 import { markIdOf, type MarkId } from '@shared/owner/marks';
 import type { OwnerChannelState, QuestionState } from '@shared/owner/state';
@@ -21,7 +22,7 @@ import { ChainFollower } from '../../engine-host/fs/chain-follower';
 import { Normalizer } from '../../engine-host/normalizer';
 import { Index } from '../index/index';
 import { transcriptChain, transcriptEvidence } from './prompt-state';
-import { OwnerChannelService, type AnsweredInput } from './service';
+import { LOG_WINDOW_MS, OwnerChannelService, type AnsweredInput } from './service';
 import type { LaunchRecord } from './store';
 
 const SID = '6c07f148-ba9f-48de-9114-bb1d41c5c0b0' as SessionId;
@@ -336,6 +337,72 @@ describe('answers follow their members (Design §6)', () => {
     t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! }); // the retry once the card was answered
     expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: entry.messageUuid, life: 'alive' }]) });
     t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered' });
+  });
+
+  // M6's fix wave 2: a report made again (the card's Record again) or late, past the late-report log
+  const evictLog = (t: Awaited<ReturnType<typeof harness>>) => {
+    t.sim.advance(LOG_WINDOW_MS + 60_000);
+    t.sim.engine(randomUUID() as MessageUuid, 'completed'); // the next logged event ages the log out
+  };
+
+  it('a report made again after delivery and the log’s eviction changes nothing: the question stays delivered', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const sentAt = t.sim.nowIso();
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, sentAt });
+    t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered' });
+    evictLog(t);
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, sentAt });
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres'), origin: 'answer' } });
+    expect(index.ownerChannel.mark(q)!.answerAttempts).toHaveLength(1);
+  });
+
+  it('a report of a prompt legacy recognition already delivered adds no answer: delivered, now as the card’s', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'SQLite'));
+    t.sim.engine(entry.messageUuid!, 'started');
+    const before = t.question(q);
+    expect(before).toMatchObject({ state: 'delivered', answer: { origin: 'legacy' } });
+    for (let n = 0; n < 2; n += 1) {
+      t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, text: answerText('Which backend?', 'SQLite') });
+      await t.service.settled();
+      expect(t.question(q)).toEqual({ state: 'delivered', answer: { ...(before as Extract<QuestionState, { state: 'delivered' }>).answer, origin: 'answer' } });
+      expect(index.ownerChannel.mark(q)!.answerAttempts).toHaveLength(1);
+    }
+  });
+
+  it('a first report that arrives after the log forgot its prompt is read through the recovery read: delivered', async () => {
+    const t = await harness();
+    const q = t.ask('Which region?');
+    t.ask('Which region?'); // a twin: legacy recognition never settles either, so only the report can
+    const sentAt = t.sim.nowIso();
+    const { entry } = await t.sim.queue.send(answerText('Which region?', 'eu'));
+    t.sim.engine(entry.messageUuid!, 'started'); // taken while main had no report (it failed)
+    evictLog(t);
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, text: answerText('Which region?', 'eu'), sentAt }); // Record again
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which region?', 'eu'), origin: 'answer' } });
+  });
+
+  it('a late first report of an answer still in the queue reads queued, then delivered when the engine takes it', async () => {
+    const t = await harness();
+    const q = t.ask('Which region?');
+    t.ask('Which region?');
+    await t.sim.queue.setPaused(true);
+    const sentAt = t.sim.nowIso();
+    const { entry } = await t.sim.queue.send(answerText('Which region?', 'eu'));
+    evictLog(t);
+    t.report(q, { disposition: 'queued', queueId: entry.queueId, text: answerText('Which region?', 'eu'), sentAt });
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'entry', id: entry.queueId, life: 'alive' }]) });
+    await t.sim.queue.setPaused(false);
+    const sent = t.sim.queue.state.entries.find((e) => e.queueId === entry.queueId)?.messageUuid;
+    t.sim.engine(sent!, 'started');
     expect(t.question(q)).toMatchObject({ state: 'delivered' });
   });
 
