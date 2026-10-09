@@ -983,7 +983,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     const tabCard = tabViewer.locator('[data-comment-card]');
     await expect(tabCard).toHaveAttribute('data-anchor-locator', '#hero');
     await expect(tabCard).toHaveAttribute('data-placement', 'below');
-    near((await tabCard.boundingBox())!.y, tabFrame.y + hero.height + 4, 'the tab card’s top');
+    const tabHero = (await tabViewer.locator('[data-deliverable-frame="html"]').contentFrame().locator('#hero').boundingBox())!; // the tab's width wraps it differently
+    near((await tabCard.boundingBox())!.y, tabHero.y + tabHero.height + 4, 'the tab card’s top');
     await expect(viewer.locator('[data-comment-card]')).toHaveCount(0);
     await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
     await s.page.keyboard.press('Escape');

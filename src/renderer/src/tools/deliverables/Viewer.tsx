@@ -204,11 +204,6 @@ function Shown({ record, shown, present, checked, reloads, mode, visible, onBack
           {body === 'html' && <ConsoleChip appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />}
         </div>
         <Actions record={record} shown={shown} reloads={reloads} path={path} body={body} present={present} mode={mode} comment={comment} commentRef={commentButton} onReload={onReload} />
-        {picking && (
-          <p role="status" data-picking="" className="px-1 text-ui-sm text-accent">
-            {DELIVERABLES_COPY.picking}
-          </p>
-        )}
       </header>
       <div ref={bodyBox} className="relative min-h-0 flex-1">
         {!checked ? (
@@ -220,8 +215,20 @@ function Shown({ record, shown, present, checked, reloads, mode, visible, onBack
         ) : (
           <Body key={reloads} record={record} shown={shown} reloads={reloads} path={path} body={body} title={title} picking={picking} onPick={onPick} />
         )}
-        {/* P2-E1 start (2026-10-09): the comment card's host, a sibling of the body so a new frame keeps the card */}
-        {hostsCard && <CommentCardHost hostId={hostId} host="deliverable" mode={mode} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} />}
+        {/* P2-E1 start (2026-10-09): the picking hint floats over the body rather than taking a header line, so ending a
+            pick never resizes the frame under the rect it just reported (a card pinned to an element at the frame's
+            bottom would otherwise sit off by the line's height); and the comment card's host, a sibling of the body so
+            a new frame keeps the card */}
+        {picking && (
+          <p
+            role="status"
+            data-picking=""
+            className="pointer-events-none absolute top-2 left-1/2 z-20 m-0 max-w-[calc(100%-16px)] -translate-x-1/2 truncate rounded-full border border-border-strong bg-bg-raised px-2.5 py-0.5 text-ui-sm text-accent shadow-float"
+          >
+            {DELIVERABLES_COPY.picking}
+          </p>
+        )}
+        {hostsCard &&<CommentCardHost hostId={hostId} host="deliverable" mode={mode} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} />}
         {/* P2-E1 end */}
       </div>
     </div>
