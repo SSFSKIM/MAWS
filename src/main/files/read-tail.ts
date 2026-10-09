@@ -6,6 +6,11 @@ import { open as openFile, type FileHandle } from 'node:fs/promises';
 export type OpenFile = (path: string, flags: string) => Promise<FileHandle>;
 
 export async function readTail(path: string, bytes: number, open: OpenFile = openFile): Promise<string | null> {
+  return (await readTailSized(path, bytes, open))?.text ?? null;
+}
+
+// P2-D (2026-10-09): the same read with the size stat saw, so a caller can tell a tail that started mid-file (`size > bytes`).
+export async function readTailSized(path: string, bytes: number, open: OpenFile = openFile): Promise<{ text: string; size: number } | null> {
   let handle: FileHandle;
   try {
     handle = await open(path, 'r');
@@ -21,7 +26,7 @@ export async function readTail(path: string, bytes: number, open: OpenFile = ope
     const buffer = Buffer.alloc(size - start);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
     const text = buffer.subarray(0, bytesRead).toString('utf8');
-    return start === 0 ? text : text.slice(text.indexOf('\n') + 1);
+    return { text: start === 0 ? text : text.slice(text.indexOf('\n') + 1), size };
   } finally {
     await handle.close();
   }

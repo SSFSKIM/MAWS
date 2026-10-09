@@ -62,6 +62,8 @@ import { trashFor } from './sessions/e2e-trash';
 import { openDialogFor } from './files/e2e-pick';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
+import { transcriptPathOf } from './sessions/context'; // P2-D
+import { readRecentTurns } from './sessions/recent-turns'; // P2-D
 // C10 end
 // C11 start
 // (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
@@ -273,6 +275,15 @@ void startWithProfileLock(app, () => {
   const engineEnv = captureShellEnvironment();
   const engineConfigDir = engineEnv.then((env) => claudeConfigDir(env, env.HOME || home));
   const userDefaults = async () => readUserEngineDefaults(await engineConfigDir);
+  // P2-D (2026-10-09): the resume chooser's preview read, from the transcript path the index keeps, else where the
+  // engine writes a launched session's transcript (the stub source intercepts it in launch mode scenario)
+  registerMainHandler('session.recentTurns', async ({ appSessionId, limit }) => {
+    const id = appSessionId as AppSessionId;
+    const record = index.unavailable === null ? index.sessions.get(id) : null;
+    const known = record ? index.sessions.summaryOf(id)?.transcriptPath : null;
+    const path = known || (record?.engineSessionId ? await transcriptPathOf(await engineEnv, record.directory, record.engineSessionId) : null);
+    return readRecentTurns(path, limit);
+  });
   const usage = new ClaudeUsageReader({ dir: claudeUsageDir(process.env, home), emit: (snapshot) => void emit('settings.usageChanged', snapshot) });
   usage.start();
   registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));

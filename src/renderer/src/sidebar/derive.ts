@@ -18,15 +18,17 @@ export type ProjectKey = ProjectId | typeof OTHER_SESSIONS;
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
-// Case-insensitive substring over the title, the project's name and the directory. The ⌘K palette searches sessions
-// with the same rule, so the sidebar's filter and the palette agree on what a query finds.
+// Case-insensitive substring over the title, the project's name, the directory and the branch (P2-D, G2: the branch the
+// record names, W9's rule). The ⌘K palette and the resume chooser search sessions with the same rule, so the sidebar's
+// filter, the palette and the chooser agree on what a query finds.
 export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): (record: SessionRecord) => boolean {
   const q = query.trim().toLowerCase();
   if (q === '') return () => true;
   return (record) =>
     record.title.text.toLowerCase().includes(q) ||
     record.directory.toLowerCase().includes(q) ||
-    (record.projectId !== null && (projects.get(record.projectId)?.name.toLowerCase().includes(q) ?? false));
+    (record.projectId !== null && (projects.get(record.projectId)?.name.toLowerCase().includes(q) ?? false)) ||
+    (branchLabel(recordBranch(record))?.toLowerCase().includes(q) ?? false); // P2-D
 }
 
 // ---- the project list --------------------------------------------------------------------------------------------------

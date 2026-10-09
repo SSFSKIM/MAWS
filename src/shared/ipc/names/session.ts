@@ -24,6 +24,7 @@ export const commands = [
   'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
   'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer',
   'session.reloadSkills', // E8
+  'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
 ] as const;
 
 export const events = [
