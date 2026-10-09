@@ -219,6 +219,18 @@ describe('session info of a session with no live process', () => {
     await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
     for (const label of ['Effort', 'Output style', 'Plugins', 'Mode', 'Context']) expect(valueOf(label)).toBe('Not observed yet');
   });
+
+  // M3: the Refresh is the owner's gesture; opening the tab starts nothing
+  it('offers Refresh, which acquires the session for a read; opening it acquired nothing', async () => {
+    offline();
+    backend.script('session.observedFacts', () => null);
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
+    expect(acquires()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY, reason: 'read' }]));
+  });
 });
 // P2-A end
 

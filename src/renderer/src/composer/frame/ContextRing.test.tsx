@@ -139,6 +139,18 @@ describe('the context ring of a session with no live process', () => {
     expect(within(screen.getByRole('dialog', { name: 'Context window' })).getByText('Not observed yet')).toBeTruthy();
   });
 
+  // M3: the popover's Refresh is the owner's gesture that starts the session; opening the popover starts nothing
+  it('the popover offers Refresh, which acquires the session for a read; opening it acquired nothing', async () => {
+    mountExited(null);
+    await settle();
+    fireEvent.click(ring());
+    await settle();
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Context window' })).getByRole('button', { name: 'Refresh' }));
+    await settle();
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'read' }]);
+  });
+
   // the review's fix: a dormant ring always says when its reading was taken, when the host kept it
   const twelve = { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null };
   function mountWith(process: 'ready' | 'exited', answers: Parameters<typeof fakeClient>[0]) {
