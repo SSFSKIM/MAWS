@@ -169,9 +169,12 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     if (state.derived.has(itemId)) return;
     state.derived.set(itemId, { id: itemId, appSessionId: id, request: noRequest, state: 'pending', stateChangedAt: fields.createdAt, expiresAt: null, ...fields });
   };
-  // F2b review 1: a turn or a stop retires what was raised before it (`at`). A fresh follower's backfill replays every
-  // old prompt as a null-origin turn.started at its record's timestamp, so the failed turn's own replayed prompt must
-  // not retire, and so re-raise, the failure that turn ended with.
+  // F2b review 1: a turn or a stop read back from the transcript (`seq: null`, a fresh follower's backfill replaying every
+  // old prompt as a null-origin turn.started at its record's timestamp) retires only what was raised before its `at`, so
+  // the failed turn's own replayed prompt does not retire, and so re-raise, the failure that turn ended with. A live one
+  // comes after everything derived so far in stream order and retires it all: its `at` is its journal row's
+  // millisecond, which a queued prompt right after a failed result can share (residue of the review).
+  const cutoffOf = (event: SessionEvent): string | null => (event.seq === null ? event.at : null);
   const retireDerived = (state: SessionState, kinds: ReadonlySet<AttentionItem['kind']>, at: string | null = null) => {
     const before = at === null ? Infinity : Date.parse(at);
     for (const kind of kinds) state.retiredBefore.set(kind, Math.max(before, state.retiredBefore.get(kind) ?? -Infinity));
@@ -186,7 +189,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const base = { sessionId: event.sessionId, createdAt: event.at };
       switch (event.kind) {
         case 'turn.started':
-          if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN, event.at);
+          if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN, cutoffOf(event));
           break;
         case 'turn.ended':
           // a user abort is not a failure: the wire marks every abort is_error: true (M6 review; pass3/plan-outcomes seq 510)
@@ -208,7 +211,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           }
           state.broker = []; // the broker retired its items at the exit; a held message cannot be released by a dead process
           retireDerived(state, new Set(['held_peer_message']));
-          if (event.reason === 'stop') retireDerived(state, RETIRED_BY_NEXT_TURN, event.at);
+          if (event.reason === 'stop') retireDerived(state, RETIRED_BY_NEXT_TURN, cutoffOf(event));
           if (event.lostAttentionCount > 0) {
             const questions = event.lostAskCount ?? 0; // E1: the blocking asks among them
             derive(id, state, event.id, { ...base, kind: 'interrupted', summary: interruptedSummary(event.lostAttentionCount - questions, questions) });

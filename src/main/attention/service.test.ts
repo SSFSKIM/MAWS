@@ -265,8 +265,8 @@ describe('attention service merges broker items with the derived kinds', () => {
       const PROMPT_AT = '2026-09-28T09:59:00.000Z';
       const FAILED_AT = '2026-09-28T09:59:30.000Z';
       for (const how of ['confirmed', 'retired'] as const) {
-        const prompt = event('turn.started', { userMessageUuid: 'u-old', origin: null, at: PROMPT_AT });
-        const failure = failedTurn({ at: FAILED_AT });
+        const prompt = event('turn.started', { userMessageUuid: 'u-old', origin: null, at: PROMPT_AT, seq: null }); // backfilled: no journal row
+        const failure = failedTurn({ at: FAILED_AT, seq: null });
         const id = `${APP}:error:${failure.id}`;
         const persisted = item({ kind: 'error', state: how, id: id as never, createdAt: FAILED_AT, stateChangedAt: AT, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
 
@@ -290,9 +290,20 @@ describe('attention service merges broker items with the derived kinds', () => {
         await before.service.settled();
         expect(store.sessions.get(APP)?.map((i) => [i.id, i.state])).toEqual([[id, how]]);
 
-        before.batch(event('turn.started', { userMessageUuid: 'u-new', origin: null, at: '2026-09-28T10:01:00.000Z' }));
+        before.batch(event('turn.started', { userMessageUuid: 'u-new', origin: null, at: '2026-09-28T10:01:00.000Z', seq: null }));
         expect(before.last()).toEqual([]);
       }
+    });
+
+    // F2b review residue: a live event's `at` is its journal row's ms, which a queued prompt right after a failed result
+    // can share (queue-and-interrupt.jsonl rows 197 and 201 are 2 ms apart; one stdout chunk's rows share one), so live
+    // turns retire by stream order.
+    it('a live human turn in the same millisecond as the failure still retires it', () => {
+      const { batch, last } = setup();
+      batch(failedTurn({ at: AT, seq: 197 }));
+      expect(last().map((i) => i.kind)).toEqual(['error']);
+      batch(event('turn.started', { userMessageUuid: 'u-queued', origin: 'human', at: AT, seq: 201 }));
+      expect(last()).toEqual([]);
     });
 
     it('rewrites a persisted item’s raw "Turn failed: <code>" summary in words on load', async () => {
