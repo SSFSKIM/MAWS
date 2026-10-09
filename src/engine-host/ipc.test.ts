@@ -1096,6 +1096,51 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;
   });
+
+  // P2-E1 start (2026-10-09): the artifact scope beside the spec, and one write chain for every session of the host (D10)
+  it("session.launch's artifactScope reaches the thread's tools, and the parent's and the thread's writes to one record queue on one chain", async () => {
+    const page = join(userData, 'dashboard.html');
+    writeFileSync(page, '<h1>HELLO_E1</h1>');
+    const transports = [scriptedTransport({ onWrite: autoResponder(handshakeResponder()) }), scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })];
+    const [parentT, threadT] = transports as [ScriptedTransport, ScriptedTransport];
+    const queue = [...transports];
+    const host = engineHost({ spawn: () => queue.shift()!, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const parent = 'app-parent' as AppSessionId;
+    const thread = 'app-thread' as AppSessionId;
+    const launch = commands['session.launch'].input;
+    expect(launch.safeParse({ spec: spec(), artifactScope: [parent] }).success).toBe(true);
+    expect(launch.safeParse({ spec: spec(), artifactScope: Array.from({ length: 17 }, (_, k) => `app-${k}`) }).success).toBe(false);
+    await host.call('session.launch', { spec: spec({ appSessionId: parent }) });
+    await host.call('session.launch', { spec: spec({ appSessionId: thread }), artifactScope: [parent] });
+    await until(() => host.statuses(parent).some((s) => s.process === 'ready') && host.statuses(thread).some((s) => s.process === 'ready'), 'both ready');
+    const call = (transport: ScriptedTransport, requestId: string, name: string, args: unknown) =>
+      transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } } } });
+    const answerOf = (transport: ScriptedTransport, requestId: string) =>
+      (transport.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === requestId) as { response: { response: { mcp_response: { result: { content: { text: string }[] } } } } } | undefined)
+        ?.response.response.mcp_response.result.content[0]!.text;
+    const answered = async (transport: ScriptedTransport, requestId: string) => {
+      await until(() => answerOf(transport, requestId) !== undefined, `the answer to ${requestId}`);
+      return JSON.parse(answerOf(transport, requestId)!) as Record<string, unknown>;
+    };
+    call(parentT, 'mcp-create', 'artifact_create', { id: 'dash', html_path: page, title: 'Dashboard' });
+    const { deliverableId } = await answered(parentT, 'mcp-create');
+    call(threadT, 'mcp-thread-1', 'artifact_update', { id: 'dash', html_path: page });
+    expect(await answered(threadT, 'mcp-thread-1')).toMatchObject({ deliverableId, version: 2, ownerAppSessionId: parent });
+    // racing writes from both sessions take distinct versions, in the order they entered the owner's chain
+    call(parentT, 'mcp-parent-2', 'artifact_update', { id: 'dash', html_path: page });
+    call(threadT, 'mcp-thread-2', 'artifact_update', { id: 'dash', html_path: page });
+    const raced = [await answered(parentT, 'mcp-parent-2'), await answered(threadT, 'mcp-thread-2')].map((answer) => answer.version);
+    expect(raced.sort()).toEqual([3, 4]);
+    const record = JSON.parse(readFileSync(join(userData, 'deliverables', parent, `${String(deliverableId)}.json`), 'utf8')) as { versions: unknown[] };
+    expect(record.versions).toHaveLength(4);
+    expect(existsSync(join(userData, 'deliverables', thread))).toBe(false);
+    const changed = host.emitted.filter((e) => e.name === 'deliverables.changed').map((e) => (e.payload as { appSessionId: string }).appSessionId);
+    expect(new Set(changed)).toEqual(new Set([parent]));
+    parentT.exit(0);
+    threadT.exit(0);
+    await Promise.all([host.ipc.table.get(parent)!.exited, host.ipc.table.get(thread)!.exited]);
+  });
+  // P2-E1 end
 });
 // E2 end
 // E4c start: the browser tools left the `maws` server on 2026-10-08 (P1 A-54): their bridge through the host's IPC went

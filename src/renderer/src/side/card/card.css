@@ -1,0 +1,10 @@
+/* P2-E1: the comment card's thread at its ~284 px width. A user row's time, Copy and Edit hang to the left of the bubble
+   in an ordinary transcript (transcript.css), where the card has no room: here they sit under the bubble, aligned to its
+   right edge, so a long toolbar beside a short comment grows leftwards inside the card. Scoped to the card's thread;
+   unlayered, as transcript.css is, and more specific than its rule. */
+[data-card-thread] .transcript-user-actions {
+  position: static;
+  justify-content: flex-end;
+  height: 20px;
+  margin: 2px 0 0;
+}

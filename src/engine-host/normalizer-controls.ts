@@ -234,7 +234,8 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
     const parsed = call.tool === 'artifact_create' ? ArtifactCreateResultSchema.safeParse(json) : ArtifactUpdateResultSchema.safeParse(json);
     if (!parsed.success) return;
     const { id: artifactId, deliverableId, version, title } = parsed.data;
-    out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title }, attribution);
+    const owner = 'ownerAppSessionId' in parsed.data && parsed.data.ownerAppSessionId !== undefined ? { ownerAppSessionId: parsed.data.ownerAppSessionId } : {}; // P2-E1: an ancestor's record
+    out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title, ...owner }, attribution);
     return;
   }
   // E2 end

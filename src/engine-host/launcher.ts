@@ -25,7 +25,7 @@ import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './l
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { EngineSession } from './session';
-import { FileDeliverableStore } from './deliverables/store'; // E1
+import { FileDeliverableStore, SessionChains } from './deliverables/store'; // E1; P2-E1: SessionChains
 import type { EngineTransport } from './transport';
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 
@@ -56,11 +56,16 @@ function readJournal(path: string): JournalRow[] {
     .map((line) => parseJournalRow(JSON.parse(line)));
 }
 
-export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promise<LaunchResult> {
+// `artifactScope` (P2-E1, D10): a side thread's ancestors, nearest first, whose artifacts its tools also resolve; handed
+// to the session for this launch only, never stored.
+export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactScope?: readonly AppSessionId[]) => Promise<LaunchResult> {
   let prelude: JournalRow[] | null = null;
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
+  // P2-E1: one write chain per host process, shared by every session's store, so a record's writes queue on its owner's
+  // chain whichever session runs them (a side thread updating its parent's artifact while the parent does)
+  const chains = new SessionChains();
 
-  return async (spec) => {
+  return async (spec, artifactScope = []) => {
     assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
@@ -103,9 +108,10 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
         // C12 end
-        deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
+        deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten, chains /* P2-E1 */ }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
         observedFacts: deps.observedFacts, // P2-A
+        artifactScope, // P2-E1
       });
       deps.wire(session, plan, spec);
       return session;

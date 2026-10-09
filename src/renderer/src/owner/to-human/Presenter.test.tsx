@@ -49,3 +49,9 @@ it('declines ordinary text and unfinished tags', () => {
   expect(assistantPresentation('Ordinary **answer**.')).toBeNull();
   expect(assistantPresentation('<to-human>unfinished')).toBeNull();
 });
+// P2-E1: a presentation with a Reply field under it (the comment card's) answers there, so it does not say to resume
+it('leaves the resume line out when the drawing is answerable', () => {
+  render(assistantPresentation('<need-input>Which path?\n<choice>A</choice></need-input>')!.render({ showRecord: false, live: false, recordKey: 'test', answerable: true }));
+  expect(screen.getByText('Which path?')).toBeTruthy();
+  expect(screen.queryByText(/Resume this session to answer/)).toBeNull();
+});

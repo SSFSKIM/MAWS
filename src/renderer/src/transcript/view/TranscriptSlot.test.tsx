@@ -11,6 +11,7 @@ import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
 import { BASH_RESULT, builder, request, tool } from '../model/test-events';
+import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -219,5 +220,51 @@ describe('TranscriptSlot', () => {
     act(() => disposeFirst());
     expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
     expect(slot()?.querySelector('[role="status"]')).not.toBeNull();
+  });
+
+  // P2-E1 (M2; ledger §5 row 3): the comment card's three options. `startAt` names the first row shown (none while it
+  // answers null, and it is told whether the history is loaded); `actions` override the registered ones for this mount;
+  // `presentation` reaches the rows' context. Without them the slot draws exactly as before.
+  it('startAt, actions and presentation: the rows from startAt’s index (none while null), the overrides over the registered actions, the presentation on the context', async () => {
+    const id = 'app-slot-card' as AppSessionId;
+    const b = builder();
+    b.turn('u1', 'The parent’s copied prompt');
+    b.text('m1', 0, 'The parent’s copied answer.');
+    b.end(['u1']);
+    b.turn('u2', 'The thread’s own prompt');
+    b.text('m2', 0, '<to-human>See [the file](src/a.ts).</to-human>');
+    b.end(['u2']);
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    const registered = vi.fn();
+    const override = vi.fn();
+    register({ openFile: registered });
+    const seen: boolean[] = [];
+    let index: number | null = null;
+    const startAt = (rows: readonly Row[], loaded: boolean) => {
+      seen.push(loaded);
+      const own = rows.findIndex((row) => row.kind === 'user' && row.text === 'The thread’s own prompt');
+      return index === null ? null : own;
+    };
+    const overrides = { openFile: override };
+    const view = render(<TranscriptSlot appSessionId={id} startAt={startAt} actions={overrides} presentation="local" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
+    expect(seen.at(-1)).toBe(true);
+    expect(screen.queryAllByRole('region', { name: 'Your message' })).toEqual([]); // null: nothing yet
+
+    index = 0;
+    view.rerender(<TranscriptSlot appSessionId={id} startAt={(rows, loaded) => startAt(rows, loaded)} actions={overrides} presentation="local" />);
+    await waitFor(() => expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(1));
+    expect(document.body.textContent).toContain('The thread’s own prompt');
+    expect(document.body.textContent).not.toContain('The parent’s copied');
+    expect(document.querySelector('[data-owner-report]')).not.toBeNull(); // the local presenter
+    fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(registered).not.toHaveBeenCalled();
+
+    view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action
+    await waitFor(() => expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(2));
+    fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
+    expect(registered).toHaveBeenCalledTimes(1);
   });
 });

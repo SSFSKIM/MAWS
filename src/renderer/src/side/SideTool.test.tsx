@@ -34,6 +34,12 @@ import { installFakeMain, ok } from '../test-support/code';
 import { browserTab, T1 } from '../test-support/browser';
 import { browserTool } from '../tools/browser/BrowserTool';
 // E4d end
+// P2-E1 start (2026-10-09)
+import { deliverableUrl } from '@shared/maws/deliverable';
+import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
+import type { DeliverablesParams } from '../tools/deliverables/DeliverablesTool';
+import { useCommentCard } from './card/store';
+// P2-E1 end
 
 const ONE = 'side-one' as AppSessionId;
 const TWO = 'side-two' as AppSessionId;
@@ -170,6 +176,68 @@ describe('the Side pane', () => {
     expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: ONE, url, select: true, reuse: 'url' }]);
   });
   // E4d end
+
+  // P2-E1 start (2026-10-09): "Show in deliverable" re-docks a thread opened from an artifact element (P2-E1 document, D7)
+  describe('Show in deliverable', () => {
+    const RECORD_ID = '00000000-0000-4000-8000-0000000000e1';
+    const ELEMENT: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(A, RECORD_ID, 1) };
+    const SHOW = 'Show in deliverable';
+    beforeEach(() => {
+      useCommentCard.setState({ open: null });
+      // the Deliverables tool as the panel opens it: its state is what it was asked to show
+      registerPanelTool<unknown[], DeliverablesParams>({
+        id: DELIVERABLES_TOOL_ID, title: 'Deliverables', icon: () => null, pinnable: true, multiInstance: false,
+        createState: (init) => [init.params],
+        open: (state, params) => void state.push(params),
+        beforeClose: async () => true,
+        dispose: () => {},
+        render: () => null,
+      });
+    });
+    afterEach(() => useCommentCard.setState({ open: null }));
+
+    it('is offered in the header of a thread on an artifact element whose page names a deliverable, and of no other', () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      const view = render(<ThreadView parent={A} child={ONE} visible />);
+      expect(screen.getByRole('button', { name: SHOW })).toBeTruthy();
+      view.unmount();
+      for (const anchor of [ANCHOR, { ...ELEMENT, pageUrl: 'https://example.com/page.html' }, { ...ELEMENT, pageUrl: undefined }]) {
+        withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor }));
+        const other = render(<ThreadView parent={A} child={ONE} visible />);
+        expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
+        other.unmount();
+      }
+    });
+
+    it('is hidden while a main tab shows the thread', () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: ONE }));
+      render(<ThreadView parent={A} child={ONE} visible />);
+      expect(screen.getByText('Shown in the main area')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
+    });
+
+    it('opens the parent’s Deliverables tool on the record at its latest version, and a card on the thread for that panel’s viewer to claim', async () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      act(() => openSideThread(A, ONE));
+      mount();
+      await userEvent.click(screen.getByRole('button', { name: SHOW }));
+      const tab = panelOf(A)!.tabs.find((t) => t.toolId === DELIVERABLES_TOOL_ID)!;
+      expect(panelOf(A)!.activeTabId).toBe(tab.id);
+      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID, appSessionId: A }]); // no version: the latest
+      expect(useCommentCard.getState().open).toMatchObject({
+        parent: A,
+        anchor: ELEMENT,
+        host: 'deliverable',
+        hostId: null,
+        claimMode: 'panel',
+        rect: null,
+        target: { kind: 'deliverable', appSessionId: A, deliverableId: RECORD_ID },
+        phase: { kind: 'thread', child: ONE, echo: null },
+      });
+    });
+  });
+  // P2-E1 end
 });
 
 // E3 (M4): the question view (Design §7) and a promoted thread's header (M3's review)

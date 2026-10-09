@@ -300,7 +300,12 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   // E2 start (E2 execution document, Interfaces "X1", Design §9): mapped from an admitted `artifact_create` or
   // `artifact_update` call and its answer when the answer parses (E1 residue 1's rule); a refusal yields none. `artifactId`
   // is the agent's short name, `deliverableId` the record's uuid.
-  event('maws.delivery.artifact', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, action: z.enum(['create', 'update']), artifactId: z.string(), deliverableId: z.string(), version: z.number().int(), title: z.string() }),
+  // P2-E1 (2026-10-09, a dated exception inside E2's entry; D10): `ownerAppSessionId`, copied from the answer, names the
+  // side thread's ancestor whose record the version belongs to; absent for the session's own.
+  event('maws.delivery.artifact', {
+    toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, action: z.enum(['create', 'update']), artifactId: z.string(), deliverableId: z.string(), version: z.number().int(), title: z.string(),
+    ownerAppSessionId: AppSessionIdSchema.optional(), // P2-E1
+  }),
   // E2 end
   // E4c start (E4c execution document, Design §10): mapped from an admitted `browser_*` call and its answer (E1 residue
   // 1's rule), so a journal rebuild reproduces it; a refusal yields none. `action` is the tabs or act action, navigate's

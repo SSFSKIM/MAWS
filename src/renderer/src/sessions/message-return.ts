@@ -16,4 +16,18 @@ export function registerMessageReturn(fn: MessageReturn): () => void {
   };
 }
 
-export const returnMessage: MessageReturn = (appSessionId, message) => messageReturn(appSessionId, message);
+// P2-E1 start (2026-10-09): a per-session claim on the return, consulted before the registered one: the comment card
+// holding a pending reply to a thread whose start may fail takes that thread's returned message back into its own
+// field, never the thread's unseen composer draft (P2-E1 document, D6). The latest claim of a session wins; disposing a
+// claim that was since replaced leaves the newer one.
+const holders = new Map<AppSessionId, MessageReturn>();
+
+export function holdMessageReturn(appSessionId: AppSessionId, fn: MessageReturn): () => void {
+  holders.set(appSessionId, fn);
+  return () => {
+    if (holders.get(appSessionId) === fn) holders.delete(appSessionId);
+  };
+}
+
+export const returnMessage: MessageReturn = (appSessionId, message) => (holders.get(appSessionId) ?? messageReturn)(appSessionId, message);
+// P2-E1 end
