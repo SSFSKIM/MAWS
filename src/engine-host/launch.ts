@@ -189,7 +189,8 @@ export function mintLaunchId(): string {
 }
 
 // `bin` and `engineVersion` are the binary probe's answer for this launch (W13): the real path and its `--version`.
-export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; bin: string; engineVersion: string }): LaunchPlan {
+// P2-C: `declaresSystemPromptSnapshot` is the probe's too; absent or false, the spec's "off" is not passed.
+export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
   }
@@ -209,6 +210,11 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
   if (pinned) args.push('--session-id', sessionId);
   if (spec.mcpConfig !== null) args.push('--mcp-config', JSON.stringify(spec.mcpConfig));
   if (spec.maxBudgetUsd !== null) args.push('--max-budget-usd', String(spec.maxBudgetUsd));
+  // P2-C start (2026-10-09): the owner channel's two flags (the P2-C document, Design §2); the undeclared flag never
+  // reaches a binary that does not know it, so a launch is never broken by it (D-1)
+  if (spec.appendSystemPrompt) args.push('--append-system-prompt', spec.appendSystemPrompt);
+  if (spec.systemPromptSnapshot === 'off' && opts.declaresSystemPromptSnapshot === true) args.push('--system-prompt-snapshot', 'off');
+  // P2-C end
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {

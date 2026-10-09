@@ -145,3 +145,20 @@ describe('FileSessionStateStore: the pause reason (C7)', () => {
   });
 });
 // C7 end
+
+// P2-C start (2026-10-09): the two launch-spec keys never reach the state file (the P2-C document, Design §2 "What is
+// recorded", R5), so an older build, whose strict reader knows neither, still reads the file this build wrote
+describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
+  it('saveLaunchSpec writes neither key, and an older-shaped strict reader still parses the file', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveLaunchSpec(ID, { ...spec, appendSystemPrompt: '# Messages to the human (MAWS to-human contract 1)', systemPromptSnapshot: 'off' });
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
+    expect(file.launchSpec).not.toHaveProperty('appendSystemPrompt');
+    expect(file.launchSpec).not.toHaveProperty('systemPromptSnapshot');
+    expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify(spec)));
+    const OlderLaunchSpecSchema = LaunchSpecSchema.omit({ appendSystemPrompt: true, systemPromptSnapshot: true }); // strict, as every build's is
+    expect(OlderLaunchSpecSchema.parse(file.launchSpec)).toEqual(spec);
+    expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).toEqual(spec);
+  });
+});
+// P2-C end

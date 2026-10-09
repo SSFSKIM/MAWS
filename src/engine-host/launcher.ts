@@ -67,7 +67,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
-    let engine: { bin: string; engineVersion: string };
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }; // P2-C: the flag's declaration
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -80,7 +80,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
       if (relay && !relay.ok) return { status: 'relay_unreachable', health: relay };
       captured = env;
       relayHealth = relay ?? undefined;
-      engine = { bin: binary.path, engineVersion: binary.version };
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
     }
 
     let plan: LaunchPlan;

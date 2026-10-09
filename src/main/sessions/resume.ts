@@ -15,6 +15,7 @@ import { resumeLaunchSpec } from './launch-mapping';
 import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
+import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 
 // C3 corrective: the host's code for an engine that wrote nothing before its first-output bound, and what the retry says
 const NO_OUTPUT = 'no_output';
@@ -61,7 +62,10 @@ export async function runResume(
       });
     }
     const fixture = takeReplay(s, 'launching');
-    let spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings());
+    // P2-C start (2026-10-09): the owner channel's decision for this launch, over the session's own transcript
+    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
+    let spec = decided.spec;
+    // P2-C end
     let end: LaunchEnd;
     let previousLaunchId: string | null = null;
     for (;;) {
@@ -71,6 +75,7 @@ export async function runResume(
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
       launched = true;
       previousLaunchId = answer.session.launchId;
+      ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09)
       end = await watch.untilReady();
       // C3 corrective: an engine that wrote nothing at all (`init_failed { no_output }`) touched nothing of the session,
       // so the resume launches once more, visibly (the host journals the retry's reconnect rows and a notice); never

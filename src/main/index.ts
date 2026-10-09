@@ -61,6 +61,7 @@ import { ReplaySeam } from './sessions/replay-seam';
 import { trashFor } from './sessions/e2e-trash';
 import { openDialogFor } from './files/e2e-pick';
 import { SessionService } from './sessions/service';
+import { startOwnerChannel } from './owner/register'; // P2-C (2026-10-09)
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 // C10 end
 // C11 start
@@ -346,6 +347,10 @@ void startWithProfileLock(app, () => {
   // E13: the session's cua socket for its launch (the in-app browser spec of 2026-10-08); the browser starts below, and a
   // launch asked before it (none is expected) carries no socket
   let cuaSockets: Browser['cua'] | null = null;
+  // P2-C start (2026-10-09): the owner channel's launch half (the P2-C document, §2, §9): mods.* over the index, and the
+  // decision every MAWS-owned launch takes for the to-human lane, reading the engine's config home from its environment
+  const ownerChannel = startOwnerChannel({ index, settings: () => settings.state().settings, engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: registerMainHandler });
+  // P2-C end
   const sessionService = new SessionService({
     index,
     host: {
@@ -368,6 +373,7 @@ void startWithProfileLock(app, () => {
     userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
     browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
+    ownerChannel, // P2-C (2026-10-09)
   });
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));

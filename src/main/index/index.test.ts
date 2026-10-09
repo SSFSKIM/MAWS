@@ -36,13 +36,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     }
   };
 
-  it('a fresh index has user_version 6 and the eight tables, in WAL mode', () => {
+  it('a fresh index has user_version 7 and the ten tables, in WAL mode', () => {
     const path = join(dir.path, 'index.sqlite');
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(MIGRATIONS).toHaveLength(6);
-    expect(inspect(path)).toEqual({ version: 6, tables: ['attention_items', 'browser_activity', 'browser_history', 'drafts', 'projects', 'replay_fixtures', 'sessions', 'side_threads'], mode: 'wal' });
+    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7]); // P2-C: 7
+    expect(MIGRATIONS).toHaveLength(7);
+    expect(inspect(path)).toEqual({ version: 7, tables: ['attention_items', 'browser_activity', 'browser_history', 'drafts', 'owner_channel_marks', 'owner_channel_sessions', 'projects', 'replay_fixtures', 'sessions', 'side_threads'], mode: 'wal' });
     // The removal mark was amended into v1 (see the repair cases below for databases created before that).
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -72,7 +72,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([2, 3, 4, 5, 6]);
+    expect(index.applied).toEqual([2, 3, 4, 5, 6, 7]); // P2-C: 7
     const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
     expect([routed('discovered'), routed('routed'), routed('direct'), routed('mismatch')]).toEqual([null, true, false, false]);
     // The rebuild touches only the flag: every other column, its values and the project index survive.
@@ -109,7 +109,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([3, 4, 5, 6]);
+    expect(index.applied).toEqual([3, 4, 5, 6, 7]); // P2-C: 7
     const of = (appId: string) => index.sessions.get(appId as AppSessionId)!;
     expect([of('non-repo').branch, of('empty').branch, of('empty').worktree, of('on-main').branch, of('on-main').worktree]).toEqual([
       null,
@@ -142,7 +142,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([4, 5, 6]);
+    expect(index.applied).toEqual([4, 5, 6, 7]); // P2-C: 7
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string }[]).map((c) => [c.name, c.type]);
@@ -150,7 +150,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const sideColumns = (db.prepare('PRAGMA table_info(side_threads)').all() as { name: string }[]).map((c) => c.name);
       expect(sideColumns).toEqual(['child_app_id', 'parent_app_id', 'opened_at', 'summarised_at', 'text', 'is_error', 'turns', 'last_turn_event_id']);
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((i) => i.name);
-      expect(indexes).toEqual(['browser_activity_session', 'browser_history_recent', 'sessions_project', 'sessions_root', 'side_threads_parent']); // E4a: v5 applies after v4; cua board #93: v6 after it
+      expect(indexes).toEqual(['browser_activity_session', 'browser_history_recent', 'owner_channel_marks_session', 'sessions_project', 'sessions_root', 'side_threads_parent']); // E4a: v5 applies after v4; cua board #93: v6 after it; P2-C: v7
       const sizes = db.prepare('SELECT app_id, transcript_size, transcript_mtime_ms, lineage, lineage_source FROM sessions ORDER BY app_id').all();
       expect(sizes).toEqual([
         { app_id: 'no-transcript', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null },
@@ -165,6 +165,32 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(index.sessions.bindings().find((b) => b.appSessionId === 'on-disk')).toMatchObject({ size: 4096, mtimeMs: -1 });
     expect(index.sessions.get('on-disk' as AppSessionId)!.lineage).toBeNull();
   });
+
+  // P2-C start (2026-10-09): the owner channel's two tables (the P2-C document, §10), added to a version-6 database
+  it('v7 adds the owner channel’s session and mark tables beside a v6 database’s rows, each going with its record', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    for (const migration of MIGRATIONS.slice(0, 6)) raw.exec(migration.sql);
+    raw.exec('PRAGMA user_version = 6');
+    raw.prepare("INSERT INTO sessions (app_id, engine_session_id, directory, kind, created_at, updated_at) VALUES ('kept', 'e-1', '/w', 'engine', 't', 't')").run();
+    raw.close();
+
+    const index = open(path);
+    expect(index.applied).toEqual([7]);
+    expect(index.sessions.get('kept' as AppSessionId)).not.toBeNull();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+      expect(columns('owner_channel_sessions')).toEqual(['app_session_id', 'override', 'enabled_at', 'launch_id', 'launched_at', 'desired', 'recorded', 'appended', 'snapshot_off', 'applied', 'style', 'observed_style', 'style_mismatch']);
+      expect(columns('owner_channel_marks')).toEqual(['id', 'app_session_id', 'kind', 'message_uuid', 'block_index', 'span', 'grammar', 'head', 'at', 'item', 'live', 'state', 'answer_text', 'answer_origin', 'answer_members', 'answered_at', 'read_at', 'state_changed_at']);
+    } finally {
+      db.close();
+    }
+    index.ownerChannel.setOverride('kept' as AppSessionId, 'off');
+    expect(index.ownerChannel.override('kept' as AppSessionId)).toBe('off');
+    expect(() => index.ownerChannel.setOverride('kept' as AppSessionId, 'sometimes' as 'off')).toThrow(/CHECK/);
+  });
+  // P2-C end
 
   it('opening it again runs no migration and keeps its rows', () => {
     const path = join(dir.path, 'index.sqlite');
@@ -324,9 +350,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
-    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (6)');
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (7)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    const message = 'index unavailable: user_version 99 is newer than this app knows (6)';
+    const message = 'index unavailable: user_version 99 is newer than this app knows (7)';
     expect(() => index.sessions.list()).toThrow(message);
     expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
     expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
@@ -358,13 +384,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7]); // P2-C: 7
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
-    expect(inspect(path).version).toBe(6);
+    expect(inspect(path).version).toBe(7);
   });
 
   it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {

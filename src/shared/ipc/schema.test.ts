@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V11 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -52,9 +52,12 @@ import * as browser from './schema/browser';
 // E4b start
 import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 // E4b end
+// P2-C start (2026-10-09)
+import * as mods from './schema/mods';
+// P2-C end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -328,7 +331,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -363,7 +366,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -588,13 +591,13 @@ describe('ipc schema validates both directions', () => {
       // `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V11, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V12, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1417,4 +1420,37 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4c end
+  // P2-C start (2026-10-09): the built-in mods (X20; the P2-C document, §9) and the binary's flag declaration
+  describe('P2-C entries', () => {
+    const row = { id: 'maws.to-human', name: 'To-human', description: 'd', version: 1, enabled: true, source: 'maws-contract' };
+    it('adds the mods namespace: two main commands, no event', () => {
+      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'main', 'mods.setSessionOverride': 'main' });
+      expect([...NAMES.mods.commands]).toEqual(Object.keys(mods.commands));
+      expect(Object.keys(mods.events)).toEqual([]);
+    });
+
+    it('lists the mods with or without a session, and answers rows of the registry’s shape', () => {
+      expect(validateCommandInput('mods.list', {}).ok).toBe(true);
+      expect(validateCommandInput('mods.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandInput('mods.list', { appSessionId: 'a', all: true }).ok).toBe(false);
+      expect(validateCommandOutput('mods.list', [row, { ...row, perSession: 'off', pending: 'next-compaction', mismatch: { resolved: 'report', observed: 'default' } }]).ok).toBe(true);
+      expect(validateCommandOutput('mods.list', [{ ...row, source: 'style' }]).ok).toBe(false);
+      expect(validateCommandOutput('mods.list', [{ ...row, id: 'maws.other' }]).ok).toBe(false);
+    });
+
+    it('sets a session’s override of a known mod to inherit, on or off', () => {
+      for (const value of ['inherit', 'on', 'off']) expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'maws.to-human', value }).ok).toBe(true);
+      expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'maws.to-human', value: 'default' }).ok).toBe(false);
+      expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'other', value: 'on' }).ok).toBe(false);
+      expect(validateCommandInput('mods.setSessionOverride', { id: 'maws.to-human', value: 'on' }).ok).toBe(false);
+    });
+
+    it('engine.binaryInfo answers whether the binary declares --system-prompt-snapshot, absent from an older host', () => {
+      const info = { path: '/b', testedVersion: '2.1.293', version: '2.1.295', ok: true, error: null };
+      expect(validateCommandOutput('engine.binaryInfo', { ...info, declaresSystemPromptSnapshot: true }).ok).toBe(true);
+      expect(validateCommandOutput('engine.binaryInfo', info).ok).toBe(true);
+      expect(validateCommandOutput('engine.binaryInfo', { ...info, declaresSystemPromptSnapshot: 'yes' }).ok).toBe(false);
+    });
+  });
+  // P2-C end
 });

@@ -1,0 +1,55 @@
+// X20's commands (the P2-C document, §9): `mods.list` answers one row per built-in mod, `mods.setSessionOverride` writes
+// a session's override of the to-human lane. Without a session a row's `source` is what a new launch in no project would
+// do; with one it is the session's last applied state (or, before its first decided launch, what its next launch would
+// do), plus `pending` while the effective lane differs from what is applied, and the style mismatch when the engine
+// reported another style than the resolver read. The app's switch is `settings.set` on `mods.toHuman.enabled`.
+import type { AppSessionId } from '@shared/graph/ids';
+import { BUILT_IN_MODS, type ModId, type ModRow } from '@shared/mods/registry';
+import type { ContractSource, LaneOverride, LanePending } from '@shared/owner/state';
+import type { SessionStore } from '../index/sessions';
+import { laneOn } from './launch';
+import { resolveStyle } from './resolve-style';
+import type { OwnerChannelStore, OwnerSessionRow } from './store';
+
+export interface ModsDeps {
+  store: OwnerChannelStore;
+  sessions: Pick<SessionStore, 'get'>;
+  appEnabled: () => boolean;
+  configHome: () => Promise<string>; // the engine's config home (the captured login-shell environment's)
+  managedSettingsPath?: string; // the tests' seam
+}
+
+export async function modsList(deps: ModsDeps, appSessionId?: AppSessionId): Promise<ModRow[]> {
+  const appEnabled = deps.appEnabled();
+  const [mod] = BUILT_IN_MODS; // the to-human lane, the one entry today
+  const base = { id: mod!.id, name: mod!.name, description: mod!.description, version: mod!.version, enabled: appEnabled };
+  if (appSessionId === undefined) return [{ ...base, source: await nextLaunchSource(deps, appEnabled, null) }];
+
+  const row = deps.store.session(appSessionId);
+  const override = row?.override ?? 'inherit';
+  const on = laneOn(appEnabled, override);
+  const directory = deps.sessions.get(appSessionId)?.directory ?? null;
+  const source = row?.applied ?? (await nextLaunchSource(deps, on, directory));
+  const pending = pendingOf(row, on);
+  const mismatch = row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null;
+  return [{ ...base, source, perSession: override, ...(pending === null ? {} : { pending }), ...(mismatch === null ? {} : { mismatch }) }];
+}
+
+export function setSessionOverride(deps: Pick<ModsDeps, 'store'>, input: { appSessionId: AppSessionId; id: ModId; value: LaneOverride }): void {
+  deps.store.setOverride(input.appSessionId, input.value); // one mod today: the id names the to-human lane
+}
+
+// What a launch with the lane `on` in `directory` (null: no project) would desire.
+async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string | null): Promise<ContractSource> {
+  if (!on) return 'off';
+  const style = await resolveStyle({ configHome: await deps.configHome(), cwd: directory, managedSettingsPath: deps.managedSettingsPath });
+  return style.compatible ? 'external-compatible-style' : 'maws-contract';
+}
+
+// Whether the instructions still differ from the lane: never decided while on, the next launch; decided since the lane
+// changed, the next launch; decided under the same lane but without the flag to honour it, the next compaction.
+function pendingOf(row: OwnerSessionRow | null, on: boolean): LanePending | null {
+  if (row === null || row.applied === null) return on ? 'next-launch' : null;
+  if ((row.applied !== 'off') === on) return null;
+  return (row.desired !== 'off') === on ? 'next-compaction' : 'next-launch';
+}

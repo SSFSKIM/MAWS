@@ -44,12 +44,13 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
       // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
       // with no engine pin. E9: to version 9, with the system locale for dictation. E10: to version 10, with the
-      // supervisor's defaults. E4a: to version 11, with the browser's defaults.
+      // supervisor's defaults. E4a: to version 11, with the browser's defaults. P2-C: to version 12, with the to-human
+      // lane and its two notification groups on.
       expect(readSettings(userData)).toMatchObject({
-        version: 11, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11
+        version: 12, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; P2-C: 12
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
-        notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
+        notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
         engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
@@ -58,6 +59,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         voice: { locale: null }, // E9
         supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
         browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' }, // E4a
+        mods: { toHuman: { enabled: true } }, // P2-C
       });
       expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 

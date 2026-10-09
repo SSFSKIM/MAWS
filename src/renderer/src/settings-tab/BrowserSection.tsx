@@ -10,7 +10,7 @@
 // - Links that open a new window: a new tab of the session, or the system browser (Decision Log 11).
 import type { Settings } from '@shared/ipc/schema';
 import { isSearchUrlTemplate } from '@shared/browser/url';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { BROWSER } from './copy';
@@ -20,7 +20,7 @@ import { BrowserImport } from './BrowserImport';
 // E4b end
 
 const DEFAULT_PROFILE = ''; // the select's value for `profile: null`
-const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V11.browser.searchUrl;
+const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V12.browser.searchUrl;
 const LINK_TARGETS = (['in-app', 'external'] as const).map((value) => ({ value, label: BROWSER.linkTargets[value] }));
 
 export function BrowserSection({ settings }: { settings: Settings }) {

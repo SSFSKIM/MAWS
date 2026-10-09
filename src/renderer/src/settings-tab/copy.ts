@@ -215,6 +215,10 @@ export const NOTIFICATIONS = {
     planReviews: 'plan reviews',
     errors: 'errors',
     heldPeerMessages: 'held peer messages',
+    // P2-C start (2026-10-09): settings 12's two owner-channel groups (the P2-C document, §9); M6 lists them
+    asyncInput: 'questions an agent left for you',
+    essential: 'must-read messages',
+    // P2-C end
   },
   approvalsCaption: 'permission requests, dialogs and MCP elicitations',
   heldNever: 'Never notifies in this version',

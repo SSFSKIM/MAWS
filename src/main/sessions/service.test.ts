@@ -12,6 +12,8 @@ import { storeLabel } from './record-actions';
 import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
+import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
+import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT } from '@shared/owner/contract'; // P2-C
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -1007,3 +1009,63 @@ describe('E13: the session\'s cua socket in its launch (the in-app browser spec 
     expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: record.appId, extraSettings: { env: { CUA_BROWSER_BACKENDS: `/u/browser/cua/${record.appId}.sock` } } });
   });
 });
+
+// P2-C start (2026-10-09): the owner channel's decision on the session service's launches (the P2-C document, Design §2,
+// §3, §9; acceptance G1 for MAWS's side): every MAWS-owned launch but the trust bootstrap is decided and recorded, and a
+// fork takes its parent's override with its record
+describe('P2-C: the to-human lane on the session service’s launches', () => {
+  let h: SessionHarness;
+  let appEnabled: boolean;
+  beforeEach(async () => {
+    appEnabled = true;
+    h = await new SessionHarness({
+      ownerChannel: (index) => new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, managedSettingsPath: join(homedir(), 'no-such-managed-settings.json'), log: () => {} }),
+    }).start();
+  });
+  afterEach(() => h.dispose());
+  const contractTranscript = (cwd: string, sessionId: SessionId) =>
+    h.writeTranscript(cwd, sessionId, `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', TO_HUMAN_CONTRACT] } })}\n`);
+
+  it('a new session’s launch carries the contract and the advertisement and is recorded; the trust bootstrap carries neither', async () => {
+    const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    const [bootstrap, launch] = h.host.launches;
+    expect(bootstrap!.appSessionId).not.toBe(id);
+    expect(bootstrap).not.toHaveProperty('appendSystemPrompt');
+    expect(bootstrap!.extraSettings).toBeNull();
+    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '1' } } });
+    expect(launch).not.toHaveProperty('systemPromptSnapshot');
+    const row = h.index.ownerChannel.session(id);
+    expect(row).toMatchObject({ desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract' });
+    expect(row?.launchId).toEqual(expect.any(String)); // the host's answer to this launch
+    expect(row?.enabledAt).not.toBeNull();
+  });
+
+  it('a resume with the session’s override off passes "off" over a recorded contract, with no append and no variable', async () => {
+    const SID = sessionIdFor(0xc2);
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work })).record;
+    contractTranscript(h.work, SID);
+    h.index.ownerChannel.setOverride(record.appId, 'off');
+    await h.service.startSession(record.appId, { message: null, options: { trust: 'declined' } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+    const launch = h.host.launches.at(-1)!;
+    expect(launch).toMatchObject({ appSessionId: record.appId, systemPromptSnapshot: 'off', extraSettings: null });
+    expect(launch).not.toHaveProperty('appendSystemPrompt');
+    expect(h.index.ownerChannel.session(record.appId)).toMatchObject({ override: 'off', desired: 'off', recorded: 'contract:1', snapshotOff: true, applied: 'off', enabledAt: null });
+  });
+
+  it('a fork takes its parent’s override with its record and reads the parent’s transcript', async () => {
+    const SID = sessionIdFor(0xc3);
+    h.trustDirectory(h.work);
+    const src = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work })).record;
+    contractTranscript(h.work, SID);
+    h.index.ownerChannel.setOverride(src.appId, 'off');
+    const outcome = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready' });
+    expect(h.index.ownerChannel.override(outcome.appSessionId)).toBe('off');
+    expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: outcome.appSessionId, resume: { sessionId: SID, fork: true }, systemPromptSnapshot: 'off' });
+    expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:1', applied: 'off' });
+  });
+});
+// P2-C end

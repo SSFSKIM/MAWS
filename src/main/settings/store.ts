@@ -4,10 +4,10 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SettingsSchema, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { atomicWriteFileSync } from '../files/atomic-write';
 
-export const DEFAULT_SETTINGS: Settings = SETTINGS_DEFAULTS_V11;
+export const DEFAULT_SETTINGS: Settings = SETTINGS_DEFAULTS_V12;
 const defaults = (): Settings => structuredClone(DEFAULT_SETTINGS);
 
 export type ResolvedTheme = SettingsState['resolvedTheme'];

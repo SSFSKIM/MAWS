@@ -570,7 +570,7 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the resolved 
     const spawn = vi.fn();
     const host = engineHost({ spawn, binaryProbe: probe(), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
     const info = await host.call('engine.configure', { binaryPath: '/nonexistent' });
-    expect(info).toEqual({ path: '/nonexistent', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent') });
+    expect(info).toEqual({ path: '/nonexistent', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent'), declaresSystemPromptSnapshot: false /* P2-C */ });
     expect(await host.call('engine.binaryInfo', undefined)).toEqual(info);
     expect(await host.call('session.launch', { spec: spec() })).toEqual({ status: 'refused', reason: 'binary_missing', message: expect.stringContaining('/nonexistent') });
     expect(spawn).not.toHaveBeenCalled();
@@ -579,7 +579,7 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the resolved 
   it('null restores the installed binary and answers its real path and version, whatever the tested version', async () => {
     const host = engineHost({ binaryProbe: probe() });
     await host.call('engine.configure', { binaryPath: '/nonexistent' });
-    expect(await host.call('engine.configure', { binaryPath: null })).toEqual({ path: INSTALLED, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null });
+    expect(await host.call('engine.configure', { binaryPath: null })).toEqual({ path: INSTALLED, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null, declaresSystemPromptSnapshot: false /* P2-C */ });
     expect(getBinaryConfig()).toEqual({ binaryPath: null });
   });
 

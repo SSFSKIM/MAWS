@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TranscriptWidth } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
 import { createSettingsStore } from '../stores/settings';
 import { applyTranscriptWidth, connectTranscriptWidth, DEFAULT_TRANSCRIPT_WIDTH } from './transcript-width';
 
@@ -15,12 +15,12 @@ describe('the transcript width', () => {
   it("defaults to tokens.css's --measure", () => {
     const tokens = readFileSync(join(__dirname, '../styles/tokens.css'), 'utf8');
     expect([...tokens.matchAll(/--measure:\s*([^;]+);/g)].map((m) => m[1]!.trim())).toEqual([`${DEFAULT_TRANSCRIPT_WIDTH}px`]);
-    expect(SETTINGS_DEFAULTS_V11.appearance.transcriptWidth).toBe(DEFAULT_TRANSCRIPT_WIDTH);
+    expect(SETTINGS_DEFAULTS_V12.appearance.transcriptWidth).toBe(DEFAULT_TRANSCRIPT_WIDTH);
   });
 
   it('follows the settings store, leaving the token alone at the default', () => {
     const settings = createSettingsStore({ invoke: async () => ({ ok: false }), on: () => () => {} } as never);
-    const state = (transcriptWidth: TranscriptWidth) => ({ settings: { ...SETTINGS_DEFAULTS_V11, appearance: { ...SETTINGS_DEFAULTS_V11.appearance, transcriptWidth } }, resolvedTheme: 'light' as const });
+    const state = (transcriptWidth: TranscriptWidth) => ({ settings: { ...SETTINGS_DEFAULTS_V12, appearance: { ...SETTINGS_DEFAULTS_V12.appearance, transcriptWidth } }, resolvedTheme: 'light' as const });
     const off = connectTranscriptWidth(settings, root);
     expect(root.style.getPropertyValue('--measure')).toBe('');
     settings.setState({ state: state(1280) });

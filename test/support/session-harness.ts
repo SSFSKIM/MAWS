@@ -35,6 +35,7 @@ export interface HarnessOptions {
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
   seedIndex?: (path: string) => void; // writes the index file before the app opens it (an older build's history)
   browserBackend?: SessionServiceDeps['browserBackend']; // E13: the session's cua socket
+  ownerChannel?: (index: Index) => NonNullable<SessionServiceDeps['ownerChannel']>; // P2-C: the to-human lane's launch decision over the index
 }
 
 export class SessionHarness {
@@ -112,6 +113,7 @@ export class SessionHarness {
       settings: this.opts.settings,
       launchGate: this.opts.launchGate, // C12
       browserBackend: this.opts.browserBackend, // E13
+      ownerChannel: this.opts.ownerChannel?.(this.index), // P2-C
       userDefaults: this.opts.userDefaults, // W3
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200 },
       log: () => {},

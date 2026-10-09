@@ -20,6 +20,7 @@ import type { HostDispatch } from '../ipc/router';
 import type { C10Settings } from './launch-mapping';
 import type { BootstrapNotes, IntentStore } from './intents';
 import type { ReplaySeam } from './replay-seam';
+import type { OwnerChannelLaunches } from '../owner/launch'; // P2-C (2026-10-09)
 
 // C12: main's launch gate (C12 execution document, Interfaces "Engine custody"; W13: custody retired): null, or the
 // refusal the setup fails with (a host that does not hold the configured binary, or a bounded wait's)
@@ -49,6 +50,9 @@ export interface SessionServiceDeps {
   // E13 (the in-app browser spec of 2026-10-08): the session's cua socket, listening from this call on, for its launch's
   // CUA_BROWSER_BACKENDS; absent or null, the launch carries none
   browserBackend?: (appSessionId: AppSessionId) => string | null;
+  // P2-C (2026-10-09): the owner channel's launch decision (src/main/owner/launch.ts), consulted before every launch but
+  // the trust bootstrap's; absent, launches carry no contract, flag or advertisement
+  ownerChannel?: OwnerChannelLaunches;
   takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs'>; // W7: the tests' seams
   timing?: { watchdogMs?: number; stopWaitMs?: number };
   now?: () => string;
