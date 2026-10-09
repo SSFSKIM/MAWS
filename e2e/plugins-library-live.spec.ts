@@ -8,9 +8,9 @@
 // written. Then, through Playwright: one Haiku turn in the repository and the session stopped; `/plugins` at its library
 // size with Esc handing the keyboard back; My items' groups; frontend-design's detail; the loaded line on the exited
 // session with no engine started; Browse's counts and the other-projects card installing here; Manage marketplaces;
-// a second Haiku turn (the session resumed through the composer, since P2-A's Refresh is not on master), then `/skills`'
+// the session resumed with no turn (`session.start`, since P2-A's Refresh is not on master), then `/skills`'
 // groups with Use in chat, and `/sandbox`. Light and dark shots of each library. The owner's ~/.claude.json check runs
-// around the whole run, outside this file (§6.3). Run on purpose only; it spends usage (two one-line Haiku turns):
+// around the whole run, outside this file (§6.3). Run on purpose only; it spends usage (one one-line Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 pnpm exec playwright test e2e/plugins-library-live.spec.ts --reporter=line
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -194,11 +194,13 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 960));
     let id = '';
+    let launched = 0; // the engine starts main answered by the end of the first step (the session's own launch)
 
     await step('start', 'a session in proj on Haiku, one turn ("Reply with OK"), then stopped', async () => {
       const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
       if (!projects.some((p) => p.directory === scratch.repo)) value(await invoke(page, 'session.projects.add', { directory: scratch.repo }));
       await newChatIn(page, 'e8-repo');
+      await expect(page.getByRole('heading', { name: 'New chat in e8-repo' })).toBeVisible();
       id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
       const model = await openWidget(page, 'model');
       await model.getByRole('menuitemradio', { name: HAIKU }).click();
@@ -212,6 +214,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       value(await invoke(page, 'session.stop', { appSessionId: id as AppSessionId, reason: 'stop' }));
       await expect.poll(async () => (await status(page, id)).process, { timeout: 60_000 }).not.toBe('ready');
       scratch.log(`stopped: ${(await status(page, id)).process}`);
+      launched = await starts();
     });
 
     await step('size', '/plugins: the library box at a 1440 by 960 window; Esc closes it and the composer has the keyboard', async () => {
@@ -273,7 +276,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       expect(line).toMatch(/plugins? loaded in this session/);
       // P2-A's Refresh (acquire, then reload_plugins) is not on master: the stand-in offers none on a stopped session
       expect(await plugins.locator('[data-plugins-loaded]').getByRole('button', { name: 'Refresh' }).count()).toBe(0);
-      expect(await starts()).toBe(0);
+      expect(await starts()).toBe(launched); // nothing since the stop: /plugins, the detail and the line started no engine
       expect((await status(page, id)).process).not.toBe('ready');
     });
 
@@ -330,8 +333,12 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await manage.getByRole('button', { name: 'Done' }).click();
     });
 
-    await step('resume', 'a second Haiku turn resumes the session (P2-A’s Refresh is not on master); the loaded line reads Loaded now', async () => {
-      await send(page, 'Reply with OK');
+    // The composer refuses a send to a stopped (not released) session, and P2-A's Refresh is not on master: the session is
+    // resumed through `session.start` with no message, the command the gateway chip's start uses; no turn runs.
+    await step('resume', 'the session resumed with no turn (P2-A’s Refresh is not on master); the loaded line reads Loaded now', async () => {
+      const outcome = value(await invoke(page, 'session.start', { appSessionId: id as AppSessionId, message: null, options: {} }));
+      scratch.log(`session.start: ${outcome.status}`);
+      await expect.poll(async () => (await status(page, id)).process, { timeout: 120_000, intervals: [500] }).toBe('ready');
       await idle(page, id);
       const s = await status(page, id);
       scratch.log(`session ${id}: ${s.process} · plugins loaded: ${s.plugins.map((p) => p.source ?? p.name).join(', ')}`);
