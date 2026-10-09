@@ -15,7 +15,7 @@ import type { HostDispatch, registerMainHandler } from '../ipc/router';
 import { transcriptPathOf, type HostEvents } from '../sessions/context';
 import { OwnerChannelLaunches } from './launch';
 import { modsList, setSessionOverride, type ModsDeps } from './mods';
-import { transcriptEvidence } from './prompt-state';
+import { transcriptChain, transcriptEvidence } from './prompt-state';
 import { OwnerChannelService, type OwnerChannelServiceDeps } from './service';
 
 export interface OwnerChannelDeps {
@@ -61,6 +61,10 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
   };
 
   // M4 start (2026-10-09): the marks, the answers and their projection
+  const transcriptOf = async (appSessionId: AppSessionId): Promise<string | null> => {
+    const record = deps.index.sessions.get(appSessionId);
+    return record?.engineSessionId == null ? null : transcriptPathOf(await deps.engineEnv, record.directory, record.engineSessionId);
+  };
   const service = new OwnerChannelService({
     store: deps.index.ownerChannel,
     sessions: deps.index.sessions,
@@ -68,9 +72,12 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     attention: deps.attention,
     dispatch: deps.dispatch,
     transcriptEvidence: async (appSessionId, uuids) => {
-      const record = deps.index.sessions.get(appSessionId);
-      if (record?.engineSessionId == null) return null;
-      return transcriptEvidence(await transcriptPathOf(await deps.engineEnv, record.directory, record.engineSessionId), uuids);
+      const path = await transcriptOf(appSessionId);
+      return path === null ? null : transcriptEvidence(path, uuids);
+    },
+    transcriptChain: async (appSessionId, uuid) => {
+      const path = await transcriptOf(appSessionId);
+      return path === null ? null : transcriptChain(path, uuid);
     },
     emit: deps.emit,
     log,

@@ -7,6 +7,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { AnswerMember, ContractSource, LaneOverride } from '@shared/owner/state';
 import type { Db, Value } from '../index/db';
+import type { StoredAnswer } from './answers';
 import type { RecordedState } from './prompt-state';
 
 export interface OwnerSessionRow {
@@ -55,10 +56,13 @@ export interface OwnerMarkRow {
   item: boolean; // item-eligible: at or after the watermark when derived
   live: boolean; // from a MAWS process while the lane was on and the session not foreign-held
   state: OwnerMarkState;
+  // a question's delivered answer: the newest the engine took (its text, origin, members and time), or null
   answerText: string | null;
   answerOrigin: 'answer' | 'reply' | 'legacy' | null;
   answerMembers: AnswerMember[];
   answeredAt: string | null;
+  // its answers still on their way, oldest first: the newest decides `queued` or `unconfirmed` (Design §6)
+  answerAttempts: StoredAnswer[];
   readAt: string | null;
   stateChangedAt: string;
 }
@@ -97,6 +101,7 @@ interface MarkRow {
   answer_origin: OwnerMarkRow['answerOrigin'];
   answer_members: string;
   answered_at: string | null;
+  answer_attempts: string;
   read_at: string | null;
   state_changed_at: string;
 }
@@ -135,16 +140,18 @@ const toMark = (row: MarkRow): OwnerMarkRow => ({
   answerOrigin: row.answer_origin,
   answerMembers: JSON.parse(row.answer_members) as AnswerMember[],
   answeredAt: row.answered_at,
+  answerAttempts: JSON.parse(row.answer_attempts) as StoredAnswer[],
   readAt: row.read_at,
   stateChangedAt: row.state_changed_at,
 });
 
 // The mark fields a caller may change after the mark is stored; its identity, kind and derivation facts never change.
-export type MarkUpdate = Partial<Pick<OwnerMarkRow, 'state' | 'answerText' | 'answerOrigin' | 'answerMembers' | 'answeredAt' | 'readAt' | 'stateChangedAt' | 'item' | 'live'>>;
+export type MarkUpdate = Partial<Pick<OwnerMarkRow, 'state' | 'answerText' | 'answerOrigin' | 'answerMembers' | 'answeredAt' | 'answerAttempts' | 'readAt' | 'stateChangedAt' | 'item' | 'live'>>;
 const MARK_COLUMNS: Record<keyof MarkUpdate, string> = {
   state: 'state', answerText: 'answer_text', answerOrigin: 'answer_origin', answerMembers: 'answer_members', answeredAt: 'answered_at',
-  readAt: 'read_at', stateChangedAt: 'state_changed_at', item: 'item', live: 'live',
+  answerAttempts: 'answer_attempts', readAt: 'read_at', stateChangedAt: 'state_changed_at', item: 'item', live: 'live',
 };
+const JSON_COLUMNS = new Set<keyof MarkUpdate>(['answerMembers', 'answerAttempts']);
 
 export class OwnerChannelStore {
   constructor(private readonly db: Db) {}
@@ -223,10 +230,10 @@ export class OwnerChannelStore {
     return (
       this.db.run(
         `INSERT INTO owner_channel_marks (id, app_session_id, kind, message_uuid, block_index, span, grammar, head, at, item, live, state,
-          answer_text, answer_origin, answer_members, answered_at, read_at, state_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          answer_text, answer_origin, answer_members, answered_at, answer_attempts, read_at, state_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO NOTHING`,
         mark.id, mark.appSessionId, mark.kind, mark.messageUuid, mark.blockIndex, mark.span, mark.grammar, mark.head, mark.at, mark.item ? 1 : 0, mark.live ? 1 : 0,
-        mark.state, mark.answerText, mark.answerOrigin, JSON.stringify(mark.answerMembers), mark.answeredAt, mark.readAt, mark.stateChangedAt,
+        mark.state, mark.answerText, mark.answerOrigin, JSON.stringify(mark.answerMembers), mark.answeredAt, JSON.stringify(mark.answerAttempts), mark.readAt, mark.stateChangedAt,
       ) === 1
     );
   }
@@ -235,7 +242,7 @@ export class OwnerChannelStore {
     const values: Record<string, Value> = {};
     for (const [key, value] of Object.entries(update) as [keyof MarkUpdate, MarkUpdate[keyof MarkUpdate]][]) {
       if (value === undefined) continue;
-      values[MARK_COLUMNS[key]] = key === 'answerMembers' ? JSON.stringify(value) : (value as Value);
+      values[MARK_COLUMNS[key]] = JSON_COLUMNS.has(key) ? JSON.stringify(value) : (value as Value);
     }
     this.db.update('owner_channel_marks', 'id', id, values);
   }

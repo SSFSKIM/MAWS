@@ -6,7 +6,8 @@
 // or `cancelled` for a uuid the host is not withdrawing kills that uuid; a `cancelled` while the host withdraws it waits
 // for the host's outcome row (`hold`, `cancel`, `giveback`). A member added late is reconciled at once against the
 // lifecycle evidence already seen for it. Nothing here concludes from absence: the service's recovery read does, after
-// a fold of the journals, and an `unknown` member waits for the transcript's evidence.
+// a fold of the journals, and an `unknown` member waits for the transcript's evidence. A question may have several
+// answers on their way (`settleAnswers`); each follows its own members.
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AnswerMember, AnswerOrigin } from '@shared/owner/state';
 
@@ -39,15 +40,43 @@ const UUID_LIFE: Partial<Record<TransitionAction, Life>> = {
   cancel: 'dead', abandon: 'dead', promote: 'alive',
 };
 
-export function newAnswer(seed: { text: string; origin: AnswerOrigin; members: AnswerMember[]; unconfirmed: boolean; reportedAt: string }): Answer {
-  return { ...seed, members: [...seed.members], deliveredAt: null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set() };
+// An answer as the table keeps it while it is on its way (one element of `owner_channel_marks.answer_attempts`).
+export interface StoredAnswer {
+  text: string;
+  origin: AnswerOrigin;
+  members: AnswerMember[];
+  unconfirmed: boolean;
+  reportedAt: string;
 }
+
+export function newAnswer(seed: StoredAnswer): Answer {
+  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set() };
+}
+
+export const storedOf = (answer: Answer): StoredAnswer => ({ text: answer.text, origin: answer.origin, members: answer.members, unconfirmed: answer.unconfirmed, reportedAt: answer.reportedAt });
 
 export function statusOf(answer: Answer): AnswerStatus {
   if (answer.deliveredAt !== null) return 'delivered';
   const open = answer.members.some((member) => member.life !== 'dead');
   if (answer.unconfirmed && (open || answer.members.length === 0)) return 'unconfirmed';
   return open ? 'queued' : 'unanswered';
+}
+
+/**
+ * One question's answers on their way, oldest first, sorted by what they came to. Each attempt keeps its own text and
+ * members ("Answer again" sends a new one, as does a follow-up Reply), so one attempt's evidence settles that attempt
+ * only. The newest attempt the engine took is the question's answer (`delivered`); an older attempt can no longer
+ * change it, so it is dropped, delivered or not. An attempt no member carries any more is `dead` (its refusal, if any,
+ * is the question's note). What is left is `open`, and the question's card reads the newest of them.
+ */
+export function settleAnswers(attempts: readonly Answer[]): { delivered: Answer | null; open: Answer[]; dead: Answer[] } {
+  const newest = attempts.findLastIndex((attempt) => statusOf(attempt) === 'delivered');
+  const later = attempts.slice(newest + 1);
+  return {
+    delivered: newest < 0 ? null : attempts[newest]!,
+    open: later.filter((attempt) => statusOf(attempt) !== 'unanswered'),
+    dead: later.filter((attempt) => statusOf(attempt) === 'unanswered'),
+  };
 }
 
 const memberOf = (answer: Answer, kind: AnswerMember['kind'], id: string | null) => (id === null ? undefined : answer.members.find((m) => m.kind === kind && m.id === id));

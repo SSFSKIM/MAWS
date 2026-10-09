@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
 import { CONTRACT_HEADER, TO_HUMAN_CONTRACT } from '@shared/owner/contract';
 import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
-import { classifySnapshot, PromptStateReader, recordedState, transcriptEvidence } from './prompt-state';
+import { classifySnapshot, PromptStateReader, recordedState, transcriptChain, transcriptEvidence } from './prompt-state';
 
 let dir: string;
 beforeEach(() => {
@@ -178,5 +178,26 @@ describe('transcriptEvidence', () => {
     expect(await transcriptEvidence(path, [NEVER])).toBeNull();
     appendFileSync(path, '\n');
     expect(await transcriptEvidence(path, [NEVER])).toBe(NEVER);
+  });
+});
+
+describe('transcriptChain (what a rewind took off the chain)', () => {
+  // rewind-real: the prompt 36a2aa44 and its answer 57525d04 were rewound; the next prompt a4d68c72 hangs from the
+  // attachment the rewound one hung from, and the cut branch stays in the file
+  const REWOUND = '36a2aa44-9ae9-455e-b52b-e70b27eecde5';
+  const BELOW = '57525d04-1955-412a-925d-f406bc870d17';
+  const fixture = join(TRANSCRIPT_FIXTURE_DIR, 'rewind-real.jsonl');
+
+  it("answers the target and every record below it on the engine's own transcript, none of the branch that replaced it, across chunks", async () => {
+    expect(await transcriptChain(fixture, REWOUND)).toEqual(new Set([REWOUND, BELOW]));
+    expect(await new PromptStateReader({ chunkBytes: 256 }).transcriptChain(fixture, REWOUND)).toEqual(new Set([REWOUND, BELOW]));
+  });
+
+  it('follows a compact boundary by its logical parent, and is null for a uuid no record has or a missing file', async () => {
+    const link = (uuid: string, parentUuid: string | null, more: Record<string, unknown> = {}) => JSON.stringify({ type: 'user', uuid, parentUuid, ...more });
+    const path = write('chain.jsonl', [link('p1', null), link('a1', 'p1'), link('b1', null, { type: 'system', subtype: 'compact_boundary', logicalParentUuid: 'a1' }), link('a2', 'b1'), link('other', null)]);
+    expect(await transcriptChain(path, 'a1')).toEqual(new Set(['a1', 'b1', 'a2']));
+    expect(await transcriptChain(path, 'nobody')).toBeNull();
+    expect(await transcriptChain(join(dir, 'missing.jsonl'), 'a1')).toBeNull();
   });
 });

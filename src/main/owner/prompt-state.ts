@@ -10,7 +10,7 @@
 // read again from the start. A last line still being written is left for the next read.
 //
 // P2-C M4: the same backward line reader answers the transcript's evidence that the engine took a prompt
-// (`transcriptEvidence`, Design §6).
+// (`transcriptEvidence`, Design §6) and what a rewind took off the chain (`transcriptChain`, Design §5).
 import { open } from 'node:fs/promises';
 import type { MessageUuid } from '@shared/graph/ids';
 import { CONTRACT_HEADER } from '@shared/owner/contract';
@@ -119,6 +119,40 @@ export class PromptStateReader {
     }
   }
 
+  // P2-C M4 (Design §5, a rewind): the uuids of the record `uuid` and of every record below it on the transcript's chain
+  // (its `parentUuid` links, and a compact boundary's `logicalParentUuid`), or null when no record has that uuid or the
+  // file cannot be read. The transcript only grows, and a rewind leaves the branch it cut in the file (the next prompt
+  // hangs from the message the rewind kept, rewind-real): so this is what a rewind to `uuid` took off the chain. Read
+  // whole, and only when main has no memory of the rewind's target (a restart, an evicted entry).
+  async transcriptChain(path: string, uuid: string): Promise<Set<string> | null> {
+    let file;
+    try {
+      file = await open(path, 'r');
+    } catch {
+      return null;
+    }
+    try {
+      const children = new Map<string, string[]>();
+      let found = false;
+      await this.linesBackwards(file, 0, (await file.stat()).size, (line) => {
+        if (!line.includes(PARENT_TEXT)) return false;
+        const link = linkOf(line);
+        if (link === null) return false;
+        if (link.uuid === uuid) found = true;
+        for (const parent of link.parents) children.set(parent, [...(children.get(parent) ?? []), link.uuid]);
+        return false;
+      });
+      if (!found) return null;
+      const below = new Set([uuid]);
+      for (const member of below) for (const child of children.get(member) ?? []) below.add(child);
+      return below;
+    } catch {
+      return null;
+    } finally {
+      await file.close();
+    }
+  }
+
   private async scan(file: FileHandle, from: number, to: number): Promise<{ found: Found | null; covered: number }> {
     let found: Found | null = null;
     const covered = await this.linesBackwards(file, from, to, (line) => (found = recordOf(line)) !== null);
@@ -172,6 +206,21 @@ function takenPromptOf(line: Buffer): MessageUuid | null {
   return null;
 }
 
+// A chain record's uuid and the uuids it hangs from, or null for a line that is not one.
+const PARENT_TEXT = Buffer.from('"parentUuid"');
+function linkOf(line: Buffer): { uuid: string; parents: string[] } | null {
+  let record: unknown;
+  try {
+    record = JSON.parse(line.toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (typeof record !== 'object' || record === null) return null;
+  const r = record as { uuid?: unknown; parentUuid?: unknown; logicalParentUuid?: unknown };
+  if (typeof r.uuid !== 'string') return null;
+  return { uuid: r.uuid, parents: [r.parentUuid, r.logicalParentUuid].filter((p): p is string => typeof p === 'string') };
+}
+
 const reader = new PromptStateReader();
 
 // The recorded state of the transcript at `path`, through the one cached tail scan.
@@ -182,4 +231,9 @@ export function recordedState(path: string): Promise<RecordedState> {
 // The first of `uuids` the transcript at `path` shows the engine took, or null (Design §6).
 export function transcriptEvidence(path: string, uuids: readonly MessageUuid[]): Promise<MessageUuid | null> {
   return reader.transcriptEvidence(path, uuids);
+}
+
+// The uuids at and below `uuid` on the chain of the transcript at `path`, or null (a rewind's reach).
+export function transcriptChain(path: string, uuid: string): Promise<Set<string> | null> {
+  return reader.transcriptChain(path, uuid);
 }

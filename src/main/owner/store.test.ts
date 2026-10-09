@@ -81,7 +81,7 @@ describe('OwnerChannelStore', () => {
   describe('marks', () => {
     const mark = (over: Partial<OwnerMarkRow> = {}): OwnerMarkRow => ({
       id: `${a}:m1:0:q0`, appSessionId: a, kind: 'need-input', messageUuid: 'm1', blockIndex: 0, span: 0, grammar: 2, head: 'Which backend?', at: '2026-10-09T10:00:00.000Z',
-      item: true, live: true, state: 'unanswered', answerText: null, answerOrigin: null, answerMembers: [], answeredAt: null, readAt: null, stateChangedAt: '2026-10-09T10:00:00.000Z', ...over,
+      item: true, live: true, state: 'unanswered', answerText: null, answerOrigin: null, answerMembers: [], answeredAt: null, answerAttempts: [], readAt: null, stateChangedAt: '2026-10-09T10:00:00.000Z', ...over,
     });
 
     it('stores a mark once by its id, answers the session’s marks in order, and updates one', () => {
@@ -91,9 +91,13 @@ describe('OwnerChannelStore', () => {
       index.ownerChannel.putMark(essential);
       expect(index.ownerChannel.marks(a)).toEqual([mark(), essential]);
       expect(index.ownerChannel.marks(b)).toEqual([]);
-      const members = [{ kind: 'entry' as const, id: 'q-1', life: 'alive' as const }];
-      index.ownerChannel.updateMark(mark().id, { state: 'queued', answerText: 'Answering "Which backend?": Postgres', answerOrigin: 'answer', answerMembers: members, stateChangedAt: '2026-10-09T10:01:00.000Z' });
-      expect(index.ownerChannel.marks(a)[0]).toEqual(mark({ state: 'queued', answerText: 'Answering "Which backend?": Postgres', answerOrigin: 'answer', answerMembers: members, stateChangedAt: '2026-10-09T10:01:00.000Z' }));
+      const attempts = [{ text: 'Answering "Which backend?": Postgres', origin: 'answer' as const, members: [{ kind: 'entry' as const, id: 'q-1', life: 'alive' as const }], unconfirmed: false, reportedAt: '2026-10-09T10:01:00.000Z' }];
+      index.ownerChannel.updateMark(mark().id, { state: 'queued', answerAttempts: attempts, stateChangedAt: '2026-10-09T10:01:00.000Z' });
+      expect(index.ownerChannel.marks(a)[0]).toEqual(mark({ state: 'queued', answerAttempts: attempts, stateChangedAt: '2026-10-09T10:01:00.000Z' }));
+      // the delivered answer and a follow-up on its way, side by side
+      const delivered = { answerText: 'Answering "Which backend?": SQLite', answerOrigin: 'reply' as const, answerMembers: [{ kind: 'uuid' as const, id: 'u-1', life: 'alive' as const }], answeredAt: '2026-10-09T10:02:00.000Z' };
+      index.ownerChannel.updateMark(mark().id, delivered);
+      expect(index.ownerChannel.mark(mark().id)).toEqual(mark({ state: 'queued', answerAttempts: attempts, ...delivered, stateChangedAt: '2026-10-09T10:01:00.000Z' }));
     });
 
     it('M4: reads one mark by id, the open answers across sessions, and the sessions holding marks', () => {

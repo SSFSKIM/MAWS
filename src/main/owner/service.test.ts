@@ -6,7 +6,7 @@
 // reader from a transcript file the test writes as the engine would.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, SessionId } from '@shared/graph/ids';
@@ -20,7 +20,7 @@ import { OwnerHostSim } from '../../../test/support/owner-host';
 import { ChainFollower } from '../../engine-host/fs/chain-follower';
 import { Normalizer } from '../../engine-host/normalizer';
 import { Index } from '../index/index';
-import { transcriptEvidence } from './prompt-state';
+import { transcriptChain, transcriptEvidence } from './prompt-state';
 import { OwnerChannelService, type AnsweredInput } from './service';
 import type { LaunchRecord } from './store';
 
@@ -35,6 +35,7 @@ let dir: ReturnType<typeof tempDir>;
 let index: Index;
 let app: AppSessionId;
 let transcript: string;
+const services: OwnerChannelService[] = []; // stopped after each test (a recovery retry's timer goes with it)
 
 beforeEach(() => {
   dir = tempDir('maws-owner-service-');
@@ -45,6 +46,7 @@ beforeEach(() => {
   writeFileSync(transcript, '');
 });
 afterEach(() => {
+  for (const service of services.splice(0)) service.stop();
   index.close();
   dir.dispose();
 });
@@ -60,18 +62,23 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
   const h = { appEnabled: opts.appEnabled ?? true };
   let service!: OwnerChannelService;
   const sim = new OwnerHostSim(app, SID, (events) => service.onEvents(app, events));
-  const make = () =>
-    new OwnerChannelService({
+  const make = () => {
+    const made = new OwnerChannelService({
       store: index.ownerChannel,
       sessions: index.sessions,
       appEnabled: () => h.appEnabled,
       attention: { setOwnerItems: (id, items, silent) => void (id === app && projections.push({ items, silent: [...silent] })) },
       dispatch: sim.dispatch,
       transcriptEvidence: (_id, uuids) => transcriptEvidence(transcript, uuids),
+      transcriptChain: (_id, uuid) => transcriptChain(transcript, uuid),
       emit: (_name, payload) => void states.push(payload.state),
       now: () => sim.nowIso(),
       log: () => {},
+      recoveryRetryMs: 5,
     });
+    services.push(made);
+    return made;
+  };
   service = make();
   service.start({ streaming: true });
   if (opts.launch !== false) await sim.launch();
@@ -96,6 +103,12 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
   return { sim, h, projections, states, get service() { return service; }, restart, state, mark, question, ask, report, items, taken };
 }
 const flush = () => new Promise((r) => setImmediate(r));
+
+// Journal rows the host's record lost (a torn journal, or a saved queue changed with no process to journal it): gone
+// from `session.promptHistory` and from the next launch's recovery read.
+function loseRows(sim: OwnerHostSim, lost: (row: { direction: string; frame: Record<string, unknown> }) => boolean): void {
+  for (const launch of sim.launches) launch.rows = launch.rows.filter((row) => !lost(row as unknown as { direction: string; frame: Record<string, unknown> }));
+}
 
 describe('answers follow their members (Design §6)', () => {
   it('an idle send the engine started before the renderer reported it: delivered from the log', async () => {
@@ -244,6 +257,42 @@ describe('answers follow their members (Design §6)', () => {
     expect(t.question(q).state).toBe('delivered');
   });
 
+  it('Answer again keeps each attempt\'s text and members: the old attempt\'s evidence settles the old text and never certifies the new one', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const postgres = answerText('Which backend?', 'Postgres');
+    const sqlite = answerText('Which backend?', 'SQLite');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(postgres, { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid, text: postgres });
+    await t.restart(); // the app closed
+    t.sim.listening = false;
+    let answer!: () => void;
+    t.sim.cancelGate = new Promise<void>((r) => (answer = r));
+    const holding = t.sim.queue.hold(messageUuid); // the withdraw row and the engine's cancelled; the hold row waits
+    await flush();
+    // the journal lost the withdrawal's rows (torn): the recovery read cannot settle the steer
+    loseRows(t.sim, (row) => (row.direction === 'meta' && row.frame.action === 'withdraw') || (row.direction === 'in' && row.frame.command_uuid === messageUuid));
+    t.sim.historyComplete = false;
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'unconfirmed', text: postgres });
+    const retry = await t.sim.queue.send(sqlite); // Answer again
+    t.report(q, { disposition: 'queued', queueId: retry.entry.queueId, text: sqlite });
+    expect(t.question(q)).toEqual({ state: 'queued', text: sqlite, origin: 'answer', members: [{ kind: 'entry', id: retry.entry.queueId, life: 'alive' }] });
+    answer();
+    const held = await holding; // the old steer, withdrawn into a held entry: the old attempt's member
+    const promoted = await t.sim.queue.promote(held.queueId, { priority: 'next' });
+    t.sim.engine(promoted.messageUuid, 'started');
+    // the old attempt arrived and is the question's answer; the new one is still on its way, and its card says so
+    expect(t.question(q)).toMatchObject({ state: 'queued', text: sqlite });
+    expect(index.ownerChannel.mark(q)).toMatchObject({ answerText: postgres, answerOrigin: 'answer' });
+    await t.sim.turnEnded();
+    const sent = t.sim.queue.state.entries.find((e) => e.queueId === retry.entry.queueId)!.messageUuid!;
+    t.sim.engine(sent, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: sqlite, origin: 'answer' } });
+  });
+
   it('started with no identifier is unconfirmed; a unique head settles it once the engine takes the prompt', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
@@ -353,6 +402,67 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { origin: 'answer' } });
   });
 
+  it.each(['backoff', 'reconnect'] as const)('a failed recovery read keeps the gate closed, so a partial log concludes nothing, and the read is retried (%s)', async (via) => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    t.service.hostDown();
+    t.sim.listening = false;
+    const held = await t.sim.queue.hold(messageUuid); // withdraw, the engine's cancelled, hold: all unheard
+    t.sim.listening = true;
+    t.sim.resync(['command.lifecycle']); // the reconnect re-delivers the engine's cancelled, not the host's rows
+    t.sim.failCommand = 'session.promptHistory';
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
+    expect(t.items().some((i) => i.kind === 'async_input')).toBe(false);
+    t.sim.failCommand = null;
+    const expected = { state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: messageUuid, life: 'dead' }, { kind: 'entry', id: held.queueId, life: 'alive' }]) };
+    if (via === 'reconnect') {
+      t.service.hostDown();
+      await t.service.hostStreaming();
+      expect(t.question(q)).toMatchObject(expected);
+    } else {
+      await vi.waitFor(() => expect(t.question(q)).toMatchObject(expected));
+    }
+  });
+
+  it.each(['reconnect', 'restart'] as const)('a withdrawal the folded record proves stays queued through a %s until its outcome row, with no second answer offered', async (via) => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    let answer!: () => void;
+    t.sim.cancelGate = new Promise<void>((r) => (answer = r));
+    const holding = t.sim.queue.hold(messageUuid); // withdraw and the engine's cancelled are in, the hold row is not
+    await flush();
+    if (via === 'reconnect') t.service.hostDown();
+    else await t.restart();
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: [{ kind: 'uuid', id: messageUuid, life: 'withdrawing' }] });
+    expect(t.items().some((i) => i.kind === 'async_input')).toBe(false);
+    answer();
+    const held = await holding;
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: messageUuid, life: 'dead' }, { kind: 'entry', id: held.queueId, life: 'alive' }]) });
+  });
+
+  it('a saved entry removed with no row (no process held the queue) is still read from the transcript and otherwise unconfirmed', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'queued', queueId: entry.queueId });
+    await t.restart();
+    t.sim.listening = false;
+    await t.sim.queue.remove(entry.queueId);
+    loseRows(t.sim, (row) => row.direction === 'meta' && row.frame.action === 'remove'); // a saved queue's removal writes none
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'unconfirmed' });
+  });
+
   it('a restart restores open answers from the table and folds the history before anything else', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
@@ -426,6 +536,21 @@ describe('ownerChannel.cancel (Design §6, "Cancel")', () => {
     expect(await t.service.cancel({ appSessionId: app, markId: q })).toEqual({ outcome: 'cancelled' });
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres') } });
     expect(t.items().some((i) => i.kind === 'async_input')).toBe(false);
+  });
+
+  it('the delivered answer is kept in the table beside a follow-up: a restart, then the follow-up\'s removal, reads the delivered answer again', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const first = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'sent', messageUuid: first.entry.messageUuid! });
+    t.sim.engine(first.entry.messageUuid!, 'started');
+    t.sim.turn = true;
+    const followUp = await t.sim.queue.send(answerText('Which backend?', 'SQLite'));
+    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'queued', queueId: followUp.entry.queueId });
+    await t.restart();
+    await t.sim.queue.remove(followUp.entry.queueId);
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres'), origin: 'answer' } });
   });
 
   it('a failed command leaves the answer unchanged', async () => {
@@ -585,6 +710,26 @@ describe('marks and the attention projection (Design §5)', () => {
     const states = Object.fromEntries(index.ownerChannel.marks(app).map((m) => [m.head, m.state]));
     expect(states).toEqual({ 'Refused?': 'retired', 'Retracted?': 'retired', 'Rewound?': 'retired' });
     expect(t.items()).toEqual([]);
+  });
+
+  it('a rewind to a prompt this run never saw retires the marks the transcript\'s chain puts after it, though the kept assistant has no mark', async () => {
+    const t = await harness();
+    const kept = t.sim.assistant(['No mark here.']);
+    const { entry } = await t.sim.queue.send('Continue');
+    const q = t.ask('Which backend?');
+    const before = t.ask('Earlier?'); // a mark the rewind keeps: its message is before the target on the chain (the chain decides, not the clock)
+    const target = entry.messageUuid!;
+    const record = (type: string, uuid: string, parentUuid: string | null) => JSON.stringify({ type, uuid, parentUuid, sessionId: SID });
+    // the engine's chain: the other mark's message, the kept assistant, the target prompt, the question's message
+    const messageOf = (id: MarkId) => index.ownerChannel.mark(id)!.messageUuid;
+    appendFileSync(transcript, [record('assistant', messageOf(before), null), record('assistant', kept, messageOf(before)), record('user', target, kept), record('assistant', messageOf(q), target)].map((l) => `${l}\n`).join(''));
+    await t.restart(); // this run never saw the target prompt
+    t.sim.row('out', { type: 'control_request', request_id: 'rw-2', request: { subtype: 'rewind_conversation', target_message_uuid: target } });
+    t.sim.row('in', { type: 'control_response', response: { subtype: 'success', request_id: 'rw-2', response: { rewound: true, targetMessageUuid: target, prefillText: null, precedingAssistantUuid: kept } } });
+    await t.service.settled();
+    expect(t.question(q)).toEqual({ state: 'retired' });
+    expect(t.question(before)).toEqual({ state: 'unanswered' });
+    expect(t.items().map((i) => i.summary)).toEqual(['Question — Earlier?']);
   });
 
   it('a live journal and its transcript yield the same mark ids', async () => {

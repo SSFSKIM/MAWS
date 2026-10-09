@@ -3,15 +3,19 @@
 // - Marks. Each finalized main-thread text block's questions and essentials are stored once by their id (a replay, a
 //   resync burst or a backfill changes nothing). A mark at or after the session's watermark may raise an item; one that
 //   came live from a MAWS process while the lane was on and no terminal or job held the session may notify. A superseding
-//   block, a retraction and a rewind retire the marks of the messages they take away.
+//   block, a retraction and a rewind retire the marks of the messages they take away (a rewind to a prompt this run did
+//   not see, by the transcript's chain).
 // - Answers. The renderer reports the seam's result (`ownerChannel.answered`); the answer then follows its members
 //   (./answers.ts) through the host's `queue.transition` rows and the engine's `command.lifecycle`, from a ten-minute log
 //   of both for a report that arrives late. A member the transcript must settle (an exit's uncertain submission) is read
-//   from it. `ownerChannel.cancel` withdraws an answer's queued entry or pending steer through the host.
+//   from it. Each answer sent ("Answer again", a follow-up Reply) keeps its own text and members; the newest the engine
+//   took is the question's answer, kept in the table beside any answer still on its way. `ownerChannel.cancel`
+//   withdraws the question's queued entries and pending steers through the host.
 // - Recovery. Main hears nothing while the host is away (an app closed or crashed, a reconnect): at start and at every
 //   reconnect, each session holding an answer on its way reads the host's prompt record (`session.promptHistory`) and
-//   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles is read
-//   from the transcript, and what that cannot settle reads `unconfirmed`, never a guess.
+//   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles, and no
+//   withdrawal on record explains, is read from the transcript, and what that cannot settle reads `unconfirmed`, never a
+//   guess. A read that fails leaves the session waiting, and is tried again after a backoff or at the next reconnect.
 // - Legacy recognition. A human prompt the engine took that answers `Answering "<head>": …` settles the one question of
 //   the session with that head (an answer given in a terminal through the doperpowers mod, or one whose report never
 //   arrived), unless the prompt is itself a member of an answer.
@@ -29,11 +33,11 @@ import { TO_HUMAN_GRAMMAR_VERSION } from '@shared/owner/to-human-parser';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall } from '../sessions/context';
-import { applyEvent, newAnswer, statusOf, type Answer, type PromptEvent } from './answers';
+import { applyEvent, newAnswer, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';
 import { pendingOf } from './mods';
 import { blockMarksOf, ownerItemsOf } from './projection';
-import type { OwnerChannelStore, OwnerMarkRow } from './store';
+import type { MarkUpdate, OwnerChannelStore, OwnerMarkRow } from './store';
 
 export type AnsweredInput = CommandInput<'ownerChannel.answered'>;
 type CancelOutcome = CommandOutput<'ownerChannel.cancel'>['outcome'];
@@ -42,6 +46,9 @@ type CancelOutcome = CommandOutput<'ownerChannel.cancel'>['outcome'];
 export const LOG_WINDOW_MS = 10 * 60_000;
 export const LOG_MAX = 2048;
 const RECENT_MAX = 2048; // the prompts and user messages remembered per session (legacy recognition, a rewind's target)
+// A failed recovery read is tried again after this, doubling up to the cap, while the host streams (and at every reconnect).
+const RECOVERY_RETRY_MS = 1000;
+const RECOVERY_RETRY_MAX_MS = 60_000;
 
 export interface OwnerChannelServiceDeps {
   store: OwnerChannelStore;
@@ -51,21 +58,21 @@ export interface OwnerChannelServiceDeps {
   dispatch: HostDispatch;
   // the first of `uuids` the session's transcript shows the engine took (./prompt-state.ts), or null
   transcriptEvidence: (appSessionId: AppSessionId, uuids: readonly MessageUuid[]) => Promise<MessageUuid | null>;
+  // the uuids at and below `uuid` on the session's transcript chain (./prompt-state.ts), or null: what a rewind took
+  transcriptChain: (appSessionId: AppSessionId, uuid: MessageUuid) => Promise<ReadonlySet<string> | null>;
   emit: (name: 'ownerChannel.changed', payload: { appSessionId: AppSessionId; state: OwnerChannelState }) => void;
   now?: () => string; // ISO-8601; the tests' clock
   log?: (message: string) => void;
+  recoveryRetryMs?: number; // the first retry's delay after a failed recovery read
 }
 
 interface SessionLive {
   log: { event: PromptEvent; at: number }[];
-  answers: Map<MarkId, Answer>; // the answers on their way (queued or unconfirmed)
+  answers: Map<MarkId, Answer[]>; // per question, its answers on their way (queued or unconfirmed), oldest first
   failures: Map<MarkId, string>; // the last refused send of an unanswered question
   prompts: Map<MessageUuid, { text: string; at: string }>; // human prompts carrying an answer line, written and not yet taken
   userAt: Map<MessageUuid, string>; // when each human prompt was written or read back (a rewind's target)
   checking: Set<MessageUuid>; // uuids whose transcript evidence is being read
-  // a delivered question's answer while a follow-up Reply is on its way: what it reads again if the follow-up never
-  // arrives (in memory: a restart in between leaves the follow-up's own outcome)
-  previous: Map<MarkId, { text: string; origin: 'answer' | 'reply' | 'legacy'; at: string }>;
 }
 
 const isForeign = (record: SessionRecord | null) => record !== null && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job');
@@ -74,22 +81,29 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 export class OwnerChannelService {
   private readonly live = new Map<AppSessionId, SessionLive>();
   private readonly recovering = new Set<AppSessionId>(); // until its recovery read is folded, no event reaches its answers
+  private connection = 0; // counts the host's departures: a read begun before one cannot open the gate after it
+  private readonly reading = new Map<AppSessionId, number>(); // the connection each session's recovery read was begun in
+  private readonly retries = new Map<AppSessionId, { count: number; timer: ReturnType<typeof setTimeout> | null }>();
   private readonly held = new Map<AppSessionId, string>(); // the last holder and archive facts each session projected under
   private readonly pending = new Set<Promise<unknown>>();
   private streaming = false;
   private offRecords: (() => void) | null = null;
   private readonly now: () => string;
   private readonly log: (message: string) => void;
+  private readonly retryMs: number;
 
   constructor(private readonly deps: OwnerChannelServiceDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
     this.log = deps.log ?? ((message) => console.warn(`[owner] ${message}`));
+    this.retryMs = deps.recoveryRetryMs ?? RECOVERY_RETRY_MS;
   }
 
   // The answers on their way come back from the table and every session re-projects silently; until the host streams,
   // each session holding one waits for its recovery read.
   start(opts: { streaming: boolean }): void {
-    for (const row of this.deps.store.openAnswers()) this.liveOf(row.appSessionId).answers.set(row.id as MarkId, answerOfRow(row));
+    for (const row of this.deps.store.openAnswers()) {
+      if (row.answerAttempts.length > 0) this.liveOf(row.appSessionId).answers.set(row.id as MarkId, row.answerAttempts.map(newAnswer));
+    }
     for (const appSessionId of this.deps.store.markedSessions()) this.project(appSessionId, true);
     this.offRecords = this.deps.sessions.onChange((record) => this.recordChanged(record));
     for (const [appSessionId, live] of this.live) if (live.answers.size > 0) this.recovering.add(appSessionId);
@@ -100,6 +114,7 @@ export class OwnerChannelService {
   stop(): void {
     this.offRecords?.();
     this.offRecords = null;
+    this.cancelRetries();
   }
 
   // Resolves once every read this service started (recoveries, transcript evidence) has settled.
@@ -110,13 +125,16 @@ export class OwnerChannelService {
   // The engine host left `ready`: main hears nothing until it streams again.
   hostDown(): void {
     this.streaming = false;
+    this.connection += 1;
+    this.cancelRetries(); // the next connection reads again
     for (const [appSessionId, live] of this.live) if (live.answers.size > 0) this.recovering.add(appSessionId);
   }
 
-  // The engine host streams again (or for the first time): every session waiting reads its prompt record.
+  // The engine host streams again (or for the first time): every session waiting reads its prompt record (unless a read
+  // begun in this connection is still out).
   async hostStreaming(): Promise<void> {
     this.streaming = true;
-    await Promise.all([...this.recovering].map((appSessionId) => this.recover(appSessionId)));
+    await Promise.all([...this.recovering].filter((appSessionId) => this.reading.get(appSessionId) !== this.connection).map((appSessionId) => this.recover(appSessionId)));
   }
 
   onEvents(appSessionId: AppSessionId, events: readonly SessionEvent[]): void {
@@ -147,7 +165,7 @@ export class OwnerChannelService {
           this.logEvent(live, event);
           if (!this.recovering.has(appSessionId)) {
             const seen = () => live.log.slice(0, -1).map((entry) => entry.event); // what came before this event
-            for (const [markId, answer] of live.answers) if (applyEvent(answer, event, seen)) touched.add(markId);
+            for (const [markId, answers] of live.answers) for (const answer of answers) if (applyEvent(answer, event, seen)) touched.add(markId);
           }
           if (event.kind === 'command.lifecycle') marked = this.taken(appSessionId, event) || marked;
           break;
@@ -169,7 +187,6 @@ export class OwnerChannelService {
     if (row.state === 'retired') return;
     const live = this.liveOf(appSessionId);
     live.failures.delete(markId);
-    if (row.state === 'delivered' && row.answerText !== null) live.previous.set(markId, { text: row.answerText, origin: row.answerOrigin ?? 'answer', at: row.answeredAt ?? row.stateChangedAt });
     if (input.disposition === 'refused') {
       live.failures.set(markId, input.reason ?? 'refused');
       this.changed(appSessionId);
@@ -178,19 +195,10 @@ export class OwnerChannelService {
     const members: AnswerMember[] = [];
     if (input.messageUuid !== undefined && input.disposition !== 'queued') members.push({ kind: 'uuid', id: input.messageUuid, life: 'alive' });
     if (input.queueId !== undefined && (input.disposition === 'queued' || input.disposition === 'started')) members.push({ kind: 'entry', id: input.queueId, life: 'alive' });
-    const existing = live.answers.get(markId);
-    let answer: Answer;
-    if (existing !== undefined && statusOf(existing) !== 'delivered' && statusOf(existing) !== 'unanswered') {
-      // answered again while unconfirmed: the earlier members are kept, for their evidence to settle it later
-      answer = existing;
-      answer.text = input.text;
-      answer.origin = input.origin;
-      for (const member of members) if (!answer.members.some((m) => m.kind === member.kind && m.id === member.id)) answer.members.push(member);
-      answer.unconfirmed = members.length === 0;
-    } else {
-      answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: this.now() });
-    }
-    live.answers.set(markId, answer);
+    // a new answer of its own: one sent before it (answered again while unconfirmed, or a delivered answer's follow-up)
+    // keeps its own text and members, for its evidence to settle it alone
+    const answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: this.now() });
+    live.answers.set(markId, [...(live.answers.get(markId) ?? []), answer]);
     if (!this.streaming) this.recovering.add(appSessionId);
     // the report reaches main after the seam answered: what happened since is in the log, replayed in order (a session
     // still waiting for its recovery read folds it there, after the history)
@@ -202,15 +210,16 @@ export class OwnerChannelService {
     this.changed(appSessionId);
   }
 
-  // Design §6, "Cancel": the answer's queued entry through `session.queue.remove`, its pending steer through
-  // `session.steer.cancel`. A failed command leaves the answer as it was.
+  // Design §6, "Cancel": the question's answers on their way, each queued entry through `session.queue.remove` and each
+  // pending steer through `session.steer.cancel`. A failed command leaves the answers as they were.
   async cancel(input: CommandInput<'ownerChannel.cancel'>): Promise<{ outcome: CancelOutcome }> {
     const appSessionId = input.appSessionId as AppSessionId;
     const markId = input.markId as MarkId;
-    const answer = this.live.get(appSessionId)?.answers.get(markId);
-    if (answer === undefined || statusOf(answer) === 'delivered' || statusOf(answer) === 'unanswered') return { outcome: 'not_queued' };
-    const alive = answer.members.filter((m) => m.life === 'alive');
-    if (alive.length === 0) return { outcome: answer.members.some((m) => m.life !== 'dead') ? 'already_delivering' : 'not_queued' };
+    const answers = (this.live.get(appSessionId)?.answers.get(markId) ?? []).filter((answer) => statusOf(answer) === 'queued' || statusOf(answer) === 'unconfirmed');
+    if (answers.length === 0) return { outcome: 'not_queued' };
+    const carried = answers.filter((answer) => answer.members.some((m) => m.life === 'alive'));
+    const alive = carried.flatMap((answer) => answer.members.filter((m) => m.life === 'alive'));
+    if (alive.length === 0) return { outcome: answers.some((answer) => answer.members.some((m) => m.life !== 'dead')) ? 'already_delivering' : 'not_queued' };
     const queue = await hostCall(this.deps.dispatch, 'session.queue.list', { appSessionId });
     let delivering = false;
     try {
@@ -234,7 +243,7 @@ export class OwnerChannelService {
       this.persist(appSessionId, markId);
       this.changed(appSessionId);
     }
-    return { outcome: !delivering && statusOf(answer) === 'unanswered' ? 'cancelled' : 'already_delivering' };
+    return { outcome: !delivering && carried.every((answer) => statusOf(answer) === 'unanswered') ? 'cancelled' : 'already_delivering' };
   }
 
   markRead(input: CommandInput<'ownerChannel.markRead'>): void {
@@ -276,7 +285,7 @@ export class OwnerChannelService {
 
   private liveOf(appSessionId: AppSessionId): SessionLive {
     let live = this.live.get(appSessionId);
-    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), failures: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set(), previous: new Map() }));
+    if (!live) this.live.set(appSessionId, (live = { log: [], answers: new Map(), failures: new Map(), prompts: new Map(), userAt: new Map(), checking: new Set() }));
     return live;
   }
 
@@ -318,7 +327,7 @@ export class OwnerChannelService {
           this.deps.store.putMark({
             id: markIdOf(appSessionId, mark.kind, mark.anchor), appSessionId, kind: mark.kind, messageUuid: mark.anchor.messageUuid, blockIndex: mark.anchor.blockIndex,
             span: mark.anchor.span, grammar: TO_HUMAN_GRAMMAR_VERSION, head: mark.head, at: event.at, item, live, state: mark.kind === 'need-input' ? 'unanswered' : 'unread',
-            answerText: null, answerOrigin: null, answerMembers: [], answeredAt: null, readAt: null, stateChangedAt: event.at,
+            answerText: null, answerOrigin: null, answerMembers: [], answeredAt: null, answerAttempts: [], readAt: null, stateChangedAt: event.at,
           }) || added;
       }
     } catch (error) {
@@ -341,13 +350,29 @@ export class OwnerChannelService {
   }
 
   // A rewind takes the target prompt and everything after it off the chain: the marks from its time on retire. A target
-  // this run never saw is placed after the message the rewind kept, when that message holds a mark.
+  // this run does not remember (a restart, an entry the bounded map let go) is found on the transcript's chain, and the
+  // marks of the messages below it retire; only a transcript that cannot place it falls back to the time of a marked
+  // message the rewind kept, and failing that the marks stay. Only the marks standing at the rewind are considered: a
+  // message after it is never the rewind's.
   private rewind(appSessionId: AppSessionId, event: Extract<SessionEvent, { kind: 'boundary.rewind' }>): boolean {
     const target = this.liveOf(appSessionId).userAt.get(event.targetMessageUuid);
     if (target !== undefined) return this.retire(appSessionId, (mark) => Date.parse(mark.at) >= Date.parse(target));
-    const kept = event.precedingAssistantUuid === null ? undefined : this.deps.store.marks(appSessionId).find((mark) => mark.messageUuid === event.precedingAssistantUuid);
-    if (kept !== undefined) return this.retire(appSessionId, (mark) => Date.parse(mark.at) > Date.parse(kept.at));
-    this.log(`${appSessionId}: a rewind to ${event.targetMessageUuid}, a prompt this run has not seen; its marks stay`);
+    const standing = new Set(this.deps.store.marks(appSessionId).filter((mark) => mark.state !== 'retired').map((mark) => mark.id));
+    this.track(
+      this.deps.transcriptChain(appSessionId, event.targetMessageUuid).then((gone) => {
+        let retired: boolean;
+        if (gone !== null) retired = this.retire(appSessionId, (mark) => standing.has(mark.id) && gone.has(mark.messageUuid));
+        else {
+          const kept = event.precedingAssistantUuid === null ? undefined : this.deps.store.marks(appSessionId).find((mark) => mark.messageUuid === event.precedingAssistantUuid);
+          if (kept === undefined) {
+            this.log(`${appSessionId}: a rewind to ${event.targetMessageUuid}, a prompt neither this run nor the transcript places; its marks stay`);
+            return;
+          }
+          retired = this.retire(appSessionId, (mark) => standing.has(mark.id) && Date.parse(mark.at) > Date.parse(kept.at));
+        }
+        if (retired) this.changed(appSessionId);
+      }),
+    );
     return false;
   }
 
@@ -380,13 +405,14 @@ export class OwnerChannelService {
     const live = this.liveOf(appSessionId);
     const marks = this.deps.store.marks(appSessionId);
     const member = (members: readonly AnswerMember[]) => members.some((m) => m.kind === 'uuid' && m.id === uuid);
-    if ([...live.answers.values()].some((answer) => member(answer.members)) || marks.some((mark) => member(mark.answerMembers))) return false;
+    const carries = [...live.answers.values()].flat().some((answer) => member(answer.members));
+    if (carries || marks.some((mark) => member(mark.answerMembers) || mark.answerAttempts.some((answer) => member(answer.members)))) return false;
     let settled = false;
     for (const { head, answer } of answersOf(text)) {
       const asked = marks.filter((mark) => mark.kind === 'need-input' && mark.state !== 'retired' && mark.head === head && Date.parse(mark.at) <= Date.parse(at));
       if (asked.length !== 1 || (asked[0]!.state !== 'unanswered' && asked[0]!.state !== 'unconfirmed')) continue;
       const markId = asked[0]!.id as MarkId;
-      this.deps.store.updateMark(markId, { state: 'delivered', answerText: answerText(head, answer), answerOrigin: 'legacy', answerMembers: [], answeredAt: at, stateChangedAt: this.now() });
+      this.deps.store.updateMark(markId, { state: 'delivered', answerText: answerText(head, answer), answerOrigin: 'legacy', answerMembers: [], answeredAt: at, answerAttempts: [], stateChangedAt: this.now() });
       live.answers.delete(markId);
       live.failures.delete(markId);
       settled = true;
@@ -394,30 +420,29 @@ export class OwnerChannelService {
     return settled;
   }
 
-  // Writes an answer's state to its mark; an answer that arrived or fell back to unanswered leaves the in-flight set. A
-  // member whose fate only the transcript can tell is read from it.
+  // Writes a question's answers to its mark (./answers.ts, `settleAnswers`): the newest the engine took becomes its
+  // delivered answer, the ones still on their way are kept beside it, and the newest of those is what the card reads.
+  // With none on its way the question reads its delivered answer (a follow-up that never arrived leaves it answered as it
+  // was), else unanswered. A member whose fate only the transcript can tell is read from it.
   private persist(appSessionId: AppSessionId, markId: MarkId): void {
     const live = this.liveOf(appSessionId);
-    const answer = live.answers.get(markId);
-    if (answer === undefined) return;
-    const status = statusOf(answer);
-    const at = this.now();
-    if (status === 'delivered') {
-      this.deps.store.updateMark(markId, { state: 'delivered', answerText: answer.text, answerOrigin: answer.origin, answerMembers: answer.members, answeredAt: answer.deliveredAt, stateChangedAt: at });
+    const answers = live.answers.get(markId);
+    if (answers === undefined) return;
+    const row = this.deps.store.mark(markId);
+    if (row === null || row.state === 'retired') {
       live.answers.delete(markId);
-      live.previous.delete(markId);
-    } else if (status === 'unanswered') {
-      const previous = live.previous.get(markId);
-      // a follow-up that never arrived leaves the question answered as it was
-      if (previous !== undefined) this.deps.store.updateMark(markId, { state: 'delivered', answerText: previous.text, answerOrigin: previous.origin, answerMembers: [], answeredAt: previous.at, stateChangedAt: at });
-      else this.deps.store.updateMark(markId, { state: 'unanswered', answerText: null, answerOrigin: null, answerMembers: [], answeredAt: null, stateChangedAt: at });
-      live.answers.delete(markId);
-      live.previous.delete(markId);
-      if (answer.failed !== null) live.failures.set(markId, answer.failed.reason);
-    } else {
-      this.deps.store.updateMark(markId, { state: status, answerText: answer.text, answerOrigin: answer.origin, answerMembers: answer.members, answeredAt: answer.reportedAt, stateChangedAt: at });
-      this.evidence(appSessionId, markId, answer);
+      return;
     }
+    const { delivered, open, dead } = settleAnswers(answers);
+    const update: MarkUpdate = { answerAttempts: open.map(storedOf), stateChangedAt: this.now() };
+    if (delivered !== null) Object.assign(update, { answerText: delivered.text, answerOrigin: delivered.origin, answerMembers: delivered.members, answeredAt: delivered.deliveredAt });
+    const shown = open.at(-1);
+    update.state = shown !== undefined ? statusOf(shown) : delivered !== null || row.answerText !== null ? 'delivered' : 'unanswered';
+    this.deps.store.updateMark(markId, update);
+    if (update.state === 'unanswered') for (const answer of dead) if (answer.failed !== null) live.failures.set(markId, answer.failed.reason);
+    if (open.length === 0) live.answers.delete(markId);
+    else live.answers.set(markId, open);
+    for (const answer of open) this.evidence(appSessionId, markId, answer);
   }
 
   // Design §6: an `unknown` member (a submission an exit cut) is settled by the transcript: taken, delivered; not, dead.
@@ -429,7 +454,7 @@ export class OwnerChannelService {
     this.track(
       this.deps.transcriptEvidence(appSessionId, unknown).then((taken) => {
         for (const uuid of unknown) live.checking.delete(uuid);
-        if (live.answers.get(markId) !== answer) return; // settled or replaced meanwhile
+        if (!live.answers.get(markId)?.includes(answer)) return; // settled meanwhile
         if (taken !== null) answer.deliveredAt = this.now();
         else for (const member of answer.members) if (member.life === 'unknown' && unknown.includes(member.id as MessageUuid)) member.life = 'dead';
         this.persist(appSessionId, markId);
@@ -438,49 +463,87 @@ export class OwnerChannelService {
     );
   }
 
-  // Design §6, "Restarts and reconnects: the recovery read".
+  // Design §6, "Restarts and reconnects: the recovery read". Until a read is folded the session's gate stays closed: a
+  // read that fails concludes nothing and is tried again (after a backoff while the host streams, and at the next
+  // reconnect), and one the host's departure overtook leaves the gate to the next connection's read.
   private async recover(appSessionId: AppSessionId): Promise<void> {
+    const connection = this.connection;
     const live = this.liveOf(appSessionId);
-    const answers = [...live.answers.entries()];
+    this.reading.set(appSessionId, connection);
     try {
-      if (answers.length === 0) return;
-      const since = new Date(Math.min(...answers.map(([, answer]) => Date.parse(answer.reportedAt))) - LOG_WINDOW_MS).toISOString();
-      const history = await hostCall(this.deps.dispatch, 'session.promptHistory', { appSessionId, since });
-      const queue = await hostCall(this.deps.dispatch, 'session.queue.list', { appSessionId });
-      // the journals first, then what the live stream brought meanwhile (an event both carry is applied once, by its id)
-      const events = [...history.events, ...live.log.map((entry) => entry.event)];
-      events.forEach((event, i) => {
-        for (const [, answer] of live.answers) applyEvent(answer, event, () => events.slice(0, i));
-      });
-      // the queue's snapshot, positively: an entry or a pending steer it shows is alive
-      const shown = new Set<string>([...queue.entries.flatMap((e) => [e.queueId, ...(e.messageUuid === null ? [] : [e.messageUuid])]), ...(queue.steers ?? []).map((s) => s.messageUuid)]);
-      const reads: Promise<void>[] = [];
-      for (const [, answer] of live.answers) {
-        if (statusOf(answer) === 'delivered') continue;
-        for (const member of answer.members) if (member.life !== 'dead' && shown.has(member.id)) member.life = 'alive';
-        // a member still alive by the record but in neither the record's end nor the snapshot: what became of it is
-        // read from the transcript, and an answer it cannot settle reads unconfirmed
-        const unsettled = answer.members.filter((m) => (m.life === 'alive' || m.life === 'withdrawing') && !shown.has(m.id));
-        if (unsettled.length === 0 || answer.members.some((m) => shown.has(m.id))) continue;
-        const uuids = unsettled.filter((m) => m.kind === 'uuid').map((m) => m.id as MessageUuid);
-        reads.push(
-          (uuids.length === 0 ? Promise.resolve(null) : this.deps.transcriptEvidence(appSessionId, uuids)).then((taken) => {
-            if (taken !== null) answer.deliveredAt = this.now();
-            else answer.unconfirmed = true;
-          }),
-        );
-      }
-      await Promise.all(reads);
+      if (live.answers.size > 0) await this.fold(appSessionId, live);
     } catch (error) {
-      this.log(`${appSessionId}: the recovery read failed, its answers keep their states: ${messageOf(error)}`);
+      this.log(`${appSessionId}: the recovery read failed; its answers wait for the next read: ${messageOf(error)}`);
+      this.retryLater(appSessionId);
+      return;
     } finally {
-      this.recovering.delete(appSessionId);
-      // an answer reported while the read was out takes the log now (an event the fold applied is skipped by its id)
-      const seen = live.log.map((entry) => entry.event);
-      for (const [, answer] of live.answers) seen.forEach((event, i) => applyEvent(answer, event, () => seen.slice(0, i)));
-      for (const markId of new Set([...answers.map(([markId]) => markId), ...live.answers.keys()])) this.persist(appSessionId, markId);
-      if (answers.length > 0 || live.answers.size > 0) this.changed(appSessionId);
+      if (this.reading.get(appSessionId) === connection) this.reading.delete(appSessionId);
     }
+    if (connection !== this.connection) return;
+    this.retries.delete(appSessionId);
+    this.recovering.delete(appSessionId);
+    // an answer reported while the read was out takes the log now (an event the fold applied is skipped by its id)
+    const seen = live.log.map((entry) => entry.event);
+    for (const answers of live.answers.values()) for (const answer of answers) seen.forEach((event, i) => applyEvent(answer, event, () => seen.slice(0, i)));
+    const marks = [...live.answers.keys()];
+    for (const markId of marks) this.persist(appSessionId, markId);
+    if (marks.length > 0) this.changed(appSessionId);
+  }
+
+  // The host's prompt record since the oldest answer on its way, then what the live stream brought meanwhile (an event
+  // both carry is applied once, by its id); then the queue's snapshot, positively. An answer neither places, and no
+  // withdrawal on record explains, is read from the transcript and otherwise reads unconfirmed. Nothing is decided from
+  // absence unless every read succeeded.
+  private async fold(appSessionId: AppSessionId, live: SessionLive): Promise<void> {
+    const all = () => [...live.answers.values()].flat();
+    const since = new Date(Math.min(...all().map((answer) => Date.parse(answer.reportedAt))) - LOG_WINDOW_MS).toISOString();
+    const history = await hostCall(this.deps.dispatch, 'session.promptHistory', { appSessionId, since });
+    const queue = await hostCall(this.deps.dispatch, 'session.queue.list', { appSessionId });
+    const events = [...history.events, ...live.log.map((entry) => entry.event)];
+    events.forEach((event, i) => {
+      for (const answer of all()) applyEvent(answer, event, () => events.slice(0, i));
+    });
+    // an entry or a pending steer the snapshot shows is alive; a steer the record shows being withdrawn, with no outcome
+    // row yet, is on its way too: its outcome row (`hold`, `cancel`, `giveback`, or `abandon` at an exit) settles it
+    const shown = new Set<string>([...queue.entries.flatMap((e) => [e.queueId, ...(e.messageUuid === null ? [] : [e.messageUuid])]), ...(queue.steers ?? []).map((s) => s.messageUuid)]);
+    const withdrawals = new Set(events.flatMap((e) => (e.kind === 'queue.transition' && e.action === 'withdraw' && e.messageUuid !== null ? [e.messageUuid as string] : [])));
+    const placed = (member: AnswerMember) => shown.has(member.id) || (member.life === 'withdrawing' && withdrawals.has(member.id));
+    const reads: Promise<() => void>[] = [];
+    for (const answer of all()) {
+      if (statusOf(answer) === 'delivered') continue;
+      for (const member of answer.members) if ((member.life === 'alive' || member.life === 'unknown') && shown.has(member.id)) member.life = 'alive';
+      // a member still alive by the record but placed by neither the record's end nor the snapshot: what became of it is
+      // read from the transcript, and an answer it cannot settle reads unconfirmed (an entry removed from a saved queue
+      // no process held, which writes no row, for one)
+      if (answer.members.some(placed)) continue;
+      const unsettled = answer.members.filter((m) => m.life === 'alive' || m.life === 'withdrawing');
+      if (unsettled.length === 0) continue;
+      const uuids = unsettled.filter((m) => m.kind === 'uuid').map((m) => m.id as MessageUuid);
+      reads.push(
+        (uuids.length === 0 ? Promise.resolve(null) : this.deps.transcriptEvidence(appSessionId, uuids)).then((taken) => () => {
+          if (taken !== null) answer.deliveredAt = this.now();
+          else answer.unconfirmed = true;
+        }),
+      );
+    }
+    for (const settle of await Promise.all(reads)) settle();
+  }
+
+  private retryLater(appSessionId: AppSessionId): void {
+    const retry = this.retries.get(appSessionId);
+    if (!this.streaming || retry?.timer) return; // the next connection reads again, or a retry is already set
+    const count = (retry?.count ?? 0) + 1;
+    const timer = setTimeout(() => {
+      this.retries.set(appSessionId, { count, timer: null });
+      if (this.streaming && this.recovering.has(appSessionId) && this.reading.get(appSessionId) !== this.connection) this.track(this.recover(appSessionId));
+    }, Math.min(RECOVERY_RETRY_MAX_MS, this.retryMs * 2 ** (count - 1)));
+    (timer as { unref?: () => void }).unref?.();
+    this.retries.set(appSessionId, { count, timer });
+  }
+
+  private cancelRetries(): void {
+    for (const { timer } of this.retries.values()) if (timer !== null) clearTimeout(timer);
+    this.retries.clear();
   }
 
   // After a change of the session's marks or answers: its items and its state.
@@ -521,9 +584,11 @@ function ownerMarkOf(mark: OwnerMarkRow, failure: string | undefined): OwnerMark
   let question: QuestionState;
   switch (mark.state) {
     case 'queued':
-    case 'unconfirmed':
-      question = { state: mark.state, text: mark.answerText ?? '', origin: mark.answerOrigin === 'reply' ? 'reply' : 'answer', members: mark.answerMembers };
+    case 'unconfirmed': {
+      const shown = mark.answerAttempts.at(-1); // the newest answer on its way
+      question = { state: mark.state, text: shown?.text ?? '', origin: shown?.origin ?? 'answer', members: shown?.members ?? [] };
       break;
+    }
     case 'delivered':
       question = { state: 'delivered', answer: { text: mark.answerText ?? '', origin: mark.answerOrigin ?? 'answer', at: mark.answeredAt ?? mark.stateChangedAt } };
       break;
@@ -534,14 +599,6 @@ function ownerMarkOf(mark: OwnerMarkRow, failure: string | undefined): OwnerMark
       question = { state: 'unanswered', ...(failure === undefined ? {} : { failed: { reason: failure } }) };
   }
   return { ...base, question };
-}
-
-// An answer on its way, as the table kept it.
-function answerOfRow(row: OwnerMarkRow): Answer {
-  return newAnswer({
-    text: row.answerText ?? '', origin: row.answerOrigin === 'reply' ? 'reply' : 'answer', members: row.answerMembers.map((m) => ({ ...m })),
-    unconfirmed: row.state === 'unconfirmed', reportedAt: row.answeredAt ?? row.stateChangedAt,
-  });
 }
 
 // A bounded map: the oldest entry goes once it holds RECENT_MAX.

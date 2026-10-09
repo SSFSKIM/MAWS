@@ -187,7 +187,7 @@ export class OwnerHostSim {
   row(direction: JournalRow['direction'], frame: unknown): SessionEvent[] {
     this.clock += 1000;
     const launch = this.launches.at(-1)!;
-    const row = { seq: launch.rows.length + 1, direction, at: this.nowIso(), frame } as JournalRow;
+    const row = { seq: (launch.rows.at(-1)?.seq ?? 0) + 1, direction, at: this.nowIso(), frame } as JournalRow; // a test may drop rows: never reuse a seq
     launch.rows.push(row);
     const events = this.normalizer.push(row).map((event) => SessionEventSchema.parse(event));
     if (events.length === 0) return events;
