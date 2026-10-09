@@ -173,6 +173,27 @@ describe('settings tab writes one field per row', () => {
     expect(b.sets).toHaveLength(3);
   });
 
+  // P2-C start (2026-10-10; the P2-C document, §9 and G7): the to-human mod's app switch and the owner channel's two groups
+  it('Notifications: the to-human switch and the two groups an agent’s marks notify for', async () => {
+    renderView();
+    const mod = row('Messages to you');
+    const toggle = within(mod).getByRole('switch', { name: 'To-human' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(mod.textContent).toContain('the next time each session starts');
+    fireEvent.click(toggle);
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ mods: { toHuman: { enabled: false } } }));
+
+    const kinds = row('For');
+    expect(within(kinds).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)).toEqual([
+      'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
+    ]);
+    fireEvent.click(within(kinds).getByRole('checkbox', { name: 'must-read messages' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { essential: false } } }));
+    fireEvent.click(within(kinds).getByRole('checkbox', { name: 'questions an agent left for you' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { asyncInput: false } } }));
+  });
+  // P2-C end
+
   it('a refused write shows a toast and the row keeps the value the store holds', async () => {
     renderView();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});

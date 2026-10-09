@@ -220,6 +220,13 @@ export const NOTIFICATIONS = {
     essential: 'must-read messages',
     // P2-C end
   },
+  // P2-C start (2026-10-10): the to-human mod's app switch (BUILT_IN_MODS' name)
+  toHuman: {
+    label: 'Messages to you',
+    name: 'To-human',
+    note: 'Agents mark what is for you: messages, must-reads, insights and questions you answer in place, and a session reads as their report. The view follows at once; the instructions, the next time each session starts.',
+  },
+  // P2-C end
   approvalsCaption: 'permission requests, dialogs and MCP elicitations',
   heldNever: 'Never notifies in this version',
   sound: 'Sound',

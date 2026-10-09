@@ -22,6 +22,7 @@ import { MarketplacesSection } from './plugins/Marketplaces';
 import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins/read';
 import { ReloadControls, useReloads } from './plugins/reload';
 import { WidgetFrame } from './WidgetFrame';
+import { BuiltInModsContent } from '../owner/mods/BuiltInModsContent'; // P2-C (2026-10-10)
 
 export interface PluginsView {
   plugins: { name: string; version: string | null; source: string | null; path: string }[];
@@ -113,6 +114,9 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
           <LoadedPluginsSection appSessionId={appSessionId} />
           {/* P2-A end */}
         </section>
+        {/* P2-C start (2026-10-10): the interim mount of "MAWS mods · Built in" until P2-B's library mounts it */}
+        <div className="mt-3"><BuiltInModsContent appSessionId={appSessionId} /></div>
+        {/* P2-C end */}
       </WidgetFrame>
       {sheet}
     </ManageProvider>
