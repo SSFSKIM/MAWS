@@ -17,6 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
+import { installCountWords } from '../src/renderer/src/widgets/plugins/browse';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
@@ -36,7 +37,9 @@ const NETWORK_REFUSAL = /could not resolve host|unable to access|failed to conne
 let scratch: PluginsScratch;
 let other: string; // a second project, trusted in the scratch home, where supabase is installed
 let refusal: string | null = null; // the network's words when the marketplace could not be added
-let popular: { name: string; count: number } | null = null; // an official plugin not installed here, counted in the millions
+// an official plugin not installed here, counted in the millions, and the count of a directory entry of its name (the
+// card Browse folds them into keeps the larger)
+let popular: { name: string; count: number; directoryCount: number | null } | null = null;
 let directoryOnly: string | null = null; // a directory entry no official entry shares a name with
 
 // The engine's CLI against the scratch home only: nothing of the runner's environment, HOME and the config home inside
@@ -79,11 +82,15 @@ test.beforeAll(() => {
     const listed = cli(['list', '--json', '--available'], scratch.repo);
     const available = (JSON.parse(listed.out) as { available: { name: string; marketplaceName: string; installCount?: unknown }[] }).available;
     const official = available.filter((p) => p.marketplaceName === OFFICIAL);
-    const counted = official.filter((p) => typeof p.installCount === 'number' && p.installCount >= 1_000_000).sort((a, b) => (b.installCount as number) - (a.installCount as number));
-    popular = counted.length > 0 ? { name: counted[0].name, count: counted[0].installCount as number } : null;
+    const positive = (n: unknown): number | null => (typeof n === 'number' && n > 0 ? n : null);
+    const counted = official.filter((p) => (positive(p.installCount) ?? 0) >= 1_000_000).sort((a, b) => (b.installCount as number) - (a.installCount as number));
+    if (counted.length > 0) {
+      const { name } = counted[0];
+      popular = { name, count: counted[0].installCount as number, directoryCount: positive(available.find((p) => p.marketplaceName === DIRECTORY && p.name === name)?.installCount) };
+    }
     const names = new Set(official.map((p) => p.name));
     directoryOnly = available.find((p) => p.marketplaceName === DIRECTORY && !names.has(p.name))?.name ?? null;
-    scratch.log(`setup · the catalogue: ${official.length} official entries, ${available.filter((p) => p.marketplaceName === DIRECTORY).length} directory entries; most popular not installed: ${popular ? `${popular.name} (${popular.count})` : 'none'}; a directory-only entry: ${directoryOnly ?? 'none'}`);
+    scratch.log(`setup · the catalogue: ${official.length} official entries, ${available.filter((p) => p.marketplaceName === DIRECTORY).length} directory entries; most popular not installed: ${popular ? `${popular.name} (${popular.count}; its directory entry ${popular.directoryCount ?? 'uncounted or absent'})` : 'none'}; a directory-only entry: ${directoryOnly ?? 'none'}`);
   }
   mkdirSync(join(scratch.config, 'skills', 'p2b-user'), { recursive: true });
   writeFileSync(join(scratch.config, 'skills', 'p2b-user', 'SKILL.md'), '---\nname: p2b-user\ndescription: A skill of your own, for the P2-B acceptance run.\n---\nReply with exactly: user skill.\n');
@@ -128,22 +135,30 @@ async function show(w: Locator, filter: string): Promise<void> {
   await w.getByRole('button', { name: 'Show' }).click();
   await w.page().getByRole('menuitemradio', { name: filter, exact: true }).click();
 }
-// Counts the invokes main answers for the commands that start an engine, by wrapping their handlers where Electron
-// keeps them (as support/plugins-live.ts's read tracker does), so "starts no engine" is read from main itself.
-async function trackStarts(app: ElectronApplication): Promise<() => Promise<number>> {
+// Counts the invokes main answers for each command, by wrapping their handlers where Electron keeps them (as
+// support/plugins-live.ts's read tracker does), so "starts no engine" and "sends nothing" are read from main itself,
+// not from a status that a fast turn could leave unchanged. A command with no handler (session.acquire before P2-A)
+// counts 0.
+type Tracked = 'session.start' | 'session.acquire' | 'session.send' | 'session.steer';
+async function trackInvokes(app: ElectronApplication): Promise<(commands: readonly Tracked[]) => Promise<number>> {
   await app.evaluate(({ ipcMain }) => {
     const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>> })._invokeHandlers;
-    const log = { starts: 0 };
-    (globalThis as unknown as { __p2bStarts: typeof log }).__p2bStarts = log;
-    for (const channel of [...handlers.keys()].filter((k) => k === 'maws:cmd:session.start' || k === 'maws:cmd:session.acquire')) {
-      const handler = handlers.get(channel)!;
-      handlers.set(channel, (event, ...args) => {
-        log.starts += 1;
+    const log: Record<string, number> = {};
+    (globalThis as unknown as { __p2bInvokes: typeof log }).__p2bInvokes = log;
+    for (const command of ['session.start', 'session.acquire', 'session.send', 'session.steer']) {
+      const handler = handlers.get(`maws:cmd:${command}`);
+      if (!handler) continue;
+      log[command] = 0;
+      handlers.set(`maws:cmd:${command}`, (event, ...args) => {
+        log[command] += 1;
         return handler(event, ...args);
       });
     }
   });
-  return () => app.evaluate(() => (globalThis as unknown as { __p2bStarts: { starts: number } }).__p2bStarts.starts);
+  return async (commands) => {
+    const log = await app.evaluate(() => (globalThis as unknown as { __p2bInvokes: Record<string, number> }).__p2bInvokes);
+    return commands.reduce((sum, command) => sum + (log[command] ?? 0), 0);
+  };
 }
 
 // ---- the run -------------------------------------------------------------------------------------------------------
@@ -151,7 +166,8 @@ async function trackStarts(app: ElectronApplication): Promise<() => Promise<numb
 test('P2-B acceptance: the plugin and skills libraries on the installed engine, in a scratch home', async () => {
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page, app } = maws;
-  const starts = await trackStarts(app);
+  const invokes = await trackInvokes(app);
+  const starts = () => invokes(['session.start', 'session.acquire']);
   const failures: string[] = [];
   let n = 0;
   const shot = (name: string) => page.screenshot({ path: join(scratch.root, `acceptance-${name}.png`) }).catch(() => undefined);
@@ -287,19 +303,24 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       const browse = w.locator('[data-plugins-section="browse"]');
       await expect(browse.locator('[data-browse-card]').first()).toBeVisible({ timeout: 120_000 });
       const search = w.getByRole('searchbox', { name: 'Search plugins' });
-      if (popular) {
-        await search.fill(popular.name);
-        const card = browse.locator(`[data-browse-card="${popular.name}@${DIRECTORY}"], [data-browse-card="${o(popular.name)}"]`).first();
-        await expect(card.locator('[data-install-count]')).toHaveText(/^\d+(\.\d)?M installs$/);
-        scratch.log(`${popular.name}: ${await card.getAttribute('data-browse-card')} · ${await card.locator('[data-install-count]').innerText()} (the CLI's ${popular.count})`);
-      } else scratch.log('no official plugin counted in the millions offered here');
-      if (directoryOnly) {
-        await search.fill(directoryOnly);
-        const card = browse.locator(`[data-browse-card="${directoryOnly}@${DIRECTORY}"]`);
-        await expect(card).toBeVisible();
-        await expect(card.locator('[data-install-count]')).toHaveCount(0);
-        scratch.log(`${directoryOnly}@${DIRECTORY}: no count`);
-      }
+      // the marketplace was added, so the catalogue must offer both candidates: a count left unproved is a failure
+      if (!popular) throw new Error('the catalogue offers no official plugin counted in the millions: the counts went unproved');
+      if (!directoryOnly) throw new Error('the catalogue offers no directory-only entry: the uncounted card went unproved');
+      await search.fill(popular.name);
+      // the official entry's own card, or the directory's card it folded into, which keeps the larger count (§5.8)
+      const own = browse.locator(`[data-browse-card="${o(popular.name)}"]`);
+      const folded = browse.locator(`[data-browse-card="${popular.name}@${DIRECTORY}"]`);
+      await expect(own.or(folded).first()).toBeVisible();
+      const isOwn = (await own.count()) > 0;
+      const counted = isOwn ? own : folded;
+      const expected = `${installCountWords(isOwn ? popular.count : Math.max(popular.count, popular.directoryCount ?? 0))} installs`;
+      await expect(counted.locator('[data-install-count]')).toHaveText(expected);
+      scratch.log(`${popular.name}: ${await counted.getAttribute('data-browse-card')} · ${await counted.locator('[data-install-count]').innerText()} (the CLI's ${popular.count}, its directory entry's ${popular.directoryCount ?? 'none'})`);
+      await search.fill(directoryOnly);
+      const uncounted = browse.locator(`[data-browse-card="${directoryOnly}@${DIRECTORY}"]`);
+      await expect(uncounted).toBeVisible();
+      await expect(uncounted.locator('[data-install-count]')).toHaveCount(0);
+      scratch.log(`${directoryOnly}@${DIRECTORY}: no count`);
       await search.fill('');
       await bothThemes('browse');
       await search.fill('supabase');
@@ -335,7 +356,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
 
     // The composer refuses a send to a stopped (not released) session, and P2-A's Refresh is not on master: the session is
     // resumed through `session.start` with no message, the command the gateway chip's start uses; no turn runs.
-    await step('resume', 'the session resumed with no turn (P2-A’s Refresh is not on master); the loaded line reads Loaded now', async () => {
+    await step('resume', 'the session resumed with no turn (P2-A’s Refresh is not on master); the loaded line reads Not observed yet until the engine reports', async () => {
       const outcome = value(await invoke(page, 'session.start', { appSessionId: id as AppSessionId, message: null, options: {} }));
       scratch.log(`session.start: ${outcome.status}`);
       await expect.poll(async () => (await status(page, id)).process, { timeout: 120_000, intervals: [500] }).toBe('ready');
@@ -344,8 +365,15 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       scratch.log(`session ${id}: ${s.process} · plugins loaded: ${s.plugins.map((p) => p.source ?? p.name).join(', ')}`);
       expect(s.process).toBe('ready');
       const w = await openWidget(page, 'plugins');
-      await expect(w.locator('[data-plugins-loaded]')).toContainText('Loaded now');
-      scratch.log(`loaded line: ${await w.locator('[data-plugins-loaded]').innerText()}`);
+      const line = w.locator('[data-plugins-loaded]');
+      // the engine reports its plugins with its first system/init: a start with no turn has observed nothing, and the
+      // line must not read "0 plugins loaded in this session · Loaded now" (the architect's ruling of 2026-10-10)
+      if (s.plugins.length + s.pluginErrors.length + s.pluginWarnings.length === 0) {
+        await expect(line).toContainText('Not observed yet');
+        await expect(line).not.toContainText('Loaded now');
+        await expect(line).not.toContainText('loaded in this session');
+      } else await expect(line).toContainText('Loaded now');
+      scratch.log(`loaded line: ${await line.innerText()}`);
     });
 
     await step('skills', '/skills: p2b-project and frontend-design’s skill under In this project, p2b-user under Created by you; Use in chat inserts and sends nothing', async () => {
@@ -362,12 +390,13 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await expect(design).toBeVisible();
       await expect(design.locator('[data-skill-badge]')).not.toHaveText('');
       scratch.log(`frontend-design's skill: ${(await design.innerText()).replaceAll('\n', ' · ')}`);
-      const turnsBefore = (await status(page, id)).turn;
+      const sends = () => invokes(['session.send', 'session.steer', 'session.start']);
+      const sentBefore = await sends();
       await design.getByRole('button', { name: 'Use in chat' }).click();
       await expect(w).toBeHidden();
       await expect(composer(page)).toContainText('/frontend-design:frontend-design');
       await page.waitForTimeout(1_000);
-      expect((await status(page, id)).turn).toBe(turnsBefore); // nothing sent
+      expect(await sends()).toBe(sentBefore); // nothing sent: no send, steer or start reached main
       await shot('skills-inserted');
       await composer(page).click();
       await page.keyboard.press('Meta+A');
