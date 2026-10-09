@@ -252,6 +252,30 @@ describe('replacing an unstarted tab', () => {
     }
   });
 
+  // F2b review 2: the E11 verdict that sets a live draft aside does not reach a restored one.
+  it('an open made before hydration keeps a saved draft its verdict would set aside, and announces nothing', async () => {
+    const discard = vi.fn(async () => true);
+    const announce = vi.fn();
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard, verdict: (tab) => (tab.id === `session:${NEW}` ? { aside: 'kept' } : null), announce });
+    try {
+      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
+      const store = createLayoutStore();
+      const hydrating = store.getState().hydrate(fake.client, () => true);
+      store.getState().openSession(B); // a click before layout.get answers
+      await settled();
+      for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? saved : null });
+      await hydrating;
+      await settled();
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+      expect(store.getState().main.closedTabs).toEqual([]);
+      expect(discard).not.toHaveBeenCalled();
+      expect(announce).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
+  });
+
   it('asks nothing for a session already open, a new tab or a split', async () => {
     const { store, discard, off, tabs } = unstartedShown(true);
     try {

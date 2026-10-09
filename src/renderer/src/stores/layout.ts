@@ -280,12 +280,14 @@ export function createLayoutStore() {
         const shown = inTheWay(get().main);
         const verdict = verdictOf(shown);
         const draft = draftInTheWay(get().main);
-        // Replayed over the hydrated tabs (the first call is the live one), only a session tab is replaced, as before E11:
-        // a restored file, Settings or Diagnostics the person never saw stays, and the session opens beside it.
+        // Replayed over the hydrated tabs (the first call is the live one), only a started session's tab is replaced, as
+        // before E11: a restored file, Settings, Diagnostics or unstarted draft the person never saw stays (a draft whatever
+        // its verdict: nothing is set aside unseen), and the session opens beside it.
         let replayed = false;
         main((m) => {
           const restored = replayed ? inTheWay(m) : null;
-          const beside = kept(m) || (restored !== null && restored.kind !== 'session');
+          const restoredStays = restored !== null && (restored.kind !== 'session' || guard?.unstarted(restored.appSessionId) === true);
+          const beside = kept(m) || restoredStays;
           replayed = true;
           return model.openSession(m, appSessionId, { ...opts, how: beside ? 'tab' : opts.how, set: setOfSession(appSessionId) });
         });
