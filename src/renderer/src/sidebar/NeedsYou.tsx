@@ -2,6 +2,7 @@
 // The attention store supplies one wait-ordered row per session; the existing hover card supplies the request preview.
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import { openAnchor, ownerAnchorOf } from '../attention/anchor'; // P2-C
 import type { NeedsYouRow } from '../attention/derive';
 import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
@@ -47,7 +48,8 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
           const record = records.get(row.appSessionId)!; // needsYou excludes missing and archived records.
           const project = record.projectId === null ? 'Other sessions' : (projects.get(record.projectId)?.name ?? 'Other sessions');
           const title = displayTitle(record);
-          const reason = ATTENTION_HEADINGS[row.oldest.kind].text;
+          const anchor = ownerAnchorOf(row.oldest); // P2-C: a question left or a must-read reads its summary and opens at its mark
+          const reason = anchor !== null ? row.oldest.summary : ATTENTION_HEADINGS[row.oldest.kind].text;
           return (
             <li key={row.appSessionId}>
               <SessionHoverCard record={record}>
@@ -64,7 +66,7 @@ export function NeedsYou({ rows, selected, onEmptyFocus }: { rows: NeedsYouRow[]
                   }}
                   onBlur={() => { focusOwner.current = null; }}
                   onKeyDown={(event) => onKeyDown(event, index)}
-                  onClick={(event) => useLayout.getState().openSession(row.appSessionId, event.metaKey ? { how: 'tab' } : {})}
+                  onClick={(event) => (anchor !== null && !event.metaKey ? openAnchor(row.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(row.appSessionId, event.metaKey ? { how: 'tab' } : {}))}
                   onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(row.appSessionId, { how: 'tab' })}
                   className={`flex w-full cursor-default flex-col rounded-sm px-[9px] py-1.5 text-left outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected === row.appSessionId ? 'bg-bg-active' : ''}`}
                 >

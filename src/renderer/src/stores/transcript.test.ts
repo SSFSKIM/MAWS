@@ -461,5 +461,19 @@ describe('transcript store: the report view', () => {
     store.getState().jumpTo(KEY, cellId.tool(tool('t1'))); // the transcript chosen: the record is not the reader's to open
     expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
   });
+
+  it('jumps to an assistant text by its message uuid and block index (a mark’s anchor, M6), and says when it has none', async () => {
+    const store = createTranscriptStore();
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 0 })).toBe(false); // nothing attached
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setOwnerLane(KEY, true);
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m2-u0'), blockIndex: 0 })).toBe(true); // folded in the record: it opens
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: rowId.text(api('m2'), 0) });
+    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set([T1]));
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 0 })).toBe(true);
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: marked });
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 1 })).toBe(false);
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('elsewhere'), blockIndex: 0 })).toBe(false);
+  });
 });
 // P2-C end

@@ -95,8 +95,8 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
     const uuid = sim.assistant([`${more}${QUESTION(head)}`]);
     return markIdOf(app, 'need-input', { messageUuid: uuid, blockIndex: 0, span: 0 });
   };
-  const report = (markId: MarkId, result: Omit<AnsweredInput, 'appSessionId' | 'markId' | 'origin' | 'text'> & { text?: string }) =>
-    service.answered({ appSessionId: app, markId, origin: 'answer', text: result.text ?? answerText(mark(markId).head, 'Postgres'), ...result });
+  const report = (markId: MarkId, result: Omit<AnsweredInput, 'appSessionId' | 'markId' | 'origin' | 'text' | 'started'> & { text?: string; started?: boolean }) =>
+    service.answered({ appSessionId: app, markId, origin: 'answer', text: result.text ?? answerText(mark(markId).head, 'Postgres'), started: false, ...result });
   const items = () => projections.at(-1)?.items ?? [];
   // what the engine wrote to its transcript for a prompt it took (M4's probe: an idle prompt's user record)
   const taken = (uuid: string) => appendFileSync(transcript, `${JSON.stringify({ type: 'user', uuid, message: { role: 'user', content: 'x' }, origin: { kind: 'human' } })}\n`);
@@ -293,16 +293,33 @@ describe('answers follow their members (Design §6)', () => {
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: sqlite, origin: 'answer' } });
   });
 
-  it('started with no identifier is unconfirmed; a unique head settles it once the engine takes the prompt', async () => {
+  it('a seam result with neither a uuid nor an entry id is unconfirmed; a unique head settles it once the engine takes the prompt', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
-    t.report(q, { disposition: 'started' });
+    t.report(q, { disposition: 'sent', started: true });
     expect(t.question(q)).toMatchObject({ state: 'unconfirmed', members: [] });
     expect(t.items().some((i) => i.kind === 'async_input')).toBe(false);
     const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres')); // the resumed session's first prompt
     expect(t.question(q).state).toBe('unconfirmed'); // written, not yet taken
     t.sim.engine(entry.messageUuid!, 'started');
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres'), origin: 'legacy' } });
+  });
+
+  it('an answer whose send started the session first correlates by its uuid like any other (X22: started is a field)', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres')); // the acquired session's first prompt
+    t.report(q, { disposition: 'sent', started: true, messageUuid: entry.messageUuid! });
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: entry.messageUuid, life: 'alive' }]) });
+    t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres'), origin: 'answer' } });
+  });
+
+  it('a refused send leaves the question unanswered with the card’s words, whether or not the session was started', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.report(q, { disposition: 'refused', started: false, reason: 'Trust this folder in the session to continue' });
+    expect(t.question(q)).toEqual({ state: 'unanswered', failed: { reason: 'Trust this folder in the session to continue' } });
   });
 });
 
@@ -576,7 +593,7 @@ describe('ownerChannel.cancel (Design §6, "Cancel")', () => {
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres') } });
     t.sim.turn = true;
     const followUp = await t.sim.queue.send(answerText('Which backend?', 'SQLite after all'));
-    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite after all'), disposition: 'queued', queueId: followUp.entry.queueId });
+    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite after all'), disposition: 'queued', started: false, queueId: followUp.entry.queueId });
     expect(t.question(q)).toMatchObject({ state: 'queued', origin: 'reply' });
     expect(await t.service.cancel({ appSessionId: app, markId: q })).toEqual({ outcome: 'cancelled' });
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres') } });
@@ -591,7 +608,7 @@ describe('ownerChannel.cancel (Design §6, "Cancel")', () => {
     t.sim.engine(first.entry.messageUuid!, 'started');
     t.sim.turn = true;
     const followUp = await t.sim.queue.send(answerText('Which backend?', 'SQLite'));
-    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'queued', queueId: followUp.entry.queueId });
+    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'queued', started: false, queueId: followUp.entry.queueId });
     await t.restart();
     await t.sim.queue.remove(followUp.entry.queueId);
     await t.service.hostStreaming();
@@ -686,7 +703,7 @@ describe('legacy recognition (Design §6)', () => {
     t.sim.engine(sent.entry.messageUuid!, 'started');
     await t.sim.turnEnded([sent.entry.messageUuid!]);
     const followUp = await t.sim.queue.send(answerText('Which backend?', 'SQLite'));
-    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'sent', messageUuid: followUp.entry.messageUuid! });
+    t.service.answered({ appSessionId: app, markId: q, origin: 'reply', text: answerText('Which backend?', 'SQLite'), disposition: 'sent', started: false, messageUuid: followUp.entry.messageUuid! });
     t.sim.engine(followUp.entry.messageUuid!, 'started');
     expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'SQLite'), origin: 'reply' } });
     await t.restart();

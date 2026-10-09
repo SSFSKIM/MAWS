@@ -4,12 +4,13 @@
 // a message, the question, and the rest of the message. The words outside any mark are the working record's: shown
 // in the full transcript and once the record is opened (`showRecord`), hidden in the report's closed record. The
 // states (answered, queued, read) are main's (`ownerChannel.state`), matched by the mark's identity: the message's
-// uuid, its block index, and the ordinal among the block's marks of the same kind (`markIdOf`).
+// uuid, its block index, and the ordinal among the block's marks of the same kind (`markIdOf`). A question's choices and
+// Reply answer it and an essential's Mark read reads it (M6, `answering.ts`), on a mark main knows.
 import { useMemo, type ReactNode } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { markIdOf, type MarkId } from '@shared/owner/marks';
+import { markIdOf, questionHead, type MarkId } from '@shared/owner/marks';
 import type { OwnerMark } from '@shared/owner/state';
-import type { Part } from '@shared/owner/to-human-parser';
+import type { Choice, Part } from '@shared/owner/to-human-parser';
 import { useOwnerChannelStore } from '../../stores/owner-channel';
 import { useSessions } from '../../stores/sessions';
 import { marksOfText } from '../../transcript/model/owner-marks';
@@ -17,7 +18,8 @@ import { Markdown } from '../../transcript/view/markdown/Markdown';
 import { LABEL } from './copy';
 import { EssentialCard } from './EssentialCard';
 import { InsightGroup, InsightNote } from './InsightNote';
-import { QuestionCard } from './QuestionCard';
+import { markRead, useQuestionAnswering } from './answering';
+import { QuestionCard, type QuestionCardProps } from './QuestionCard';
 import './report.css';
 
 export interface OwnerReportProps {
@@ -63,8 +65,8 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
     const mark = markOf(part.kind, span);
     items.push({
       main: part.kind === 'need-input'
-        ? <QuestionCard key={index} text={part.text} choices={part.choices ?? []} state={mark?.question ?? null} live={live} held={held} />
-        : <EssentialCard key={index} text={part.text} live={live} mark={mark} />,
+        ? <AnsweredQuestion key={index} appSessionId={appSessionId} text={part.text} choices={part.choices ?? []} mark={mark} live={live} held={held} />
+        : <EssentialCard key={index} text={part.text} live={live} mark={mark} markRead={mark?.item && mark.essential?.state === 'unread' ? () => markRead(appSessionId, [mark.id as MarkId]) : undefined} />,
       insights: [],
     });
   });
@@ -83,6 +85,12 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
       ))}
     </div>
   );
+}
+
+// M6: a question card with its actions, once main knows the mark (a block still streaming answers nothing yet).
+function AnsweredQuestion({ appSessionId, text, choices, mark, live, held }: { appSessionId: AppSessionId; text: string; choices: Choice[]; mark: OwnerMark | null; live: boolean; held: QuestionCardProps['held'] }) {
+  const { actions, busy, note } = useQuestionAnswering(appSessionId, mark === null ? null : (mark.id as MarkId), mark?.head ?? questionHead(text));
+  return <QuestionCard text={text} choices={choices} state={mark?.question ?? null} live={live} held={held} actions={actions} busy={busy} note={note} />;
 }
 
 function MessageCard({ text, live }: { text: string; live: boolean }) {

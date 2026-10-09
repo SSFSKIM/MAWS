@@ -1,5 +1,6 @@
 // The report view's words (the P2-C document, Design §7 and §8; the labels the parent's Decision Log 19 chose).
 import type { Kind } from '@shared/owner/to-human-parser';
+import { STARTING_SESSION } from '../../sessions/acquire';
 
 export const LABEL: Record<Kind, string> = { 'to-human': 'Message', essential: 'Must read', 'need-input': 'Question', insight: 'Insight' };
 
@@ -28,6 +29,15 @@ export const QUESTION = {
   answered: 'Answered:',
   terminal: 'This session is open in a terminal',
   backgroundJob: 'This session is running as a background job',
+  // M6: the card's actions
+  sending: 'Sending…',
+  starting: STARTING_SESSION, // the send starts the session first (P2-A)
+  replyLabel: 'Your answer',
+  send: 'Send',
+  close: 'Close',
+  retry: 'Retry',
+  takeOver: 'Take over here', // the holder notice's words (HolderActions)
+  alreadyOnItsWay: 'Already on its way',
 };
 
 export const ESSENTIAL = { markRead: 'Mark read', read: 'Read' };

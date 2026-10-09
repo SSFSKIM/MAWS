@@ -1465,12 +1465,16 @@ describe('ipc schema validates both directions', () => {
 
     it('takes the seam’s result per disposition, and refuses an unknown one or an origin the card does not send', () => {
       const report = { appSessionId: 'a', markId: 'a:m1:0:q0', text: 'Answering "Which backend?": Postgres', origin: 'answer' };
-      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(true);
-      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', queueId: 'q-1' }).ok).toBe(true);
-      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'started' }).ok).toBe(true);
-      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'refused', reason: 'Session ended' }).ok).toBe(true);
-      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'delivered' }).ok).toBe(false);
-      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'legacy', disposition: 'sent' }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', started: false, messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: true, queueId: 'q-1' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'steered', started: false, messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'refused', started: false, reason: 'Session ended' }).ok).toBe(true);
+      // X22's final shape (P2-A): `started` is a field, never a disposition; `held` is the composer's alone
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'started', started: true }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'held', started: false, reason: 'trust' }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'delivered', started: false }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'legacy', disposition: 'sent', started: false }).ok).toBe(false);
       expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: 'all' }).ok).toBe(true);
       expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: ['a:m1:0:e0'] }).ok).toBe(true);
       expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: 'some' }).ok).toBe(false);

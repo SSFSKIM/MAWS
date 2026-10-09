@@ -14,9 +14,12 @@ export const OwnerChannelAnsweredSchema = z.strictObject({
   markId: MarkIdSchema,
   text: z.string(), // the prompt the seam sent (`answerText(head, answer)`)
   origin: AnswerOriginSchema,
-  disposition: z.enum(['sent', 'steered', 'queued', 'started', 'refused']), // the seam's result
-  messageUuid: MessageUuidSchema.optional(), // `sent`, `steered` (and `started` once it carries one)
-  queueId: z.string().optional(), // `queued` (and `started` once it carries one)
+  // the seam's result in X22's final shape (P2-A; 2026-10-10): `held` is the composer's alone, so a card's send the
+  // session could not take is `refused` with the card's words; `started` says the send acquired the session first
+  disposition: z.enum(['sent', 'steered', 'queued', 'refused']),
+  started: z.boolean(),
+  messageUuid: MessageUuidSchema.optional(), // `sent`, `steered`; a result with neither id reads unconfirmed (Design §6)
+  queueId: z.string().optional(), // `queued`
   reason: z.string().optional(), // `refused`
 });
 

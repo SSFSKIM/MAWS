@@ -1,6 +1,7 @@
 // The session status glyph (C5 execution document, Derivations, glyph table; residue *Glyphs*): one derivation for
 // sidebar row, tab and card (§5.7). First matching row wins. Tones name X7 tokens; labels are the `aria-label`, and the
 // character differs per state so colour is never the only signal.
+import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
@@ -28,6 +29,10 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
 
   const open = pending.filter((i) => isOpen(i) && isActionable(i));
   if (open.some((i) => i.kind === 'question')) return glyph('?', 'warning', 'Question');
+  // P2-C start (2026-10-10; the P2-C document, M6): the owner channel's question an agent can wait on, then its must-read
+  if (open.some((i) => i.kind === 'async_input')) return glyph(ATTENTION_HEADINGS.async_input.char, 'info', ATTENTION_HEADINGS.async_input.text);
+  if (open.some((i) => i.kind === 'essential_unread')) return glyph(ATTENTION_HEADINGS.essential_unread.char, 'accent', ATTENTION_HEADINGS.essential_unread.text);
+  // P2-C end
   if (open.some((i) => i.kind === 'plan')) return glyph('◇', 'info', 'Plan review');
   const trouble = open.find((i) => TROUBLE[i.kind] !== undefined);
   if (trouble) return glyph('!', 'danger', TROUBLE[trouble.kind]!);

@@ -4,7 +4,7 @@
 // change with `rowsOf`, whose per-turn memo keeps unchanged rows by reference; a streaming block's later deltas change
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
-import type { AgentId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
 import { foldedInReport, reportViewOf } from '../owner/report/project'; // P2-C (2026-10-09)
@@ -73,6 +73,9 @@ export interface TranscriptStore {
   setOwnerLane(key: string, on: boolean): void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleReportRecord(key: string, turn: TurnId): void;
+  // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
+  // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
+  jumpToMessage(key: string, anchor: { messageUuid: MessageUuid; blockIndex: number }): boolean;
   // P2-C end
 }
 
@@ -440,6 +443,15 @@ export function createTranscriptStore() {
             ui.collapsedTurns.add(turn);
           }
         });
+      },
+      jumpToMessage(key, { messageUuid, blockIndex }) {
+        const current = entry(key);
+        if (!current) return false;
+        const text = (row: Row) => row.kind === 'assistant_text' && row.messageUuid === messageUuid && row.blockIndex === blockIndex;
+        const row = current.rows.find(text) ?? allExpandedRows(current.state).find(text);
+        if (!row) return false;
+        jump(key, row.id, { ...(row.turnId !== null && { turnId: row.turnId }) }, false);
+        return true;
       },
       // P2-C end
 

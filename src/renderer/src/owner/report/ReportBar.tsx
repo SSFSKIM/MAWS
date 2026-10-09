@@ -8,11 +8,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { focusedSession } from '../../composer/ComposerAppKeys';
 import { useOwnerChannelStore } from '../../stores/owner-channel';
 import { useTranscriptStore } from '../../stores/transcript';
+import { markRead } from './answering';
 import { REPORT } from './copy';
 import { reportViewOf } from './project';
 import './report.css';
 
-export function ReportBar({ appSessionId, markAllRead }: { appSessionId: AppSessionId; markAllRead?: () => void }) {
+export function ReportBar({ appSessionId, markAllRead = () => markRead(appSessionId, 'all') }: { appSessionId: AppSessionId; markAllRead?: () => void }) {
   const owner = useOwnerChannelStore((s) => s.bySession.get(appSessionId) ?? null); // the session's transcript slot follows it
   const key = appSessionId; // the session transcript's store key (`ipcSource`)
   const report = useTranscriptStore((s) => reportViewOf(s.entries[key]?.state?.ui));

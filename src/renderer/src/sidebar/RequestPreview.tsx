@@ -21,7 +21,7 @@ import { itemAge } from './derive';
 import { displayTitle } from '../sessions/title';
 
 export const HEADINGS = ATTENTION_HEADINGS; // the one table C7's card reads too
-const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
+const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 
 const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'LS']);
 const PLAN_LINES = 6;

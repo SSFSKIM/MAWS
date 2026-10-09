@@ -1,7 +1,8 @@
 // Getting to what needs you (charter §5.7; C5 execution document, M5): ⌘⇧J opens the oldest Needs-you session that is
 // not the one in front of you, in the focused pane (a session tab, never the Overview, because the item wants an
 // answer and the docked card is where scopes live); a notification click arrives from main as `attention.navigate`
-// and opens the same way (W9: the item it names is no longer kept for a transcript jump nothing built); when main could
+// and opens the same way (W9: the item it names is no longer kept for a transcript jump nothing built; P2-C M6: an
+// owner-channel item it names opens at its mark in the report, anchor.ts); when main could
 // not post an OS notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
 import { isOpen } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
@@ -20,6 +21,7 @@ import { useSessions } from '../stores/sessions';
 import { sideChildrenShown } from '../side/store';
 import { useCommentCard } from '../side/card/store'; // P2-E1
 import { askSheet } from '../tools/maws/ask/store';
+import { openAnchor, ownerAnchorOf } from './anchor'; // P2-C
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
 
@@ -34,12 +36,21 @@ function openNextNeedsYou(): void {
   const tab = activeTab(useLayout.getState().main);
   const current = tab?.kind === 'session' ? tab.appSessionId : null;
   const next = nextNeedsYou(rows, current);
-  if (next) openInFocusedPane(next.appSessionId);
+  if (next) openItem(next.appSessionId, next.oldest);
 }
 
-function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
-  openInFocusedPane(appSessionId as AppSessionId);
+function navigate({ appSessionId, attentionId }: EventPayload<'attention.navigate'>): void {
+  const id = appSessionId as AppSessionId;
+  openItem(id, attentionId === null ? undefined : itemOf(id, attentionId as AttentionId));
 }
+
+// P2-C start (2026-10-10; M6): an owner-channel item opens at its anchor in the report (anchor.ts); any other, its session
+function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): void {
+  const anchor = item === undefined ? null : ownerAnchorOf(item);
+  if (anchor !== null) openAnchor(appSessionId, anchor);
+  else openInFocusedPane(appSessionId);
+}
+// P2-C end
 
 // E11 (W-C; E1's live sitting): a session whose tab is in front in a pane has its request on screen already, the
 // docked card (C7); a toast would only cover the panel's action bar. A file tab of the session does not count (the
@@ -96,7 +107,7 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
     id: toastId(attentionId as AttentionId),
     level: 'warning',
     text: item?.summary ? `${title} needs you · ${previewLine(item.summary, 200) ?? item.summary}` : `${title} needs you`, // E11 F2b (plan 2.6)
-    actions: [{ label: 'Open session', run: () => openInFocusedPane(id) }],
+    actions: [{ label: 'Open session', run: () => openItem(id, item) }], // P2-C: an owner-channel item at its mark
     dismissible: true,
   });
   toasted.set(attentionId as AttentionId, { appSessionId: id, held: item !== undefined });

@@ -199,8 +199,10 @@ export class OwnerChannelService {
       return;
     }
     const members: AnswerMember[] = [];
+    // the first member is the seam's: the uuid it sent or steered, the entry it queued; whether the send started the
+    // session first changes nothing, and a result carrying neither id is unconfirmed
     if (input.messageUuid !== undefined && input.disposition !== 'queued') members.push({ kind: 'uuid', id: input.messageUuid, life: 'alive' });
-    if (input.queueId !== undefined && (input.disposition === 'queued' || input.disposition === 'started')) members.push({ kind: 'entry', id: input.queueId, life: 'alive' });
+    if (input.queueId !== undefined && input.disposition === 'queued') members.push({ kind: 'entry', id: input.queueId, life: 'alive' });
     // a new answer of its own: one sent before it (answered again while unconfirmed, or a delivered answer's follow-up)
     // keeps its own text and members, for its evidence to settle it alone
     const answer = newAnswer({ text: input.text, origin: input.origin, members, unconfirmed: members.length === 0, reportedAt: this.now() });
