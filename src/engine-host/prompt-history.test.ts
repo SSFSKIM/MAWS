@@ -183,4 +183,20 @@ describe('unsettledPrompts: the steers a dead launch left unstated (P2-C)', () =
     expect(summary(after.events).slice(-1)).toEqual(['app-ph:L3:3:0 abandon - u-1']);
     expect(await unsettledPrompts(dir, 'L4')).toEqual([]);
   });
+
+  // fix wave 3: a recovery that could not read the earlier launches' journals starts anyway, but certifies nothing
+  it('a recovery whose journal read fails writes no recovered row, so a later walk still folds the earlier launch', async () => {
+    write('L1.jsonl', 1, [spawn('2026-01-09T10:00:00.000Z'), initRow('2026-01-09T10:00:00.100Z'), recoveredRow('2026-01-09T10:00:00.200Z'), steerOut('2026-01-09T10:00:01.000Z', 'u-1')]);
+    const rows: Record<string, unknown>[] = [];
+    const queue = new MessageQueue({
+      appSessionId: APP, store: new MemorySessionStateStore(), write: async () => {}, meta: (frame) => void rows.push(frame), turnOpen: () => false, canWrite: () => true,
+      cancel: async () => true, onChange: () => {}, log: () => {}, unsettled: () => Promise.reject(new Error('EIO: i/o error')),
+    });
+    await queue.recover(); // startup goes on
+    expect(queue.recovered).toBe(true);
+    expect(rows).toEqual([]); // no abandon, and no recovered row certifying what was never read
+    write('L2.jsonl', 1, [spawn('2026-01-09T11:00:00.000Z'), initRow('2026-01-09T11:00:00.100Z'), exitRow('2026-01-09T11:00:01.000Z')]);
+    expect(await unsettledPrompts(dir, 'L3')).toEqual(['u-1']);
+    expect((await promptHistory(dir, APP, '2026-01-09T10:00:00.500Z')).complete).toBe(false);
+  });
 });

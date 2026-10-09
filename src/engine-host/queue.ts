@@ -118,11 +118,13 @@ export class MessageQueue {
     await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
       const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
       // P2-C: what an earlier launch that died with its host left unstated, abandoned with the stored pending steers
+      // A failed read keeps startup going but leaves no `recovered` row: that row certifies the leftovers were read and
+      // stated, so the next launch's walk goes on past this one and reads them again.
       const prior = await (this.deps.unsettled?.() ?? Promise.resolve([])).catch((error: unknown) => {
         this.log(`the earlier launches' unsettled steers could not be read: ${messageOf(error)}`);
-        return [] as MessageUuid[];
+        return null;
       });
-      for (const uuid of prior) this.unended.add(uuid);
+      for (const uuid of prior ?? []) this.unended.add(uuid);
       this.entries = loaded.entries;
       this.paused = loaded.paused;
       this.releasePaused = this.paused;
@@ -136,7 +138,7 @@ export class MessageQueue {
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
       }
       this.settleAfterExit();
-      this.journal({ event: 'queue', action: RECOVERED_ACTION }); // P2-C: the earlier launches' leftovers are on record from here
+      if (prior !== null) this.journal({ event: 'queue', action: RECOVERED_ACTION }); // P2-C: the earlier launches' leftovers are on record from here
       await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
       this.deps.onPauseChange?.(this.releasePaused);
     });
