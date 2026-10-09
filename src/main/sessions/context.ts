@@ -9,6 +9,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { TakeOverDeps } from './take-over'; // W7
+import type { AcquisitionMemory } from './availability'; // P2-A
 import { normalizePath } from '@shared/sessions/trust';
 import { resolveStorePaths, slugOf } from '../../engine-host/fs/paths';
 import type { GitRun } from '../git/runner';
@@ -50,13 +51,17 @@ export interface SessionServiceDeps {
   // CUA_BROWSER_BACKENDS; absent or null, the launch carries none
   browserBackend?: (appSessionId: AppSessionId) => string | null;
   takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs'>; // W7: the tests' seams
-  timing?: { watchdogMs?: number; stopWaitMs?: number };
+  // P2-A (X16): where the service publishes each session's acquisition memory (main's read model, so the digest's
+  // availability follows it); absent, nothing is published
+  acquisitions?: { observeAcquisition(appSessionId: AppSessionId, memory: AcquisitionMemory): void };
+  timing?: { watchdogMs?: number; stopWaitMs?: number; exitWaitMs?: number /* P2-A */ };
   now?: () => string;
   log?: (message: string) => void;
 }
 
 export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)
 export const STOP_WAIT_MS = 10_000; // a bootstrap stop answered { exited: false } waits this long for the exit
+export const EXIT_WAIT_MS = 15_000; // P2-A: an acquisition waits this long for a process still exiting (the stop ladder's 7 s with margin)
 
 // A refusal the engine host answered (`{ ok: false }`), thrown with its code and message.
 export class HostError extends Error {

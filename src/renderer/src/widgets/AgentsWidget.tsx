@@ -7,6 +7,7 @@ import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
 import { AGENTS, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
+import { useDormant } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export function present(catalog: SessionCatalog): { name: string; description: string }[] {
@@ -32,8 +33,17 @@ export function AgentsBody({ agents, appSessionId, close }: { agents: { name: st
 export function AgentsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const catalog = useSessionCatalog(appSessionId);
   const launched = useSessions((s) => s.engine.has(appSessionId));
+  const dormant = useDormant(appSessionId); // P2-A: a session that never launched in this app run offers Load now
+  const known = launched || catalog.revision > 0;
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.agents} command="agents" state={launched || catalog.revision > 0 ? 'ready' : 'not_running'} error={null} close={close}>
+    <WidgetFrame
+      appSessionId={appSessionId}
+      title={WIDGET_TITLE.agents}
+      command="agents"
+      state={known ? 'ready' : (dormant?.state ?? 'loading')}
+      error={known ? null : (dormant?.words ?? null)}
+      close={close}
+    >
       <AgentsBody agents={present(catalog)} appSessionId={appSessionId} close={close} />
     </WidgetFrame>
   );

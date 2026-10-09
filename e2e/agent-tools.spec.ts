@@ -805,8 +805,8 @@ test.describe('E7: the orchestration views', () => {
       expect(rows.at(-1)).toMatchObject({ resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." });
     });
 
-    await test.step('from its JSONL, on a session not running here: the same rows, Reply closed with the reason', async () => {
-      await h.load('A', 'events/agents-peer'); // the backfill of A's recorded transcript
+    await test.step('from its JSONL, on a session not running here: the same rows, Reply tries to start and keeps the text on refusal', async () => {
+      await h.load('A', 'events/agents-peer'); // P2-A §5.6: backfilled Reply tries to start; the stub's A has no main index record, so refusal keeps the text.
       await h.agents('clearStatus', 'A');
       await expandAll();
       await expect.poll(async () => (await peerRows()).map((row) => (row.kind === 'message' ? [row.direction, row.preview, row.result, row.reply] : [row.kind, row.sections.map((s) => s.heading)]))).toEqual([
@@ -817,8 +817,12 @@ test.describe('E7: the orchestration views', () => {
         ['inbound', 'E7 probe: second message while you work', null, true],
         ['outbound', 'E7 probe: nobody', 'failed', false],
       ]);
-      await expect(h.agents('reply', 1, text)).rejects.toThrow('Replying needs the session running here');
-      expect((await h.agents('calls')).steer, 'nothing more asked').toHaveLength(1);
+      await h.agents('reply', 1, text);
+      const reply = h.page.locator('[data-agents-harness-transcript] [data-part="peer-composer"]');
+      await expect(reply.locator('[data-part="peer-line"][data-failed]')).toHaveText('no session record for A');
+      await expect(reply.locator('textarea')).toBeEnabled();
+      await expect(reply.locator('textarea')).toHaveValue(text);
+      expect((await h.agents('calls')).steer, 'the refused start asks nothing more').toHaveLength(1);
     });
     h.expectQuietConsole();
   });

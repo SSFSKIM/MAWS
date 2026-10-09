@@ -17,6 +17,6 @@ export function holderWords(holder: SessionRecord['holder']): string {
 }
 
 // "Held by …", with the actions the caller offers (the job's Attach, from `sessions/attach.ts`).
-export function toastHeld(holder: SessionRecord['holder'], actions: Notice['actions'] = []): void {
-  toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
+export function toastHeld(holder: SessionRecord['holder'], actions: Notice['actions'] = [], id?: string /* P2-A: one notice per start */): void {
+  toast({ ...(id !== undefined && { id }), level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
 }

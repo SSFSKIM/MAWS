@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SessionHarness } from '../../../test/support/session-harness';
+import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // P2-A
 import { commandChannel } from '@shared/ipc/schema';
 
 // Electron is faked as in the router's own test: one recorded ipcMain handler per channel, one app window.
@@ -78,6 +79,23 @@ describe('main answers the session service commands through the router', () => {
     });
     // the parent has no process in this host: its refusal goes back verbatim
     expect(await invoke('side.sendToMain', { appSessionId: parent, anchor, text: 'look', screenshot: null })).toMatchObject({ ok: false, error: { code: 'internal', message: `unknown session ${parent}` } });
+  });
+
+  // P2-A (X16): the acquisition through the router; the engine host's own host_unavailable keeps its code, so the
+  // supervisor's banner returns for it as for the other launches
+  it('acquires a record through the router, and relays the host’s host_unavailable with its code', async () => {
+    h.trustDirectory(h.work);
+    h.host.script = () => ({});
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x2a01), directory: h.work })).record;
+    expect(await invoke('session.acquire', { appSessionId: record.appId, reason: 'send' })).toEqual({ ok: true, value: { status: 'ready', appSessionId: record.appId, launched: true, joined: false } });
+    expect(await invoke('session.acquire', { appSessionId: record.appId, reason: 'mount' })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    const other = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x2a02), directory: h.work })).record;
+    h.host.unavailable = true;
+    try {
+      expect(await invoke('session.acquire', { appSessionId: other.appId, reason: 'send' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    } finally {
+      h.host.unavailable = false;
+    }
   });
 
   it('answers an unknown session’s delete as internal', async () => {

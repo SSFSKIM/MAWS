@@ -487,7 +487,9 @@ test('the composer keeps its draft across a tab switch and a reload', async ({ e
   await messageIn(page, 0).click();
   await page.keyboard.type('a composer draft');
   await expect.poll(async () => value(await invoke(page, 'session.drafts.get', { appSessionId: appId! }))).not.toBeNull();
-  await expect(control(page, 0)).toBeDisabled(); // no process behind the record: nothing sends
+  // P2-A: no process behind the record, so Send offers to start the session (nothing is sent here: the draft is the subject)
+  await expect(control(page, 0)).toBeEnabled();
+  await expect(control(page, 0)).toHaveAttribute('aria-description', 'Starts this session');
   await showPanes(page, [null, null]);
   await showPanes(page, [{ composer: appId! }, null]);
   await expect(messageIn(page, 0)).toHaveText('a composer draft');

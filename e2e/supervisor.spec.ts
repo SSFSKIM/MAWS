@@ -572,9 +572,10 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     expect(restarted.lastExit).toMatchObject({ code: null, signal: 'SIGKILL', interrupted: 1 });
     expect(s.lock()?.pid).toBe(fresh);
 
-    // the renderer drops the dead host's statuses: the composer no longer offers Stop, the glyph is not live
+    // the renderer drops the dead host's statuses: the composer no longer offers Stop, the glyph is not live; P2-A: Send
+    // offers to start the session again
     await expect(submitOf(run.page)).toHaveAttribute('data-submit-state', 'send');
-    await expect(submitOf(run.page)).toHaveAttribute('title', 'Session ended');
+    await expect(submitOf(run.page)).toHaveAttribute('aria-description', 'Starts this session');
     await expect(glyphOf(row)).not.toHaveAttribute('aria-label', /Working|Needs approval/);
     const composer = `"${await submitOf(run.page).textContent()}" (${await submitOf(run.page).getAttribute('title')})`;
     // the transcript closes the dead turn once the successor's table does not list the session: stopped, not Working

@@ -48,7 +48,7 @@ export function DestinationControl({ form, compact = false }: { form: CommentFor
   const name = useId();
   const options: { to: CommentDestination; label: string; caption: string; enabled: boolean }[] = [
     { to: 'thread', label: COPY.thread, caption: COPY.threadCaption, enabled: true },
-    { to: 'main', label: COPY.main, caption: form.mainCaption, enabled: form.ready },
+    { to: 'main', label: COPY.main, caption: form.mainCaption, enabled: form.mainEnabled }, // P2-A: mainEnabled
   ];
   return (
     <fieldset className="m-0 min-w-0 border-0 p-0" disabled={form.sending}>
@@ -84,7 +84,7 @@ export function CommentRefusal({ form }: { form: CommentForm }) {
       <button type="button" className={SECONDARY} disabled={!form.canSend(phase.destination)} onClick={() => void form.send(phase.destination)}>
         {COPY.retry}
       </button>
-      {phase.destination === 'thread' && form.ready && (
+      {phase.destination === 'thread' && form.mainEnabled && ( /* P2-A: mainEnabled */
         <button type="button" className={SECONDARY} onClick={() => void form.send('main')}>
           {COPY.mainInstead}
         </button>

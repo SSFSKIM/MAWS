@@ -11,6 +11,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
+import { digest } from '../../../../../test/support/builders';
+import { useReadLoads } from '../../widgets/read';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
 import { useGateway } from '../../gateway/store';
@@ -59,6 +61,7 @@ afterEach(() => {
   useGateway.setState({ switching: new Map(), directLogin: new Map() }); // W2
   useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() }); // W2
   useSettings.setState({ state: null }); // W2
+  useReadLoads.setState({ loads: new Map() }); // P2-A
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -178,6 +181,74 @@ describe('session info renders the six sections', () => {
     expect(screen.getByText('Open a session to see its details')).toBeTruthy();
   });
 });
+
+// P2-A start (2026-10-09; X17): with no live process the sections show what the engine last reported, each labelled
+// with when, and "Not observed yet" for a session MAWS never ran; the record's requested values are never shown as
+// observed, and no engine read runs
+describe('session info of a session with no live process', () => {
+  const ago = (ms: number) => new Date(Date.now() - ms - 60_000).toISOString();
+  const facts = (over: Record<string, unknown>) => ({
+    version: 1, appSessionId: READY, engineSessionId: null, writtenAt: ago(0), source: 'journal', launches: ['L1'],
+    engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true, ...over,
+  });
+  const offline = () => useSessions.setState({ engine: new Map(), records: new Map([[READY, record]]), digests: new Map() });
+
+  it('labels the observed model, effort, mode, output style, plugin count and context with when', async () => {
+    offline();
+    const days = ago(2 * 86_400_000);
+    const hours = ago(3 * 3_600_000);
+    backend.script('session.observedFacts', () =>
+      facts({
+        model: { value: 'claude-haiku-4-5', at: days, launchId: 'L1' }, effort: { value: 'high', at: hours, launchId: 'L1' }, mode: { value: 'plan', at: hours, launchId: 'L1' },
+        outputStyle: { value: 'Explanatory', at: days, launchId: 'L1' }, plugins: { value: { plugins: [{ name: 'p', path: '/p', source: null, version: null }], errors: [], warnings: [] }, at: days, launchId: 'L1' },
+        contextUsage: { value: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 }, at: hours, launchId: 'L1' },
+      }),
+    );
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('claude-haiku-4-5 · Last observed 2 days ago'));
+    expect(valueOf('Effort')).toBe('high · Last observed 3 hours ago'); // its own age, not the model's
+    expect(valueOf('Output style')).toBe('Explanatory · Last observed 2 days ago');
+    expect(valueOf('Plugins')).toBe('1 loaded · Last observed 2 days ago');
+    expect(valueOf('Mode')).toBe('Plan · Last observed 3 hours ago');
+    expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000 · Last observed 3 hours ago');
+    expect(screen.queryByText(/Not running in this app/)).toBeNull();
+    expect(backend.calls.filter((c) => c.command !== 'session.observedFacts' && c.command.startsWith('session.get'))).toEqual([]);
+  });
+
+  it('reads "Not observed yet" where a fact would be for a session MAWS never ran, never the record’s defaults', async () => {
+    offline();
+    backend.script('session.observedFacts', () => null);
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    for (const label of ['Effort', 'Output style', 'Plugins', 'Mode', 'Context']) expect(valueOf(label)).toBe('Not observed yet');
+  });
+
+  // M3: the Refresh is the owner's gesture; opening the tab starts nothing
+  it('offers Refresh, which acquires the session for a read; opening it acquired nothing', async () => {
+    offline();
+    backend.script('session.observedFacts', () => null);
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
+    expect(acquires()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY, reason: 'read' }]));
+  });
+
+  // M3 review (§10 Q7, acceptance 6): a terminal holding the session: its facts read-only, the holder's actions in place of Refresh
+  it('a session a terminal holds names the holder and offers its actions where Refresh would be, starting nothing', async () => {
+    useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, holder: { kind: 'terminal', pid: 4711 } }]]), digests: new Map([[READY, digest(READY, { availability: 'foreign_held' })]]) });
+    backend.script('session.observedFacts', () => null);
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    expect(screen.getByText('Held by terminal · 4711')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(backend.calls.filter((c) => c.command === 'session.acquire')).toEqual([]);
+  });
+});
+// P2-A end
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {

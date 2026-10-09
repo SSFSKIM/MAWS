@@ -467,11 +467,8 @@ export class Normalizer {
   // a replay's empty answer to a read it never recorded) samples nothing.
   private contextSample(frame: ControlResponseFrame, out: Emitter, attribution: Attribution): void {
     if (frame.response.subtype !== 'success') return;
-    const parsed = GetContextUsageResponseSchema.safeParse(frame.response.response);
-    if (!parsed.success) return;
-    const { maxTokens, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
-    const { totalTokens, percentage } = contextTotal(parsed.data);
-    out.emit({ kind: 'context.sample', totalTokens, maxTokens, percentage, autoCompactThreshold: autoCompactThreshold ?? null, isAutoCompactEnabled, model }, attribution);
+    const sample = contextSampleOf(frame.response.response);
+    if (sample) out.emit({ kind: 'context.sample', ...sample }, attribution);
   }
 
   // C10 start: the held trust line as the session's warning, once
@@ -628,3 +625,15 @@ function budgetOf(value: unknown): { limitKiB: number; totalKiB: number } | null
   return b && typeof b.limitKiB === 'number' && typeof b.totalKiB === 'number' ? { limitKiB: b.limitKiB, totalKiB: b.totalKiB } : null;
 }
 // C12 end
+
+// P2-A start (2026-10-09): the `context.sample` payload of a successful `get_context_usage` answer, or null for one
+// without the figures; X17's journal recovery maps the journal's answers with it, so there is one mapping.
+export type ContextSample = Omit<Extract<EventPayload, { kind: 'context.sample' }>, 'kind'>;
+export function contextSampleOf(response: unknown): ContextSample | null {
+  const parsed = GetContextUsageResponseSchema.safeParse(response);
+  if (!parsed.success) return null;
+  const { maxTokens, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+  const { totalTokens, percentage } = contextTotal(parsed.data);
+  return { totalTokens, maxTokens, percentage, autoCompactThreshold: autoCompactThreshold ?? null, isAutoCompactEnabled, model };
+}
+// P2-A end

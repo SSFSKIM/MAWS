@@ -55,6 +55,10 @@ import type { SideQuestionRequest } from '@shared/wire/control';
 import { SideQuestionLog } from './side-questions';
 // E3 end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
+// P2-A start (2026-10-09; X17)
+import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
+import type { ObservedFactsRecorder, ObservedFactsService } from './observed-facts';
+// P2-A end
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
@@ -105,6 +109,9 @@ export interface EngineSessionOptions {
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
+  // P2-A (X17): the host's observed facts; this launch's recorder is fed every row the session journals and writes the
+  // facts beside the state file. Absent (the conformance suites, unit tests), nothing is recorded.
+  observedFacts?: ObservedFactsService;
   // P2-E1 (D10): a side thread's ancestors, nearest first, whose artifacts its artifact tools also resolve (main's
   // `artifactScopeOf`, sent beside the spec by `session.launch`; never stored). Absent or empty for any other session.
   artifactScope?: readonly AppSessionId[];
@@ -148,6 +155,7 @@ export class EngineSession {
   private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
   readonly surface: SessionSurface; // R2: the remote surface MAWS attaches as
   private readonly maws: SessionMaws; // E1: the `maws` tool server, its bridges and the asks (session-maws.ts)
+  private readonly observed: ObservedFactsRecorder | null; // P2-A (X17)
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
@@ -220,6 +228,8 @@ export class EngineSession {
       log: this.log,
     });
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
+    // P2-A (X17): its base (what earlier launches observed) loads now, before this launch's first write
+    this.observed = opts.observedFacts?.recorder({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, engineSessionId: () => this.normalizer.state.sessionId ?? this.plan.sessionId }) ?? null;
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
       client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
@@ -502,6 +512,12 @@ export class EngineSession {
     return this.broker.retiredReason(requestId as RequestId) !== null;
   }
 
+  // P2-A (X17): what `engine.observedFacts` answers while this row is in the table, live or exited: the facts earlier
+  // launches observed merged with this launch's. Null without a recorder.
+  observedFacts(): Promise<ObservedFactsAnswer | null> {
+    return this.observed ? this.observed.answer() : Promise.resolve(null);
+  }
+
   // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
   brokerItems(): AttentionItem[] {
     return [...this.broker.snapshot(), ...this.maws.attention()];
@@ -532,7 +548,7 @@ export class EngineSession {
       modelOverrides: Object.fromEntries(Object.entries(env).filter(([key]) => /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL$/.test(key))),
       engineVersion: tracked.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
       bin: this.plan.bin, // W13: the spawn row's
-      fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
+      fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings, pluginsObservedAt: tracked.pluginsObservedAt, // P2-A
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
       pendingRequests: this.broker.live + (this.client?.pending ?? 0) + this.maws.pending /* E1 */, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
@@ -557,6 +573,7 @@ export class EngineSession {
     } catch (error) {
       throw new JournalWriteFailed(error);
     }
+    this.observed?.row(row); // P2-A (X17): the facts are read from the rows as journaled, as recovery reads them
     const events = this.normalizer.push(row);
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
@@ -1079,6 +1096,7 @@ export class EngineSession {
       this.log(`exit not journaled: ${messageOf(error)}`);
     }
     this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release };
+    if (this.observed) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status
     this.setProcess('exited');
     this.journalClosed = true;
     void this.journal.close().catch((error: unknown) => this.log(`journal not closed: ${messageOf(error)}`));

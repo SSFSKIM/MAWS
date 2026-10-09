@@ -32,7 +32,8 @@ import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { currentSet } from '../stores/layout-model';
-import { registerReleasedResume } from './resume-seam'; // C12
+import { useSetup } from '../sessions/store'; // P2-A
+import { trustState } from '../test-support/setup-intents'; // P2-A
 import { DictationKeys } from './dictation/DictationKeys'; // E9
 import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
 
@@ -498,6 +499,24 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
   });
 
+  // P2-A M3 review (acceptance 5): on a session with no ready process the chosen directory starts it first, said beside the "+"
+  it('Add directory… on an exited session says Starting… after the choice while the session starts, then adds it', async () => {
+    live(A, { status: { process: 'exited' } });
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    expect(await addDirectoryState(user)).toBeNull(); // offered: the choice starts the session
+    await user.click(plusOf());
+    await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
+    await waitFor(() => expect(invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'chip' }])); // after the picker answered
+    expect(invoked('layout.pickFiles')).toHaveLength(1);
+    const phase = composerOf(0).querySelector('[data-add-directory-phase]');
+    expect(phase?.textContent).toBe('Starting…');
+    expect(invoked('session.applyFlagSettings')).toEqual([]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
+    await waitFor(() => expect(composerOf(0).querySelector('[data-add-directory-phase]')).toBeNull());
+  });
+
   // W10 (C10): "model matters a bit more": the model chip toward the middle, the context ring at the outermost edge
   it('orders the toolbar + · location · mode · mic … model · context ring, the ring last', async () => {
     live(A);
@@ -855,61 +874,108 @@ describe('unstarted send holds a starting state', () => {
   });
 });
 
-// C12 start: Send-to-resume (C12 execution document, Interfaces "Send-to-resume"): a session released under the memory
-// budget sends through the resume C10 registers, with the message; its `!` waits for a message first.
-describe('a released session resumes on Send', () => {
-  const exitedBy = (appSessionId: AppSessionId, reason: 'budget' | 'stop') =>
-    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_000_000 } : null } } });
-  const released = (appSessionId: AppSessionId) => {
-    exitedBy(appSessionId, 'budget');
-    useSessions.getState().applyDigest(digest(appSessionId, { phase: 'idle', released: { at: '2026-09-29T14:02:00.000Z', reason: 'budget', limitKiB: 8_388_608 } }));
-  };
-  let off: () => void = () => {};
-  afterEach(() => off());
+// P2-A start (2026-10-09; the execution document §5.4, superseding C12's send-to-resume): Send on a session with a
+// record and no ready process acquires it through the human seam, then sends; the text stays in the locked editor until
+// the host accepts it. `!` and `#` acquire too. Archived and foreign-held sessions refuse with their words.
+describe('Send on a session with a record and no ready process', () => {
+  const exitedBy = (appSessionId: AppSessionId, reason: 'budget' | 'stop' | 'crash') =>
+    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: null } } });
+  const READY = { status: 'ready', appSessionId: A, launched: true, joined: false };
+  beforeEach(() => useSetup.setState({ cards: new Map() }));
 
-  it('sends the typed message to the registered resume, clears the editor once it is taken, and records the prompt', async () => {
-    const resume = vi.fn(async () => true);
-    off = registerReleasedResume(resume);
-    released(A);
+  it.each(['budget', 'stop', 'crash'] as const)('an exited session (%s) starts on Send: the text stays locked until the host accepts it, then clears and is recorded', async (reason) => {
+    exitedBy(A, reason);
     mount([{ index: 0, id: A }]);
     await type('carry on');
     await waitFor(() => expect(primary().disabled).toBe(false));
-    expect(primary().getAttribute('aria-description')).toBe('Resumes this session');
+    expect(primary().getAttribute('aria-description')).toBe('Starts this session');
     await key(editorOf(), { key: 'Enter' });
-    await waitFor(() => expect(resume).toHaveBeenCalledExactlyOnceWith(A, { content: 'carry on', display: 'carry on' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    expect(invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'send' }]);
+    expect(editorOf().editor.getText()).toBe('carry on');
+    await act(() => fake.reply('session.acquire', READY));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
-    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.send')).toEqual([{ appSessionId: A, content: 'carry on' }]);
     expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'carry on', pastedContents: {} }]);
   });
 
-  it('keeps the text when the resume is refused', async () => {
-    const resume = vi.fn(async () => false);
-    off = registerReleasedResume(resume);
-    released(A);
+  it('a trust card holds the message: nothing is sent, the editor and its draft keep the text', async () => {
+    exitedBy(A, 'stop');
     mount([{ index: 0, id: A }]);
     await type('carry on');
     await key(editorOf(), { key: 'Enter' });
-    await waitFor(() => expect(resume).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A, trust: trustState() }));
+    await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust', message: { content: 'carry on', display: 'carry on' } }));
     expect(editorOf().editor.getText()).toBe('carry on');
+    expect(invoked('session.send')).toEqual([]);
     expect(invoked('session.history.append')).toEqual([]);
+    await waitFor(() => expect(JSON.stringify(invoked('session.drafts.set').at(-1))).toContain('carry on'), { timeout: 3_000 });
+    expect(useNotices.getState().notices).toEqual([]);
   });
 
-  it('a stopped session, and a released one whose mark an archive dropped, still read Session ended and resume nothing', async () => {
-    const resume = vi.fn(async () => true);
-    off = registerReleasedResume(resume);
+  it('a refusal says why with Retry, and the text stays', async () => {
     exitedBy(A, 'stop');
-    exitedBy(B, 'budget'); // the host's row still says budget; main's digest has no mark (archived and unarchived)
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/work/gone' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Directory not found: /work/gone', ['Retry']]]));
+    expect(editorOf().editor.getText()).toBe('carry on');
+    expect(invoked('session.send')).toEqual([]);
+  });
+
+  it('an archived session and a foreign-held one refuse Send with their words', () => {
+    exitedBy(A, 'stop');
+    live(B, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 42 } } });
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'archived' }));
+    useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }));
     mount([{ index: 0, id: A }, { index: 1, id: B }]);
-    for (const pane of [0, 1] as const) {
-      await type('carry on', pane);
-      await waitFor(() => expect(primary(pane).title).toBe('Session ended'));
+    for (const [pane, words] of [[0, 'Archived · unarchive it to continue'], [1, 'Held by terminal · 42']] as const) {
+      expect(primary(pane).title).toBe(words);
       expect(primary(pane).disabled).toBe(true);
-      await key(editorOf(pane), { key: 'Enter' });
     }
-    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it('a start in flight reads Starting… and Send stays enabled to join it', async () => {
+    exitedBy(A, 'stop');
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }));
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await waitFor(() => expect(primary().disabled).toBe(false));
+    expect(primary().textContent).toBe('Starting…');
+    expect(primary().getAttribute('aria-description')).toBe('Sends once the session has started');
+  });
+
+  it('`!` acquires before it runs; a trust card it meets carries no message and the text stays', async () => {
+    exitedBy(A, 'stop');
+    mount([{ index: 0, id: A }]);
+    await type('!ls');
+    await waitFor(() => expect(primary().disabled).toBe(false));
+    expect(primary().getAttribute('aria-description')).toBe('Starts this session');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A, trust: trustState() }));
+    await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust', message: null }));
+    expect(editorOf().editor.getText()).toBe('!ls');
+    expect(invoked('session.bash')).toEqual([]);
+    expect(invoked('session.send')).toEqual([]);
+  });
+
+  it('`!` on an exited session runs once the acquisition answers ready', async () => {
+    exitedBy(A, 'stop');
+    mount([{ index: 0, id: A }]);
+    await type('!ls');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await act(() => fake.reply('session.acquire', READY));
+    await waitFor(() => expect(invoked('session.bash')).toEqual([{ appSessionId: A, command: 'ls' }]));
+    await act(() => fake.reply('session.bash', { commandUuid: '22222222-2222-4222-8222-222222222222' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
   });
 });
-// C12 end
+// P2-A end
 
 // E9 start: push-to-talk dictation through the composer (E9 execution document, Design §6 to §8): the one app-level hold
 // resolves the focused pane's session, writes into that composer only, and shows its state in that toolbar; the

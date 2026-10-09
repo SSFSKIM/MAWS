@@ -36,7 +36,7 @@ export function item(appSessionId: string, kind: AttentionKind, createdAt: strin
 export function digest(appSessionId: string, over: Partial<SessionDigest> = {}): SessionDigest {
   return {
     appSessionId: appSessionId as AppSessionId, phase: 'idle', activity: null, lastAssistantLine: null, turnStartedAt: null, lastTurnEndedAt: null,
-    context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 1, ...over,
+    context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 1, availability: 'usable' /* P2-A */, ...over,
   };
 }
 

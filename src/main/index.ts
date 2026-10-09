@@ -33,6 +33,7 @@ import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-gua
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
+import { registerObservedFacts } from './sessions/observed'; // P2-A
 import { startYield } from './sessions/yield'; // W7
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
@@ -379,8 +380,10 @@ void startWithProfileLock(app, () => {
     userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
     browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
+    acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
   });
   registerSessionServiceHandlers(sessionService);
+  registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
   // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in

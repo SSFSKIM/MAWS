@@ -341,6 +341,22 @@ describe('summary card', () => {
     expect(within(section('Plugins')).queryByRole('button', { name: 'Reload plugins' })).toBeNull();
   });
 
+  // P2-A (2026-10-09; X17): with no live process the count is the last list the engine host kept, with when; a live one
+  // that has reported its plugins reads "Loaded now"; a session switch reads the facts and starts nothing
+  it('counts the observed plugins of a session with no process, labelled with when, and the live ones as loaded now', async () => {
+    const plugins = [{ name: 'p1', path: '/p1', source: null, version: null }, { name: 'p2', path: '/p2', source: null, version: null }];
+    const at = new Date(Date.now() - 2 * 86_400_000 - 60_000).toISOString();
+    bridge({ 'session.observedFacts': { version: 1, appSessionId: A, engineSessionId: null, writtenAt: at, source: 'journal', launches: ['L1'], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: { value: { plugins, errors: [], warnings: [] }, at, launchId: 'L1' }, contextUsage: null, complete: true } });
+    await mount();
+    expect(within(section('Plugins')).getByText('Plugins · 2 loaded')).toBeTruthy();
+    expect(within(section('Plugins')).getByText('Loaded last time, 2 days ago')).toBeTruthy();
+    expect(within(section('Plugins')).queryByRole('button', { name: 'Reload plugins' })).toBeNull();
+    expect([...fake.invoked('session.start'), ...fake.invoked('session.launch')]).toEqual([]);
+    act(() => useSessions.setState({ engine: new Map([[A, { ...engineStatus(A), plugins: [plugins[0]!], pluginsObservedAt: new Date().toISOString() }]]) }));
+    expect(within(section('Plugins')).getByText('Plugins · 1 loaded')).toBeTruthy();
+    expect(within(section('Plugins')).getByText('Loaded now')).toBeTruthy();
+  });
+
   it('a registered tool’s summary component fills its section in place of the baseline', async () => {
     const { tool } = probeTool('subagents', { title: 'Subagents', summary: ({ appSessionId, open }) => <button type="button" onClick={() => open()}>custom {appSessionId}</button> });
     offs.push(registerPanelTool(tool));

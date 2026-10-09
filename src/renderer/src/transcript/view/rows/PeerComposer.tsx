@@ -3,18 +3,24 @@
 // `'next'` steer, to SendMessage the owner's text to the address (the registered `replyToPeer`, the agent tools' relay
 // store); the line above the box walks that ask from the store (`peerReplies`): asked with its elapsed, the session
 // sending it, sent, or failed with the reason (the text back in an empty box, as the drill-in's relay does). Closed with
-// the reason when the session is not running here or the last one to this address is still asked. A plain textarea:
-// ⌘↵ sends, Enter breaks the line.
+// the reason when the session cannot be started here or the last one to this address is still asked. A plain textarea:
+// ⌘↵ sends, Enter breaks the line. P2-A (2026-10-09; the execution document §5.6): on a session with a record and no
+// ready process Send starts it first (`acquireSession(id, 'peer')`, the line reading Starting…) and then asks it by
+// the same steer; a refused start says why on the line and keeps the text; a terminal or job holding it, or an
+// archive, closes the box with the reason. Opening the box starts nothing.
 import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
 import { RELAY_LONG_WAIT_MS } from '../../../relay-wait'; // after this long asked, the long-wait clause (the drill-in relay's too)
+import { acquireSession, refusalWords, STARTING_SESSION } from '../../../sessions/acquire';
+import { availabilityRefusal, useAvailability } from '../../../sessions/availability';
 import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
 import { duration } from '../../model/time';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
 import { TickingStatus, useTicker } from './parts';
+
 
 
 // The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
@@ -42,13 +48,19 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   const actions = useActions();
   const { peerReplies } = actions;
   const reply = useSyncExternalStore(peerReplies.subscribe, () => (appSessionId === null ? undefined : peerReplies.get(appSessionId, target.address)));
-  const live = useSessions((s) => appSessionId !== null && s.engine.has(appSessionId));
+  const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
+  // P2-A start: a session with a record and no ready process is started by Send; the holder or the archive closes the box
+  const availability = useAvailability(appSessionId ?? ('' as AppSessionId));
+  const holder = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId)?.holder ?? null)));
+  const closed = ready ? null : availabilityRefusal(availability, holder, peerMessageCopy.disabled.notRunningHere(target.mode));
+  const [start, setStart] = useState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>({ kind: 'idle' });
+  // P2-A end
   const session = displayTitle(useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null))));
   // A failed ask's text stays in the relay store until the next edit, so a composer mounted again (its row virtualised
   // away and back) starts with it in the box (E11 W-D).
   const [draft, setDraft] = useState(() => (reply?.state.kind === 'failed' ? reply.text : ''));
   const [sending, setSending] = useState(false); // the steer is out and unanswered
-  const reason = !live ? peerMessageCopy.disabled.notRunningHere(target.mode) : reply?.state.kind === 'asked' ? peerMessageCopy.disabled.pending(target.mode) : null;
+  const reason = closed ?? (reply?.state.kind === 'asked' ? peerMessageCopy.disabled.pending(target.mode) : null);
   const canSend = reason === null && !sending && draft.trim() !== '' && appSessionId !== null;
   const now = useTicker(reply?.state.kind === 'asked');
   const line = peerReplyLine(reply, target.mode, session, now);
@@ -65,6 +77,20 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
     if (!canSend || appSessionId === null) return;
     setSending(true);
     try {
+      // P2-A start (2026-10-09): the session started first when it has no ready process
+      if (!ready) {
+        setStart({ kind: 'starting' });
+        let refusal: string | null;
+        try {
+          const outcome = await acquireSession(appSessionId, 'peer');
+          refusal = refusalWords(outcome);
+        } catch (error) {
+          refusal = error instanceof Error ? error.message : String(error);
+        }
+        if (refusal !== null) return setStart({ kind: 'refused', words: refusal }); // the text stays
+        setStart({ kind: 'idle' });
+      }
+      // P2-A end
       await actions.replyToPeer(appSessionId, target, draft.trim());
     } finally {
       setSending(false);
@@ -74,6 +100,7 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
 
   const edit = (next: string) => {
     setDraft(next);
+    if (start.kind === 'refused') setStart({ kind: 'idle' }); // P2-A: shown until the next edit, as a failed ask's line is
     const kind = reply?.state.kind;
     if (appSessionId !== null && (kind === 'sent' || kind === 'failed')) peerReplies.dismiss(appSessionId, target.address); // shown until the next edit
   };
@@ -84,8 +111,13 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
 
   return (
     <div ref={root} data-key-sink="composer" className="transcript-peer-composer" data-part="peer-composer">
-      {line !== null && (
-        <TickingStatus line={line.line} elapsed={line.elapsed} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
+      {/* P2-A: this box's own start over the relay's line while it runs or was refused */}
+      {start.kind !== 'idle' ? (
+        <p role="status" data-part="peer-line" className="transcript-peer-line" data-failed={start.kind === 'refused' ? '' : undefined}>
+          {start.kind === 'starting' ? STARTING_SESSION : start.words}
+        </p>
+      ) : (
+        line !== null && <TickingStatus line={line.line} elapsed={line.elapsed} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
       )}
       <label htmlFor={id} className="transcript-peer-label">
         {peerMessageCopy.label(target.mode, session)}

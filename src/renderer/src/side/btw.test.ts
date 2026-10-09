@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
-import { record, status } from '../../../../test/support/builders';
+import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -44,11 +44,36 @@ afterEach(() => {
 });
 
 describe('the btw widget’s typed apply', () => {
-  it('answers false without a ready process, asking nothing and opening nothing', async () => {
+  // P2-A (2026-10-09; the execution document §5.6): the typed question's Enter is the gesture that starts the session
+  it('answers true at once on an exited session: the view opens, the session is acquired (side), then the question is asked once', async () => {
     withProcess(A, 'exited');
-    await expect(applyBtw(A, 'why?')).resolves.toBe(false);
+    let answer: boolean | undefined;
+    await act(async () => void applyBtw(A, ' why? ').then((a) => (answer = a)));
+    expect(answer).toBe(true);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([]); // not before the engine is ready
+    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'why?' }]);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  it('an acquisition refused asks nothing and says why in a toast', async () => {
+    withProcess(A, 'exited');
+    await act(async () => void applyBtw(A, 'why?'));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
-    expect(sidePaneOf(useSidePane.getState(), A).view).toBeNull();
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Directory not found: /gone']);
+  });
+
+  it('answers false for a session a terminal holds, or an archived one, acquiring nothing (the widget opens and says why)', async () => {
+    withProcess(A, 'exited');
+    useSessions.setState((s) => ({ digests: new Map(s.digests).set(A, digest(A, { availability: 'foreign_held' })) }));
+    await expect(applyBtw(A, 'why?')).resolves.toBe(false);
+    useSessions.setState((s) => ({ digests: new Map(s.digests).set(A, digest(A, { availability: 'archived' })) }));
+    await expect(applyBtw(A, 'why?')).resolves.toBe(false);
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([]);
   });
 
   it('answers true at once with one: the question view opens on the shown session and the question is asked', async () => {

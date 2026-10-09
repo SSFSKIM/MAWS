@@ -3,9 +3,13 @@
 // turn), amber once it reaches the autocompact threshold. Its popover is the context window's own: the engine's full
 // reading on open, the threshold, and Compact. Per session only: no account windows and no cost (those are the top
 // bar's, W6, and Session info's). A session with no record yet has no ring.
+// P2-A (X17): with no live process, the ring draws the last reading the engine host kept for the session, its title
+// saying when ("Last reading, 3 hours ago"), else the digest's sample; reading it starts nothing.
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import { FRESHNESS, useObservedFacts } from '../../sessions/observed'; // P2-A
 import { ContextPopoverBody } from '../../statusline/ContextPopover';
 import { tokens } from '../../statusline/format';
 import { useSessions } from '../../stores/sessions';
@@ -28,13 +32,23 @@ export function contextRingOf(context: Context | null): { percent: number | null
 
 export function ContextRing({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
-  const context = useSessions((s) => s.digests.get(appSessionId)?.context ?? null);
+  return record ? <Ring record={record} /> : null;
+}
+
+function Ring({ record }: { record: SessionRecord }) {
+  const appSessionId = record.appId;
+  const sampled = useSessions((s) => s.digests.get(appSessionId)?.context ?? null);
+  const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  // P2-A: not live, the last reading the host kept, dated. It is never older than the digest's sample (the recorder
+  // writes every sample the digest folds), which carries no time; the digest's stands only when the host kept none.
+  const { facts } = useObservedFacts(appSessionId, { enabled: !live });
+  const observed = live ? null : (facts?.contextUsage ?? null);
   const [open, setOpen] = useState(false);
-  if (!record) return null;
-  const ring = contextRingOf(context);
+  const ring = contextRingOf(observed?.value ?? sampled);
+  const label = observed ? `${ring.label} · ${FRESHNESS.lastReading(observed.at)}` : ring.label;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger aria-label={ring.label} title={ring.label} data-context-ring={ring.percent ?? ''} className={`${CHIP} size-7 justify-center`}>
+      <Popover.Trigger aria-label={label} title={label} data-context-ring={ring.percent ?? ''} className={`${CHIP} size-7 justify-center`}>
         <svg aria-hidden viewBox="0 0 16 16" className="size-4 -rotate-90">
           <circle cx="8" cy="8" r={R} fill="none" className="stroke-border-strong" strokeWidth="2" />
           {ring.percent !== null && ring.percent > 0 && (
