@@ -108,6 +108,58 @@ describe('the chooser’s groups', () => {
     expect(rowTime(local(6, 14), 'thisWeek', now)).toMatch(/^\S+ /);
     expect(rowTime(local(1), 'lastWeek', now)).toBe(new Date(local(1)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
   });
+
+  it('a Monday week runs across New Year (Mon 2026-12-28 to Sun 2027-01-03)', () => {
+    const at = (year: number, month: number, day: number, hour = 0, minute = 0) => new Date(year, month, day, hour, minute).getTime();
+    const saturday = at(2027, 0, 2, 10);
+    expect(groupOf(at(2027, 0, 1, 9), saturday)).toMatchObject({ kind: 'yesterday' });
+    expect(groupOf(at(2026, 11, 28), saturday)).toMatchObject({ kind: 'thisWeek' });
+    expect(groupOf(at(2026, 11, 27, 23, 59), saturday)).toMatchObject({ kind: 'lastWeek' });
+    expect(groupOf(at(2026, 11, 20, 12), saturday)).toMatchObject({ kind: 'week', key: `week:${at(2026, 11, 14)}` });
+    const monday = at(2027, 0, 4, 9);
+    expect(groupOf(at(2026, 11, 31, 23, 59), monday)).toMatchObject({ kind: 'lastWeek' });
+    expect(groupOf(at(2026, 11, 28), monday)).toMatchObject({ kind: 'lastWeek' });
+    expect(groupOf(at(2026, 11, 27, 23, 59), monday)).toMatchObject({ kind: 'week', key: `week:${at(2026, 11, 21)}` });
+    const newYearsDay = groupOf(at(2027, 0, 1, 9), at(2027, 0, 20, 9));
+    expect(newYearsDay, 'a week starting in the year before names that year').toMatchObject({ kind: 'week', key: `week:${at(2026, 11, 28)}` });
+    expect(newYearsDay.label).toContain('2026');
+    const row = (id: string, ms: number) => ({ record: record(id), at: ms });
+    const groups = chooserGroups([row('a', at(2027, 0, 2, 8)), row('b', at(2027, 0, 1, 9)), row('c', at(2026, 11, 29, 9)), row('d', at(2026, 11, 27, 9))], saturday);
+    expect(groups.map((g) => [g.kind, g.rows.map((r) => r.record.appId)])).toEqual([['today', ['a']], ['yesterday', ['b']], ['thisWeek', ['c']], ['lastWeek', ['d']]]);
+  });
+
+  // The local days of 2026 on which the clock moves (the UTC offset at noon differs from the day before's); a zone
+  // without daylight saving time has none, and these cases have nothing to prove there. A change at midnight (a day
+  // with no 00:00, as in America/Santiago) is left out: the model's week start there carries the missing midnight's
+  // 01:00 back to the Monday, a known gap (P2-D M1 fix wave report) outside these cases.
+  const clockChanges: { day: Date; forward: boolean }[] = [];
+  for (let d = new Date(2026, 0, 2, 12); d.getFullYear() === 2026; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 12)) {
+    const before = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12).getTimezoneOffset();
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getHours() === 0;
+    if (d.getTimezoneOffset() !== before && midnight) clockChanges.push({ day: d, forward: d.getTimezoneOffset() < before });
+  }
+  // Around a clock change: the days stay calendar days (23 or 25 hours long) and the weeks start at local Monday midnight.
+  const acrossChange = (change: { day: Date }) => {
+    // the first Monday after the change: the change falls in the week before it
+    const monday = new Date(change.day.getFullYear(), change.day.getMonth(), change.day.getDate() + ((8 - change.day.getDay()) % 7 || 7));
+    const at = (days: number, hour = 0, minute = 0) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + days, hour, minute).getTime();
+    const mondayMorning = at(0, 9);
+    expect(groupOf(at(-1, 0, 30), mondayMorning)).toMatchObject({ kind: 'yesterday' });
+    expect(groupOf(at(-1, 23, 30), mondayMorning)).toMatchObject({ kind: 'yesterday' });
+    expect(groupOf(at(-2, 23, 30), mondayMorning)).toMatchObject({ kind: 'lastWeek' });
+    expect(groupOf(at(-7, 0, 30), mondayMorning)).toMatchObject({ kind: 'lastWeek' });
+    expect(groupOf(at(-8, 23, 30), mondayMorning)).toMatchObject({ kind: 'week', key: `week:${at(-14)}` });
+    const sundayNight = at(-1, 23, 30);
+    expect(groupOf(at(-2, 0, 30), sundayNight)).toMatchObject({ kind: 'yesterday' });
+    expect(groupOf(at(-7, 0, 30), sundayNight)).toMatchObject({ kind: 'thisWeek' });
+    expect(groupOf(at(-8, 23, 30), sundayNight)).toMatchObject({ kind: 'lastWeek' });
+    const row = (id: string, ms: number) => ({ record: record(id), at: ms });
+    expect(chooserGroups([row('a', at(-1, 12)), row('b', at(-7, 0, 30)), row('c', at(-8, 23, 30))], mondayMorning).map((g) => g.kind)).toEqual(['yesterday', 'lastWeek', 'week']);
+  };
+  const springForward = clockChanges.find((change) => change.forward);
+  const fallBack = clockChanges.find((change) => !change.forward);
+  it.skipIf(springForward === undefined)('across a spring-forward day (23 hours)', () => acrossChange(springForward!));
+  it.skipIf(fallBack === undefined)('across a fall-back day (25 hours)', () => acrossChange(fallBack!));
 });
 
 describe('row badges', () => {

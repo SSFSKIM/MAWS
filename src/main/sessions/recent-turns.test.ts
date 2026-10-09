@@ -26,6 +26,16 @@ function chain(entries: { type: 'user' | 'assistant'; content: unknown }[], from
     .join('\n');
 }
 
+// The fixture's lines `from` to `to` (1-based, inclusive): a window into a recorded transcript.
+const lines = (name: string, from: number, to?: number) => text(name).split('\n').slice(from - 1, to).join('\n');
+const prompts = (answer: { turns: { prompt: { text: string } | null }[] }) => answer.turns.map((t) => t.prompt?.text ?? null);
+// One record per line with explicit uuids and parents (progress rows, bash pairs).
+const records = (...rows: Record<string, unknown>[]) =>
+  rows.map((row, i) => JSON.stringify({ sessionId: 's-1', timestamp: `2026-10-09T11:00:${String(i).padStart(2, '0')}.000Z`, ...row })).join('\n');
+const user = (uuid: string, parentUuid: string | null, content: unknown) => ({ type: 'user', uuid, parentUuid, message: { role: 'user', content } });
+const assistant = (uuid: string, parentUuid: string, content: unknown[]) => ({ type: 'assistant', uuid, parentUuid, message: { role: 'assistant', content } });
+const progress = (uuid: string, parentUuid: string) => ({ type: 'progress', uuid, parentUuid, data: { type: 'hook_progress' } });
+
 describe('recentTurnsOf', () => {
   it('one turn per human prompt, its last answer and its tool calls (a steer the engine took folds into its turn)', () => {
     expect(brief('w1-steer-next-disk')).toEqual([{ prompt: expect.stringMatching(/^Count to 8 with separate Bash sleep 1 calls/), answer: 'COUNTED', tools: 8 }]);
@@ -79,6 +89,48 @@ describe('recentTurnsOf', () => {
     expect(answer.turns[0].answer?.text).toBe('The build is green.');
     expect(answer.turns[1].prompt?.text).toBe('[Image]');
     expect(RecentTurnsSchema.safeParse(answer).success).toBe(true);
+  });
+
+  it('a rewind anchor cuts the chain at once: the discarded turn is gone before the next prompt arrives', () => {
+    // rewind-real.jsonl through the anchor's queue operations (line 29): the BANANA turn was rewound, nothing sent since
+    expect(recentTurnsOf(lines('rewind-real', 1, 29), 20, false).turns.map((t) => [t.prompt?.text, t.answer?.text])).toEqual([['Remember the word APPLE. Reply OK.', 'OK']]);
+    // the anchor's target lies before the window: nothing on the kept chain is proven, and never the discarded branch
+    expect(recentTurnsOf(lines('rewind-real', 25, 29), 20, true)).toEqual({ turns: [], earlier: true, source: 'transcript' });
+    // a prompt after the anchor is the leaf again, even when the anchor's target lies before the window
+    const after = recentTurnsOf(lines('rewind-real', 25, 33), 20, true);
+    expect(prompts(after)).toEqual([expect.stringMatching(/^List every word I asked you to remember/)]);
+    expect(after.earlier).toBe(true);
+  });
+
+  it('a progress row is never the leaf: one written last, pointing at an earlier prompt, keeps the later turns', () => {
+    const answer = recentTurnsOf(
+      records(
+        user('p1', null, 'first'),
+        assistant('a1', 'p1', [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }]),
+        progress('g1', 'a1'),
+        user('r1', 'g1', [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }]), // walks through the progress row
+        assistant('a1b', 'r1', [{ type: 'text', text: 'listed' }]),
+        user('p2', 'a1b', 'second'),
+        assistant('a2', 'p2', [{ type: 'text', text: 'done' }]),
+        progress('g2', 'p1'),
+      ),
+      5,
+      false,
+    );
+    expect(answer.turns.map((t) => [t.prompt?.text, t.answer?.text, t.toolCalls])).toEqual([['first', 'listed', 1], ['second', 'done', 0]]);
+  });
+
+  it('a command’s output is never a prompt: a window starting after /compact shows no <local-command-stdout>', () => {
+    const answer = recentTurnsOf(lines('w1-compact', 32), 20, true);
+    expect(prompts(answer)).toEqual(['Reply TWO']);
+    expect(answer.earlier).toBe(true);
+    expect(prompts(recentTurnsOf(lines('w1-compact', 30), 20, true)), 'the caveat and the output fold into the command').toEqual(['/compact', 'Reply TWO']);
+  });
+
+  it('a bash input and its output are one prompt `! <command>`; the output alone is none', () => {
+    const output = user('o1', 'b1', '<bash-stdout>a.txt</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>');
+    expect(recentTurnsOf(records(user('b1', null, '<bash-input>ls</bash-input>'), output), 5, false).turns.map((t) => [t.prompt?.text, t.answer, t.toolCalls])).toEqual([['! ls', null, 0]]);
+    expect(recentTurnsOf(records(output), 5, true).turns).toEqual([]);
   });
 
   it('an empty or unparsable text has no turns', () => {
