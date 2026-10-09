@@ -113,6 +113,8 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     const [id] = s.ids;
     await show(s, id);
     await replay(s, id, ASK_BLOCKING);
+    // P2-C Design §7 defaults lane-on panes to Report; this case checks transcript follow mode.
+    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
     await allowNext(s, id); // mcp__maws__ask (seq 129)
 
     const capsule = capsuleOf(s);
