@@ -613,8 +613,11 @@ export class CuaConnection {
 
   // ---- reading tabs --------------------------------------------------------------------------------------------------
 
+  // cua #90: never an internal tab. An extension's options page runs in the extension's origin (its storage, its
+  // background, its host permissions), which the agent must not drive, as it never reaches the extension's popups,
+  // background pages or service workers (A-51's intent). Every listing, lookup, lease and event goes through here.
   private reachable(entry: TabEntry): boolean {
-    return this.ctx.reaches(this.appSessionId, entry.tab.appSessionId);
+    return entry.tab.internal === null && this.ctx.reaches(this.appSessionId, entry.tab.appSessionId);
   }
 
   private reachableEntries(): TabEntry[] {
