@@ -1,0 +1,48 @@
+E11 final gate, packaged-suite regression on 3d09cd4b: diagnosis and gates at the fix 3e20ea32 (2026-10-08)
+
+Symptom (gates/final2-e2e-packaged-3d09cd4b.txt and its two retries): 1, 1 and 2 click timeouts of ~31 s on the
+hover-revealed "New chat in <project>" (e2e/support/sidebar.ts newChatIn), in side.spec cases 1, 2, 7 and sessions.spec
+"an unstarted tab with a draft survives a relaunch"; each the first newChatIn after a fresh launch.
+
+Cause: neither a product regression nor specific to the packaged build. The desktop's own pointer reaches the quiet e2e window:
+setIgnoreMouseEvents(true) lets clicks through, but the real cursor crossing the window still arrives in the page as a
+mouseover and a document mouseleave at the cursor's own coordinates, which drops :hover from the project line between
+the hover and the click; the click then waits on a display:none button until it times out.
+Not F2b 2.1: window 1280x820 in both builds (screen 1512x982), the project line at y 190 and the button at 263,197
+(22x22), html/body scrollTop 0, no scroll event between the hover and the click.
+
+Measurement (a temporary diagnostic spec, not committed: fresh launches, add a project, expand it, hover the line, probe
+the button's visibility for 2 s while logging every pointer, scroll, resize and focus event; owner at the desktop; the
+3d09cd4b packaged build and the built out/):
+  packaged launch 0: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  packaged launch 1: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  packaged launch 2: hover kept at 100/300/400/600/1000/2000 ms = true/true/false/false/false/false; click timed out; desktop-pointer events 79 (first mouseout at 668,818, 520 ms after the hover)
+  packaged launch 3: hover kept at 100/300/400/600/1000/2000 ms = true/false/false/false/false/false; click timed out; desktop-pointer events 23 (first mouseout at 1245,171, 420 ms after the hover)
+  packaged launch 4: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  packaged launch 5: hover kept at 100/300/400/600/1000/2000 ms = false/false/false/false/false/false; click timed out; desktop-pointer events 42 (first mouseout at 961,437, 160 ms after the hover)
+  built out/ launch 0: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/false/false; click timed out; desktop-pointer events 19 (first mouseout at 624,346, 1226 ms after the hover)
+  built out/ launch 1: hover kept at 100/300/400/600/1000/2000 ms = true/false/false/false/false/false; click timed out; desktop-pointer events 28 (first mouseout at 606,531, 397 ms after the hover)
+  built out/ launch 2: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  built out/ launch 3: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  built out/ launch 4: hover kept at 100/300/400/600/1000/2000 ms = true/false/false/false/false/false; click timed out; desktop-pointer events 28 (first mouseout at 831,310, 377 ms after the hover)
+  built out/ launch 5: hover kept at 100/300/400/600/1000/2000 ms = true/true/true/true/true/true; click ok; desktop-pointer events 0
+  Every launch with desktop-pointer events lost the hover and failed; every launch without them passed, in both builds.
+  An earlier 16-launch packaged run with no desktop activity: 16/16 passed, 0 desktop-pointer events; the instrumented
+  packaged suite in that quiet spell: 54 passed.
+
+Fix (3e20ea32, harness only; product source unchanged, 2.1's guarantee untouched): e2e/support/hover.ts clickRevealed
+hovers again until the click on the revealed control lands (toPass, 3 s per click, 20 s overall); used by newChatIn, the
+Resume picker's project button, side.spec's comment mark and tab close, composer.spec's Edit (twice), code-editor.spec's
+comment mark.
+
+Gates at 3e20ea32 (all through waitload20 && with-slot, MAWS_E2E_QUIET=1):
+  build:app (unsigned)      exit 0
+  e2e:packaged run 1        exit 1   53 passed, 1 failed (3.8m), load 7.17: shell.spec.ts:42 toBeFocused on the Overview
+                                     dialog ("inactive"), the known single packaged focus flake (rules 8); no
+                                     hover-revealed click failed
+  e2e:packaged run 2        exit 0   54 passed (3.7m), load 16.42
+  e2e                       exit 0   52 passed (3.6m), load 10.54
+  e2e:side                  exit 0   8 passed (31.2s), load 6.04
+  e2e:c7                    exit 0   29 passed (1.1m), load 8.63
+  e2e:code                  exit 0   36 passed (1.4m), load 12.40
+Sibling evidence restored after the runs; logs under /tmp/maws-review/packfix-3e20ea32/.
