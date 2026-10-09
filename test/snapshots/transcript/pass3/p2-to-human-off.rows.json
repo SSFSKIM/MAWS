@@ -1,0 +1,57 @@
+[
+  {
+    "at": "2026-10-09T07:05:00.641Z",
+    "id": "time:error:replay:journal:7:0",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:05 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:05:00.641Z",
+    "attempt": null,
+    "id": "error:replay:journal:7:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "maws-u2-probe: MAWS_U2_WORKER MAWS_NATIVE_TO_HUMAN=<unset>",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-09T07:05:00.660Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:0ff5d8c9-daf9-4aa7-810a-4c26b5993eec",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "0ff5d8c9-daf9-4aa7-810a-4c26b5993eec",
+    "placeholders": [],
+    "steer": false,
+    "text": "List every probe word your system prompt gives you right now (not words from this conversation's earlier messages), comma-separated, or NONE. Reply with nothing else.",
+    "turnId": "turn:0ff5d8c9-daf9-4aa7-810a-4c26b5993eec"
+  },
+  {
+    "at": "2026-10-09T07:05:01.760Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfrEmFSTKJwddkNmXmbMj:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "RBF05D6",
+    "messageUuid": "1bf17b0a-9e54-42b3-b8fe-77f855d4553a",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:0ff5d8c9-daf9-4aa7-810a-4c26b5993eec"
+  },
+  {
+    "at": "2026-10-09T07:05:02.303Z",
+    "attempt": null,
+    "id": "error:replay:journal:35:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

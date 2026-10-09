@@ -1,0 +1,79 @@
+[
+  {
+    "at": "2026-10-09T07:13:02.103Z",
+    "id": "time:turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:13 AM",
+    "turnId": "turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2"
+  },
+  {
+    "at": "2026-10-09T07:13:02.103Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:f9c7422d-7cf3-456d-a17c-f19119a76ee2",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f9c7422d-7cf3-456d-a17c-f19119a76ee2",
+    "placeholders": [],
+    "steer": false,
+    "text": "/compact",
+    "turnId": "turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2"
+  },
+  {
+    "at": "2026-10-09T07:13:05.550Z",
+    "boundaryKind": "compaction",
+    "detail": "b1f0efc6-560e-4c2a-b585-b723d7e1acc6",
+    "hiddenRows": 0,
+    "id": "boundary:replay:journal:13:0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Context compacted · 19k → 1k tokens · manual",
+    "turnId": "turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2"
+  },
+  {
+    "at": "2026-10-09T07:13:05.629Z",
+    "id": "local:03a9d808-5dce-40ab-8d97-fd8acc641b1f",
+    "kind": "local_command",
+    "messageUuid": "03a9d808-5dce-40ab-8d97-fd8acc641b1f",
+    "text": "Compacted",
+    "turnId": "turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2"
+  },
+  {
+    "at": "2026-10-09T07:13:05.551Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:0a8915dc-1b20-4c81-b1b4-6a6d27988225",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "0a8915dc-1b20-4c81-b1b4-6a6d27988225",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly OK.",
+    "turnId": "turn:0a8915dc-1b20-4c81-b1b4-6a6d27988225"
+  },
+  {
+    "at": "2026-10-09T07:13:07.127Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfrFNyxYVf1EhDZvCr649:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "2462a0e6-f112-4185-b888-4e120f4c113d",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:0a8915dc-1b20-4c81-b1b4-6a6d27988225"
+  },
+  {
+    "at": "2026-10-09T07:13:07.637Z",
+    "attempt": null,
+    "id": "error:replay:journal:49:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
