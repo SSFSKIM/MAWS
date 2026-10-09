@@ -1,3 +1,4 @@
+import { guardStdio } from './stdio-guard'; // cua board #97
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
@@ -110,6 +111,9 @@ import { startBrowser, type Browser } from './browser';
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
+
+// cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
+guardStdio([process.stdout, process.stderr]);
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
