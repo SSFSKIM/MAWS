@@ -1,12 +1,13 @@
 // P2-A M3's resource regression in the renderer (the execution document §6.2 M3 (b) and (c), acceptance 7; G5): with
-// 200 indexed sessions, every registered slash widget, Session info, the panel's Plugins summary and the context ring
-// mounted on exited sessions start nothing (no `session.acquire`, `session.start` or `session.launch`): not on mount,
+// 200 indexed sessions, every registered slash widget, every panel tool the app registers (each tool's body and its
+// summary section; the registrations are App.tsx's, made here as it makes them) and the context ring mounted on
+// exited sessions start nothing (no `session.acquire`, `session.start` or `session.launch`): not on mount,
 // not when a mounted session is released by the memory budget, not on Session info's 30 s refetch, and not across a
 // focused switch through 20 exited sessions. One Load now acquires exactly once.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { Component, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,9 +18,17 @@ import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { ContextRing } from '../composer/frame/ContextRing';
 import { slashWidget, WIDGET_COMMANDS } from '../composer/mentions/widgets';
-import { panelHost } from '../panel/host';
-import type { PanelToolContext } from '../panel/tool';
-import { Plugins } from '../panel/summary/Plugins';
+import { panelHost, registerPanelTool } from '../panel/host';
+import type { PanelTool, PanelToolContext } from '../panel/tool';
+import { Summary } from '../panel/summary/Summary';
+import { registerSidePane } from '../side/register';
+import { registerAgentTools } from '../tools/agents';
+import { browserTool } from '../tools/browser/BrowserTool';
+import { registerCodeTools } from '../tools/code';
+import { deliverablesTool } from '../tools/deliverables/DeliverablesTool';
+import { askSheetTool } from '../tools/maws/ask/AskSheetTool';
+import { registerScmTool } from '../tools/scm';
+import { terminalTool } from '../tools/terminal';
 import { resetCatalogStore } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
 import { sessionInfoTool } from '../tools/session-info';
@@ -49,9 +58,12 @@ beforeEach(() => {
   const exited = new Map<AppSessionId, EngineSessionStatus>(scenario.engine.map((s) => [s.appSessionId, { ...s, process: 'exited', turn: null }]));
   useSessions.setState({ engine: exited, records: new Map(records.map((r) => [r.appId, r])), digests: new Map(records.map((r) => [r.appId, digest(r.appId, { availability: 'resumable' })])) });
   off = registerAllWidgets();
+  registerAppTools();
 });
 afterEach(() => {
   cleanup();
+  for (const { tool, state } of instances.values()) tool.dispose(state);
+  instances.clear();
   off();
   resetCatalogStore();
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
@@ -64,18 +76,63 @@ const ctxOf = (appSessionId: AppSessionId): PanelToolContext => ({
   appSessionId, session: useSessions.getState().records.get(appSessionId) ?? null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
 });
 
-// Every surface that mounts with a session: the slash widgets, Session info (shown, so its reads are enabled), the
-// panel's Plugins summary and the composer's context ring.
+// The panel's tools as App.tsx registers them, once (the app never unregisters them).
+function registerAppTools(): void {
+  if (panelHost.tools().length > 0) return;
+  for (const tool of [terminalTool, sessionInfoTool, askSheetTool, deliverablesTool, browserTool]) registerPanelTool(tool as PanelTool<unknown, unknown>);
+  registerCodeTools();
+  registerAgentTools();
+  registerScmTool();
+  registerSidePane();
+}
+
+// A tool body that cannot mount in this DOM (no canvas, no webview) is named, never a reason to start anything.
+const unmounted = new Set<string>();
+class Guard extends Component<{ id: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    unmounted.add(this.props.id);
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+// One instance per tool and session, as the host keeps them, disposed after each case.
+const instances = new Map<string, { tool: PanelTool<unknown, unknown>; state: unknown }>();
+function stateOf(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, ctx: PanelToolContext): unknown {
+  const key = `${tool.id}:${appSessionId}`;
+  if (!instances.has(key)) instances.set(key, { tool, state: tool.createState({ appSessionId, session: ctx.session, instanceId: key, params: undefined }) });
+  return instances.get(key)!.state;
+}
+
+// Every surface that mounts with a session: the slash widgets, the panel's summary card (Plugins among its sections), every panel tool's body (shown, so its reads are enabled)
+// and summary section, and the composer's context ring.
 function Surfaces({ appSessionId }: { appSessionId: AppSessionId }): ReactNode {
-  const Info = sessionInfoTool.render;
+  const ctx = ctxOf(appSessionId);
   return (
     <>
       {WIDGET_COMMANDS.map(({ name }) => {
         const Widget = slashWidget(name)!.component;
         return <Widget key={name} appSessionId={appSessionId} args="" close={() => {}} />;
       })}
-      <Info state={sessionInfoTool.createState({ appSessionId, session: ctxOf(appSessionId).session, instanceId: `session-info:${appSessionId}`, params: undefined })} ctx={ctxOf(appSessionId)} />
-      <Plugins appSessionId={appSessionId} />
+      {panelHost.tools().map((tool) => {
+        const Body = tool.render;
+        const Summary = tool.summary;
+        const state = stateOf(tool, appSessionId, ctx);
+        return (
+          <Guard key={tool.id} id={tool.id}>
+            <Body state={state} ctx={ctx} />
+            {Summary && <Summary appSessionId={appSessionId} open={() => {}} />}
+          </Guard>
+        );
+      })}
+      <Guard id="summary">
+        <Summary appSessionId={appSessionId} />
+      </Guard>
       <ContextRing appSessionId={appSessionId} />
     </>
   );
@@ -93,10 +150,12 @@ const mount = (appSessionId: AppSessionId) => {
 const settle = (ms = 20) => act(async () => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 describe('mounted surfaces on exited sessions start nothing (G5)', () => {
-  it('every widget, Session info, the Plugins summary and the ring mounted on an exited session: zero starts; one Load now: one acquisition', async () => {
+  it('every widget, every panel tool and its summary, the summary card and the ring mounted on an exited session: zero starts; one Load now: one acquisition', async () => {
     mount(ID);
     await settle();
     expect(starts()).toEqual([]);
+    expect(panelHost.tools().map((t) => t.id).sort()).toEqual(['ask-sheet', 'background', 'browser', 'deliverables', 'files', 'log', 'review', 'session-info', 'side', 'source-control', 'subagents', 'tasks', 'terminal']);
+    expect([...unmounted].sort(), 'tools that cannot mount in this DOM').toEqual([]);
     expect(screen.getAllByRole('button', { name: 'Load now' }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('button', { name: 'Load now' })[0]);
     await settle();
