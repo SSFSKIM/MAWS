@@ -20,6 +20,9 @@ export function DeliverableTab({ tab }: { tab: DeliverableTabRef }) {
   const [scope, setScope] = useState<DeliverablesScope>('session');
   const [scrollTop, setScrollTop] = useState(0);
   const onGone = useCallback(() => setGone(true), []);
+  // P2-E1: the tab is on screen while its pane shows it (the pane mounts the active tab only), unless a maximized panel
+  // covers the main region, which stays mounted and inert (the Shell's rule): then its comment card is offscreen too
+  const onScreen = useLayout((s) => !(s.regions.panel.maximized && !s.regions.panel.collapsed));
   if (gone) {
     return (
       <div data-deliverable-tab="" className="h-full bg-bg">
@@ -37,7 +40,7 @@ export function DeliverableTab({ tab }: { tab: DeliverableTabRef }) {
   }
   return (
     <div data-deliverable-tab="" className="h-full">
-      <DeliverableViewer appSessionId={tab.appSessionId} id={tab.deliverableId} version={version} mode="tab" onVersion={setVersion} onGone={onGone} />
+      <DeliverableViewer appSessionId={tab.appSessionId} id={tab.deliverableId} version={version} mode="tab" visible={onScreen} onVersion={setVersion} onGone={onGone} />
     </div>
   );
 }

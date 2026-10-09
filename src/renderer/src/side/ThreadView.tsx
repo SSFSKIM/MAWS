@@ -9,7 +9,15 @@
 // typed in the thread's composer answers under the thread, in this pane (the architect's ruling): the thread's own
 // question view (`BtwView`, keyed by the thread) opens beneath it, and the header's toggle hides and shows it while the
 // thread has side questions.
+//
+// P2-E1 (M3, D7): a thread a comment on an artifact element opened has "Show in deliverable" beside Open as tab: the
+// parent's Deliverables tool opens on the record at its latest version (the thread may have written versions since the
+// comment, and a viewer on the latest follows its next ones), and a card on this thread opens for that panel's viewer to
+// claim and pin at the element, found again by its selector. Opening the tool takes the panel from this pane, so the
+// pane stops drawing the thread and the card's host may claim it (CardHost.tsx). Hidden while a main tab shows the
+// thread, where the card's own close rule would shut it at once.
 import { useEffect } from 'react';
+import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { SessionPane } from '../session/SessionPane';
@@ -26,8 +34,21 @@ import { hideSideChild, setInlineQuestions, showSideChild, sidePaneOf, useSidePa
 import { openBrowserUrl } from '../tools/browser/comment/actions';
 import { COMMENT_COPY } from '../tools/browser/comment/copy';
 // E4d end
+// P2-E1 start (2026-10-09)
+import { openDeliverable } from '../tools/maws/actions';
+import { openCard, targetOf } from './card/store';
+// P2-E1 end
 
 const COPY = SIDE_COPY.pane;
+
+// P2-E1 start (2026-10-09): the re-dock (D7)
+function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: Anchor): void {
+  const target = targetOf(anchor);
+  if (target === null) return;
+  openDeliverable(target.appSessionId, target.deliverableId); // no version: the latest; activated, so this pane yields the panel
+  openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
+}
+// P2-E1 end
 
 // The first question of a promoted thread: the first `Q:` line of its promotion prompt (the user row whose anchor is
 // the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history). The
@@ -61,6 +82,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d start
   const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
   // E4d end
+  const redocks = anchor !== null && targetOf(anchor) !== null; // P2-E1: an artifact element whose page names a deliverable
 
   return (
     <div data-side-thread-view={child} className="flex h-full min-h-0 flex-col">
@@ -113,6 +135,13 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             {COPY.questions}
           </button>
         )}
+        {/* P2-E1 start (2026-10-09) */}
+        {!inMain && redocks && (
+          <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => showInDeliverable(parent, child, anchor)}>
+            {COPY.showInDeliverable}
+          </button>
+        )}
+        {/* P2-E1 end */}
         {!inMain && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => useLayout.getState().openTab({ kind: 'session', appSessionId: child })}>
             {COPY.openAsTab}

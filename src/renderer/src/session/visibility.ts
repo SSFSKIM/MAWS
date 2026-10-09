@@ -3,7 +3,8 @@
 // is reported to main as `session.setVisible`, which the source turns into the unread rule and `lastSeen`. A session
 // tab with no record yet (an unstarted session) is reported once its record arrives. E3: a side thread the Side pane
 // draws is visible too while the panel is open on its parent, maximized or not (the pane publishes it only while its
-// tab is selected), or the thread's unread mark would never clear.
+// tab is selected), or the thread's unread mark would never clear. P2-E1: so is the thread a comment card draws while
+// its host is on screen (the card publishes it only then).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -14,6 +15,7 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
+import { useCommentCard } from '../side/card/store'; // P2-E1
 
 export function visibleSessions(
   main: LayoutMain,
@@ -38,6 +40,10 @@ export function visibleSessions(
     if (child !== undefined && records.has(child)) visible.add(child);
   }
   // E3 end
+  // P2-E1 start (2026-10-09): the thread a comment card draws on screen (its host visible); read from the card's store
+  const card = useCommentCard.getState().shownThread;
+  if (card !== null && records.has(card.child)) visible.add(card.child);
+  // P2-E1 end
   return visible;
 }
 
@@ -62,6 +68,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
   });
   const offSessions = stores.sessions.subscribe((state, before) => state.records !== before.records && update());
   const offSide = stores.side.subscribe((state, before) => state.panes !== before.panes && update()); // E3
+  const offCard = useCommentCard.subscribe((state, before) => state.shownThread !== before.shownThread && update()); // P2-E1
   window.addEventListener('focus', update);
   window.addEventListener('blur', update);
   document.addEventListener('visibilitychange', update);
@@ -70,6 +77,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     offLayout();
     offSessions();
     offSide(); // E3
+    offCard(); // P2-E1
     window.removeEventListener('focus', update);
     window.removeEventListener('blur', update);
     document.removeEventListener('visibilitychange', update);

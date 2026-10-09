@@ -72,7 +72,7 @@ export class DeliverablesHandle {
   // The record is gone: the list, headed by the notice (Design §4, §11).
   gone = (id: string) => this.update({ view: LIST, notice: DELIVERABLES_COPY.notRecorded(id) });
 
-  setVersion = (version: number) => {
+  setVersion = (version: number | null) => {
     const { view } = this.state;
     if (view.kind === 'record' && view.version !== version) this.update({ view: { ...view, version } });
   };
@@ -113,6 +113,7 @@ function DeliverablesBody({ state, ctx }: { state: DeliverablesHandle; ctx: Pane
         id={view.id}
         version={view.version}
         mode="panel"
+        visible={ctx.visible}
         onBack={state.back}
         onVersion={state.setVersion}
         onGone={state.gone}

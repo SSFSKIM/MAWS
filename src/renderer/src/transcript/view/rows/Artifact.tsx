@@ -13,7 +13,8 @@ type ArtifactRow = Extract<Row, { kind: 'artifact' }>;
 
 export function ArtifactRowView({ row }: { row: ArtifactRow }) {
   const actions = useActions();
-  const appSessionId = useRowSession();
+  const rowSession = useRowSession();
+  const appSessionId = row.ownerAppSessionId ?? rowSession; // P2-E1: a side thread's version of its ancestor's artifact is the ancestor's record
   const registered = row.error === null && row.deliverableId !== null && row.version !== null ? { id: row.deliverableId, version: row.version } : null;
   const state = row.error !== null ? 'error' : registered ? 'registered' : 'pending';
   return (

@@ -254,6 +254,7 @@ interface ArtifactRecord {
   announced: boolean; // `maws.delivery.artifact` said: the result no longer refines
   error: string | null;
   answered: boolean; // the call's result is in
+  ownerAppSessionId: AppSessionId | null; // P2-E1: the ancestor whose record the version belongs to, as the result or the event names it
 }
 // E2 end
 // E4c start: what a turn's events say about one browser tool call (its row): the call opens it, its result fills it,
@@ -659,7 +660,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'maws.delivery.artifact': {
         const artifact = event.toolUseId === null ? undefined : artifacts.get(event.toolUseId);
         if (!artifact) break;
-        Object.assign(artifact, { deliverableId: event.deliverableId, version: event.version, title: event.title, announced: true });
+        Object.assign(artifact, { deliverableId: event.deliverableId, version: event.version, title: event.title, announced: true, ownerAppSessionId: event.ownerAppSessionId ?? null /* P2-E1 */ });
         break;
       }
       // E2 end
@@ -1205,7 +1206,7 @@ function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
   const input = record(use.input);
   return {
     use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id), htmlPath: str(input.html_path),
-    title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false,
+    title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false, ownerAppSessionId: null,
   };
 }
 
@@ -1217,7 +1218,10 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
   }
   if (artifact.announced) return;
   const parsed = (artifact.action === 'create' ? ArtifactCreateResultSchema : ArtifactUpdateResultSchema).safeParse(firstJsonBlock(result.content));
-  if (parsed.success) Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title });
+  if (!parsed.success) return;
+  // P2-E1: the result names the owner too, since a session read from disk has no host event to say it
+  const owner = 'ownerAppSessionId' in parsed.data ? (parsed.data.ownerAppSessionId ?? null) : null;
+  Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title, ownerAppSessionId: owner });
 }
 
 function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnContext): RowOf<'artifact'> {
@@ -1227,6 +1231,7 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnCont
     title: artifact.title, htmlPath: artifact.htmlPath, deliverableId: artifact.deliverableId, version: artifact.version, error: artifact.error,
     answered: artifact.answered,
     ...(context.closed && !artifact.answered && !artifact.announced && { neverAnswered: true as const }), // E11: as the delivery row's
+    ...(artifact.ownerAppSessionId !== null && { ownerAppSessionId: artifact.ownerAppSessionId }), // P2-E1
   };
 }
 // E2 end

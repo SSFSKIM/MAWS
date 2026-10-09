@@ -1,0 +1,27 @@
+P2-E1 M5: the gates on the branch head (2026-10-09, branch worktree-agent-aebcc33c93831f363 at 3808711f; the evidence
+commit adds only this directory). Each heavy step alone through /tmp/maws-review/waitload20.sh and with-slot.sh, the
+tracked evidence tree restored after each e2e group (only p2-e1/ kept).
+
+pnpm typecheck                       exit 0
+pnpm lint                            exit 0
+pnpm test --maxWorkers=4             727 files passed, 1 skipped (728); 10142 tests passed, 1 skipped (10143)
+pnpm test:probes                     214 pass, 0 fail
+pnpm e2e:deliverables                run 1: 9 passed, 1 failed; run 2 (alone, the timing retry): 10 passed
+                                     run 1's failure: "a relaunch over the same profile lists every deliverable …"
+                                     (e2e/deliverables.spec.ts:1036), the sidebar project row's expand click
+                                     (e2e/support/sidebar.ts:33 expandRow) left aria-expanded "false" for 5 s; no
+                                     card, comment or artifact-scope code on that path; passed unchanged on the retry
+                                     (and in every M1 to M4 run)
+MAWS_P2E1_SHOTS=1 pnpm e2e:side      12 passed (cases 1 to 8 E3's, 9 to 12 E1's; case 8 extended with the card)
+pnpm e2e:code                        36 passed (the gutter's sheet unchanged)
+pnpm e2e:browser-comment             13 passed (the browser's sheet unchanged)
+pnpm e2e:transcript                  31 passed (the transcript options inert by default)
+pnpm e2e:panel                       23 passed
+
+Live: pnpm e2e:p1-live, S3 cases 1 to 3, once: 3 passed (live.txt).
+
+Shots (shots/, both themes, written by e2e:side under MAWS_P2E1_SHOTS=1, each theme's window holding none of the
+other theme's colour tokens):
+  card-composing-{light,dark}.png       case 8: the card's composer half beside the heading
+  card-thread-request-{light,dark}.png  case 8: the card's thread with C7's inline request card and the needs-you strip
+  card-thread-updated-{light,dark}.png  case 12: the card after the thread's artifact_update, the viewer on v2

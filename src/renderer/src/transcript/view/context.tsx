@@ -110,6 +110,9 @@ export interface TranscriptContextValue {
   sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
   effort?: string | null; // additive (W8): the effort the session runs at, which the live thinking label names; null when unknown
   motion?: WorkMotion; // additive (W8): the work area's fold as motion, one per mounted transcript
+  // additive (P2-E1): 'local' draws the owner channel through MAWS's own presenter whatever the engine surface's
+  // attachment (the comment card's thread, until P2-C's module takes the option over); absent, as before
+  presentation?: 'local';
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
