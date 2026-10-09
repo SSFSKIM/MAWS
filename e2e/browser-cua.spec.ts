@@ -331,11 +331,11 @@ test('the person\'s own navigations of a leased idle tab are theirs: ⌘R in the
     host = await connectFakeHost((await app.socketPathFor(A))!);
     // the page loaded before the lease and read only through it: the tab stays idle, as at the owner's sitting
     const created = await host.request<{ id: number }>('tabs.create', { url: pages.url('/'), group: { key: 's', title: 'cua' } });
+    await host.waitFor('tabs.updated', (p) => p.tabId === created.id && p.status === 'complete' && String(p.url).startsWith(pages.origin));
     await host.request('debugger.attach', { tabId: created.id });
     const tab = (await app.inspect())[A]!.leased[0]!;
     const send = cdp(host, created.id);
     await send('Page.enable');
-    await host.waitFor('tabs.updated', (p) => p.tabId === created.id && p.status === 'complete' && String(p.url).startsWith(pages.origin));
     expect(await app.control(tab)).toBe('idle');
     const committed = () => host!.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.frameNavigated').length;
 
