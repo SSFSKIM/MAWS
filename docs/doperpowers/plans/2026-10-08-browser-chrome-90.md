@@ -17,7 +17,7 @@ branch `spec/browser-chrome-90`). It owns the design, the acceptance, the Decisi
 both repositories; this file only keeps MAWS's convention that execution documents live under `plans/`.
 
 MAWS branch: `90-browser-chrome` (worktree `/Users/new/Developer/GitHub/MAWS-wt-90`), cut from `master` at `5bd2cd57`
-and rebased onto `16006624` at M4 with no conflicts.
+and rebased onto `16006624` at M4 with no conflicts, then onto `035ce4f9` after the owner's sitting (docs-only conflicts in the ledger and the tracker).
 
 Versions taken (ledger §4, X15), unchanged by the rebase since master's index and settings stood at 6 and 11:
 settings version 12 (`browser.bookmarksBar`, `fromV11`; no keymap action), index migration 7 (`browser_bookmarks`,
