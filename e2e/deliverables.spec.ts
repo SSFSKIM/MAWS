@@ -10,8 +10,8 @@
 // M7's seven cases drive the product as the owner does, over a scratch project the sidebar shows (support/
 // maws-tools.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
 // the console chip; (2) the Deliverables tool's list, viewer, versions and main tab; (3) a delivered file of every kind
-// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into E3's
-// composer; (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay. Records
+// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into the
+// comment card beside the element (P2-E1; E3's composer before it); (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay. Records
 // are written straight into the store's layout (`<userData>/deliverables/<appSessionId>/<id>.json`, the reader's format)
 // where no replay writes them; main's reader has no cache. MAWS_E2_SHOTS=1 also writes the evidence shots in both themes
 // under docs/doperpowers/evidence/p1-e2/ (`e2-<surface>-<theme>.png`).
@@ -262,6 +262,27 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
     await maws.page.mouse.click(100, 300);
     await expect.poll(posted).toHaveLength(2);
     expect((await posted())[1]).toBe('e2-page-click'); // picking ended with the pick: the page has its clicks back
+
+    // P2-E1 (M3): re-pin's locate round trip (P2-E1 document, D8): the page answers where an element is now, by selector,
+    // null for one it has not or an invalid selector, each answer carrying its ask's id; a locate starts no picking and
+    // leaves nothing in the page
+    await maws.page.evaluate(() => {
+      const element = document.getElementById('e2-frame') as HTMLIFrameElement;
+      ['#hero', 'body > p:nth-of-type(1)', '#gone', 'h1['].forEach((selector, i) => element.contentWindow!.postMessage({ type: 'maws:locate', id: i + 1, selector }, '*'));
+    });
+    await expect.poll(posted).toHaveLength(6);
+    expect((await posted()).slice(2)).toEqual([
+      { type: 'maws:located', id: 1, selector: '#hero', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
+      { type: 'maws:located', id: 2, selector: 'body > p:nth-of-type(1)', rect: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) } },
+      { type: 'maws:located', id: 3, selector: '#gone', rect: null },
+      { type: 'maws:located', id: 4, selector: 'h1[', rect: null },
+    ]);
+    const lead = (await posted())[3] as { rect: { y: number; height: number } };
+    expect(lead.rect.y).toBeGreaterThanOrEqual(200); // under the heading
+    expect(lead.rect.height).toBeGreaterThan(0);
+    expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
+    await maws.page.mouse.click(100, 300);
+    await expect.poll(posted).toHaveLength(7); // the page still hears its clicks: no picking started
   } finally {
     await maws.cleanup();
   }
@@ -873,10 +894,24 @@ const COMMENT_PAGE =
   '<p class="lead" style="padding:0 24px">Revenue by region, third quarter.</p>' +
   "<script>console.error('E2_PAGE_LOG')</script></body></html>";
 
-test('comment mode: Escape ends picking and nothing else, picking highlights the element under the pointer, and a click opens E3’s composer on the artifact-element anchor', async () => {
+// P2-E1 (M1): a page whose last element sits at the bottom of its frame, where the card opens above it.
+const FOOTER_PAGE =
+  '<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body style="margin:0;font:16px system-ui;background:#ffffff;color:#1b1b1b">' +
+  '<p style="margin:0;padding:24px">Notes for the quarter.</p>' +
+  '<footer id="foot" style="position:fixed;left:0;right:0;bottom:0;margin:0;padding:12px 24px;background:#fff3e0">Prepared by the analytics team</footer></body></html>';
+
+// Within a pixel: a box edge as the layout rounds it.
+const near = (actual: number, expected: number, what: string) => expect(Math.abs(actual - expected), `${what}: ${actual} against ${expected}`).toBeLessThanOrEqual(1);
+
+// P2-E1 (M1; P2-E1 document, acceptance 1 and 2): a pick opens the comment card beside the element inside the viewer's
+// body (no sheet, no Side tab, the main area's tabs unchanged, the Deliverables tab still selected), below the element
+// with room and above one at the frame's bottom; the same in the record's deliverable main tab; Escape dismisses it and
+// gives focus back to Comment.
+test('comment mode: Escape ends picking and nothing else, picking highlights the element under the pointer, and a click opens the comment card beside the element', async () => {
   await scene({ titles: ['E2: comment'] }, async (s) => {
     const [id] = s.ids;
     const record = seedArtifact(s.maws.userData, id, 'dash', 'Dashboard', [COMMENT_PAGE]);
+    const notes = seedArtifact(s.maws.userData, id, 'notes', 'Notes', [FOOTER_PAGE], new Date(Date.now() - 60_000).toISOString());
     await show(s, id);
     await openDeliverables(s);
     await rowOf(listOf(s), record).click();
@@ -886,7 +921,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
     const comment = viewer.getByRole('button', { name: 'Comment', exact: true });
     const hint = viewer.locator('[data-picking]');
-    const deliverablesTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ });
+    const tools = s.panel.getByRole('tablist', { name: 'Panel tools' });
+    const deliverablesTab = tools.getByRole('tab', { name: /Deliverables/ });
 
     // Escape while picking ends picking; the viewer, the panel's tab and the session's composer stay as they were
     await comment.click();
@@ -909,22 +945,89 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(hint).toBeVisible();
     await expect(comment).toHaveAttribute('aria-pressed', 'true');
 
-    // the heading under the pointer is highlighted in the page; a click picks it and opens E3's composer
+    // the heading under the pointer is highlighted in the page; a click picks it and opens the card beside it
     const box = (await viewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
     await s.page.mouse.move(box.x + 60, box.y + 30);
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
     await shoot(s, 'comment-picking', () => s.page.mouse.move(box.x + 61, box.y + 31));
+    const mainTabs = s.page.locator('[data-region="main"] [role="tab"]');
+    const mainTabsBefore = await mainTabs.count();
     await s.page.mouse.click(box.x + 60, box.y + 30);
-    const composer = s.page.getByRole('dialog', { name: 'Comment on Dashboard v1 › h1#hero “Sales overview”' });
-    await expect(composer).toBeVisible();
-    await expect(composer).toHaveAttribute('data-anchor-kind', 'artifact-element');
-    await expect(composer).toHaveAttribute('data-anchor-locator', '#hero');
+    const card = viewer.getByRole('dialog', { name: 'Comment on Dashboard v1 › h1#hero “Sales overview”' });
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-comment-card', '');
+    await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-element');
+    await expect(card).toHaveAttribute('data-anchor-locator', '#hero');
+    await expect(card).toHaveAttribute('data-card-phase', 'composing');
+    await expect(card).toHaveAttribute('data-placement', 'below');
+    await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
     await expect(hint).toHaveCount(0); // one pick per Comment
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(0);
-    await composer.getByRole('textbox', { name: 'Comment' }).fill('Make the heading larger.');
-    await shoot(s, 'comment');
+    await expect(deliverablesTab).toHaveAttribute('aria-selected', 'true');
+    await expect(tools.getByRole('tab', { name: /^Side/ })).toHaveCount(0);
+    await expect(mainTabs).toHaveCount(mainTabsBefore);
+
+    // its box: 4 px under the heading's bottom edge, at its left, 300 px wide, inside the viewer's body
+    const hero = (await frame.locator('#hero').boundingBox())!;
+    const body = (await viewer.locator('[data-card-host]').boundingBox())!;
+    const placed = (await card.boundingBox())!;
+    near(placed.y, hero.y + hero.height + 4, 'the card’s top');
+    near(placed.x, hero.x, 'the card’s left');
+    expect(body.width).toBeGreaterThanOrEqual(316);
+    near(placed.width, 300, 'the card’s width');
+    expect(placed.x + placed.width).toBeLessThanOrEqual(body.x + body.width - 8 + 1);
+    expect(placed.y + placed.height).toBeLessThanOrEqual(body.y + body.height + 1);
+
+    // the composer half: the sheet's names, the field focused, Side thread chosen, Send waiting for text
+    const field = card.getByRole('textbox', { name: 'Comment' });
+    await expect(field).toBeFocused();
+    await expect(card.getByRole('radio', { name: 'Side thread' })).toBeChecked();
+    await expect(card.locator('[data-destination="thread"]')).toHaveCount(1);
+    await expect(card.locator('[data-destination="main"]')).toHaveCount(1);
+    await expect(card.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await field.fill('Make the heading larger.');
+    await expect(card.getByRole('button', { name: 'Send' })).toBeEnabled();
+    await shoot(s, 'comment-card');
     await s.page.keyboard.press('Escape');
-    await expect(composer).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+    await expect(comment).toBeFocused();
+    await expect(deliverablesTab).toHaveAttribute('aria-selected', 'true');
+
+    // the same pick in the record's deliverable main tab opens the card inside that tab's viewer
+    await viewer.getByRole('button', { name: 'Open in tab' }).click();
+    const tabViewer = viewerOf(s.page.locator('[data-region="main"] [data-deliverable-tab]'));
+    await expect(tabViewer).toHaveAttribute('data-deliverable-id', record.id);
+    await tabViewer.getByRole('button', { name: 'Comment', exact: true }).click();
+    await expect(tabViewer.locator('[data-picking]')).toBeVisible();
+    const tabFrame = (await tabViewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
+    await s.page.mouse.click(tabFrame.x + 60, tabFrame.y + 30);
+    const tabCard = tabViewer.locator('[data-comment-card]');
+    await expect(tabCard).toHaveAttribute('data-anchor-locator', '#hero');
+    await expect(tabCard).toHaveAttribute('data-placement', 'below');
+    const tabHero = (await tabViewer.locator('[data-deliverable-frame="html"]').contentFrame().locator('#hero').boundingBox())!; // the tab's width wraps it differently
+    near((await tabCard.boundingBox())!.y, tabHero.y + tabHero.height + 4, 'the tab card’s top');
+    await expect(viewer.locator('[data-comment-card]')).toHaveCount(0);
+    await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
+    await s.page.keyboard.press('Escape');
+    await expect(tabCard).toHaveCount(0);
+
+    // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
+    await viewer.getByRole('button', { name: 'Back' }).click();
+    await rowOf(listOf(s), notes).click();
+    await expect(viewer).toHaveAttribute('data-deliverable-id', notes.id);
+    const foot = (await frameAt(s.page, deliverableUrl(id, notes.id, 1))).locator('#foot');
+    await expect(foot).toHaveText('Prepared by the analytics team');
+    await comment.click();
+    await expect(hint).toBeVisible();
+    const footBox = (await foot.boundingBox())!;
+    await s.page.mouse.click(footBox.x + 60, footBox.y + footBox.height / 2);
+    const above = viewer.locator('[data-comment-card]');
+    await expect(above).toHaveAttribute('data-anchor-locator', '#foot');
+    await expect(above).toHaveAttribute('data-placement', 'above');
+    const aboveBox = (await above.boundingBox())!;
+    near(aboveBox.y + aboveBox.height, footBox.y - 4, 'the card’s bottom');
+    await s.page.keyboard.press('Escape');
+    await expect(above).toHaveCount(0);
   });
 });
 

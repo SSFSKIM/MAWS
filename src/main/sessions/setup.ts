@@ -36,6 +36,7 @@ import {
 import { trustStateOf } from './trust';
 import { openedEvent, sideThreadTitle } from '../side/side-threads'; // E3
 import { inheritOwnerOverride, ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
+import { launchScopeOf } from './artifact-scope'; // P2-E1
 
 export { SetupFailure, type Setup } from './setup-steps';
 
@@ -236,7 +237,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     const spec = decided.spec;
     // P2-C end
     watch = new LaunchWatch(s, appSessionId);
-    const answer = await hostCall(s.dispatch, 'session.launch', { spec });
+    const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
     ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09): before any event of the launch

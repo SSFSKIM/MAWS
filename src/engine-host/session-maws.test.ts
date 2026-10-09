@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AttentionId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
 import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
@@ -26,9 +26,10 @@ import { FileDeliverableStore } from './deliverables/store';
 import { buildLaunch, RELAY_URL } from './launch';
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine, type ReplayTransport } from './replay-transport';
-import { EngineSession } from './session';
+import { EngineSession, type EngineSessionOptions } from './session';
 import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
+import { artifactCreateTool } from './tool-server/artifacts'; // P2-E1
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -54,8 +55,8 @@ afterEach(() => {
 type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }[]; isError?: boolean; tools?: unknown[] } & Record<string, unknown>; error?: { code: number; message: string } };
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
-async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}) {
-  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0' }, transport });
+async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}, session: Partial<EngineSessionOptions> = {} /* P2-E1 */) {
+  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0', ...session }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
   // E2: the store's announcements and the capture requests
@@ -630,6 +631,33 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(run.answerOf(atExit)).toBeUndefined();
     expect(run.session.answerCapture(atExit, { ok: true, png: PNG, width: 1, height: 1, consoleErrors: [] })).toBe('not_pending');
   });
+
+  // P2-E1 start (2026-10-09): the artifact scope reaches the tools through the session's option (D10)
+  it("a side thread's update of its parent's artifact writes the parent's record, announced under the parent, its event naming the owner live and on rebuild", async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+    const parent = 'app-parent' as AppSessionId;
+    const seeded = await artifactCreateTool({ deliverables: new FileDeliverableStore(userData) }).call(
+      { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' },
+      { appSessionId: parent, cwd, toolUseId: 'toolu_parent' as ToolUseId, requestId: 'r0' as RequestId, signal: new AbortController().signal },
+    );
+    const deliverableId = (JSON.parse((seeded.content[0] as { text: string }).text) as { deliverableId: string }).deliverableId;
+    const run = await mawsSession({}, { artifactScope: [parent] });
+    const update = run.call('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_update');
+    expect(json(await run.answered(update))).toEqual({ status: 'updated', id: 'dash', deliverableId, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: parent });
+    expect((await readdir(join(userData, 'deliverables', parent, deliverableId))).sort()).toEqual(['v1.html', 'v2.html']);
+    expect(run.changes).toEqual([{ appSessionId: parent, id: deliverableId, change: 'updated' }]);
+    const own = run.call('artifact_create', { id: 'own', html_path: 'dashboard.html', title: 'Own' }, 'toolu_own');
+    await run.answered(own);
+    await until(() => run.maws().length === 2, 'the artifact events');
+    const [updated, created] = run.maws();
+    expect(updated).toMatchObject({ kind: 'maws.delivery.artifact', toolUseId: 'toolu_update', action: 'update', artifactId: 'dash', deliverableId, version: 2, ownerAppSessionId: parent });
+    expect(created).toMatchObject({ kind: 'maws.delivery.artifact', toolUseId: 'toolu_own', action: 'create', artifactId: 'own' });
+    expect(created).not.toHaveProperty('ownerAppSessionId');
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+  // P2-E1 end
 });
 // E2 end
 

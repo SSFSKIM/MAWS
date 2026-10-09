@@ -8,13 +8,18 @@
 // composer does, so a session transcript shown without its composer reads the live queue.
 // W8: a session's transcript names the effort the session runs at in its live thinking label, the effort the model
 // selector shows (W3's `useShownEffort`); a child's names none.
+// P2-E1: three additive options for a mount that shows a session in a smaller place (the comment card's thread): the
+// first row to show (`startAt`), actions overriding the registered ones for this mount, and the presentation forced
+// local (`Transcript`'s). Absent, the slot draws as before.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useEffect, useMemo } from 'react';
 import { useShownEffort } from '../../composer/effective-effort';
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { heldRow } from '../model/derive';
+import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
+import type { TranscriptActions } from './context';
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { Transcript } from './Transcript';
 
@@ -22,10 +27,14 @@ export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
   agentId?: AgentId;
   className?: string;
+  startAt?: (rows: readonly Row[], loaded: boolean) => number | null; // P2-E1: the first row shown; null: none yet
+  presentation?: 'local'; // P2-E1: the owner channel through MAWS's presenter, whatever the surface's attachment
+  actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
 }
 
-export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptSlotProps) {
-  const actions = useRegisteredActions();
+export function TranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+  const registered = useRegisteredActions();
+  const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
@@ -53,6 +62,8 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
       tail={tail}
       withdrawn={withdrawn}
       effort={agentId === undefined ? effort : null}
+      startAt={startAt}
+      presentation={presentation}
     />
   );
 }

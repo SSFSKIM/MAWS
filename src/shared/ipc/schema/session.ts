@@ -85,7 +85,10 @@ const MessageUuidOutput = z.strictObject({ messageUuid: MessageUuidSchema });
 
 const c3Commands = {
   // lifecycle and state
-  'session.launch': host(z.strictObject({ spec: LaunchSpecSchema }), LaunchResultSchema),
+  // P2-E1 start (2026-10-09): `artifactScope`, a side thread's ancestors nearest first (D10), a sibling of the spec so the
+  // host never stores it (the stored spec's strict reader in an older build would move the state file aside)
+  'session.launch': host(z.strictObject({ spec: LaunchSpecSchema, artifactScope: z.array(AppSessionIdSchema).max(16).optional() }), LaunchResultSchema),
+  // P2-E1 end
   'session.status': host(input({}), EngineSessionStatusSchema),
   'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable() }), EventsSnapshotSchema),
   // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same

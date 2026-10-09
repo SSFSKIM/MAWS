@@ -113,7 +113,12 @@ const PROMPTS = {
     'Then call mcp__maws__artifact_screenshot with id "p1-page" and look at the image it returns. ' +
     'Then call mcp__maws__artifact_update with id "p1-page" and html_path "page-v2.html". ' +
     'Then reply with one line: COLOUR: followed by the one-word name of the background colour you saw in the screenshot.',
-  thread: 'Reply with exactly one word, ANCHORED, and use no tool.',
+  // P2-E1 (M5): the thread edits the page it comments on and updates the parent's artifact, then answers
+  thread:
+    'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file first. ' +
+    'First run the Bash command `sed -i \'\' \'s/version 2/commented/\' page-v2.html` in the foreground. ' +
+    'Then call mcp__maws__artifact_update with id "p1-page" and html_path "page-v2.html". ' +
+    'Then reply with exactly one word: ANCHORED.',
   slow: 'Run the Bash command `sleep 25; echo SLEPT` yourself, in the foreground (never in the background, never through an agent), then reply with its output.',
   steer: 'When you reply, add the word STEER_SEEN at the end.',
   btw: 'In one word: what was the background colour of the artifact’s first version?',
@@ -320,7 +325,8 @@ async function sendFromComposer(live: Live, id: AppSessionId, prompt: string, op
 }
 
 // Waits for `until`, allowing every permission the session asks meanwhile through the card docked in `scope` (the main
-// pane, or the Side pane for a thread), once. A request already resolved is left alone.
+// pane, or the Side pane for a thread), or C7's inline request card when `scope` is a comment card's thread (P2-E1: it
+// has no `group` role), once. A request already resolved is left alone.
 async function drive(live: Live, scope: Locator, id: string, what: string, until: () => Promise<boolean>, allowed: string[] = [], timeout = TURN_MS): Promise<void> {
   const deadline = Date.now() + timeout;
   for (;;) {
@@ -330,7 +336,7 @@ async function drive(live: Live, scope: Locator, id: string, what: string, until
     const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
     const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
     if (open.length > 0) {
-      const frame = scope.getByRole('group', { name: 'Approval needed' });
+      const frame = scope.getByRole('group', { name: 'Approval needed' }).or(scope.locator('[data-request-card]').filter({ hasText: 'Approval needed' })).first(); // P2-E1
       const allow = frame.getByRole('button', { name: 'Allow', exact: true });
       if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
         const once = frame.getByRole('radio', { name: 'Allow once' });
@@ -549,7 +555,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     note(`case 1: PASS: record ${deliverableId} (${record.versions.length} versions under ${join(l.sc.userData, 'deliverables', parent)}); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Deliverables tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour`);
   });
 
-  // A pick in the viewer through the pick overlay, the comment composer on the element's `artifact-element` anchor.
+  // A pick in the viewer through the pick overlay: the comment card beside the element, on its `artifact-element` anchor
+  // (P2-E1: the card keeps the sheet's accessible names, so the form's locators are the sheet's).
   async function pickTitle(l: Live): Promise<Locator> {
     const viewer = viewerOf(l.panel);
     await l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ }).click();
@@ -560,50 +567,55 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     await l.page.mouse.move(box.x + 60, box.y + 30);
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
     await l.page.mouse.click(box.x + 60, box.y + 30);
-    const sheet = l.page.locator('[data-comment-composer]');
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toHaveAttribute('data-anchor-kind', 'artifact-element');
-    await expect(sheet).toHaveAttribute('data-anchor-locator', '#title');
-    return sheet;
+    const card = viewer.locator('[data-comment-card]');
+    await expect(card).toHaveAttribute('data-card-phase', 'composing');
+    await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-element');
+    await expect(card).toHaveAttribute('data-anchor-locator', '#title');
+    await expect(l.page.locator('[data-comment-composer]'), 'no sheet').toHaveCount(0);
+    return card;
   }
 
   // The side thread of this sitting's parent, once the app lists it.
   const sideThreadOf = async (l: Live) => (value(await invoke(l.page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? '') as AppSessionId;
   const forkReceipted = (l: Live, child: string) => chargeOf(sessionRows(l, child), FORK_ALLOCATION_USD).receipted;
 
-  test('2 a comment picked on the artifact goes to a Side thread, which answers in the Side pane and sums itself up in the parent; the parent’s turns unchanged', async () => {
+  test('2 a comment picked on the artifact goes to a Side thread that lives in the card: it edits the page and updates the parent’s artifact (its permissions answered in the card), answers there and sums itself up in the parent; the parent’s turns unchanged', async () => {
     const l = live!;
     refuseOverCap(note, 'S3 case 2', 's3', { usd: FORK_ALLOCATION_USD, for: 'the side thread’s allocation (a fork takes no --max-budget-usd: Q12)' });
     test.skip(artifact === null, 'case 1 recorded no artifact');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
-    const sheet = await pickTitle(l);
-    await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
-    await sheet.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.thread);
+    const card = await pickTitle(l);
+    await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.thread);
+    const recordFile = join(l.sc.userData, 'deliverables', parent, `${artifact!.deliverableId}.json`);
+    const versionsOf = () => (JSON.parse(readFileSync(recordFile, 'utf8')) as { versions: { path: string }[] }).versions;
+    const versionsBefore = versionsOf().length;
     // the thread's allocation charged before it can spend, settled once it has stopped
     charge(note, { key: 's3-fork', case: 's3', label: 'the side thread’s allocation (reserved until its journal settles it)', usd: FORK_ALLOCATION_USD });
-    await sheet.getByRole('button', { name: 'Send' }).click();
+    await card.getByRole('button', { name: 'Send' }).click();
 
     let child = '' as AppSessionId;
     let passed = false; // its checks held; PASS is logged only once its spend has settled within the allocation
     let overspend: string | null = null;
     try {
-      await expect(sheet).toHaveCount(0);
+      // the card stays and becomes the thread (P2-E1): no Side pane, the Deliverables tab still selected
+      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 60_000 });
       await expect.poll(async () => (child = await sideThreadOf(l)), { timeout: 60_000 }).not.toBe('');
       l.started.push({ label: 'side thread', id: child });
       const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
       const anchor = record?.lineage?.anchor;
       expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
-      const pane = l.panel.locator(`[data-side-thread-view="${child}"]`);
-      await expect(pane, 'the Side pane opens on the thread').toBeVisible({ timeout: 60_000 });
-      await expect(pane.locator('header').first(), 'the anchor at the thread’s head').toContainText(anchor!.label);
-      await expect(pane.locator('[data-chip="anchor"]').first()).toHaveAttribute('data-anchor-kind', 'artifact-element');
+      await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
+      await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
+      await expect(l.panel.locator(`[data-side-thread-view="${child}"]`), 'no Side pane on the thread').toHaveCount(0);
+      await expect(l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
 
       const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
       const allowed: string[] = [];
       // the thread's turn, or its receipts reaching its allocation, whichever comes first
       const done = async () => mainTurnsEnded(await events(l, child)).length > 0 && (await idleNow(l, child));
-      await drive(l, pane, child, 'the thread’s turn', async () => forkReceipted(l, child) >= FORK_ALLOCATION_USD || (await done()), allowed);
+      await drive(l, card, child, 'the thread’s turn', async () => forkReceipted(l, child) >= FORK_ALLOCATION_USD || (await done()), allowed);
       if (!(await done())) throw new Error(`the side thread reached its US$${FORK_ALLOCATION_USD.toFixed(2)} allocation (receipted US$${forkReceipted(l, child).toFixed(4)}) before its turn ended; stopped`);
       const status = await statusOf(l, child);
       if (status.pid !== null) l.pids.add(status.pid);
@@ -612,13 +624,27 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const summary = (await row.textContent())?.trim() ?? '';
       const turnsAfter = mainTurnsEnded(await events(l, parent)).length;
       const usersAfter = outUsers(sessionRows(l, parent)).length;
-      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its reply ${JSON.stringify(reply)}; permissions allowed in the Side pane ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; no --max-budget-usd on the fork (Q12): bounded by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
+      // the thread's artifact_update wrote the parent's record's next version (P2-E1 G4), none under the thread
+      const threadRows = sessionRows(l, child);
+      const update = mcpCalls(threadRows).find((c) => c.name === 'artifact_update');
+      const answer = update ? mcpResultOf(threadRows, update.requestId) : null;
+      const updated = answer ? (JSON.parse((answer.content.find((b) => b.type === 'text') as { text: string }).text) as Record<string, unknown>) : null;
+      const versions = versionsOf();
+      const latest = versions.length > 0 ? readFileSync(versions.at(-1)!.path, 'utf8') : '';
+      const viewer = viewerOf(l.panel);
+      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_update answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; no --max-budget-usd on the fork (Q12): bounded by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
       expect(reply).toContain('ANCHORED');
-      await expect(pane.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the Side pane').not.toHaveCount(0);
+      await expect(card.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the card').not.toHaveCount(0);
       expect(summary).toContain('ANCHORED');
+      expect(updated, 'artifact_update wrote the parent’s artifact').toMatchObject({ status: 'updated', id: 'p1-page', deliverableId: artifact!.deliverableId, version: versionsBefore + 1, ownerAppSessionId: parent });
+      expect(versions, 'the parent’s record one version longer').toHaveLength(versionsBefore + 1);
+      expect(latest).toContain('P1 live page, commented');
+      expect(existsSync(join(l.sc.userData, 'deliverables', child)), 'no deliverable under the thread').toBe(false);
+      await expect(viewer, 'the viewer on the latest moved to the new version').toHaveAttribute('data-version', String(versionsBefore + 1));
+      await expect(card, 'the card still open on its thread').toHaveAttribute('data-card-phase', 'thread');
       expect(turnsAfter, 'the parent ran no turn').toBe(turnsBefore);
       expect(usersAfter, 'the main conversation received nothing').toBe(usersBefore);
-      await shoot(l, '6', 'side-thread');
+      await shoot(l, '6', 'side-thread-card');
       passed = true;
     } finally {
       // the thread stopped through the app, then charged what it spent: its receipts, or its whole allocation when a
@@ -667,7 +693,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
       return bash !== undefined && ofKind(all, 'permission.requested').every((e) => resolved.has(e.requestId));
     }, allowed);
-    const sheet = await pickTitle(l);
+    const sheet = await pickTitle(l); // the card's composer half (P2-E1), with the sheet's names
     await sheet.locator('[data-destination="main"]').click();
     await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeChecked();
     const caption = (await sheet.locator('[data-destination="main"]').textContent())?.trim() ?? '';
@@ -680,7 +706,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const written = outUsers(sessionRows(l, parent)).map((r) => r.frame as { priority?: string; message?: { content?: unknown } });
     const steer = written.find((f) => JSON.stringify(f.message?.content ?? '').includes(PROMPTS.steer));
     const reply = mainTurnsEnded(await events(l, parent)).at(-1)?.resultText ?? '';
-    note(`case 3: the sheet's Send to main caption ${JSON.stringify(caption)}; sent ${Math.round((Date.now() - sentAt) / 1000)} s before the turn ended; the written prompt ${steer ? `priority ${JSON.stringify(steer.priority ?? null)}` : 'MISSING'}; permissions allowed ${JSON.stringify(allowed)}; reply ${JSON.stringify(reply)}`);
+    note(`case 3: the card's Send to main caption ${JSON.stringify(caption)}; sent ${Math.round((Date.now() - sentAt) / 1000)} s before the turn ended; the written prompt ${steer ? `priority ${JSON.stringify(steer.priority ?? null)}` : 'MISSING'}; permissions allowed ${JSON.stringify(allowed)}; reply ${JSON.stringify(reply)}`);
     expect(steer, 'the comment went to the main conversation').toBeDefined();
     expect.soft(steer?.priority, 'a `next` steer, the parent mid-turn').toBe('next');
     const bubble = l.pane.locator('[data-bubble]').filter({ hasText: PROMPTS.steer });

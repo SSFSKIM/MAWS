@@ -70,8 +70,9 @@ export async function readAtMost(handle: FileHandle, limit: number): Promise<Buf
   return Buffer.concat(chunks, total);
 }
 
-// One promise chain per session; a task that fails releases the chain for the next.
-class SessionChains {
+// One promise chain per session; a task that fails releases the chain for the next. P2-E1: exported, one per host process
+// (the launcher's), so a record's writes queue on its owner's chain whichever session's store runs them.
+export class SessionChains {
   private readonly tails = new Map<AppSessionId, Promise<unknown>>();
 
   run<T>(appSessionId: AppSessionId, task: () => Promise<T>): Promise<T> {
@@ -89,12 +90,14 @@ class SessionChains {
 export class FileDeliverableStore implements DeliverableWriter {
   private readonly readRecord: (path: string) => Promise<string>;
   private readonly onWritten: OnDeliverableWritten;
-  private readonly chains = new SessionChains();
+  private readonly chains: SessionChains;
 
-  // `readFile`: a test seam for a record removed between the listing and its read
-  constructor(private readonly userData: string, opts: { readFile?: (path: string) => Promise<string>; onWritten?: OnDeliverableWritten } = {}) {
+  // `readFile`: a test seam for a record removed between the listing and its read. `chains`: the write chains, shared by
+  // every session's store in the host (P2-E1: a side thread writes its ancestor's records); a private one by default.
+  constructor(private readonly userData: string, opts: { readFile?: (path: string) => Promise<string>; onWritten?: OnDeliverableWritten; chains?: SessionChains } = {}) {
     this.readRecord = opts.readFile ?? ((path) => readFile(path, 'utf8'));
     this.onWritten = opts.onWritten ?? (() => {});
+    this.chains = opts.chains ?? new SessionChains();
   }
 
   async write(record: DeliverableRecord): Promise<void> {
