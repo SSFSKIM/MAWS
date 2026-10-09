@@ -236,6 +236,34 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// P2-C (2026-10-09): a viewport that shrinks with no scroll is not a scroll upward, even right after the browser clamped
+// the offset upward as the viewport grew (a permission card leaving the composer, then the ask notice growing it): the
+// follower stays in follow mode and the end in view, however far past the 80 px threshold the shrink moves it.
+test('a viewport that grows and then shrinks with no scroll keeps a follower at the end', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const frames = async (n: number) => {
+      for (let k = 0; k < n; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    const full = scroller.clientHeight;
+    scroller.style.height = '120px'; // shrinks: the follower is kept at the end
+    await frames(3);
+    scroller.style.height = `${full}px`; // grows: the browser clamps the offset upward, at the end
+    await frames(2);
+    scroller.style.height = '120px'; // shrinks again before that scroll settles, by more rows than the overscan
+  });
+  await expect.poll(() => distanceFromEnd(page), { message: 'the end is kept in view' }).toBeLessThanOrEqual(1);
+  expect((await metrics(page)).following, 'still following').toBe(true);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ })).toHaveCount(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('collapsing a divider keeps its position', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);

@@ -69,6 +69,7 @@ export interface TranscriptListProps {
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
+  const seen = useRef<{ offset: number | null; size: number | null }>({ offset: null, size: null }); // P2-C: the scroll offset and viewport size at the virtualiser's last change
   // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
   // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
   // 280 px the moment it opens, and the rows below would jump there and back while the disclosure motion starts it
@@ -99,7 +100,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     // Reaching the end (within the threshold) enters follow mode; only a scroll upward leaves it. Content changing
     // size under a follower is not a reason to stop following.
     onChange: (instance) => {
-      const next = instance.isAtEnd() ? true : instance.scrollDirection === 'backward' ? false : followingRef.current;
+      // P2-C start (2026-10-09): a scroll upward is a backward direction with the offset moved since the last change
+      // seen and the viewport the same size. The virtualiser's direction outlives the scroll that set it (the browser's
+      // clamp as the viewport grew), so a viewport then shrinking with no scroll (the composer growing with a notice)
+      // read as a scroll upward and left follow mode whenever the end moved past the threshold.
+      const offset = instance.scrollOffset;
+      const size = instance.scrollRect?.height ?? null;
+      const movedUp = instance.scrollDirection === 'backward' && offset !== seen.current.offset && size === seen.current.size;
+      seen.current = { offset, size };
+      const next = instance.isAtEnd() ? true : movedUp ? false : followingRef.current;
+      // P2-C end
       if (next === followingRef.current) return;
       followingRef.current = next;
       onFollowChange?.(next);
