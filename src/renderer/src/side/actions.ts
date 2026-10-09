@@ -9,6 +9,7 @@ import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import { anchoredMessage, promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { SendToMainDisposition } from '@shared/ipc/schema/side';
 import type { FirstMessage } from '@shared/sessions/intent';
 import { ipc } from '../ipc/client';
 import { panelHost, shownSession, usePanelHost } from '../panel/host';
@@ -82,9 +83,17 @@ export interface CommentInput {
   screenshot: AnchorScreenshot | null;
 }
 
-// Sends a comment where the sheet said. A side thread is adopted as C10's fork is (its setup followed, its card docked)
-// and revealed in the parent's pane; Send to main is main's steer-or-send. A refusal comes back in words for the sheet.
-export async function sendComment(destination: CommentDestination, input: CommentInput, client: MawsBridge = ipc): Promise<{ ok: true } | { ok: false; error: string }> {
+// Sends a comment where the sheet (or the card) said. A side thread is adopted as C10's fork is (its setup followed, its
+// card docked) and revealed in the parent's pane unless `reveal`, asked when the fork answers, says no (P2-E1: a card
+// that still holds the thread shows it itself; one closed meanwhile asks for the reveal, so a thread is never created
+// unseen); Send to main is main's steer-or-send. The answer names the adopted thread, or Send to main's disposition; a
+// refusal comes back in words for the form.
+export async function sendComment(
+  destination: CommentDestination,
+  input: CommentInput,
+  options: { reveal?: () => boolean } = {},
+  client: MawsBridge = ipc,
+): Promise<{ ok: true; child?: AppSessionId; disposition?: SendToMainDisposition } | { ok: false; error: string }> {
   const { parent, text, screenshot } = input;
   const anchor: Anchor = { ...input.anchor };
   delete anchor.screenshot; // the screenshot travels as its own field, the sheet's (M1's review)
@@ -93,12 +102,12 @@ export async function sendComment(destination: CommentDestination, input: Commen
     if (!result.ok) return { ok: false, error: result.error.message };
     // held by a paused or held app queue: it is not lost, and not sent yet either (M3's review)
     if (result.value.disposition === 'queued') toast({ level: 'info', text: SIDE_COPY.composer.queued, actions: [], dismissible: true });
-    return { ok: true };
+    return { ok: true, disposition: result.value.disposition };
   }
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text, screenshot } });
   if (!result.ok) return { ok: false, error: result.error.message };
   const adopted = await adoptFork(parent, result.value, threadMessage(anchoredMessage({ anchor, text, destination: 'thread', screenshot: screenshot !== null })));
   if (!adopted.ok) return adopted;
-  revealNewThread(parent, adopted.appSessionId);
-  return { ok: true };
+  if (options.reveal?.() ?? true) revealNewThread(parent, adopted.appSessionId);
+  return { ok: true, child: adopted.appSessionId };
 }

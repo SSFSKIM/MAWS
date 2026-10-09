@@ -11,7 +11,24 @@ import { showAnchor } from '../editor/EditorDialogs';
 // composer seam takes whole so E6's, E4's and E2's producers call the same opener.
 export type { FileLineAnchor } from '@shared/anchor/anchor';
 
-export type CommentComposerOpener = (anchor: Anchor, context: { appSessionId: AppSessionId }) => void;
+// P2-E1 start (2026-10-09): how a comment is presented (P2-E1 document, D2; X21). The producer decides: a card in the
+// named host kind (`hostId` the exact view that picked, `rect` the element's box in that host frame's viewport CSS
+// pixels as the pick reported it), or the sheet. Absent means the sheet. The rect rides here, never on the X10 anchor,
+// which is agent-facing and persisted.
+export interface CardRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export type CommentPlacement = { kind: 'card'; host: 'deliverable' | 'browser'; hostId?: string; rect?: CardRect } | { kind: 'sheet' };
+export interface CommentContext {
+  appSessionId: AppSessionId;
+  placement?: CommentPlacement;
+}
+// P2-E1 end
+
+export type CommentComposerOpener = (anchor: Anchor, context: CommentContext) => void;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -83,8 +100,8 @@ export function registerCommentComposer(open: CommentComposerOpener): () => void
   };
 }
 
-// The registered composer, else the placeholder sheet naming the anchor.
-export function openCommentComposer(anchor: Anchor, context: { appSessionId: AppSessionId }): void {
+// The registered composer, else the placeholder sheet naming the anchor (which ignores the placement).
+export function openCommentComposer(anchor: Anchor, context: CommentContext): void {
   const registration = registrations.at(-1);
   if (registration) registration.open(anchor, context);
   else showAnchor(anchor, context.appSessionId);

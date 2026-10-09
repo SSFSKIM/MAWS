@@ -28,6 +28,11 @@ export const SIDE_COPY = {
     queued: 'Queued; it sends when the queue resumes',
     refusedAfterClose: (error: string) => `The comment was not sent: ${error}`,
   },
+  // P2-E1: the comment card beside the element (P2-E1 document, D12); its form's words are the composer's above
+  card: {
+    title: (label: string) => `Comment on ${label}`, // the dialog's accessible name, the sheet's own
+    close: 'Close',
+  },
   pane: {
     title: 'Side',
     threads: 'Side threads',

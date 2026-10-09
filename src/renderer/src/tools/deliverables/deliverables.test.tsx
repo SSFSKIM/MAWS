@@ -3,7 +3,7 @@
 // sandboxed, the PDF frame without a sandbox for a PDF alone, native media, the read-only file viewer), the missing and
 // gone states, the console chip and Reload, the summary section and the `deliverable` main tab.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnchorSchema, type Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
@@ -15,7 +15,9 @@ import { useLayout } from '../../stores/layout';
 import { activeTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { fail, installFakeMain, ok } from '../../test-support/code';
-import { registerCommentComposer } from '../code/anchor/anchor';
+import { openComment } from '../../side/register';
+import { CLAIM_DEADLINE_MS, openCard, useCommentCard } from '../../side/card/store';
+import { registerCommentComposer, type CommentContext } from '../code/anchor/anchor';
 import { useFiles } from '../code/files/store';
 import { useViewer } from '../code/viewer/viewer-store';
 import { DeliverablesSummary } from './DeliverablesSummary';
@@ -469,7 +471,7 @@ describe('the console chip and Reload', () => {
 // E2 (M6): comment mode (Design §10). The frame's page cannot be reached from the app (an opaque origin), so the
 // viewer posts `maws:pick` into the frame and listens for what the bridge script posts back, from that frame alone.
 describe('comment mode on an artifact element', () => {
-  const opened: { anchor: Anchor; context: { appSessionId: AppSessionId } }[] = [];
+  const opened: { anchor: Anchor; context: CommentContext }[] = [];
   let offComposer: () => void;
   beforeEach(() => {
     opened.length = 0;
@@ -506,9 +508,13 @@ describe('comment mode on an artifact element', () => {
     expect(sent).toEqual([{ type: 'maws:pick', on: true }]);
     expect(hint()).not.toBeNull();
     expect(button('Comment')!.getAttribute('aria-pressed')).toBe('true');
-    post(picked, target);
+    post({ ...picked, rect: { ...picked.rect, extra: 1 } }, target);
+    // P2-E1: a card in this viewer's host, beside the element the pick's rect names (its four numbers alone)
     expect(opened).toEqual([
-      { anchor: { kind: 'artifact-element', locator: 'body > h1:nth-of-type(1)', label: 'Dashboard v2 › h1.title “Sales overview”', pageUrl: deliverableUrl(A, ART.id, 2) }, context: { appSessionId: A } },
+      {
+        anchor: { kind: 'artifact-element', locator: 'body > h1:nth-of-type(1)', label: 'Dashboard v2 › h1.title “Sales overview”', pageUrl: deliverableUrl(A, ART.id, 2) },
+        context: { appSessionId: A, placement: { kind: 'card', host: 'deliverable', hostId: expect.any(String), rect: { x: 0, y: 0, width: 10, height: 10 } } },
+      },
     ]);
     expect(AnchorSchema.safeParse(opened[0]!.anchor).success).toBe(true);
     expect(hint()).toBeNull(); // one pick per Comment
@@ -593,13 +599,110 @@ describe('comment mode on an artifact element', () => {
     expect(opened[0]!.anchor).toMatchObject({ label: 'Dashboard v1 › h1.title “Sales overview”', pageUrl: deliverableUrl(A, ART.id, 1) });
   });
 
-  it('is offered in the deliverable main tab too', async () => {
+  it('is offered in the deliverable main tab too, a card in that viewer’s own host', async () => {
+    await mount({ target: ART.id });
+    const panel = spyFrame();
+    fireEvent.click(button('Comment')!);
+    post(picked, panel.target);
+    cleanup();
     render(<DeliverableTab tab={{ id: `deliverable:${A}:${ART.id}`, kind: 'deliverable', appSessionId: A, deliverableId: ART.id, pinned: false }} />);
     await settle();
     const { target } = spyFrame();
     fireEvent.click(button('Comment')!);
     post(picked, target);
-    expect(opened).toHaveLength(1);
+    expect(opened).toHaveLength(2);
+    expect(opened[1]!.context.placement).toMatchObject({ kind: 'card', host: 'deliverable', rect: picked.rect });
+    const hostOf = (k: number) => (opened[k]!.context.placement as { hostId: string }).hostId;
+    expect(hostOf(1)).not.toBe(hostOf(0));
+  });
+});
+
+// P2-E1 (M1): the comment card in the viewer (P2-E1 document, D3 and D9): the viewer's body hosts the card, drawn by the
+// viewer that picked alone; an unhosted card (the re-dock) is claimed by a viewer of its record in its mode only, and
+// closes when nobody claims it; Close gives focus back to Comment; the viewer going away closes its card.
+describe('the comment card in the viewer', () => {
+  let offComposer: () => void;
+  beforeEach(() => {
+    offComposer = registerCommentComposer(openComment);
+    useCommentCard.setState({ open: null });
+  });
+  afterEach(() => {
+    offComposer();
+    useCommentCard.setState({ open: null });
+    vi.useRealTimers();
+  });
+
+  const picked = { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: 10, height: 10 } };
+  const post = (data: unknown, source: unknown) => act(() => void window.dispatchEvent(new MessageEvent('message', { data, source: source as MessageEventSource })));
+  const pickIn = (root: HTMLElement) => {
+    fireEvent.click(within(root).getByRole('button', { name: 'Comment' }));
+    post(picked, root.querySelector('iframe')!.contentWindow);
+  };
+  const cardIn = (root: Element) => root.querySelector<HTMLElement>('[data-comment-card]');
+  const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v2 › h1#hero', pageUrl: deliverableUrl(A, ART.id, 2) };
+  const redock = (anchor = ANCHOR) => act(() => openCard(anchor, { appSessionId: A, placement: { kind: 'card', host: 'deliverable' }, claimMode: 'panel' }));
+  const panelAndTab = async () => {
+    const handle = create({ target: ART.id });
+    render(
+      <>
+        <div data-test="panel">
+          <Mounted state={handle} />
+        </div>
+        <div data-test="tab">
+          <DeliverableTab tab={{ id: `deliverable:${A}:${ART.id}`, kind: 'deliverable', appSessionId: A, deliverableId: ART.id, pinned: false }} />
+        </div>
+      </>,
+    );
+    await settle();
+    return { panel: document.querySelector<HTMLElement>('[data-test="panel"]')!, tab: document.querySelector<HTMLElement>('[data-test="tab"]')! };
+  };
+
+  it('a pick opens the card inside the viewer that picked, and in no other viewer of the record', async () => {
+    const { panel, tab } = await panelAndTab();
+    pickIn(tab);
+    expect(cardIn(tab)).not.toBeNull();
+    expect(cardIn(tab)!.closest('[data-deliverable-viewer]')!.contains(tab.querySelector('iframe'))).toBe(true);
+    expect(cardIn(panel)).toBeNull();
+    expect(document.querySelector('[data-comment-composer]')).toBeNull();
+    pickIn(panel); // a new pick replaces it
+    expect(cardIn(panel)).not.toBeNull();
+    expect(cardIn(tab)).toBeNull();
+  });
+
+  it('an unhosted card is claimed by the viewer of its record in its mode alone', async () => {
+    const { panel, tab } = await panelAndTab();
+    redock();
+    await settle();
+    expect(cardIn(panel)).not.toBeNull();
+    expect(cardIn(tab)).toBeNull();
+    expect(useCommentCard.getState().open!.hostId).not.toBeNull();
+  });
+
+  it('an unhosted card no viewer accepts closes after the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    render(<DeliverableTab tab={{ id: `deliverable:${A}:${ART.id}`, kind: 'deliverable', appSessionId: A, deliverableId: ART.id, pinned: false }} />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    redock(); // the tab is not the panel the re-dock meant
+    redock({ ...ANCHOR, pageUrl: deliverableUrl(A, PAGE.id, 1) }); // nor is any viewer of another record
+    await act(() => vi.advanceTimersByTimeAsync(CLAIM_DEADLINE_MS - 1));
+    expect(useCommentCard.getState().open).not.toBeNull();
+    expect(cardIn(document.body)).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(useCommentCard.getState().open).toBeNull();
+  });
+
+  it('Close gives focus back to the viewer’s Comment button; leaving the viewer closes its card', async () => {
+    const { handle } = await mount({ target: ART.id });
+    pickIn(document.body);
+    fireEvent.click(within(cardIn(document.body)!).getByRole('button', { name: 'Close' }));
+    expect(cardIn(document.body)).toBeNull();
+    expect(document.activeElement).toBe(button('Comment'));
+
+    pickIn(document.body);
+    expect(cardIn(document.body)).not.toBeNull();
+    act(() => handle.back());
+    await settle();
+    expect(useCommentCard.getState().open).toBeNull();
   });
 });
 
