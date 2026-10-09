@@ -1,0 +1,8 @@
+Command: pnpm e2e:settings (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== e2e:settings head 786300c4 start 2026-10-08T16:55:24Z load { 24.30 22.32 17.66 }
+== e2e:settings exit 0 end 2026-10-08T16:59:43Z
+--- summary lines
+9 passed (17.9s)
+restore: 0 sibling evidence changes left
+--- exit code: 0

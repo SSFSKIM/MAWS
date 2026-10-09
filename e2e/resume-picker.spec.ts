@@ -2,6 +2,7 @@
 // an expanded project's row opens "Resume session" scoped to that project; a search narrows it, Enter opens the session
 // in the main area and the picker goes.
 import { expect, test } from '@playwright/test';
+import { clickRevealed } from './support/hover';
 import { launchMaws } from './support/launch';
 import { openProject, projectLine, projectRow } from './support/sidebar';
 
@@ -14,8 +15,7 @@ test('resume picker: from an expanded project, search, open a session', async ()
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 });
     await openProject(page, 'MAWS');
     const row = projectRow(page, 'MAWS');
-    await projectLine(row).hover();
-    await row.getByRole('button', { name: 'Resume a session in MAWS' }).click();
+    await clickRevealed(projectLine(row), row.getByRole('button', { name: 'Resume a session in MAWS' }));
 
     const picker = page.getByRole('dialog', { name: 'Resume session' });
     await expect(picker).toBeVisible();

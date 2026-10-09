@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
 import { app, BrowserWindow, dialog, screen } from 'electron';
@@ -5,6 +6,8 @@ import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
+import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
+import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
@@ -46,6 +49,7 @@ import { baseUrlFrom, ClaudeUsageControl } from './usage/claude-usage-control'; 
 // C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
 import { registerFilesHandlers } from './files/register';
+import { allowlistOf } from './files/allowlist'; // E11
 // C8c end
 // C10 start (emit comes with C3's imports, createGitRunner with C7's, shell with C8c's)
 import { captureShellEnvironment } from '@shared/host/shell-env';
@@ -121,13 +125,58 @@ registerDeliverableScheme();
 // Only an explicit quit (Cmd+Q, the menu, the Dock) ends the app.
 app.on('window-all-closed', () => {});
 
+// E11 §2.7: main's own build (electron.vite.config.ts's stamp), logged once at startup so a log says which main ran, and
+// handed to the running instance by a second launch, which brings the running one forward and, when the launch is a
+// newer build, says the running one is older and offers to quit it (before, the second launch exited with no word).
+const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
+console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
+let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
+const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
+function offerQuit(win: BrowserWindow, notice: string): void {
+  const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
+  void dialog.showMessageBox(win, options).then(({ response }) => {
+    if (response === 0) app.quit(); // the ordinary quit, its question about running sessions included
+  });
+}
+// E11 F2b (plan 2.7b; the owner's actual case): opening the app after a rebuild at the same bundle path activates this
+// process and starts no other, so `activate` (and a second launch too) compares the bundle main loaded, as it is on disk
+// now, with this process's start, once per build on disk (`staleBuildCheck`). Built on first use: the paths are read then.
+const STARTED_AT = Date.now() - process.uptime() * 1000;
+const bundleMtime = (path: string): number | null => {
+  const asar = process.noAsar;
+  process.noAsar = true; // the archive file itself, not the directory Electron's fs makes of it
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  } finally {
+    process.noAsar = asar;
+  }
+};
+let diskCheck: (() => string | null) | null = null;
+const diskBuildIsNewer = (): string | null =>
+  (diskCheck ??= staleBuildCheck({
+    bundlePath: loadedBundlePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+    stat: bundleMtime,
+    startedAt: STARTED_AT,
+    running: MAIN_BUILD,
+    formatTime: builtAtLabel,
+  }))();
+function answerSecondLaunch(launched: MainBuild | null): void {
+  const win = bringForward();
+  if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
+  const onDisk = diskBuildIsNewer(); // asked either way, so the build on disk this answer covers is not said again
+  const notice = olderInstanceNotice(MAIN_BUILD, launched, builtAtLabel) ?? onDisk;
+  if (notice !== null) offerQuit(win, notice);
+}
+
 void startWithProfileLock(app, () => {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts();
+  const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
@@ -273,7 +322,8 @@ void startWithProfileLock(app, () => {
   // C7 end
   // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
   // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
-  const filesService = registerFilesHandlers(sessions.model, {
+  // E11: an unstarted session (a New chat before its first send) reads its setup intent's location
+  const filesService = registerFilesHandlers(allowlistOf(sessions.model, intents), {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
     showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
@@ -528,8 +578,20 @@ void startWithProfileLock(app, () => {
   // ---- end C5 ----
   app.on('activate', () => {
     if (shutdown.quitting()) return; // W-B review M6: the services are stopped or stopping (the keep-quit hold)
-    if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
+    const win = appWindows()[0] ?? openWindow(); // E2: a capture window is not the app's
+    const notice = diskBuildIsNewer(); // E11 F2b (plan 2.7b): a rebuild on disk, said once per build
+    if (notice !== null) offerQuit(win, notice);
   });
+  // E11 §2.7: a second launch brings this instance forward, as activate does
+  bringForward = () => {
+    if (shutdown.quitting()) return null;
+    const win = appWindows()[0] ?? openWindow();
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    app.focus({ steal: true });
+    return win;
+  };
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
   // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
   // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
@@ -547,4 +609,4 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
-});
+}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7

@@ -1281,12 +1281,11 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         await page.keyboard.press('Enter');
         const w = page.locator(`[data-widget="${name}"]`);
         await expect(w).toBeVisible();
-        await expect(w.locator('footer')).toContainText('Read with');
+        await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: no provenance foot
         await expect(w).not.toContainText('Reading', { timeout: 20_000 });
-        const footer = await w.locator('footer').innerText();
         const error = await w.getByRole('alert').count();
         if (name === 'context' || name === 'mcp') opened[`${name}.screenshots`] = await shoot(page, `10.8-widget-${name}`);
-        opened[name] = { footer, error };
+        opened[name] = { error };
         expect(error, `/${name} answered without an error`).toBe(0);
       });
     }

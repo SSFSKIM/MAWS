@@ -11,12 +11,14 @@ import { orderProjects } from '../overview/derive';
 import {
   filterProjectList,
   formatAge,
+  itemAge,
   lineageCaption,
   nestLineage,
   needsYouAge,
   OTHER_SESSIONS,
   projectList,
   projectSessions,
+  relativeAge,
   rowBranch,
   SESSIONS_CAP,
   sessionAge,
@@ -228,6 +230,18 @@ describe('sidebar row text', () => {
     expect([0, 59_000, 60_000, 3_599_000, 3_600_000, 86_399_000, 86_400_000, 7 * 86_400_000, -5000].map(formatAge)).toEqual([
       'now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now',
     ]);
+  });
+
+  // E11 F2b (plan 2.4): an outcome (an error, an interruption) says when it happened; a request says how long it has waited
+  it('an outcome reads "2 weeks ago", a request "waiting 5m"', () => {
+    const DAY = 86_400_000;
+    expect([0, 59_000, 60_000, 120_000, 3_600_000, 7_200_000, DAY, 2 * DAY, 7 * DAY, 14 * DAY].map(relativeAge)).toEqual([
+      'just now', 'just now', '1 minute ago', '2 minutes ago', '1 hour ago', '2 hours ago', '1 day ago', '2 days ago', '1 week ago', '2 weeks ago',
+    ]);
+    const now = at('2026-10-08T10:00:00Z');
+    expect(itemAge(item('r', 'error', '2026-09-24T10:00:00Z'), now)).toBe('2 weeks ago');
+    expect(itemAge(item('r', 'interrupted', '2026-10-03T10:00:00Z'), now)).toBe('5 days ago');
+    expect(itemAge(item('r', 'permission', '2026-10-08T09:55:00Z'), now)).toBe('waiting 5m');
   });
 
   it('a working session is "now"; otherwise the age of its latest movement; a Needs-you row shows its wait', () => {

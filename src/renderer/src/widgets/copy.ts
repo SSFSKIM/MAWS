@@ -1,16 +1,12 @@
-// Every widget string and foot in one table (C11 execution document, Repository map and the widget table under
-// Interfaces "Widgets"). A foot reads `Read with <control> · <what is edited elsewhere>`; the sentences are the table's.
-// Backticks in a sentence mark code, which the frame renders in mono.
+// Every widget string in one table (C11 execution document, Repository map and the widget table under Interfaces
+// "Widgets"). E11's sitting (owner-notes 00-consolidated-plan §2.2) removed C11's `Read with … · …` foot from every
+// frame: a change's scope, what it writes, a lock and a destructive consequence are said beside the control or in its
+// sheet, in words, never as a footer naming the wire.
 import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { WidgetCommandName } from '../composer';
 import { NOT_RUNNING } from '../statusline/mode-menu';
 import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
-
-export interface WidgetFoot {
-  readWith: string; // the engine's read or control, by its wire name
-  editedWhere: string | null; // what the widget will not edit and where it is edited instead
-}
 
 export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   model: 'Model & effort',
@@ -35,40 +31,11 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
   btw: 'Side question', // E3
-};
-
-// `/usage` on a direct session: its windows are the engine's own, not ClaudeUsage's (C11 M6, live).
-export const USAGE_DIRECT_FOOT: WidgetFoot = { readWith: 'get_usage', editedWhere: 'A direct session’s windows come from the engine’s own login' };
-
-// W3: the model selector (`model`, `effort`, `fast`) is a menu, not a framed widget, and has no foot.
-export type FramedWidgetName = Exclude<WidgetCommandName, 'model' | 'effort' | 'fast'>;
-export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
-  permissions: { readWith: 'list_permission_rules', editedWhere: 'Sets the mode with `set_permission_mode` for this session only · rules are edited in their settings files; session grants come from approval cards' },
-  usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
-  config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
-  plugins: pluginsFoot(null), // E8: the widget words it with the paths `plugins.env` answers, once it has
-  mcp: {
-    readWith: 'mcp_status',
-    editedWhere: 'Servers are configured in `.mcp.json` and settings · Reconnect is for this session · Enable and disable: recorded by the engine for this project in `~/.claude.json`',
-  },
-  sandbox: { readWith: 'get_sandbox_dialog', editedWhere: "Sandbox is enabled in settings (`sandbox`); the terminal's toggle writes there" },
-  hooks: { readWith: 'get_hooks_listing', editedWhere: "Hooks are edited in settings and plugins; MAWS's own callback hooks are not listed by the engine (none in P0)" },
-  memory: { readWith: 'get_memory_dialog', editedWhere: 'Memory files are edited in your editor; Reveal opens their folder' },
-  skills: { readWith: 'get_skills_dialog and system/init', editedWhere: 'Skills are files under `.claude/skills` and plugins; the palette runs them' },
-  agents: { readWith: 'initialize', editedWhere: 'Agents are files under `.claude/agents` and plugins' },
-  status: { readWith: 'get_status', editedWhere: 'What `/status` prints in the terminal' },
-  compact: { readWith: 'get_context_usage', editedWhere: 'Sends `/compact` as the next message · compaction rewrites the conversation; nothing on disk is truncated' },
-  context: { readWith: 'get_context_usage', editedWhere: "Context is the engine's own accounting" },
-  rename: { readWith: 'rename_session', editedWhere: 'Named through the engine, so the terminal sees it' },
-  resume: { readWith: 'the sessions list', editedWhere: 'There is no resume control on the wire; a resume is a launch (C10)' },
-  export: { readWith: 'export_conversation', editedWhere: "The engine's own text export; the JSONL stays where it is" },
-  diff: { readWith: 'get_workspace_diff', editedWhere: 'Read-only; staging and commits are P1' },
-  rewind: { readWith: 'rewind_conversation and rewind_files', editedWhere: 'The transcript on disk is never truncated: the next turn branches from the earlier message' }, // W3 (B7)
-  btw: { readWith: 'side_question', editedWhere: 'Answered beside the running turn with no tools; nothing is added to the conversation · answers show in the Side pane' }, // E3
+  'reload-plugins': 'Reload plugins', // E11 §2.2: the engine's terminal-only command as MAWS's action
 };
 
 // The frame.
-export const FRAME = { reading: 'Reading…', noAnswer: NO_ANSWER, lastValue: LAST_VALUE, readWith: 'Read with', close: (title: string) => `Close ${title}` };
+export const FRAME = { reading: 'Reading…', noAnswer: NO_ANSWER, lastValue: LAST_VALUE, close: (title: string) => `Close ${title}` };
 
 // Words several widgets share.
 export const SHARED = { none: 'none', on: 'on', off: 'off', yes: 'yes', no: 'no', reveal: 'Reveal', revealRefused: 'Finder was not opened for this path' };
@@ -96,6 +63,7 @@ export const PERMISSIONS = {
   added: 'added',
   managedOnly: 'Only managed rules apply',
   grants: (n: number) => `${n} session grant${n === 1 ? '' : 's'} · re-applied after a resume`,
+  modeScope: 'The mode applies to this session only; rules are edited in their settings files', // E11 §2.2: was the foot's
 };
 
 // Usage.
@@ -165,34 +133,33 @@ export const CONFIG = {
 // Plugins.
 export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
-// E8: the `/plugins` widget's foot. Every change runs the engine's CLI after a sheet; a listing writes no configuration
-// but refreshes the engine's own catalogue cache (E8 D-12), and the CLI keeps its own records in its global config file
-// (`plugins.env`'s `globalConfig`, verbatim). Until `plugins.env` answers, the foot names no path.
-export function pluginsFoot(paths: { configHome: string; globalConfig: string } | null): WidgetFoot {
-  const readWith = 'claude plugin list --json · marketplace list --json · system/init';
-  if (paths === null) return { readWith, editedWhere: "Every change runs the engine's CLI after you confirm it · the files it writes are named once the engine is resolved" };
-  const home = paths.configHome;
-  return {
-    readWith,
-    editedWhere: `Every change runs the engine's CLI after you confirm it; the engine writes \`${home}/settings.json\` and \`${home}/plugins\` and keeps its own records in \`${paths.globalConfig}\` · listing refreshes the engine's own catalogue cache under \`${home}/plugins\``,
-  };
-}
-
 // MCP.
 export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
 
-// Sandbox.
+// Sandbox (E11 §2.2): on or off first, with why it is off or what happens to a command it cannot run; the engine's
+// fields under Details.
 export const SANDBOX = {
-  supported: 'supported',
-  unsupported: (reason: string | null) => `unsupported${reason ? `: ${reason}` : ''}`,
-  enabled: 'Enabled',
-  enabledInSettings: 'Enabled in settings',
-  locked: 'Locked',
+  on: 'Sandbox on',
+  off: 'Sandbox off',
+  notInSettings: 'Not turned on in your settings',
+  notInEffect: 'Turned on in your settings but not in effect',
+  unavailable: (reason: string) => `Turned on in your settings but unavailable: ${reason}`,
+  unsupported: (reason: string | null) => `Not supported on this Mac${reason ? `: ${reason}` : ''}`,
+  fallbackAllowed: 'A command that fails in the sandbox may run outside it, with your permission',
+  fallbackRefused: 'Commands run only inside the sandbox',
+  fallbackRefusedOthers: 'Other commands run only inside the sandbox', // under `outside`: the excluded ones are named first
+  // the excluded commands, which run outside the sandbox whatever the fallback says: the first three, then a count
+  outside: (commands: string[]) => `Run outside it: ${commands.slice(0, 3).join(', ')}${commands.length > 3 ? ` and ${commands.length - 3} more` : ''}`,
+  locked: 'Set by your organization; it cannot be changed here',
+  details: 'Details',
+  inSettings: 'In your settings',
+  lockedRow: 'Set by policy',
   autoAllow: 'Auto-allow',
   available: 'available',
   notAvailable: 'not available',
   fallback: 'Unsandboxed fallback',
-  unavailable: 'Unavailable',
+  allowed: 'allowed',
+  refused: 'not allowed',
   network: 'Network',
   managed: 'managed',
   settings: 'Sandbox settings',
@@ -339,6 +306,7 @@ export const REWIND = {
   filesRefused: 'The files could not be rewound',
   filesDone: 'Files rewound to before that message',
   filesNotRestored: (why: string) => `The conversation was rewound; its files were not · ${why}`,
+  consequence: 'The next message continues from that point; the transcript on disk keeps everything', // E11 §2.2: was the foot's
 };
 
 // W3: the model selector's own words (Codex's two-view menu, r1-codex §5; Claude Desktop's slider ends).
@@ -389,7 +357,7 @@ export const RELOAD = {
 // operation line. The engine's own `message` and `failureCode` are shown as it printed them, never paraphrased.
 const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
-  reloadMods: 'Reload mods',
+  reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
   reloadSkills: 'Reload skills',
   // Installed
   installed: 'Installed',
@@ -483,6 +451,7 @@ export const COMPACT = {
   queuedFirst: 'Queued messages go first',
   unanswered: `${NO_ANSWER} · the command may still run; check the transcript before sending again`, // a send is no read: nothing to show "the last value" of
   open: 'Compact…',
+  consequence: 'Summarises the conversation for the turns after it; the transcript on disk keeps everything', // E11 §2.2: was the foot's
 };
 
 // Rename.

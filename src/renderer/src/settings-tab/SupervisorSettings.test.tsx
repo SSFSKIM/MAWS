@@ -40,6 +40,7 @@ const status = (over: Partial<HostStatus> = {}): HostStatus => ({
   supervisor: supervisor(),
   appBuildId: 'b',
   appWire: 'w',
+  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' },
   matches: 'same',
   reason: null,
   waitingLiveSessions: null,

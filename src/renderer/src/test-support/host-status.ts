@@ -3,6 +3,7 @@
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
 
 export const SUPERVISOR_STARTED = new Date(2026, 9, 6, 14, 2).toISOString(); // 14:02 local
+export const MAIN_BUILT = new Date(2026, 9, 8, 2, 5).toISOString(); // E11 §2.7: main's build, 02:05 local
 
 export const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatus => ({
   mode: 'detached',
@@ -28,6 +29,7 @@ export const hostStatus = (over: Partial<HostStatus> = {}): HostStatus => ({
   supervisor: supervisorStatus(),
   appBuildId: 'b',
   appWire: 'w',
+  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: MAIN_BUILT },
   matches: 'same',
   reason: null,
   waitingLiveSessions: null,

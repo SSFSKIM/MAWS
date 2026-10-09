@@ -59,7 +59,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return HOSTS[name];
       // E10: the supervisor's status the hosts store reads at connect (the engine host in the app, as under the harness)
       case 'host.status':
-        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
+        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
       case 'fs.state':
         return {
           configHome: '/Users/new/.claude',

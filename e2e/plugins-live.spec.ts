@@ -4,7 +4,7 @@
 // "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` and the panel,
 // every management action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
-// `e8-probe@e8-scratch` installed and reflected in the running session before any new turn, the panel's Reload mods and
+// `e8-probe@e8-scratch` installed and reflected in the running session before any new turn, the panel's Reload plugins and
 // Reload skills, Refresh, a real Update to 0.2.0, `/skills` after the next turn, disable, enable, uninstall, the
 // engine's error for a plugin its marketplace withdrew, the plugin installed again, and the marketplace removed with it
 // still installed (2.1.291 uninstalls it; the sheet names it). Around every action the config
@@ -239,14 +239,13 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(s.gateway.verified).toBe('routed');
     });
 
-    await step('plugins', '/plugins lists the engine’s (empty) registry; the foot names the scratch home', async () => {
+    await step('plugins', '/plugins lists the engine’s (empty) registry', async () => {
       const w = await openPlugins(page);
       const text = await w.innerText();
       scratch.log(`installed: ${(await w.locator('[data-plugins-section="installed"]').innerText()).replaceAll('\n', ' · ')}`);
       scratch.log(`marketplaces: ${(await w.locator('[data-plugins-section="marketplaces"]').innerText()).replaceAll('\n', ' · ')}`);
-      scratch.log(`foot: ${(await w.locator('footer').innerText()).replaceAll('\n', ' ')}`);
       scratch.observe('plugins', text);
-      await expect(w.locator('footer')).toContainText(scratch.config);
+      await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: the sheet names the scratch home a change writes
     });
 
     const addLine = (w: Locator) => w.getByRole('textbox', { name: 'Add marketplace' }).locator('xpath=ancestor::form[1]');
@@ -296,15 +295,15 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(s.plugins.map((p) => p.name)).toContain('e8-probe');
     });
 
-    await step('panel-reload', 'the panel’s Plugins section: Plugins · N loaded (the built-in ones and e8-probe), Reload mods, Reload skills', async () => {
+    await step('panel-reload', 'the panel’s Plugins section: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
       await closeWidgets(page);
       const panel = panelPlugins(page);
       await expect(panel).toContainText(`Plugins · ${builtin + 1} loaded`);
-      const mods = panel.getByRole('button', { name: 'Reload mods' });
+      const mods = panel.getByRole('button', { name: 'Reload plugins' });
       const line = mods.locator('xpath=following-sibling::*[@role="status"]');
       await mods.click();
       await expect(line).toHaveText(new RegExp(`^Reloaded · \\d+ commands · \\d+ agents · ${builtin + 1} plugins · 0 errors$`), { timeout: 60_000 });
-      scratch.log(`Reload mods: ${await line.innerText()}`);
+      scratch.log(`Reload plugins: ${await line.innerText()}`);
       await shot(`${String(n).padStart(2, '0')}-panel-reload-mods`);
       await panel.getByRole('button', { name: 'Reload skills' }).click();
       await expect(line).toHaveText(/^Reloaded · \d+ skills?$/, { timeout: 60_000 });

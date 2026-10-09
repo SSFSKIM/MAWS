@@ -40,9 +40,17 @@ const c5Events = {
 } as const satisfies Record<`attention.${string}`, z.ZodType>;
 // C5 end
 
+// E11 F2b (plan 2.4; owner decision 1): an error item seen in its opened session leaves Needs you (`seen`: confirmed,
+// its notice still shown in the session) and Dismiss retires it (`dismissed`); either way the session keeps the fact
+// ("Ended with an error") until its next human turn. Only error items are acknowledged; anything else is left as is.
+const e11Commands = {
+  'attention.acknowledge': { input: z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema, how: z.enum(['seen', 'dismissed']) }), output: z.void(), owner: 'main' },
+} as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+
 export const commands = {
   ...c3Commands, // C3
   ...c5Commands, // C5
+  ...e11Commands, // E11 F2b
 } as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

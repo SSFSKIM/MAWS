@@ -6,7 +6,7 @@ import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetMemoryDialogResponse } from '@shared/wire/control';
 import { prefillComposer } from '../composer';
-import { MEMORY, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { MEMORY, SHARED, WIDGET_TITLE } from './copy';
 import { Group, Mono, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -73,7 +73,7 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
 export function MemoryWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getMemoryDialog', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.memory} command="memory" foot={WIDGET_FOOT.memory} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.memory} command="memory" state={read.state} error={read.error} close={close}>
       {read.data && <MemoryBody view={present(read.data)} appSessionId={appSessionId} close={close} />}
     </WidgetFrame>
   );

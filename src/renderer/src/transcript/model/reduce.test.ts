@@ -504,28 +504,73 @@ describe('turn boundaries', () => {
     expect(rowsOf(state).filter((row) => row.kind === 'user')).toHaveLength(1);
   });
 
+  // Informative outputs (`/cost`, `/status`, `/context`, `/help`) keep their card (W1); see the next case for echoes that
+  // only confirm a setting change.
   it('a local-command echo never opens a turn and renders as a local_command row, tags stripped, loose outside a turn and in the work area inside one', () => {
     const b = builder();
-    b.emit('user.message', { messageUuid: uuid('lc1'), content: '<local-command-stdout>Set model to `opus`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.emit('user.message', { messageUuid: uuid('lc1'), content: '<local-command-stdout>Total cost: $0.0123</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
     let state = reduce(b.events);
     expect(state.order).toEqual([]);
     let list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'local_command']);
-    expect(find(list, 'local_command')).toMatchObject({ id: rowId.local(uuid('lc1')), messageUuid: 'lc1', text: 'Set model to `opus`', turnId: null });
+    expect(find(list, 'local_command')).toMatchObject({ id: rowId.local(uuid('lc1')), messageUuid: 'lc1', text: 'Total cost: $0.0123', turnId: null });
     // Untagged by C4's backfill: the wrapper is still recognised.
-    b.emit('user.message', { messageUuid: uuid('lc2'), content: '<local-command-stdout>Set model to `sonnet`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: null, bash: null });
+    b.emit('user.message', { messageUuid: uuid('lc2'), content: '<local-command-stdout>Current model: sonnet</local-command-stdout>', isReplay: true, isSynthetic: false, origin: null, bash: null });
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' });
     b.result('t1', 'ok');
-    b.emit('user.message', { messageUuid: uuid('lc3'), content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.emit('user.message', { messageUuid: uuid('lc3'), content: '<local-command-stdout>Context usage: 12k / 200k tokens</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
     b.text('m1', 0, 'Done');
     b.end(['u1']);
     state = reduce(b.events);
     expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
     list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'local_command', 'local_command', 'user', 'divider', 'cell', 'local_command', 'assistant_text']);
-    expect(find(list, 'local_command', 2)).toMatchObject({ turnId: turnId.ofMessage(uuid('u1')), text: 'Set model to `haiku`' });
+    expect(find(list, 'local_command', 2)).toMatchObject({ turnId: turnId.ofMessage(uuid('u1')), text: 'Context usage: 12k / 200k tokens' });
     expect(find(list, 'user').text).toBe('prompt u1');
+  });
+
+  // E11's sitting (owner-notes 00-consolidated-plan §2.3): an echo that only confirms a setting change draws nothing,
+  // since the chip already shows it; the lines are 2.1.293's own (its `/model`, `/fast`, `/effort`, `/output-style`,
+  // `/plan`, `/theme` and `/color` messages, read from the binary) and 2.1.283's recorded `Set model to` echoes. One
+  // that carries anything more (a save that failed, an override still in force) keeps its card.
+  it('an echo that only confirms a setting change draws nothing, loose or inside a turn; one carrying more keeps its card', () => {
+    const confirmations = [
+      'Set model to `haiku (claude-haiku-4-5-20251001)`', // pass2/auto-routed seq 153 (2.1.283)
+      'Set model to `opus (claude-opus-5-5[1m])` for this session only',
+      'Set model to `fable` and saved as your default for new sessions with high effort · Fast mode OFF',
+      'Kept model as `sonnet`',
+      'Fast mode ON · Draws from usage credits',
+      'Fast mode OFF',
+      '\u001b[33m↯\u001b[0m Kept Fast mode ON',
+      'Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation',
+      'Set effort level to xhigh (this session only): Deeper reasoning than high, just below maximum (on supported models)',
+      'Effort level set to auto',
+      'Output style set to Explanatory',
+      'Enabled plan mode',
+      'Theme set to dark',
+      'Session color set to: blue',
+    ];
+    const informative = [
+      "Set model to `opus` for this session only · couldn't save it as your default: settings.json isn't valid JSON",
+      'Effort set to auto for this session, but CLAUDE_CODE_EFFORT_LEVEL=high still controls this session',
+      "Effort 'max' exceeds the cap for opus set by your settings or organization; set to 'high' instead (this session only): Deep",
+      'Set effort level to high (saved, though your organization starts new sessions on opus at medium effort): Comprehensive',
+      'Current model: opus',
+      'Session renamed to: C4 acceptance',
+      'Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation\nWarning: settings could not be saved',
+    ];
+    const b = builder();
+    confirmations.forEach((text, i) => b.emit('user.message', { messageUuid: uuid(`c${i}`), content: `<local-command-stdout>${text}</local-command-stdout>`, isReplay: true, isSynthetic: false, origin: i % 2 === 0 ? 'local-command' : null, bash: null }));
+    expect(rows(b.events)).toEqual([]);
+    b.turn('u1');
+    b.emit('user.message', { messageUuid: uuid('in-turn'), content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    informative.forEach((text, i) => b.emit('user.message', { messageUuid: uuid(`i${i}`), content: `<local-command-stdout>${text}</local-command-stdout>`, isReplay: true, isSynthetic: false, origin: 'local-command', bash: null }));
+    b.text('m1', 0, 'Done');
+    b.end(['u1']);
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'local_command').map((row) => (row as Extract<Row, { kind: 'local_command' }>).text)).toEqual(informative);
+    expect(reduce(b.events).order).toEqual([turnId.ofMessage(uuid('u1'))]);
   });
 
   it('an interrupt marker yields no row and opens no turn; the turn’s stopped disposition carries the interruption', () => {

@@ -409,3 +409,35 @@ The empty line inside the table noted at the top (line 51 at 1582e97c) was dropp
 == Dispositions at 5.2 (2026-10-08) ==
 32 | C12 busy-quit hang | closed at 3f877e1b: three quiet e2e:c12 runs (E10 final driver; M2 gates/postdebt-e2e-c12-07e50719.txt; M5 gates/final-e2e-c12-06ca330d.txt)
 35 | C7 keyboard failures | kept, owner P2: M5's chained e2e:c7 lost an Escape with the owner at the desktop (gates/final-retries-06ca330d.txt), green on its retry alone; row re-worded at 3f877e1b
+
+== Dispositions at 7.3 (2026-10-08; tracker at 2614d7bf) ==
+Format as at 5.2: line at 1582e97c | handle | disposition: "closed at <commit>: <evidence>" or "kept, <owner>: <why>; now line <n>".
+Covers every original row whose disposition moved after 5.2, M7.2's wave included (E11 Decision Log 43 and 46).
+31 | C3 resume stall cause unexplained | kept, owner the owner (step G at the next sitting): S6's twenty resumes clean (live-s6.txt: ten terminal, ten row Resumes, first output within 0.4 s each) and step C without a stall (owner-results.txt C6), but step G not run (G1 to G4 owner: not run), so the clause's sitting half is unmet; row re-worded at 2614d7bf; now line 30
+103 | comment composer's screenshot is a chip, not a thumbnail | closed at 59c9fdf1: the owner decided Q4 at the sitting (a small screenshot thumbnail; owner-results.txt A3.1 and Q4), built in M7.2's F2b (side.screenshot.preview), the row removed in that commit
+106 | E7 non-isMeta peer record unrecorded | closed at 2614d7bf: S2(c)'s terminal peer record is isMeta true (promptSource system, turnOrigin peer; live-s2.txt (c)), the -p form the backfill already reads; the terminal's transcript under fixtures/pass3/e7-peer-transcripts/ and its backfill test at 5e62c8da
+157 | E4d (seen) context-menu DIP and capturePage at zoom undriven | closed at 2614d7bf: the joint sitting's A12.5 pass (owner-results.txt A12.5: at a confirmed 125 % zoom, right-click Increment gave "Comment on button Increment", #inc and a screenshot chip, no offset); case 10 never flaked, so it is not re-measured
+
+== Rows added after 1.6 ==
+Format as "Rows added after M0": commit (step) | owner (tracker column) | handle | owner.
+df5f3160 (M4) | E10 · X13 | the connect burst's writable-cap half (scale review A sweep#1's remainder) | owner P2
+df5f3160 (M4) | E4c · E2 | a screenshot call withdrawn during the record write (scale review A scalpel-2#1's remainder) | owner P2
+6e85a535 (M6) | E11 (the p1-live harness) | the spend ledger keeps a launch reservation whole when a next steer joins the running turn | owner P2
+6e85a535 (M6) | E7 (seen by E11 S2(d)) | a terminal team's teammate report read from disk as an owner's prompt | owner P2
+25eb6be8 (M7.2) | E2 (taste) | the deliverables viewers' fit, zoom and size adjustment | owner P2
+25eb6be8 (M7.2) | E1 · to-human (taste) | the report view hides a plain reply after an answered question | owner P2
+25eb6be8 (M7.2) | E2 · E3 | a comment's side thread cannot update the artifact it comments on | owner P2
+25eb6be8 (M7.2) | E4b | an imported extension loads and does not work (Google Translate, chrome.contextMenus) | owner P2
+25eb6be8 (M7.2) | C9 (seen at E11's sitting) | the `cat` Korean Backspace residue, unclassified | owner P2
+2614d7bf (7.3) | C7 (seen at E11's sitting) | the composer's mode chip reads Auto while Haiku fell to Manual, then Accept edits | owner P2
+2614d7bf (7.3) | E5 · E2 (seen at E11's sitting) | the Files route opens PDF and MP4 outside MAWS while Deliverables renders them | owner P2
+2614d7bf (7.3) | E4a (seen at E11's sitting) → E13 | A10.9: a click on the already-selected Browser tool does not take the page back | owner E13 (the browser ticket, 3.E)
+2614d7bf (7.3) | C3 · E11 F2b 2.4 (taste) | a seen error leaves Needs you within about 500 ms (owner decision 1; a dwell?) | owner P2
+2614d7bf (7.3) | E4c · E4a (taste) | the takeover banner, up about 3 s, missed at step F | owner P2 (E13 if it keeps the strip)
+2614d7bf (7.3) | C11 · E11 F2a (taste) | the sandbox line "Run outside it: docker, npm" reads as an instruction | owner P2
+
+Tracker counts at 7.3: 159 rows at M0; 79 fixed by the waves, 8 removed and 1 dropped at 1.6 (7 annotated closed, the C4
+  intermediate-commits row), 1 closed at 5.2 (C12 busy-quit), 1 closed in M7.2 (the Q4 chip), 2 closed at 7.3 (E7 non-isMeta,
+  E4d zoom right-click): 68 original rows kept (64 re-deferred and 3 narrowed at 1.6 less the Q4 chip row, plus C7 kept at
+  5.2 and C3 kept at 7.3), each with an owner; 24 rows added after M0 (9 by W-A and 1.6, 2 at M4, 2 at M6, 5 at M7.2, 6 at
+  7.3); 92 rows at 2614d7bf. Acceptance 4's check: tracker-check-1.6.txt, "== 7.3 ==".

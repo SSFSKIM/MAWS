@@ -1,5 +1,5 @@
 // `/plugins` (C11 execution document, the widget table; E8 execution document, M2): the plugin-management surface. From
-// the top: Reload mods and Reload skills for this session; Installed (`claude plugin list --json`), Marketplaces
+// the top: Reload plugins and Reload skills for this session; Installed (`claude plugin list --json`), Marketplaces
 // (`claude plugin marketplace list --json`, with Add marketplace), Available (`--available`, read only once its section
 // is opened), each change through the engine's own CLI after a confirm sheet (`plugins/`); and "Loaded in this
 // session", the plugins the engine loaded, from the latest `system/init` or `reload_plugins` answer as C3's status
@@ -11,7 +11,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { NOT_RUNNING } from '../statusline/mode-menu';
 import { useSessions } from '../stores/sessions';
-import { PLUGIN_MANAGEMENT, PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
+import { PLUGIN_MANAGEMENT, PLUGINS, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { AvailableSection } from './plugins/Available';
 import { useCallback } from 'react';
@@ -72,7 +72,7 @@ const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): num
   return n;
 };
 
-// `plugins.env`'s read as the sheet and the foot take it: resolved only by an answer that names a binary; an answer
+// `plugins.env`'s read as the sheet takes it: resolved only by an answer that names a binary; an answer
 // without one is the probe's refusal in its own words (`binaryError`), and a failed read is the read's refusal.
 function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): EngineResolution {
   if (env.data) {
@@ -92,15 +92,14 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const installed = usePluginsRead('plugins.list', cwd);
   const reloads = useReloads(appSessionId);
   const ready = status?.process === 'ready';
-  // the binary and the paths are the host's answer, never a guess: the foot shows the last one, and every sheet reads it
-  // again and confirms nothing until it names a binary (M2 review; E8 whole-branch review)
-  const engine = resolutionOf(env);
+  // the binary and the paths are the host's answer, never a guess: every sheet reads it again and confirms nothing until
+  // it names a binary (M2 review; E8 whole-branch review); the sheet names what the change writes (E11 §2.2)
   const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
   const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, ready ? reloads.reloadMods : null, resolveEngine);
   const plugins = installed.data?.plugins ?? [];
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(engine.state === 'ready' ? engine.env : null)} state={installed.state} error={installed.error} close={close}>
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state={installed.state} error={installed.error} close={close}>
         {ready && (
           <div className="mb-2">
             <ReloadControls reloads={reloads} />

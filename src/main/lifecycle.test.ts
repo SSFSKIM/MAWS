@@ -1,3 +1,5 @@
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Loads the real `src/main/index.ts` against a fake Electron `app` that records its listeners, with the modules it
@@ -6,6 +8,7 @@ const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
   const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn() };
+  const appPath = `/tmp/maws-lifecycle-test-app-${process.pid}`;
   const app = {
     on(event: string, listener: (...args: unknown[]) => void) {
       listeners.set(event, [...(listeners.get(event) ?? []), listener]);
@@ -15,6 +18,7 @@ const fake = vi.hoisted(() => {
     requestSingleInstanceLock: () => true,
     hasSingleInstanceLock: () => true,
     getPath: () => '/tmp/maws-lifecycle-test',
+    getAppPath: () => appPath, // E11 F2b: where the development build of main is read from (`out/main/index.js`)
     isPackaged: false,
     setPath: vi.fn(),
     commandLine: { appendSwitch: vi.fn() },
@@ -22,7 +26,7 @@ const fake = vi.hoisted(() => {
     exit: vi.fn(),
   };
   const emit = (event: string) => (listeners.get(event) ?? []).forEach((listener) => listener());
-  return { listeners, windows, hosts, app, emit, createWindow: vi.fn(() => void windows.push({})) };
+  return { listeners, windows, hosts, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
 });
 
 vi.mock('electron', () => {
@@ -30,6 +34,7 @@ vi.mock('electron', () => {
   return {
     app: fake.app,
     BrowserWindow: { getAllWindows: () => fake.windows },
+    dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
   };
 });
@@ -87,6 +92,9 @@ vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null }
 // C11 end
 
 beforeAll(async () => {
+  // E11 §2.7: electron.vite.config.ts defines main's build stamp for its bundle; vitest does not
+  vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
+  vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
   await import('./index');
   await Promise.resolve(); // let `whenReady().then(...)` run
 });
@@ -109,6 +117,32 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(fake.createWindow).toHaveBeenCalledTimes(created + 1);
     fake.emit('activate');
     expect(fake.createWindow).toHaveBeenCalledTimes(created + 1);
+  });
+
+  // E11 F2b (plan 2.7b; the owner's actual case): opening the app after a rebuild activates this process; main's bundle
+  // on disk written after it started is a newer build, said once per build on disk, and Keep running keeps it running
+  it('on activate, a build of main on disk newer than this process offers to quit, once per build on disk', async () => {
+    const before = fake.showMessageBox.mock.calls.length;
+    fake.emit('activate');
+    expect(fake.showMessageBox, 'the bundle it started from (none here) says nothing').toHaveBeenCalledTimes(before);
+    const bundle = join(fake.appPath, 'out/main/index.js');
+    mkdirSync(dirname(bundle), { recursive: true });
+    writeFileSync(bundle, '// rebuilt\n');
+    const later = new Date(Date.now() + 3_600_000);
+    utimesSync(bundle, later, later);
+    try {
+      fake.emit('activate');
+      expect(fake.showMessageBox).toHaveBeenCalledTimes(before + 1);
+      const [, options] = fake.showMessageBox.mock.calls.at(-1) as unknown as [unknown, { message: string; buttons: string[] }];
+      expect(options.message).toMatch(/^An older MAWS is running, built .+; the build on disk is newer; quit to use it$/);
+      expect(options.buttons).toEqual(['Quit MAWS', 'Keep running']);
+      await Promise.resolve();
+      expect(fake.app.quit, 'Keep running').not.toHaveBeenCalled();
+      fake.emit('activate');
+      expect(fake.showMessageBox, 'the same build on disk is said once').toHaveBeenCalledTimes(before + 1);
+    } finally {
+      rmSync(fake.appPath, { recursive: true, force: true });
+    }
   });
 
   it('stops the hosts on will-quit', () => {

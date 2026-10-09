@@ -31,12 +31,18 @@ export const SupervisorStatusSchema = z.strictObject({
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 
+// E11 §2.7: main's own build as electron.vite.config.ts stamps it (the package version, the commit, the build time),
+// shown in Diagnostics apart from the supervisor; not the engine-host bundle's `appBuildId`.
+export const MainBuildSchema = z.strictObject({ version: z.string(), commit: z.string(), builtAt: z.string() });
+export type MainBuild = z.infer<typeof MainBuildSchema>;
+
 export const HostStatusSchema = z.strictObject({
   transport: z.enum(['utility', 'detached']),
   state: HostStateSchema.shape.state,
   supervisor: SupervisorStatusSchema.nullable(), // null while none is connected
   appBuildId: z.string(),
   appWire: z.string(),
+  mainBuild: MainBuildSchema, // E11 §2.7: which main is answering
   matches: z.enum(['same', 'build', 'wire', 'protocol']).nullable(), // null while no supervisor is connected
   reason: z.enum(['incompatible', 'held_lock']).nullable(), // why `crashed`, when it is
   // while `incompatible`: the sessions the refusing supervisor said it runs (the banner's N); null otherwise

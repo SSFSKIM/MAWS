@@ -52,7 +52,7 @@ describe('main answers files.* through the router', () => {
     const { installRouter } = await import('../ipc/router');
     const records = new Map<string, AllowlistRecord>([['A', { directory: join(root, 'repo'), additionalDirectories: [], worktree: null }]]);
     const emit = vi.fn();
-    const files = registerFilesHandlers({ record: (id) => records.get(id) ?? null }, { emit, openPath, showItemInFolder, env: {} });
+    const files = registerFilesHandlers((id) => records.get(id) ?? null, { emit, openPath, showItemInFolder, env: {} });
     dispose = () => files.dispose();
     installRouter({ appUrl: APP_URL });
     return { files, emit, openPath, epochs: files.epochs };

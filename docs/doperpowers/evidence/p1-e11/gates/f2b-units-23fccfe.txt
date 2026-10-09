@@ -1,0 +1,9 @@
+Command: pnpm test --maxWorkers=4 (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 23fccfe
+--- summary lines
+== units head 23fccfe start 2026-10-08T20:26:31Z load { 54.55 30.25 20.63 }
+eligible: load 17.82 after 90s
+slot slot.1 acquired at 13:28:01 load { 17.82 24.15 19.23 }
+ Test Files  716 passed | 1 skipped (717)
+      Tests  9968 passed | 1 skipped (9969)
+== units exit 0 end 2026-10-08T20:31:18Z

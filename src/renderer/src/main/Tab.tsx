@@ -7,11 +7,11 @@ import { ContextMenu } from 'radix-ui';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
-import { useChordHint } from '../app/IconButton';
+import { PinIcon, useChordHint } from '../app/IconButton';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
-import { selectPendingOf, useAttention } from '../stores/attention';
+import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -58,10 +58,11 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
+  const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
   if (!record) return { title: unstarted.title, secondary: unstarted.project, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending), fileType: null };
+  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 
 function useTabLabel(tab: TabRef): TabLabel {
@@ -88,6 +89,9 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
   }
 }
+
+// E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
+export const PINNED_HINT = 'Pinned: stays open when you open another session';
 
 export interface TabProps {
   tab: TabRef;
@@ -134,7 +138,12 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
     >
       {label.glyph && <GlyphMark glyph={label.glyph} />}
       {label.fileType && <span className="font-mono text-info">{label.fileType}</span>}
-      {tab.pinned && <span aria-label="Pinned" role="img" className="size-1 shrink-0 rounded-full bg-fg-muted" />}
+      {/* E11 F2b (plan 2.5): a pin you can see, saying what it does */}
+      {tab.pinned && (
+        <span aria-label="Pinned" role="img" title={PINNED_HINT} className="inline-flex shrink-0 text-fg-muted">
+          <PinIcon className="size-[11px]" />
+        </span>
+      )}
       {dirty && <DirtyMark />}{/* E5 */}
       <span className="truncate">{label.title}</span>
       {label.secondary && <small className="shrink-0 text-fg-muted">{label.secondary}</small>}

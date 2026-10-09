@@ -16,6 +16,8 @@ import { filesTool, type FilesState } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
 import { dirname, expandTo, hidden, joinPath, roleOf, rootsFor, rowsOf, sameFile, type Listing } from './tree';
 import { currentSet } from '../../../stores/layout-model';
+import { useSetup } from '../../../sessions/store'; // E11
+import { FILES_COPY } from '../copy'; // E11
 
 const S = 'app-a' as AppSessionId;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -428,6 +430,62 @@ describe('files tool', () => {
     await waitFor(() => expect(items()).toHaveLength(2));
     act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r', additionalDirectories: [] })) })));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(2));
+  });
+
+  // E11's sitting (joint-sitting notes, A4 setup): a New chat's Files pane said "Could not list: unknown app session"
+  // until the session started. Main now lists an unstarted session's location; the pane lists the roots again when the
+  // intent's location changes (a project chosen after the pane opened), and before any is chosen says to open a session.
+  it("an unstarted session's pane follows its intent's location, and says to open a session before it has one", async () => {
+    useSessions.setState((s) => {
+      const records = new Map(s.records);
+      records.delete(A);
+      return { records };
+    });
+    let chosen = false;
+    installFakeMain((name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list' && input.path === undefined) return chosen ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail(`unknown app session: ${A}`);
+      return fail(`unexpected ${name}`);
+    });
+    const intent = (location: unknown) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt: chosen ? '2026-10-08T10:00:01.000Z' : '2026-10-08T10:00:00.000Z', progress: { worktree: null } }) as never;
+    act(() => useSetup.getState().applyIntents([intent(null)]));
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(screen.getByText(FILES_COPY.noSession)).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+    chosen = true;
+    act(() => useSetup.getState().applyIntents([intent({ kind: 'directory', path: '/r' })]));
+    await waitFor(() => expect(items()).toEqual(['r']));
+    act(() => useSetup.setState({ intents: new Map() }));
+  });
+
+  // F2a review 4: main lists a new worktree's repository until the setup makes the worktree, then the worktree; the
+  // location alone does not change at that step, so the pane follows the setup's progress too.
+  it("an unstarted session's pane lists the new worktree once its setup has made it", async () => {
+    useSessions.setState((s) => {
+      const records = new Map(s.records);
+      records.delete(A);
+      return { records };
+    });
+    let made = false;
+    installFakeMain((name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list' && input.path === undefined) return answer({ root: null, path: '', entries: [dir(made ? '/r-feature' : '/r')], truncated: false });
+      return fail(`unexpected ${name}`);
+    });
+    const location = { kind: 'newWorktree', repoRoot: '/r', name: 'feature', branch: { kind: 'new', name: 'feature', base: 'HEAD' } };
+    const worktree = { path: '/r-feature', branch: 'feature', head: 'abc', createdHere: true };
+    const intent = (updatedAt: string) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt, progress: { worktree: made ? worktree : null } }) as never;
+    act(() => useSetup.getState().applyIntents([intent('2026-10-08T10:00:00.000Z')]));
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(items()).toEqual(['r']));
+    made = true;
+    act(() => useSetup.getState().applyIntents([intent('2026-10-08T10:00:01.000Z')]));
+    await waitFor(() => expect(items()).toEqual(['r-feature']));
+    act(() => useSetup.setState({ intents: new Map() }));
   });
 
   it('stops watching the expanded directories under a collapsed parent, and remembers their expansion', async () => {

@@ -9,6 +9,7 @@ import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
+import type { ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { heldToast } from './attach';
@@ -203,6 +204,20 @@ export function isEmptyDraft(draft: SetupIntent['draft']): boolean {
     return Array.isArray(content) && content.some(hasContent);
   };
   return !hasContent(draft.doc);
+}
+
+// E11 F2b (plan 2.5; owner decision 2): opening a session in an unstarted tab's place. A start in flight keeps the tab
+// (the launch must land somewhere); a draft (typed text, attachments, a first message held behind a card) is set aside:
+// the tab goes to the ⌘⇧T history with its intent and draft kept, nothing asked. A blank one answers null: discarded
+// silently by its close guard, as before. A session with a record is not this verdict's.
+export function unstartedReplaceVerdict(appSessionId: AppSessionId): ReplaceVerdict {
+  const setup = useSetup.getState();
+  const intent = setup.intents.get(appSessionId);
+  if (intent === undefined || useSessions.getState().records.has(appSessionId)) return null;
+  if (isStarting(setup, appSessionId)) return { keep: 'The new chat is starting' };
+  const liveDoc = liveDraftDoc(appSessionId);
+  const blank = (liveDoc === undefined ? isEmptyDraft(intent.draft) : isEmptyDoc(liveDoc)) && intent.message === null;
+  return blank ? null : { aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' };
 }
 
 // C5's close guard for a session tab: a session with a record closes as usual; an unstarted one with nothing typed is

@@ -5,3 +5,5 @@
 declare const __MAWS_DEV_CSP_NONCE__: string | null;
 // The app's `package.json` version; what the hosts report as `hostVersion` in their pings.
 declare const __MAWS_VERSION__: string;
+// E11 §2.7: main's build stamp, the commit (`unknown` outside a checkout) and the build's ISO time.
+declare const __MAWS_BUILD__: { commit: string; builtAt: string };

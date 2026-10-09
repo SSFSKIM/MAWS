@@ -82,6 +82,13 @@ describe('notifier fires once per item when unfocused', () => {
     expect(posted()[0].shown).toBe(1);
   });
 
+  // E11 F2b (plan 2.6): the body is the summary's owner-aware preview
+  it('posts the preview of a summary carrying the owner’s marks', () => {
+    const h = harness();
+    h.set(CHARTER, [item(CHARTER, 'error', T, { summary: '<to-human>\nBackground task failed: npm test exited 1\n</to-human>' })]);
+    expect(posted()[0].options.body).toBe('Background task failed: npm test exited 1');
+  });
+
   it('titles a session with no project by its title alone, and plays the sound when asked', () => {
     const h = harness({ settings: { ...SETTINGS, notifications: { ...SETTINGS.notifications, sound: true } } });
     h.set(LOOSE, [item(LOOSE, 'question', T)]);

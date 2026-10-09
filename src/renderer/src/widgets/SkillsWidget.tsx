@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSkillsDialogResponse } from '@shared/wire/control';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
-import { RELOAD, SKILLS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { RELOAD, SKILLS, WIDGET_TITLE } from './copy';
 import { operationLine, useOperation } from './operation';
 import { parseEach, Row, Rows, TextButton } from './parts';
 import { lineFailed, skillsSummary } from './plugins/reload';
@@ -51,7 +51,7 @@ export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSession
   const reload = useOperation(appSessionId, 'session.reloadSkills');
   const line = operationLine(reload.state, skillsSummary);
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" foot={WIDGET_FOOT.skills} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={read.state} error={read.error} close={close}>
       <div className="mb-2 flex items-baseline gap-2">
         <TextButton onClick={() => void reload.run({})} disabled={reload.state.phase === 'working'}>
           {RELOAD.reload}

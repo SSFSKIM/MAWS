@@ -29,7 +29,7 @@ const SCENARIO = 'stub:test/fixtures/shell/nine-sessions.json';
 const READY = 'app-7412a115'; // ready, idle, routed through the relay
 const READS = 'spikes/protocol-probe/fixtures/reads.jsonl';
 const CONTROLS = 'test/fixtures/engine/auto-routed-controls.jsonl'; // pass2/auto-routed without the unissuable fork_conversation pair
-const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff', 'rewind' /* W3 */, 'btw' /* E3 */];
+const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff', 'rewind' /* W3 */, 'btw' /* E3 */, 'reload-plugins' /* E11 §2.2: the engine's terminal-only command as MAWS's action */];
 
 // E8 (M3): `/plugins` reads the engine's CLI through the engine host, which runs MAWS_E2E_ENGINE_BIN; under the widget
 // backend that is the plugin CLI stub (test/support/plugin-cli-stub.ts) over this starting state: one folder
@@ -212,7 +212,7 @@ test.describe('interactive', () => {
       const dialog = page.locator(`[data-widget-dialog="${name}"]`);
       await expect(dialog.locator(`[data-widget="${name}"]`)).toBeVisible();
       await expect(page.locator('[data-composer]').locator('[data-widget]')).toHaveCount(0);
-      await expect(widget(page, name).locator('footer')).toContainText('Read with');
+      await expect(widget(page, name).locator('footer')).toHaveCount(0); // E11 §2.2: no provenance foot
       if (name === NAMES.find((n) => !['model', 'effort', 'fast', 'rename'].includes(n))) {
         const box = await dialog.boundingBox();
         const view = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
@@ -258,7 +258,7 @@ test.describe('interactive', () => {
     await expect(files.nth(1)).toContainText('does not exist yet');
 
     await pick(page, 'sandbox'); // reads.jsonl seq 75
-    await expect(widget(page, 'sandbox')).toContainText('disabled · supported');
+    await expect(widget(page, 'sandbox')).toContainText('Sandbox off'); // E11 §2.2: the first read in words
 
     await pick(page, 'diff'); // reads.jsonl seq 81
     await expect(widget(page, 'diff')).toContainText('0 files · +0 −0 · working tree');
@@ -503,8 +503,8 @@ test.describe('interactive', () => {
 
     await inProject(backend);
     await pick(page, 'plugins');
-    // E8: Reload mods, its line beside the button (the widget's rows carry status lines of their own)
-    const reloadMods = widget(page, 'plugins').getByRole('button', { name: 'Reload mods' });
+    // E8: Reload plugins (E11 §2.2), its line beside the button (the widget's rows carry status lines of their own)
+    const reloadMods = widget(page, 'plugins').getByRole('button', { name: 'Reload plugins' });
     const reloadLine = reloadMods.locator('xpath=following-sibling::*[@role="status"]');
     await reloadMods.click();
     await expect(reloadLine).toHaveText('Working…');
@@ -818,7 +818,7 @@ test.describe('replay conformance', () => {
     await read('session.getSkillsDialog', {}); // seq 71: empty, so the catalogue's skills
     await expect(widget(page, 'skills').getByRole('list', { name: 'Skills' }).getByRole('listitem')).toHaveCount(18);
     await read('session.getSandboxDialog', {}); // seq 74
-    await expect(widget(page, 'sandbox')).toContainText('disabled · supported');
+    await expect(widget(page, 'sandbox')).toContainText('Sandbox off');
     await read('session.getStatus', {}); // seq 77
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
     await read('session.getWorkspaceDiff', {}); // seq 80
@@ -855,9 +855,8 @@ test.describe('plugin management (E8)', () => {
     const market = marketplaceRow(w, MARKET);
     await expect(market).toContainText('directory');
     await expect(market).toContainText(join(backend.userData, 'market'));
-    // the foot names the config home and the global config file as `plugins.env` answers them (D-12)
-    await expect(w.locator('footer')).toContainText(configHome(backend));
-    await expect(w.locator('footer')).toContainText(join(configHome(backend), '.claude.json'));
+    // E11 §2.2: no foot; what a change writes is named in its sheet (below)
+    await expect(w.locator('footer')).toHaveCount(0);
 
     const reads = () => stubCalls(backend.cli).filter((argv) => argv[0] === 'plugin');
     expect(reads()).toContainEqual(['plugin', 'list', '--json']);
@@ -1147,7 +1146,7 @@ test.describe('plugin management (E8)', () => {
     await (await sidebarRow(page, { appSessionId: READY })).click();
     const plugins = page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
     await expect(plugins).toContainText('Plugins · 11 loaded'); // pass2/real-settings seq 15
-    const reloadMods = plugins.getByRole('button', { name: 'Reload mods' });
+    const reloadMods = plugins.getByRole('button', { name: 'Reload plugins' });
     const line = reloadMods.locator('xpath=following-sibling::*[@role="status"]');
     await reloadMods.click();
     await expect(line).toHaveText('Working…');

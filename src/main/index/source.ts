@@ -27,6 +27,7 @@ import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
+import { previewLine } from '@shared/owner/preview';
 import type { Index } from './index';
 import { warmLinkedWorktrees } from './projects';
 import { contested, type BindingChange, type ChangeCause } from './sessions';
@@ -341,7 +342,7 @@ export class IndexSessionSource implements SessionSource {
       appSessionId: record.appId,
       phase: record.holder.kind === 'terminal' || record.holder.kind === 'background_job' ? 'foreign' : 'exited',
       activity: null,
-      lastAssistantLine: text === null ? null : text.split('\n', 1)[0].slice(0, LAST_LINE_CHARS),
+      lastAssistantLine: text === null ? null : previewLine(text, LAST_LINE_CHARS), // E11 F2b: a summary cached raw reads clean too
       turnStartedAt: null,
       lastTurnEndedAt: summary?.lastRecordAt ?? null, // C5's rebase: the session's last activity (age, recency order)
       context: null,

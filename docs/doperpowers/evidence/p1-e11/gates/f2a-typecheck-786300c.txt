@@ -1,0 +1,7 @@
+Command: pnpm typecheck (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== typecheck head 786300c4 start 2026-10-08T17:14:30Z load { 15.14 15.73 20.39 }
+== typecheck exit 0 end 2026-10-08T17:15:18Z
+--- summary lines
+(no counts printed; exit code below)
+--- exit code: 0

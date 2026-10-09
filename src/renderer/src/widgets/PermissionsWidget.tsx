@@ -14,7 +14,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { ListModelsResponse, ListPermissionRulesResponse } from '@shared/wire/control';
 import { liveModeBinding, ModeMenu, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING } from '../statusline';
 import { useSessions } from '../stores/sessions';
-import { FRAME, PERMISSIONS, TYPED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { FRAME, PERMISSIONS, TYPED, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { engineReadKey, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -76,6 +76,7 @@ export function ModeHeader({ mode, grants, segment }: { mode: NonNullable<Permis
       {!segment && mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{mode.refusal}</p>}
       {grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(grants)}</p>}
       {segment && <div className="mt-1">{segment}</div>}
+      {segment && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.modeScope}</p>}
     </div>
   );
 }
@@ -176,7 +177,6 @@ export function PermissionsWidget({ appSessionId, args, close }: { appSessionId:
       appSessionId={appSessionId}
       title={WIDGET_TITLE.permissions}
       command="permissions"
-      foot={WIDGET_FOOT.permissions}
       state={read.state === 'not_running' || !status ? read.state : 'ready'}
       error={read.data ? read.error : null}
       close={close}

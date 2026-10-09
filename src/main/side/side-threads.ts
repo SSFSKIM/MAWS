@@ -7,6 +7,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
+import { stripAnsi } from '@shared/wire/ansi';
 import type { Emit, HostEvents } from '../sessions/context';
 import type { SideThreadRow, SideThreadStore } from '../index/side-threads';
 
@@ -27,11 +28,13 @@ const SUMMARY_CUT_FROM = 200;
 
 // A turn's result text as the row shows it: whole up to 400 characters; longer, cut at the first sentence end (kept)
 // or line end (dropped) past 200, else at 400 with an ellipsis. A sentence end is `.`, `!` or `?` before whitespace or
-// the end, and not an abbreviation's dot (`e.g.`), so a path, a number or an abbreviation is never cut mid-token.
+// the end, and not an abbreviation's dot (`e.g.`), so a path, a number or an abbreviation is never cut mid-token. The
+// result text is what the engine displayed, so a MessageDisplay hook's colour codes are cleaned first, as the
+// transcript and the digest clean them (E11's sitting: escape fragments around "to human" in a side thread's row).
 const SENTENCE_OR_LINE_END = /(?<!\.\w)[.!?](?=\s|$)|\n/g;
 
 export function summaryText(text: string): string {
-  const trimmed = text.trim();
+  const trimmed = stripAnsi(text).trim();
   if (trimmed.length <= SUMMARY_MAX) return trimmed;
   SENTENCE_OR_LINE_END.lastIndex = SUMMARY_CUT_FROM;
   const end = SENTENCE_OR_LINE_END.exec(trimmed);
@@ -69,7 +72,7 @@ export function summarisedEvent(row: SideThreadRow, child: SessionRecord): Sessi
     ...base(thread.parent, thread.sessionId, `${row.childAppSessionId}:summarised:${row.turns}`, row.summarisedAt),
     kind: 'side.thread.summarised',
     childAppSessionId: row.childAppSessionId,
-    text: row.text,
+    text: row.text === null ? null : stripAnsi(row.text), // a row written before summaryText cleaned it (E11)
     isError: row.isError,
     turns: row.turns,
   };

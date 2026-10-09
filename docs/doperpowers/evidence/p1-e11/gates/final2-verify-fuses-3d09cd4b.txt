@@ -1,0 +1,6 @@
+step verify-fuses
+command: pnpm verify:fuses
+head 3d09cd4b  ended 2026-10-09T01:12:11Z  load { 13.81 16.16 17.57 }  0s
+$ out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo "$out" && echo "$out" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }
+  RunAsNode is Enabled
+exit 0

@@ -5,7 +5,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../../test/support/index-fixture';
-import { readScreenshotBlock, ScreenshotRefused } from './screenshot';
+import { readScreenshotBlock, ScreenshotRefused, screenshotPreview } from './screenshot';
 
 // a 1×1 PNG
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -33,6 +33,16 @@ describe('readScreenshotBlock', () => {
     const path = join(root.path, 'shots', 'capture.bin');
     writeFileSync(path, PNG);
     expect(await readScreenshotBlock(path, [root.path])).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } });
+  });
+
+  // E11 F2b (Q4, owner-decided): the comment composer's thumbnail reads through the same checks, as a data URL
+  it('previews a screenshot under a root as a data URL of its own type, and refuses one outside as a send would', async () => {
+    const path = join(root.path, 'crop.png');
+    writeFileSync(path, PNG);
+    expect(await screenshotPreview(path, [root.path])).toBe(`data:image/png;base64,${PNG.toString('base64')}`);
+    const away = join(outside.path, 'crop.png');
+    writeFileSync(away, PNG);
+    expect(await refusal(screenshotPreview(away, [root.path]))).toBe('screenshot: not under an allowed root');
   });
 
   it('types JPEG, GIF and WebP by their magic bytes', async () => {

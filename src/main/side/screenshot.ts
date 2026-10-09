@@ -18,6 +18,11 @@ export class ScreenshotRefused extends InvalidSideInput {
 }
 
 export async function readScreenshotBlock(path: string, roots: readonly string[]): Promise<ContentBlock> {
+  const { mediaType, data } = await readScreenshot(path, roots);
+  return { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
+}
+
+async function readScreenshot(path: string, roots: readonly string[]): Promise<{ mediaType: NonNullable<ReturnType<typeof imageTypeOf>>; data: string }> {
   const real = await realpath(path).catch(() => null);
   if (real === null) throw new ScreenshotRefused('not found');
   const allowed = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
@@ -37,10 +42,18 @@ export async function readScreenshotBlock(path: string, roots: readonly string[]
     if (bytes.length > MAX_SEND_IMAGE_BYTES) throw new ScreenshotRefused('larger than 5 MiB'); // grew since the stat
     const mediaType = imageTypeOf(bytes);
     if (mediaType === null) throw new ScreenshotRefused('not a PNG, JPEG, GIF or WebP');
-    return { type: 'image', source: { type: 'base64', media_type: mediaType, data: bytes.toString('base64') } };
+    return { mediaType, data: bytes.toString('base64') };
   } finally {
     await handle.close();
   }
+}
+
+// E11 F2b (Q4, owner-decided): the comment composer's thumbnail of the screenshot it will send (`side.screenshot.preview`),
+// read through the same checks as the send, as a data URL (the renderer's CSP admits `data:` images; the renderer
+// cannot read a file under `userData` itself).
+export async function screenshotPreview(path: string, roots: readonly string[]): Promise<string> {
+  const { mediaType, data } = await readScreenshot(path, roots);
+  return `data:${mediaType};base64,${data}`;
 }
 
 const startsWith = (bytes: Buffer, prefix: readonly number[], at = 0) => prefix.every((byte, i) => bytes[at + i] === byte);

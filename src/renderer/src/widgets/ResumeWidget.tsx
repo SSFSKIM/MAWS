@@ -13,7 +13,7 @@ import { sessionAge } from '../sidebar/derive';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { RESUME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { RESUME, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { WidgetFrame } from './WidgetFrame';
 import { displayTitle } from '../sessions/title';
@@ -85,7 +85,7 @@ export function ResumeWidget({ appSessionId, close }: { appSessionId: AppSession
   const records = useSessions((s) => s.records);
   const sessions = projectSessions({ records }, appSessionId);
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.resume} command="resume" foot={WIDGET_FOOT.resume} state="ready" error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.resume} command="resume" state="ready" error={null} close={close}>
       {sessions.length === 0 ? (
         <p className="m-0 text-ui-sm text-fg-muted">{RESUME.none}</p>
       ) : (

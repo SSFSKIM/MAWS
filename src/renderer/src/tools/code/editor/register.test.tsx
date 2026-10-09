@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { connectCodeEvents } from '../../../ipc/events';
-import { requestCloseTab, runAction } from '../../../keymap/actions-runtime';
+import { replaceVerdict, requestCloseTab, runAction } from '../../../keymap/actions-runtime';
 import { Tab } from '../../../main/Tab';
 import { useLayout } from '../../../stores/layout';
 import { activeTab, allTabs } from '../../../stores/layout-model';
@@ -65,6 +65,18 @@ describe('editor registrations', () => {
     }
     return { disk, shown };
   }
+
+  // E11 F2b (plan 2.5): opening a session in a file tab's place keeps a file with unsaved changes, and says so
+  describe('replace verdict', () => {
+    it('a clean file gives its place; an edited one stays, named', async () => {
+      await openApp({ dirty: false });
+      expect(replaceVerdict(fileTab())).toBeNull();
+      type('// mine\n');
+      await waitFor(() => expect(entry().dirty).toBe(true));
+      expect(replaceVerdict(fileTab())).toEqual({ keep: 'app.ts has unsaved changes' });
+      expect(sheet(), 'nothing asked').toBeNull();
+    });
+  });
 
   describe('editor dialogs', () => {
     it('closes a clean file tab at once, without the sheet', async () => {

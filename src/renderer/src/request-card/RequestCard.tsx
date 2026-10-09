@@ -22,7 +22,7 @@ import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
-import { needsYouAge } from '../sidebar/derive';
+import { itemAge } from '../sidebar/derive';
 import { useAttention } from '../stores/attention';
 import { markDocked } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -308,7 +308,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         body = <ElicitationBody {...variant} request={request} />;
         break;
       default:
-        body = <NoticeBody item={item} />;
+        body = <NoticeBody item={item} seenHere={placement === 'docked'} />;
     }
   }
 
@@ -330,7 +330,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
-          {hover && <Muted>{[project, record ? displayTitle(record) : null, `waiting ${needsYouAge(item, now)}`].filter(Boolean).join(' · ')}</Muted>}
+          {hover && <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>}
         </div>
       )}
       {failed && (

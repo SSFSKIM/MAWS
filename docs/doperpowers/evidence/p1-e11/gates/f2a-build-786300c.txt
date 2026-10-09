@@ -1,0 +1,7 @@
+Command: pnpm build (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== build head 786300c4 start 2026-10-08T17:23:56Z load { 18.77 16.45 18.81 }
+== build exit 0 end 2026-10-08T17:24:27Z
+--- summary lines
+(no counts printed; exit code below)
+--- exit code: 0

@@ -141,18 +141,17 @@ describe('fixture gates through the model', () => {
     expect(rows.some((row) => row.kind === 'error' && row.scope === 'hook')).toBe(false);
   });
 
-  it('pass2/auto-routed: four local_command rows and no user row for them; the interrupt markers yield no row', () => {
+  // The four echoes are `Set model to` confirmations: the engine tags them, and they draw nothing (E11 §2.3; the model
+  // chip says it). They neither become user rows nor open turns.
+  it('pass2/auto-routed: the four model echoes draw no row and no user row; the interrupt markers yield no row', () => {
     const rows = rowsFor('pass2', 'auto-routed');
-    const locals = ofKind(rows, 'local_command');
-    expect(locals).toHaveLength(4);
-    expect(locals.every((row) => row.text.startsWith('Set model to '))).toBe(true);
-    expect(locals.every((row) => row.id.startsWith('local:'))).toBe(true);
+    expect(events('pass2', 'auto-routed').filter((e) => e.kind === 'user.message' && e.origin === 'local-command')).toHaveLength(4);
+    expect(ofKind(rows, 'local_command')).toEqual([]);
     expect(ofKind(rows, 'user').some((row) => row.text.includes('local-command') || row.text.startsWith('Set model'))).toBe(false);
     const state = stateOf('pass2', 'auto-routed');
     expect(state.order.every((id) => !state.turns.get(id)!.events.some((e) => e.kind === 'turn.started' && e.userMessageUuid && e.userMessageUuid.startsWith('local')))).toBe(true);
     const unrouted = rowsFor('pass2', 'auto-unrouted');
-    const unroutedLocals = ofKind(unrouted, 'local_command');
-    expect(unroutedLocals).toHaveLength(3);
+    expect(ofKind(unrouted, 'local_command')).toEqual([]);
     expect(events('pass2', 'auto-unrouted').filter((e) => e.kind === 'user.message' && e.origin === 'local-command').map((e) => e.seq)).toEqual([43, 52, 65]);
     expect(ofKind(unrouted, 'user').some((row) => row.text.startsWith('Set model'))).toBe(false);
     expect(ofKind(unrouted, 'user')).toHaveLength(3);

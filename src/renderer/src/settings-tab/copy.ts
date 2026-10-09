@@ -26,7 +26,7 @@ export const ENGINE = {
   useInstalled: 'Use installed',
   binaryNote: "New sessions start on your installed Claude Code (~/.local/bin/claude, else claude on your shell's PATH), found again at every launch. Running sessions keep the binary they started on.",
   binaryChosenNote: 'New sessions start on the binary you chose. Running sessions keep the binary they started on.',
-  tested: (version: string) => `MAWS's fixtures and conformance tests were recorded on Claude Code ${version}`,
+  tested: (version: string) => `MAWS was verified against Claude Code ${version}`, // E11 2.8: the release E11's live sittings ran, as the compat notice words it
   binaryReading: 'Reading the binary…',
   update: 'Update',
   updateAction: 'Update Claude Code…',

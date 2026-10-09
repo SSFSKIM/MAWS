@@ -1,0 +1,109 @@
+P1 recomposition checklist against the P1 spec's §2, at E11
+=============================================================
+
+E11 of docs/doperpowers/plans/2026-10-05-p1-extension.md (execution document docs/doperpowers/plans/2026-10-06-e11-finish.md,
+Design §7, Task 8.1). Written 2026-10-08 on branch worktree-agent-ac1b5d6ccf4ac2092; the landing record is A-55.
+
+This is NOT P1's closure. Architect's ruling of 2026-10-08: E13 (the cua in-app browser, MAWS PR #1) joined P1 as its
+thirteenth child, and P1's recomposition completes at E13's landing. This record verifies §2 as written today, on the
+heads below. The browser-tool items, which E13 replaces (the owner's decision: cua_repl drives the in-app browser directly,
+replacing MAWS's browser_* tool route; owner-notes/00-consolidated-plan.txt §4b), are marked "superseded by E13 at its
+landing": owner-script A11 (A11.1 to A11.7), D7, D11, F1, A12.1, A12.2 and the questions Q8 to Q10. E13's landing re-runs
+them on its route and writes the rows that close P1.
+
+Evidence (paths relative to this directory unless stated): prerun.txt (§2 items 1 to 12; the sittings S1 to S8 on engine
+2.1.293, US$0.3220 of US$5.00), live-s1.txt to live-s8.txt, owner-file-check.txt, owner-script.txt, owner-results.txt (filled
+from the owner's sitting of 2026-10-08 by the executor, E11 Decision Log 41; the sitting ran master 5dcddd70's bundle on
+engine 2.1.294, not development-signed), owner-notes/ on master (the joint-sitting notes, the consolidated plan, reports
+A to H), triage.txt and tracker-check-1.6.txt, scale-review/ (pairs.txt, A to E .findings.json, report.txt), gates/.
+Heads: M5's final head 06ca330d (gates/final-summary-06ca330d.txt, every step green, c7 and packaged on their retry alone);
+the sittings S1 to S8 on later heads with 06ca330d's product (prerun.txt); M7.2's waves F2a and F2b moved the product, so the
+whole verify chain re-ran on the product head 3d09cd4b (gates/final2-summary-3d09cd4b.txt: green throughout; packaged 54/54 after the harness fix 3e20ea32).
+
+Verdicts: met (the agents' evidence and the owner's observation cover the item as written); met as restated (met with the
+restatement in the notes: the parts the owner did not observe stand on the agents' live run on the installed engine; for
+the owner to accept); gap (observed failing, or its closing act blocked, with what blocks it); waived by the owner;
+owner: not run (the owner's step that §2 needs did not run at the sitting, which is closed; the agents' half is noted);
+owner: pending (the owner has not yet given it); superseded by E13 at its landing. No item is waived; none is silently met.
+
+== §2 items 1 to 13 ==
+
+| # | Item | Pre-run evidence (prerun.txt row) | Owner's step | Verdict | Notes |
+|---|---|---|---|---|---|
+| 1 | Workflow widget: phases, agents with models; click an agent for its transcript; Stop; topology tree | row 1: e2e:agents 23; S2(a) PASSED live (steps i, v, x on Haiku: the widget's agents with models, Stop workflow stopping then stopped, the tree under the collapsed Done, the disk read) | A6.1 pass, A6.2 pass; B23, B24 owner: not run | met as restated | The owner saw a live workflow's compact card open the widget with the phase table, agents with model, state, time and tokens (A6.1) and the stacking under 520 px (A6.2). The click into an agent's transcript, Stop and the nested topology tree were not observed by the owner (B5: nested topology not generated); they stand on S2(a)'s live run. [parent-impact] from S2(a): 2.1.293 orders a workflow stop task_updated, task_notification, then the empty snapshot (E11 Surprises). |
+| 2 | From MAWS: add a marketplace, install, update, enable, disable, reload mods; the session reflects it | row 2: e2e:widgets 24, e2e:settings 9; S7 PASSED live (E8's sixteen steps, each "Reloaded in 1 session · reflected", every write in the scratch home) | J1, A7.1, A7.3 owner: not run; A7.2 pass with a note | owner: not run | The agents' half is met (S7). The owner withheld plugin changes because the live plugin configuration is shared. A7.2's note ("still severely unreadable"; Claude Desktop's interface as the model) went to F2a 2.2 (footers, sandbox copy, a Reload plugins action) and to the plan's §3.B (P2). |
+| 3 | Hold a key, speak, the text lands in the composer | row 3: e2e:voice 14 (scripted recogniser); no sitting (TCC and the microphone are hands) | E1 to E5, A8.1 owner: unsigned build; A8.2 pass; A8.3 note | owner: not run | The sitting's build was not development-signed (codesign: Identifier=Electron, no Authority), so the TCC dialogs and dictation could not run (E11 Decision Log 10). Blocks: a development-signed build:app and the owner's microphone. |
+| 4 | Edit a file in a MAWS tab and save; a conflict opens the merge view | row 4: e2e:code 36 (cases 1 to 7); no sitting | A4.1 pass, A4.2 note, A4.3 pass; A4.4 owner: not run | met | The owner saved over a disk change and the inline comparison opened with per-hunk Keep mine and Take theirs (A4.2, wording corrected in F2a; per-hunk Keep mine showing no visible change noted, unclassified); Changed on disk and the close sheet passed. Not exercised: git's conflict-marker blocks (P-19) and the quit question (A4.4). A4.1's "unknown app session" in an unstarted chat fixed in F2a. |
+| 5 | send_file: a row and the viewer (PDF, HTML, image, video, audio, markdown); artifacts keep versions | row 5: e2e:tools 8, e2e:deliverables 10, e2e:transcript 31; S8 PASSED; S3 case 1 PASSED (main's real artifact_screenshot answered a live engine for the first time) | A1.3 note, A2.1 pass with a taste note, A2.2 to A2.5 pass | met | All six kinds in the panel and a main tab, versions, the console, Open as file, the blocked link (A-34). Open externally reached TextEdit's open dialog only (an evidence limit). Taste (A2.1, the owner: "size adjustment is far too lacking"): tracker row 2026-10-08 (E2, taste). |
+| 6 | A comment on a browser or artifact element opens a side thread; the agent edits and replies; main not interrupted; Send to main | row 6: e2e:side 8, e2e:deliverables 10, e2e:browser-comment 13; S3 cases 2 and 3 PASSED live (thread reply in the Side pane and the parent's summary row, the parent's turns unchanged; Send to main steered the parent); E4d's live proof (A-49) | A3.1 note (Q4), A3.2 pass with a note, A3.3 pass, A12.1 pass (superseded by E13), A12.3 note, A12.5 pass, A12.6 pass | met as restated | The owner's comment threads replied and nested (A3.2); Send to main was not observed by the owner and stands on S3 case 3. The artifact half's limit: a comment's fork cannot update the original artifact (per-session registries; tracker row 2026-10-08, design boundary). A3.2's ANSI leak fixed in F2a; Q4's thumbnail built in F2b. A12.1 (the thread's agent acting on the page through browser_act) is superseded by E13 at its landing. |
+| 7 | The browser imports a Chrome profile the owner chooses; the agent drives a tab through MAWS's browser tools; the owner takes over by clicking and the agent resumes | row 7: e2e:browser 8, e2e:browser-import 6, e2e:browser-tools 11; S4 case 5 PASSED live (the real browser, main real), case 7 (the OOPIF page) | D1 to D6 (D4, D5 notes; D6 pass with notes), D8 pass with a note, D9, D10 owner: not run; D7 pass, D11 owner: not run, F1 pass by trace with a note | superseded by E13 at its landing | Import half met today: the owner imported the Minhyeok profile, the pill names it and GitHub shows the owner signed in (D6). The tool and takeover halves are E13's: D7 passed on a local page, F1 passed by trace (control went to human; the banner was up about 3 s and the owner most likely missed it: tracker row 2026-10-08, taste), D11 (takeover on a signed-in site) not run. Owner decision 6 (the profile pill's floating popover) and the bars and bookmarks requirement (D6) are the browser ticket's. D8: an imported extension loads and does not work (tracker row 2026-10-08, boundary). |
+| 8 | Batch ask: the capsule opens the sheet with choices, free text, files or folders, a repository, decide for me; async does not block | row 8: e2e:tools 8 (cases 2 to 6); S8 steps 2 and 3 PASSED live (five modalities, async acknowledged before the answer); S1 PASSED (the interrupt during a blocking ask; fixture p1-maws-ask-interrupt admitted) | A1.1 pass, A1.2 pass with a taste note; B13, B14 owner: not run | met as restated | The owner answered a blocking ask through the sheet, saw the capsule's states and a background arrival that did not switch the view (A1.1, A1.2). The individual modalities and the async case stand on S8's live run. Taste (A1.2, the report view hiding the plain reply after an answer): tracker row 2026-10-08, plan §3.C (P2). |
+| 9 | Quit with a turn in flight, relaunch: still there and still streaming | row 9: e2e:supervisor 8, e2e:supervisor:packaged 1, e2e:packaged 51; S5 PASSED live (packaged build, detached, keep-quit mid-turn, relaunch onto the same supervisor and engine, DONE once, nothing doubled); Q6 and Q7 pass | G1 to G4 owner: not run; A9.2, A9.3, A9.4 pass | owner: not run | The agents' half is met (S5). The owner deferred the lifecycle steps (sessions were running). Blocks: step G on the owner's profile; the C3 resume-stall row stays open for it. |
+| 10 | /btw opens a side pane with the answer; main untouched | row 10: e2e:side 8 (case 5); S3 case 4 PASSED live | J2 pass, A3.3 pass | met | /btw in a comment fork answered in the Side pane with no message added to the thread's transcript. |
+| 11 | Stage, commit, push and open a PR from the panel; the summary row shows PR state and checks | row 11: e2e:scm 8 (a local bare remote, a fake gh), e2e:panel 23; no sitting (the credentials are the owner's) | H1 to H5, A5.1 to A5.4 owner: not run | owner: not run | Blocks: a throwaway branch pushed with the owner's helper and a draft PR (step H). |
+| 12 | Tasks read-only via show_pane 'tasks' (P-20); cross-session messages as rows, answerable | row 12: e2e:agents 23, e2e:tools 8 (case 7); S2(b), S2(c) PASSED live; S2(d) a team formed in a terminal (fixture admitted) | J3 pass, A6.4 pass, J4 pass | met | Tasks opened read-only ("The engine is not creating task lists in this session"); a peer message rendered with Reply and the reply arrived (J4; the second session was the controller, not a terminal peer). S2(d)'s finding (a teammate's report read from disk as an owner's prompt): tracker row, E7, P2. |
+| 13 | The three gaps carried from P0 close: C8-S, C9, S | the rows C8-S, C9 and S below | B, C | gap | S closed; C8-S and C9 stay open (their rows say what blocks them). |
+
+== E11's six acceptance clauses (the P1 spec's §9 E11; the execution document's Acceptance) ==
+
+| # | Clause | Evidence | Verdict | Notes |
+|---|---|---|---|---|
+| 1 | The panel and reference taste sitting over P0's panels and P1's surfaces, with its findings fixed or logged | owner-results.txt B1 to B40; the C8-S row | gap | Step B's reference comparison was not held (B1 to B40 owner: not run). Every note the sitting did produce is routed (C8-S row); none unrouted. |
+| 2 | The native terminal hands observed by the owner | owner-results.txt C1 to C6 | gap | IME in the three surfaces and ⌘-click observed (C1 note, C2 note, C3 pass, C4 note); sleep and wake (C5) not run. |
+| 3 | A scale review of the P1 tree at level max with its verified findings fixed | scale-review/pairs.txt (five pairs, coverage exact), A to E .findings.json, report.txt; M4 F-H 81a345df..50219ea0 and F-R 50219ea0..06a216b3; M5 gates/final-summary-06ca330d.txt | met | 20 confirmed findings (P2 2, P3 18; A 3, B 2, C 11, D 1, E 3): 18 fixed whole, 2 partly with their remainders as tracker rows (df5f3160), 0 dismissed, 0 deferred, no [parent-impact]; none fixed by the executor inline; M5 green on 06ca330d and the chain re-run on the final head 3d09cd4b (gates/final2-summary-3d09cd4b.txt). |
+| 4 | The carried tracker rows closed or re-deferred with a reason | tracker-check-1.6.txt "== 7.3 ==" (PASS); triage.txt | met | Every row at M0 has a disposition; no row is open until an E11 step; every kept row names an owner; kept 68 plus added 24 equals the tracker's 92 rows. |
+| 5 | The agents' pre-run of §2 items 1 to 12 under a scratch config home with evidence | prerun.txt; live-s1.txt to live-s8.txt; owner-file-check.txt | met | Twelve rows; S1 to S8 all ran within their caps on 2.1.293 through the relay on Haiku; every A-15 reading identical to the baseline (25 keys, 42a98859…); S1's fixture admitted; US$0.3220 of US$5.00; no survivor. |
+| 6 | The owner's one sitting; §15 written | owner-script.txt; owner-results.txt; the execution document's Closing drafts | met as restated | The sitting ran 2026-10-08 (one joint session with the fork driving the GUI at the owner's request). owner-results.txt was filled from its record by the executor (Decision Log 41), not by the owner; rows not run read owner: not run. §15 is drafted as E11's close and P1's state at E11; P1's §15 is written at E13's landing (the 2026-10-08 ruling). |
+
+== The three gaps carried from P0 ==
+
+| Gap | Closing act | Evidence | Verdict | Notes |
+|---|---|---|---|---|
+| C8-S | Step B: P0's panels and P1's surfaces, light then dark, beside Codex desktop and Claude Desktop | owner-results.txt B1 to B40 (owner: not run), pre.3 (owner: not run) | gap | Blocks: the owner's reference comparison in both themes with the reference apps open. Where the sitting's taste notes went: A2.1 viewer sizing, tracker row 2026-10-08 (E2, taste); A1.2 the report view hiding a plain reply, tracker row 2026-10-08 (taste; plan §3.C, P2); A7.2 the plugins widget, F2a 2.2 (footers removed, sandbox copy, Reload plugins) and plan §3.B (P2); A3.1 the screenshot chip, F2b (Q4's thumbnail); D6 profile settings in the main tab, owner decision 6 (the floating popover; the browser ticket); D6 the bookmarks and extensions bars, 3.E (the browser ticket); taste rows at 7.3: a seen error leaving Needs you in about 500 ms, the takeover banner at about 3 s, the sandbox line "Run outside it". No note unrouted. |
+| C9 | Step C: Korean IME in a Terminal tab, the composer and an editor tab; ⌘-click a terminal URL; sleep and wake under the detached supervisor | owner-results.txt C1 to C6; owner-notes/terminal-ime/ (the screenshots 23 to 30) | gap | Observed: the composer (C2, composed correctly) and the editor (C3, composition passes); the Terminal tab under cat leaves residual jamo and spaces after Backspace while plain zsh erases the composing jamo (C1: unclassified, a canonical-echo observation; tracker row 2026-10-08, C9, P2); ⌘-click opens externally in Chrome (C4, recorded, not a failure). Blocks: C5, sleep and wake with a terminal running and a turn streaming under the detached supervisor, deferred by the owner. |
+| S | The scale review of the integrated app (Design §4) | as clause 3 above | met | Five area panels at level max over 06fa09ac..07e50719, every confirmed finding routed and fixed or tracked; the panel was not re-run after the fixes (A-14's bound, E11 Decision Log 3). |
+
+== T, §13 and §15 ==
+
+| Row | Item | Evidence | Verdict | Notes |
+|---|---|---|---|---|
+| T | The tracker triaged | triage.txt; tracker-check-1.6.txt "== 7.3 ==" | met | 159 rows at M0: 79 fixed in W-A to W-E, 7 removed (annotated closed) and 1 dropped at 1.6, 4 closed with evidence (C12 busy-quit at 5.2; the Q4 chip in F2b; the E7 non-isMeta peer record and E4d's 125 % right-click at 7.3), 68 kept with an owner (63 re-deferred, 3 narrowed, the C7 keyboard row kept at 5.2, the C3 resume stall kept at 7.3 for step G); 24 rows added after M0 (9 by W-A and 1.6, 2 at M4, 2 at M6, 5 at M7.2, 6 at 7.3); 92 rows. Acceptance 4: PASS. |
+| §13/§15 | The tracking row, the landing record and the retrospective | the execution document's Closing drafts | pending: the architect's (A-55) | The architect records E11's landing as A-55 and copies the drafts. §15 and the charter's §20 paragraph close at E13's landing. |
+
+== Browser-tool items superseded by E13 at its landing ==
+
+Their state today, for E13's recomposition to take over (owner-results.txt rows):
+  A11.1 to A11.7 (E4c's browser tools: reads while held, open once per busy stretch, the 10 s decay, cursor colours, a
+    browser-only turn, queued time against the deadline, a thread's driver retired): owner: not run.
+  D7 (browser_tabs and browser_navigate on the imported profile): pass on a local page.
+  D11 (the takeover on a signed-in site): owner: not run.
+  F1 (the OOPIF human key): pass by trace, with a note (the banner up about 3 s, most likely missed).
+  A12.1 (the thread's agent clicks the commented element in the same tab): pass ('Clicked button "Increment"').
+  A12.2 (the "Clicked #<id>" heading for a css-only act): owner: not run (the anchored act carried role and name).
+  Q8 (a css-only act's role and name), Q9 (a browser-only turn's divider), Q10 (queued time; a thread's driver): owner:
+    not run.
+  A10.9 (a click on the already-selected Browser tool does not take the page back) is tagged for the same ticket
+    (tracker row 2026-10-08, owner E13).
+
+== Open for the owner ==
+
+  The owner questions left open when the sitting closed: Q1, Q2, Q3, Q5, Q7, Q11, Q12 (Q4 answered, a thumbnail, built in
+    F2b; Q6 answered by the routing of E11 Decision Log 43 and 45; Q8 to Q10 pass to E13; the profile settings' placement
+    answered as owner decision 6).
+  The rebuilt-app check of F2b's 2.7b and 2.4 (owner-results.txt N2.7b, N2.4b): rebuild MAWS.app at the same bundle path
+    while MAWS runs, open the running app (a Dock click or a second launch): "An older MAWS is running, built <time>; the
+    build on disk is newer; quit to use it" appears once, Keep running quits nothing and it does not return for the same
+    build; an error in a session whose tab is open leaves Needs you once its notice is viewed, Dismiss clears it, and the
+    row keeps "ended with an error" with its time.
+  The steps not run: B (C8-S), C5 (C9), E (voice, on a development-signed build), G (keep-quit; the C3 stall row), H (push
+    and PR), J1 (plugins on the owner's marketplace), D9 and D10, A4.4, A5, A7.1, A7.3, A9.1, A9.5, A10.5, A14.1; the P-3
+    measure (what still sends the owner to a terminal; N3.A is the nearest statement).
+
+== The next cut's seed ==
+
+  The owner's consolidated plan, owner-notes/00-consolidated-plan.txt on master: §3, the P2 children 3.A every session
+    behaves as running, 3.B the extensions library (Claude Desktop's plugin interface), 3.C to-human as default application
+    behaviour, 3.D the resume chooser (A and C first, B and D after; each needs its own grill and execution document), with
+    the owner's decisions 1 to 5 of §4 binding on them; and 3.E (§4b), the in-app browser items handed to the cua_repl
+    session's ticket, now E13 (bookmarks import and bar, the extensions bar, the profile avatar, decision 6's popover).
+  Plus the tracker's 92 rows with their owners and the execution document's Deferred list.

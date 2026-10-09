@@ -99,6 +99,35 @@ describe('the comment composer', () => {
     expect(screen.queryByText('Screenshot · 640 × 480')).toBeNull();
   });
 
+  // E11 F2b (Q4, owner-decided: "a small image preview"): the screenshot shows as a thumbnail of itself, named as the chip
+  // was, so the area can be checked before sending; Remove stays a button of its own; a picture main will not read keeps
+  // the words alone
+  it('shows a producer’s screenshot as a thumbnail named with its size, removable by keyboard; an unreadable one keeps its words', async () => {
+    const DATA = 'data:image/png;base64,iVBORw0KGgo=';
+    fake = fakeClient({ 'side.screenshot.preview': { dataUrl: DATA } });
+    window.maws = fake.client;
+    withParent('ready');
+    render(<CommentComposerHost />);
+    const screenshot = { path: '/user-data/browser/crops/one.png', width: 640, height: 480 };
+    act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
+    const thumbnail = await screen.findByRole('img', { name: 'Screenshot · 640 × 480' });
+    expect(thumbnail.getAttribute('src')).toBe(DATA);
+    expect(fake.invoked('side.screenshot.preview')).toEqual([{ appSessionId: PARENT, screenshot }]);
+    const remove = screen.getByRole('button', { name: 'Remove screenshot' });
+    remove.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('img', { name: 'Screenshot · 640 × 480' })).toBeNull();
+    act(() => useCommentComposer.setState({ open: null }));
+
+    fake = fakeClient({});
+    window.maws = fake.client;
+    act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
+    await act(() => fake.fail('side.screenshot.preview', 'screenshot: not found'));
+    expect(screen.queryByRole('img', { name: 'Screenshot · 640 × 480' })).toBeNull();
+    expect(screen.getByText('Screenshot · 640 × 480')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove screenshot' })).toBeTruthy();
+  });
+
   // M3's review (M4): the failure paths
   it('a refusal arriving after the sheet closed mid-send is a toast with its reason', async () => {
     withParent('ready');

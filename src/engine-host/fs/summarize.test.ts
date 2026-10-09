@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
 import { loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { HEAD_TAIL_BYTES, summarize } from './summarize';
@@ -52,7 +53,7 @@ describe('head and tail summary', () => {
     expect(summary.lastRecordAt).toBe(withUuid.at(-1)?.timestamp);
     const lastAssistant = [...records].reverse().find((r) => r.type === 'assistant');
     const lastText = (lastAssistant?.message as { content: { type: string; text?: string }[] }).content.find((b) => b.type === 'text')?.text;
-    expect(summary.lastAssistantText).toBe(lastText?.slice(0, 200));
+    expect(summary.lastAssistantText).toBe(previewLine(lastText!, 200)); // E11 F2b: the preview, not the raw text
   });
 
   // W13: a session resumed after an update was last written by the newer engine, as its live status says
@@ -97,6 +98,16 @@ describe('head and tail summary', () => {
 
   // Debt wave 4, the title rule (charter §19, the C12 review rulings, item (1)): a `none`-source title is the
   // conversation's first human prompt; the engine's `last-prompt` follows the latest prompt, a relay's steer included.
+  // E11 F2b (plan 2.6): the last answer is kept as its preview, chosen from the whole block before the 200-character cap
+  it('keeps the last answer as its owner-aware preview: the essential text, not the "<to-human>" its first line holds', () => {
+    const report = `<to-human>\n${'context '.repeat(40)}\n<essential>Decisive: the cache is stale.</essential>\n</to-human>`;
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-09-29T10:00:00.000Z', message: { role: 'user', content: 'Check the cache' } }) +
+      line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-09-29T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: report }] } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').lastAssistantText).toBe('Decisive: the cache is stale.');
+  });
+
   it("the prompt is the conversation's first, never a later prompt or a relay's steer that the engine's last-prompt names", () => {
     const steer = 'Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PING in your next inbox line';
     const text =

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore, registerReplaceGuard } from './layout';
+import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
 import { currentSet } from './layout-model';
 
 const A = 'app-a' as AppSessionId;
@@ -252,6 +252,30 @@ describe('replacing an unstarted tab', () => {
     }
   });
 
+  // F2b review 2: the E11 verdict that sets a live draft aside does not reach a restored one.
+  it('an open made before hydration keeps a saved draft its verdict would set aside, and announces nothing', async () => {
+    const discard = vi.fn(async () => true);
+    const announce = vi.fn();
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard, verdict: (tab) => (tab.id === `session:${NEW}` ? { aside: 'kept' } : null), announce });
+    try {
+      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
+      const store = createLayoutStore();
+      const hydrating = store.getState().hydrate(fake.client, () => true);
+      store.getState().openSession(B); // a click before layout.get answers
+      await settled();
+      for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? saved : null });
+      await hydrating;
+      await settled();
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+      expect(store.getState().main.closedTabs).toEqual([]);
+      expect(discard).not.toHaveBeenCalled();
+      expect(announce).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
+  });
+
   it('asks nothing for a session already open, a new tab or a split', async () => {
     const { store, discard, off, tabs } = unstartedShown(true);
     try {
@@ -260,6 +284,87 @@ describe('replacing an unstarted tab', () => {
       store.getState().openSession(B, { how: 'tab' });
       expect(discard).not.toHaveBeenCalled();
       expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+});
+
+// E11 F2b (plan 2.5; owner decision 2): opening a session replaces the main tab whatever it shows; the guard's verdict
+// keeps what would be lost and sets an unstarted chat's draft aside, and the owner is told which.
+describe('replacing a tab of any kind', () => {
+  const NEW = 'new-1' as AppSessionId;
+  const B = 'b' as AppSessionId;
+  const FILE = { kind: 'file', path: '/r/a.ts', line: null, appSessionId: A } as const;
+  const tabs = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes[0].tabs.map((t) => t.id);
+
+  function guarded(verdicts: Record<string, ReplaceVerdict>) {
+    const discard = vi.fn(async () => true);
+    const announce = vi.fn();
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard, verdict: (tab) => verdicts[tab.id] ?? null, announce });
+    return { discard, announce, off };
+  }
+
+  it('a clean file, Settings or Diagnostics gives its place, remembered for ⌘⇧T, and nothing is said', () => {
+    const { announce, off } = guarded({});
+    try {
+      for (const target of [FILE, { kind: 'settings', section: null } as const, { kind: 'diagnostics' } as const]) {
+        const store = createLayoutStore();
+        store.getState().openSession(A);
+        store.getState().openTab(target);
+        const old = shown(store).panes[0].activeTabId;
+        store.getState().openSession(B);
+        expect(tabs(store), target.kind).toEqual([`session:${A}`, 'session:b']);
+        expect(store.getState().main.closedTabs.map((t) => t.id)).toEqual([old]);
+      }
+      expect(announce).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
+  });
+
+  it('a file with unsaved changes stays open and says why; the session opens beside it', () => {
+    const { announce, off } = guarded({ 'file:/r/a.ts': { keep: 'a.ts has unsaved changes' } });
+    try {
+      const store = createLayoutStore();
+      store.getState().openSession(A);
+      store.getState().openTab(FILE);
+      store.getState().openSession(B);
+      expect(tabs(store)).toEqual([`session:${A}`, 'file:/r/a.ts', 'session:b']);
+      expect(shown(store).panes[0].activeTabId).toBe('session:b');
+      expect(store.getState().main.closedTabs).toEqual([]);
+      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'file:/r/a.ts' }), { keep: 'a.ts has unsaved changes' });
+    } finally {
+      off();
+    }
+  });
+
+  it('an unstarted chat with a draft is set aside: replaced in place, its intent kept (nothing discarded or asked), ⌘⇧T brings it back', () => {
+    const { discard, announce, off } = guarded({ [`session:${NEW}`]: { aside: 'kept' } });
+    try {
+      const store = createLayoutStore();
+      store.getState().openSession(A);
+      store.getState().openSession(NEW, { how: 'tab' });
+      store.getState().openSession(B);
+      expect(tabs(store)).toEqual([`session:${A}`, 'session:b']);
+      expect(store.getState().main.closedTabs.map((t) => t.id)).toEqual([`session:${NEW}`]);
+      expect(discard).not.toHaveBeenCalled();
+      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: `session:${NEW}` }), { aside: 'kept' });
+    } finally {
+      off();
+    }
+  });
+
+  it('a pinned tab of any kind is left alone, and its pin says so without a word from the guard', () => {
+    const { announce, off } = guarded({});
+    try {
+      const store = createLayoutStore();
+      store.getState().openSession(A);
+      store.getState().openTab(FILE);
+      store.getState().togglePinned('file:/r/a.ts');
+      store.getState().openSession(B);
+      expect(tabs(store)).toEqual(['file:/r/a.ts', 'session:b', `session:${A}`]); // the pinned tab first, the session after it
+      expect(announce).not.toHaveBeenCalled();
     } finally {
       off();
     }

@@ -1,3 +1,5 @@
+// The owner layer's to-human grammar (R4 S0, 2026-10-04), shared since E11 F2b so main and the engine host's
+// summaries read it as the renderer's Presenter does (`preview.ts`).
 // Stored-text grammar mirrors doperpowers 7.135.0's to-human mod, not an HTML/Markdown parser. In particular,
 // balanced tag mentions inside code still count. S0 differs from the live mod: unbalanced marks stay literal.
 // The shell hook's ANSI headers are display-only; stored messages retain the original tags.

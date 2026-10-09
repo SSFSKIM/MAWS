@@ -238,6 +238,16 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 // ---- (1) G1: the toggle, the outline, the pick, the sheet --------------------------------------------------------------
 
+
+// E11 F2b (Q4, owner-decided): the sheet shows the crop as a thumbnail named "Screenshot · W × H" (main reads the file
+// for it through the send's own checks); its size, from that name.
+async function thumbnailSize(sheet: Locator): Promise<[string, string]> {
+  const thumbnail = sheet.locator('[data-comment-screenshot]').getByRole('img', { name: /^Screenshot · \d+ × \d+$/ });
+  await expect(thumbnail, 'the screenshot shows as a thumbnail').toBeVisible();
+  const [, w, h] = /Screenshot · (\d+) × (\d+)/.exec((await thumbnail.getAttribute('alt'))!)!;
+  return [w!, h!];
+}
+
 test('1. the Comment toggle arms the page: the hover outline names the button, a click opens E3’s sheet with the label, the locator and the crop, and no event reaches the page', async () => {
   await commentScene({ titles: ['E4d: pick'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
@@ -275,15 +285,15 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     await expect(sheet).toHaveAttribute('data-anchor-locator', '#increment');
     await expect(sheet.getByText('#increment', { exact: true }), 'the locator shown').toBeVisible();
     const chip = sheet.locator('[data-comment-screenshot]');
-    await expect(chip).toContainText(/Screenshot · \d+ × \d+/);
-    const [, w, h] = /Screenshot · (\d+) × (\d+)/.exec((await chip.textContent())!)!;
+    const [w, h] = await thumbnailSize(sheet);
     expect(Number(w)).toBeGreaterThan(0);
     expect(Number(h)).toBeGreaterThan(0);
     const crops = cropsOf(s);
     expect(crops, 'one crop file').toHaveLength(1);
     const bytes = readFileSync(crops[0]!);
     expect(bytes.subarray(0, 8).equals(PNG_SIGNATURE), 'a PNG').toBe(true);
-    expect(pngSize(bytes), 'the chip states the file’s own size').toEqual({ width: Number(w), height: Number(h) });
+    expect(pngSize(bytes), 'the thumbnail is named with the file’s own size').toEqual({ width: Number(w), height: Number(h) });
+    expect(await chip.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth), 'the thumbnail draws the crop itself (Q4)').toBe(Number(w));
     const dpr = await page.evaluate(() => window.devicePixelRatio);
     expect(near(Number(w), button.width * dpr, 2 * dpr + 1) && near(Number(h), button.height * dpr, 2 * dpr + 1), `the crop is the button: ${w}×${h} at DPR ${dpr} for ${JSON.stringify(button)}`).toBe(true);
     const picked = await lastPicked(s, 1);
@@ -538,7 +548,7 @@ test('4. a drag picks an area: the smallest element holding the marquee is named
     expect(scroll.y, 'the page is scrolled, so the box is in document coordinates').toBeGreaterThan(0);
     expectBox(anchor.box, { ...marquee, x: marquee.x + scroll.x, y: marquee.y + scroll.y });
     const dpr = await page.evaluate(() => window.devicePixelRatio);
-    const [, w, h] = /Screenshot · (\d+) × (\d+)/.exec((await sheet.locator('[data-comment-screenshot]').textContent())!)!;
+    const [w, h] = await thumbnailSize(sheet);
     expect(near(Number(w), marquee.width * dpr, 2) && near(Number(h), marquee.height * dpr, 2), `crop ${w}×${h} for the marquee ${marquee.width}×${marquee.height} at DPR ${dpr}`).toBe(true);
     // G2's expression on the one anchor with a role and no name (`getByRole(role, {})`): css alone, then css and role
     const byCss = page.locator(`css=${anchor.css}`);
@@ -594,7 +604,7 @@ test('6. the context menu’s Comment picks the element at the point without arm
     const sheet = sheetOf(s, 'textbox “Name”');
     await expect(sheet).toBeVisible();
     await expect(sheet).toHaveAttribute('data-anchor-locator', '#name');
-    await expect(sheet.locator('[data-comment-screenshot]')).toContainText(/Screenshot · \d+ × \d+/);
+    await thumbnailSize(sheet);
     const { anchor } = await lastPicked(s, 1);
     expect(anchor).toMatchObject({ css: '#name', role: 'textbox', name: 'Name', label: 'textbox “Name”' });
     expect((await recorded(s)).changed, 'no arm, no disarm').toEqual([]);

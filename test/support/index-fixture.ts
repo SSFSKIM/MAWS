@@ -3,8 +3,10 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
+import { MIGRATIONS } from '../../src/main/index/migrations';
 
 // A fresh directory under the system temp dir, realpathed (macOS: /var → /private/var) so it compares equal to what the
 // index stores, with a remover for afterEach.
@@ -46,4 +48,21 @@ export function summary(over: Partial<TranscriptSummary> = {}): TranscriptSummar
     birthtimeMs: 0, // E3
     ...over,
   };
+}
+
+// An index file as a build before `sessions.removed_at` was amended into the released v1 left it: v1 without the column,
+// then the released entries up to `version` (3 is the owner's database), at that user_version, with the given rows.
+export function preAmendmentIndex(path: string, rows: { appId: string; sessionId: string; archived: number; directory?: string }[] = [], version = 3): void {
+  const v1 = MIGRATIONS[0].sql.replace('summary TEXT, removed_at TEXT,', 'summary TEXT,');
+  if (v1 === MIGRATIONS[0].sql) throw new Error('migration 1 no longer declares sessions.removed_at where this fixture expects it');
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(v1);
+    for (const migration of MIGRATIONS.slice(1, version)) raw.exec(migration.sql);
+    raw.exec(`PRAGMA user_version = ${version}`);
+    const insert = raw.prepare("INSERT INTO sessions (app_id, engine_session_id, directory, archived, created_at, updated_at) VALUES (?, ?, ?, ?, 't', 't')");
+    for (const row of rows) insert.run(row.appId, row.sessionId, row.directory ?? '/w', row.archived);
+  } finally {
+    raw.close();
+  }
 }

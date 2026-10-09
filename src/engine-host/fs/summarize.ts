@@ -5,6 +5,7 @@
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
+import { previewLine } from '@shared/owner/preview';
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
@@ -224,7 +225,7 @@ function assistantText(record: TranscriptRecord): string | null {
   const content = (record.message as { content?: unknown } | undefined)?.content;
   if (!Array.isArray(content)) return null;
   const text = content.find((block): block is { type: 'text'; text: string } => isBlock(block) && block.type === 'text' && typeof block.text === 'string');
-  return text ? text.text.slice(0, TEXT_CAP) : null;
+  return text ? previewLine(text.text, TEXT_CAP) : null; // E11 F2b: the owner-aware preview, chosen before the cap
 }
 
 const isBlock = (value: unknown): value is { type: string; text?: unknown } =>

@@ -255,38 +255,6 @@
     "turnId": "turn:427ddfed-d47a-43db-81b3-f6f7d6588f1c"
   },
   {
-    "at": "2026-09-28T09:56:46.861Z",
-    "id": "local:338362d2-ca43-44b8-9232-5cb8f24ea913",
-    "kind": "local_command",
-    "messageUuid": "338362d2-ca43-44b8-9232-5cb8f24ea913",
-    "text": "Set model to `haiku (claude-haiku-4-5-20251001)`",
-    "turnId": null
-  },
-  {
-    "at": "2026-09-28T09:56:49.192Z",
-    "id": "local:cf843919-8bbc-497e-b9d1-f807919ee418",
-    "kind": "local_command",
-    "messageUuid": "cf843919-8bbc-497e-b9d1-f807919ee418",
-    "text": "Set model to `claude/astra`",
-    "turnId": null
-  },
-  {
-    "at": "2026-09-28T09:56:49.194Z",
-    "id": "local:19da5031-15f0-4338-9cac-d55a69066c10",
-    "kind": "local_command",
-    "messageUuid": "19da5031-15f0-4338-9cac-d55a69066c10",
-    "text": "Set model to `opus (claude-opus-5-5[1m])`",
-    "turnId": null
-  },
-  {
-    "at": "2026-09-28T09:56:49.221Z",
-    "id": "local:4676e5dc-a508-4385-93ba-cbdf523db034",
-    "kind": "local_command",
-    "messageUuid": "4676e5dc-a508-4385-93ba-cbdf523db034",
-    "text": "Set model to `sonnet (claude-sonnet-5[1m])`",
-    "turnId": null
-  },
-  {
     "at": "2026-09-28T09:56:49.743Z",
     "attempt": null,
     "id": "error:replay:journal:189:0",

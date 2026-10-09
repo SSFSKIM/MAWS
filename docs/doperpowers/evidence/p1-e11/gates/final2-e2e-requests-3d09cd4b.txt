@@ -1,0 +1,5 @@
+step e2e-requests
+command: pnpm e2e:requests
+head 3d09cd4b  ended 2026-10-09T01:10:52Z  load { 16.93 17.04 17.99 }  47s
+  11 passed (16.8s)
+exit 0

@@ -103,12 +103,44 @@ describe('every widget renders its fixture response', () => {
     expect(view.autoMemory).toBe('on');
   });
 
-  it('sandbox: disabled · supported, with its settings and empty restrictions', () => {
+  // E11's sitting (owner-notes 00-consolidated-plan §2.2): the first read is on or off with why, the wire's fields under
+  // a disclosure.
+  it('sandbox: Sandbox off and why, with its settings and empty restrictions as details', () => {
     const view = Sandbox.present(line<GetSandboxDialogResponse>('reads', 75));
-    expect(view.line).toBe('disabled · supported');
-    expect(view.rows).toContainEqual({ label: 'Enabled in settings', value: 'no' });
+    expect(view.headline).toBe('Sandbox off');
+    expect(view.reason).toBe('Not turned on in your settings');
+    expect(view.locked).toBe(false);
+    expect(view.rows).toContainEqual({ label: 'In your settings', value: 'off' });
+    expect(view.rows).toContainEqual({ label: 'Unsandboxed fallback', value: 'allowed' });
     expect(view.restrictions).toEqual([]);
     expect(view.dependencies).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('sandbox: on says what happens to a command it cannot run; off says it is unsupported or unavailable, and a policy lock', () => {
+    const base = line<GetSandboxDialogResponse>('reads', 75);
+    expect(Sandbox.present({ ...base, enabled: true, enabled_in_settings: true, mode: 'auto-allow', unsandboxed_fallback: true })).toMatchObject({ headline: 'Sandbox on', reason: 'A command that fails in the sandbox may run outside it, with your permission' });
+    expect(Sandbox.present({ ...base, enabled: true, enabled_in_settings: true, unsandboxed_fallback: false, locked: true })).toMatchObject({ headline: 'Sandbox on', reason: 'Commands run only inside the sandbox', locked: true });
+    expect(Sandbox.present({ ...base, supported: false, unsupported_reason: 'sandbox-exec is missing' }).reason).toBe('Not supported on this Mac: sandbox-exec is missing');
+    expect(Sandbox.present({ ...base, enabled_in_settings: true, unavailable_reason: 'dependencies are missing' }).reason).toBe('Turned on in your settings but unavailable: dependencies are missing');
+    expect(Sandbox.present({ ...base, enabled_in_settings: true }).reason).toBe('Turned on in your settings but not in effect');
+  });
+
+  // F2a review 1: the engine runs excluded commands outside the sandbox whatever the fallback says, so with any excluded
+  // the first read names them and the refused fallback speaks only of the other commands.
+  it('sandbox: on with excluded commands names them in the first read, and the refused fallback covers only the rest', () => {
+    const base = line<GetSandboxDialogResponse>('reads', 75);
+    const on = { ...base, enabled: true, enabled_in_settings: true };
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: false })).toMatchObject({ reason: 'Commands run only inside the sandbox', outside: null });
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: false, excluded_commands: ['docker', 'npm'] })).toMatchObject({
+      reason: 'Other commands run only inside the sandbox',
+      outside: 'Run outside it: docker, npm',
+      excluded: ['docker', 'npm'],
+    });
+    expect(Sandbox.present({ ...on, unsandboxed_fallback: true, excluded_commands: ['docker', 'npm', 'git', 'make', 'kubectl'] })).toMatchObject({
+      reason: 'A command that fails in the sandbox may run outside it, with your permission',
+      outside: 'Run outside it: docker, npm, git and 2 more',
+    });
+    expect(Sandbox.present({ ...base, excluded_commands: ['docker'] }).outside, 'off: every command already runs outside it').toBeNull();
   });
 
   it('diff: 0 files on the working tree; a null diff says why', () => {

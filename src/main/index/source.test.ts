@@ -237,6 +237,10 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     await applied();
     expect(index.sessions.get(appId)?.holder).toEqual({ kind: 'none' });
     expect(recorded.of('setDigest').at(-1)?.lastAssistantLine).toBe('After crash');
+    // E11 F2b (plan 2.6): a summary cached before the preview (200 raw characters, a mark cut from its pair) reads clean
+    fake.fire('fs.sessionChanged', { appSessionId: appId, summary: { ...disk, size: disk.size + 2, lastAssistantText: '<to-human>\n<essential>Decisive: the cache is stale' } });
+    await applied();
+    expect(recorded.of('setDigest').at(-1)?.lastAssistantLine).toBe('Decisive: the cache is stale');
 
     fake.fire('session.status', { appSessionId: appId, status: status(appId, { engineSessionId: disk.sessionId }) });
     expect(index.sessions.get(appId)?.holder.kind).toBe('self');

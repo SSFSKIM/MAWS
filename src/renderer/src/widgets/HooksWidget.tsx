@@ -1,10 +1,10 @@
 // `/hooks` (C11 execution document, the widget table): `get_hooks_listing` as the terminal lists it: the events that
 // have hooks with their counts, each hook with its event, matcher, source label and display text, and the policy line.
-// MAWS's own callback hooks are not in the engine's listing (none in P0), and the foot says so.
+// MAWS's own callback hooks are not in the engine's listing.
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetHooksListingResponse } from '@shared/wire/control';
-import { HOOKS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { HOOKS, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -75,7 +75,7 @@ export function HooksBody({ view }: { view: HooksView }) {
 export function HooksWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getHooksListing', { appSessionId });
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.hooks} command="hooks" foot={WIDGET_FOOT.hooks} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.hooks} command="hooks" state={read.state} error={read.error} close={close}>
       {read.data && <HooksBody view={present(read.data)} />}
     </WidgetFrame>
   );

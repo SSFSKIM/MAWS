@@ -1,0 +1,7 @@
+Command: pnpm build (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== build head 59c9fdf start 2026-10-08T18:32:24Z load { 27.75 27.72 25.99 }
+eligible: load 18.28 after 121s
+slot slot.1 acquired at 11:34:25 load { 18.28 24.75 25.06 }
+== build exit 0 end 2026-10-08T18:34:51Z

@@ -1,11 +1,12 @@
 // What the app shows of the engine host's supervisor (E10 execution document, Interfaces "X2 additions", §Design 1 "The
 // crash of a supervisor", §11): `host.status`, main's composition of the supervisor's last `host.supervisorStatus` with
-// main's own facts (the transport, the state, why it is crashed, the app's build and wire, the last unexpected exit),
+// main's own facts (the transport, the state, why it is crashed, the app's build and wire, main's own build stamp, the
+// last unexpected exit),
 // answered as a command and emitted on every SupervisorStatus and every transition of the engine host; and the two
 // actions behind the Settings and Diagnostics rows and the banners, `host.restart` and `host.openLog`.
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { ipcError } from '@shared/ipc/errors';
-import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
+import type { HostStatus, MainBuild, SupervisorStatus } from '@shared/ipc/schema/host';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import type { HostSupervisor } from './supervisor';
 
@@ -13,6 +14,7 @@ export interface HostStatusDeps {
   hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor'>;
   appBuildId(): string; // the build id of the engine-host bundle this app would start
   appWire(): string; // this app's wire fingerprint
+  mainBuild: MainBuild; // E11 §2.7: main's own build, for Diagnostics
   logPath(): string | null; // where a detached supervisor's log is, connected or not; null for a utility host
   emit(status: HostStatus): void;
   register: typeof registerMainHandler;
@@ -49,6 +51,7 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       supervisor,
       appBuildId: deps.appBuildId(),
       appWire: deps.appWire(),
+      mainBuild: deps.mainBuild,
       // while an incompatible supervisor is waited for, nothing is connected; what it refused says how it differs
       matches: supervisor ? matchesOf(supervisor) : facts.reason === 'incompatible' ? facts.refused : null,
       reason: facts.reason,

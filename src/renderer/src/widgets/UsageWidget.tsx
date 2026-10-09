@@ -14,7 +14,7 @@ import { resetsIn, windowShown } from '../statusline/format';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
-import { USAGE, USAGE_DIRECT_FOOT, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { USAGE, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, num } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -120,7 +120,7 @@ export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionI
   const read = useEngineRead('session.getUsage', { appSessionId });
   const route = useSessions((s) => (s.engine.get(appSessionId)?.gateway.mode === 'direct' ? 'direct' : 'gateway'));
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" foot={route === 'direct' ? USAGE_DIRECT_FOOT : WIDGET_FOOT.usage} state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} close={close}>
       {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}
     </WidgetFrame>
   );

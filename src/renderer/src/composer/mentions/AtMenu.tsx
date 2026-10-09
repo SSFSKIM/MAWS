@@ -92,7 +92,7 @@ export function AtMenu(props: PopupProps) {
   if (rows.length === 0) return null;
   const optionId = (i: number) => `composer-at-${i}`;
   return (
-    <Listbox label="Mention" activeId={optionId(active)}>
+    <Listbox label="Mention" activeId={optionId(active)} revealKey={rows}>
       {GROUPS.map(({ group, label }) => {
         const inGroup = rows.map((row, index) => ({ row, index })).filter(({ row }) => (row.item?.group ?? 'files') === group);
         if (inGroup.length === 0) return null;

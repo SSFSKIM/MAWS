@@ -1,6 +1,6 @@
 // The Engine section (C11 execution document, Interfaces "Settings tab" Engine; mockup 06 vignette 04): the binary MAWS
 // launches (W13: the installed Claude Code unless one is chosen, shown by its real path and probed version, with the
-// version MAWS's fixtures were recorded on as information and the user's own `claude update` one click away; a chosen
+// version MAWS was verified against as information and the user's own `claude update` one click away; a chosen
 // path reaches the engine host through `engine.configure`, which main alone pushes, and this section awaits
 // `settings.engineApplied`), the engine's config home (read-only to MAWS), the subagent model new sessions launch with,
 // and (W3) the mode a session takes when the engine refuses auto. W7: the memory budget's switch, whose rows show only

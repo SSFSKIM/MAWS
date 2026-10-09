@@ -79,7 +79,7 @@ export const SUMMARY_COPY = {
   loading: 'Loading…',
   sourcesUnavailable: 'Sources unavailable', // the transcript's hydration failed (C6's phase 'failed')
   sourceOnly: 'Source only',
-  // Plugins (E8 D-9): the plugins the session loaded, beside Reload mods and Reload skills
+  // Plugins (E8 D-9): the plugins the session loaded, beside Reload plugins and Reload skills
   pluginsLoaded: (n: number) => `Plugins · ${n} loaded`,
 } as const;
 

@@ -20,8 +20,9 @@ export interface FilesHandlerDeps {
 // The service, plus the per-window epochs (for tests and diagnostics: a closed window leaves no entry behind).
 export type FilesHandlers = FilesService & { readonly epochs: ReadonlyMap<number, number> };
 
-export function registerFilesHandlers(model: { record(appSessionId: AppSessionId): AllowlistRecord | null }, deps: FilesHandlerDeps): FilesHandlers {
-  const files = createFilesService({ records: (appSessionId) => model.record(appSessionId), ...deps });
+// `records`: whose directories a session may read (`allowlistOf`: its record, else its setup intent's location).
+export function registerFilesHandlers(records: (appSessionId: AppSessionId) => AllowlistRecord | null, deps: FilesHandlerDeps): FilesHandlers {
+  const files = createFilesService({ records, ...deps });
   const followed = new WeakSet<WebContents>();
   // Each navigation starts a new epoch for its window, so a watch in flight when its window navigated is dropped when it
   // completes rather than held by a page that can no longer unwatch it; a closed window's epoch is pruned, and a watch

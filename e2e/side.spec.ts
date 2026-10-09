@@ -18,6 +18,7 @@ import { anchoredMessage } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { menu, otherThemeColours } from './support/code-product';
+import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
@@ -185,9 +186,7 @@ async function openFile(page: Page, repo: ScratchRepo, relative: string): Promis
 async function commentOn(page: Page, viewer: Locator, line: number): Promise<Locator> {
   const mark = viewer.locator(`.cm-comment-mark[aria-label="Comment on line ${line}"]`);
   await expect(mark).toBeAttached();
-  await mark.locator('xpath=..').hover();
-  await expect(mark).toBeVisible();
-  await mark.click();
+  await clickRevealed(mark.locator('xpath=..'), mark);
   const sheet = page.getByRole('dialog', { name: `Comment on app.ts:${line}` });
   await expect(sheet).toBeVisible();
   return sheet;
@@ -365,8 +364,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(thread.locator('[data-composer]'), 'one live composer per session').toHaveCount(0);
 
     // closing that tab brings the thread back into the pane
-    await tab.hover();
-    await tab.getByRole('button', { name: /^Close / }).click();
+    await clickRevealed(tab, tab.getByRole('button', { name: /^Close / }));
     await expect(tab).toHaveCount(0);
     await expect(thread.getByText('Shown in the main area')).toHaveCount(0);
     await expect(thread.getByText(CHILD_REPLY)).toBeVisible();

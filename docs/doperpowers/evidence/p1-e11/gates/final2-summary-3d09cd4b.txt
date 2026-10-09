@@ -1,0 +1,35 @@
+== final2 head 3d09cd4b 2026-10-09T00:33:16Z load { 8.44 14.68 17.07 } front "LSDisplayName"="cmux"
+typecheck exit 0 46s 
+lint exit 0 28s 
+build-app exit 0 38s 
+test exit 0 197s  Test Files  716 passed | 1 skipped (717)       Tests  9977 passed | 1 skipped (9978) 
+test-probes exit 0 1s # pass 176 # fail 0 
+build exit 0 31s 
+e2e exit 0 230s   52 passed (3.8m) 
+e2e-transcript exit 0 224s   31 passed (3.2m) 
+e2e-terminal exit 0 156s   15 passed (1.9m) 
+e2e-panel exit 0 76s   23 passed (42.4s) 
+e2e-c7 exit 0 99s   29 passed (1.1m) 
+e2e-voice exit 0 59s   14 passed (26.7s) 
+e2e-code exit 0 118s   36 passed (1.5m) 
+e2e-agents exit 0 101s   23 passed (1.2m) 
+e2e-widgets exit 0 69s   24 passed (38.5s) 
+e2e-settings exit 0 46s   9 passed (17.5s) 
+e2e-c12 exit 0 39s   4 passed (11.1s) 
+e2e-tools exit 0 45s   8 passed (14.6s) 
+e2e-scm exit 0 60s   8 passed (33.0s) 
+e2e-side exit 0 58s   8 passed (29.6s) 
+e2e-deliverables exit 0 79s   10 passed (48.8s) 
+e2e-supervisor exit 0 165s   8 passed (2.3m) 
+e2e-browser exit 0 50s   8 passed (20.3s) 
+e2e-browser-comment exit 0 56s   13 passed (26.1s) 
+e2e-browser-import exit 0 58s   6 passed (27.9s) 
+e2e-browser-tools exit 0 80s   11 passed (49.6s) 
+e2e-requests exit 0 47s   11 passed (16.8s) 
+e2e-composer exit 0 79s   18 passed (48.8s) 
+verify-fuses exit 0 0s 
+e2e-packaged exit 1 253s   53 passed (4.2m) 
+e2e-supervisor-packaged exit 0 3s   1 passed (1.7s) 
+stale supervisors: 1
+== done 2026-10-09T01:16:27Z load { 14.49 14.03 16.12 }
+packaged: 3 runs red at 3d09cd4b (1, 1, 2 click timeouts), cause the owner's desktop pointer crossing the test window (6 of 12 instrumented launches lost the hover with the owner active, 16 of 16 passed idle); harness fix 3e20ea32 (gates/packfix-*), then 53 passed / 1 failed (the known Overview focus flake) and 54/54; touched groups e2e 52, side 8, c7 29, code 36 green. The stale-supervisor count of 1 is the owner's own MAWS app (main checkout dist, real user data), not a run of ours. Product head 3d09cd4b.

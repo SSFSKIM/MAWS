@@ -1,0 +1,8 @@
+Command: pnpm e2e:side (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== e2e:side head 786300c4 start 2026-10-08T17:05:05Z load { 20.84 37.44 28.97 }
+== e2e:side exit 0 end 2026-10-08T17:06:34Z
+--- summary lines
+8 passed (28.6s)
+restore: 0 sibling evidence changes left
+--- exit code: 0

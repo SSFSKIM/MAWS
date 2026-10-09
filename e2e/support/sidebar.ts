@@ -3,6 +3,7 @@
 // that reaches a session's row expands its project first; the project comes from the session's own record
 // (`session.list`), so a test names only the session.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { clickRevealed } from './hover';
 
 export const sidebarOf = (page: Page) => page.locator('[data-region="sidebar"]');
 
@@ -54,8 +55,7 @@ export async function closeProject(page: Page, name: string): Promise<void> {
 export async function newChatIn(page: Page, name: string): Promise<void> {
   await showProjectList(page);
   const row = projectRow(page, name);
-  await projectLine(row).hover();
-  await row.getByRole('button', { name: `New chat in ${name}`, exact: true }).click();
+  await clickRevealed(projectLine(row), row.getByRole('button', { name: `New chat in ${name}`, exact: true }));
 }
 
 export type SessionMatch = string | { appSessionId: string };

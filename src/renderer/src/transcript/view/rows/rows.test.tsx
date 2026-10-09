@@ -170,12 +170,12 @@ describe('live thinking label', () => {
 describe('local command row', () => {
   it('shows the command output under its header, never as a bubble', async () => {
     const b = builder();
-    b.emit('user.message', { messageUuid: uuid('lc'), content: '<local-command-stdout>Set model to opus</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.emit('user.message', { messageUuid: uuid('lc'), content: '<local-command-stdout>Total cost: $0.0123</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
     const store = await storeWith(b.events);
     const row = rowOf(store.rows(), 'local_command');
     const { container } = renderRow(row);
     expect(container.textContent).toContain('Command output');
-    expect(container.textContent).toContain('Set model to opus');
+    expect(container.textContent).toContain('Total cost: $0.0123');
     expect(container.querySelector('[data-bubble]')).toBeNull();
   });
 });

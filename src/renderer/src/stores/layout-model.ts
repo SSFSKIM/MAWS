@@ -273,16 +273,17 @@ export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: 
 
 // I2: a session opened from the sidebar, the Overview or the palette replaces what the focused pane shows. Open anywhere,
 // it is activated, the strip moving to its set; otherwise the strip moves to `set` (I3: the session's project's) and an
-// unpinned session tab active in its focused pane gives its place to it under the session's own tab id, the old ref
-// joining the closed-tab history for ⌘⇧T; a pinned tab, a tab of another kind or an empty pane is left alone and the
-// session opens after it. An unstarted active tab is the store's to keep out of this (it opens a tab beside it).
+// unpinned tab active in its focused pane, of any kind (E11 F2b, plan 2.5; owner decision 2), gives its place to it
+// under the session's own tab id, the old ref joining the closed-tab history for ⌘⇧T; a pinned tab or an empty pane is
+// left alone and the session opens after it. A tab whose work replacing it would lose (an unsaved file, a launch in
+// flight, a blank unstarted chat) is the store's to keep out of this (it asks for a tab of its own).
 export function replaceActive(main: LayoutMain, appSessionId: AppSessionId, set?: TabSetKey): LayoutMain {
   const target: TabTarget = { kind: 'session', appSessionId };
   if (isOpen(main, tabId(target))) return openTab(main, target, { set });
   const to = set ?? main.current;
   const shown = switchSet(main, to);
   const old = activeTab(shown);
-  if (old?.kind !== 'session' || old.pinned) return openTab(shown, target, { set });
+  if (old === null || old.pinned) return openTab(shown, target, { set });
   return onSet(shown, to, (v) => {
     const at = locate(v, old.id) as { pane: Pane; index: number };
     const tab = toRef(target);

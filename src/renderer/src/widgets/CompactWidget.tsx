@@ -11,7 +11,7 @@ import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { ipc } from '../ipc/client';
 import { present as presentContext } from './ContextWidget';
-import { COMPACT, CONTEXT, FRAME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { COMPACT, CONTEXT, FRAME, WIDGET_TITLE } from './copy';
 import { num } from './parts';
 import { MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -45,7 +45,7 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" foot={WIDGET_FOOT.compact} state={read.state === 'not_running' ? 'not_running' : 'ready'} error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" state={read.state === 'not_running' ? 'not_running' : 'ready'} error={null} close={close}>
       <div className="flex flex-col gap-2">
         <p className="m-0 text-fg-muted">
           {sampled
@@ -75,6 +75,7 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
           </button>
           {blocked && <span className="text-ui-sm text-fg-muted">{blocked}</span>}
         </div>
+        <p className="m-0 text-ui-sm text-fg-muted">{COMPACT.consequence}</p>
         {refused && (
           <p role="alert" className="m-0 text-ui-sm text-danger">
             {refused}

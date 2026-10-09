@@ -11,11 +11,12 @@ import { SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { appIdentity } from './identity';
+import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import { hostModeFromEnv } from './mode';
 import { startHostStatus } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
-export function createHosts(): HostSupervisor {
+export function createHosts(mainBuild: MainBuild): HostSupervisor {
   const mode = hostModeFromEnv(process.env);
   console.log(`[hosts] the engine host runs ${mode === 'detached' ? 'detached (the supervisor)' : 'as a utility process'}`);
   // E10 Task 2.4: one identity for the hello and for host.status, so the e2e seams (MAWS_E2E_BUILD_ID, MAWS_E2E_WIRE)
@@ -40,6 +41,7 @@ export function createHosts(): HostSupervisor {
     hosts: supervisor,
     appBuildId: identity.buildId,
     appWire: identity.wire,
+    mainBuild, // E11 §2.7
     logPath: () => (mode === 'detached' ? join(app.getPath('userData'), 'supervisor', SUPERVISOR_FILES.log) : null),
     emit: (status) => void emit('host.status', status),
     register: registerMainHandler,

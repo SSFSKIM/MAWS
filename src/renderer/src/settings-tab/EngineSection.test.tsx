@@ -87,7 +87,7 @@ describe('the binary row and the update', () => {
     renderSection();
     expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
     expect(within(row('Binary')).getByText('2.1.287')).toBeTruthy();
-    expect(within(row('Binary')).getByText("MAWS's fixtures and conformance tests were recorded on Claude Code 2.1.283")).toBeTruthy();
+    expect(within(row('Binary')).getByText('MAWS was verified against Claude Code 2.1.283')).toBeTruthy();
     expect(within(row('Binary')).queryByRole('button', { name: 'Use installed' })).toBeNull(); // nothing chosen
     expect(row('Binary').querySelector('.text-warning')).toBeNull(); // a newer version is information, never a refusal
     expect(screen.queryByRole('group', { name: 'Pinned version' })).toBeNull();

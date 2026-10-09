@@ -1,0 +1,8 @@
+Command: pnpm e2e:c7 (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== e2e:c7 head 786300c4 start 2026-10-08T17:09:35Z load { 12.20 21.69 24.01 }
+== e2e:c7 exit 0 end 2026-10-08T17:11:07Z
+--- summary lines
+29 passed (1.1m)
+restore: 0 sibling evidence changes left
+--- exit code: 0

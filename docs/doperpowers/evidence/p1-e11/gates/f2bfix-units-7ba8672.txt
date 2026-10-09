@@ -1,0 +1,6 @@
+Command: pnpm exec vitest run src/main/attention src/renderer/src/stores src/renderer/src/composer/mentions
+head: 7ba8672f
+ Test Files  28 passed (28)
+      Tests  298 passed (298)
+Type Errors  no errors
+exit 0

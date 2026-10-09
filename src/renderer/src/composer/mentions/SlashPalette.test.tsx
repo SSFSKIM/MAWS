@@ -103,17 +103,29 @@ describe('the slash palette groups its rows by origin', () => {
     expect(command.mock.calls[0][0].key).toBe('widget:status');
   });
 
-  it('keeps the chosen row in view, the one it opens on included', () => {
-    const shown: string[] = [];
-    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
-      shown.push(this.textContent ?? '');
+  // F2b (plan 2.1): by scrolling the list alone; the document-wide scrollIntoView moved the whole window
+  it('keeps the chosen row in view by scrolling the list alone, the one it opens on included', () => {
+    // a 60px list over 30px rows (the headings take no room here): rows 0 and 1 show at scrollTop 0
+    const ROW = 30;
+    const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 200, width: 200, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const geometry = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const list = this.closest('[role="listbox"]') as HTMLElement | null;
+      if (this.getAttribute('role') === 'listbox') return box(0, 60);
+      if (this.getAttribute('role') === 'option' && list) return box(Array.from(list.querySelectorAll('[role="option"]')).indexOf(this) * ROW - list.scrollTop, ROW);
+      return box(0, 0);
     });
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     try {
-      const { key } = open('status');
-      expect(shown.at(-1)).toContain('/status');
-      key('ArrowDown');
-      expect(shown.at(-1)).toContain('/statusline');
+      const { key, active } = open('status'); // opens on /status, the Widget group's, below the fold
+      const list = screen.getByRole('listbox');
+      const at = screen.getAllByRole('option').indexOf(active());
+      expect(at).toBeGreaterThan(1);
+      expect(list.scrollTop).toBe(at * ROW + ROW - 60);
+      key('ArrowDown'); // back to the first row
+      expect(list.scrollTop).toBe(0);
+      expect(scroll).not.toHaveBeenCalled();
     } finally {
+      geometry.mockRestore();
       scroll.mockRestore();
     }
   });

@@ -28,6 +28,7 @@ export const WIDGET_COMMANDS = [
   { name: 'diff', description: 'Changes in the working tree' },
   { name: 'rewind', description: 'Rewind the conversation, its files or both to an earlier message' }, // W3 (B7); Esc Esc too
   { name: 'btw', description: 'Ask a side question beside the running turn' }, // E3: the engine's side_question, never a prompt
+  { name: 'reload-plugins', description: 'Reload the plugins of this session' }, // E11 §2.2: the engine's terminal-only command, run as reload_plugins
 ] as const satisfies ReadonlyArray<{ name: string; description: string }>;
 
 export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];

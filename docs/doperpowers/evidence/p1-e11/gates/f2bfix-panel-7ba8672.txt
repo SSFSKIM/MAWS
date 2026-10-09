@@ -1,0 +1,4 @@
+Command: pnpm e2e:panel (through /tmp/maws-review/waitload20.sh && with-slot.sh)
+head: 7ba8672f
+  23 passed (39.7s)
+exit 0

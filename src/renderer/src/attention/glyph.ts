@@ -4,6 +4,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
+import { relativeAge } from '../app/relative-age';
 import { isActionable, isOpen } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
@@ -16,7 +17,9 @@ const TROUBLE: Partial<Record<AttentionItem['kind'], string>> = {
   auto_mode_unavailable: 'Needs you: auto mode unavailable',
 };
 
-export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): Glyph {
+// `ended` (E11 F2b, plan 2.4; owner decision 1): the session's error seen or dismissed (`selectEndedWithErrorOf`), which
+// it keeps saying, with its time, until its next turn retires it; `now` dates it.
+export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], ended: AttentionItem | null = null, now = Date.now()): Glyph {
   const { holder } = record;
   if (holder.kind === 'terminal') return glyph('⌁', 'info', 'Live in terminal');
   if (holder.kind === 'background_job') return glyph('⌁', 'info', 'Live as background job');
@@ -36,6 +39,9 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
       return glyph('●', 'accent', 'Working', true);
     case 'failed':
       return glyph('✕', 'danger', 'Failed');
+  }
+  if (ended !== null) return glyph('✕', 'danger', `Ended with an error ${relativeAge(now - Date.parse(ended.createdAt))}`);
+  switch (digest?.phase) {
     case 'exited':
       return glyph('✓', 'faint', 'Done');
   }

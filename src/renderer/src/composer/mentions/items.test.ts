@@ -52,9 +52,10 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
   });
 
   it('opens a registered widget for its name whatever the origin', () => {
-    for (const name of ['model', 'compact', 'permissions'] as const) offs.push(registerSlashWidget(name, { title: name, component: Widget }));
+    for (const name of ['model', 'compact', 'permissions', 'reload-plugins'] as const) offs.push(registerSlashWidget(name, { title: name, component: Widget }));
     const items = slashItems(autoRouted(), registeredWidgetNames(), []);
-    for (const name of ['model', 'compact', 'permissions']) expect(byName(items, name).action).toEqual({ kind: 'widget' });
+    // E11 §2.2: the engine's terminal-only /reload-plugins is MAWS's action once its widget is registered
+    for (const name of ['model', 'compact', 'permissions', 'reload-plugins']) expect(byName(items, name).action).toEqual({ kind: 'widget' });
     expect(byName(items, 'model').origin).toBe('engine');
     offs.splice(0).forEach((off) => off());
     expect(byName(slashItems(autoRouted(), registeredWidgetNames(), []), 'model').action).toEqual({ kind: 'text' });

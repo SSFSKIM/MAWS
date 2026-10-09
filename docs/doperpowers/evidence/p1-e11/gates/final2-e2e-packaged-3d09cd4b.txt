@@ -1,0 +1,8 @@
+step e2e-packaged
+command: pnpm e2e:packaged
+head 3d09cd4b  ended 2026-10-09T01:16:24Z  load { 14.49 14.03 16.12 }  253s
+  1 failed
+  138 skipped
+  53 passed (4.2m)
+[ELIFECYCLE] Command failed with exit code 1.
+exit 1

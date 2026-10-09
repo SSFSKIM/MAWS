@@ -4,7 +4,7 @@
 // The ⌘K palette's toggle is here too (M5); ⌘⇧J is registered with the attention wiring (`attention/navigation.ts`).
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { discardForReplace, isUnstarted, registerAction, requestCloseTab } from '../keymap/actions-runtime';
+import { announceReplace, discardForReplace, isUnstarted, registerAction, replaceVerdict, requestCloseTab } from '../keymap/actions-runtime';
 import { focusPaneElement } from '../main/pane-dom';
 import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
@@ -65,8 +65,9 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),
     registerSessionAction('openInNewTab', (appSessionId) => layout().openSession(appSessionId, { how: 'tab' })),
     registerSessionAction('openInSplit', (appSessionId) => layout().openSession(appSessionId, { split: true })),
-    // I2: an unstarted tab a replace would take the place of passes its close guard first
-    registerReplaceGuard({ unstarted: isUnstarted, discard: discardForReplace }),
+    // I2: an unstarted tab a replace would take the place of passes its close guard first; E11 F2b: any other tab is
+    // replaced unless its kind's verdict keeps it or sets it aside, and the owner is told which
+    registerReplaceGuard({ unstarted: isUnstarted, discard: discardForReplace, verdict: replaceVerdict, announce: announceReplace }),
     registerSessionAction('pin', async (appSessionId) => {
       const current = useSessions.getState().records.get(appSessionId);
       if (!current) return;

@@ -33,6 +33,7 @@ export interface HarnessOptions {
   stopWaitMs?: number;
   launchGate?: SessionServiceDeps['launchGate']; // C12: main's launch gate
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
+  seedIndex?: (path: string) => void; // writes the index file before the app opens it (an older build's history)
 }
 
 export class SessionHarness {
@@ -74,6 +75,7 @@ export class SessionHarness {
     mkdirSync(this.userData, { recursive: true });
     mkdirSync(this.home, { recursive: true });
     mkdirSync(this.work, { recursive: true });
+    opts.seedIndex?.(join(this.userData, 'index.sqlite'));
     this.index = new Index(join(this.userData, 'index.sqlite'));
     this.host = new FakeEngineHost();
     this.boot();

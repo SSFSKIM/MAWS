@@ -131,6 +131,7 @@ describe('renderer hosts store: the supervisor’s status', () => {
     supervisor: state === 'ready' ? { mode: 'detached', pid: 48213, startedAt: '2026-10-06T14:02:00.000Z', buildId: 'b', protocol: 1, wire: 'w', liveSessions, rows: liveSessions, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/s', logPath: '/l', orphansKilled: 0 } : null,
     appBuildId: 'b',
     appWire: 'w',
+    mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' },
     matches: state === 'ready' ? 'same' : null,
     reason: null,
     waitingLiveSessions: null,

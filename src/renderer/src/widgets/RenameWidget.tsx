@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
-import { RENAME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { RENAME, WIDGET_TITLE } from './copy';
 import { WidgetFrame } from './WidgetFrame';
 
 type Outcome = { renamed: string } | { refused: string } | null;
@@ -47,7 +47,7 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
   });
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rename} command="rename" foot={WIDGET_FOOT.rename} state="ready" error={null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.rename} command="rename" state="ready" error={null} close={close}>
       <div className="flex flex-col gap-2">
         {given === '' && (
           <div className="flex items-end gap-2">

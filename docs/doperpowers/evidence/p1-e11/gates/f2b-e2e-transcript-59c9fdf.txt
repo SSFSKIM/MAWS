@@ -1,0 +1,14 @@
+Command: pnpm e2e:transcript (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== e2e-transcript head 59c9fdf start 2026-10-08T19:15:10Z load { 26.53 25.10 24.45 }
+eligible: load 18.64 after 1443s
+slot slot.1 acquired at 12:39:14 load { 18.64 23.10 23.74 }
+  ✘   1 e2e/transcript.spec.ts:104:1 › anchoring: 500 turns stream while old work is expanded (15.3m)
+  ✘  14 e2e/transcript.spec.ts:699:1 › every fixture renders its whole work area expanded (1.0m)
+    Error: page.evaluate: Target page, context or browser has been closed
+    Error: page.evaluate: Target page, context or browser has been closed
+  2 failed
+  29 passed (18.8m)
+[ELIFECYCLE] Command failed with exit code 1.
+== e2e-transcript exit 1 end 2026-10-08T19:58:30Z

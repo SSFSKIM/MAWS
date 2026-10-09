@@ -1,0 +1,8 @@
+Command: pnpm e2e:supervisor (through /tmp/maws-review/waitload20.sh && with-slot.sh where heavy)
+head: 786300c4
+== e2e:supervisor head 786300c4 start 2026-10-08T17:11:07Z load { 8.71 17.95 22.33 }
+== e2e:supervisor exit 0 end 2026-10-08T17:13:44Z
+--- summary lines
+8 passed (2.2m)
+restore: 0 sibling evidence changes left
+--- exit code: 0

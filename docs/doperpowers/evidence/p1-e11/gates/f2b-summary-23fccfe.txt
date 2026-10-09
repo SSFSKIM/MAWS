@@ -1,0 +1,24 @@
+E11 M7.2 F2b gates (2026-10-08). Every heavy step through /tmp/maws-review/waitload20.sh && with-slot.sh, one e2e
+group at a time, sibling evidence (p1-e1, p1-e3, p1-e5, p1-e10 and any other) restored after each group: 0 changes left
+every time. Files: f2b-<step>-<head>.txt beside this one.
+
+== Chain 1 on 59c9fdf1 (the six item commits)
+typecheck 0 · lint 0 · units 716 files, 9967 passed, 1 skipped · probes 0 · build 0 · e2e 52 passed (140 skipped by
+config) · e2e:panel 22 passed, 1 failed · e2e:side 8 · e2e:browser-comment 13 · e2e:browser-tools 11 (1 skipped) ·
+e2e:transcript 29 passed, 2 failed · e2e:c7 29 · e2e:code 36 · e2e:widgets 24 · e2e:supervisor 7 passed, 1 failed ·
+e2e:browser 8 · final build 0.
+- e2e:panel's failure (the product host's Push state "Trust this folder to see PR state" not shown within 5 s) and
+  e2e:transcript's two (the page closed: a 15.3-minute anchoring case after a 24-minute load wait at load 23 to 26)
+  passed alone on faa5e69a: panel 23/23, transcript 31/31 (f2b-e2e-panel-rerun-faa5e69.txt,
+  f2b-e2e-transcript-rerun-faa5e69.txt). Timing-only; both results recorded.
+- e2e:supervisor's failure was F2b's: the relaunched window restores the session's tab, so the tail's error is seen
+  there and the case's "Needs you: error" glyph read no longer held (faa5e69a amends the case). Its re-run on
+  faa5e69a failed twice: once early (the page closed at untilRequested, before the amended code), once on the amended
+  assertion, which found a product bug (the composer handed swapOf only open items, so an error seen in its session
+  vanished from it). Fixed at 23fccfe1 with a Composer unit test.
+
+== Chain 2 on 23fccfe1 (the final head; the composer, the supervisor case)
+typecheck 0 · lint 0 · units 716 files, 9968 passed, 1 skipped · build 0 · e2e 52 passed · e2e:supervisor 8 ·
+e2e:c7 29 · e2e:widgets 24 · e2e:side 8 · final build 0 (out/ left as a product build).
+The groups chain 1 passed whose code did not move after 59c9fdf1 (browser-comment, browser-tools, code, browser,
+transcript, panel) were not run again.

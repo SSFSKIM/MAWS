@@ -1,6 +1,6 @@
 // Plugins (R1; charter D-9 as amended 2026-10-01; E8 D-9): shown whenever the session's status lists a loaded plugin or
 // a plugin pins a status line. The header row, while the status lists any, counts the plugins the session loaded
-// (`system/init`, or the last `reload_plugins` answer) beside Reload mods and Reload skills for a running session, with
+// (`system/init`, or the last `reload_plugins` answer) beside Reload plugins and Reload skills for a running session, with
 // one operation line (the `/plugins` widget's controls); beneath, each plugin's pinned status line, the engine's
 // `ui_status`, as "<plugin> · <text>" by plugin name, from the session's transcript entry as Sources reads its activity
 // (the card never attaches a source of its own). An empty text clears a line.

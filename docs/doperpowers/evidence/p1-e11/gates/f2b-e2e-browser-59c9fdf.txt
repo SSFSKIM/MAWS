@@ -1,0 +1,8 @@
+Command: pnpm e2e:browser (heavy steps through /tmp/maws-review/waitload20.sh && with-slot.sh; sibling evidence restored after each e2e group)
+head: 59c9fdf
+--- summary lines
+== e2e-browser head 59c9fdf start 2026-10-08T20:08:20Z load { 14.02 17.72 21.30 }
+eligible: load 14.02 after 0s
+slot slot.1 acquired at 13:08:20 load { 14.02 17.72 21.30 }
+  8 passed (21.2s)
+== e2e-browser exit 0 end 2026-10-08T20:09:14Z

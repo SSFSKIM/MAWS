@@ -1,0 +1,5 @@
+step e2e-widgets
+command: pnpm e2e:widgets
+head 3d09cd4b  ended 2026-10-09T00:57:49Z  load { 24.37 21.73 20.56 }  69s
+  24 passed (38.5s)
+exit 0

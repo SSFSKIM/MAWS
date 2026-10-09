@@ -6,6 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
+import { relativeAge } from '../app/relative-age';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
@@ -209,3 +210,11 @@ export function sessionAge(record: SessionRecord, digest: SessionDigest | null |
 
 // A waiting request shows how long its item has waited (the request preview, C7's card).
 export const needsYouAge = (oldest: AttentionItem, now: number): string => formatAge(now - Date.parse(oldest.createdAt));
+
+export { relativeAge };
+
+// E11 F2b (plan 2.4): an outcome (a failed turn, an interruption) says when it happened; anything else waits on an answer and says for how
+// long ("waiting 5m").
+const OUTCOMES: ReadonlySet<AttentionItem['kind']> = new Set(['error', 'interrupted']);
+export const itemAge = (item: AttentionItem, now: number): string =>
+  OUTCOMES.has(item.kind) ? relativeAge(now - Date.parse(item.createdAt)) : `waiting ${needsYouAge(item, now)}`;

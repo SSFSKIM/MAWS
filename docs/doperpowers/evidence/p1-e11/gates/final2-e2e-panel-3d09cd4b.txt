@@ -1,0 +1,5 @@
+step e2e-panel
+command: pnpm e2e:panel
+head 3d09cd4b  ended 2026-10-09T00:50:23Z  load { 18.40 21.34 19.82 }  76s
+  23 passed (42.4s)
+exit 0

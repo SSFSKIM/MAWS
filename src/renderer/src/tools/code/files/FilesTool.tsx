@@ -16,6 +16,8 @@ import { FILES_COPY, REFUSAL } from '../copy';
 import { normalizeLexically, openFile } from '../open-file';
 import { listingKey, useFiles } from './store';
 import { dirname, expandTo, roleOf, rootsFor, rowsOf, type RootRole, type TreeRow } from './tree';
+import { useSetup } from '../../../sessions/store'; // E11
+import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
 export const FILES_TOOL_ID = 'files';
 export const FILES_ROW_HEIGHT = 24;
@@ -85,6 +87,11 @@ function RefreshIcon({ className }: { className?: string }) {
   );
 }
 
+// E11: an unstarted session's directories as its intent names them, for re-listing when they change: a new worktree's
+// path too, which replaces its repository in main's listing once the setup makes it (F2a review 4).
+const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
+  intent ? JSON.stringify([intent.location, intent.additionalDirectories, intent.progress.worktree?.path ?? null]) : '';
+
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
   return <SessionTree key={ctx.appSessionId} ui={state.ui} appSessionId={ctx.appSessionId} session={ctx.session} />;
@@ -110,8 +117,11 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
     [rootEntries, listings, appSessionId, view.expanded, roles],
   );
 
-  // The roots, again whenever the record changes the directories the session may read.
-  const declared = session ? rootsFor(session).map((c) => c.path).join('\0') : '';
+  // The roots, again whenever the record changes the directories the session may read; before the session starts, its
+  // setup intent's location, which main lists until the record exists (E11), so a project chosen after the pane opened
+  // is listed then.
+  const unstarted = useSetup((s) => (session ? '' : unstartedRootsKey(s.intents.get(appSessionId))));
+  const declared = session ? rootsFor(session).map((c) => c.path).join('\0') : unstarted;
   useEffect(() => useFiles.getState().list(appSessionId, null), [appSessionId, declared]);
   // Watches follow the expanded directories that are shown: one under a collapsed parent keeps its expansion in memory
   // but is not watched (nor listed) while hidden. Declared before the listing effect, so a first listing waits for its
@@ -242,7 +252,12 @@ function TreeList({
   );
 }
 
+// E11: what main says of a session it cannot place (a New chat with no project yet): the pane's no-session sentence,
+// not an error.
+const UNKNOWN_SESSION = 'unknown app session';
+
 function RootsFailure({ message }: { message: string }) {
+  if (message.startsWith(UNKNOWN_SESSION)) return <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>;
   return (
     <p role="alert" className="px-3 py-2 text-ui-sm text-danger">
       {message === REFUSAL ? FILES_COPY.refused(message) : FILES_COPY.couldNotList(message)}
