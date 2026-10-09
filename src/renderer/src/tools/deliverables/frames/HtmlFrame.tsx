@@ -89,12 +89,12 @@ export function HtmlFrame({ url, title, appSessionId, deliverableId, version, pi
           const message = parseLocatedMessage(event.data);
           if (message?.selector === selector) finish(message.rect);
         };
-        function post() {
+        const post = () => {
           waiting.delete(post);
           window.addEventListener('message', onMessage);
-          frame!.contentWindow?.postMessage(locateMessage(selector), '*'); // an opaque origin has no name to target
+          frame.contentWindow?.postMessage(locateMessage(selector), '*'); // an opaque origin has no name to target
           timer = setTimeout(gone, LOCATE_TIMEOUT_MS);
-        }
+        };
         unanswered.add(gone);
         if (load.current.loaded) post();
         else waiting.add(post);

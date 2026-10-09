@@ -844,9 +844,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       const [element, placed] = [(await hero.boundingBox())!, (await redocked.boundingBox())!];
       return Math.abs(placed.y - (element.y + element.height + 4)) <= 1 && Math.abs(placed.x - element.x) <= 1;
     };
+    // pinned only once claimed, its thread drawn and the frame asked: its own close rule (the Side pane drew the thread a
+    // moment ago) would have shut it in the commit that drew the thread, before any of that
     await expect.poll(pinnedUnder, { message: 'the card 4 px under the heading, at its left', timeout: 10_000 }).toBe(true);
-    // not shut by its own close rule (the Side pane drew the thread a moment ago): still open well after the claim
-    await page.waitForTimeout(1_500);
     await expect(redocked).toBeVisible();
     await expect(redocked.getByRole('textbox', { name: 'Reply' })).toBeEnabled();
 
