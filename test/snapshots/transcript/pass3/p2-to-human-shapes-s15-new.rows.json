@@ -1,0 +1,46 @@
+[
+  {
+    "at": "2026-10-09T07:37:20.977Z",
+    "id": "time:turn:6d6e10da-7a8b-4191-a531-dd3674e863b0",
+    "kind": "time",
+    "label": "Oct 9, 2026 7:37 AM",
+    "turnId": "turn:6d6e10da-7a8b-4191-a531-dd3674e863b0"
+  },
+  {
+    "at": "2026-10-09T07:37:20.977Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:6d6e10da-7a8b-4191-a531-dd3674e863b0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "6d6e10da-7a8b-4191-a531-dd3674e863b0",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly OK.",
+    "turnId": "turn:6d6e10da-7a8b-4191-a531-dd3674e863b0"
+  },
+  {
+    "at": "2026-10-09T07:37:21.482Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfrHEGf7YrjGmFP9VYXdQ:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "f2e1cf3c-a3aa-45ea-83f8-45bdfff67d81",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:6d6e10da-7a8b-4191-a531-dd3674e863b0"
+  },
+  {
+    "at": "2026-10-09T07:37:22.085Z",
+    "attempt": null,
+    "id": "error:replay:journal:27:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
