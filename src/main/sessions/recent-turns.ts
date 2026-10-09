@@ -9,7 +9,7 @@ import type { SessionId } from '@shared/graph/ids';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, type RecentTurn, type RecentTurns } from '@shared/ipc/schema/session';
 import { previewLine } from '@shared/owner/preview';
 import { slashCommandLine } from '@shared/wire/local-command';
-import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
+import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
 import { jsonLines, readTailSized, type OpenFile } from '../files/read-tail';
 
@@ -63,12 +63,14 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
     if (parsed.success && parsed.data.isSidechain !== true) records.push(parsed.data);
   }
   const leafUuid = leafUuidOf(records);
-  if (leafUuid === null) return { turns: [], earlier: false, source: 'transcript' };
+  // no whole record in the window (one larger than it was cut): the conversation exists, its turns lie before the window
+  if (leafUuid === null) return { turns: [], earlier: cut, source: 'transcript' };
   const leaf = records.find((record) => record.uuid === leafUuid);
   // a rewind to a record before the window: the kept chain is not in it, and the discarded branch is no fallback
   if (leaf === undefined) return { turns: [], earlier: cut, source: 'transcript' };
-  // the walk from the leaf: currentChain starts at the last record with a uuid, so the leaf goes last
-  const { chain } = currentChain([...records, leaf]);
+  // the walk from the leaf: currentChain starts at the last record with a uuid, so the leaf goes last; then a parallel
+  // response's blocks and results the walk passed by rejoin, as the chain follower keeps them
+  const chain = withResponseGroups(currentChain([...records, leaf]).chain, records);
   const sessionId = (chain.find((r) => typeof r.sessionId === 'string')?.sessionId ?? 'unknown') as SessionId;
   const ctx = createBackfillContext({ sessionId, agent: null });
   const turns: RecentTurn[] = [];

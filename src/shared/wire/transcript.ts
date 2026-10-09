@@ -83,3 +83,63 @@ export function currentChain(records: TranscriptRecord[]): ChainResult {
   }
   return { chain: leafToRoot.reverse(), leaf, gap };
 }
+
+// The API response a record belongs to: an assistant record's own (`message.id`; a diagnostic belongs to none), or for a
+// tool result, the response of the record that issued its tool (`sourceToolAssistantUUID`, else its parent).
+function responseIdOf(record: TranscriptRecord, byUuid: ReadonlyMap<string, TranscriptRecord>): string | null {
+  const id = (r: TranscriptRecord | undefined): string | null => {
+    if (r?.type !== 'assistant' || r.isApiErrorMessage === true) return null;
+    const message = r.message as { id?: unknown } | null | undefined;
+    return typeof message?.id === 'string' ? message.id : null;
+  };
+  if (record.type === 'assistant') return id(record);
+  const content = (record.message as { content?: unknown } | null | undefined)?.content;
+  const toolResult = record.type === 'user' && Array.isArray(content) && content.some((block: unknown) => typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'tool_result');
+  if (!toolResult) return null;
+  const source = typeof record.sourceToolAssistantUUID === 'string' ? record.sourceToolAssistantUUID : record.parentUuid;
+  return typeof source === 'string' ? id(byUuid.get(source)) : null;
+}
+
+// P2-D (2026-10-09): the engine's recovery of a parallel response (SPEC 11.2.2 and 35.12.3), the chain follower's FX6 rule
+// read over a finished set of records. One API response with several tool calls is written as several assistant records
+// sharing `message.id`, and each tool result parents on the record that issued its tool, so the walk from the leaf passes
+// through the last result's issuer only and drops the response's other blocks and results. A response whose last-written
+// record is on `chain` regains its members off it, with the records hanging off them written inside the response (a
+// hook's attachment between two results), in file order. A chain that leaves a response before its last record (a fork
+// from an earlier block, a rewind to one) is a real branch: nothing of that response is recovered.
+export function withResponseGroups(chain: readonly TranscriptRecord[], records: readonly TranscriptRecord[]): TranscriptRecord[] {
+  const first = new Map<string, number>(); // uuid → index of its first record (a uuid is written once)
+  records.forEach((record, index) => {
+    if (typeof record.uuid === 'string' && !first.has(record.uuid)) first.set(record.uuid, index);
+  });
+  const byUuid = new Map([...first].map(([uuid, index]) => [uuid, records[index]]));
+  const responses = new Map<string, number[]>(); // response id → its members' indexes, in file order
+  for (const index of first.values()) {
+    const id = responseIdOf(records[index], byUuid);
+    if (id !== null) responses.set(id, [...(responses.get(id) ?? []), index]);
+  }
+  const onChain = new Set(chain.map((record) => record.uuid));
+  const recovered: number[] = [];
+  for (const members of responses.values()) {
+    const last = members.at(-1)!;
+    if (!onChain.has(records[last].uuid) || members.every((i) => onChain.has(records[i].uuid))) continue;
+    const inResponse = new Set(members.map((i) => records[i].uuid as string));
+    for (let i = members[0] + 1; i < last; i++) {
+      const { uuid, parentUuid } = records[i];
+      if (typeof uuid === 'string' && first.get(uuid) === i && typeof parentUuid === 'string' && inResponse.has(parentUuid)) inResponse.add(uuid);
+    }
+    for (const uuid of inResponse) if (!onChain.has(uuid)) recovered.push(first.get(uuid)!);
+  }
+  if (recovered.length === 0) return [...chain];
+  // merged by file position, the chain's own order untouched
+  recovered.sort((a, b) => a - b);
+  const out: TranscriptRecord[] = [];
+  let next = 0;
+  for (const record of chain) {
+    const at = first.get(record.uuid as string) ?? -1;
+    while (next < recovered.length && recovered[next] < at) out.push(records[recovered[next++]]);
+    out.push(record);
+  }
+  for (; next < recovered.length; next++) out.push(records[recovered[next]]);
+  return out;
+}

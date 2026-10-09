@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
-import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords } from '../../../test/support/fixtures';
-import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, type TranscriptRecord } from './transcript';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, withResponseGroups, type TranscriptRecord } from './transcript';
 
 const uuids = (records: TranscriptRecord[]) => records.map((r) => r.uuid);
 
@@ -102,5 +104,23 @@ describe('transcript records chain from the leaf', () => {
     const meta = AgentMetaSchema.parse({ agentType: 'general-purpose', description: 'Read and report one.txt content', toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, model: 'haiku' });
     expect(meta.spawnDepth).toBe(1);
     expect(AgentMetaSchema.safeParse({ agentType: 'x', description: 'y' }).success).toBe(false);
+  });
+});
+
+describe('a parallel response regains its siblings', () => {
+  // the chain follower's FX6 fixture and the chain it keeps (chain-follower.test.ts, PARALLEL_CHAIN)
+  const records = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-parallel-tool-group.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => parseTranscriptRecord(JSON.parse(line)));
+  const FOLLOWER_CHAIN = ['u1', 'a1', 'a2', 'h1', 'rA', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'a6', 'rC', 'rA2', 'rB2', 'a7', 's1'];
+
+  it('the raw walk drops the blocks and results its last result bypasses; the recovery keeps the follower’s chain', () => {
+    const { chain } = currentChain(records);
+    expect(uuids(chain)).toEqual(['u1', 'a1', 'a2', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'rB2', 'a7', 's1']);
+    expect(uuids(withResponseGroups(chain, records))).toEqual(FOLLOWER_CHAIN);
+  });
+
+  it('a chain that leaves a response before its last record (a fork) recovers nothing of it', () => {
+    const fork = parseTranscriptRecord({ type: 'user', uuid: 'foreign', parentUuid: 'a1', message: { role: 'user', content: 'A second writer prompt.' } });
+    const window = [...records.slice(0, 6), fork];
+    expect(uuids(withResponseGroups(currentChain(window).chain, window))).toEqual(['u1', 'a1', 'foreign']);
   });
 });

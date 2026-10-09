@@ -10,7 +10,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { project, record } from '../../../../test/support/builders';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
-import { clearPreviewCache } from './preview';
+import { clearPreviewCache, SETTLE_MS } from './preview';
 import { ResumeChooser } from './ResumeChooser';
 
 const P = project('p', 0, { name: 'maws' });
@@ -98,6 +98,38 @@ describe('the resume chooser', () => {
     change('alpha', { archived: false });
     expect(titles()).toEqual(['alpha', 'beta', 'gamma']);
     expect(selected()).toBe('beta');
+  });
+
+  it('a fallback after the opening selection reads its preview once the selection settles, not at once', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeClient({ 'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] }, 'session.recentTurns': { turns: [], earlier: false, source: 'transcript' } });
+      window.maws = fake.client;
+      const read = () => fake.invoked('session.recentTurns').map((input) => (input as { appSessionId: string }).appSessionId);
+      fill(base);
+      mount();
+      await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+      expect(read(), 'the opening selection at once').toEqual(['alpha']);
+      change('alpha', { archived: true });
+      expect(selected()).toBe('beta');
+      await act(async () => void (await vi.advanceTimersByTimeAsync(SETTLE_MS - 1)));
+      expect(read()).toEqual(['alpha']);
+      change('beta', { archived: true });
+      expect(selected()).toBe('gamma');
+      await act(async () => void (await vi.advanceTimersByTimeAsync(SETTLE_MS)));
+      expect(read(), 'the fallbacks settle like a move: only the one that stays is read').toEqual(['alpha', 'gamma']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a conversation whose turns all lie before the read window says earlier messages are not shown, not that it has none', async () => {
+    window.maws = fakeClient({ 'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] }, 'session.recentTurns': { turns: [], earlier: true, source: 'transcript' } }).client;
+    fill(base);
+    mount();
+    const turns = screen.getByTestId('resume-turns');
+    expect(await within(turns).findByText(RESUME_COPY.earlier)).toBeTruthy();
+    expect(turns.textContent).not.toContain(RESUME_COPY.empty);
   });
 
   it('badges the opened project’s rows only once All projects widens past it', async () => {

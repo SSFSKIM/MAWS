@@ -133,6 +133,25 @@ describe('recentTurnsOf', () => {
     expect(recentTurnsOf(records(output), 5, true).turns).toEqual([]);
   });
 
+  // test/fixtures/transcript-parallel-tool-group.jsonl, the chain follower's FX6 fixture: two parallel responses (m1 with
+  // two tool calls, m3 with three), each result parented on the block that issued its tool
+  const PARALLEL = readFileSync(join(ROOT, 'test/fixtures/transcript-parallel-tool-group.jsonl'), 'utf8');
+  const parallelLines = PARALLEL.split('\n').filter(Boolean);
+
+  it('keeps a parallel response whole: all five tool calls and the answer, as the chain follower does', () => {
+    expect(recentTurnsOf(PARALLEL, 5, false).turns.map((t) => [t.prompt?.text, t.answer?.text, t.toolCalls])).toEqual([['Run independent checks.', 'All checks completed.', 5]]);
+  });
+
+  it('a fork or a rewind from the middle of a response recovers nothing of it', () => {
+    const shown = (text: string) => recentTurnsOf(text, 5, false).turns.map((t) => [t.prompt?.text ?? null, t.toolCalls]);
+    // a second writer's prompt parented on the response's first block: a real branch (the follower's W7 case)
+    const fork = JSON.stringify({ type: 'user', uuid: 'foreign', parentUuid: 'a1', message: { role: 'user', content: 'A second writer prompt.' } });
+    expect(shown([...parallelLines.slice(0, 6), fork].join('\n'))).toEqual([['Run independent checks.', 1], ['A second writer prompt.', 0]]);
+    // a rewind anchor naming the first block: the rest of the response is cut
+    const rewind = JSON.stringify({ type: 'last-prompt', lastPrompt: 'again', leafUuid: 'a1', rewound: true });
+    expect(shown([...parallelLines.slice(0, 6), rewind].join('\n'))).toEqual([['Run independent checks.', 1]]);
+  });
+
   it('an empty or unparsable text has no turns', () => {
     expect(recentTurnsOf('', 5, false)).toEqual({ turns: [], earlier: false, source: 'transcript' });
     expect(recentTurnsOf('{"type":"user", torn', 5, true).turns).toEqual([]);
@@ -143,6 +162,14 @@ describe('readRecentTurns', () => {
   it('no path or no file answers none', async () => {
     expect(await readRecentTurns(null, 5)).toEqual(NO_TURNS);
     expect(await readRecentTurns(join(tmpdir(), 'maws-no-such-transcript.jsonl'), 5)).toEqual(NO_TURNS);
+  });
+
+  it('a last record larger than the window (a prompt with an image) still says the conversation has earlier messages', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'maws-recent-'));
+    const path = join(dir, 't.jsonl');
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(300 * 1024) } };
+    writeFileSync(path, `${chain([{ type: 'user', content: 'first' }, { type: 'assistant', content: [{ type: 'text', text: 'done' }] }, { type: 'user', content: [image] }])}\n`);
+    expect(await readRecentTurns(path, 5)).toEqual({ turns: [], earlier: true, source: 'transcript' });
   });
 
   it('reads the tail only: a window smaller than the file drops the turns before it and says so', async () => {

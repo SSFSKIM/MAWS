@@ -86,7 +86,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<ChooserToggles>(() => initialToggles(context));
   const [picked, setPicked] = useState<AppSessionId | null>(null);
-  const [settled, setSettled] = useState(false); // false until the selection first moves: the opening one previews at once
+  const [settled, setSettled] = useState(false); // false until the selection first moves (a fallback too): the opening one previews at once
   const now = useNow();
   const search = useRef<HTMLInputElement>(null);
   const ids = useId();
@@ -99,7 +99,11 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   // so a row that becomes the newest, or the one that left coming back, takes nothing.
   const selected = shown.find((row) => row.record.appId === picked) ?? shown[0] ?? null;
   const selectedId = selected?.record.appId ?? null;
-  if (selectedId !== picked) setPicked(selectedId);
+  if (selectedId !== picked) {
+    setPicked(selectedId);
+    // only the opening selection previews at once; a fallback replacing a kept one settles like a move
+    if (picked !== null) setSettled(true);
+  }
   const optionId = (appSessionId: AppSessionId) => `${ids}-${appSessionId}`;
 
   useEffect(() => {
@@ -362,7 +366,8 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
       <div ref={turns} data-testid="resume-turns" aria-busy={preview.status === 'loading'} tabIndex={0} className="mt-1 min-h-0 flex-1 overflow-y-auto pr-1 outline-accent focus-visible:outline-2">
         {preview.status === 'loading' && <p className="m-0 text-ui-sm text-fg-faint">{COPY.loading}</p>}
         {preview.status === 'error' && <p className="m-0 text-ui-sm text-fg-muted">{COPY.failed}</p>}
-        {ready && ready.turns.length === 0 && <p className="m-0 text-ui-sm text-fg-faint">{COPY.empty}</p>}
+        {/* no turn in the read window: an existing conversation whose turns lie before it, else one with none */}
+        {ready && ready.turns.length === 0 && <p className="m-0 text-ui-sm text-fg-faint">{ready.earlier ? COPY.earlier : COPY.empty}</p>}
         {ready && ready.turns.length > 0 && (
           <ol className="m-0 flex list-none flex-col gap-2 p-0">
             {ready.earlier && <li className="text-center text-ui-sm text-fg-faint">{COPY.earlier}</li>}
