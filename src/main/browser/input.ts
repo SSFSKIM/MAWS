@@ -30,7 +30,8 @@ import type { TabEntry, TabInput } from './tabs';
 export const FROM_DEBUGGER = 1 << 23;
 
 export type InputHook = 'before-input-event' | 'input-event' | 'before-mouse-event';
-export type InputKind = 'key' | 'mouse' | 'wheel';
+// `chrome`: a command the person gave the tab from outside its page (navigation.ts), which no hook here sees
+export type InputKind = 'key' | 'mouse' | 'wheel' | 'chrome';
 export type InputSource = 'human' | 'agent';
 
 export interface Attribution {

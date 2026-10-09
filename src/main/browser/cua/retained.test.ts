@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BROWSER_CURSOR_CHANNEL } from '@shared/browser/cursor';
+import { Navigator } from '../navigation';
 import { CURSOR_HIDE_GRACE_MS, PERSON_USING_TAB } from './presence';
 import { A, harness, S, takeDown } from './server.fake';
 
@@ -265,6 +266,21 @@ describe('the agent\'s activity, told to the windows', () => {
     navigate('https://shop.test/agent-timer'); // idle, nobody near: the agent's own page work
     await settle();
     expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'navigated')).toEqual([{ kind: 'navigated', url: 'https://shop.test/agent-timer', title: '' }]);
+  });
+
+  // cua board #98: the person's Reload from the chrome passes through no input hook of the page's
+  it('the person\'s Reload from MAWS\'s chrome on a leased idle tab is theirs, not reported', async () => {
+    const h = harness({ presence: true });
+    const t = await leasedTab(h);
+    const navigator = new Navigator({ store: h.store, history: { visit() {}, setTitle() {} }, favicons: { resolve: async () => null }, emit: () => {}, seam: { line() {}, openExternal() {} } });
+    const navigate = (url: string) => t.cdp.event('Page.frameNavigated', { frame: { id: t.cdp.frameId, url, loaderId: 'L' } });
+    expect(navigator.navigate(t.entry.tab.tabId, 'reload')).toBe(true);
+    navigate('https://person.test/reloaded');
+    expect(t.entry.tab.control).toBe('idle'); // the person's command leaves an idle tab idle, as their click does
+    t.entry.input.lastHumanAt = Date.now() - 3_100;
+    navigate('https://shop.test/agent'); // nobody near: the agent's
+    await settle();
+    expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'navigated')).toEqual([{ kind: 'navigated', url: 'https://shop.test/agent', title: '' }]);
   });
 
   it('a click whose node cannot be named in time is told with no label', async () => {

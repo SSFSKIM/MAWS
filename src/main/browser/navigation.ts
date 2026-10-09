@@ -67,9 +67,17 @@ export class Navigator {
 
   // `browser.tabs.navigate`: false when there was nothing to do (no history that way, no page to stop or reload) or the
   // tab could not be loaded (left suspended by the cap; its view could not be created).
+  //
+  // Every caller is the person (the chrome's buttons and address field over IPC, the page's context menu, keys.ts's
+  // chords); an agent navigates through CDP under its lease and never comes here. So the command is stamped on the tab's
+  // input seam as the person's input, as a click in the page would be: `personHolds` then reads the navigation it starts
+  // as theirs, not as the agent's activity (cua board #98: a Reload from the chrome on a leased idle tab passed through
+  // no hook of the page's and was told as "Navigated to …"). No activation, so neither the `window.open` gate nor the
+  // clipboard carve-out opens for the page; a chord's key is also counted by the page's own hook.
   navigate(tabId: string, to: NavigateTo): boolean {
     const { store } = this.deps;
     const entry = store.require(tabId);
+    entry.input.emit({ kind: 'chrome', source: 'human', at: this.now(), activation: false });
     const wc = entry.view?.webContents ?? null;
     if (typeof to === 'object') {
       const checked = validateBrowserUrl(to.url);
