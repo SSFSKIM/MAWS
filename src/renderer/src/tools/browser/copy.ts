@@ -149,6 +149,15 @@ export const BROWSER_COPY = {
     reimport: 'Re-import this profile…',
     settings: 'Browser settings',
   },
+  // the extensions action bar (Chrome's words) and its notices
+  extensions: {
+    bar: 'Extensions',
+    puzzle: 'Extensions', // Chrome's puzzle button
+    noPopup: 'This extension has no popup here',
+    actionTitle: (title: string, hasPopup: boolean) => (hasPopup ? title : `${title}\nThis extension has no popup here`),
+    popupFailed: (name: string | undefined) => `${name || 'An extension'}’s popup could not be shown`,
+    pageClosed: (name: string | undefined) => `${name || 'An extension'} is no longer loaded, so its options tab closed`,
+  },
   // cua #90 end
 
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----

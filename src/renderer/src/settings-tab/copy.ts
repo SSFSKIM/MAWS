@@ -253,6 +253,8 @@ export const BROWSER = {
   remove: 'Remove imported profile',
   extensions: 'Extensions',
   walletOff: 'Wallet extensions start off',
+  // cua #90: what an extension's popup cannot do in MAWS's browser (its spec's S1: `chrome.tabs.query` never answers the page)
+  popupLimit: 'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
   toggles: [
     { value: 'on', label: 'On' },
     { value: 'off', label: 'Off' },

@@ -26,6 +26,8 @@ export const BrowserProfileSchema = z.looseObject({
   gaiaName: z.string().nullable().optional(),
   userName: z.string().nullable().optional(),
   avatar: z.looseObject({ kind: z.string() }).optional(),
+  // cua #90: the profile's extensions in Settings' order, for the action bar's list (always present in E4b's records)
+  extensions: z.array(z.looseObject({ id: z.string(), name: z.string(), chromeId: z.string().nullable().optional() })).optional(),
 });
 export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
 const ProfilesFileSchema = z.looseObject({ version: z.union([z.literal(1), z.literal(2) /* cua #90: profiles.json version 2 */]), profiles: z.array(BrowserProfileSchema) });

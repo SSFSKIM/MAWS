@@ -1156,11 +1156,11 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */,
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */,
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
-      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.')) /* E4b, cua #90: their blocks are pinned below */).toEqual([
+      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90: their blocks are pinned below */).toEqual([
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
@@ -1168,7 +1168,7 @@ describe('ipc schema validates both directions', () => {
         'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
-      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.')) /* E4b, cua #90 */).toEqual([
+      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90 */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
         'browser.agent.acting', // E4c, restored by E13 (P1 A-54)
@@ -1314,11 +1314,11 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') /* cua #90 */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */ && !name.startsWith('browser.bookmarks.') /* cua #90 */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1408,8 +1408,8 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('appends browser.bookmarks.tree, .sync and .changed after E13’s entries, main-owned, every name bridged', () => {
-      expect(Object.keys(browser.commands).slice(-5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
-      expect(Object.keys(browser.events).slice(-1)).toEqual(['browser.bookmarks.changed']);
+      expect(Object.keys(browser.commands).slice(-10, -5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
+      expect(Object.keys(browser.events).slice(-4, -3)).toEqual(['browser.bookmarks.changed']);
       for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons'] as const) expect(commands[name].owner).toBe('main');
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
@@ -1455,6 +1455,37 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.bookmarks.favicons', { partition: 'persist:maws-chrome-Default', origins: Array.from({ length: 501 }, () => 'https://a.b') }).ok).toBe(false);
       expect(validateCommandOutput('browser.bookmarks.favicons', { icons: { 'https://a.b': 'data:image/png;base64,QQ==' } }).ok).toBe(true);
       expect(validateEventPayload('browser.chrome.command', { tabId, command: 'toggleBookmarksBar' }).ok).toBe(true);
+    });
+
+    // M3: the extensions action bar
+    it('appends browser.extensions.* after the bookmarks, main-owned, every name bridged', () => {
+      const names = ['browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle'] as const;
+      expect(Object.keys(browser.commands).slice(-5)).toEqual([...names]);
+      expect(Object.keys(browser.events).slice(-3)).toEqual(['browser.extensions.actions.changed', 'browser.extensions.popup', 'browser.extensions.reveal']);
+      for (const name of names) expect(commands[name].owner).toBe('main');
+    });
+
+    it('validates the actions, the tab-scoped commands, the events and the notices', () => {
+      const tabId = 'b_000000000001';
+      const extensionId = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+      const action = { extensionId, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true };
+      const anchor = { x: 600, y: 36, width: 24, height: 24 };
+      expect(validateCommandOutput('browser.extensions.actions', { actions: [action, { ...action, icon: 'data:image/png;base64,QQ==' }] }).ok).toBe(true);
+      for (const bad of [{ ...action, icon: 'https://x.test/icon.png' }, { ...action, extensionId: 'x' }, { ...action, popupUrl: 'chrome-extension://x/' }]) {
+        expect(validateCommandOutput('browser.extensions.actions', { actions: [bad] }).ok, JSON.stringify(bad)).toBe(false);
+      }
+      expect(validateCommandInput('browser.extensions.action.click', { tabId, extensionId, anchor }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.action.click', { tabId, extensionId, anchor: { ...anchor, x: 0.5 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.click', { extensionId, anchor }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.options', { tabId, extensionId }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.action.options', { tabId, extensionId, url: `chrome-extension://${extensionId}/options.html` }).ok).toBe(false);
+      expect(validateCommandInput('browser.extensions.action.menu', { tabId, extensionId, anchor: { x: 1, y: 2 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.extensions.puzzle', { tabId, anchor }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.actions.changed', { partition: 'persist:maws-chrome-Default' }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.popup', { tabId, extensionId: null }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.reveal', { tabId, show: { kind: 'settings' } }).ok).toBe(true);
+      expect(validateEventPayload('browser.extensions.reveal', { tabId, show: { kind: 'tab', tab: {} } }).ok).toBe(false);
+      for (const kind of ['extensionPopupFailed', 'extensionPageClosed']) expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: null, kind, name: 'MAWS probe' }).ok, kind).toBe(true);
     });
   });
   // cua #90 end

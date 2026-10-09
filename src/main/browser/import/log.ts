@@ -15,13 +15,17 @@ export type ImportLogEvent =
   | { kind: 'skip'; category: 'history' | 'cookies' | 'extensions'; reason: CookieSkipReason | HistorySkipReason | ExtensionSkipReason; host?: string | null }
   | { kind: 'keychain'; outcome: KeychainOutcome | 'cancelled'; exitCode?: number | null }
   | { kind: 'extension'; id: string; status: ImportedExtension['status']; background?: ImportedExtension['background'] }
-  | { kind: 'error'; where: string; code: string; message?: string };
+  | { kind: 'error'; where: string; code: string; message?: string }
+  // cua #90: an extension popup's link or `window.open` MAWS refused (no recent activation, or not http(s)): its scheme
+  // only, never the URL (the popup has no tab whose chrome could say it)
+  | { kind: 'popupRefused'; id: string; reason: 'activation' | 'scheme'; scheme: string };
 
 const MESSAGE_MAX = 200;
 // A code, a reason or a place is an identifier (`wrongKey`, `EBUSY`, `SQLITE_CORRUPT`); anything else prints as invalid.
 const word = (text: string) => (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(text) ? text : '<invalid>');
 const host = (text: string) => (/^[\w.:[\]-]{1,255}$/.test(text) ? text : '<invalid>');
 const id = (text: string) => (/^[a-p]{32}$/.test(text) || /^[0-9a-f-]{36}$/.test(text) ? text : '<invalid>');
+const scheme = (text: string) => (/^[a-z][a-z0-9+.-]{0,31}:$/.test(text) ? text : '<invalid>'); // cua #90
 const count = (n: number) => (Number.isSafeInteger(n) ? String(n) : '?');
 
 export function formatImportLog(event: ImportLogEvent): string {
@@ -37,6 +41,8 @@ export function formatImportLog(event: ImportLogEvent): string {
         return `extension ${id(event.id)} ${word(event.status)}${event.background ? ` background=${word(event.background)}` : ''}`;
       case 'error':
         return `error ${word(event.where)} ${word(event.code)}${event.message ? `: ${redactMessage(event.message)}` : ''}`;
+      case 'popupRefused':
+        return `popup ${id(event.id)} refused ${word(event.reason)} scheme=${scheme(event.scheme)}`;
     }
   })();
   return `[browser-import] ${line}`;

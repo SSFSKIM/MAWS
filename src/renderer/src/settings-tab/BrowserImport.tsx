@@ -6,7 +6,8 @@
 //   or failed with no sheet showing it is offered beside the button, with Show, until a sheet shows its report.
 // - One group per imported record: its date, the report's summary with Show report (cua board #90: and, when its
 //   bookmarks were imported, Sync bookmarks now with the mirror's last read), an On/Off toggle per extension
-//   (main loads or unloads it at once when the profile's partition is open; wallets start off), and Remove imported
+//   (main loads or unloads it at once when the profile's partition is open; wallets start off; cua #90: under a muted
+//   line saying what their popups cannot see here), and Remove imported
 //   profile behind its confirm sheet.
 //
 // The records and the run come from the import store (App.tsx connects it); the toggles live in `profiles.json`, never
@@ -80,6 +81,7 @@ export function BrowserImport() {
             </button>
           </Setting>
           {record.extensions.length > 0 && <p className="m-0 mt-1 text-ui-sm font-medium text-fg-muted">{BROWSER.extensions}</p>}
+          {record.extensions.length > 0 && <p data-extension-popup-limit="" className="m-0 text-ui-sm text-fg-muted">{BROWSER.popupLimit}</p> /* cua #90 */}
           {record.extensions.map((extension) => (
             <ExtensionToggle key={extension.id} profileDir={record.profileDir} extension={extension} />
           ))}

@@ -16,6 +16,7 @@ import type { Index } from '../../index/index';
 import type { registerMainHandler } from '../../ipc/router';
 import { registerBookmarkHandlers } from '../bookmarks/register';
 import { BookmarkSync } from '../bookmarks/sync';
+import type { ExtensionUi } from '../extensions';
 import type { Partitions } from '../partition';
 import type { BrowserEmit, TabStore } from '../tabs';
 import { createImportView } from './chips-import';
@@ -49,7 +50,11 @@ export interface BrowserImportDeps {
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv;
   // E4a's `Browser` handle (Decision Log 31): its tabs, for removal and the first-page hold, and its partitions.
-  browser: { store: Pick<TabStore, 'all' | 'close' | 'onViewCreated'>; partitions: Pick<Partitions, 'session' | 'registerPreparer'> };
+  browser: {
+    store: Pick<TabStore, 'all' | 'close' | 'onViewCreated'>;
+    partitions: Pick<Partitions, 'session' | 'registerPreparer'>;
+    extensions?: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, closed first by a removal
+  };
   profiles: ImportedProfiles;
   chooseDirectory?: ChooseDirectory;
 }
@@ -101,6 +106,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
           {
             userData, env, importing: () => service.running(), store: browser.store, partitions: browser.partitions, extensions, history: index.browserHistory,
             bookmarks: index.browserBookmarks, // cua #90
+            closingExtensionPages: browser.extensions && ((partition) => browser.extensions!.removing(partition)), // cua #90
             profiles,
           },
           profileDir,

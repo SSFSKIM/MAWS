@@ -82,6 +82,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
         removePartition: vi.fn(() => void steps.push('removePartition')),
       },
       bookmarks: { removePartition: vi.fn((partition: string) => void steps.push(`remove bookmarks ${partition}`)) }, // cua #90
+      closingExtensionPages: vi.fn((partition: string) => void steps.push(`extension pages ${partition}`)), // cua #90
       browsable: () => state.records.filter((candidate) => !withdrawn.has(candidate.profileDir)),
       profiles: {
         get: (profileDir: string) => state.records.find((candidate) => candidate.profileDir === profileDir) ?? null,
@@ -97,10 +98,11 @@ describe('Remove imported profile (E4b Design §12)', () => {
   });
   afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
-  it('closes the profile\'s tabs first, then unloads, clears, deletes, forgets the history and the bookmarks and drops the record, in that order', async () => {
+  it('closes the profile\'s extension pages (cua #90) and tabs first, then unloads, clears, deletes, forgets the history and the bookmarks and drops the record, in that order', async () => {
     const removed = await removeImportedProfile(deps, 'Default');
     expect(removed).toEqual({ tabs: 2, historyRows: 4, extensions: 2 });
     expect(steps).toEqual([
+      `extension pages ${PARTITION}`, // cua #90: its popups and options tabs closed first, each options tab told
       'close b_000000000001',
       'close b_000000000003',
       'destroyed b_000000000001',

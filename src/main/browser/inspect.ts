@@ -7,6 +7,7 @@
 // how many tabs are loaded and measured.
 import type { CuaBackend } from './cua';
 import type { NativeMenuSeam } from './bookmarks/menu';
+import type { ExtensionsInspector } from './extensions';
 import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 
@@ -24,6 +25,7 @@ export interface BrowserInspector {
   metrics(): { loaded: number; sampled: number };
   cua?: Pick<CuaBackend, 'socketPathFor' | 'inspect' | 'holds'>; // E13, under MAWS_E2E=1
   menu?: NativeMenuSeam & { openAllAsked(): number[] }; // cua #90: the last native menu, chosen from by id path; "Open all"'s questions
+  extensions?: ExtensionsInspector; // cua #90: the open extension popup, and its page's answers
 }
 
 declare global {

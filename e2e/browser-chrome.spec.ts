@@ -30,6 +30,16 @@
 // The cover's still (M2's fix): with the popover open in the 380 px session panel the pane shows the page's still, a
 // decoded picture of the page, and at no frame is the page's view hidden with no still in the pane; a page that commits
 // and paints only once the popover is open gets its still too.
+//
+// M3 (the extensions action bar) proves: (9) the probe extension's icon right of the address field in a main tab, the
+// popup-less extension present but inert, its popup under the icon (its right edge on the icon's, sized by its page)
+// whose page reaches the service worker and is not answered the page tab by `chrome.tabs.query`, a second click and the
+// window's cover closing it, the browser preload doing nothing in extension pages, the action's native menu's Options
+// opening `options.html` as an internal tab titled "MAWS probe extension · Options" with a read-only address field, and
+// in the 380 px session panel the icons folded into the puzzle button whose menu lists the actions, Options and Manage
+// extensions…; Settings' imported profile saying what popups cannot see; (12) the options tab not restored by a
+// relaunch, the page's tab restored; (10, the actions) removing the profile closes an open options tab with a notice
+// naming the extension, and lists no action.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -45,7 +55,7 @@ import {
   closeSheet, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard, recordOf, recordPhases,
   settingsFile, suggest, type ImportScene, type ImportSeams,
 } from './support/browser-import-scene';
-import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, paneIn, paneRect, resizeWindow, tabAt, tabsOf, viewOf } from './support/browser-scene';
+import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, pageAt, paneIn, paneRect, preloadRunsAt, resizeWindow, tabAt, tabsOf, viewOf } from './support/browser-scene';
 import { invoke, value } from './support/c7-replay';
 import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
 import { menuAfter, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
@@ -708,6 +718,159 @@ test('the cover\'s still: the profile popover over the 380 px panel shows the pa
       throw error;
     }
     await closeScene(s);
+  } finally {
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+});
+
+// ---- (9, 10, 12) the extensions action bar -----------------------------------------------------------------------------
+
+interface PopupSeam {
+  __maws_browser: { extensions: { popup(): { windowId: number; tabId: string; extensionId: string; url: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean } | null } };
+}
+const popupOf = (s: ImportScene) => s.maws.app.evaluate(() => (globalThis as unknown as PopupSeam).__maws_browser.extensions.popup());
+const actionIn = (view: Locator, extensionId: string) => view.locator(`[data-extension-action="${extensionId}"]`);
+const puzzleIn = (view: Locator) => view.locator('[data-extensions-puzzle]');
+type PopupResult = { ping: { value?: { echo?: unknown; swSawMessage?: boolean } }; tabsActive: { value?: { url: string }[] }; tabsAll: { value?: { url: string }[] } };
+
+test('9, 10, 12: the extensions action bar: the probe\'s icon right of the address field, its popup under it reaching its background, Options as a transient tab, the puzzle fold in the panel, all gone with the profile', async () => {
+  const server = await startBrowserServer();
+  const { scratch, chrome } = importScratch(['cua #90: the action bar'], { bookmarksOrigin: server.origin });
+  const keychain = `file:${chrome.passwordFile}`;
+  const probeId = chrome.extensions.probe.id;
+  const popupUrl = `chrome-extension://${probeId}/popup.html`;
+  const optionsUrl = `chrome-extension://${probeId}/options.html`;
+  const OPTIONS_TITLE = 'MAWS probe extension · Options';
+  try {
+    const s = await launchBarScene(scratch, server, chrome, { keychain });
+    const [id] = s.ids as [AppSessionId];
+    let optionsTab: string;
+    let pageTab: string;
+    try {
+      await importThrough(s, { history: false, cookies: false, bookmarks: false });
+      await closeSheet(s);
+      await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBe('Default');
+      // Settings says what a popup cannot see here
+      const region = await openSettingsBrowser(s);
+      await expect(region.locator('[data-imported-profile="Default"] [data-extension-popup-limit]')).toHaveText(
+        'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
+      );
+
+      // (9) the session panel at 380 px: the icons fold into the puzzle button, whose menu lists the extension
+      const panel = await browserPanel(s, id);
+      await address(panel, server.url('/a.html'));
+      pageTab = await tabAt(s, id, server.url('/a.html'));
+      await expect(puzzleIn(panel)).toBeVisible();
+      await expect(panel.locator('[data-extension-actions]')).toHaveCount(0);
+      const folded = await menuAfter(s.maws.app, () => puzzleIn(panel).click());
+      expect(menuIds(folded)).toEqual(expect.arrayContaining([`action:${probeId}`, `action:${chrome.extensions.fails.id}`, 'options', 'manage']));
+      expect(menuIds(folded).at(-1)).toBe('manage');
+      expect(menuShape(folded)).toContainEqual(['Options', ['MAWS probe extension']]);
+      expect(folded.find((node) => 'id' in node && node.id === `action:${chrome.extensions.fails.id}`)).toMatchObject({ enabled: false }); // no popup: inert
+
+      // a main tab: the icons inline, right of the address field and before the pill
+      await overflow(s, panel, 'Open in tab');
+      const main = browserIn(s, 'main');
+      const probe = actionIn(main, probeId);
+      await expect(probe).toBeVisible();
+      await expect(puzzleIn(main)).toHaveCount(0);
+      const [field, icon, pill] = await Promise.all([main.locator('[data-address-box]').boundingBox(), probe.boundingBox(), main.locator('[data-browser-partition]').boundingBox()]);
+      expect(icon!.x).toBeGreaterThanOrEqual(field!.x + field!.width);
+      expect(icon!.x + icon!.width).toBeLessThanOrEqual(pill!.x);
+      expect([icon!.width, icon!.height]).toEqual([24, 24]);
+      await expect(probe).toHaveAttribute('title', 'MAWS probe');
+      const fails = actionIn(main, chrome.extensions.fails.id);
+      await expect(fails).toHaveAttribute('aria-disabled', 'true');
+      await expect(fails).toHaveAttribute('title', /This extension has no popup here$/);
+      await fails.click({ force: true }); // aria-disabled: Playwright would wait for it to be enabled
+      expect(await popupOf(s)).toBeNull();
+
+      // the popup, the button pressed meanwhile: under the icon, its right edge on the icon's. Its size is not observed here: Playwright's attachment to every
+      // page keeps Chromium from reporting a preferred size (measured on a bare Electron app under `_electron.launch`:
+      // no `preferred-size-changed`; the same app without Playwright reports it), so the popup stays at Chrome's 25 px
+      // minimum in this run; the resize on every report is the unit tests' and S1's (spikes/extension-popup)
+      await probe.click();
+      await expect.poll(async () => (await popupOf(s))?.extensionId).toBe(probeId);
+      const popup = (await popupOf(s))!;
+      expect(popup).toMatchObject({ tabId: pageTab, extensionId: probeId, url: popupUrl });
+      expect(popup.bounds.y).toBe(Math.round(icon!.y + icon!.height));
+      expect(popup.bounds.x + popup.bounds.width).toBe(Math.round(icon!.x + icon!.width));
+      expect(popup.visible).toBe(true);
+      await expect(probe).toHaveAttribute('aria-pressed', 'true');
+      // its page reached the service worker, and the page tab is not what tabs.query answers it (S1)
+      const popupPage = await pageAt(s, popupUrl);
+      await expect.poll(() => popupPage.evaluate(() => (window as unknown as { __popupResult?: unknown }).__popupResult !== undefined)).toBe(true);
+      const result = (await popupPage.evaluate(() => (window as unknown as { __popupResult: unknown }).__popupResult)) as PopupResult;
+      expect(result.ping.value).toMatchObject({ echo: { ping: 1 }, swSawMessage: true });
+      expect((result.tabsActive.value ?? []).map((tab) => tab.url)).not.toContain(server.url('/a.html'));
+      // the browser preload does nothing in an extension's page
+      expect((await preloadRunsAt(s, popupUrl)).map((runs) => runs.main)).toEqual([0]);
+      // a second click on the action closes it
+      await probe.click();
+      await expect.poll(() => popupOf(s)).toBeNull();
+      await expect(probe).toHaveAttribute('aria-pressed', 'false');
+      // the window's cover closes it: a layer freezes the page, and no live popup floats over the layer
+      await probe.click();
+      await expect.poll(async () => (await popupOf(s))?.extensionId).toBe(probeId);
+      value(await invoke(s.page, 'browser.view.cover', { covered: true }));
+      await expect.poll(() => popupOf(s)).toBeNull();
+      value(await invoke(s.page, 'browser.view.cover', { covered: false }));
+
+      // the action's context menu: Options opens the options page as a tab, the main tab moving to it
+      const context = await menuAfter(s.maws.app, () => probe.click({ button: 'right' }));
+      expect(menuIds(context)).toEqual(['name', '—', `options:${probeId}`, 'manage']);
+      await pickMenu(s.maws.app, [`options:${probeId}`]);
+      await expect.poll(async () => (await tabsOf(s, id)).tabs.length).toBe(2);
+      const opened = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
+      optionsTab = opened.tabId;
+      expect(opened).toMatchObject({ partition: DEFAULT, url: optionsUrl, title: OPTIONS_TITLE, internal: { kind: 'extension', extensionId: probeId, title: OPTIONS_TITLE } });
+      expect((await tabsOf(s, id)).selected).toBe(optionsTab);
+      await expect(chipOf(main, optionsTab).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
+      const optionsField = main.locator('[data-address-internal] input');
+      await expect(optionsField).toHaveValue(OPTIONS_TITLE);
+      await expect(optionsField).toHaveJSProperty('readOnly', true);
+      const optionsPage = await pageAt(s, optionsUrl);
+      await expect.poll(() => optionsPage.evaluate(() => document.title)).toBe('MAWS probe options');
+      expect(await optionsPage.evaluate(() => (window as unknown as { __optionsResult: unknown }).__optionsResult)).toEqual({ name: 'MAWS probe extension', href: optionsUrl });
+      expect((await preloadRunsAt(s, optionsUrl)).map((runs) => runs.main)).toEqual([0]);
+      await expectNothingLogged(s);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+
+    // (12) the options tab is transient: a relaunch restores the page's tab and not it
+    const again = await launchBarScene(scratch, server, chrome, { keychain }, s.ids);
+    try {
+      const { tabs } = await tabsOf(again, id);
+      expect(tabs.map((tab) => tab.tabId)).toEqual([pageTab]);
+      expect((await tabsOf(again, id)).selected).toBe(pageTab); // the tab the options tab's closing would have selected
+
+      // (10, the actions) Remove imported profile: its open options tab closes with a notice naming the extension, and
+      // the actions list is empty
+      const panel = await browserPanel(again, id);
+      await expect(puzzleIn(panel)).toBeVisible();
+      value(await invoke(again.page, 'browser.extensions.action.options', { tabId: pageTab, extensionId: probeId }));
+      await expect.poll(async () => (await tabsOf(again, id)).tabs.some((tab) => tab.url === optionsUrl)).toBe(true);
+      expect(value(await invoke(again.page, 'browser.extensions.actions', { partition: DEFAULT })).actions.map((action) => action.extensionId)).toContain(probeId);
+      // the notice is heard as main sends it: its line lasts 4 s, and a removal can take longer than that under load
+      await again.page.evaluate(() => {
+        const heard: unknown[] = [];
+        (window as unknown as { __cua90Notices: unknown[] }).__cua90Notices = heard;
+        window.maws.on('browser.notice', (notice) => void heard.push(notice));
+      });
+      value(await invoke(again.page, 'browser.import.remove', { profileDir: 'Default' }));
+      expect((await tabsOf(again, id)).tabs).toEqual([]);
+      expect(await again.page.evaluate(() => (window as unknown as { __cua90Notices: unknown[] }).__cua90Notices)).toContainEqual({ appSessionId: id, tabId: null, kind: 'extensionPageClosed', name: 'MAWS probe extension' });
+      expect(value(await invoke(again.page, 'browser.extensions.actions', { partition: DEFAULT })).actions).toEqual([]);
+      await expectNothingLogged(again);
+    } catch (error) {
+      await again.maws.cleanup();
+      throw error;
+    }
+    await closeScene(again);
   } finally {
     await server.close();
     rmSync(scratch.root, { recursive: true, force: true });

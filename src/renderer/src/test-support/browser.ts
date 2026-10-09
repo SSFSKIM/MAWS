@@ -36,6 +36,7 @@ export function browserTab(tabId: string, appSessionId: AppSessionId, over: Part
     createdAt: '2026-10-06T10:00:00.000Z',
     lastShownAt: '2026-10-06T10:00:00.000Z',
     agentBadge: null, // E13
+    internal: null, // cua #90
     ...over,
   };
 }

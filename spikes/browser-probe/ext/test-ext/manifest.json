@@ -9,5 +9,6 @@
   "content_scripts": [
     { "matches": ["http://127.0.0.1/*", "http://localhost/*"], "js": ["content.js"], "run_at": "document_idle" }
   ],
-  "action": { "default_title": "MAWS probe" }
+  "action": { "default_title": "MAWS probe", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html" }
 }

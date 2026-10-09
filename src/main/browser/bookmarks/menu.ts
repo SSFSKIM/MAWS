@@ -6,8 +6,9 @@
 // the end of every level that holds URLs a separator and "Open all (n)", as Chrome's own folder menus end), and the »
 // menu (the bar's chips from the first one the renderer could not fit, then after a separator Other bookmarks and
 // Mobile bookmarks as submenus when they hold anything). Each item carries a stable id (`bookmark:<nodeId>`,
-// `folder:<nodeId>`, `open-all`, `root:other`, `root:mobile`, `empty`; M3 adds its own) so the e2e can choose by id path,
-// since names repeat across folders.
+// `folder:<nodeId>`, `open-all`, `root:other`, `root:mobile`, `empty`; the extensions bar's menus, built in
+// extensions/menu.ts and popped by the same presenter, add theirs) so the e2e can choose by id path, since names repeat
+// across folders.
 //
 // The presenter pops a built menu on a window at the anchor; under MAWS_E2E it records the menu instead (a native menu
 // cannot be driven through CDP, and a real one on screen would take the e2e's mouse), and `pick(path)` runs the item

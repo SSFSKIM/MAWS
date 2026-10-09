@@ -19,6 +19,10 @@
 // A view shows only while its tab is placed, its window uncovered, and the tab has a committed page of its own (not
 // suspended, no load error, not crashed, not failed): the renderer draws those states in the pane instead.
 //
+// cua #90: an extension's popup is a view of its own over the window's page views (extensions/popup.ts). The manager tells
+// `onViewAdded` whenever it adds a page view to a window, which puts that view on top, so the popup is raised back over
+// it, and `onCovered` the moment a cover goes on, before any still is taken: the popup closes then.
+//
 // The app window's own renderer reloading (⌘R) or crashing resets that window: its cover cleared, its owners released,
 // their views hidden; the fresh renderer's panes claim again on mount. A closing window gives its views up; the tabs
 // live on, unplaced.
@@ -90,6 +94,8 @@ export class ViewManager {
   private readonly stills = new WeakMap<TabEntry, number>();
   private readonly capturing = new WeakMap<TabEntry, number>(); // the cover generation keeping each page up
   private readonly staged = new WeakSet<TabEntry>(); // in the staging window for its still: left alone meanwhile
+  private readonly added = new Set<(win: BrowserWindow) => void>(); // cua #90
+  private readonly coverOn = new Set<(win: BrowserWindow) => void>(); // cua #90
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
@@ -149,6 +155,7 @@ export class ViewManager {
     // any placed page holding the native focus gives it to the window's own page, so the layer takes the typing and Esc
     if (placed.some(holdsFocus)) win.webContents.focus();
     this.coveredWindows.add(win.id);
+    for (const listener of [...this.coverOn]) listener(win); // cua #90: the window's popup closes at once
     // cua #90: a page on screen stays up until its still is in the pane (`still`), so the pane never shows a hole
     for (const entry of showing) this.capturing.set(entry, generation);
     for (const entry of placed) this.apply(entry);
@@ -159,6 +166,22 @@ export class ViewManager {
   focusEmulationWanted(entry: TabEntry): boolean {
     return this.focusEmulated.get(entry) ?? false;
   }
+
+  // cua #90 start: what the window's extension popup follows
+  onViewAdded(listener: (win: BrowserWindow) => void): () => void {
+    this.added.add(listener);
+    return () => void this.added.delete(listener);
+  }
+
+  onCovered(listener: (win: BrowserWindow) => void): () => void {
+    this.coverOn.add(listener);
+    return () => void this.coverOn.delete(listener);
+  }
+
+  isCovered(windowId: number): boolean {
+    return this.coveredWindows.has(windowId);
+  }
+  // cua #90 end
 
   dispose(): void {
     for (const unhook of this.unhook) unhook();
@@ -173,6 +196,11 @@ export class ViewManager {
     this.apply(entry, { lastShownAt: this.stamp() });
   }
 
+  // cua #90: a page view joined the window, on top of it
+  private viewAdded(win: BrowserWindow): void {
+    for (const listener of [...this.added]) listener(win);
+  }
+
   private stamp(): string {
     return new Date(this.now()).toISOString();
   }
@@ -185,6 +213,7 @@ export class ViewManager {
       this.detach(entry);
       placement.window.contentView.addChildView(view);
       entry.host = placement.window;
+      this.viewAdded(placement.window); // cua #90
     }
     view.setBounds(placement.rect);
   }
@@ -257,6 +286,7 @@ export class ViewManager {
         if (entry.view === view && entry.host && !entry.host.isDestroyed()) {
           entry.host.contentView.addChildView(view);
           if (entry.placement) view.setBounds(entry.placement.rect);
+          this.viewAdded(entry.host); // cua #90: back on top of its window's views
         }
       }
       if (!stage.isDestroyed()) stage.destroy();

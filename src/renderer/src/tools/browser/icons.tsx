@@ -130,6 +130,13 @@ export const SyncIcon = ({ className }: Glyph) => (
   </Icon>
 );
 
+// the extensions action bar's puzzle piece: the folded bar's button, and an extension's action that has no icon
+export const PuzzleIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="M6.5 3.5a1.5 1.5 0 0 1 3 0v1h3v3h-1a1.5 1.5 0 0 0 0 3h1v3h-3v-1a1.5 1.5 0 0 0-3 0v1h-3v-3h1a1.5 1.5 0 0 0 0-3h-1v-3h3z" />
+  </Icon>
+);
+
 export const ImportIcon = ({ className }: Glyph) => (
   <Icon className={className}>
     <path d="M8 2.5v7M5 6.5l3 3 3-3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />

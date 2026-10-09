@@ -18,7 +18,7 @@ export const SLOW_COPY_BYTES = 64 * 1024 * 1024; // the Work profile's probe cop
 
 // E0b's probe extension (an MV3 worker, a content script marking the page, an offscreen document), copied as it is.
 const PROBE_SOURCE = resolve(__dirname, '../../spikes/browser-probe/ext/test-ext');
-const PROBE_FILES = ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html'];
+const PROBE_FILES = ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html', 'popup.html', 'popup.js', 'options.html', 'options.js']; // cua #90: its popup and options page
 
 // --- Lifted from E0b's crypto.mjs (the encryption half): Chrome's macOS Safe Storage scheme. The AES key is
 // PBKDF2-HMAC-SHA1(password, "saltysalt", 1003, 16 bytes); a value is "v10" + AES-128-CBC(iv = 16 spaces, PKCS#7), and a

@@ -13,9 +13,12 @@
 // typed), and titles name the visited row. A page's own top-level navigation leaves http(s) only for `mailto:`, which goes
 // out through `openExternalUrl` (Decision Log 27) under the `window.open` gate (a recent activation, three per 5 s), so a
 // script cannot launch the mail client in a loop; anything else is refused with the seam line and the chrome's notice,
-// told once per burst of refusals. A page that closes itself (`window.close()`) takes its tab with it. A certificate
+// told once per burst of refusals (cua board #90: an internal tab, an extension's options page, admits its own
+// extension's pages, and its links to the web open as a new tab of its session after an activation, the tab staying
+// the extension's; it keeps the extension's title and icon through its page's own). A page that closes itself (`window.close()`) takes its tab with it. A certificate
 // error is never overridden, no client certificate is ever chosen, and `beforeunload` never blocks (Decision Log 26).
 import type { Certificate, WebContents } from 'electron';
+import { isExtensionPage } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { BrowserHistoryStore } from '../index/browser-history';
 import type { Favicons } from './favicon';
@@ -57,6 +60,7 @@ export class Navigator {
   private readonly faviconRequests = new WeakMap<TabEntry, number>();
   private readonly mailOpens = new WeakMap<TabEntry, number[]>(); // when the page's mailto: navigations went out
   private readonly lastRefusedAt = new WeakMap<TabEntry, number>(); // the page's last refused navigation
+  private readonly webLinks = new WeakMap<TabEntry, number[]>(); // cua #90: when an internal tab's web links opened
   private readonly now: () => number;
 
   constructor(private readonly deps: NavigatorDeps) {
@@ -213,7 +217,8 @@ export class Navigator {
       if (!live()) return;
       const typed = this.typed.delete(entry); // after redirects the URL is not the typed one, but the navigation is
       store.navigationCommitted(tabId, { url: ownUrl(url), ...historyFlags(wc) });
-      store.update(tabId, { title: committedTitle(wc, url), zoom: roundZoom(wc.getZoomFactor()) });
+      const internal = entry.tab.internal; // cua #90: still an internal tab once committed: the extension's title
+      store.update(tabId, { title: internal ? internal.title : committedTitle(wc, url), zoom: roundZoom(wc.getZoomFactor()) });
       this.visit(entry, url, typed);
     });
     wc.on('did-navigate-in-page', (_event, url, isMainFrame) => {
@@ -229,7 +234,7 @@ export class Navigator {
       store.loadFailed(tabId, { url: validatedURL || entry.tab.url, code, description, ...historyFlags(wc) });
     });
     wc.on('page-title-updated', (_event, title) => {
-      if (!live()) return;
+      if (!live() || entry.tab.internal) return; // cua #90: an internal tab is titled by MAWS
       store.update(tabId, { title });
       // the title is the committed document's, never a pending navigation's target (whose row it would mislabel), nor
       // an error page's raised after a failed load (`committed` false), which would relabel the last good page's row
@@ -238,7 +243,7 @@ export class Navigator {
       if (entry.committed && url !== null && validateBrowserUrl(url).ok) this.safely(() => this.deps.history.setTitle(partition, url, title));
     });
     wc.on('page-favicon-updated', (_event, favicons) => {
-      if (!live()) return;
+      if (!live() || entry.tab.internal) return; // cua #90: an internal tab shows its extension's icon
       const request = (this.faviconRequests.get(entry) ?? 0) + 1;
       this.faviconRequests.set(entry, request);
       void this.deps.favicons.resolve(entry.tab.partition, favicons, entry.committedUrl /* cua #90: the bar's icons */).then((favicon) => {
@@ -270,10 +275,13 @@ export class Navigator {
 
     wc.on('will-navigate', (event) => {
       const { url } = event;
-      if (validateBrowserUrl(url).ok) return;
+      const internal = entry.tab.internal; // cua #90
+      if (internal && isExtensionPage(url, internal.extensionId)) return;
+      if (!internal && validateBrowserUrl(url).ok) return;
       event.preventDefault();
       if (!live()) return;
       const at = this.now();
+      if (internal && validateBrowserUrl(url).ok) return this.openWebLink(entry, url, at); // cua #90
       if (/^mailto:/i.test(url)) {
         const sent = (this.mailOpens.get(entry) ?? []).filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
         this.mailOpens.set(entry, sent);
@@ -311,6 +319,21 @@ export class Navigator {
   }
 
   // ---- internals ------------------------------------------------------------------------------------------------------
+
+  // cua #90: a link from an internal tab to the web: a new selected tab of its session and partition after an activation
+  // in the page (the `window.open` gate's rule), so the extension's page stays where it is; without one, a blocked pop-up.
+  private openWebLink(entry: TabEntry, url: string, at: number): void {
+    const { store } = this.deps;
+    const recent = (this.webLinks.get(entry) ?? []).filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
+    this.webLinks.set(entry, recent);
+    if (!activationAllows(at, entry.input.lastActivationAt, recent)) {
+      store.update(entry.tab.tabId, { blockedPopups: entry.tab.blockedPopups + 1 });
+      return this.deps.seam.line(`browser-blocked-popup ${url}`);
+    }
+    recent.push(at);
+    const { appSessionId, partition } = entry.tab;
+    store.open({ appSessionId, url, select: true, partition, opener: entry });
+  }
 
   private visit(entry: TabEntry, url: string, typed: boolean): void {
     if (!validateBrowserUrl(url).ok) return; // about:blank never reaches the history

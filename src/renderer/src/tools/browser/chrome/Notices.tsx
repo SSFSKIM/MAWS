@@ -58,6 +58,8 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   commentCannotName: 'warning',
   // E4d end
   dialogAnswered: 'info', // E4c
+  extensionPopupFailed: 'warning', // cua #90
+  extensionPageClosed: 'info', // cua #90
 };
 
 export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' | /* E4c */ 'dialogType' | 'excerpt'>): string {
@@ -86,6 +88,12 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
     case 'dialogAnswered':
       return BROWSER_COPY.dialogAnswered(notice.dialogType ?? 'alert', notice.excerpt ?? '');
     // E4c end
+    // cua #90 start: an extension's popup or options tab closed by main
+    case 'extensionPopupFailed':
+      return BROWSER_COPY.extensions.popupFailed(notice.name);
+    case 'extensionPageClosed':
+      return BROWSER_COPY.extensions.pageClosed(notice.name);
+    // cua #90 end
   }
 }
 

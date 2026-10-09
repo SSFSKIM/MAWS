@@ -47,6 +47,7 @@ import { AgentCursor } from './agent/cursor';
 import { BookmarkBar, openAllConfirmation } from './bookmarks/bar';
 import { NativeMenus } from './bookmarks/menu';
 import { ProfileAvatars } from './profile-avatars';
+import { startExtensionUi, type ExtensionUi } from './extensions';
 // cua #90 end
 
 export interface BrowserDeps {
@@ -76,6 +77,7 @@ export interface Browser {
   // tab's is, and its per-boot extension loading registered as a preparer
   partitions: Partitions;
   // E4b end
+  extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
 export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
@@ -155,6 +157,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     store, views, navigator, downloads, history: index.browserHistory, profiles, register,
     bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
   });
+  // cua #90: the extensions action bar (its list, popups, options tabs and menus)
+  const extensionUi = startExtensionUi({ store, views, partitions, records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
@@ -206,6 +210,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   if (inspector) globalThis.__maws_browser = inspector;
   if (inspector) inspector.cua = cua; // E13: the e2e's fake host reads the socket and the leases
   if (inspector) inspector.menu = { ...menus.seam, openAllAsked: () => confirmOpenAll.asked() }; // cua #90: the native menus
+  if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
   const commentMode = startCommentMode({ store, emit, register, userData, env });
@@ -221,9 +226,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     views,
     cua, // E13
     partitions, // E4b
+    extensions: extensionUi, // cua #90
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       commentMode.stop(); // E4d
+      extensionUi.stop(); // cua #90: every popup closed
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       presence?.dispose(); // E4c
       stopCuaStatus?.(); // E13

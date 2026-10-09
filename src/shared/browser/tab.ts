@@ -10,6 +10,8 @@ export const BROWSER_TAB_ID = /^b_[0-9a-f]{12}$/;
 // Main's `invalid_input` message for a tab id it does not know (a tab closed meanwhile); the renderer drops only this one.
 export const UNKNOWN_BROWSER_TAB = 'unknown browser tab';
 export const BrowserTabIdSchema = z.string().regex(BROWSER_TAB_ID);
+// cua #90: a Chrome extension id, as `import.ts`'s EXTENSION_ID (which imports this file, so it cannot be imported here)
+const EXTENSION_ID = /^[a-p]{32}$/;
 
 // The tab's own Chromium session: the default partition, or one per imported Chrome profile (E4b). Never the app's
 // default session, nor E2's `maws-capture`.
@@ -73,5 +75,21 @@ export const BrowserTabSchema = z.strictObject({
   // page it drives opened), the group's title when the agent named its session, else "agent"; null for every other tab
   // and once the agent's connection let the tab go. Never persisted.
   agentBadge: z.string().max(BROWSER_AGENT_BADGE_MAX_CHARS).nullable(),
+  // cua #90 additive (its spec's "The popup view", options): an extension's options page MAWS opened as a tab, the one
+  // place a `chrome-extension://` URL loads in a tab; `title` is what the tab and its address field show ("<name> ·
+  // Options"). Such a tab is transient: never persisted, never suspended (closed instead), closed with its extension.
+  // null for every other tab.
+  internal: z.strictObject({ kind: z.literal('extension'), extensionId: z.string().regex(EXTENSION_ID), title: z.string() }).nullable(),
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;
+
+// cua #90: whether a URL is a page of the extension (`chrome-extension://<id>/…`), the one origin an internal tab of that
+// extension may show.
+export function isExtensionPage(url: string, extensionId: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'chrome-extension:' && parsed.host === extensionId; // Node gives the scheme an opaque origin
+  } catch {
+    return false;
+  }
+}

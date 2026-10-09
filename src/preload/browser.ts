@@ -13,8 +13,13 @@
 // It is built as its own preload entry (`electron.vite.config.ts`, out/preload/browser.js). A sandboxed preload can
 // `require` no file of its own, so it must never share a module with the app's preload (`index.ts`): Rollup would split
 // the shared module into a chunk both would fail to load (`bundle.test.ts` checks the build).
+// cua #90 start: an extension's own document (its popup, options page, background page) gets nothing from this file
+import { browserPreloadActs } from './browser-scope';
+
+const acts = browserPreloadActs((globalThis as { location?: { protocol: string } }).location?.protocol ?? '');
+// cua #90 end
 const world = globalThis as { __mawsBrowserPreloadRuns?: number };
-world.__mawsBrowserPreloadRuns = (world.__mawsBrowserPreloadRuns ?? 0) + 1;
+if (acts) world.__mawsBrowserPreloadRuns = (world.__mawsBrowserPreloadRuns ?? 0) + 1;
 
 export {};
 // E4d start: comment mode's hover UI and pick (E4d execution document, Design §3): one listener on main's
@@ -24,7 +29,7 @@ export {};
 import { ipcRenderer } from 'electron';
 import { installCommentMode } from './browser-comment';
 
-installCommentMode(ipcRenderer);
+if (acts) installCommentMode(ipcRenderer); // cua #90: the tab's pages only
 // E4d end
 // E4c start: the agent's cursor (E4c execution document, Design §9): one listener on main's `browser:cursor`, drawing
 // `<maws-agent-cursor>`; nothing sent, nothing exposed. `browser-cursor.ts` and the zod-free `@shared/browser/cursor` it
@@ -32,5 +37,5 @@ installCommentMode(ipcRenderer);
 // `ipcRenderer` E4d's block imports above (a second import of it trips the duplicate-import rule).
 import { installAgentCursor } from './browser-cursor';
 
-installAgentCursor(ipcRenderer);
+if (acts) installAgentCursor(ipcRenderer); // cua #90: the tab's pages only
 // E4c end

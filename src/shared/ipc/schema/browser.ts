@@ -45,8 +45,11 @@ import { AbsolutePathSchema } from './settings';
 // cua #90 start
 import { BOOKMARK_FAVICON_ORIGINS_MAX, BookmarkSyncErrorSchema, BookmarkTreeSchema } from '../../browser/bookmarks';
 import { BrowserProfileListItemSchema } from '../../browser/profiles';
+import { ExtensionActionSchema } from '../../browser/extensions';
 
 const BookmarkNodeIdSchema = z.number().int().min(1); // an index row's id (the empty tree's roots, 0, are never acted on)
+// A control's box in CSS px of the window's content area, rounded by the renderer: where a popup or a menu anchors.
+const ControlRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int().min(0), height: z.number().int().min(0) });
 // cua #90 end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
@@ -80,6 +83,9 @@ export const BrowserNoticeSchema = z.strictObject({
     // tells the person when they select the tab (A-42)
     'dialogAnswered',
     // E4c end
+    // cua #90 (in place): an extension's popup that failed to load or crashed, closed; an extension's options tab closed
+    // because the extension was unloaded (turned off, or its profile removed). `name`: the extension's.
+    'extensionPopupFailed', 'extensionPageClosed',
   ]),
   name: z.string().optional(),
   count: z.number().int().min(0).optional(),
@@ -294,6 +300,22 @@ export const commands = {
     output: z.strictObject({ icons: z.record(z.string(), z.string()) }),
     owner: 'main',
   },
+  // The extensions action bar (Interfaces "Extensions"): `actions` lists the partition's loaded extensions as actions,
+  // in Settings' order. The tab-scoped commands name the tab they came from, from which main reads the partition, the
+  // session and the window, and an extension of another partition is unknown. `action.click` opens the action's popup
+  // under `anchor` (a second click on the same action closes it); `action.options` opens its options page as a new
+  // selected tab of the tab's session; `action.menu` pops the action's native context menu (its name, Options, Manage
+  // extensions…) at `anchor`; `puzzle` pops the folded bar's native menu under the puzzle button (`anchor`), whose
+  // actions anchor their popup there.
+  'browser.extensions.actions': { input: z.strictObject({ partition: BrowserPartitionSchema }), output: z.strictObject({ actions: z.array(ExtensionActionSchema) }), owner: 'main' },
+  'browser.extensions.action.click': { input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema, anchor: ControlRectSchema }), output: z.void(), owner: 'main' },
+  'browser.extensions.action.options': { input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema }), output: z.void(), owner: 'main' },
+  'browser.extensions.action.menu': {
+    input: z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema, anchor: z.strictObject({ x: z.number().int(), y: z.number().int() }) }),
+    output: z.void(),
+    owner: 'main',
+  },
+  'browser.extensions.puzzle': { input: z.strictObject({ tabId: BrowserTabIdSchema, anchor: ControlRectSchema }), output: z.void(), owner: 'main' },
   // cua #90 end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
@@ -328,5 +350,15 @@ export const events = {
   // E13 end
   // cua #90 start: a partition's bookmark rows were replaced (an import or a sync); a bar of that partition re-reads its tree
   'browser.bookmarks.changed': z.strictObject({ partition: BrowserPartitionSchema }),
+  // the partition's actions changed (an extension loaded or unloaded): its bars read the list again
+  'browser.extensions.actions.changed': z.strictObject({ partition: BrowserPartitionSchema }),
+  // the popup open over the tab's window, for that tab's action button (pressed while its popup shows); null: none
+  'browser.extensions.popup': z.strictObject({ tabId: BrowserTabIdSchema, extensionId: ExtensionIdSchema.nullable() }),
+  // a menu's choice (in main) the chrome showing `tabId` carries on: show the options tab main opened (a main tab moves
+  // to it; the panel shows the session's selected tab already), or open Settings › Browser (Manage extensions…)
+  'browser.extensions.reveal': z.strictObject({
+    tabId: BrowserTabIdSchema,
+    show: z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('tab'), tab: BrowserTabSchema }), z.strictObject({ kind: z.literal('settings') })]),
+  }),
   // cua #90 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

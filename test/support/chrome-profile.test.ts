@@ -58,6 +58,8 @@ interface Manifest {
   host_permissions?: string[];
   background?: unknown;
   content_scripts: { matches: string[] }[];
+  action?: unknown; // cua #90
+  options_ui?: unknown;
 }
 const manifestOf = (dir: string) => json<Manifest>(join(dir, 'manifest.json'));
 
@@ -235,7 +237,9 @@ describe('buildChromeUserData', () => {
     expect(manifest.permissions).toEqual(source.permissions);
     expect(manifest.background).toEqual({ service_worker: 'sw.js' });
     expect(manifest.name).toBe(probe.name);
-    for (const file of ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html']) {
+    expect(manifest.action).toEqual({ default_title: 'MAWS probe', default_popup: 'popup.html' }); // cua #90
+    expect(manifest.options_ui).toEqual({ page: 'options.html' });
+    for (const file of ['sw.js', 'content.js', 'offscreen.html', 'offscreen.js', 'panel.html', 'popup.html', 'popup.js', 'options.html', 'options.js']) {
       expect(readFileSync(join(probe.dir, file), 'utf8')).toBe(readFileSync(join(PROBE_SOURCE, file), 'utf8'));
     }
   });

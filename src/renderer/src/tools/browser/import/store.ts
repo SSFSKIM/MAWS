@@ -107,10 +107,13 @@ export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryCli
     client.on('browser.import.changed', ({ profiles }) => {
       set({ records: profiles, listed: true });
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.profiles.list'] });
+      void queries.invalidateQueries({ queryKey: ['maws', 'browser.extensions.actions'] }); // cua #90: names and order follow the records
       void queries.invalidateQueries({ queryKey: ['maws', 'browser.import.profiles'] }); // the picker's "Imported" marks
     }),
     // cua #90: a partition's bookmark rows were replaced (an import, a sync): its bars read the tree again
     client.on('browser.bookmarks.changed', ({ partition }) => void queries.invalidateQueries({ queryKey: ['maws', 'browser.bookmarks.tree', { partition }] })),
+    // cua #90: an extension of the partition loaded or unloaded: its action bars read the list again
+    client.on('browser.extensions.actions.changed', ({ partition }) => void queries.invalidateQueries({ queryKey: ['maws', 'browser.extensions.actions', { partition }] })),
   ];
   void list(client);
   return () => offs.forEach((off) => off());

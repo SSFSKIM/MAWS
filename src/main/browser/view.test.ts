@@ -625,6 +625,53 @@ describe('the view manager: the cover\'s still (cua board #90)', () => {
   });
 });
 
+// cua #90: an extension's popup view sits above the page views of its window; it is told when a page view joins a window
+// (and would rise above it) and when the window's cover goes on (and it must close)
+describe('the view manager: what the extension popup hears (cua #90)', () => {
+  it('tells its listeners each time a page view is added to a window: a first claim, a move, a view made for a placed tab, a page back from staging', async () => {
+    const h = harness();
+    const one = h.win();
+    const two = h.win();
+    const added: number[] = [];
+    h.manager.onViewAdded((win) => void added.push(win.id));
+    const { tabId } = h.loaded();
+    h.place(one.sender, tabId, 'p1', R, true);
+    h.place(one.sender, tabId, 'p1', { ...R, x: 40 }); // a move within its window adds nothing
+    h.place(two.sender, tabId, 'p2', R, true);
+    expect(added).toEqual([one.w.id, two.w.id]);
+    const late = h.store.open({ appSessionId: A, url: null, select: true }).tab.tabId;
+    h.place(one.sender, late, 'p3', R, true);
+    h.store.load(late, 'https://late.test/');
+    expect(added).toEqual([one.w.id, two.w.id, one.w.id]);
+    // a page that never painted, staged for its still and put back in its window
+    await h.manager.cover(true, one.sender);
+    const view = h.views.at(-1)!;
+    let captures = 0;
+    view.capture = async () => fakeImage(10, ++captures === 1);
+    h.store.navigationCommitted(late, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    h.store.update(late, { loading: false });
+    await vi.waitFor(() => expect(h.covered()).toHaveLength(1));
+    expect(added).toEqual([one.w.id, two.w.id, one.w.id, one.w.id]);
+  });
+
+  it('tells the cover the moment it goes on, before the still is taken and the page hidden, and answers whether a window is covered', async () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    const heard: { window: number; visible: boolean; captured: boolean; covered: boolean }[] = [];
+    h.manager.onCovered((win) => void heard.push({ window: win.id, visible: view.visible, captured: view.calls.includes('capture'), covered: h.manager.isCovered(win.id) }));
+    expect(h.manager.isCovered(w.id)).toBe(false);
+    const pending = h.manager.cover(true, sender);
+    expect(heard).toEqual([{ window: w.id, visible: true, captured: false, covered: true }]);
+    await pending;
+    await h.manager.cover(true, sender); // already covered: not told again
+    await h.manager.cover(false, sender);
+    expect(h.manager.isCovered(w.id)).toBe(false);
+    expect(heard).toHaveLength(1);
+  });
+});
+
 describe('the view manager: windows (Design §3 "reloading or crashing", §15)', () => {
   it('the app renderer\'s reload clears that window\'s cover and owners and hides its views, and no other window\'s', async () => {
     const h = harness();

@@ -18,6 +18,7 @@ import type { BrowserTab } from '@shared/browser/tab';
 import { hostOf } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserChromeCommand, BrowserNotice, BrowserTabsChanged } from '@shared/ipc/schema/browser';
+import type { EventPayload } from '@shared/ipc/schema';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 
@@ -167,6 +168,20 @@ export function onChromeCommand(listener: (command: BrowserChromeCommand) => voi
   return () => void commandListeners.delete(listener);
 }
 
+// ---- cua #90: the extensions action bar ------------------------------------------------------------------------------
+
+// The action whose popup main shows over each tab's window (its button pressed meanwhile), by tab id.
+const extensionPopups = createStore<{ open: ReadonlyMap<string, string> }>()(() => ({ open: new Map() }));
+export const useExtensionPopup = (tabId: string | null): string | null => useStore(extensionPopups, (s) => (tabId === null ? null : (s.open.get(tabId) ?? null)));
+
+// A choice made in a native menu that the chrome showing the tab carries on (the options tab main opened; Settings).
+export type ExtensionReveal = EventPayload<'browser.extensions.reveal'>;
+const revealListeners = new Set<(reveal: ExtensionReveal) => void>();
+export function onExtensionReveal(listener: (reveal: ExtensionReveal) => void): () => void {
+  revealListeners.add(listener);
+  return () => void revealListeners.delete(listener);
+}
+
 // ---- show requests -----------------------------------------------------------------------------------------------------
 
 export interface ShowRequest {
@@ -208,6 +223,17 @@ export function connectBrowser(client: MawsBridge = ipc): () => void {
       setSessions(new Map([[appSessionId, { ...value, tabs: value.tabs.map((tab) => (tab.tabId === tabId ? { ...tab, control, controlSince } : tab)) }]]));
     }),
     client.on('browser.chrome.command', (command) => commandListeners.forEach((listener) => listener(command))),
+    // cua #90 start: the action bar's popup and its menus' choices
+    client.on('browser.extensions.popup', ({ tabId, extensionId }) =>
+      extensionPopups.setState((s) => {
+        const open = new Map(s.open);
+        if (extensionId === null) open.delete(tabId);
+        else open.set(tabId, extensionId);
+        return { open };
+      }),
+    ),
+    client.on('browser.extensions.reveal', (reveal) => revealListeners.forEach((listener) => listener(reveal))),
+    // cua #90 end
   ];
   list(client);
   return () => offs.forEach((off) => off());
@@ -246,5 +272,7 @@ export function resetBrowser(): void {
   noticeTimers.clear();
   commandListeners.clear();
   showListeners.clear();
+  revealListeners.clear(); // cua #90
+  extensionPopups.setState({ open: new Map() }); // cua #90
   browser.setState(initial());
 }
