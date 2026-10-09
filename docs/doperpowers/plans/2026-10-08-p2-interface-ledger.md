@@ -59,4 +59,5 @@ Files more than one P2 child touches: `src/shared/ipc/names/session.ts` and `sch
 ## 7. Record
 
 - 2026-10-08: opened with the composite spec; reservations above; no child dispatched (the owner's approval pending).
+- 2026-10-09 00:20 PDT: wave 1 dispatched after the owner's approval (spec 7462fe28, pin 8814d733): P2-0's executor and the authors of P2-A, P2-C and P2-E1, each in an isolated worktree, coding or designing against the rows above; B and D wait for a slot. Names proposed in their hand-backs are recorded here before a second child codes against them.
 - 2026-10-08 (review 1): rows added for the seam (P2-0, X22), `availability`, `mods.list`, `plugins.manifest`, the forced local presenter and the observed-facts file; the slot rule stated in §4; the sidecar's tolerant reader assigned to P2-0; E1's artifact-scope row made conditional on the owner's answer.

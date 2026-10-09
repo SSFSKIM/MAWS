@@ -191,12 +191,12 @@ Everything below is advisory inheritance unless marked **[binding]** with its jo
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
-| P2-0 The human send seam | brief | not-dispatched (dispatchable at approval; first) | `docs/doperpowers/ledgers/2026-10-0X-p2-0.md` on its branch |
-| P2-A Sessions available on demand | plan | not-dispatched (dispatchable at approval; G1 after P2-0) | execution document `docs/doperpowers/plans/2026-10-0X-p2-a-sessions-available.md` at dispatch; fixture `spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-*` (U1) |
-| P2-B Extensions library | plan | not-dispatched (dispatchable at approval) | `docs/doperpowers/plans/2026-10-0X-p2-b-extensions-library.md` |
-| P2-C To-human as the app's own behaviour | plan | not-dispatched (dispatchable at approval) | `docs/doperpowers/plans/2026-10-0X-p2-c-to-human.md`; the doperpowers PR in the owner's repository; fixture `pass3/p2-to-human-*` (U2) |
-| P2-D Resume chooser | brief | not-dispatched (dispatchable at approval) | `docs/doperpowers/ledgers/2026-10-0X-p2-d.md` on its branch |
-| P2-E1 Comments behave like comments: the card and the deliverable | plan | not-dispatched (dispatchable at approval) | `docs/doperpowers/plans/2026-10-0X-p2-e1-comment-card.md` |
+| P2-0 The human send seam | brief | in-flight: executor dispatched 2026-10-09 00:20 PDT (sol, isolated worktree) against pin 8814d733 | `docs/doperpowers/ledgers/2026-10-08-p2-0.md` on its branch |
+| P2-A Sessions available on demand | plan | in-flight: author dispatched 2026-10-09 00:20 PDT (Opus, isolated worktree) against pin 8814d733; the execution document, then its review, then an executor | execution document `docs/doperpowers/plans/2026-10-0X-p2-a-sessions-available.md` at dispatch; fixture `spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-*` (U1) |
+| P2-B Extensions library | plan | not-dispatched (waits for a free worker slot; four at once) | `docs/doperpowers/plans/2026-10-0X-p2-b-extensions-library.md` |
+| P2-C To-human as the app's own behaviour | plan | in-flight: author dispatched 2026-10-09 00:20 PDT (Opus, isolated worktree) against pin 8814d733 | `docs/doperpowers/plans/2026-10-0X-p2-c-to-human.md`; the doperpowers PR in the owner's repository; fixture `pass3/p2-to-human-*` (U2) |
+| P2-D Resume chooser | brief | not-dispatched (waits for a free worker slot) | `docs/doperpowers/ledgers/2026-10-0X-p2-d.md` on its branch |
+| P2-E1 Comments behave like comments: the card and the deliverable | plan | in-flight: author dispatched 2026-10-09 00:20 PDT (Opus, isolated worktree) against pin 8814d733 | `docs/doperpowers/plans/2026-10-0X-p2-e1-comment-card.md` |
 | P2-E2 The comment card in the browser pane | brief | not-dispatched (blocked-by E1; external #90) | `docs/doperpowers/ledgers/2026-10-0X-p2-e2.md` |
 | P2-F Finish | plan | not-dispatched (blocked) | `docs/doperpowers/plans/2026-10-0X-p2-f-finish.md`; `docs/doperpowers/evidence/p2-finish/` |
 
