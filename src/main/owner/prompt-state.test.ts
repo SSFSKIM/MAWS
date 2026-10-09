@@ -157,7 +157,7 @@ describe('transcriptEvidence', () => {
     expect(await transcriptEvidence(fixture('w1-steer-next-disk'), [NEVER])).toBeNull();
   });
 
-  it('reads no other record naming the uuid as evidence, reads across chunks, and is null for a missing file or no uuid', async () => {
+  it('reads no other record naming the uuid as evidence, reads across chunks, and is null for no uuid', async () => {
     const lines = [
       JSON.stringify({ type: 'file-history-snapshot', messageId: NEVER, snapshot: { messageId: NEVER } }),
       JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: `the prompt ${NEVER}` }),
@@ -168,8 +168,14 @@ describe('transcriptEvidence', () => {
     expect(await new PromptStateReader({ chunkBytes: 64 }).transcriptEvidence(path, [NEVER])).toBeNull();
     const taken = write('taken.jsonl', [userWith(NEVER), ...lines.slice(3)]);
     expect(await new PromptStateReader({ chunkBytes: 64 }).transcriptEvidence(taken, [NEVER])).toBe(NEVER);
-    expect(await transcriptEvidence(join(dir, 'missing.jsonl'), [NEVER])).toBeNull();
     expect(await transcriptEvidence(taken, [])).toBeNull();
+  });
+
+  // A read that fails is no evidence that the prompt was not taken (Design §6's recovery barrier): it rejects, for the
+  // service to wait and read again, never null (which the service reads as "not taken").
+  it('rejects when the transcript cannot be read: a missing file, or one that cannot be read as a file', async () => {
+    await expect(transcriptEvidence(join(dir, 'missing.jsonl'), [NEVER])).rejects.toThrow(/ENOENT/);
+    await expect(transcriptEvidence(dir, [NEVER])).rejects.toThrow(/EISDIR/);
   });
 
   it('leaves a last line still being written out', async () => {

@@ -3,9 +3,9 @@
 // have carried it. The first comes from the seam's result; every later one only from a `queue.transition` row naming a
 // member (two-way: every id the row names joins, with the life the row gives it), never from text. The engine's
 // `command.lifecycle` `started` or `completed` for a member uuid delivers the answer, for good; `discarded`, `refused`,
-// or `cancelled` for a uuid the host is not withdrawing kills that uuid; a `cancelled` while the host withdraws it waits
-// for the host's outcome row (`hold`, `cancel`, `giveback`). A member added late is reconciled at once against the
-// lifecycle evidence already seen for it. Nothing here concludes from absence: the service's recovery read does, after
+// or `cancelled` for a uuid the host is not withdrawing kills that uuid for good (no later row revives it); a `cancelled`
+// while the host withdraws it waits for the host's outcome row (`hold`, `cancel`, `giveback`). A member added late is
+// reconciled at once against the lifecycle evidence already seen for it. Nothing here concludes from absence: the service's recovery read does, after
 // a fold of the journals, and an `unknown` member waits for the transcript's evidence. A question may have several
 // answers (`settleAnswers`); each follows its own members.
 import type { PromptHistoryEvent } from '@shared/graph/events';
@@ -29,6 +29,7 @@ export interface Answer {
   reportedAt: string; // when main learnt of it: the recovery read starts a window before it
   readonly applied: Set<string>; // the event ids already applied (a log replay and a recovery fold overlap)
   readonly droppedWhileWithdrawing: Set<string>; // uuids the engine cancelled while the host withdrew them
+  readonly ended: Set<string>; // uuids the engine itself ended (discarded, refused, cancelled unasked): no row revives them
 }
 
 // The lives a row gives the ids it names (Design §6's table); undefined: the row says nothing of that id.
@@ -52,7 +53,7 @@ export interface StoredAnswer {
 }
 
 export function newAnswer(seed: StoredAnswer): Answer {
-  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: seed.deliveredAt ?? null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set() };
+  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: seed.deliveredAt ?? null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set(), ended: new Set() };
 }
 
 export const storedOf = (answer: Answer): StoredAnswer => ({
@@ -114,8 +115,10 @@ export function applyEvent(answer: Answer, event: PromptEvent, seen: () => Itera
   };
   let uuidLife = UUID_LIFE[event.action];
   if (event.messageUuid !== null) {
-    // a giveback returns a steer the engine kept, unless the engine cancelled it while the host was withdrawing it
+    // a giveback returns a steer the engine kept, unless the engine cancelled it while the host was withdrawing it; and
+    // a uuid the engine ended stays ended whatever the host's claim says of it after (a withdrawal it then gives back)
     if (event.action === 'giveback' && answer.droppedWhileWithdrawing.has(event.messageUuid)) uuidLife = 'dead';
+    if (answer.ended.has(event.messageUuid) && uuidLife !== undefined) uuidLife = 'dead';
     if (uuidLife !== 'withdrawing') answer.droppedWhileWithdrawing.delete(event.messageUuid);
   }
   set('entry', event.queueId, ENTRY_LIFE[event.action]);
@@ -141,12 +144,16 @@ function applyLifecycle(answer: Answer, event: Extract<PromptEvent, { kind: 'com
     case 'discarded':
     case 'refused':
       member.life = 'dead';
+      answer.ended.add(member.id);
       if (event.state === 'refused') answer.failed = { reason: 'refused' };
       return true;
     case 'cancelled':
       // the host's own withdrawal: its outcome row decides
       if (member.life === 'withdrawing') answer.droppedWhileWithdrawing.add(member.id);
-      else member.life = 'dead';
+      else {
+        member.life = 'dead';
+        answer.ended.add(member.id);
+      }
       return true;
     default:
       return false; // `queued`: the engine has it waiting, which every member already reads as alive

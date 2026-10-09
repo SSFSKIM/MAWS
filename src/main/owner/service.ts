@@ -11,7 +11,8 @@
 //   from it. Each answer sent ("Answer again", a follow-up Reply) keeps its own text and members; the newest the engine
 //   took is the question's answer, kept in the table beside any answer still on its way. An older answer stays the
 //   question's: followed to its end, and kept once taken, so its prompt is never read as another question's answer.
-//   `ownerChannel.cancel` withdraws the question's queued entries and pending steers through the host.
+//   `ownerChannel.cancel` withdraws the question's queued entries and pending steers through the host. An answer's text
+//   follows its queued entry's content (`session.queue`), which the composer may edit under the same entry id.
 // - Recovery. Main hears nothing while the host is away (an app closed or crashed, a reconnect): at start and at every
 //   reconnect, each session holding an answer on its way reads the host's prompt record (`session.promptHistory`) and
 //   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles, and no
@@ -27,6 +28,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, MessageUuid, SessionId } from '@shared/graph/ids';
+import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { SessionRecord } from '@shared/graph/session';
 import { answersOf, answerText } from '@shared/owner/answer';
@@ -59,7 +61,8 @@ export interface OwnerChannelServiceDeps {
   appEnabled: () => boolean; // settings' mods.toHuman.enabled
   attention: { setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void };
   dispatch: HostDispatch;
-  // the first of `uuids` the session's transcript shows the engine took (./prompt-state.ts), or null
+  // the first of `uuids` the session's transcript shows the engine took (./prompt-state.ts), or null; rejects when the
+  // transcript cannot be read, which is no evidence either way
   transcriptEvidence: (appSessionId: AppSessionId, uuids: readonly MessageUuid[]) => Promise<MessageUuid | null>;
   // the uuids at and below `uuid` on the session's transcript chain (./prompt-state.ts), or null: what a rewind took
   transcriptChain: (appSessionId: AppSessionId, uuid: MessageUuid) => Promise<ReadonlySet<string> | null>;
@@ -195,6 +198,25 @@ export class OwnerChannelService {
     if (marked || touched.size > 0) this.changed(appSessionId);
   }
 
+  // The host's queue snapshot (`session.queue`). An answer is correlated by its entry's id, and the composer's queue
+  // editor may change the entry's content under that id: the answer's text follows the content, which is what the host
+  // submits (an entry is editable only while queued, so the last content shown is the one written). Positive evidence,
+  // taken in memory while the session waits for its recovery read, and written once the gate is open.
+  queueShown(appSessionId: AppSessionId, entries: readonly QueueEntry[]): void {
+    const live = this.live.get(appSessionId);
+    if (live === undefined) return;
+    const touched = followContent(live, entries);
+    if (touched.size === 0 || this.recovering.has(appSessionId)) return;
+    for (const markId of touched) this.persist(appSessionId, markId);
+    this.changed(appSessionId);
+  }
+
+  // States the session's owner channel again: a decided launch's record (what it applied, what is pending) and its
+  // observed style (the mismatch) are part of it.
+  publish(appSessionId: AppSessionId): void {
+    this.emitState(appSessionId);
+  }
+
   // The seam's result for a question's answer (Design §6, "The card's send").
   answered(input: AnsweredInput): void {
     const appSessionId = input.appSessionId as AppSessionId;
@@ -207,13 +229,14 @@ export class OwnerChannelService {
     // carries one of this question's answers (on its way, delivered, legacy recognition's) adds no answer. The question's
     // answers are written and stated again all the same (persisting is idempotent), so a report whose first write
     // failed, its answer left in memory only, succeeds only once the table has it. Legacy recognition's answer only
-    // learns that it was the card's (the engine took the prompt before the report arrived): it keeps the card's origin.
+    // learns that it was the card's (the engine took the prompt before the report arrived): it takes the card's origin,
+    // and the card's text whole (legacy recognition reads one line of the prompt; a Reply may have several).
     const ids = [input.messageUuid, input.queueId].filter((id) => id !== undefined);
     if (ids.length > 0) {
       const answers = this.answersOf(live, row);
       const known = answers.find((answer) => answer.members.some((m) => ids.includes(m.id)));
       if (known !== undefined) {
-        if (known.origin === 'legacy') known.origin = input.origin;
+        if (known.origin === 'legacy') Object.assign(known, { origin: input.origin, text: input.text });
         live.answers.set(markId, answers);
         this.persist(appSessionId, markId);
         this.changed(appSessionId);
@@ -433,7 +456,7 @@ export class OwnerChannelService {
     if (event.messageUuid === null || event.bash !== null || event.isSynthetic || (event.origin !== 'human' && event.origin !== null)) return false;
     const live = this.liveOf(appSessionId);
     if (!live.userAt.has(event.messageUuid)) remember(live.userAt, event.messageUuid, event.at);
-    const text = typeof event.content === 'string' ? event.content : event.content.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
+    const text = textOf(event.content);
     if (answersOf(text).length === 0) return false;
     if (event.seq === null) return this.recognize(appSessionId, event.messageUuid, text, event.at);
     remember(live.prompts, event.messageUuid, { text, at: event.at });
@@ -510,20 +533,29 @@ export class OwnerChannelService {
   }
 
   // Design §6: an `unknown` member (a submission an exit cut) is settled by the transcript: taken, delivered; not, dead.
+  // A transcript that cannot be read settles nothing: the session waits behind the recovery barrier, whose read (tried
+  // again after a backoff, and at the next reconnect) reads the transcript for it again.
   private evidence(appSessionId: AppSessionId, markId: MarkId, answer: Answer): void {
     const live = this.liveOf(appSessionId);
     const unknown = answer.members.filter((m) => m.kind === 'uuid' && m.life === 'unknown' && !live.checking.has(m.id as MessageUuid)).map((m) => m.id as MessageUuid);
     if (unknown.length === 0) return;
     for (const uuid of unknown) live.checking.add(uuid);
     this.track(
-      this.deps.transcriptEvidence(appSessionId, unknown).then((taken) => {
-        for (const uuid of unknown) live.checking.delete(uuid);
-        if (!live.answers.get(markId)?.includes(answer)) return; // settled meanwhile
-        if (taken !== null) answer.deliveredAt = this.now();
-        else for (const member of answer.members) if (member.life === 'unknown' && unknown.includes(member.id as MessageUuid)) member.life = 'dead';
-        this.persist(appSessionId, markId);
-        this.changed(appSessionId);
-      }),
+      this.deps.transcriptEvidence(appSessionId, unknown).then(
+        (taken) => {
+          for (const uuid of unknown) live.checking.delete(uuid);
+          if (!live.answers.get(markId)?.includes(answer)) return; // settled meanwhile
+          settleUnknown(answer, unknown, taken, this.now());
+          this.persist(appSessionId, markId);
+          this.changed(appSessionId);
+        },
+        (error: unknown) => {
+          for (const uuid of unknown) live.checking.delete(uuid);
+          this.log(`${appSessionId}: the transcript could not be read; its answers wait for the next read: ${messageOf(error)}`);
+          this.recovering.add(appSessionId);
+          this.retryLater(appSessionId);
+        },
+      ),
     );
   }
 
@@ -575,6 +607,7 @@ export class OwnerChannelService {
     events.forEach((event, i) => {
       for (const answer of all()) applyEvent(answer, event, () => events.slice(0, i));
     });
+    followContent(live, queue.entries); // an entry edited while main did not hear the queue
     // an entry or a pending steer the snapshot shows is alive; a steer a complete record shows being withdrawn, with no
     // outcome row yet, is on its way too: its outcome row (`hold`, `cancel`, `giveback`, or `abandon` at an exit) settles
     // it. A record that is not complete may have lost that row, so there a withdrawal proves nothing.
@@ -585,6 +618,10 @@ export class OwnerChannelService {
     for (const answer of all()) {
       if (statusOf(answer) === 'delivered') continue;
       for (const member of answer.members) if ((member.life === 'alive' || member.life === 'unknown') && shown.has(member.id)) member.life = 'alive';
+      // an exit's uncertain submission is read from the transcript within the fold, so a read that fails keeps the gate
+      // closed and is tried again with the fold
+      const unknown = answer.members.filter((m) => m.kind === 'uuid' && m.life === 'unknown').map((m) => m.id as MessageUuid);
+      if (unknown.length > 0) reads.push(this.deps.transcriptEvidence(appSessionId, unknown).then((taken) => () => settleUnknown(answer, unknown, taken, this.now())));
       // a member still alive by the record but placed by neither the record's end nor the snapshot: what became of it is
       // read from the transcript, and an answer it cannot settle reads unconfirmed (an entry removed from a saved queue
       // no process held, which writes no row, for one)
@@ -648,6 +685,35 @@ export class OwnerChannelService {
       this.log(`the items of ${appSessionId} could not be projected: ${messageOf(error)}`);
     }
   }
+}
+
+// The text of a prompt's content: a string, or its text blocks one per line.
+function textOf(content: string | readonly { type: string; text?: unknown }[]): string {
+  return typeof content === 'string' ? content : content.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
+}
+
+// Each answer whose entry the queue shows takes the entry's content as its text; answers the questions whose text moved.
+function followContent(live: SessionLive, entries: readonly QueueEntry[]): Set<MarkId> {
+  const touched = new Set<MarkId>();
+  for (const [markId, answers] of live.answers) {
+    for (const answer of answers) {
+      for (const entry of entries) {
+        if (!answer.members.some((m) => m.kind === 'entry' && m.id === entry.queueId)) continue;
+        const text = textOf(entry.content);
+        if (text === answer.text) continue;
+        answer.text = text;
+        touched.add(markId);
+      }
+    }
+  }
+  return touched;
+}
+
+// The transcript's word on an answer's `unknown` members: one of them taken delivers it; none taken, they are dead.
+function settleUnknown(answer: Answer, unknown: readonly MessageUuid[], taken: MessageUuid | null, now: string): void {
+  if (answer.deliveredAt !== null) return;
+  if (taken !== null) answer.deliveredAt = now;
+  else for (const member of answer.members) if (member.life === 'unknown' && unknown.includes(member.id as MessageUuid)) member.life = 'dead';
 }
 
 // A question's state as main reports it (src/shared/owner/state.ts).

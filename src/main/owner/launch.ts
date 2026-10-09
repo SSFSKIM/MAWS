@@ -11,7 +11,8 @@
 // plugin drawing its own to-human view can defer. The decision is recorded in the index when the host answers
 // `launching`, and the engine's own report of its output style at that launch's first `session.init` is compared with
 // the resolver's reading of the settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's
-// name until a launch's init agrees with the resolver's own reading again.
+// name until a launch's init agrees with the resolver's own reading again. Each record is published as the session's
+// owner channel state (`ownerChannel.changed`), which the report and the mods library read again on.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
@@ -75,6 +76,8 @@ export interface OwnerChannelLaunchDeps {
   log: (message: string) => void;
   // the engine host's event batches, subscribed to at the first decided launch (nothing is due before one)
   subscribe?: (listener: (appSessionId: AppSessionId, events: readonly SessionEvent[]) => void) => void;
+  // the session's owner channel changed (a launch recorded, a style observed): its state is published again
+  changed?: (appSessionId: AppSessionId) => void;
 }
 
 // The decided launches' bookkeeping: the record at `launching`, and the mismatch check at the launch's first init.
@@ -97,7 +100,9 @@ export class OwnerChannelLaunches {
       });
     } catch (error) {
       this.deps.log(`the owner channel could not record the launch of ${decision.appSessionId}: ${messageOf(error)}`);
+      return;
     }
+    this.deps.changed?.(decision.appSessionId);
   }
 
   // A session's events from the engine host: the first live `session.init` after a decided launch carries the style the
@@ -115,7 +120,9 @@ export class OwnerChannelLaunches {
       this.deps.store.recordObserved(appSessionId, observed, observed !== resolved);
     } catch (error) {
       this.deps.log(`the owner channel could not record the style of ${appSessionId}: ${messageOf(error)}`);
+      return;
     }
+    this.deps.changed?.(appSessionId);
   }
 }
 

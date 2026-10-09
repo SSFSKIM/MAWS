@@ -1,9 +1,10 @@
 // Main's owner channel (the P2-C document, §2, §5, §6, §9): the decided launches' bookkeeping, which the session service
 // consults before every MAWS-owned launch (src/main/owner/launch.ts), fed the engine host's event batches for the
 // mismatch check; `mods.list` and `mods.setSessionOverride` over the index; and (M4) the marks, answers and attention
-// projection of ./service.ts with `ownerChannel.*`, fed the same batches, told when the host leaves `ready` and when it
-// streams again (the recovery read), and when the lane's switch moves. The config home is the engine's, from the captured
-// login-shell environment, never main's own `process.env`.
+// projection of ./service.ts with `ownerChannel.*`, fed the same batches and the queue's snapshots, told when the host
+// leaves `ready` and when it streams again (the recovery read), and when the lane's switch moves; a launch's record and
+// its observed style are published through the service as the session's state. The config home is the engine's, from
+// the captured login-shell environment, never main's own `process.env`.
 import { homedir } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostState } from '@shared/ipc/schema';
@@ -49,6 +50,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     appEnabled,
     log,
     subscribe: (listener) => void deps.onEvent('session.eventBatch', ({ appSessionId, events }) => listener(appSessionId, events)),
+    changed: (appSessionId) => service.publish(appSessionId), // a launch's record and its observed style are the lane's state
   });
   const mods: ModsDeps = {
     store: deps.index.ownerChannel,
@@ -88,6 +90,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     let enabled = appEnabled();
     offs.push(
       deps.onEvent('session.eventBatch', ({ appSessionId, events }) => service.onEvents(appSessionId as AppSessionId, events)),
+      deps.onEvent('session.queue', ({ appSessionId, entries }) => service.queueShown(appSessionId as AppSessionId, entries)), // an answer's entry edited
       deps.onHostState((state) => {
         if (state.state !== 'ready') service.hostDown();
       }),

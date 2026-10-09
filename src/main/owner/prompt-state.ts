@@ -92,16 +92,12 @@ export class PromptStateReader {
   // `queued_command` attachment's `source_uuid` (a `next` steer folded mid-turn); a steer it cancelled leaves none (M4's
   // probe, pass3/p2-to-human-steer-cancel-disk). Read backwards, where recent prompts are; only a line holding one of
   // the uuids is parsed. Uncached: it is asked rarely (an exit's uncertain submission, a recovery the journals could not
-  // settle) and for uuids no earlier scan looked for.
+  // settle) and for uuids no earlier scan looked for. A transcript that cannot be read (missing, or failing mid-read)
+  // rejects: it says nothing of the prompt, and null would read as "not taken" (the service waits and reads again).
   async transcriptEvidence(path: string, uuids: readonly MessageUuid[]): Promise<MessageUuid | null> {
     if (uuids.length === 0) return null;
     const needles = uuids.map((uuid) => Buffer.from(uuid));
-    let file;
-    try {
-      file = await open(path, 'r');
-    } catch {
-      return null;
-    }
+    const file = await open(path, 'r');
     try {
       let taken: MessageUuid | null = null;
       await this.linesBackwards(file, 0, (await file.stat()).size, (line) => {
@@ -112,8 +108,6 @@ export class PromptStateReader {
         return true;
       });
       return taken;
-    } catch {
-      return null;
     } finally {
       await file.close();
     }
@@ -228,7 +222,8 @@ export function recordedState(path: string): Promise<RecordedState> {
   return reader.recordedState(path);
 }
 
-// The first of `uuids` the transcript at `path` shows the engine took, or null (Design §6).
+// The first of `uuids` the transcript at `path` shows the engine took, or null (Design §6); rejects when the file cannot
+// be read.
 export function transcriptEvidence(path: string, uuids: readonly MessageUuid[]): Promise<MessageUuid | null> {
   return reader.transcriptEvidence(path, uuids);
 }

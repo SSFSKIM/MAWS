@@ -34,6 +34,8 @@ export class OwnerHostSim {
   cancelAnswer: 'withdrawn' | 'nothing' | Error = 'withdrawn';
   cancelGate: Promise<void> | ((uuid: MessageUuid) => Promise<void>) | null = null;
   historyComplete = true;
+  // the queue's snapshots (`session.queue`) as main hears them, published after each change the store saved
+  onQueue: ((queue: MessageQueue['state']) => void) | null = null;
   failCommand: CommandName | null = null;
   readonly commands: { name: string; input: unknown }[] = [];
   private normalizer!: Normalizer;
@@ -83,7 +85,9 @@ export class OwnerHostSim {
         await gate();
         return this.cancelAnswer === 'withdrawn';
       },
-      onChange: () => {},
+      onChange: (queue) => {
+        if (this.listening) this.onQueue?.(queue);
+      },
       log: () => {},
       unsettled: async () => {
         const fold = new UnsettledFold();

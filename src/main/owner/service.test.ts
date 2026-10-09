@@ -82,6 +82,7 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
   };
   service = make();
   service.start({ streaming: true });
+  sim.onQueue = (queue) => service.queueShown(app, queue.entries);
   if (opts.launch !== false) await sim.launch();
   const restart = async () => {
     service.stop();
@@ -395,6 +396,34 @@ describe('answers follow their members (Design §6)', () => {
     }
   });
 
+  it('a report of a multi-line Reply legacy recognition already delivered keeps the whole text, not the first line legacy read', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const text = answerText('Which backend?', 'Postgres\nOnly after a backup.');
+    const { entry } = await t.sim.queue.send(text);
+    t.sim.engine(entry.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: answerText('Which backend?', 'Postgres'), origin: 'legacy' } });
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, text });
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text, origin: 'answer' } });
+    expect(index.ownerChannel.mark(q)!.answerText).toBe(text);
+  });
+
+  it('an answer edited in the queue reads and is answered as edited, under the same entry', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'queued', queueId: entry.queueId });
+    const edited = answerText('Which backend?', 'SQLite');
+    await t.sim.queue.edit(entry.queueId, edited);
+    expect(t.question(q)).toMatchObject({ state: 'queued', text: edited });
+    await t.sim.turnEnded();
+    const sent = t.sim.queue.state.entries.find((e) => e.queueId === entry.queueId)!.messageUuid!;
+    t.sim.engine(sent, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: edited } });
+    expect(index.ownerChannel.mark(q)!.answerText).toBe(edited);
+  });
+
   it('a first report that arrives after the log forgot its prompt is read through the recovery read: delivered', async () => {
     const t = await harness();
     const q = t.ask('Which region?');
@@ -423,6 +452,18 @@ describe('answers follow their members (Design §6)', () => {
     const sent = t.sim.queue.state.entries.find((e) => e.queueId === entry.queueId)?.messageUuid;
     t.sim.engine(sent!, 'started');
     expect(t.question(q)).toMatchObject({ state: 'delivered' });
+  });
+
+  it.each(['refused', 'discarded'] as const)('a steer the engine %s while a hold withdrew it, given back, stays ended for a late report', async (state) => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.sim.cancelAnswer = 'nothing';
+    t.sim.cancelGate = async (uuid) => t.sim.engine(uuid, state);
+    await expect(t.sim.queue.hold(messageUuid)).rejects.toThrow();
+    t.report(q, { disposition: 'steered', messageUuid });
+    expect(t.question(q)).toMatchObject({ state: 'unanswered' });
   });
 
   it('a held follow-up on an answered question leaves it answered', async () => {
@@ -636,6 +677,61 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     t.sim.listening = true;
     await t.service.hostStreaming();
     expect(t.question(q)).toMatchObject({ state: 'unconfirmed' });
+  });
+
+  it('an answer edited in the queue while main was away reads as edited once the recovery read sees the queue', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'queued', queueId: entry.queueId });
+    t.sim.listening = false;
+    const edited = answerText('Which backend?', 'SQLite');
+    await t.sim.queue.edit(entry.queueId, edited);
+    await t.restart();
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q)).toMatchObject({ state: 'queued', text: edited });
+    await t.sim.turnEnded();
+    t.sim.engine(t.sim.queue.state.entries[0]!.messageUuid!, 'started');
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text: edited } });
+  });
+
+  it('a transcript that cannot be read settles no uncertain submission: the answer waits, then the retried read settles it', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    const { entry } = await t.sim.queue.send(answerText('Which backend?', 'Postgres'));
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid! });
+    const file = transcript;
+    transcript = dir.path; // a directory: every read of it fails
+    await t.sim.exit('crash');
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: expect.arrayContaining([{ kind: 'uuid', id: entry.messageUuid, life: 'unknown' }]) });
+    transcript = file;
+    t.taken(entry.messageUuid!);
+    await vi.waitFor(() => expect(t.question(q).state).toBe('delivered'));
+  });
+
+  it('a transcript that cannot be read leaves an answer the history cannot settle queued, never unconfirmed, until a read succeeds', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    await t.restart();
+    t.sim.listening = false;
+    await t.sim.exit('crash');
+    await t.sim.launch();
+    t.sim.launches.splice(0, t.sim.launches.length - 1); // the journals that held the steer's end were pruned
+    t.sim.historyComplete = false;
+    t.sim.listening = true;
+    const file = transcript;
+    transcript = dir.path;
+    await t.service.hostStreaming();
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'queued', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
+    transcript = file;
+    await vi.waitFor(() => expect(t.question(q).state).toBe('unconfirmed'));
   });
 
   it('a restart restores open answers from the table and folds the history before anything else', async () => {

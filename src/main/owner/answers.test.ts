@@ -203,6 +203,22 @@ describe("the engine's lifecycle for a member uuid", () => {
       expect(statusOf(answer)).toBe(outcome === 'hold' ? 'queued' : 'unanswered'); // a hold transfers it to the held entry
     }
   });
+
+  it.each(['refused', 'discarded'] as const)('a giveback never revives a uuid the engine %s while the host withdrew it', async (state) => {
+    let uuid!: MessageUuid;
+    const events = await recorded(async (sim) => {
+      sim.turn = true;
+      uuid = (await sim.queue.steer('a', { priority: 'next' })).messageUuid;
+      // the engine ends the steer during the withdrawal and had nothing to withdraw: the host gives the claim back
+      sim.cancelAnswer = 'nothing';
+      sim.cancelGate = async (u) => sim.engine(u, state);
+      await sim.queue.hold(uuid);
+    });
+    expect(events.filter((e) => e.kind === 'queue.transition').map((e) => (e as Row).action)).toEqual(expect.arrayContaining(['withdraw', 'giveback']));
+    const answer = fold(seeded('uuid', uuid), events);
+    expect(lifeOf(answer, 'uuid', uuid)).toBe('dead');
+    expect(statusOf(answer)).toBe('unanswered');
+  });
 });
 
 describe('members added late, events applied twice, a delivered answer', () => {

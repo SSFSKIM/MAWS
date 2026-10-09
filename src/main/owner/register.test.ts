@@ -108,14 +108,36 @@ describe('startOwnerChannel', () => {
     expect([...hostStates, ...streamings, ...settingsListeners]).toEqual([]);
   });
 
-  it('feeds the host’s event batches to the launches’ mismatch check', () => {
+  it('feeds the host’s event batches to the launches’ mismatch check, and states the session’s owner channel after each record', () => {
     const { launches } = start();
+    // before its first decided launch the session's lane waits for it; the launch's record ends the wait, which the report
+    // and the mods row learn from the owner channel's own event
+    expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { on: true, applied: null, pending: 'next-launch' } });
     launches.launched(
       { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', decidedBy: 'default', styleUnresolved: null },
       { launchId: 'l1', at: 't' },
     );
+    expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { on: true, applied: 'maws-contract', pending: null, mismatch: null } } });
     const init = { id: 'e1', sessionId: 's', at: 't', seq: 1, agentId: null, parentToolUseId: null, kind: 'session.init', outputStyle: 'Explanatory' } as unknown as SessionEvent;
     fire('session.eventBatch', { appSessionId: a, events: [init] });
     expect(index.ownerChannel.session(a)).toMatchObject({ style: 'default', observedStyle: 'Explanatory', styleMismatch: true });
+    expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { mismatch: { resolved: 'default', observed: 'Explanatory' } } } });
+  });
+
+  it('feeds the host’s queue snapshots to the answers: a queued answer edited in the queue reads as edited', () => {
+    index.ownerChannel.recordLaunch(a, { launchId: 'l1', at: '2026-10-09T09:00:00.000Z', laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default' });
+    const channel = start();
+    const block = {
+      id: 'e1', sessionId: 's', at: '2026-10-09T10:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'assistant.block.complete', messageUuid: '11111111-1111-4111-8111-111111111111',
+      apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '<need-input>Which backend?</need-input>' }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [],
+    } as unknown as SessionEvent;
+    fire('session.eventBatch', { appSessionId: a, events: [block] });
+    const markId = (handlers.get('ownerChannel.state')!({ appSessionId: a }) as { marks: { id: string }[] }).marks[0]!.id;
+    handlers.get('ownerChannel.answered')!({ appSessionId: a, markId, text: 'Answering "Which backend?": Postgres', origin: 'reply', disposition: 'queued', queueId: 'q1', started: false });
+    const entry = { queueId: 'q1', appSessionId: a, content: 'Answering "Which backend?": SQLite', createdAt: 't', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    fire('session.queue', { appSessionId: a, entries: [entry], paused: false });
+    expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { marks: [{ question: { state: 'queued', text: 'Answering "Which backend?": SQLite' } }] } });
+    channel.stop();
+    expect(listeners.get('session.queue')).toEqual([]);
   });
 });
