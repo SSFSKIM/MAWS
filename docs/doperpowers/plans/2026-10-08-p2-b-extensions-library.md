@@ -433,6 +433,8 @@ Consumed from P2-A (ledger §1): `useLoadedPlugins`, `Freshness`, `ObservedPlugi
 
 ## 10. Open questions for the architect (B proceeds on each recommendation)
 
+> Answered by the architect 2026-10-09 (the P2 spec's Decision Log 20; the ledger's §1, §4 and §6 rows record the names): questions 1 to 10 as recommended, the owner's sitting adjusting taste and copy. X20's `ModRow` already carries `name` and `description`; the per-session toggle write is C's `mods.setSessionOverride`, the app toggle `settings.set` on `mods.toHuman.enabled`.
+
 1. **(owner, taste) "From Anthropic & Partners".** Desktop's rule (the marketplace whose repository is `anthropics/claude-plugins-official`) plus the engine's built-in directory; the community marketplace (`anthropics/claude-plugins-community`, which the owner has added) goes under "From marketplaces you added". Recommendation: yes (Desktop's boundary; community plugins are third-party).
 2. **(owner, taste) Plugins installed only for other projects and not enabled here.** Hidden from the default list, shown read-only under Show › "Other projects". Recommendation: yes (the owner's complaint was 132 rows with paths; what cannot run here is one filter away; Desktop's library shows only what applies to the open folder).
 3. **(owner, taste) The pseudo-scope groups.** "Created by you" for skills-directory plugins and `--plugin-dir` folders, "Synced from claude.ai" for synced ones. Recommendation: yes.
