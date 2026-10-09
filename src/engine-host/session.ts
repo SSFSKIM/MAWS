@@ -44,9 +44,8 @@ import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
 // E1 start (E11: the wiring in session-maws.ts)
-import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import type { PendingAsk } from '@shared/maws/ask';
-import type { BrowserWaitReason } from '@shared/maws/browser';
 import type { AskAnswer } from '@shared/maws/tools';
 import type { DeliverableWriter, OnDeliverableWritten } from './deliverables/store';
 import { SessionMaws, type MawsListeners } from './session-maws';
@@ -106,12 +105,6 @@ export interface EngineSessionOptions {
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
-  // E4c start: where main writes a browser screenshot (the launcher's userData: host and main derive the same path from
-  // it; a session without one, in tests, names paths under the temp directory), and the runtime's notice that the app
-  // went (the browser bridge settles its pending requests `appNotOpen`; absent, it never goes)
-  userData?: string;
-  onClientGone?: (hook: () => void) => () => void;
-  // E4c end
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -128,7 +121,7 @@ interface SessionListeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
 }
-// E1, E2, E4c: paneShow, deliverableChanged, artifactCapture, browserRequest, browserCancel (session-maws.ts)
+// E1, E2: paneShow, deliverableChanged, artifactCapture (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
 
 type ProcessState = EngineSessionStatus['process'];
@@ -155,7 +148,7 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */, browserRequest: new Set(), browserCancel: new Set() /* E4c */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -210,7 +203,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, userData: opts.userData, onClientGone: opts.onClientGone,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
@@ -380,12 +373,9 @@ export class EngineSession {
     return this.maws.answerCapture(requestId, result);
   }
 
-  answerBrowser(requestId: RequestId, result: MawsBrowserAnswerResult): 'delivered' | 'not_pending' {
-    return this.maws.answerBrowser(requestId, result);
-  }
-
-  browserWaiting(requestId: RequestId, waiting: BrowserWaitReason | null): 'delivered' | 'not_pending' {
-    return this.maws.browserWaiting(requestId, waiting);
+  // E13: an agent's finished download through cua, as a file deliverable once per path
+  recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
+    return this.maws.recordDownload(download);
   }
 
   asks(): PendingAsk[] {
@@ -1067,7 +1057,7 @@ export class EngineSession {
     const { lost: lostApprovals } = this.broker.processExited();
     // E1 M5 fix: a blocking ask still published is attention lost like a pending AskUserQuestion (the architect's ruling
     // 1), counted before the tool server aborts it; `lostAskCount` names the asks among them (absent when none). E1: every
-    // tool call, pane, capture and browser request settles, and the async asks are cancelled before the exit row.
+    // tool call, pane and capture settles, and the async asks are cancelled before the exit row.
     const lostAsks = this.maws.processExited();
     const lost = lostApprovals + lostAsks;
     this.sideQuestions.processExited(new Date().toISOString()); // E3: no answer comes once the process is gone

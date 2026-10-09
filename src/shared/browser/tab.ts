@@ -27,11 +27,13 @@ export const BrowserControlSchema = z.enum(['idle', 'agent', 'human']);
 export type BrowserControl = z.infer<typeof BrowserControlSchema>;
 
 export const BROWSER_HANDBACK_IDLE_MS = 3000; // E4c: the human's control lapses after this long without input
+export const BROWSER_AGENT_IDLE_MS = 10_000; // E4c: `control: 'agent'` lapses to idle this long after the agent's last action
 export const BROWSER_LOADED_TABS_MAX = 12; // loaded tabs across the app (Design §2; Decision Log 6)
 export const BROWSER_TABS_MEMORY_MAX_MIB = 2048; // the soft cap on loaded tabs' sampled working sets
 export const BROWSER_DENIED_MAX = 8; // a document's denied permission requests kept for the banner
 export const BROWSER_PLACEHOLDER_MAX_BYTES = 400 * 1024; // the cover's JPEG; larger, and main sends null
 export const BROWSER_SUGGESTIONS_MAX = 8; // the address field's history rows
+export const BROWSER_AGENT_BADGE_MAX_CHARS = 40; // E13: an agent tab's badge text
 
 const count = z.number().int().min(0);
 
@@ -67,5 +69,9 @@ export const BrowserTabSchema = z.strictObject({
   covered: z.boolean(), // main hid the view for a layer
   createdAt: z.string(),
   lastShownAt: z.string(),
+  // E13 additive (the in-app browser spec of 2026-10-08): the panel's badge on a tab an agent created through cua (or a
+  // page it drives opened), the group's title when the agent named its session, else "agent"; null for every other tab
+  // and once the agent's connection let the tab go. Never persisted.
+  agentBadge: z.string().max(BROWSER_AGENT_BADGE_MAX_CHARS).nullable(),
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;

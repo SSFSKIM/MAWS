@@ -1,8 +1,7 @@
 // The browser's tab store (E4a execution document, Design §2): main's record of every browser tab, keyed by tab id,
-// each belonging to one session (P-21), with each session's selected tab (what the panel tool shows; what E4c's
-// `browser_tabs select` moves). Every change goes through `update`, which marks the tab's session dirty and sends
-// `browser.tabs.changed` with that session's whole list on the next macrotask, so a page load's dozen changes in a frame
-// reach the renderer once.
+// each belonging to one session (P-21), with each session's selected tab (what the panel tool shows). Every change goes
+// through `update`, which marks the tab's session dirty and sends `browser.tabs.changed` with that session's whole list
+// on the next macrotask, so a page load's dozen changes in a frame reach the renderer once.
 //
 // A tab is *loaded* when it has a view; the view is created when a URL is first loaded into the tab (opened with one,
 // navigated, or resumed), never for an empty or suspended tab alone. At most BROWSER_LOADED_TABS_MAX tabs are loaded
@@ -104,6 +103,9 @@ export interface TabStoreDeps {
   now?(): number;
   newTabId?(): string;
   schedule?(fn: () => void): void; // the next macrotask
+  // E13 (the in-app browser spec of 2026-10-08, Decision Log M2): a tab an agent drives through cua (under a debugger
+  // lease) is never a cap victim: suspending it would end the agent's attachment under it
+  driven?(tabId: string): boolean;
 }
 
 // A page's `window.open` child, adopted as a tab of its opener's session in its opener's partition (window-open.ts).
@@ -190,7 +192,7 @@ export class TabStore {
   }
 
   // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
-  // not the agent's or the human's (Design §2), nor one of `spared` (the tab being loaded; a page opening a tab, which
+  // not the agent's or the human's (Design §2), nor driven through cua (E13), nor one of `spared` (the tab being loaded; a page opening a tab, which
   // never suspends its own opener). The count cap here and the memory cap (memory.ts) share it.
   capVictim(...spared: TabEntry[]): TabEntry | undefined {
     const eligible = this.all().filter(
@@ -200,7 +202,8 @@ export class TabStore {
         entry.tab.placedIn === null &&
         !entry.tab.loading &&
         entry.tab.download?.state !== 'progressing' &&
-        entry.tab.control === 'idle',
+        entry.tab.control === 'idle' &&
+        this.deps.driven?.(entry.tab.tabId) !== true,
     );
     eligible.sort((a, b) => a.tab.lastShownAt.localeCompare(b.tab.lastShownAt) || a.tab.createdAt.localeCompare(b.tab.createdAt));
     return eligible[0];
@@ -428,7 +431,7 @@ export class TabStore {
     const entry = this.require(tabId);
     entry.committed = false;
     entry.pending = null; // the crash page stands; a stop that follows restores nothing over it
-    entry.debugger?.detach();
+    entry.debugger?.end();
     this.update(tabId, { crashed: { reason }, loading: false, unresponsive: false });
   }
 
@@ -527,7 +530,7 @@ export class TabStore {
     const view = entry.view;
     if (!view) return;
     for (const listener of [...this.destroying]) listener(entry);
-    entry.debugger?.detach();
+    entry.debugger?.end();
     entry.view = null;
     entry.debugger = null;
     entry.committed = false;
@@ -627,6 +630,7 @@ export class TabStore {
       covered: false,
       createdAt: at,
       lastShownAt: at,
+      agentBadge: null, // E13: an agent's badge is live, never restored
     };
   }
 

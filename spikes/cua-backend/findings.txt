@@ -1,0 +1,258 @@
+cua backend spikes S1 (dialogs) and S2 (file chooser), run 2026-10-08 in worktree MAWS-wt-13 (branch e13-cua-in-app-browser)
+with the repository's Electron 44.4.5 (Chrome 152.0.7977.130), macOS 26 (Darwin 25.6.0). Own userData under a mkdtemp in
+/tmp; page served from 127.0.0.1 on a random port; every run self-exits (hard timeout 30 s / 15 s); no window is ever shown.
+Each probe runs two views: "placed" (a WebContentsView in a hidden BaseWindow, show: false, 1000 x 700 / 800 x 600) and
+"unplaced" (a WebContentsView never added to any window, so no owner window). The debugger is the tab's webContents.debugger,
+attach('1.3'), Page.enable.
+
+Commands (from the worktree root, ELECTRON_RUN_AS_NODE unset):
+  node_modules/.bin/electron --js-flags=--expose-gc spikes/cua-backend/s1-dialogs.mjs     (exit 0, 11.6 s)
+  node_modules/.bin/electron spikes/cua-backend/s2-file-chooser.mjs                         (exit 0, ~1 s; run twice, both pass)
+
+==== S1: dialogs, the -run-dialog wrap holding Electron's callback ====
+Setup: Electron's one -run-dialog listener (count 1 before the wrap, as on 44.4.5) is replaced by one that stores
+(info, callback) and never calls Electron's original. Dialogs are fired from a page task (setTimeout inside Runtime.evaluate)
+so the evaluate returns before the renderer blocks; results read back by Runtime.evaluate of window.r and document.title.
+
+Q1  Is Page.javascriptDialogOpening delivered while the callback is held?  YES, both views, every dialog.
+    alert:   {"defaultPrompt":"","frameId":"…","hasBrowserHandler":true,"message":"hello alert","type":"alert","url":"http://127.0.0.1:<port>/"}
+    confirm: {"defaultPrompt":"","frameId":"…","hasBrowserHandler":true,"message":"ok to proceed?","type":"confirm","url":"http://127.0.0.1:<port>/"}
+    Note: hasBrowserHandler is true (Electron's dialog manager is still the content-layer handler, even though the wrap shows
+    nothing). Ordering: the CDP event reached main's JS before the -run-dialog emission (the first round logged "held
+    callbacks: 0" at javascriptDialogOpening, then "-run-dialog alert … (held)"); MAWS cannot assume it has seen -run-dialog
+    when the CDP event arrives.
+
+Q2  Does Page.handleJavaScriptDialog resolve alert/confirm, and does Page.javascriptDialogClosed arrive?  YES, both views.
+    alert  handle {accept:false} -> {} | closed {"result":false,"userInput":""} | page {"r":"alert-returned","title":"after-alert"}
+    confirm handle {accept:false} -> {} | closed {"result":false,"userInput":""} | page {"r":false,"title":"confirm:false"}
+    confirm handle {accept:true}  -> {} | closed {"result":true,"userInput":""}  | page {"r":true,"title":"confirm:true"}
+    alert  handle {accept:true}  -> {} | closed {"result":true,"userInput":""}  | page {"r":"alert2-returned","title":"after-alert2"}
+
+Q3a Held callback called after CDP answered:
+    - first call: no throw, no effect: callback(false) after CDP accept:true left the page at {"r":true,"title":"confirm:true"};
+    - second call of the same callback: THROWS "One-time callback was called more than once" (a catchable JS Error in main;
+      no crash);
+    - a later dialog afterwards works normally (confirm/accept:true -> page confirm:true, closed event arrives);
+    - (3e) a stale callback (its dialog already answered by CDP) called WHILE a newer dialog is open: no throw, no
+      javascriptDialogClosed within 800 ms, the page stays blocked on the newer dialog (evaluate did not return), and CDP's
+      handle(true) on the newer one then resolves it normally ({"r":true,"title":"confirm:true"}). A stale callback is
+      inert; it cannot answer a newer dialog.
+    - (3d) the reverse order: the wrap answers through the held callback FIRST (callback(true)): javascriptDialogClosed
+      arrives ({"result":true,"userInput":""}), page confirm:true, and a later Page.handleJavaScriptDialog returns
+      ERROR "No dialog is showing". So whichever side answers first wins; the other is a no-op (callback) or a clean
+      protocol error (CDP).
+Q3b Held callback never called and dropped (--js-flags=--expose-gc, references dropped, global.gc() x5):
+    - after CDP answered: a FinalizationRegistry on the callbacks proves collection
+      (finalized ["confirm:after late?","confirm:ok to proceed?","alert:hello alert"]); the next confirm and alert are
+      answered by CDP normally; no crash, renderer not crashed, debugger still attached;
+    - (3c) dropped BEFORE CDP answers (the wrap keeps no reference; gc while the dialog is open; finalizer fired:
+      ["confirm:dropped before answer?"]): CDP handle(true) still resolves it ({} | closed result:true | page confirm:true)
+      and the next alert is answered normally. Collection of the callback does NOT auto-answer the dialog (otherwise CDP's
+      handle would have failed "No dialog is showing" and r would be false).
+
+Q4  Native box / freeze: none. The wrap never calls Electron's listener, so no sheet/NSAlert can be shown; the hidden window's
+    'sheet-begin' never fired; main's 50 ms setInterval max gap over each scenario was 55 ms (placed) and 54 ms (unplaced,
+    where Electron's own listener would have been a parentless runModal that freezes main, per findings-e4c-unplaced.txt).
+    renderer crashed? false in every case; no render-process-gone / child-process-gone; process exit 0.
+
+Q5  Never-placed view (no owner window): identical results to the placed view for Q1 to Q4 (see the unplaced lines below).
+
+Caveat for the product (not a failure of the probe): a held callback that nobody answers leaves the page blocked
+indefinitely; with no CDP client handling dialogs on the tab (cua not attached, Page not enabled), MAWS must still answer
+through the callback (as its current routes do).
+
+S1 probe output (final run):
+[s1] electron 44.4.5 chrome 152.0.7977.130 url http://127.0.0.1:62121/
+[s1] ==== placed ====
+[s1] placed Electron -run-dialog listeners before wrap: 1 after: 1
+[s1] placed alert/accept:false opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"hello alert","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog alert "hello alert" at 291 (held)
+[s1] placed alert/accept:false handle {"accept":false} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":false,"userInput":""} | page: {"r":"alert-returned","title":"after-alert"}
+[s1] placed confirm/accept:false opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"ok to proceed?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1]   -run-dialog confirm "ok to proceed?" at 393 (held)
+[s1] placed confirm/accept:false handle {"accept":false} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":false,"userInput":""} | page: {"r":false,"title":"confirm:false"}
+[s1] placed confirm/accept:true opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"second?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 2
+[s1]   -run-dialog confirm "second?" at 495 (held)
+[s1] placed confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] placed 3a late callback(false) after CDP accept:true -> ok (no throw) | page: {"r":true,"title":"confirm:true"}
+[s1] placed 3a held[0] called twice -> THROW One-time callback was called more than once
+[s1] placed after-late confirm/accept:true opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"after late?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 3
+[s1]   -run-dialog confirm "after late?" at 920 (held)
+[s1] placed after-late confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] placed 3b dropped 4 callbacks, gc available: true | finalized so far: ["confirm:after late?","confirm:ok to proceed?","alert:hello alert"]
+[s1] placed after-gc confirm/accept:false opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"after gc?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog confirm "after gc?" at 2044 (held)
+[s1] placed after-gc confirm/accept:false handle {"accept":false} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":false,"userInput":""} | page: {"r":false,"title":"confirm:false"}
+[s1] placed after-gc2 alert/accept:true opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"after gc 2","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog alert "after gc 2" at 2673 (held)
+[s1] placed after-gc2 alert/accept:true handle {"accept":true} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | page: {"r":"alert2-returned","title":"after-alert2"}
+[s1]   -run-dialog confirm "dropped before answer?" at 2788 (dropped)
+[s1]   3c finalized before CDP answer: ["confirm:dropped before answer?"]
+[s1] placed 3c dropped-before-answer confirm/accept:true opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"dropped before answer?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1] placed 3c dropped-before-answer confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] placed 3c next alert/accept:false opening: {"defaultPrompt":"","frameId":"D58112975A2487D728B3F80582D2DAAD","hasBrowserHandler":true,"message":"next after 3c","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1]   -run-dialog alert "next after 3c" at 3713 (dropped)
+[s1] placed 3c next alert/accept:false handle {"accept":false} -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":false,"userInput":""} | page: {"r":"alert3c-returned","title":"after-alert3c"}
+[s1]   -run-dialog confirm "wrap answers first" at 3819 (held)
+[s1] placed 3d callback(true) first -> closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | later handle(false): ERROR No dialog is showing | page: {"r":true,"title":"confirm:true"}
+[s1]   -run-dialog confirm "stale target A" at 4096 (held)
+[s1]   -run-dialog confirm "newer B" at 4198 (held)
+[s1] placed 3e stale callback(false) while B open -> ok (no throw) | closed event: NONE (800 ms) | page: evaluate blocked (B still open)
+[s1] placed 3e then CDP handle(true) on B -> {} | closed: {"frameId":"D58112975A2487D728B3F80582D2DAAD","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] placed renderer crashed? false | debugger attached? true | max main tick gap so far (ms): 55
+[s1] ==== unplaced ====
+[s1] unplaced Electron -run-dialog listeners before wrap: 1 after: 1
+[s1] unplaced alert/accept:false opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"hello alert","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog alert "hello alert" at 6048 (held)
+[s1] unplaced alert/accept:false handle {"accept":false} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":false,"userInput":""} | page: {"r":"alert-returned","title":"after-alert"}
+[s1] unplaced confirm/accept:false opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"ok to proceed?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1]   -run-dialog confirm "ok to proceed?" at 6150 (held)
+[s1] unplaced confirm/accept:false handle {"accept":false} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":false,"userInput":""} | page: {"r":false,"title":"confirm:false"}
+[s1] unplaced confirm/accept:true opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"second?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 2
+[s1]   -run-dialog confirm "second?" at 6252 (held)
+[s1] unplaced confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] unplaced 3a late callback(false) after CDP accept:true -> ok (no throw) | page: {"r":true,"title":"confirm:true"}
+[s1] unplaced 3a held[0] called twice -> THROW One-time callback was called more than once
+[s1] unplaced after-late confirm/accept:true opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"after late?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 3
+[s1]   -run-dialog confirm "after late?" at 6655 (held)
+[s1] unplaced after-late confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] unplaced 3b dropped 4 callbacks, gc available: true | finalized so far: ["confirm:after late?","confirm:ok to proceed?","alert:hello alert","confirm:after gc?","confirm:dropped before answer?","confirm:after late?","confirm:ok to proceed?","alert:hello alert","alert:next after 3c","confirm:second?"]
+[s1] unplaced after-gc confirm/accept:false opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"after gc?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog confirm "after gc?" at 7777 (held)
+[s1] unplaced after-gc confirm/accept:false handle {"accept":false} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":false,"userInput":""} | page: {"r":false,"title":"confirm:false"}
+[s1] unplaced after-gc2 alert/accept:true opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"after gc 2","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 0
+[s1]   -run-dialog alert "after gc 2" at 8398 (held)
+[s1] unplaced after-gc2 alert/accept:true handle {"accept":true} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | page: {"r":"alert2-returned","title":"after-alert2"}
+[s1]   -run-dialog confirm "dropped before answer?" at 8521 (dropped)
+[s1]   3c finalized before CDP answer: ["confirm:dropped before answer?","confirm:dropped before answer?"]
+[s1] unplaced 3c dropped-before-answer confirm/accept:true opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"dropped before answer?","type":"confirm","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1] unplaced 3c dropped-before-answer confirm/accept:true handle {"accept":true} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] unplaced 3c next alert/accept:false opening: {"defaultPrompt":"","frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","hasBrowserHandler":true,"message":"next after 3c","type":"alert","url":"http://127.0.0.1:62121/"} | held callbacks: 1
+[s1]   -run-dialog alert "next after 3c" at 9441 (dropped)
+[s1] unplaced 3c next alert/accept:false handle {"accept":false} -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":false,"userInput":""} | page: {"r":"alert3c-returned","title":"after-alert3c"}
+[s1]   -run-dialog confirm "wrap answers first" at 9543 (held)
+[s1] unplaced 3d callback(true) first -> closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | later handle(false): ERROR No dialog is showing | page: {"r":true,"title":"confirm:true"}
+[s1]   -run-dialog confirm "stale target A" at 9699 (held)
+[s1]   -run-dialog confirm "newer B" at 9801 (held)
+[s1] unplaced 3e stale callback(false) while B open -> ok (no throw) | closed event: NONE (800 ms) | page: evaluate blocked (B still open)
+[s1] unplaced 3e then CDP handle(true) on B -> {} | closed: {"frameId":"C01238EA5B95B10FFFDB213C94DBCEB6","result":true,"userInput":""} | page: {"r":true,"title":"confirm:true"}
+[s1] unplaced renderer crashed? false | debugger attached? true | max main tick gap so far (ms): 54
+[s1] DONE max main tick gap (ms): 54 total ms 11553
+[s1] debugger detached: target closed
+[s1] debugger detached: target closed
+
+==== S2: file chooser interception on webContents.debugger ====
+Q1  With Page.setInterceptFileChooserDialog {enabled:true} ({} returned), a trusted click (Input.dispatchMouseEvent
+    mouseMoved, mousePressed, mouseReleased at the input's centre {x:220,y:120}) emitted
+    Page.fileChooserOpened {"backendNodeId":2,"frameId":"…","mode":"selectSingle"} about 10 ms after the click, both views;
+    the page saw ["mousedown@file","mouseup@file","click@file"] (isTrusted), navigator.userActivation.hasBeenActive false ->
+    true; no native panel ('sheet-begin' never fired, the process exits in about 1 s with code 0).
+    Input-delivery surprises (orthogonal to interception, relevant to how cua drives MAWS tabs):
+    - without Emulation.setFocusEmulationEnabled {enabled:true}, both pages read visibilityState 'hidden' and the
+      dispatched pressed/released pair never reached the page (page saw [], no activation, no event). With it (Playwright's
+      attach sends it; E4c measured the same), visibilityState 'visible' and the click lands;
+    - on the never-placed view (setBounds 800 x 600 + setVisible(true), viewport 800x600, focus emulation on), a bare
+      pressed/released pair (no preceding mouseMoved) did not reach the page (2 runs; page saw []), while the placed view
+      took it; with a mouseMoved first it lands on both. Puppeteer/Playwright-style clicks send mouseMoved first.
+    - fallback also measured: Runtime.evaluate {userGesture:true} "document.getElementById('file').click()" emitted
+      fileChooserOpened {"backendNodeId":1,…,"mode":"selectSingle"} within 1 ms, both views.
+Q2  DOM.setFileInputFiles {files:[<tmp>/upload-probe.txt], backendNodeId} -> {} (no DOM.enable/getDocument needed); the change
+    handler wrote "upload-probe.txt:14" into #picked; input.files.length 1. Both views, all runs.
+Q3  Page.setInterceptFileChooserDialog {enabled:false} -> {} (succeeds). No click was made with interception off (it would
+    open a native NSOpenPanel on the owner's screen). The first S2 run (before the diagnostics) exited 3 by its own 2 s bound
+    because the click never reached the page (the visibility issue above), so no chooser was requested and no panel opened.
+
+S2 probe output (final run):
+[s2] electron 44.4.5 chrome 152.0.7977.130 url http://127.0.0.1:62037/ upload /var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-s2-rFteLN/upload-probe.txt
+[s2] ==== placed ====
+[s2] placed Page.enable {"ok":{}}
+[s2] placed setInterceptFileChooserDialog {enabled:true} {"ok":{}}
+[s2] placed visibilityState: hidden
+[s2] placed Emulation.setFocusEmulationEnabled {enabled:true} {"ok":{}}
+[s2] placed visibilityState: visible | viewport: 800x600 | userActivation.hasBeenActive before: false
+[s2] placed trigger A (Input.dispatchMouseEvent at {"x":220,"y":120}): page saw ["mousedown@file","mouseup@file","click@file"] | hasBeenActive: true | fileChooserOpened: 1
+[s2] placed Page.fileChooserOpened {"backendNodeId":2,"frameId":"51D0788B1DA3B189BFADDC816ED1D32E","mode":"selectSingle"} (+10 ms after the click)
+[s2] placed DOM.setFileInputFiles {"ok":{}} | #picked: "upload-probe.txt:14" | input.files.length: 1
+[s2] placed setInterceptFileChooserDialog {enabled:false} {"ok":{}}
+[s2] placed fileChooserOpened events total: 1 | renderer crashed? false
+[s2] ==== unplaced ====
+[s2] unplaced Page.enable {"ok":{}}
+[s2] unplaced setInterceptFileChooserDialog {enabled:true} {"ok":{}}
+[s2] unplaced visibilityState: hidden
+[s2] unplaced Emulation.setFocusEmulationEnabled {enabled:true} {"ok":{}}
+[s2] unplaced visibilityState: visible | viewport: 800x600 | userActivation.hasBeenActive before: false
+[s2] unplaced trigger A (Input.dispatchMouseEvent at {"x":220,"y":120}): page saw ["mousedown@file","mouseup@file","click@file"] | hasBeenActive: true | fileChooserOpened: 1
+[s2] unplaced Page.fileChooserOpened {"backendNodeId":2,"frameId":"CE775DFBD5F0F7AB880A45F3AC6DC6AF","mode":"selectSingle"} (+11 ms after the click)
+[s2] unplaced DOM.setFileInputFiles {"ok":{}} | #picked: "upload-probe.txt:14" | input.files.length: 1
+[s2] unplaced setInterceptFileChooserDialog {enabled:false} {"ok":{}}
+[s2] unplaced fileChooserOpened events total: 1 | renderer crashed? false
+[s2] DONE total ms 1015
+
+==== Verdicts ====
+S1: PROMOTE — with the wrap only holding Electron's callback, CDP's own Page.javascriptDialogOpening / handleJavaScriptDialog / javascriptDialogClosed work for alert and confirm on placed and never-placed views with no native box and no main freeze; first answer wins, a later single callback call is an inert no-op (even with a newer dialog open), a second call of the same callback throws a catchable "One-time callback was called more than once", and dropping/GC'ing it (before or after CDP answers) is harmless.
+S2: PROMOTE — Page.setInterceptFileChooserDialog, Page.fileChooserOpened and DOM.setFileInputFiles pass through webContents.debugger unchanged (placed and never-placed views); the only caveats are input delivery (focus emulation needed on hidden pages; send mouseMoved before press on never-placed views), not interception.
+
+==== M2 live proof (2026-10-08) ====
+MAWS built from this branch (pnpm e2e:browser-cua's harness build, out/main/index.js) run by
+`node spikes/cua-backend/serve-dev.mjs /tmp/mh13-live2 live-A live-B` (own userData, MAWS_E2E=1, MAWS_E2E_QUIET=1), cua
+from the cua worktree at 602391b (M1 plus the harness's viewport fix):
+  CUA_BROWSER_BACKENDS=/tmp/mh13-live2/browser/cua/live-A.sock CUA_HOME=/tmp/cua-h13 \
+    node scripts/accept/maws-features.mjs --report … --other /tmp/mh13-live2/browser/cua/live-B.sock
+  {"profiles":"PASS","createTab":"PASS","locator":"PASS","viewport":"PASS","popup":"PASS","download":"SKIP","alert":"SKIP",
+   "confirm":"SKIP","chooser":"SKIP","cleanup":"PASS","isolation":"PASS"}
+The full report is m2-live-maws-features.json beside this file. After the run MAWS's seam read
+{"live-A":{"connections":0,"held":0,"leased":[]},"live-B":{"connections":0,"held":0,"leased":[]}}.
+Relaunch (acceptance 13's MAWS half, no engine): a `cua serve` polling profiles_list every 0.5 s read maws ready, then
+not ready 12 s after MAWS was stopped (socket files unlinked), then ready again 2.6 s after MAWS was relaunched over the
+same userData (the same path, live-A.sock).
+The vendor's tab.screenshot() answers JPEG on this route (FF D8 FF E0), so the harness's viewport step now reads JPEG too.
+
+==== M3 live proof (2026-10-08) ====
+MAWS built from this branch (`pnpm build`, out/main/index.js) run by the Electron binary itself, no Playwright driver:
+  node_modules/.bin/electron spikes/cua-backend/serve-plain.cjs /tmp/mh13-m3 live-A live-B
+cua from the cua worktree (M1 plus M3's harness steps):
+  CUA_BROWSER_BACKENDS=/tmp/mh13-m3/browser/cua/live-A.sock CUA_HOME=/tmp/cua-h13 \
+    node scripts/accept/maws-features.mjs --report … --other /tmp/mh13-m3/browser/cua/live-B.sock
+  {"profiles":"PASS","createTab":"PASS","locator":"PASS","viewport":"PASS","popup":"PASS","download":"PASS","alert":"PASS",
+   "confirm":"PASS","chooser":"PASS","cleanup":"PASS","isolation":"PASS"}
+The full report is m3-live-maws-features.json beside this file. download: download.path() under ~/Downloads, sha256
+a3030829…6ec5 (the fixture's), 7729 bytes, no save dialog, the file removed by the harness afterwards (its birth time
+and bytes proved it was the run's); alert: getJsDialog() type alert, dismiss() → #state after-alert; confirm: dismiss()
+→ confirm:false; chooser: setFiles([a 1234-byte file]) → #picked cua-upload.txt:1234. MAWS logged that the download was
+not recorded as a deliverable: no engine host holds the synthetic session live-A (the recording needs a real session).
+The 30 s default, live on the same build over the socket (no vendor): a confirm left unanswered opened at 1.6 s and
+closed at 31.6 s with result false (Page.javascriptDialogClosed from Chromium), the page reading confirm:false.
+
+Surprise: the first M3 run used serve-dev.mjs (Playwright's Electron driver) and failed alert and confirm with "no
+JavaScript dialog within 5 s": Playwright's own CDP client attaches to every page of the app it launches and dismisses
+a dialog that has no listener of its own, so the dialog closed 1 ms after it opened with nothing in MAWS answering it
+(the held callback was never called; the wrap, its route and the lease were all in place). S1 ran on the bare Electron
+binary and never saw it. The e2e harness (Playwright) cannot observe the held route for the same reason; the dialog
+pins are unit tests (src/main/browser/cua/dialogs.test.ts, agent/dialogs.test.ts) plus this live run.
+
+==== S3: the vendor's plain screenshot is a screencast first (E13 whole-branch review), run 2026-10-08 ====
+Question: the vendor's tab.screenshot() (tab_screenshot, css mode) and the AX state's screenshot start a screencast,
+take the first fresh Page.screencastFrame, stop and ack it, and capture with Page.captureScreenshot only when no frame
+comes within 2 s (vendor browser-service.mjs BS:43892-44050). Does a MAWS-shaped view yield frames, placed and parked?
+  node_modules/.bin/electron spikes/cua-backend/s3-screencast.mjs        (exit 0, ~10 s; run twice, same shape)
+Per view, three rounds of the vendor's sequence on a static page (frame: ms to the first frame, else the 2 s lapse;
+fresh: its metadata.timestamp is at or after the start, the vendor's own test; capture: Page.captureScreenshot's ms):
+  placed (a shown, transparent, inactive window; the page reads hidden)   no frame (2000), frame 21 ms, frame 18 ms
+  placed + Emulation.setFocusEmulationEnabled {enabled:true}              frame 32, 20, 20 ms (page reads visible)
+  placed in a never-shown window                                          no frame (2000), frame 17 ms, frame 18 ms
+  parked (never added to a window, 1280 x 800: MAWS's parking)            no frame in all three rounds (2000 each)
+  parked + focus emulation                                                frame 22, 20, 18 ms (page reads visible)
+Every frame that came was fresh; Page.captureScreenshot took 18-78 ms on every view. Verdict: a view yields screencast
+frames once its page reads visible; the vendor sends Emulation.setFocusEmulationEnabled {enabled:true} on every attach
+(BS:48115-48131), so on the real route a parked, never-placed agent tab answers the screencast in about 20 ms and never
+pays the 2 s fallback. MAWS's lease reset turns focus emulation off on release; the vendor's next attach turns it on
+again before any screenshot, so the rule holds per lease. Were a host ever to screenshot without focus emulation, a parked
+tab would pay 2 s per screenshot (then capture): the dependency is recorded here, not as debt.
+
+Live, the same day, on a plain MAWS (serve-plain.cjs, own userData under /tmp, a harness build of the final fix wave at f3519ff8) with
+cua serve from cua-wt-13 (CUA_HOME=/tmp/cua-h13), one agent tab (unselected, so parked): createBrowserTab, a locator
+click, then tab.screenshot() three times: 74, 66, 66 ms, each a 1280 x 800 JPEG. A trace of the lease's commands showed
+per screenshot Page.startScreencast {maxHeight:800, maxWidth:1280} forwarded about 50 ms after it arrived (the cursor's
+hide and its grace), the first frame 13 ms later, stop and ack; one "screenshot" activity each (three rows). After the
+cell the vendor took one more screencast, unbounded (no maxWidth/maxHeight, device mode): its response-metadata capture
+of the surface (BS:64978-65075, `_meta["codex/browserUse"]`), which MAWS neither hides the cursor for nor rows.

@@ -1,12 +1,19 @@
 // Downloads (E4a execution document, Design §8; A-31; Decision Log 18): a download is the human's, through the native
 // save dialog (Electron's, drawn above every view) opened at the Downloads folder with the file's name; one started while
-// the agent holds the page is cancelled and reported (`browser.download.refused`, E4c's tool error, and the chrome's
-// notice). Each tab shows one download line at a time (a second replaces it), following the item to done, cancelled or
+// the agent holds the page with no cua lease on it is cancelled and reported (`browser.download.refused` and the
+// chrome's notice). Each tab shows one download line at a time (a second replaces it), following the item to done, cancelled or
 // failed; Reveal in Finder shows the saved file. Under the e2e alone, `MAWS_E2E_SAVE_PATH` names the folder the file is
 // saved into without the dialog. A download from no tab of ours is cancelled.
-import { basename, join } from 'node:path';
+//
+// E13 (the in-app browser spec of 2026-10-08, "Downloads"): a download from a tab under a cua lease that the person does
+// not hold is the agent's, saved without a dialog in the Downloads folder under its own name, " (1)", " (2)"… before its
+// extension when the name is taken there or by a download still in flight, and reported through `agent`
+// (cua/downloads.ts: the host, the windows, the deliverable). Its line and Reveal in Finder are a person's download's.
+import { existsSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
 import type { DownloadItem, Session, WebContents } from 'electron';
 import type { BrowserTab } from '@shared/browser/tab';
+import type { AgentDownloads } from './cua/downloads';
 import type { PreparePartition } from './partition';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 
@@ -20,12 +27,26 @@ export interface DownloadsDeps {
   downloadsDir(): string;
   saveDir: string | null; // e2eSaveDir(env)
   reveal(path: string): void; // Reveal in Finder (the seam's under the e2e)
+  agent?: AgentDownloads; // E13: the agent's downloads through cua
+  exists?(path: string): boolean; // E13: a file is in the folder (tests)
+}
+
+// E13: the first free path for `filename` in `dir`: the name itself, else Chrome's macOS " (1)", " (2)"… before the
+// extension.
+export function uniqueDownloadPath(dir: string, filename: string, taken: (path: string) => boolean): string {
+  const extension = filename.startsWith('.') && extname(filename.slice(1)) === '' ? '' : extname(filename);
+  const stem = filename.slice(0, filename.length - extension.length);
+  for (let n = 0; ; n++) {
+    const path = join(dir, n === 0 ? filename : `${stem} (${n})${extension}`);
+    if (!taken(path)) return path;
+  }
 }
 
 const DONE_STATES = { completed: 'done', cancelled: 'cancelled', interrupted: 'failed' } as const;
 
 export class Downloads {
   private readonly current = new WeakMap<TabEntry, DownloadItem>();
+  private readonly inFlight = new Set<string>(); // E13: the paths the agent's downloads are being saved to
 
   constructor(private readonly deps: DownloadsDeps) {}
 
@@ -42,17 +63,29 @@ export class Downloads {
     const filename = item.getFilename();
     if (!entry) return item.cancel();
     const { tabId, appSessionId } = entry.tab;
-    if (entry.tab.control === 'agent') {
+    // E13: the agent's, through cua: no dialog, the folder's next free name, reported as it goes
+    const agent = this.deps.agent?.owns(entry) ? this.deps.agent : undefined;
+    if (agent) {
+      const exists = this.deps.exists ?? existsSync;
+      const path = uniqueDownloadPath(this.deps.saveDir ?? this.deps.downloadsDir(), filename, (candidate) => this.inFlight.has(candidate) || exists(candidate));
+      this.inFlight.add(path);
+      item.setSavePath(path);
+      const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [];
+      const ended = agent.started(entry, { url: chain[0] ?? item.getURL(), finalUrl: chain.at(-1) ?? item.getURL(), path });
+      item.once('done', (_event, state) => {
+        this.inFlight.delete(path);
+        ended({ state, path: item.getSavePath() || path, bytes: item.getReceivedBytes() });
+      });
+    } else if (entry.tab.control === 'agent') {
       item.cancel();
       emit('browser.download.refused', { tabId, url: item.getURL(), filename });
-      // E4c start: told in main too, beside the IPC emission: the agent's call that started it answers downloadRefused
-      this.notifyRefused({ tabId, url: item.getURL(), filename });
-      // E4c end
       emit('browser.notice', { appSessionId, tabId, kind: 'downloadRefusedAgent' });
       return;
     }
-    if (this.deps.saveDir !== null) item.setSavePath(join(this.deps.saveDir, filename));
-    else item.setSaveDialogOptions({ defaultPath: join(this.deps.downloadsDir(), filename) });
+    if (!agent) {
+      if (this.deps.saveDir !== null) item.setSavePath(join(this.deps.saveDir, filename));
+      else item.setSaveDialogOptions({ defaultPath: join(this.deps.downloadsDir(), filename) });
+    }
 
     this.current.set(entry, item);
     const line = (download: BrowserTab['download']) => {
@@ -74,24 +107,4 @@ export class Downloads {
     this.deps.reveal(download.path);
     return { revealed: true };
   }
-
-  // E4c start: the in-process hook for `browser.download.refused` (E4c execution document, Design §6; Decision Log 36,
-  // 43): main's browser tools listen for the refusal of the tab they act on and turn it into their call's error.
-  private readonly refusedListeners = new Set<(refused: { tabId: string; url: string; filename: string }) => void>();
-
-  onRefused(listener: (refused: { tabId: string; url: string; filename: string }) => void): () => void {
-    this.refusedListeners.add(listener);
-    return () => void this.refusedListeners.delete(listener);
-  }
-
-  private notifyRefused(refused: { tabId: string; url: string; filename: string }): void {
-    for (const listener of [...this.refusedListeners]) {
-      try {
-        listener(refused);
-      } catch (error) {
-        console.error('[browser] a download-refusal listener failed:', error);
-      }
-    }
-  }
-  // E4c end
 }

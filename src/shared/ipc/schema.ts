@@ -201,10 +201,6 @@ export const HOST_EVENTS = [
   'maws.pane.show',
   'maws.artifact.capture',
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
-  // E4c start: the browser tools' request to main and its cancellation (`maws.browser.progress` is main's)
-  'maws.browser.request',
-  'maws.browser.cancel',
-  // E4c end
 ] as const satisfies readonly EventName[];
 // E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;

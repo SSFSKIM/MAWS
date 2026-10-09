@@ -1,292 +1,18 @@
 import { EventEmitter } from 'node:events';
 import type { WebContentsView } from 'electron';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import { describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import type { EventName, EventPayload, HostState } from '@shared/ipc/schema';
-import type { MawsBrowserAnswerResult, MawsBrowserRequest } from '@shared/ipc/schema/maws';
-import { BROWSER_ANSWER_MS, BROWSER_TOOL_ERRORS } from '@shared/maws/browser';
-import { TOOL_ERRORS } from '@shared/maws/tools';
-import { BrowserBridge } from '../../../engine-host/tool-server/browser-bridge';
+import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabStore } from '../tabs';
-import type { BrowserCall, CallContext } from './handlers';
-import { BrowserRequests, e2eTabIds, reachableSessions, startBrowserAgent } from './index';
+import { TabControls } from './control';
+import { AgentCursor } from './cursor';
+import { e2eTabIds, reachableSessions, startAgentPresence } from './index';
 
-// The request lifecycle in main (E4c Design §4 "Every request has an AbortController", Interfaces "Main"): one request
-// at a time per tab, the host's cancel, the tab's close, the engine host's connection going (Decision Log 46: the host
-// settles its own calls `appNotOpen` then and sends no cancel, so main must stop on its own), and what is answered.
+// What stays of E4c's browser tools in main (P1 A-54; the in-app browser spec of 2026-10-08, M4): the lineage rule, the
+// e2e's tab ids, and the agent's presence over E4a's real store (the dialogs' wrap, parking, the e2e seam).
 
 const A = 'App-A' as AppSessionId;
-const rid = (n: number) => `req-${n}` as RequestId;
-const request = (n: number, tool: MawsBrowserRequest['tool'], args: unknown, appSessionId = A): MawsBrowserRequest => ({ appSessionId, requestId: rid(n), toolUseId: null, tool, args });
-
-const TAB = 'b_000000000001';
-const OTHER = 'b_000000000002';
-const FOREIGN = 'b_000000000003'; // another session's tab
-
-// A run the test settles by hand, with the context it was given.
-function deferredRuns() {
-  const runs: { call: BrowserCall; ctx: CallContext; settle(result: MawsBrowserAnswerResult | null): void }[] = [];
-  const run = vi.fn(
-    (call: BrowserCall, ctx: CallContext) =>
-      new Promise<MawsBrowserAnswerResult | null>((resolve) => {
-        runs.push({ call, ctx, settle: resolve });
-      }),
-  );
-  return { runs, run };
-}
-
-function harness() {
-  const { runs, run } = deferredRuns();
-  const answers: { call: BrowserCall; result: MawsBrowserAnswerResult }[] = [];
-  const reports: [string, string, unknown][] = [];
-  const pending = vi.fn();
-  const entries = new Map([TAB, OTHER, FOREIGN].map((tabId) => [tabId, { tab: { tabId } }]));
-  const requests = new BrowserRequests({
-    run,
-    answer: (call, result) => void answers.push({ call, result }),
-    report: (call, tabId, reason) => void reports.push([call.requestId, tabId, reason]),
-    control: { requestPending: pending },
-    store: { entry: (tabId: string) => entries.get(tabId) as never },
-    reaches: (appSessionId, tabId) => entries.has(tabId) && (tabId === FOREIGN ? appSessionId === 'App-B' : appSessionId === A),
-    now: () => 5_000,
-  });
-  return { requests, runs, run, answers, reports, pending, entries };
-}
-
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-const OK = (n: number): MawsBrowserAnswerResult => ({ ok: true, result: { n } });
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe('BrowserRequests: running and answering', () => {
-  it('runs a request with its parsed arguments and answers the host', async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'https://example.com' }), 'host');
-    await flush();
-    expect(h.runs).toHaveLength(1);
-    expect(h.runs[0].call).toMatchObject({ appSessionId: A, requestId: rid(1), tool: 'browser_navigate', args: { tabId: TAB, url: 'https://example.com' } }); // validators never transform
-    expect(h.runs[0].ctx.startedAt).toBe(5_000);
-    h.runs[0].ctx.waiting(TAB, 'human');
-    expect(h.reports).toEqual([[rid(1), TAB, 'human']]);
-    h.runs[0].settle(OK(1));
-    await flush();
-    expect(h.answers).toEqual([{ call: h.runs[0].call, result: OK(1) }]);
-    expect(h.pending.mock.calls.map(([entry, delta]) => [entry.tab.tabId, delta])).toEqual([
-      [TAB, 1],
-      [TAB, -1],
-    ]);
-  });
-
-  it('answers arguments main refuses without running anything', async () => {
-    const h = harness();
-    await h.requests.accept(request(1, 'browser_tabs', { action: 'open' }), 'host');
-    expect(h.run).not.toHaveBeenCalled();
-    expect(h.answers[0].result).toEqual({ ok: false, error: TOOL_ERRORS.invalidArguments('browser_tabs', 'url: open needs a url') });
-  });
-
-  it("answers tabNotFound at once for a tab the session does not reach, never queuing on it nor counting it pending (P-21)", async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: FOREIGN, url: 'reload' }, 'App-B' as AppSessionId), 'host'); // its owner's request
-    await flush();
-    const refused = await h.requests.accept(request(2, 'browser_navigate', { tabId: FOREIGN, url: 'reload' }), 'host');
-    expect(refused).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', FOREIGN) });
-    expect(h.answers.map(({ call, result }) => [call.requestId, result])).toEqual([[rid(2), refused]]);
-    // answered while the owner's request still runs on that tab: never queued behind it, never counted on it
-    expect(h.runs.map(({ call }) => call.requestId)).toEqual([rid(1)]);
-    expect(h.pending.mock.calls.map(([entry, delta]) => [entry.tab.tabId, delta])).toEqual([[FOREIGN, 1]]);
-    expect(await h.requests.accept(request(3, 'browser_navigate', { tabId: 'b_00000000dead', url: 'reload' }), 'seam')).toEqual({
-      ok: false,
-      error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', 'b_00000000dead'),
-    });
-  });
-
-  it('runs one request at a time per tab, and different tabs side by side', async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'back' }), 'host');
-    void h.requests.accept(request(3, 'browser_navigate', { tabId: OTHER, url: 'reload' }), 'host');
-    void h.requests.accept(request(4, 'browser_tabs', { action: 'list' }), 'host');
-    await flush();
-    expect(h.runs.map(({ call }) => call.requestId).sort()).toEqual([rid(1), rid(3), rid(4)]);
-    h.runs.find(({ call }) => call.requestId === rid(1))!.settle(OK(1));
-    await flush();
-    expect(h.runs.map(({ call }) => call.requestId).at(-1)).toBe(rid(2));
-  });
-
-  it('keeps the queue moving after a run that throws, answering actionFailed for it', async () => {
-    const h = harness();
-    h.run.mockImplementationOnce(() => Promise.reject(new Error('boom\n  at somewhere')));
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    await flush();
-    expect(h.answers[0].result).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed('browser_navigate', 'reload', '', 'boom') });
-    expect(h.runs.map(({ call }) => call.requestId)).toEqual([rid(2)]);
-  });
-
-  it('answers a seam run to its caller, never to the host', async () => {
-    const h = harness();
-    const answer = h.requests.accept(request(1, 'browser_tabs', { action: 'list' }), 'seam');
-    await flush();
-    h.runs[0].ctx.waiting(TAB, 'cover');
-    h.runs[0].settle(OK(1));
-    expect(await answer).toEqual(OK(1));
-    expect(h.answers).toEqual([]);
-    expect(h.reports).toEqual([[rid(1), TAB, 'cover']]); // the progress the e2e listens to still goes out
-  });
-});
-
-describe('BrowserRequests: ending a request', () => {
-  it("the host's cancel aborts a running request and nothing is answered, even when its run answers", async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    await flush();
-    expect(h.requests.cancel(A, rid(1))).toBe(true);
-    expect(h.runs[0].ctx.signal.aborted).toBe(true);
-    h.runs[0].settle(OK(1)); // a dispatched action that completed anyway: its answer is discarded
-    await flush();
-    expect(h.answers).toEqual([]);
-    expect(h.requests.cancel(A, rid(1))).toBe(false);
-  });
-
-  it('drops a cancelled request still in the queue unrun', async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    await flush();
-    h.requests.cancel(A, rid(2));
-    h.runs[0].settle(OK(1));
-    await flush();
-    expect(h.runs).toHaveLength(1);
-    expect(h.answers.map(({ call }) => call.requestId)).toEqual([rid(1)]);
-  });
-
-  it("ignores a cancel naming another session's request", async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_tabs', { action: 'list' }), 'host');
-    await flush();
-    expect(h.requests.cancel('App-B' as AppSessionId, rid(1))).toBe(false);
-    expect(h.runs[0].ctx.signal.aborted).toBe(false);
-  });
-
-  it("answers tabClosed for the tab's running and queued requests when it closes", async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(3, 'browser_navigate', { tabId: OTHER, url: 'reload' }), 'host');
-    await flush();
-    h.requests.abortTab(TAB);
-    h.runs[0].settle(null); // its wait rejected on the abort
-    await flush();
-    expect(h.answers.map(({ call, result }) => [call.requestId, result])).toEqual([
-      [rid(1), { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', TAB) }],
-      [rid(2), { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', TAB) }],
-    ]);
-    expect(h.runs[1].ctx.signal.aborted).toBe(false); // the other tab's request runs on
-  });
-
-  it('aborts every running and queued request, answering none, when the engine host goes (Decision Log 46)', async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(3, 'browser_tabs', { action: 'list' }), 'host');
-    await flush();
-    h.requests.abortAll();
-    expect(h.runs.map(({ ctx }) => ctx.signal.aborted)).toEqual([true, true]);
-    for (const run of h.runs) run.settle(OK(0));
-    await flush();
-    expect(h.runs).toHaveLength(2); // the queued one never ran
-    expect(h.answers).toEqual([]);
-    expect(h.requests.pendingFor(TAB)).toBe(false);
-  });
-
-  it('says whether a tab has a request pending (the driver never idles one out from under it)', async () => {
-    const h = harness();
-    expect(h.requests.pendingFor(TAB)).toBe(false);
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    await flush();
-    expect(h.requests.pendingFor(TAB)).toBe(true);
-    h.runs[0].settle(OK(1));
-    await flush();
-    expect(h.requests.pendingFor(TAB)).toBe(false);
-  });
-});
-
-// A request queued on a tab behind one that waits on the person or a cover waits too: main tells the host and the row
-// the head's reason for it, so its deadline pauses and its line reads truthfully, and lifts it when the head resumes or
-// ends. Time queued behind a head that works still counts against the queued request's deadline.
-describe('BrowserRequests: a queued request waits with the head of its tab', () => {
-  it("mirrors the head's wait onto the requests queued on its tab, at enqueue too, and lifts it when the head resumes or its turn ends", async () => {
-    const h = harness();
-    void h.requests.accept(request(1, 'browser_navigate', { tabId: TAB, url: 'reload' }), 'host');
-    void h.requests.accept(request(2, 'browser_navigate', { tabId: TAB, url: 'back' }), 'host');
-    void h.requests.accept(request(3, 'browser_navigate', { tabId: OTHER, url: 'reload' }), 'host');
-    await flush();
-    const head = h.runs[0];
-    head.ctx.waiting(TAB, 'human');
-    expect(h.reports).toEqual([[rid(1), TAB, 'human'], [rid(2), TAB, 'human']]); // the other tab's request is not touched
-    void h.requests.accept(request(4, 'browser_navigate', { tabId: TAB, url: 'forward' }), 'host'); // joins a paused queue
-    expect(h.reports.at(-1)).toEqual([rid(4), TAB, 'human']);
-    h.reports.length = 0;
-    head.ctx.waiting(TAB, null);
-    head.ctx.waiting(TAB, 'cover');
-    expect(h.reports).toEqual([
-      [rid(1), TAB, null], [rid(2), TAB, null], [rid(4), TAB, null],
-      [rid(1), TAB, 'cover'], [rid(2), TAB, 'cover'], [rid(4), TAB, 'cover'],
-    ]);
-    h.reports.length = 0;
-    head.settle(OK(1)); // its turn ends while it still waits (an answer the cover wait gave up on)
-    await flush();
-    expect(h.reports).toEqual([[rid(2), TAB, null], [rid(4), TAB, null]]);
-    expect(h.runs.at(-1)!.call.requestId).toBe(rid(2));
-    h.reports.length = 0;
-    h.requests.cancel(A, rid(4)); // a cancelled request is told nothing more
-    h.runs.at(-1)!.ctx.waiting(TAB, 'human');
-    h.runs.at(-1)!.ctx.waiting(TAB, null);
-    expect(h.reports).toEqual([[rid(2), TAB, 'human'], [rid(2), TAB, null]]);
-  });
-
-  it('a request queued past 30 s behind a held head does not time out at the host; its deadline runs from the resume', async () => {
-    vi.useFakeTimers();
-    const { runs, run } = deferredRuns();
-    const entries = new Map([[TAB, { tab: { tabId: TAB } }]]);
-    // the host's bridge and main's requests wired to each other as the IPC does (each closure runs after both exist)
-    const bridge = new BrowserBridge({
-      send: (sent) => void requests.accept({ appSessionId: A, ...sent }, 'host'),
-      cancel: (requestId) => void requests.cancel(A, requestId),
-    });
-    const requests = new BrowserRequests({
-      run,
-      answer: (call, result) => void bridge.answer(call.requestId as RequestId, result),
-      report: (call, _tabId, reason) => void bridge.waiting(call.requestId as RequestId, reason),
-      control: { requestPending: vi.fn() },
-      store: { entry: (tabId: string) => entries.get(tabId) as never },
-      reaches: () => true,
-      now: Date.now,
-    });
-    const ask = (n: number) => {
-      const outcome: { kind?: string } = {};
-      void bridge.request({ requestId: rid(n), toolUseId: null, tool: 'browser_navigate', args: { tabId: TAB, url: 'reload' } }, new AbortController().signal).then(({ kind }) => (outcome.kind = kind));
-      return outcome;
-    };
-    const first = ask(1);
-    const second = ask(2);
-    await vi.advanceTimersByTimeAsync(0);
-    runs[0].ctx.waiting(TAB, 'human'); // the person holds the page
-    await vi.advanceTimersByTimeAsync(5 * BROWSER_ANSWER_MS);
-    expect([first.kind, second.kind]).toEqual([undefined, undefined]);
-    runs[0].ctx.waiting(TAB, null); // handed back: both deadlines run again, whole
-    await vi.advanceTimersByTimeAsync(BROWSER_ANSWER_MS - 1);
-    expect(second.kind).toBeUndefined();
-    runs[0].settle(OK(1));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(first.kind).toBe('answered');
-    await vi.advanceTimersByTimeAsync(1); // the head worked for the whole re-armed deadline: the residual the queue accepts
-    expect(second.kind).toBe('timeout');
-  });
-});
 
 describe('reachableSessions (P-24, Decision Log 29)', () => {
   const T = 'App-T' as AppSessionId;
@@ -320,8 +46,8 @@ describe('e2eTabIds (Design §13 (b); Decision Log 36)', () => {
   });
 });
 
-// The wiring: the host's events in, the commands out, the tab's close and the host's state, over E4a's real store.
-describe('startBrowserAgent', () => {
+// The wiring over E4a's real store: every new view's dialogs wrapped, parking by control and by lease, the seam.
+describe('startAgentPresence', () => {
   class FakeWebContents extends EventEmitter {
     readonly loadURL = vi.fn(() => Promise.resolve());
     readonly close = vi.fn();
@@ -339,8 +65,7 @@ describe('startBrowserAgent', () => {
   }
 
   function wired() {
-    const emitted: { name: EventName; payload: unknown }[] = [];
-    const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
+    const emit = (() => undefined) as <N extends EventName>(name: N, payload: EventPayload<N>) => unknown;
     let ids = 0;
     const store = new TabStore({
       emit,
@@ -350,203 +75,79 @@ describe('startBrowserAgent', () => {
       schedule: () => {},
     });
     const views = { park: vi.fn() };
-    const listeners = new Map<string, (payload: never) => void>();
-    const stateListeners = new Set<(state: HostState) => void>();
-    const dispatched: [string, unknown][] = [];
-    const hosts = {
-      onEvent: vi.fn((name: string, listener: (payload: never) => void) => {
-        listeners.set(name, listener);
-        return () => void listeners.delete(name);
-      }),
-      dispatch: vi.fn(async (_owner: string, name: string, input: unknown) => {
-        dispatched.push([name, input]);
-        return { ok: true, value: { outcome: 'delivered' } } as never;
-      }),
-      onState: vi.fn((_owner: string, listener: (state: HostState) => void) => {
-        stateListeners.add(listener);
-        return () => void stateListeners.delete(listener);
-      }),
+    const controls = new TabControls({ store });
+    const cursor = new AgentCursor({ store, controls });
+    const leased = new Set<string>();
+    const held: string[] = [];
+    const cua = {
+      holds: (tabId: string) => leased.has(tabId),
+      onChange: () => () => {},
+      dialogs: { holds: (tabId: string) => leased.has(tabId), hold: (entry: { tab: { tabId: string } }) => void held.push(entry.tab.tabId) },
     };
-    const drivers = { for: vi.fn(), state: vi.fn(() => 'none' as const), close: vi.fn(async () => {}), retire: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
-    const agent = startBrowserAgent({
-      store,
-      navigator: { navigate: vi.fn(() => true) },
-      onDownloadRefused: () => () => {},
-      sessions: { get: (id: AppSessionId) => (id === THREAD ? ({ lineage: { kind: 'side-thread', parentAppSessionId: A } } as never) : null) },
-      hosts: hosts as never,
-      emit,
-      env: {},
-      views,
-      userData: '/nonexistent/maws-user-data',
-      drivers,
-    });
-    const send = (name: string, payload: unknown) => listeners.get(name)!(payload as never);
-    const hostState = (state: HostState['state']) => {
-      for (const listener of stateListeners) listener({ state, pid: null, restarts: 0, revision: 1 });
+    const presence = startAgentPresence({ store, emit, views, controls, cursor, cua });
+    const open = (select = true) => store.open({ appSessionId: A, url: 'https://a.test/', select }).tab.tabId;
+    const contentsOf = (tabId: string) => store.entry(tabId)!.view!.webContents as unknown as FakeWebContents;
+    const stop = () => {
+      presence.dispose();
+      cursor.dispose();
+      controls.dispose();
     };
-    return { store, agent, send, hostState, dispatched, listeners, emitted, drivers, views };
+    return { store, presence, views, controls, leased, held, open, contentsOf, stop };
   }
 
-  const THREAD = 'App-Thread' as AppSessionId;
-  const status = (appSessionId: AppSessionId, process: string) => ({ appSessionId, status: { appSessionId, process } });
-
-  it("retires the drivers of an exited session's tabs at once, but not one another session still has a request on (Design §4)", async () => {
+  it("wraps every new view's dialogs: an agent-held tab's alert is answered with its default, a leased one's goes to cua's held route", () => {
     const w = wired();
-    const mine = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    const busy = w.store.open({ appSessionId: A, url: 'https://b.test/', select: false }).tab.tabId;
-    const theirs = w.store.open({ appSessionId: 'App-B' as AppSessionId, url: 'https://c.test/', select: true }).tab.tabId;
-    // a side thread of A is navigating in A's second tab
-    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId: busy, url: 'https://d.test/' }, THREAD));
-    await flush();
-    w.send('session.status', status(A, 'ready'));
-    expect(w.drivers.retire).not.toHaveBeenCalled();
-    w.send('session.status', status(A, 'exited'));
-    expect(w.drivers.retire.mock.calls).toEqual([[mine]]);
-    expect(w.drivers.retire).not.toHaveBeenCalledWith(theirs);
-    await w.agent.stop();
-  });
-
-  it("answers tabNotFound for another session's tab without queuing on it", async () => {
-    const w = wired();
-    const theirs = w.store.open({ appSessionId: 'App-B' as AppSessionId, url: 'https://c.test/', select: true }).tab.tabId;
-    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId: theirs, url: 'reload' }));
-    await vi.waitFor(() => expect(w.dispatched).toHaveLength(1));
-    expect(w.dispatched[0]).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabNotFound('browser_navigate', theirs) } }]);
-    await w.agent.stop();
-  });
-
-  it("answers maws.browser.request through maws.browser.answer, and stops listening at stop", async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.send('maws.browser.request', request(1, 'browser_tabs', { action: 'list' }));
-    await vi.waitFor(() => expect(w.dispatched).toHaveLength(1));
-    expect(w.dispatched[0]).toEqual([
-      'maws.browser.answer',
-      { appSessionId: A, requestId: rid(1), result: { ok: true, result: expect.objectContaining({ action: 'list', tabs: [expect.objectContaining({ tabId })] }) } },
-    ]);
-    await w.agent.stop();
-    expect(w.listeners.size).toBe(0);
-  });
-
-  it('a request the host cancels, or that the engine host stops waiting for, answers nothing', async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId, url: 'https://b.test/' }));
-    w.send('maws.browser.request', request(2, 'browser_navigate', { tabId, url: 'https://c.test/' }));
-    await flush();
-    w.send('maws.browser.cancel', { appSessionId: A, requestId: rid(1) });
-    await flush();
-    w.hostState('restarting');
-    await flush();
-    expect(w.dispatched).toEqual([]);
-    await w.agent.stop();
-  });
-
-  it("answers tabClosed for a request whose tab the person closes, and closes the tab's driver", async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId, url: 'https://b.test/' }));
-    await flush();
-    w.store.close(tabId);
-    await vi.waitFor(() => expect(w.dispatched).toHaveLength(1));
-    expect(w.dispatched[0]).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', tabId) } }]);
-    expect(w.drivers.close).toHaveBeenCalledWith(tabId);
-    await w.agent.stop();
-  });
-
-
-  it('runs a seam request without the host, and reads the tab for the e2e', async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    const answer = await w.agent.seam.run(A, 'browser_tabs', { action: 'list' });
-    expect(answer).toMatchObject({ ok: true, result: { action: 'list' } });
-    expect(w.dispatched).toEqual([]);
-    expect(w.agent.seam.control(tabId)).toEqual({ control: 'idle', controlSince: expect.any(String) });
-    expect(w.agent.seam.control('b_00000000dead')).toBeNull();
-    expect(w.agent.seam.driverState(tabId)).toBe('none');
-    w.store.entry(tabId)!.input.emit({ kind: 'mouse', source: 'human', at: 7 });
-    expect(w.agent.seam.lastInputs(tabId)).toEqual([{ kind: 'mouse', source: 'human', at: 7 }]);
-    await w.agent.stop();
-  });
-
-  it('a seam screenshot carries a record id the seam minted; a host request without one is refused (Decision Log 77 (d))', async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.drivers.for.mockRejectedValue(new Error('no page'));
-    // past the id check: the handler went on to the driver, which failed
-    expect(await w.agent.seam.run(A, 'browser_screenshot', { tabId })).toEqual({
-      ok: false, error: BROWSER_TOOL_ERRORS.actionFailed('browser_screenshot', 'screenshot', '', 'MAWS could not attach to the tab: no page'),
-    });
-    w.send('maws.browser.request', request(1, 'browser_screenshot', { tabId }));
-    await vi.waitFor(() => expect(w.dispatched).toEqual([
-      ['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.screenshotFailed('the request carries no deliverable id') } }],
-    ]));
-    expect(w.drivers.for).toHaveBeenCalledTimes(1);
-    await w.agent.stop();
-  });
-
-  it('a request held at the pause point by the person reports the wait, and answers tabClosed when the tab closes (Design §8)', async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.store.entry(tabId)!.input.emit({ kind: 'mouse', source: 'human', at: Date.now() }); // the person clicked just now
-    w.send('maws.browser.request', request(1, 'browser_navigate', { tabId, url: 'https://b.test/' }));
-    await vi.waitFor(() => expect(w.dispatched).toEqual([['maws.browser.waiting', { appSessionId: A, requestId: rid(1), waiting: 'human' }]]));
-    expect(w.agent.seam.control(tabId)?.control).toBe('human');
-    w.store.close(tabId);
-    await vi.waitFor(() => expect(w.dispatched.at(-1)).toEqual(['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.tabClosed('browser_navigate', tabId) } }]));
-    await w.agent.stop();
-  });
-
-  it('wraps every new view\'s dialogs: an alert under agent control is answered and reaches the tab\'s next result', async () => {
-    const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: false }).tab.tabId;
-    const contents = w.store.entry(tabId)!.view!.webContents as unknown as FakeWebContents;
+    const tabId = w.open(false);
     w.store.setControl(tabId, 'agent');
     const callback = vi.fn();
-    contents.emit('-run-dialog', { dialogType: 'alert', messageText: 'Saved.', defaultPromptText: '' }, callback);
+    w.contentsOf(tabId).emit('-run-dialog', { dialogType: 'alert', messageText: 'Saved.', defaultPromptText: '' }, callback);
     expect(callback).toHaveBeenCalledWith(false, '');
-    expect(contents.native).not.toHaveBeenCalled();
-    const answer = await w.agent.seam.run(A, 'browser_tabs', { action: 'select', tabId });
-    expect(answer).toMatchObject({ ok: true, result: { tabId, dialogs: [{ type: 'alert', message: 'Saved.' }] } });
-    await w.agent.stop();
+    expect(w.contentsOf(tabId).native).not.toHaveBeenCalled();
+    w.leased.add(tabId);
+    const heldCallback = vi.fn();
+    w.contentsOf(tabId).emit('-run-dialog', { dialogType: 'confirm', messageText: 'Leave?', defaultPromptText: '' }, heldCallback);
+    expect(w.held).toEqual([tabId]);
+    expect(heldCallback).not.toHaveBeenCalled();
+    w.stop();
   });
 
-  it('parks an unplaced tab the agent has a request on, through the view manager', async () => {
+  it('parks an unplaced tab the agent acts on, through the view manager', () => {
     const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    w.drivers.for.mockReturnValue(new Promise(() => {})); // the request stays pending
-    void w.agent.seam.run(A, 'browser_snapshot', { tabId });
-    await flush();
+    const tabId = w.open();
+    w.controls.markActing(w.store.entry(tabId)!);
     expect(w.views.park).toHaveBeenCalledWith(w.store.entry(tabId), { x: 0, y: 0, width: 1280, height: 800 });
-    await w.agent.stop();
+    w.stop();
   });
 
-  it('the seam sends the person\'s input with its screen point, and counts the cursor\'s messages', async () => {
+  it("the seam reads the tab's control and the person's last inputs, sends input with its screen point, and counts the cursor's messages", () => {
     const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    const tabId = w.open();
     const entry = w.store.entry(tabId)!;
+    expect(w.presence.seam.control(tabId)).toEqual({ control: 'idle', controlSince: entry.tab.controlSince });
+    expect(w.presence.seam.control('b_00000000dead')).toBeNull();
+    entry.input.emit({ kind: 'mouse', source: 'human', at: Date.now() });
+    expect(w.presence.seam.lastInputs(tabId)).toEqual([{ kind: 'mouse', source: 'human', at: expect.any(Number) }]);
     entry.host = { isDestroyed: () => false, getContentBounds: () => ({ x: 100, y: 30, width: 800, height: 600 }) } as never;
     (entry.view as unknown as { getBounds: () => object }).getBounds = () => ({ x: 400, y: 50, width: 300, height: 200 });
-    const contents = entry.view!.webContents as unknown as FakeWebContents;
-    expect(w.agent.seam.sendInput(tabId, { type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1 })).toBe(true);
-    expect(w.agent.seam.sendInput(tabId, { type: 'keyDown', keyCode: 'a' })).toBe(true);
+    const contents = w.contentsOf(tabId);
+    expect(w.presence.seam.sendInput(tabId, { type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1 })).toBe(true);
+    expect(w.presence.seam.sendInput(tabId, { type: 'keyDown', keyCode: 'a' })).toBe(true);
     expect(contents.sendInputEvent.mock.calls).toEqual([[{ type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1, globalX: 510, globalY: 100 }], [{ type: 'keyDown', keyCode: 'a' }]]);
-    expect(w.agent.seam.sendInput('b_00000000dead', { type: 'keyDown', keyCode: 'a' })).toBe(false);
+    expect(w.presence.seam.sendInput('b_00000000dead', { type: 'keyDown', keyCode: 'a' })).toBe(false);
     w.store.setControl(tabId, 'agent');
     w.store.setControl(tabId, 'idle'); // the agent lets go: the cursor hides
-    expect(w.agent.seam.cursorMessages(tabId)).toBe(1);
+    expect(w.presence.seam.cursorMessages(tabId)).toBe(1);
     expect(contents.send).toHaveBeenCalledWith('browser:cursor', { kind: 'hide' });
-    await w.agent.stop();
+    w.stop();
   });
 
-  it("hands the handlers its drivers: a snapshot reads the tab's page through the tab's driver", async () => {
+  it('dispose lets go of the dialogs, parking and inputs: nothing parks afterwards', () => {
     const w = wired();
-    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
-    const ariaSnapshot = vi.fn(async () => '- heading "A" [level=1] [ref=e2]');
-    w.drivers.for.mockResolvedValue({ page: { ariaSnapshot } });
-    const answer = await w.agent.seam.run(A, 'browser_snapshot', { tabId });
-    expect(answer).toMatchObject({ ok: true, result: { tabId, refs: 1 }, text: '- heading "A" [level=1] [ref=e2]' });
-    expect(w.drivers.for).toHaveBeenCalledWith(w.store.entry(tabId));
-    await w.agent.stop();
+    w.presence.dispose();
+    const tabId = w.open();
+    w.controls.markActing(w.store.entry(tabId)!);
+    expect(w.views.park).not.toHaveBeenCalled();
+    expect(w.presence.seam.lastInputs(tabId)).toEqual([]);
+    w.stop();
   });
 });

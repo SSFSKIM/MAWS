@@ -23,7 +23,7 @@ function fakeView() {
   return { webContents } as unknown as WebContentsView & { webContents: typeof webContents };
 }
 
-function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]['restored']; fileBroken?: boolean; createView?: (tab: BrowserTab) => WebContentsView } = {}) {
+function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]['restored']; fileBroken?: boolean; createView?: (tab: BrowserTab) => WebContentsView; driven?: (tabId: string) => boolean } = {}) {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const queue: (() => void)[] = [];
   const views: ReturnType<typeof fakeView>[] = [];
@@ -46,6 +46,7 @@ function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]
     now: () => clock,
     newTabId: () => `b_${(++ids).toString(16).padStart(12, '0')}`,
     schedule: (fn) => void queue.push(fn),
+    driven: options.driven,
   });
   const flush = () => {
     while (queue.length > 0) queue.shift()!();
@@ -251,6 +252,18 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     expect(h.views[1]!.webContents.close).toHaveBeenCalled();
     // told to the opener's session, on the tab it opened, not on the other session's tab that was unloaded
     expect(h.notices()).toEqual([{ appSessionId: B, tabId: added.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX }]);
+  });
+
+  it('E13: a tab an agent drives through cua (under a lease) is never the victim, idle as its control may read', () => {
+    const driven = new Set<string>();
+    const h = harness({ driven: (tabId) => driven.has(tabId) });
+    const tabs = fill(h);
+    for (const t of tabs) h.store.update(t.tabId, { loading: false });
+    driven.add(tabs[0]!.tabId); // the least recently shown, idle (the agent-idle timer lapsed), its lease still held
+    open(h, 'https://new.test/', { appSessionId: B });
+    expect(h.store.entry(tabs[0]!.tabId)!.view).not.toBeNull();
+    expect(h.store.entry(tabs[1]!.tabId)!.view).toBeNull();
+    expect(h.store.capVictim()?.tab.tabId).toBe(tabs[2]!.tabId);
   });
 
   it('with no eligible victim a commanded open opens suspended, its URL kept, and nothing is closed', () => {
@@ -605,7 +618,7 @@ describe('TabStore: the TabDebugger (Design §10, §15)', () => {
     const first = entry.debugger!;
     expect(first).toBeInstanceOf(TabDebugger);
     expect(first.attached).toBe(false); // attached only when someone asks
-    const detach = vi.spyOn(first, 'detach');
+    const detach = vi.spyOn(first, 'end');
     h.store.rendererGone(tab.tabId, 'crashed');
     expect(detach).toHaveBeenCalledTimes(1);
     expect(entry.debugger).toBe(first); // the view lives on, and so does its debugger: the next ask attaches again

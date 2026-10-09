@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,7 +58,7 @@ const fakes = await vi.hoisted(async () => {
     isVisible: () => true,
     isMinimized: () => false,
   });
-  const app = new EventEmitter(); // the app's own events (the client certificate a request with no page asks for)
+  const app = Object.assign(new EventEmitter(), { getVersion: () => '9.9.9' }); // the app's own events (the client certificate a request with no page asks for); E13: its version
   return { cdp, View, win, app };
 });
 
@@ -73,7 +73,7 @@ const commentIpc = await vi.hoisted(async () => {
 vi.mock('electron', () => ({
   app: fakes.app,
   ipcMain: { handle: () => {}, on: commentIpc.on, removeListener: commentIpc.removeListener }, // E4d: on, removeListener
-  BrowserWindow: { fromWebContents: () => fakes.win },
+  BrowserWindow: { fromWebContents: () => fakes.win, getAllWindows: () => [] }, // E13: getAllWindows
   session: {
     fromPartition: () => ({
       getUserAgent: () => 'UA Electron/1',
@@ -190,6 +190,13 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(browser.store.list(A).tabs).toEqual([]);
     browser.stop();
     expect(listeners.size).toBe(0);
+  });
+
+  it('E13: registers browser.agent.activities.list, answering the session\'s kept agent activity (none yet)', () => {
+    const handlers = new Map<string, (input: unknown) => unknown>();
+    const browser = start(fakeIndex([A]).index, { register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never });
+    expect(handlers.get('browser.agent.activities.list')!({ appSessionId: A })).toEqual({ activities: [] });
+    browser.stop();
   });
 
   it('one profiles accessor serves both a new tab\'s partition and browser.profiles.list (Decision Log 40)', () => {
@@ -314,8 +321,8 @@ describe('startBrowser wires comment mode (E4d)', () => {
   });
 });
 // E4d end
-// E4c start: the browser tools started inside startBrowser (E4c Design §4; Decision Log 36)
-describe('startBrowser: the browser tools (E4c)', () => {
+// E4c start: the agent's presence started inside startBrowser (E4c Design §4; Decision Log 36; P1 A-54)
+describe("startBrowser: the agent's presence (E4c's, re-homed when the browser tools left; P1 A-54)", () => {
   const fakeHosts = () => {
     const events = new Map<string, unknown>();
     return {
@@ -326,27 +333,25 @@ describe('startBrowser: the browser tools (E4c)', () => {
           return () => void events.delete(name);
         }),
         dispatch: vi.fn(async () => ({ ok: true })),
-        onState: vi.fn(() => () => {}),
       },
     };
   };
 
-  it("subscribes to the engine host's browser requests only when it is given the hosts, and stops at stop", () => {
+  it("listens to the engine host's session status only (no browser request any more), and stops at stop", () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
-    expect([...events.keys()]).toEqual(['maws.browser.request', 'maws.browser.cancel', 'session.status']);
-    expect(hosts.onState).toHaveBeenCalledWith('engine-host', expect.any(Function));
+    expect([...events.keys()]).toEqual(['session.status']); // E13's status hook
     browser.stop();
     expect(events.size).toBe(0);
   });
 
-  it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', async () => {
+  it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', () => {
     const { hosts } = fakeHosts();
     const e2e = start(fakeIndex([A]).index, { env: { MAWS_E2E: '1' }, hosts: hosts as never });
-    expect(e2e.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).toBe('b_000000000001');
-    const answer = await globalThis.__maws_browser!.agent!.run(A, 'browser_tabs', { action: 'list' });
-    expect(answer).toMatchObject({ ok: true, result: { tabs: [{ tabId: 'b_000000000001' }] } });
+    const { tabId } = e2e.store.open({ appSessionId: A, url: null, select: true }).tab;
+    expect(tabId).toBe('b_000000000001');
+    expect(globalThis.__maws_browser!.agent!.control(tabId)).toMatchObject({ control: 'idle' });
     e2e.stop();
     const plain = start(fakeIndex([A]).index, { hosts: hosts as never });
     expect(plain.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).not.toBe('b_000000000001');
@@ -354,3 +359,37 @@ describe('startBrowser: the browser tools (E4c)', () => {
   });
 });
 // E4c end
+
+// E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2)
+describe("startBrowser: cua's primitive server (E13)", () => {
+  it('serves a socket per session from a status of its live engine (never a trust bootstrap\'s), closed with its record and at stop', async () => {
+    userData = mkdtempSync('/tmp/mbs-'); // a Unix socket path must stay short
+    const listeners = new Set<(payload: { appSessionId: AppSessionId; status: { process: string } }) => void>();
+    const hosts = {
+      onEvent: vi.fn((name: string, listener: never) => {
+        if (name !== 'session.status') return () => {};
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }),
+      dispatch: vi.fn(async () => ({ ok: true })),
+      onState: vi.fn(() => () => {}),
+    };
+    const { index, change } = fakeIndex([A]);
+    const browser = start(index, { hosts: hosts as never });
+    const dir = join(userData, 'browser', 'cua');
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    const status = (appSessionId: string, process: string) => listeners.forEach((l) => l({ appSessionId: appSessionId as AppSessionId, status: { process } }));
+    status('a-bootstrap-id', 'ready');
+    status(A, 'exited');
+    expect(readdirSync(dir)).toEqual([]);
+    status(A, 'ready'); // an engine that outlived the app's relaunch (D-16)
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual([`${A}.sock`]));
+    expect(browser.cua.socketPathFor(A)).toBe(join(dir, `${A}.sock`));
+    change(A, 'removed');
+    expect(readdirSync(dir)).toEqual([]);
+    browser.cua.socketPathFor(A);
+    browser.stop();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});
+// E13 end

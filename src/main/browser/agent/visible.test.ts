@@ -2,8 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { BROWSER_AGENT_IDLE_MS } from '@shared/maws/browser';
+import { BROWSER_AGENT_IDLE_MS, DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 
 vi.mock('electron', () => ({
@@ -80,26 +79,53 @@ function harness({ focus = 'off' }: { focus?: 'on' | 'off' } = {}) {
     setFocusEmulation: (entry, enabled) => void focusCalls.push([entry.tab.tabId, enabled]),
   });
   const controls = new TabControls({ store });
-  const parking = new Parking({ store, views: manager, controls });
+  const leased = new Set<string>();
+  const leaseListeners = new Set<(tabId: string) => void>();
+  const leases = {
+    holds: (tabId: string) => leased.has(tabId),
+    onChange: (listener: (tabId: string) => void) => (leaseListeners.add(listener), () => void leaseListeners.delete(listener)),
+  };
+  const lease = (tabId: string, held: boolean) => {
+    if (held) leased.add(tabId);
+    else leased.delete(tabId);
+    for (const listener of [...leaseListeners]) listener(tabId);
+  };
+  const parking = new Parking({ store, views: manager, controls, leases });
   const loaded = () => {
     const { tabId } = store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab;
     store.navigationCommitted(tabId, { url: 'https://a.test/', canGoBack: false, canGoForward: false });
     return { entry: store.entry(tabId)!, view: views.at(-1)! };
   };
   const place = (tabId: string, rect: Rect | null, claim = true) => manager.place({ tabId, paneId: 'p1', surface: 'panel', rect, claim }, sender);
-  return { store, manager, controls, parking, win, loaded, place, focusCalls };
+  return { store, manager, controls, parking, win, loaded, place, focusCalls, lease };
 }
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('parking an unplaced tab (Design §9; Decision Log 36, 43)', () => {
-  it('a never-placed tab with a request pending gets a working size, out of any window, and stays hidden as E4a keeps it', () => {
+describe('parking by lease (the in-app browser spec, "Parking and placement")', () => {
+  it('an unplaced tab a cua connection holds a lease on is parked, a pane\'s claim supersedes it, and the release unparks it', () => {
+    const h = harness();
+    const { entry, view } = h.loaded();
+    h.lease(entry.tab.tabId, true);
+    expect([h.parking.parked(entry), view.bounds]).toEqual([true, PARKED_BOUNDS]);
+    h.place(entry.tab.tabId, R);
+    expect(h.parking.parked(entry)).toBe(false);
+    expect(view.bounds).toEqual(R);
+    h.place(entry.tab.tabId, null);
+    expect(h.parking.parked(entry)).toBe(true); // released by the pane while still leased: parked again
+    h.lease(entry.tab.tabId, false);
+    expect(h.parking.parked(entry)).toBe(false);
+  });
+});
+
+describe('parking an unplaced tab the agent holds (Design §9; Decision Log 36, 43)', () => {
+  it('a never-placed tab the agent holds gets a working size, out of any window, and stays hidden as E4a keeps it', () => {
     const h = harness();
     const { entry, view } = h.loaded();
     expect(view.bounds).toEqual({ x: 0, y: 0, width: 0, height: 0 }); // E4a's view as created
-    h.controls.requestPending(entry, 1);
+    h.controls.markActing(entry);
     expect(view.bounds).toEqual(PARKED_BOUNDS);
     expect(view.visible).toBe(false);
     expect(entry.visible).toBe(false);
@@ -124,7 +150,7 @@ describe('parking an unplaced tab (Design §9; Decision Log 36, 43)', () => {
     const h = harness();
     const { entry, view } = h.loaded();
     h.place(entry.tab.tabId, R);
-    h.controls.requestPending(entry, 1);
+    h.lease(entry.tab.tabId, true);
     h.controls.markActing(entry);
     expect(view.bounds).toEqual(R);
     expect(view.visible).toBe(true);
@@ -147,26 +173,24 @@ describe('parking an unplaced tab (Design §9; Decision Log 36, 43)', () => {
     expect(entry.tab.placedIn).toEqual({ paneId: 'p1', surface: 'panel' });
   });
 
-  it('unparks when the agent lets go with nothing pending, and parks again for the next request', () => {
+  it('unparks when the agent lets go, and parks again for its next action', () => {
     const h = harness();
     const { entry, view } = h.loaded();
-    h.controls.requestPending(entry, 1);
     h.controls.markActing(entry);
     h.controls.actionEnded(entry);
-    h.controls.requestPending(entry, -1);
     expect(h.parking.parked(entry)).toBe(true); // still the agent's for 10 s
     vi.advanceTimersByTime(BROWSER_AGENT_IDLE_MS);
     expect(entry.tab.control).toBe('idle');
     expect(h.parking.parked(entry)).toBe(false);
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // as if elsewhere resized: the next park sizes it again
-    h.controls.requestPending(entry, 1);
+    h.controls.markActing(entry);
     expect(view.bounds).toEqual(PARKED_BOUNDS);
   });
 
   it('a tab without a view is not parked; its new view is, when the agent still holds it', () => {
     const h = harness();
     const { entry } = h.loaded();
-    h.controls.requestPending(entry, 1);
+    h.lease(entry.tab.tabId, true);
     h.store.suspend(entry.tab.tabId);
     expect(h.parking.parked(entry)).toBe(false);
     h.store.load(entry.tab.tabId, 'https://a.test/');

@@ -1,9 +1,11 @@
 // E4c (Task 3.2): the Browser tool follows the agent (E4c execution document, Design §10; Decision Log 6), connected once
-// from App.tsx's E4c block. Main emits `browser.agent.acting` when an agent action targets a tab, after it selected that
-// tab in its session (or kept the tab the person is using selected). A window that shows the session opens the
-// session's Browser tool when none is open (a pinned one counts), activated, as E1's `connectAsks` opens the sheet; it
-// never switches the main view or the shown session. No tab id goes with the open: main's selection stands, so the tool
-// shows the acting tab, or the one the person is using, and a page they are typing in is never swapped from here.
+// from App.tsx's E4c block. Removed with the browser tools in E13 M4 and restored on the owner's decision for cua's
+// leases (P1 A-54, amended): main emits `browser.agent.acting` when a cua lease's first acting command arrives on a tab
+// (src/main/browser/cua/connection.ts), without selecting it (the owner's choice for agent tabs; E4c selected it unless
+// the person was using the selected tab). A window that shows the session opens the session's Browser tool when none is
+// open (a pinned one counts), activated, as E1's `connectAsks` opens the sheet; it never switches the main view or the
+// shown session. No tab id goes with the open: main's selection stands, so the tool shows the session's selected tab, the
+// one the person is using included, and a page they are typing in is never swapped from here.
 //
 // Once per turn: the first action of a turn the window shows decides, and nothing opens or activates that session's tool
 // again until the turn ends (`busy` leaves true), so a person who moved to another panel tab, or closed the tool, is not

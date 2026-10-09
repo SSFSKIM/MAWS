@@ -1,6 +1,6 @@
-// E4c (Task 3.2): the Browser tool follows the agent (Design §10; Decision Log 6). On `browser.agent.acting` a window
-// that shows the session opens the session's Browser tool when it has none, activated, and lets main's selection stand
-// (no tab id is sent: main already selected the acting tab, or kept the person's). Once per turn: after the first
+// E4c (Task 3.2): the Browser tool follows the agent (Design §10; Decision Log 6; restored for cua's leases, P1 A-54
+// amended). On `browser.agent.acting` a window that shows the session opens the session's Browser tool when it has none,
+// activated, and lets main's selection stand (no tab id is sent: the agent's tab is not selected). Once per turn: after the first
 // action of a turn the window shows, nothing opens or activates again until the session's turn ends, so a person who
 // moved to another panel tab, or closed the tool, is not pulled back on every action. Another session's action, or one
 // the window does not show, opens nothing.

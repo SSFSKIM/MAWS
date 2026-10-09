@@ -1,28 +1,13 @@
-// E4c (E4c execution document, Design §2; Acceptance G1's unit pins): the six browser tools' contract: names,
-// descriptions, annotations, input and result schemas, constants and the exact error texts.
+// E4c (E4c execution document, Design §2): the six browser tools' record, kept since they left the `maws` server on
+// 2026-10-08 (P1 A-54) so journals and X8 fixtures written before still map and render: the names (outside X9's list
+// now), the input schemas a historical call is admitted by, the result schemas and how a call is summarised.
 import { describe, expect, it } from 'vitest';
-import * as z from 'zod';
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../browser/dialog';
 import { BrowserLocatorSchema } from '../browser/locator';
 import {
   browserCallOf,
-  BROWSER_ACTION_TIMEOUT_MS,
-  BROWSER_AGENT_IDLE_MS,
-  BROWSER_ANSWER_MS,
-  BROWSER_BRIDGE_IDLE_MS,
-  BROWSER_DIALOG_EXCERPT_MAX_CHARS,
-  BROWSER_DIALOG_MESSAGE_MAX_CHARS,
-  BROWSER_DIALOGS_MAX,
-  BROWSER_ERROR_DETAIL_MAX_CHARS,
-  BROWSER_ERROR_MAX_CHARS,
-  BROWSER_EVAL_MAX_CHARS,
-  BROWSER_LOCATE_MS,
-  BROWSER_SCREENSHOT_MAX_BYTES,
   BROWSER_SNAPSHOT_MAX_CHARS_CEILING,
-  BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT,
-  BROWSER_SNAPSHOT_OUTLINE_MAX_LINES,
-  BROWSER_TOOL_ERRORS,
   BROWSER_TOOL_NAMES,
-  BROWSER_TOOLS,
   BrowserActInputSchema,
   BrowserActResultSchema,
   BrowserEvalInputSchema,
@@ -37,114 +22,42 @@ import {
   BrowserTabsInputSchema,
   BrowserTabsResultSchema,
   BrowserTargetSchema,
-  browserTargetText,
   browserToolResultSchemaOf,
   BrowserWaitReasonSchema,
   isBrowserToolName,
   LANDMARK_ROLES,
+  parseBrowserToolArguments,
 } from './browser';
 import { SessionEventSchema } from '../graph/events';
 import { BrowserNoticeSchema } from '../ipc/schema/browser';
-import { BrowserWaitingSchema } from '../ipc/schema/maws';
-import { MAWS_TOOL_ANNOTATIONS, MAWS_TOOL_NAMES, MAWS_TOOLS, mawsToolList, parseToolArguments, TOOL_ERRORS } from './tools';
+import { MAWS_TOOL_NAMES, MAWS_TOOLS, mawsToolList } from './tools';
 
 const TAB = 'b_0123456789ab';
 const UUID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
 
-const DESCRIPTIONS: Record<(typeof BROWSER_TOOL_NAMES)[number], [title: string, description: string]> = {
-  browser_tabs: [
-    'Browser tabs',
-    'List, open, close or select this session\'s tabs in the MAWS browser; without this tool, ask the user to open the page and describe what you need from it. "list" returns the session\'s tabs with their ids, URLs, titles and who controls each; "open" takes a url (http or https) and opens it in a new tab that stays open until you close it; "close" and "select" take a tabId. Tabs the user opened are listed too; the user sees the tab you act on. Returns the tab list and, for open, the new tab\'s id.',
-  ],
-  browser_navigate: [
-    'Browser navigate',
-    'Navigate a MAWS browser tab to a URL, or go back, forward or reload; without this tool, ask the user to open the page. url is an http or https URL or one of "back", "forward", "reload" (reload also loads a tab the user left unloaded). Waits for the page to load (up to 30 s). A page that starts a download is refused: the user downloads files, you do not. Returns the tab\'s URL and title after the load.',
-  ],
-  browser_snapshot: [
-    'Browser snapshot',
-    "Read a MAWS browser tab as an accessibility snapshot with element refs; without this tool, ask the user to describe the page or paste its text. Each interactive or named element has a ref like e12 that browser_act and browser_screenshot accept as a target. Refs are valid for the current document and until your next snapshot of it: after a navigation or a later snapshot, take a new snapshot before acting. The snapshot is cut at maxChars (default 24000, at most 64000) on a line boundary with a trailer saying how much was omitted and an outline of the page's landmarks and their refs, so you can call again with root set to a ref or a landmark role (banner, navigation, main, contentinfo, search, complementary, region, form) for one subtree; a rooted snapshot invalidates refs outside that subtree until the next whole-page snapshot. Returns the snapshot as text after a JSON header with the tab's URL, title and the cut.",
-  ],
-  browser_act: [
-    'Browser act',
-    'Act on an element in a MAWS browser tab: click, fill, select, check, press, hover or scroll; without this tool, ask the user to do it and tell you the result. target is a ref from browser_snapshot (e.g. "e12") or a locator {css, role?, name?} such as a comment anchor carries. fill types value into a field (replacing its content); select picks the option whose label or value is value; check sets a checkbox to value ("true" or "false", default true); press sends a key or chord (e.g. "Enter", "Control+a") to the element; scroll scrolls the element into view and then by value pixels when given (negative scrolls up). The action waits for the element to be visible and enabled (up to 10 s). If the user is using the page, the action waits until they stop or hand it back, and the result says so. A ref that no longer resolves is an error naming it: take a new snapshot. Returns the tab\'s URL and title after the action and whether it navigated.',
-  ],
-  browser_eval: [
-    'Browser eval',
-    "Evaluate a JavaScript expression in a MAWS browser tab's page and return its value; without this tool, use browser_snapshot or ask the user. Use it to read page state (text, attributes, computed values, JSON the page holds); it runs in the page with the page's permissions, so prefer browser_act for changes. A promise is awaited; the value is returned as JSON (cut at 16000 characters). If the user is using the page, the evaluation waits until they stop. Returns the value and the tab's URL and title.",
-  ],
-  browser_screenshot: [
-    'Browser screenshot',
-    'Take a screenshot of a MAWS browser tab and receive it as an image; without this tool, use browser_snapshot. target (a ref or a locator) screenshots one element; fullPage captures the whole scrollable page; neither captures the viewport. The picture is also saved as a deliverable the user can open from the transcript. Pictures are kept under 3.5 MB (JPEG when a PNG would exceed it). Returns the image and a JSON record with the deliverable id, size and format.',
-  ],
-};
-
-describe('X9 as E4c extends it: the six browser tools', () => {
-  it('names the six tools and appends them after the artifact tools, thirteen in all', () => {
+describe('the six browser tools, a historical record (P1 A-54)', () => {
+  it('keeps the six names, none of which the maws server lists any more', () => {
     expect(BROWSER_TOOL_NAMES).toEqual(['browser_tabs', 'browser_navigate', 'browser_snapshot', 'browser_act', 'browser_eval', 'browser_screenshot']);
-    expect(MAWS_TOOL_NAMES).toEqual([
-      'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
-      'browser_tabs', 'browser_navigate', 'browser_snapshot', 'browser_act', 'browser_eval', 'browser_screenshot',
-    ]);
-    expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
-    expect(Object.keys(BROWSER_TOOLS)).toEqual([...BROWSER_TOOL_NAMES]);
+    for (const name of BROWSER_TOOL_NAMES) {
+      expect(MAWS_TOOL_NAMES as readonly string[]).not.toContain(name);
+      expect(Object.keys(MAWS_TOOLS)).not.toContain(name);
+    }
+    expect(mawsToolList().filter((tool) => tool.name.startsWith('browser_'))).toEqual([]);
     for (const name of BROWSER_TOOL_NAMES) expect(isBrowserToolName(name)).toBe(true);
     for (const other of ['artifact_screenshot', 'browser', 'mcp__maws__browser_tabs', 1, null]) expect(isBrowserToolName(other)).toBe(false);
   });
 
-  it('carries each title and description word for word, the fallback sentence first and a Returns sentence last', () => {
-    for (const name of BROWSER_TOOL_NAMES) {
-      const [title, description] = DESCRIPTIONS[name];
-      expect(MAWS_TOOLS[name].title, name).toBe(title);
-      expect(MAWS_TOOLS[name].description, name).toBe(description);
-      expect(description, name).toMatch(/^[^.]*; without this tool, [^.]*\./);
-      expect(description, name).toMatch(/ Returns [^.]*\.$/);
-    }
-  });
-
-  it('lists them in order with their JSON schemas and annotations: navigate, act and eval are not read-only', () => {
-    const list = mawsToolList();
-    expect(list.map((t) => t.name)).toEqual([...MAWS_TOOL_NAMES]);
-    const browser = list.filter((t) => isBrowserToolName(t.name));
-    for (const tool of browser) {
-      const spec = MAWS_TOOLS[tool.name];
-      expect(tool.inputSchema, tool.name).toEqual(z.toJSONSchema(spec.input));
-      expect(tool.inputSchema, tool.name).toMatchObject({ type: 'object', additionalProperties: false });
-    }
-    expect(browser.map((t) => [t.name, t.annotations])).toEqual([
-      ['browser_tabs', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser tabs' }],
-      ['browser_navigate', { readOnlyHint: false, openWorldHint: false, title: 'Browser navigate' }],
-      ['browser_snapshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser snapshot' }],
-      ['browser_act', { readOnlyHint: false, openWorldHint: false, title: 'Browser act' }],
-      ['browser_eval', { readOnlyHint: false, openWorldHint: false, title: 'Browser eval' }],
-      ['browser_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser screenshot' }],
-    ]);
-    const schemaOf = (name: string) => list.find((t) => t.name === name)!.inputSchema;
-    expect(schemaOf('browser_tabs')).toMatchObject({ required: ['action'], properties: { action: { enum: ['list', 'open', 'close', 'select'] }, tabId: { type: 'string', pattern: '^b_[0-9a-f]{12}$' } } });
-    expect(schemaOf('browser_snapshot')).toMatchObject({ required: ['tabId'], properties: { maxChars: { type: 'integer', minimum: 1000, maximum: 64000 } } });
-    expect(schemaOf('browser_act')).toMatchObject({ required: ['tabId', 'action', 'target'], properties: { action: { enum: ['click', 'fill', 'select', 'check', 'press', 'hover', 'scroll'] }, value: { type: 'string', maxLength: 20000 } } });
-    expect(schemaOf('browser_eval')).toMatchObject({ required: ['tabId', 'expression'], properties: { expression: { type: 'string', minLength: 1, maxLength: 20000 } } });
-  });
-
-  it('holds the constants of the contract', () => {
+  it('admits a historical call by its input schema, as the server did', () => {
+    expect(parseBrowserToolArguments('browser_act', { tabId: TAB, action: 'click', target: 'e12' })).toEqual({ ok: true, data: { tabId: TAB, action: 'click', target: 'e12' } });
+    expect(parseBrowserToolArguments('browser_act', { tabId: TAB, action: 'fill', target: 'e12' })).toEqual({ ok: false });
+    expect(parseBrowserToolArguments('browser_tabs', { action: 'list' })).toEqual({ ok: true, data: { action: 'list' } });
     expect(LANDMARK_ROLES).toEqual(['banner', 'navigation', 'main', 'contentinfo', 'search', 'complementary', 'region', 'form']);
-    expect({
-      BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_SNAPSHOT_MAX_CHARS_CEILING, BROWSER_SNAPSHOT_OUTLINE_MAX_LINES, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES,
-      BROWSER_ANSWER_MS, BROWSER_ACTION_TIMEOUT_MS, BROWSER_LOCATE_MS, BROWSER_AGENT_IDLE_MS, BROWSER_BRIDGE_IDLE_MS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX,
-      BROWSER_DIALOG_EXCERPT_MAX_CHARS,
-    }).toEqual({
-      BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT: 24_000, BROWSER_SNAPSHOT_MAX_CHARS_CEILING: 64_000, BROWSER_SNAPSHOT_OUTLINE_MAX_LINES: 40, BROWSER_EVAL_MAX_CHARS: 16_000,
-      BROWSER_SCREENSHOT_MAX_BYTES: 3_670_016, BROWSER_ANSWER_MS: 30_000, BROWSER_ACTION_TIMEOUT_MS: 10_000, BROWSER_LOCATE_MS: 2_000, BROWSER_AGENT_IDLE_MS: 10_000,
-      BROWSER_BRIDGE_IDLE_MS: 300_000, BROWSER_DIALOG_MESSAGE_MAX_CHARS: 500, BROWSER_DIALOGS_MAX: 10,
-      BROWSER_DIALOG_EXCERPT_MAX_CHARS: 200,
-    });
+    expect(BROWSER_SNAPSHOT_MAX_CHARS_CEILING).toBe(64_000);
   });
 });
 
 describe('the browser tools\' inputs: strict, bounded, never defaulted', () => {
-  const refusal = (tool: (typeof BROWSER_TOOL_NAMES)[number], args: unknown) => {
-    const parsed = parseToolArguments(tool, args);
-    return parsed.ok ? null : parsed.error;
-  };
+  const admits = (tool: (typeof BROWSER_TOOL_NAMES)[number], args: unknown) => parseBrowserToolArguments(tool, args).ok;
 
   it('targets: a ref (with an optional frame ordinal) or a strict locator {css, role?, name?}', () => {
     for (const ref of ['e1', 'e12', 'f2e7', 'f10e300']) expect(BrowserRefSchema.safeParse(ref).success, ref).toBe(true);
@@ -163,16 +76,16 @@ describe('the browser tools\' inputs: strict, bounded, never defaulted', () => {
     expect(BrowserTabsInputSchema.safeParse({ action: 'open', url: 'http://127.0.0.1:17391/form.html' }).success).toBe(true);
     expect(BrowserTabsInputSchema.safeParse({ action: 'close', tabId: TAB }).success).toBe(true);
     expect(BrowserTabsInputSchema.safeParse({ action: 'select', tabId: TAB }).success).toBe(true);
-    expect(refusal('browser_tabs', { action: 'open' })).toBe('browser_tabs: invalid arguments: url: open needs a url');
-    expect(refusal('browser_tabs', { action: 'close' })).toBe('browser_tabs: invalid arguments: tabId: close needs a tabId');
-    expect(refusal('browser_tabs', { action: 'select' })).toBe('browser_tabs: invalid arguments: tabId: select needs a tabId');
-    expect(refusal('browser_tabs', { action: 'list', tabId: TAB })).toBe('browser_tabs: invalid arguments: tabId: list takes no tabId');
-    expect(refusal('browser_tabs', { action: 'list', url: 'https://a.b/' })).toBe('browser_tabs: invalid arguments: url: list takes no url');
-    expect(refusal('browser_tabs', { action: 'open', url: 'file:///etc/hosts' })).toMatch(/^browser_tabs: invalid arguments: url: /);
-    expect(refusal('browser_tabs', { action: 'open', url: 'javascript:alert(1)' })).toMatch(/^browser_tabs: invalid arguments: url: /);
-    expect(refusal('browser_tabs', { action: 'close', tabId: 'tab-1' })).toMatch(/^browser_tabs: invalid arguments: tabId: /);
-    expect(refusal('browser_tabs', { action: 'reload' })).toMatch(/^browser_tabs: invalid arguments: action: /); // an unknown action
-    expect(refusal('browser_tabs', { action: 'list', all: true })).toMatch(/^browser_tabs: invalid arguments: /);
+    expect(admits('browser_tabs', { action: 'open' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'close' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'select' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'list', tabId: TAB })).toBe(false);
+    expect(admits('browser_tabs', { action: 'list', url: 'https://a.b/' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'open', url: 'file:///etc/hosts' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'open', url: 'javascript:alert(1)' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'close', tabId: 'tab-1' })).toBe(false);
+    expect(admits('browser_tabs', { action: 'reload' })).toBe(false); // an unknown action
+    expect(admits('browser_tabs', { action: 'list', all: true })).toBe(false);
   });
 
   it('browser_navigate: an http or https URL, or back, forward, reload', () => {
@@ -189,7 +102,7 @@ describe('the browser tools\' inputs: strict, bounded, never defaulted', () => {
     for (const root of ['heading', 'body', '']) expect(BrowserSnapshotInputSchema.safeParse({ tabId: TAB, root }).success, root).toBe(false);
     for (const maxChars of [1000, 24_000, 64_000]) expect(BrowserSnapshotInputSchema.safeParse({ tabId: TAB, maxChars }).success, String(maxChars)).toBe(true);
     for (const maxChars of [999, 64_001, 2000.5]) expect(BrowserSnapshotInputSchema.safeParse({ tabId: TAB, maxChars }).success, String(maxChars)).toBe(false);
-    expect(refusal('browser_snapshot', { tabId: TAB, maxChars: 64_001 })).toMatch(/^browser_snapshot: invalid arguments: maxChars: /);
+    expect(admits('browser_snapshot', { tabId: TAB, maxChars: 64_001 })).toBe(false);
   });
 
   it('browser_act: fill, select and press need a value; check takes "true" or "false"; scroll a signed integer', () => {
@@ -208,9 +121,9 @@ describe('the browser tools\' inputs: strict, bounded, never defaulted', () => {
     expect(act('click', undefined, { css: 'button.save', role: 'button', name: 'Save' })).toBe(true);
     expect(act('drag')).toBe(false);
     expect(act('fill', 'x'.repeat(20_001))).toBe(false);
-    expect(refusal('browser_act', { tabId: TAB, action: 'fill', target: 'e3' })).toBe('browser_act: invalid arguments: value: fill needs a value');
-    expect(refusal('browser_act', { tabId: TAB, action: 'check', target: 'e3', value: 'on' })).toBe('browser_act: invalid arguments: value: check takes "true" or "false"');
-    expect(refusal('browser_act', { tabId: TAB, action: 'scroll', target: 'e3', value: 'down' })).toBe('browser_act: invalid arguments: value: scroll takes a signed integer number of pixels');
+    expect(admits('browser_act', { tabId: TAB, action: 'fill', target: 'e3' })).toBe(false);
+    expect(admits('browser_act', { tabId: TAB, action: 'check', target: 'e3', value: 'on' })).toBe(false);
+    expect(admits('browser_act', { tabId: TAB, action: 'scroll', target: 'e3', value: 'down' })).toBe(false);
   });
 
   it('browser_eval takes one expression up to 20000 characters; browser_screenshot a target or fullPage, not both', () => {
@@ -222,7 +135,7 @@ describe('the browser tools\' inputs: strict, bounded, never defaulted', () => {
     expect(BrowserScreenshotInputSchema.safeParse({ tabId: TAB, target: { css: 'main' } }).success).toBe(true);
     expect(BrowserScreenshotInputSchema.safeParse({ tabId: TAB, fullPage: true }).success).toBe(true);
     expect(BrowserScreenshotInputSchema.safeParse({ tabId: TAB, target: 'e4', fullPage: false }).success).toBe(true);
-    expect(refusal('browser_screenshot', { tabId: TAB, target: 'e4', fullPage: true })).toBe('browser_screenshot: invalid arguments: fullPage: fullPage captures the page; give it or a target, not both');
+    expect(admits('browser_screenshot', { tabId: TAB, target: 'e4', fullPage: true })).toBe(false);
   });
 });
 
@@ -255,11 +168,10 @@ describe('the browser tools\' results', () => {
 
   // Task 1.4 (Decision Log 44 (d)): one waiting reason for the results, the X1 event and the IPC; one excerpt bound for
   // the dialog notice
-  it('shares one waiting-reason enum and one dialog excerpt bound with the event and the IPC', () => {
+  it('shares one waiting-reason enum with the event, and the dialog excerpt bound with the notice', () => {
     expect(BrowserWaitReasonSchema.options).toEqual(['human', 'cover']);
     expect(BrowserActResultSchema.shape.waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
     expect(BrowserNavigateResultSchema.shape.waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
-    expect(BrowserWaitingSchema.unwrap()).toBe(BrowserWaitReasonSchema);
     const action = SessionEventSchema.options.find((option) => option.shape.kind.value === 'maws.browser.action')!;
     expect((action.shape as unknown as { waitedFor: { unwrap(): unknown } }).waitedFor.unwrap()).toBe(BrowserWaitReasonSchema);
     const notice = { appSessionId: 'a', tabId: TAB, kind: 'dialogAnswered', dialogType: 'alert' } as const;
@@ -298,81 +210,6 @@ describe('the browser tools\' results', () => {
       expect(schema.safeParse({ ...results[name], dialogs: [{ type: 'alert', message: 'x'.repeat(501) }] }).success, name).toBe(false);
       expect(schema.safeParse({ ...results[name], dialogs: [{ type: 'beforeunload', message: '' }] }).success, name).toBe(false);
     }
-  });
-});
-
-describe('the browser tools\' error texts', () => {
-  it('names the tool, the tab or the target, and what to do next', () => {
-    const e = BROWSER_TOOL_ERRORS;
-    expect(e.tabNotFound('browser_act', TAB)).toBe(`browser_act: no tab "${TAB}" in this session; call browser_tabs {action: "list"}`);
-    expect(e.tabNotLoaded('browser_snapshot', TAB, 'https://a.b/')).toBe(`browser_snapshot: tab "${TAB}" is not loaded (https://a.b/); call browser_navigate {tabId, url: "reload"} first`);
-    expect(e.tabClosed('browser_act', TAB)).toBe(`browser_act: tab "${TAB}" was closed during the action`);
-    expect(e.tabCrashed('browser_eval', TAB)).toBe(`browser_eval: the page in tab "${TAB}" crashed; call browser_navigate {tabId, url: "reload"} to revive it`);
-    expect(e.staleRef('browser_act', 'e12', 'previous-document')).toBe('browser_act: ref "e12" is stale: it belongs to a previous document; call browser_snapshot again and use a ref from it');
-    expect(e.staleRef('browser_screenshot', 'f1e4', 'missing')).toBe('browser_screenshot: ref "f1e4" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it');
-    expect(e.targetNotFound('browser_act', { css: '#save' })).toBe('browser_act: no element matches {css: "#save"} (0 matches)');
-    expect(e.targetNotFound('browser_act', { css: 'input[name="q"]', role: 'textbox', name: 'Search' })).toBe('browser_act: no element matches {css: "input[name=\\"q\\"]", role: "textbox", name: "Search"} (0 matches)');
-    // Decision Log 30: css alone matched one element whose role or name disagrees; the fallback is not taken
-    expect(e.targetNotFound('browser_act', { css: '#save', role: 'button', name: 'Save' }, { role: 'button', name: 'Cancel' })).toBe('browser_act: {css: "#save"} matches one element, button "Cancel", not button "Save"');
-    expect(e.targetNotFound('browser_act', { css: '#save', role: 'link' }, { role: 'button', name: 'Save' })).toBe('browser_act: {css: "#save"} matches one element, button "Save", not link');
-    // Task 1.4 (Decision Log 44 (d)): the disagreement names what the locator wanted, never a bare "not": an empty name
-    // is named as such, and a locator with neither role nor name cannot carry `found` (a type error)
-    expect(e.targetNotFound('browser_act', { css: '#save', name: '' }, { role: 'button', name: 'Save' })).toBe('browser_act: {css: "#save"} matches one element, button "Save", not ""');
-    // @ts-expect-error a locator with neither role nor name cannot disagree with the element css matched
-    void (() => e.targetNotFound('browser_act', { css: '#save' }, { role: 'button', name: 'Save' }));
-    expect(e.humanHasPage('browser_act')).toBe('browser_act: the user has the page; the action was cancelled before they handed it back');
-    expect(e.navigationFailed('browser_navigate', 'http://nope.invalid/', 'dns', 'ERR_NAME_NOT_RESOLVED')).toBe('browser_navigate: http://nope.invalid/ failed to load (dns, ERR_NAME_NOT_RESOLVED)');
-    expect(e.downloadRefused('browser_act', 'https://a.b/f.zip', 'f.zip')).toBe('browser_act: https://a.b/f.zip started a download (f.zip), which MAWS refuses for the agent; the user downloads files');
-    expect(e.actionTimeout('browser_act', 'click', 'e12', 10_000)).toBe('browser_act: click on e12 was not actionable within 10 s (the element must be visible and enabled)');
-    expect(e.actionFailed('browser_act', 'fill', '{css: "#name"}', 'Element is not an <input>')).toBe('browser_act: fill on {css: "#name"} failed: Element is not an <input>');
-    expect(e.actionFailed('browser_navigate', 'back', '', 'no page to go back to')).toBe('browser_navigate: back failed: no page to go back to');
-    expect(e.evalFailed('ReferenceError: foo is not defined')).toBe('browser_eval: ReferenceError: foo is not defined');
-    expect(e.rootNotFound('main')).toBe('browser_snapshot: no element for root "main"');
-    expect(e.screenshotFailed('Target closed')).toBe('browser_screenshot: could not capture: Target closed');
-    expect(e.screenshotTooLarge(4_000_000)).toBe('browser_screenshot: the picture is 4000000 bytes after the JPEG fallback and exceeds 3.5 MiB; screenshot a target instead of fullPage');
-    expect(e.browserTimeout('browser_navigate')).toBe('browser_navigate: MAWS did not answer within 30 s');
-    expect(e.pageCovered('browser_act', 60)).toBe('browser_act: the page has been covered by a MAWS sheet or notice for 60 s; nothing was done; call it again once the page is shown');
-    expect(e.interrupted('browser_act')).toBe('browser_act: cancelled, the turn was interrupted');
-  });
-
-  it('cuts each piece MAWS did not write (a page\'s message, a URL, a name, an argument echoed) at BROWSER_ERROR_DETAIL_MAX_CHARS, so every text fits BROWSER_ERROR_MAX_CHARS', () => {
-    const e = BROWSER_TOOL_ERRORS;
-    const long = 'x'.repeat(50_000);
-    const cut = `${'x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS - 1)}…`;
-    expect(e.evalFailed(long)).toBe(`browser_eval: ${cut}`);
-    expect(e.evalFailed('x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS))).toBe(`browser_eval: ${'x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS)}`); // at the bound: whole
-    expect(e.downloadRefused('browser_act', long, long)).toBe(`browser_act: ${cut} started a download (${cut}), which MAWS refuses for the agent; the user downloads files`);
-    // the schema's longest locator, every character escaped, and a page's accessible name: still bounded
-    const locator = { css: '"'.repeat(2_000), role: '"'.repeat(64), name: '"'.repeat(500) };
-    const texts = [
-      e.tabNotLoaded('browser_act', TAB, long),
-      e.staleRef('browser_act', `e${'1'.repeat(50_000)}`, 'missing'),
-      e.targetNotFound('browser_act', locator),
-      e.targetNotFound('browser_act', locator, { role: long, name: long }),
-      e.navigationFailed('browser_navigate', long, 'dns', long),
-      e.downloadRefused('browser_act', long, long),
-      e.actionTimeout('browser_act', 'click', long, 10_000),
-      e.actionFailed('browser_act', 'click', long, long),
-      e.evalFailed(long),
-      e.rootNotFound(long),
-      e.screenshotFailed(long),
-    ];
-    for (const text of texts) expect(text.length).toBeLessThanOrEqual(BROWSER_ERROR_MAX_CHARS);
-    expect(Math.max(...texts.map((text) => text.length))).toBeGreaterThan(3 * BROWSER_ERROR_DETAIL_MAX_CHARS); // the bound is not slack
-  });
-
-  it('joins TOOL_ERRORS beside E4a\'s refusal and E10\'s appNotOpen, widened to the browser tools (Decision Log 31)', () => {
-    for (const key of Object.keys(BROWSER_TOOL_ERRORS)) expect(TOOL_ERRORS, key).toHaveProperty([key], BROWSER_TOOL_ERRORS[key as keyof typeof BROWSER_TOOL_ERRORS]);
-    expect(TOOL_ERRORS.navigationRefused('file:///etc/hosts', 'browser_navigate')).toBe('browser_navigate: MAWS opens only http and https pages in its browser; refused "file:///etc/hosts"');
-    for (const name of BROWSER_TOOL_NAMES) expect(TOOL_ERRORS.appNotOpen(name)).toBe(`${name}: MAWS is not open; the browser tools need the MAWS window`);
-    expect(TOOL_ERRORS.appNotOpen('show_pane')).toBe('show_pane: MAWS is not open; the pane cannot be shown');
-    expect(TOOL_ERRORS.appNotOpen('artifact_screenshot')).toBe('artifact_screenshot: MAWS is not open; the artifact cannot be captured');
-  });
-
-  it('names a target as the texts and the row do: a ref as itself, a locator in braces', () => {
-    expect(browserTargetText('e12')).toBe('e12');
-    expect(browserTargetText({ css: '#save' })).toBe('{css: "#save"}');
-    expect(browserTargetText({ css: '.x', role: 'button', name: 'Go' })).toBe('{css: ".x", role: "button", name: "Go"}');
   });
 });
 

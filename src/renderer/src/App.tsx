@@ -107,8 +107,8 @@ import { connectBrowserImport } from './tools/browser/import/store';
 // E4b end
 // E4c start
 import { openBrowserTab } from './tools/browser/agent/actions';
+import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
 import { connectBrowserAgent } from './tools/browser/agent/connect';
-import { connectBrowserProgress } from './tools/browser/agent/progress';
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
 
@@ -266,9 +266,9 @@ export function App() {
   // that ends with no sheet mounted still makes its profile the active one
   useEffect(() => connectBrowserImport(), []);
   // E4b end
-  // E4c start: the browser tools' rows (E4c execution document, Design §10): main's waiting reports for the row's line,
-  // and the row's Open tab; the Browser tool following the agent into the tab it acts on
-  useEffect(() => connectBrowserProgress(), []);
+  // E4c start: the browser action rows' Open tab (E4c execution document, Design §10; the rows of journals written before
+  // the browser tools left, P1 A-54); the Browser tool following the agent (restored for cua's leases, A-54 amended)
+  useEffect(() => connectBrowserActivity(), []); // E13: what an agent did through cua, for the transcript's rows
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
   useEffect(() => connectBrowserAgent(), []);
   // E4c end

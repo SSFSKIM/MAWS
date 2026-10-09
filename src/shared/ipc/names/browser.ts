@@ -11,6 +11,7 @@ export const commands = [
   'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
   'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
   // E4b end
+  'browser.agent.activities.list', // E13
 ] as const;
 
 export const events = [
@@ -21,5 +22,6 @@ export const events = [
   // E4b start
   'browser.import.progress', 'browser.import.finished', 'browser.import.changed',
   // E4b end
-  'browser.agent.acting', // E4c
+  'browser.agent.acting', // E4c (removed with the browser tools, restored by E13 for cua's leases: P1 A-54)
+  'browser.agent.activity', // E13
 ] as const;

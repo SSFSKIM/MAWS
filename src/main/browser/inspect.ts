@@ -5,6 +5,7 @@
 // records of the window holding the view and the pane placing it; `showPane` hands the windows a `maws.pane.show` as
 // the engine host would for `show_pane` (the e2e runs no engine; it answers whether the event was sent); `metrics` says
 // how many tabs are loaded and measured.
+import type { CuaBackend } from './cua';
 import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 
@@ -20,6 +21,7 @@ export interface BrowserInspector {
   tab(tabId: string): InspectedTab | null;
   showPane(request: MawsPaneShow): boolean; // `emit`'s answer: false when the request was invalid and nothing was sent
   metrics(): { loaded: number; sampled: number };
+  cua?: Pick<CuaBackend, 'socketPathFor' | 'inspect' | 'holds'>; // E13, under MAWS_E2E=1
 }
 
 declare global {

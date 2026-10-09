@@ -12,7 +12,7 @@ import { replayedSession } from './conformance/session-harness';
 import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
 import { BATCH_BYTES, SessionStream } from './session-stream';
-import { BROWSER_SCREENSHOT_MAX_BYTES } from '@shared/maws/browser'; // E11
+import { ARTIFACT_SCREENSHOT_MAX_BYTES as SCREENSHOT_MAX_BYTES } from '@shared/maws/tools'; // E11: A-34's image cap
 import { LINE_CAP } from '@shared/host/socket-protocol'; // E11
 // E10 start
 import { status as engineStatus } from '../../test/support/builders';
@@ -464,7 +464,7 @@ describe('the delivered cursor and the connect burst (E10)', () => {
     const fake = client();
     const s = stream(fake.emit);
     fake.state.connected = false;
-    const data = 'A'.repeat(Math.ceil((BROWSER_SCREENSHOT_MAX_BYTES * 4) / 3)); // one screenshot at the cap, as base64
+    const data = 'A'.repeat(Math.ceil((SCREENSHOT_MAX_BYTES * 4) / 3)); // one screenshot at the cap, as base64
     const shot = (seq: number): SessionEvent =>
       ev('tool.result', { id: `${APP}:L:${seq}:0`, sessionId: 'sess-burst', seq, toolUseId: `toolu_${seq}`, content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }] });
     const tail = [...rows(1, 3), ...Array.from({ length: 20 }, (_, k) => shot(4 + k)), ...rows(24, 3)];

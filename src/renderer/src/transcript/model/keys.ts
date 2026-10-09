@@ -55,6 +55,8 @@ export const rowId = {
   // E4c start: a browser tool call's row, keyed by the tool use
   browserAction: (toolUse: ToolUseId) => row(`browser:${toolUse}`),
   // E4c end
+  // E13: a browser activity standing alone, keyed by the number the window gave it on arrival
+  browserActivity: (seq: number) => row(`browser-activity:${seq}`),
 };
 
 export const cellId = {

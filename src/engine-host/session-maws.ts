@@ -1,18 +1,17 @@
 // The `maws` wiring of one EngineSession (E1 execution document, Interfaces "The tool server"; E2's capture bridge;
-// E4c's browser bridge; moved out of session.ts in E11's debt wave W-A, unchanged): the `maws` MCP server the engine
-// handshakes over `mcp_message`, the bridges its tools ask the app through (`show_pane`'s panes, `artifact_screenshot`'s
-// capture, the browser tools'), the asks waiting for the human and the blocking asks' attention items. The session owns
+// moved out of session.ts in E11's debt wave W-A; E4c's browser bridge removed with the browser tools, P1 A-54): the
+// `maws` MCP server the engine handshakes over `mcp_message`, the bridges its tools ask the app through (`show_pane`'s
+// panes, `artifact_screenshot`'s capture), the asks waiting for the human and the blocking asks' attention items. The session owns
 // the process, the journal and the queue; the wiring asks it through `SessionMawsHost`.
-import { tmpdir } from 'node:os';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestId, SessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { MawsArtifactCapturedResult, MawsBrowserAnswerResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
-import type { BrowserWaitReason } from '@shared/maws/browser';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import type { AskAnswer, AskResult } from '@shared/maws/tools';
 import type { ControlRequestFrame } from '@shared/wire/frames';
+import { recordDownload } from './deliverables/downloads'; // E13
 import { MemoryDeliverableStore, type DeliverableChange, type DeliverableWriter, type OnDeliverableWritten } from './deliverables/store';
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue } from './queue';
@@ -20,7 +19,6 @@ import { AskAnswerMismatch } from './tool-server/ask';
 import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
 import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
 import { HostBridge } from './tool-server/bridge';
-import { BrowserBridge, type BrowserRequest } from './tool-server/browser-bridge';
 import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
 import { MawsToolServer, toolText } from './tool-server/server';
 import { mawsTools } from './tool-server/tools';
@@ -34,21 +32,14 @@ export interface MawsListeners {
   deliverableChanged: (change: { appSessionId: AppSessionIdOf; id: string; change: DeliverableChange }) => void;
   artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: AppSessionIdOf }) => void;
   // E2 end
-  // E4c start: a browser tool asks main (maws.browser.request); the host tells main to stop one (maws.browser.cancel)
-  browserRequest: (request: BrowserRequest & { appSessionId: AppSessionIdOf }) => void;
-  browserCancel: (cancel: { appSessionId: AppSessionIdOf; requestId: RequestId }) => void;
-  // E4c end
 }
 
 export interface SessionMawsHost {
   appSessionId: AppSessionIdOf;
   appVersion?: string;
-  // E1: where the `maws` tools record deliverables (EngineSessionOptions.deliverables); E10: whether an app is connected;
-  // E4c: where main writes a browser screenshot, and the runtime's notice that the app went
+  // E1: where the `maws` tools record deliverables (EngineSessionOptions.deliverables); E10: whether an app is connected
   deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
   hasClient?: () => boolean;
-  userData?: string;
-  onClientGone?: (hook: () => void) => () => void;
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -67,34 +58,26 @@ export class SessionMaws {
   private readonly toolServer: MawsToolServer;
   private readonly panes: PaneBridge;
   private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
-  private readonly browser: BrowserBridge; // E4c: the bridge the browser tools ask main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
+  private readonly deliverables: DeliverableWriter; // E1: the tools' writer; E13: an agent's downloads recorded through it too
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.hasClient /* E10 */ });
     this.captures = new HostBridge({ send: (request) => host.emit('artifactCapture', { appSessionId: host.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: host.hasClient /* E10 */ }); // E2
     const announce: OnDeliverableWritten = (record, change) => host.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
-    // E4c start: a deadline paused while main waits on the person or a cover; main told to stop what no one awaits
-    this.browser = new BrowserBridge({
-      send: (request) => host.emit('browserRequest', { appSessionId: host.appSessionId, ...request }),
-      cancel: (requestId) => host.emit('browserCancel', { appSessionId: host.appSessionId, requestId }),
-      connected: host.hasClient,
-      onClientGone: host.onClientGone,
-    });
-    // E4c end
     this.askTable = new AskTable({
       onChange: () => {
         this.publishAsks(); // E1 M4b
         host.touch();
       },
     });
+    this.deliverables = host.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce });
     this.toolServer = new MawsToolServer({
       tools: mawsTools({
-        deliverables: host.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce }), bridge: this.panes, capture: this.captures /* E2 */,
+        deliverables: this.deliverables, bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
-        browser: this.browser, userData: host.userData ?? tmpdir() /* E4c */,
       }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
@@ -136,17 +119,16 @@ export class SessionMaws {
     return this.captures.answer(requestId, result);
   }
 
-  // E4c start: main's answer to a browser tool's request (`maws.browser.answer`), the first one wins; and its report
-  // that the request waits on the person or a cover, or no longer does (`maws.browser.waiting`), which pauses or
-  // re-arms the request's deadline.
-  answerBrowser(requestId: RequestId, result: MawsBrowserAnswerResult): 'delivered' | 'not_pending' {
-    return this.browser.answer(requestId, result);
+  // E13: an agent's download through cua finished (`maws.download.recorded`): a file deliverable, once per path; a write
+  // that fails is logged and leaves the saved file as it is.
+  async recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
+    try {
+      return await recordDownload(this.deliverables, download);
+    } catch (error) {
+      this.host.log(`could not record the download of tab ${download.tabId} as a deliverable: ${(error as Error).message}`);
+      throw error;
+    }
   }
-
-  browserWaiting(requestId: RequestId, waiting: BrowserWaitReason | null): 'delivered' | 'not_pending' {
-    return this.browser.waiting(requestId, waiting);
-  }
-  // E4c end
 
   // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
   asks(): PendingAsk[] {
@@ -199,7 +181,6 @@ export class SessionMaws {
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
     this.captures.processExited(); // E2
-    this.browser.processExited(); // E4c: main told to stop each; the bridge stops following the app
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
     return lostAsks;
   }

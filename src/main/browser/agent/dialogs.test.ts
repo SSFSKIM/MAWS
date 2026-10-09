@@ -2,15 +2,15 @@ import { EventEmitter } from 'node:events';
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '@shared/browser/dialog';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabStore, type TabEntry } from '../tabs';
 import { DIALOG_BOUND_WINDOW_MS, PageDialogs, routeDialog, wrapRunDialog, type RunDialogInfo } from './dialogs';
 
 // The `-run-dialog` wrap (E4c Decision Log 33, 35 and A-42's conditions 1 to 4; Decision Log 44 (a), 60): the guard (one
-// listener, Electron's own, or no wrap), the routing table, the agent's buffer `take` drains, the never-placed tab's
-// `dialogAnswered` held until it is shown, and the bound on an adopted pop-up's repeated dialogs.
+// listener, Electron's own, or no wrap), the routing table, the agent-held tab's defaults, the never-placed tab's
+// `dialogAnswered` held until it is shown, the bound on an adopted pop-up's repeated dialogs, and cua's held route.
 
 const A = 'App-A' as AppSessionId;
 type Callback = (accept: boolean, text: string) => void;
@@ -36,7 +36,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function harness({ listeners = 1 }: { listeners?: number } = {}) {
+function harness({ listeners = 1, leased = new Set<string>() }: { listeners?: number; leased?: Set<string> } = {}) {
   vi.useFakeTimers({ now: Date.parse('2026-10-07T09:00:00.000Z') });
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
@@ -53,22 +53,24 @@ function harness({ listeners = 1 }: { listeners?: number } = {}) {
     now: Date.now,
   });
   const lines: string[] = [];
-  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line) });
+  const heldCalls: { tabId: string; type: string; message: string; callback: Callback }[] = [];
+  const held = { holds: (tabId: string) => leased.has(tabId), hold: (entry: TabEntry, dialog: RunDialogInfo, callback: Callback) => void heldCalls.push({ tabId: entry.tab.tabId, type: dialog.dialogType, message: dialog.messageText, callback }) };
+  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line), held });
   const open = () => {
     const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId)!;
     return { entry, wc: contents.at(-1)! };
   };
   const place = (entry: TabEntry, placed = true) => store.update(entry.tab.tabId, { placedIn: placed ? { paneId: 'p1', surface: 'panel' } : null });
   const notices = () => emitted.filter((e) => e.name === 'browser.notice').map((e) => e.payload);
-  return { store, dialogs, open, place, notices, lines, contents };
+  return { store, dialogs, open, place, notices, lines, contents, leased, heldCalls };
 }
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 60)', () => {
-  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0 };
+describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 60; A-53)', () => {
+  const base = { control: 'idle' as const, placed: true, safeDialogs: true, recent: 0, leased: false, personHolds: false };
   it.each([
     ['an agent-held tab, placed or not', { ...base, control: 'agent' as const }, 'agent'],
     ['an agent-held unplaced tab', { ...base, control: 'agent' as const, placed: false }, 'agent'],
@@ -79,6 +81,12 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
     ['a placed ordinary tab after many dialogs (Electron\'s safeDialogs bounds it)', { ...base, recent: 9 }, 'native'],
     ['a placed adopted pop-up, its first two dialogs', { ...base, safeDialogs: false, recent: 1 }, 'native'],
     ['a placed adopted pop-up, its third within the window', { ...base, safeDialogs: false, recent: 2 }, 'bounded'],
+    ['A-53: a leased tab the agent drives, placed or not', { ...base, leased: true, control: 'agent' as const }, 'held'],
+    ['A-53: a leased unplaced agent tab', { ...base, leased: true, control: 'agent' as const, placed: false }, 'held'],
+    ['A-53: a leased idle tab nobody touched (the agent\'s deferred page work)', { ...base, leased: true }, 'held'],
+    ['A-53: a leased placed tab the person holds keeps its native dialog', { ...base, leased: true, control: 'human' as const, personHolds: true }, 'native'],
+    ['A-53: a leased placed idle tab the person touched within 3 s keeps its native dialog', { ...base, leased: true, personHolds: true }, 'native'],
+    ['A-53: a leased never-placed tab the person holds gets the hidden defaults', { ...base, leased: true, control: 'human' as const, personHolds: true, placed: false }, 'hidden'],
   ])('alert and confirm: %s → %s', (_name, facts, route) => {
     expect(routeDialog({ ...facts, type: 'alert' })).toBe(route);
     expect(routeDialog({ ...facts, type: 'confirm' })).toBe(route);
@@ -86,9 +94,9 @@ describe('routeDialog: the routing table (A-42 conditions 1 to 3; Decision Log 6
 
   it('a prompt is always Electron\'s (it answers at once and shows nothing), as is any other kind', () => {
     for (const control of ['idle', 'agent', 'human'] as const) {
-      for (const placed of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5 })).toBe('native');
+      for (const placed of [true, false]) for (const leased of [true, false]) expect(routeDialog({ type: 'prompt', control, placed, safeDialogs: false, recent: 5, leased, personHolds: false })).toBe('native');
     }
-    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0 })).toBe('native');
+    expect(routeDialog({ type: 'beforeunload', control: 'agent', placed: false, safeDialogs: true, recent: 0, leased: true, personHolds: false })).toBe('native');
   });
 });
 
@@ -122,8 +130,8 @@ describe('wrapRunDialog: the guard (A-42 condition 4)', () => {
   });
 });
 
-describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 68)', () => {
-  it('answers an agent-held tab\'s alert and confirm with the page\'s defaults, never natively, and keeps them for the next result', () => {
+describe('PageDialogs: an agent-held tab with no lease (A-42 condition 2)', () => {
+  it('answers its alert and confirm with the page\'s defaults, never natively, with no notice', () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.store.setControl(entry.tab.tabId, 'agent');
@@ -132,53 +140,55 @@ describe('PageDialogs: the agent\'s dialogs (A-42 condition 2; Decision Log 37, 
     expect(alert).toHaveBeenCalledWith(false, '');
     expect(confirm).toHaveBeenCalledWith(false, '');
     expect(wc.native).not.toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([
-      { type: 'alert', message: 'Saved.' },
-      { type: 'confirm', message: 'Leave this page?' },
-    ]);
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
+    expect(h.heldCalls).toEqual([]);
     expect(h.notices()).toEqual([]);
   });
 
-  it('keeps the last ten, each message cut to the cap as plain text', () => {
-    const h = harness();
-    const { entry, wc } = h.open();
-    h.store.setControl(entry.tab.tabId, 'agent');
-    for (let i = 0; i < 12; i++) wc.dialog('alert', `n${i}`);
-    wc.dialog('confirm', `<b>${'x'.repeat(600)}</b>`);
-    const taken = h.dialogs.take(entry.tab.tabId);
-    expect(taken).toHaveLength(BROWSER_DIALOGS_MAX);
-    expect(taken[0]).toEqual({ type: 'alert', message: 'n3' });
-    expect(taken.at(-1)!.message).toHaveLength(BROWSER_DIALOG_MESSAGE_MAX_CHARS);
-    expect(taken.at(-1)!.message.startsWith('<b>xxx')).toBe(true);
-  });
-
-  it('never cuts a message inside a surrogate pair', () => {
-    const h = harness();
-    const { entry, wc } = h.open();
-    h.store.setControl(entry.tab.tabId, 'agent');
-    wc.dialog('alert', `${'x'.repeat(BROWSER_DIALOG_MESSAGE_MAX_CHARS - 1)}😀tail`);
-    expect(h.dialogs.take(entry.tab.tabId)[0]!.message).toBe('x'.repeat(BROWSER_DIALOG_MESSAGE_MAX_CHARS - 1));
-  });
-
-  it('a prompt is left to Electron (unsupported: answered at once, shown nowhere) and not reported', () => {
+  it('a prompt is left to Electron (unsupported: answered at once, shown nowhere)', () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.store.setControl(entry.tab.tabId, 'agent');
     const callback = wc.dialog('prompt');
     expect(wc.native).toHaveBeenCalledTimes(1);
     expect(callback).toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
   });
+});
 
-  it('forgets a closed tab\'s dialogs', async () => {
+describe('PageDialogs: a tab under a cua lease (A-53)', () => {
+  it('hands the agent\'s alert and confirm to the held route unanswered, never natively; a prompt stays Electron\'s', () => {
     const h = harness();
     const { entry, wc } = h.open();
+    h.leased.add(entry.tab.tabId);
+    h.place(entry);
+    const alert = wc.dialog('alert', 'Saved.'); // idle, nobody touched it: the agent's deferred page work
     h.store.setControl(entry.tab.tabId, 'agent');
-    wc.dialog('alert');
-    h.store.close(entry.tab.tabId);
-    await Promise.resolve();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
+    const confirm = wc.dialog('confirm', 'Leave?');
+    expect(alert).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(wc.native).not.toHaveBeenCalled();
+    expect(h.heldCalls.map(({ tabId, type, message }) => ({ tabId, type, message }))).toEqual([
+      { tabId: entry.tab.tabId, type: 'alert', message: 'Saved.' },
+      { tabId: entry.tab.tabId, type: 'confirm', message: 'Leave?' },
+    ]);
+    h.heldCalls[0]!.callback(false, '');
+    expect(alert).toHaveBeenCalledWith(false, ''); // the held route answers with the page's own callback
+    wc.dialog('prompt');
+    expect(wc.native).toHaveBeenCalledTimes(1);
+  });
+
+  it('a leased tab the person holds (human, or touched within 3 s) keeps A-42\'s human rows: the placed tab\'s native box', () => {
+    const h = harness();
+    const { entry, wc } = h.open();
+    h.leased.add(entry.tab.tabId);
+    h.place(entry);
+    h.store.setControl(entry.tab.tabId, 'human');
+    wc.dialog('confirm', 'Leave?');
+    expect(wc.native).toHaveBeenCalledTimes(1);
+    h.store.setControl(entry.tab.tabId, 'idle');
+    entry.input.emit({ kind: 'mouse', source: 'human', at: Date.now() });
+    wc.dialog('alert', 'Typed into');
+    expect(wc.native).toHaveBeenCalledTimes(2);
+    expect(h.heldCalls).toEqual([]);
   });
 });
 
@@ -211,7 +221,14 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     h.place(entry, false);
     h.place(entry);
     expect(h.notices()).toHaveLength(1);
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]); // the person's, never the agent's
+  });
+
+  it('never cuts a held excerpt inside a surrogate pair', () => {
+    const h = harness();
+    const { entry, wc } = h.open();
+    wc.dialog('alert', `${'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1)}😀tail`);
+    h.place(entry);
+    expect(h.notices()).toEqual([expect.objectContaining({ excerpt: 'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1) })]);
   });
 
   it('a released tab is unplaced too: its dialog is answered rather than raised over a window that does not show it', () => {
@@ -231,7 +248,6 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     expect(wc.dialog('alert')).toHaveBeenCalledWith(false, '');
     expect(wc.dialog('confirm')).toHaveBeenCalledWith(false, '');
     expect(wc.native).not.toHaveBeenCalled();
-    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
     expect(h.notices()).toEqual([]);
   });
 });
@@ -256,7 +272,6 @@ describe('PageDialogs: an adopted pop-up\'s repeated dialogs (Decision Log 60)',
     expect(h.wc.dialog('confirm', 'four')).toHaveBeenCalledWith(false, '');
     expect(h.wc.native).toHaveBeenCalledTimes(2);
     expect(h.notices()).toEqual([{ appSessionId: A, tabId: h.entry.tab.tabId, kind: 'dialogAnswered', dialogType: 'alert', excerpt: 'three' }]);
-    expect(h.dialogs.take(h.entry.tab.tabId)).toEqual([]);
   });
 
   it('counts a native dialog from when the person closed it, so a slow loop is still bounded', () => {

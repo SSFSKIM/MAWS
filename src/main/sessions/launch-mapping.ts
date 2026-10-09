@@ -46,6 +46,9 @@ export interface LaunchInput {
   sessionId: SessionId | null;
   inheritGrantsFrom: AppSessionId | null;
   replay: string | null;
+  // E13 (the in-app browser spec of 2026-10-08, "Socket and lifecycle"): the session's cua socket, which the engine, its
+  // subagents and the cua_repl shims they start inherit as CUA_BROWSER_BACKENDS; null when there is none
+  browserBackend?: string | null;
 }
 
 export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSettings()): LaunchSpec {
@@ -63,7 +66,8 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     sessionId: input.sessionId,
     trust: input.trust,
     mcpConfig: null,
-    extraSettings: null,
+    // the engine's environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way to add a variable
+    extraSettings: input.browserBackend ? { env: { CUA_BROWSER_BACKENDS: input.browserBackend } } : null,
     maxBudgetUsd: null,
     replay: input.replay,
     inheritGrantsFrom: input.inheritGrantsFrom,
@@ -86,7 +90,7 @@ export function trustMapping(
 // ---- the three launches -------------------------------------------------------------------------------------------
 // An intent's real launch: its chips, the id pinned at its first attempt, and for a fork the source it resumes with
 // `--fork-session` (pinned too: C3's buildLaunch emits `--session-id` beside a fork's resume) and the grants it inherits.
-export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const fork = intent.kind === 'fork' ? intent.source : null;
   return toLaunchSpec(
     {
@@ -102,6 +106,7 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
       sessionId: intent.progress.engineSessionId,
       inheritGrantsFrom: fork?.appSessionId ?? null,
       replay: ctx.replay,
+      browserBackend: ctx.browserBackend ?? null,
     },
     settings,
   );
@@ -114,7 +119,7 @@ export type ResumeOptions = Partial<{ gateway: Gateway; model: string | null; ef
 // are re-passed. The route is the record's last one unless the caller says otherwise, and a record whose route was
 // never verified (every discovered session) takes D-19's default rather than reading null as a routing fact. `model`
 // and `effort` are C11's route-switch overrides for this launch; C3 re-applies the session's own grants by app id.
-export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const routed = record.gateway.routed;
   const recordEffort = EffortSchema.safeParse(record.effort);
   return toLaunchSpec(
@@ -131,6 +136,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       sessionId: null,
       inheritGrantsFrom: null,
       replay: ctx.replay,
+      browserBackend: ctx.browserBackend ?? null,
     },
     settings,
   );

@@ -52,9 +52,6 @@ import * as browser from './schema/browser';
 // E4b start
 import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 // E4b end
-// E4c start
-import { BROWSER_ERROR_MAX_CHARS } from '../maws/browser';
-// E4c end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */ } satisfies Record<
@@ -864,9 +861,9 @@ describe('ipc schema validates both directions', () => {
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
     it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.browser.answer', 'maws.browser.waiting' /* E4c */]);
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.browser.request', 'maws.browser.cancel', 'maws.browser.progress' /* E4c */]);
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
     });
 
@@ -1118,7 +1115,7 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't',
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */,
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
@@ -1127,12 +1124,14 @@ describe('ipc schema validates both directions', () => {
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
+        'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
-        'browser.agent.acting', // E4c
+        'browser.agent.acting', // E4c, restored by E13 (P1 A-54)
+        'browser.agent.activity', // E13
       ]);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
@@ -1267,11 +1266,11 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
-      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */).slice(-events.length)).toEqual(events);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */ && name !== 'browser.agent.activity' /* E13 */).slice(-events.length)).toEqual(events);
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1352,59 +1351,61 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4b end
-  // E4c start: the browser tools' bridge between the engine host and main, the waiting line, the acting tab (P1 ledger
-  // §5; E4c execution document, Interfaces "IPC")
+  // E4c start: what stays of E4c's IPC once the browser tools left the `maws` server (P1 A-54): no `maws.browser.*` bridge;
+  // `browser.agent.acting`, restored for cua's leases (A-54, amended); E13's download record and agent activity
   describe('E4c entries', () => {
     const TAB_ID = 'b_000000000001';
-    const UUID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
 
-    it('adds the browser request, its cancellation and progress events, and the answer and waiting commands to the host', () => {
-      expect(commands['maws.browser.answer'].owner).toBe('engine-host');
-      expect(commands['maws.browser.waiting'].owner).toBe('engine-host');
+    it('the browser tools\' bridge left with the tools', () => {
+      expect(Object.keys(commands).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
+      expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
       expect([...NAMES.maws.events]).toEqual(Object.keys(maws.events));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
 
-    it('validates a request: one of the six tools, its arguments left to main, and a screenshot\'s deliverable id and path', () => {
-      const request = { appSessionId: 'a', requestId: 'r1', toolUseId: 'toolu_1', tool: 'browser_act', args: { tabId: TAB_ID, action: 'click', target: 'e12' } };
-      expect(validateEventPayload('maws.browser.request', request).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.request', { ...request, toolUseId: null, args: 'anything' }).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.request', { ...request, tool: 'browser_screenshot', deliverableId: UUID, path: `/u/deliverables/a/screenshots/${UUID}.png` }).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.request', { ...request, tool: 'artifact_screenshot' }).ok).toBe(false);
-      expect(validateEventPayload('maws.browser.request', { ...request, deliverableId: 'd1' }).ok).toBe(false);
-      expect(validateEventPayload('maws.browser.request', { ...request, extra: 1 }).ok).toBe(false);
-      expect(validateEventPayload('maws.browser.cancel', { appSessionId: 'a', requestId: 'r1' }).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.cancel', { appSessionId: 'a' }).ok).toBe(false);
-    });
-
-    it('validates an answer: a result with the snapshot\'s text or the screenshot\'s file, or an error', () => {
-      const answer = (result: unknown) => validateCommandInput('maws.browser.answer', { appSessionId: 'a', requestId: 'r1', result }).ok;
-      expect(answer({ ok: true, result: { status: 'ok', tabId: TAB_ID } })).toBe(true);
-      expect(answer({ ok: true, result: { status: 'ok' }, text: '- heading "E4c order form" [level=1] [ref=e3]' })).toBe(true);
-      expect(answer({ ok: true, result: { status: 'ok' }, image: { path: `/u/${UUID}.jpg`, mimeType: 'image/jpeg', width: 1280, height: 800, bytes: 90_000 } })).toBe(true);
-      expect(answer({ ok: true, result: { status: 'ok' }, image: { path: '/u/x.webp', mimeType: 'image/webp', width: 1, height: 1, bytes: 1 } })).toBe(false);
-      expect(answer({ ok: false, error: 'browser_act: tab "b_000000000001" was closed during the action' })).toBe(true);
-      expect(answer({ ok: false, error: 'x'.repeat(BROWSER_ERROR_MAX_CHARS) })).toBe(true); // bounded: it is journaled
-      expect(answer({ ok: false, error: 'x'.repeat(BROWSER_ERROR_MAX_CHARS + 1) })).toBe(false);
-      expect(answer({ ok: false })).toBe(false);
-      expect(answer({ ok: true })).toBe(false);
-      expect(validateCommandOutput('maws.browser.answer', { outcome: 'not_pending' }).ok).toBe(true);
-      expect(validateCommandOutput('maws.browser.answer', { outcome: 'write_failed' }).ok).toBe(false);
-      for (const waiting of ['human', 'cover', null]) expect(validateCommandInput('maws.browser.waiting', { appSessionId: 'a', requestId: 'r1', waiting }).ok, String(waiting)).toBe(true);
-      expect(validateCommandInput('maws.browser.waiting', { appSessionId: 'a', requestId: 'r1', waiting: 'sheet' }).ok).toBe(false);
-      expect(validateCommandOutput('maws.browser.waiting', { outcome: 'delivered' }).ok).toBe(true);
-    });
-
-    it('validates the waiting line\'s progress and the acting tab', () => {
-      const progress = { appSessionId: 'a', toolUseId: 'toolu_1', tabId: TAB_ID, tool: 'browser_act', waiting: 'human', since: '2026-10-07T00:00:00.000Z' };
-      expect(validateEventPayload('maws.browser.progress', progress).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.progress', { ...progress, toolUseId: null, waiting: null }).ok).toBe(true);
-      expect(validateEventPayload('maws.browser.progress', { ...progress, tabId: 'tab-1' }).ok).toBe(false);
+    it('validates the acting tab: its owner, the tab and the session acting (E4c\'s event, restored for cua\'s leases)', () => {
       const acting = { appSessionId: 'a', tabId: TAB_ID, actingSessionId: 'thread' };
       expect(validateEventPayload('browser.agent.acting', acting).ok).toBe(true);
       expect(validateEventPayload('browser.agent.acting', { ...acting, tabId: 'nope' }).ok).toBe(false);
       expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(false); // who acts is named
+    });
+
+    it('E13: validates an agent\'s finished download through cua', () => {
+      const download = { appSessionId: 'a', tabId: TAB_ID, path: '/Users/x/Downloads/r.pdf', filename: 'r.pdf', url: 'http://127.0.0.1:1/r.pdf', bytes: 10 };
+      expect(commands['maws.download.recorded'].owner).toBe('engine-host');
+      expect(validateCommandInput('maws.download.recorded', download).ok).toBe(true);
+      expect(validateCommandInput('maws.download.recorded', { ...download, path: 'r.pdf' }).ok).toBe(false);
+      expect(validateCommandInput('maws.download.recorded', { ...download, bytes: -1 }).ok).toBe(false);
+      for (const outcome of ['recorded', 'duplicate', 'not_held']) expect(validateCommandOutput('maws.download.recorded', { outcome }).ok).toBe(true);
+    });
+
+    it('E13: validates an agent\'s activity through cua: one of the listed kinds, typed text as a count only', () => {
+      const at = '2026-10-08T00:00:00.000Z';
+      const ok = (activity: unknown) => validateEventPayload('browser.agent.activity', { appSessionId: 'a', tabId: TAB_ID, at, activity }).ok;
+      for (const activity of [
+        { kind: 'navigated', url: 'https://example.com/', title: '' },
+        { kind: 'clicked', x: 10, y: 20.5, label: 'button Submit' },
+        { kind: 'clicked', x: 0, y: 0, label: null },
+        { kind: 'typed', chars: 12 },
+        { kind: 'key', key: 'Enter' },
+        { kind: 'screenshot' },
+        { kind: 'download', filename: 'cua-report.pdf', state: 'complete' },
+        { kind: 'dialog', type: 'confirm', excerpt: 'Leave?', answered: 'default' },
+        { kind: 'tabOpened', url: 'about:blank' },
+        { kind: 'tabClosed', url: 'https://example.com/' },
+      ]) expect(ok(activity), JSON.stringify(activity)).toBe(true);
+      expect(ok({ kind: 'typed', chars: 3, text: 'abc' })).toBe(false); // the text itself never travels
+      expect(ok({ kind: 'typed', chars: 0 })).toBe(false);
+      expect(ok({ kind: 'clicked', x: 1, y: 1, label: 'x'.repeat(41) })).toBe(false);
+      expect(ok({ kind: 'dialog', type: 'prompt', excerpt: '', answered: 'accepted' })).toBe(false);
+      expect(ok({ kind: 'moved', x: 1, y: 1 })).toBe(false);
+      expect(validateEventPayload('browser.agent.activity', { appSessionId: 'a', tabId: 'nope', at, activity: { kind: 'screenshot' } }).ok).toBe(false);
+      // the session's kept activity, listed when a transcript mounts
+      const kept = { appSessionId: 'a', tabId: TAB_ID, at, activity: { kind: 'screenshot' } };
+      expect(validateCommandInput('browser.agent.activities.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.activities.list', { activities: [kept] }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.activities.list', { activities: Array(501).fill(kept) }).ok).toBe(false);
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

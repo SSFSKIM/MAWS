@@ -1,6 +1,6 @@
 // The tab's one `webContents.debugger` attachment (E4a execution document, Design §10; A-19, A-33; Decision Log 19),
-// shared by every later piece that speaks CDP to a page: E4c's tool bridge, E4b's CHIPS import, E4d's crop, and MAWS's
-// own focus emulation (visibility.ts). It is Playwright-agnostic and never speaks WebSocket; E4c's bridge sits on it.
+// shared by every later piece that speaks CDP to a page: cua's primitive server (E13; E4c's tool bridge until
+// 2026-10-08), E4b's CHIPS import, E4d's crop, and MAWS's own focus emulation (visibility.ts). It never speaks WebSocket.
 //
 // `send` is the only way a command reaches the page: the raw debugger is never handed out. That is what makes the input
 // attribution sound (`findings-pass2.txt:143-170`): every `Input.*` command, the tools' and MAWS's own, enters the
@@ -12,6 +12,15 @@
 // id, which Chromium keeps across cross-site swaps, `findings-pass2.txt:306-310`) and survives navigations. `send`
 // attaches when nothing is attached yet, so whoever asks first attaches; a renderer crash detaches it (the store) and the
 // next ask attaches again. Chromium's own detach (the webContents closing) is forwarded with its reason.
+//
+// Leases (the in-app browser spec of 2026-10-08, "Debugger leases"; P1 A-51): the attachment is counted, not owned. A
+// lease attaches when nothing is attached and the attachment ends when the last lease is released, so no holder's
+// release ends an attachment another holder still uses. cua's primitive server takes a lease per tab it drives; the
+// older holders (focus emulation, and a plain `attach()` as `shared`) hold one implicit lease each through
+// `attach(owner)` and `detach(owner)` (E4c's Playwright driver held one too until it left on 2026-10-08, P1 A-54).
+// Leases count attachment, not authority: CDP state belongs to the one attachment, so whoever drives a tab is decided
+// above this class (one automation owner per tab). `end` is the store's: the page is going (closed,
+// suspended, crashed), so the attachment ends whatever is held and every lease with it, as Chromium's own detach does.
 import type { WebContents } from 'electron';
 
 const PROTOCOL_VERSION = '1.3';
@@ -40,6 +49,15 @@ export type DebuggerEventListener = (params: unknown, sessionId: string, method:
 
 type DebuggerHost = Pick<WebContents, 'debugger' | 'isDestroyed'>;
 
+// One hold on the attachment; `live` turns false when it is released or the attachment ended under it.
+export interface DebuggerLease {
+  readonly live: boolean;
+  release(): void;
+}
+
+// The holders of an implicit lease, each through `attach(owner)` / `detach(owner)`.
+export type DebuggerOwner = 'shared' | 'focus';
+
 export class TabDebugger {
   private connection: Promise<void> | null = null; // the attachment, made or being made
   private isAttached = false;
@@ -51,6 +69,8 @@ export class TabDebugger {
   private readonly listeners = new Map<string, Set<DebuggerEventListener>>();
   private readonly observers = new Set<(phase: CommandPhase) => void>();
   private readonly detachListeners = new Set<(reason: string) => void>();
+  private readonly holders = new Set<object>(); // every live lease, the owners' implicit ones included
+  private readonly owners = new Map<DebuggerOwner, DebuggerLease>();
 
   constructor(
     private readonly webContents: DebuggerHost,
@@ -71,8 +91,63 @@ export class TabDebugger {
     return this.frameId;
   }
 
+  // How many leases are held (the owners' implicit ones included).
+  get leases(): number {
+    return this.holders.size;
+  }
+
+  // Whether this owner holds its implicit lease.
+  heldBy(owner: DebuggerOwner): boolean {
+    return this.owners.has(owner);
+  }
+
+  // A lease on the attachment: attaches when nothing is attached (every caller in the meantime shares the one
+  // attachment); rejects, holding nothing, when the attach fails.
+  async lease(): Promise<DebuggerLease> {
+    const token = {};
+    const holders = this.holders;
+    holders.add(token);
+    const lease: DebuggerLease = {
+      get live() {
+        return holders.has(token);
+      },
+      release: () => {
+        if (holders.delete(token) && holders.size === 0) this.endAttachment();
+      },
+    };
+    try {
+      await this.ensureAttached();
+    } catch (error) {
+      this.holders.delete(token);
+      throw error;
+    }
+    if (!this.holders.has(token)) throw new Error('the debugger was detached while attaching');
+    return lease;
+  }
+
+  // The owner's implicit lease (idempotent per owner), attaching if nothing is attached.
+  async attach(owner: DebuggerOwner = 'shared'): Promise<void> {
+    if (this.owners.has(owner)) return this.ensureAttached();
+    const lease = await this.lease();
+    if (this.owners.has(owner)) lease.release(); // two attaches of one owner raced: one lease is kept
+    else this.owners.set(owner, lease);
+  }
+
+  // Releases the owner's implicit lease; when no lease remains, the attachment ends (a no-op while detached).
+  detach(owner: DebuggerOwner = 'shared'): void {
+    const lease = this.owners.get(owner);
+    this.owners.delete(owner);
+    lease?.release();
+    if (this.holders.size === 0) this.endAttachment();
+  }
+
+  // The page is going (the store: closed, suspended, crashed): the attachment ends whatever is held, every lease with it.
+  end(): void {
+    this.endAttachment();
+  }
+
   // Attaches if nothing is attached; every caller in the meantime shares the one attachment.
-  attach(): Promise<void> {
+  private ensureAttached(): Promise<void> {
     if (!this.connection) {
       const generation = this.generation;
       this.connection = this.connect(generation).catch((error: unknown) => {
@@ -87,8 +162,11 @@ export class TabDebugger {
   }
 
   // Detaches (a no-op while detached); the detach listeners hear it once, as they hear Chromium's.
-  detach(): void {
-    if (this.connection === null) return;
+  private endAttachment(): void {
+    if (this.connection === null) {
+      this.dropLeases();
+      return;
+    }
     this.detachDebugger();
     this.release('detached');
   }
@@ -96,7 +174,7 @@ export class TabDebugger {
   // Sends one command to the page (or to a child session) and answers its result; attaches first when needed. While
   // attached, an Input command is in the table by the time this returns.
   send<T = unknown>(method: string, params?: CommandParams, sessionId?: string): Promise<T> {
-    const sent = this.isAttached ? this.command(method, params, sessionId) : this.attach().then(() => this.command(method, params, sessionId));
+    const sent = this.isAttached ? this.command(method, params, sessionId) : this.ensureAttached().then(() => this.command(method, params, sessionId));
     return sent as Promise<T>;
   }
 
@@ -188,12 +266,19 @@ export class TabDebugger {
 
   // The attachment is gone: nothing is in flight any more (each pending reply rejects), and the listeners are told.
   private release(reason: string | null): void {
+    this.dropLeases();
     this.generation++;
     this.connection = null;
     this.isAttached = false;
     this.frameId = null;
     this.flying.clear();
     if (reason !== null) for (const listener of [...this.detachListeners]) this.safely(() => listener(reason));
+  }
+
+  // Every lease ends with the attachment (or with an attach that failed).
+  private dropLeases(): void {
+    this.holders.clear();
+    this.owners.clear();
   }
 
   private observe(phase: CommandPhase): void {

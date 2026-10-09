@@ -14,6 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 // E3 end
 import type { ListingSection } from './agent-listing'; // E7
 import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
+import type { BrowserActivity } from '@shared/browser/activity'; // E13
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -124,6 +125,12 @@ export type Row = RowBase &
         tabCount: number | null; state: 'running' | 'done' | 'error' | 'cancelled'; detail: string | null; answered: boolean;
       }
     // E4c end
+    // E13 start: what an agent did in the in-app browser through cua (the in-app browser spec of 2026-10-08, "Action
+    // rows"; M3 fix wave), a persistent row as the browser action row is: under the cua_repl `js` call it happened in
+    // (`toolUseId`, and `turnId` its turn), or standalone with neither (a download that completed after its turn, a dialog
+    // MAWS answered by default). Never derived from X1 events: the transcript view places it (browser-activity.ts)
+    | { kind: 'browser_activity'; toolUseId: ToolUseId | null; appSessionId: AppSessionId; tabId: string; activity: BrowserActivity }
+    // E13 end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

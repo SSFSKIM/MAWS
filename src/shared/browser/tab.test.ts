@@ -22,9 +22,16 @@ const TAB = {
   loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
   memoryKiB: null, placedIn: null, covered: false,
   createdAt: '2026-10-06T00:00:00.000Z', lastShownAt: '2026-10-06T00:00:00.000Z',
+  agentBadge: null, // E13
 } as const;
 
 describe('BrowserTab (E4a, the cross-child model)', () => {
+  it('E13: carries an agent tab\'s badge, bounded, or null', () => {
+    expect(BrowserTabSchema.parse({ ...TAB, agentBadge: 'agent' }).agentBadge).toBe('agent');
+    expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: 'x'.repeat(41) }).success).toBe(false);
+    expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: undefined }).success).toBe(false);
+  });
+
   it('accepts the Interfaces shape, the fields filled in', () => {
     expect(BrowserTabSchema.parse(TAB)).toEqual(TAB);
     const busy = {

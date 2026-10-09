@@ -45,7 +45,6 @@ export interface LauncherDeps {
   log: (message: string) => void;
   wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
   hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
-  onClientGone?: (hook: () => void) => () => void; // E4c: the runtime's, the browser bridge settles on it
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -104,7 +103,6 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         // C12 end
         deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
-        userData: deps.userData, onClientGone: deps.onClientGone, // E4c: the screenshots' home; the app's going
       });
       deps.wire(session, plan, spec);
       return session;

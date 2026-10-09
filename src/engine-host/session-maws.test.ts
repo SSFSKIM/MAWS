@@ -4,10 +4,10 @@
 // rebuild. Replayed: E0a's pass3/p1-sdk-mcp-roundtrip through the app's own handshake, up to the probe's own writes.
 // E1 M2 (Plan of Work M2, "What it proves"): the `ask` lifecycle on the same scripted session (blocking and async, the
 // claim-write-commit rule with its failures, the withdrawn and exit cancellations, every event on rebuild).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -29,10 +29,6 @@ import { replayEngine, type ReplayTransport } from './replay-transport';
 import { EngineSession } from './session';
 import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
-// E4c start
-import type { MawsBrowserCancel, MawsBrowserRequest } from '@shared/ipc/schema/maws';
-import type { EngineSessionOptions } from './session';
-// E4c end
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -58,8 +54,8 @@ afterEach(() => {
 type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }[]; isError?: boolean; tools?: unknown[] } & Record<string, unknown>; error?: { code: number; message: string } };
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
-async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}, session: Partial<EngineSessionOptions> = {} /* E4c */) {
-  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0', ...session }, transport });
+async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}) {
+  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0' }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
   // E2: the store's announcements and the capture requests
@@ -98,11 +94,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
       // E2 (Decision Log 4): the two writers are not read-only
       ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }], ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
       ['artifact_list', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifacts' }], ['artifact_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Screenshot artifact' }],
-      // E4c start: the six browser tools; navigate, act and eval are not read-only (A-31)
-      ['browser_tabs', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser tabs' }], ['browser_navigate', { readOnlyHint: false, openWorldHint: false, title: 'Browser navigate' }],
-      ['browser_snapshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser snapshot' }], ['browser_act', { readOnlyHint: false, openWorldHint: false, title: 'Browser act' }],
-      ['browser_eval', { readOnlyHint: false, openWorldHint: false, title: 'Browser eval' }], ['browser_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Browser screenshot' }],
-      // E4c end
+      // E4c's six browser tools left on 2026-10-08 (P1 A-54): nothing after the artifact tools
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);
@@ -693,121 +685,19 @@ describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
   });
 });
 
-// E4c start (E4c execution document, Task 1.4; Design §3 and §10): the browser tools on the same scripted session: the
-// request main answers (`maws.browser.request`), its waiting report, its answer and `maws.browser.action` live and on
-// rebuild, the screenshot's record on disk, the cancellations (withdrawn, exit) and the app's absence or going (X13).
-describe('the browser tools on an EngineSession (scripted)', () => {
-  const TAB = 'b_0123456789ab';
-  const page = { status: 'ok', tabId: TAB, url: 'http://127.0.0.1:17391/form.html', title: 'E4c order form', ms: 42 };
-  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
-  const json = (rpc: Rpc, at = 0) => JSON.parse((rpc.result!.content!.filter((b) => (b as { type?: string }).type === 'text')[at] as { text: string }).text) as Record<string, unknown>;
-
-  async function browserSession(session: Parameters<typeof mawsSession>[1] = {}) {
-    const run = await mawsSession({}, { userData, ...session });
-    const requests: MawsBrowserRequest[] = [];
-    const cancels: MawsBrowserCancel[] = [];
-    run.session.on('browserRequest', (request) => requests.push(request));
-    run.session.on('browserCancel', (cancel) => cancels.push(cancel));
-    return { ...run, requests, cancels };
-  }
-
-  it('asks main through maws.browser.request, pauses for its waiting report, answers its result and yields maws.browser.action, live and on rebuild', async () => {
-    const run = await browserSession();
-    const appSessionId = run.session.status().appSessionId;
-    const args = { tabId: TAB, action: 'click', target: 'e12' };
-    const act = run.call('browser_act', args, 'toolu_click');
-    await until(() => run.requests.length === 1, 'the browser request');
-    expect(run.requests).toEqual([{ appSessionId, requestId: act, toolUseId: 'toolu_click', tool: 'browser_act', args }]);
-    expect(run.session.status().pendingRequests).toBe(1);
-    expect(run.session.browserWaiting(act, 'human')).toBe('delivered');
-    expect(run.session.browserWaiting(act, null)).toBe('delivered');
-    const result = { ...page, action: 'click', target: { ref: 'e12', role: 'button', name: 'Submit' }, navigated: true, waitedFor: 'human', waitedMs: 3012 };
-    expect(run.session.answerBrowser(act, { ok: true, result })).toBe('delivered');
-    expect(run.session.answerBrowser(act, { ok: true, result })).toBe('not_pending');
-    expect(run.session.browserWaiting(act, 'cover')).toBe('not_pending');
-    expect(json(await run.answered(act))).toEqual(result);
-    // a refusal from main is the call's error, and still the row's fact
-    const evaluate = run.call('browser_eval', { tabId: TAB, expression: 'x' }, 'toolu_eval');
-    await until(() => run.requests.length === 2, 'the second request');
-    run.session.answerBrowser(evaluate, { ok: false, error: TOOL_ERRORS.evalFailed('ReferenceError: x is not defined') });
-    expect((await run.answered(evaluate)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.evalFailed('ReferenceError: x is not defined') }], isError: true });
-    // a call the schema refuses asks main nothing and makes no event
-    expect((await run.answered(run.call('browser_tabs', { action: 'open' }))).result!.isError).toBe(true);
-    expect(run.requests).toHaveLength(2);
-    await until(() => run.maws().length === 2, 'the action events');
-    expect(run.maws()).toMatchObject([
-      { kind: 'maws.browser.action', toolUseId: 'toolu_click', requestId: act, tool: 'browser_act', action: 'click', tabId: TAB, target: 'e12', url: page.url, title: page.title, ms: 42, deliverableId: null, error: null, waitedFor: 'human', waitedMs: 3012 },
-      { kind: 'maws.browser.action', toolUseId: 'toolu_eval', requestId: evaluate, tool: 'browser_eval', action: 'eval', tabId: TAB, target: null, url: null, error: TOOL_ERRORS.evalFailed('ReferenceError: x is not defined') },
-    ]);
-    expect(run.cancels).toEqual([]);
+// E4c start: the six browser tools left the `maws` server on 2026-10-08 (P1 A-54; the in-app browser spec's acceptance 12):
+// the session lists none of them, and a call naming one is the server's unknown tool, with nothing asked of main.
+describe('the removed browser tools on an EngineSession (scripted)', () => {
+  it('lists no browser_* tool, and answers a call to one as an unknown tool without asking main', async () => {
+    const run = await mawsSession();
+    const listed = await run.answered(run.mcp({ id: 1, method: 'tools/list' }));
+    expect((listed.result!.tools as { name: string }[]).filter((tool) => tool.name.startsWith('browser_'))).toEqual([]);
+    const act = await run.answered(run.call('browser_act', { tabId: 'b_0123456789ab', action: 'click', target: 'e12' }, 'toolu_click'));
+    expect(act.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act') }], isError: true });
+    expect(run.shows).toEqual([]);
+    expect(run.captures).toEqual([]);
     run.transport.exit(0);
     await run.session.exited;
-    expect(run.rebuilt()).toEqual(run.events);
-  });
-
-  it('a screenshot names its file under userData, answers the image first and writes the screenshot record', async () => {
-    const run = await browserSession();
-    const appSessionId = run.session.status().appSessionId;
-    const shot = run.call('browser_screenshot', { tabId: TAB }, 'toolu_shot');
-    await until(() => run.requests.length === 1, 'the screenshot request');
-    const { deliverableId, path } = run.requests[0]!;
-    expect(path).toBe(join(userData, 'deliverables', appSessionId, 'screenshots', `${deliverableId}.png`));
-    mkdirSync(dirname(path!), { recursive: true });
-    writeFileSync(path!, PNG);
-    const result = { ...page, deliverableId, path, width: 1, height: 1, bytes: PNG.length, mimeType: 'image/png', target: null, fullPage: false };
-    run.session.answerBrowser(shot, { ok: true, result, image: { path: path!, mimeType: 'image/png', width: 1, height: 1, bytes: PNG.length } });
-    const rpc = await run.answered(shot);
-    expect(rpc.result!.content![0]).toEqual({ type: 'image', data: PNG.toString('base64'), mimeType: 'image/png' });
-    expect(json(rpc)).toEqual(result);
-    expect(await new FileDeliverableStore(userData).get(appSessionId, deliverableId!)).toMatchObject({ kind: 'screenshot', path, title: page.title, sourceUrl: page.url, toolUseId: 'toolu_shot', versions: [{ path, toolUseId: 'toolu_shot' }] });
-    expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }]);
-    await until(() => run.maws().length === 1, 'the action event');
-    expect(run.maws()).toMatchObject([{ kind: 'maws.browser.action', tool: 'browser_screenshot', action: 'screenshot', target: 'page', deliverableId }]);
-    run.transport.exit(0);
-    await run.session.exited;
-    expect(run.rebuilt()).toEqual(run.events);
-  });
-
-  it('tells main to stop a call the engine withdrew, paused or not, and every call pending at exit; none is answered', async () => {
-    const run = await browserSession();
-    const appSessionId = run.session.status().appSessionId;
-    const withdrawn = run.call('browser_act', { tabId: TAB, action: 'click', target: 'e1' });
-    const paused = run.call('browser_eval', { tabId: TAB, expression: '1' });
-    const atExit = run.call('browser_snapshot', { tabId: TAB });
-    await until(() => run.requests.length === 3, 'the three requests');
-    run.session.browserWaiting(paused, 'human');
-    run.transport.push({ type: 'control_cancel_request', request_id: withdrawn });
-    run.transport.push({ type: 'control_cancel_request', request_id: paused });
-    await until(() => run.cancels.length === 2, 'the two cancels');
-    expect(run.cancels).toEqual([{ appSessionId, requestId: withdrawn }, { appSessionId, requestId: paused }]);
-    expect(run.session.answerBrowser(withdrawn, { ok: false, error: 'late' })).toBe('not_pending');
-    run.transport.exit(1);
-    await run.session.exited;
-    expect(run.cancels).toEqual([{ appSessionId, requestId: withdrawn }, { appSessionId, requestId: paused }, { appSessionId, requestId: atExit }]);
-    await new Promise((r) => setTimeout(r, 10));
-    for (const id of [withdrawn, paused, atExit]) expect(run.answerOf(id)).toBeUndefined();
-    expect(run.maws()).toEqual([]);
-  });
-
-  // X13: with no app connected a browser call fails at once; when the app goes, a pending one (paused included) does too
-  it('answers appNotOpen at once with no app, and settles pending calls appNotOpen when the app goes', async () => {
-    let connected = false;
-    const gone = new Set<() => void>();
-    const run = await browserSession({ hasClient: () => connected, onClientGone: (hook) => (gone.add(hook), () => gone.delete(hook)) });
-    expect((await run.answered(run.call('browser_tabs', { action: 'list' }))).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('browser_tabs') }], isError: true });
-    expect(run.requests).toEqual([]);
-    connected = true;
-    const paused = run.call('browser_act', { tabId: TAB, action: 'click', target: 'e1' });
-    await until(() => run.requests.length === 1, 'the request');
-    run.session.browserWaiting(paused, 'human');
-    connected = false;
-    for (const hook of [...gone]) hook();
-    expect((await run.answered(paused)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('browser_act') }], isError: true });
-    await until(() => run.maws().length === 2, 'the action events');
-    expect(run.maws().map((e) => (e as { error: string | null }).error)).toEqual([TOOL_ERRORS.appNotOpen('browser_tabs'), TOOL_ERRORS.appNotOpen('browser_act')]);
-    run.transport.exit(0);
-    await run.session.exited;
-    expect(gone.size).toBe(0); // the session stopped following the app at its exit
   });
 });
 // E4c end

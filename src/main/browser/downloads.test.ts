@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
-import { Downloads, e2eSaveDir } from './downloads';
+import { Downloads, e2eSaveDir, uniqueDownloadPath } from './downloads';
 import { TabStore, type TabEntry } from './tabs';
 
 const A = 'App-A' as AppSessionId;
@@ -28,8 +28,9 @@ class FakeItem extends EventEmitter {
   getSavePath = () => this.savePath;
 }
 
-function harness(saveDir: string | null = null) {
+function harness(saveDir: string | null = null, agent?: ConstructorParameters<typeof Downloads>[0]['agent']) {
   const emitted: { name: EventName; payload: unknown }[] = [];
+  const taken = new Set<string>(); // the files already in the folder
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
   const store = new TabStore({
     emit,
@@ -38,10 +39,10 @@ function harness(saveDir: string | null = null) {
     schedule: () => {},
   });
   const reveal = vi.fn();
-  const downloads = new Downloads({ store, emit, downloadsDir: () => '/Users/owner/Downloads', saveDir, reveal });
+  const downloads = new Downloads({ store, emit, downloadsDir: () => '/Users/owner/Downloads', saveDir, reveal, agent, exists: (path) => taken.has(path) });
   const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId) as TabEntry;
   const start = (item: FakeItem, wc: unknown = entry.view!.webContents) => downloads.handle(item as never, wc as never);
-  return { store, entry, downloads, emitted, reveal, start };
+  return { store, entry, downloads, emitted, reveal, start, taken };
 }
 
 describe('Downloads (E4a Design §8; A-31: the human\'s, through a save dialog)', () => {
@@ -133,20 +134,66 @@ describe('Downloads (E4a Design §8; A-31: the human\'s, through a save dialog)'
   });
 });
 
-// E4c start: the in-process hook beside the IPC emission (E4c Design §6; Decision Log 43)
-describe('Downloads.onRefused (E4c)', () => {
-  it("tells main's listeners of a refusal, and only of a refusal", () => {
-    const h = harness();
-    const heard = vi.fn();
-    const stop = h.downloads.onRefused(heard);
-    h.start(new FakeItem('free.bin'));
-    expect(heard).not.toHaveBeenCalled(); // the person's download is theirs
-    h.store.setControl(h.entry.tab.tabId, 'agent');
-    h.start(new FakeItem());
-    expect(heard).toHaveBeenCalledWith({ tabId: h.entry.tab.tabId, url: 'https://a.test/file.bin', filename: 'file.bin' });
-    stop();
-    h.start(new FakeItem());
-    expect(heard).toHaveBeenCalledTimes(1);
+describe('an agent\'s download through cua (E13: the in-app browser spec of 2026-10-08, "Downloads")', () => {
+  const agentRoute = (leased = true) => {
+    const ends: unknown[] = [];
+    const starts: unknown[] = [];
+    const agent = { owns: vi.fn(() => leased), started: vi.fn((_entry: TabEntry, download: unknown) => (starts.push(download), (end: unknown) => void ends.push(end))) };
+    return { agent, starts, ends };
+  };
+
+  it('a leased tab\'s download is saved without a dialog in ~/Downloads under its name, reported, and its line shown as a person\'s', () => {
+    const { agent, starts, ends } = agentRoute();
+    const h = harness(null, agent);
+    h.entry.tab.control = 'agent'; // the lease decides, not control (the old tools\' refusal is for their own tabs)
+    const item = Object.assign(new FakeItem('cua-report.pdf', 7741), { getURLChain: () => ['https://a.test/r', 'https://a.test/cua-report.pdf'] });
+    h.start(item);
+    expect(item.cancel).not.toHaveBeenCalled();
+    expect(item.setSaveDialogOptions).not.toHaveBeenCalled();
+    expect(item.setSavePath).toHaveBeenCalledWith('/Users/owner/Downloads/cua-report.pdf');
+    expect(starts).toEqual([{ url: 'https://a.test/r', finalUrl: 'https://a.test/cua-report.pdf', path: '/Users/owner/Downloads/cua-report.pdf' }]);
+    expect(h.entry.tab.download).toMatchObject({ name: 'cua-report.pdf', state: 'progressing' });
+    expect(h.emitted.map((e) => e.name)).not.toContain('browser.download.refused');
+    item.received = 7741;
+    item.emit('done', {}, 'completed');
+    expect(ends).toEqual([{ state: 'completed', path: '/Users/owner/Downloads/cua-report.pdf', bytes: 7741 }]);
+    expect(h.entry.tab.download).toMatchObject({ state: 'done', path: '/Users/owner/Downloads/cua-report.pdf' });
+    expect(h.downloads.reveal(h.entry.tab.tabId)).toEqual({ revealed: true });
+  });
+
+  it('never overwrites: a name taken in the folder, or by a download still in flight, gets Chrome\'s " (1)", " (2)" before its extension', () => {
+    const { agent, starts } = agentRoute();
+    const h = harness(null, agent);
+    h.taken.add('/Users/owner/Downloads/cua-report.pdf');
+    h.start(new FakeItem('cua-report.pdf'));
+    h.start(new FakeItem('cua-report.pdf'));
+    expect(starts.map((s) => (s as { path: string }).path)).toEqual(['/Users/owner/Downloads/cua-report (1).pdf', '/Users/owner/Downloads/cua-report (2).pdf']);
+    expect(uniqueDownloadPath('/d', 'archive.tar.gz', (p) => p === '/d/archive.tar.gz')).toBe('/d/archive.tar (1).gz');
+    expect(uniqueDownloadPath('/d', 'README', (p) => p === '/d/README')).toBe('/d/README (1)');
+    expect(uniqueDownloadPath('/d', '.env', () => false)).toBe('/d/.env');
+  });
+
+  it('a cancelled or failed agent download ends as such; the e2e save folder replaces ~/Downloads', () => {
+    const { agent, ends } = agentRoute();
+    const h = harness('/tmp/e2e-saves', agent);
+    const item = new FakeItem('a.bin');
+    h.start(item);
+    expect(item.setSavePath).toHaveBeenCalledWith('/tmp/e2e-saves/a.bin');
+    item.emit('done', {}, 'cancelled');
+    expect(ends).toEqual([{ state: 'cancelled', path: '/tmp/e2e-saves/a.bin', bytes: 0 }]);
+    expect(h.entry.tab.download).toMatchObject({ state: 'cancelled' });
+  });
+
+  it('a tab under no lease keeps today\'s routes: the person\'s save dialog, the old tools\' refusal', () => {
+    const { agent, starts } = agentRoute(false);
+    const h = harness(null, agent);
+    const item = new FakeItem();
+    h.start(item);
+    expect(item.setSaveDialogOptions).toHaveBeenCalled();
+    h.entry.tab.control = 'agent';
+    const refused = new FakeItem();
+    h.start(refused);
+    expect(refused.cancel).toHaveBeenCalled();
+    expect(starts).toEqual([]);
   });
 });
-// E4c end

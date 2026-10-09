@@ -981,3 +981,29 @@ describe('the launch gate', () => {
   });
 });
 // C12 end
+
+describe('E13: the session\'s cua socket in its launch (the in-app browser spec of 2026-10-08)', () => {
+  let h: SessionHarness;
+  const asked: string[] = [];
+  beforeEach(async () => {
+    asked.length = 0;
+    h = await new SessionHarness({ browserBackend: (appSessionId) => (asked.push(appSessionId), `/u/browser/cua/${appSessionId}.sock`) }).start();
+  });
+  afterEach(() => h.dispose());
+
+  it('an intent\'s launch and a record\'s resume carry CUA_BROWSER_BACKENDS for their own session; the trust bootstrap does not', async () => {
+    const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    const [bootstrap, launch] = h.host.launches;
+    expect(bootstrap!.appSessionId).not.toBe(id);
+    expect(bootstrap!.extraSettings).toBeNull();
+    expect(launch).toMatchObject({ appSessionId: id, extraSettings: { env: { CUA_BROWSER_BACKENDS: `/u/browser/cua/${id}.sock` } } });
+    expect(asked).toEqual([id]);
+
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xe13), directory: h.work })).record;
+    await h.service.startSession(record.appId, { message: null, options: { trust: 'declined' } });
+    await h.settled(record.appId);
+    expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: record.appId, extraSettings: { env: { CUA_BROWSER_BACKENDS: `/u/browser/cua/${record.appId}.sock` } } });
+  });
+});

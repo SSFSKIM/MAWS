@@ -17,6 +17,9 @@ import { validateBrowserUrl } from '../../browser/url';
 // E4c start
 import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 // E4c end
+// E13 start
+import { BROWSER_ACTIVITIES_KEPT, BrowserAgentActivitySchema } from '../../browser/activity';
+// E13 end
 import type { CommandSpec } from './common';
 // E4d start
 import { AnchorSchema } from '../../anchor/anchor';
@@ -234,6 +237,15 @@ export const commands = {
     owner: 'main',
   },
   // E4b end
+  // E13 start: a session's agent activity main kept for the app's life (the last 500, oldest first), which a transcript
+  // lists when it mounts and merges the live `browser.agent.activity` events after (the in-app browser spec of
+  // 2026-10-08, "Action rows")
+  'browser.agent.activities.list': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema }),
+    output: z.strictObject({ activities: z.array(BrowserAgentActivitySchema).max(BROWSER_ACTIVITIES_KEPT) }),
+    owner: 'main',
+  },
+  // E13 end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -256,9 +268,13 @@ export const events = {
   'browser.import.finished': z.strictObject({ importId: ImportIdSchema, report: ImportReportSchema }),
   'browser.import.changed': z.strictObject({ profiles: z.array(ImportedProfileSchema) }),
   // E4b end
-  // E4c start: an agent's action targets this tab (E4c Design §6 step 1); a window showing the session opens the Browser
-  // tool on it once per turn. `appSessionId` owns the tab; `actingSessionId` made the call (a side thread acting in its
-  // parent's tab, Decision Log 29; else the owner), so the once counts the turn that acts
+  // E4c start: an agent acts on this tab (E4c Design §6 step 1; since E13, a cua lease's first acting command, P1 A-54); a
+  // window showing the session opens the Browser tool on it once per turn. `appSessionId` owns the tab; `actingSessionId`
+  // acts (a side thread acting in its parent's tab, Decision Log 29; else the owner), so the once counts the turn that acts
   'browser.agent.acting': z.strictObject({ appSessionId: AppSessionIdSchema, tabId: BrowserTabIdSchema, actingSessionId: AppSessionIdSchema }),
   // E4c end
+  // E13 start: what an agent did in a tab through cua (the in-app browser spec of 2026-10-08, "Action rows"), at most 20
+  // per second per tab; the windows attach each to the session's cua_repl `js` call
+  'browser.agent.activity': BrowserAgentActivitySchema,
+  // E13 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

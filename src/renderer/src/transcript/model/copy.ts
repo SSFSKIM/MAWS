@@ -4,6 +4,7 @@ import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { TOOL_CATEGORIES, type SubagentStatus, type ToolCategory } from './rows';
 import { MCP_TOOL } from './classify';
+import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 
 export const plural = (n: number, noun: string, nouns = `${noun}s`) => `${n} ${n === 1 ? noun : nouns}`;
@@ -633,8 +634,6 @@ function browserPhrase(row: BrowserActionFacts): BrowserPhrase {
 export const BROWSER_ACTION = {
   failed: (base: string) => `Could not ${base}`,
   cancelled: 'Cancelled, the turn was interrupted',
-  waitingHuman: (elapsed: string) => `Waiting · you have the page · ${elapsed}`,
-  waitingCover: (elapsed: string) => `Waiting · a sheet covers the page · ${elapsed}`,
   waited: (reason: 'human' | 'cover', ms: number) => (reason === 'human' ? `waited ${took(ms)} for you` : `waited ${took(ms)} under a sheet`),
   openTab: 'Open tab',
   open: 'Open',
@@ -663,3 +662,42 @@ export function browserActionHeading(row: BrowserActionFacts & { state: 'running
 // A refusal as the person reads it: without the tool's name, which the model's text opens with.
 export const browserActionError = (error: string) => capitalise(error.replace(/^browser_[a-z]+: /, ''));
 // E4c end
+
+// E13 start: what an agent did in the in-app browser through cua (the in-app browser spec of 2026-10-08, "Action rows"),
+// one line per activity in the browser action row's words. A page is named by its host (an address that is not http(s)
+// as given, cut); a click by the node's tag and text main read ("button Submit"), else its point; typing by its count
+// only (the text never reaches the window); a dialog by its text, folded onto one line, and how it was answered.
+function activityPage(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.host !== '') return parsed.host;
+  } catch {
+    // not a URL: shown as given
+  }
+  return cut(url);
+}
+
+const blankPage = (url: string) => url === '' || url === 'about:blank';
+
+export function browserActivityLine(activity: BrowserActivity): string {
+  switch (activity.kind) {
+    case 'navigated': return activity.url === '' ? 'Navigated to a page' : `Navigated to ${activityPage(activity.url)}`;
+    case 'clicked': return activity.label === null || activity.label.trim() === '' ? `Clicked at ${Math.round(activity.x)}, ${Math.round(activity.y)}` : `Clicked ${cut(activity.label)}`;
+    case 'typed': return `Typed ${plural(activity.chars, 'character')}`;
+    case 'key': return `Pressed ${activity.key}`;
+    case 'screenshot': return 'Screenshot';
+    case 'download': {
+      const name = cut(activity.filename);
+      return activity.state === 'complete' ? `Downloaded ${name}` : activity.state === 'interrupted' ? `Download failed: ${name}` : `Download cancelled: ${name}`;
+    }
+    case 'dialog': {
+      const text = cut(activity.excerpt.replace(/\s+/g, ' ').trim());
+      const named = `${activity.type === 'alert' ? 'Alert' : 'Confirm'}${text === '' ? '' : ` "${text}"`}`;
+      const answer = activity.answered === 'default' ? 'answered by default after 30 s' : activity.type === 'alert' ? 'closed' : activity.answered;
+      return `${named} ${answer}`;
+    }
+    case 'tabOpened': return blankPage(activity.url) ? 'Opened a tab' : `Opened a tab at ${activityPage(activity.url)}`;
+    case 'tabClosed': return blankPage(activity.url) ? 'Closed a tab' : `Closed the tab at ${activityPage(activity.url)}`;
+  }
+}
+// E13 end

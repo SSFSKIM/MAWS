@@ -105,7 +105,7 @@ import { shutdownSteps } from './lifecycle/shutdown';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 // E11 end
 // E4a start
-import { startBrowser } from './browser';
+import { startBrowser, type Browser } from './browser';
 // E4a end
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
@@ -339,6 +339,9 @@ void startWithProfileLock(app, () => {
   // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
   // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
   // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
+  // E13: the session's cua socket for its launch (the in-app browser spec of 2026-10-08); the browser starts below, and a
+  // launch asked before it (none is expected) carries no socket
+  let cuaSockets: Browser['cua'] | null = null;
   const sessionService = new SessionService({
     index,
     host: {
@@ -360,6 +363,7 @@ void startWithProfileLock(app, () => {
     settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
     userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
+    browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
   });
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
@@ -490,6 +494,7 @@ void startWithProfileLock(app, () => {
     // E4c end
   });
   shutdown.add('browser', browser.stop);
+  cuaSockets = browser.cua; // E13
   // E4a end
   // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
   // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is

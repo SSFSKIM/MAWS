@@ -11,7 +11,7 @@ import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/maws/tools'; // E2
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
-import { MAWS_TOOL_USE } from './classify'; // E2
+import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
@@ -123,7 +123,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row); // E7
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
@@ -1237,7 +1237,7 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnCont
 // snapshot's size and text, an eval's value, a listing's count); the event, when the journal has one, overrides the
 // fields it carries. A result the engine stopped (an interruption, a denial inside an aborted turn) reads cancelled, as
 // does a call whose turn closed with none; a refusal is an error with its text.
-const BROWSER_TOOL_OF_USE = new Map<string, BrowserToolName>(BROWSER_TOOL_NAMES.map((name) => [MAWS_TOOL_USE[name], name]));
+const BROWSER_TOOL_OF_USE = new Map<string, BrowserToolName>(BROWSER_TOOL_NAMES.map((name) => [HISTORICAL_BROWSER_TOOL_USE[name], name]));
 const ACT_VALUES = new Set(['select', 'press', 'check', 'scroll']); // a fill's value is what was typed: never kept
 
 function browserActionOfCall(use: Event<'tool.use'>): BrowserActionRecord {

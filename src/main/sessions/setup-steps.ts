@@ -36,6 +36,7 @@ export interface Setup {
   settings: () => C10Settings;
   userDefaults: () => Promise<UserEngineDefaults>; // W3
   launchGate: LaunchGate; // C12
+  browserBackend: (appSessionId: AppSessionId) => string | null; // E13: the session's cua socket
   now: () => string;
   log: (message: string) => void;
   watchdogMs: number;

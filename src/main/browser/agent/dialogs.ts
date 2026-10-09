@@ -7,8 +7,9 @@
 // a parentless modal that freezes main. CDP's `Page.handleJavaScriptDialog` answers the page but never closes Electron's
 // box, so the one lever is that listener: every tab view's is wrapped at creation (adopted pop-ups included), and the
 // wrapper routes each dialog:
-//   - the agent holds the tab (`control: 'agent'`): `alert` dismissed, `confirm` answered false, and the dialog's type and
-//     message, cut, kept for the agent's result (`take`, drained into the next result naming the tab);
+//   - the agent holds the tab (`control: 'agent'`) with no cua lease on it (the lapse after a lease's release): `alert`
+//     dismissed, `confirm` answered false (until 2026-10-08 the type and message were kept for the browser tools'
+//     result, which left with the tools, P1 A-54);
 //   - no pane places the tab and the agent does not hold it (never placed, or released; the person's): answered with the
 //     same defaults and held, at most ten, until a pane next places the tab, when one `browser.notice` `dialogAnswered`
 //     names the last of them (A-42 condition 3: "this tab" is then the shown one);
@@ -17,16 +18,19 @@
 //     once two dialogs have ended within 5 s (sliding, reset by a committed navigation), further ones are dismissed as
 //     `safeDialogs` would, with one notice per run (Decision Log 60);
 //   - a `prompt` (or any other kind) is always Electron's: its renderer refuses `prompt()` before main sees it, and its
-//     listener answers one that arrives at once without showing anything.
+//     listener answers one that arrives at once without showing anything;
+//   - A-53 (the in-app browser spec of 2026-10-08, M3 review): a tab under a cua lease that the agent holds (control
+//     `agent`, or `idle` with `personHolds` false: the agent's own deferred page work): `held`, handed unanswered to cua's
+//     held route (cua/dialogs.ts), which lets the vendor answer through CDP and answers the 30 s default through the
+//     callback. A leased tab the person holds (`human`, or touched within the hand-back window) keeps the rows above.
 // The guard: the wrap is installed only over exactly one existing listener, Electron's own; otherwise the view is left
 // native and one line is logged, so an Electron that renames or multiplies the event fails the e2e's alert step loudly
 // rather than freezing. The event is Electron-internal on a version-pinned build (A-42; the tracker's re-verify row).
 import type { WebContents } from 'electron';
-import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
+import { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOGS_MAX } from '@shared/browser/dialog';
 import type { BrowserControl } from '@shared/browser/tab';
-import type { BrowserDialog } from '@shared/maws/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
-import type { AgentDialogs } from './handlers';
+import { personHolds } from './control';
 
 export const RUN_DIALOG_EVENT = '-run-dialog';
 export const DIALOG_BOUND_WINDOW_MS = 5_000;
@@ -62,7 +66,7 @@ function safeDialogsOf(contents: WebContents): boolean {
   return preferences?.safeDialogs === true;
 }
 
-export type DialogRoute = 'native' | 'agent' | 'hidden' | 'bounded';
+export type DialogRoute = 'native' | 'agent' | 'hidden' | 'bounded' | 'held';
 
 export interface DialogFacts {
   type: string;
@@ -70,11 +74,14 @@ export interface DialogFacts {
   placed: boolean; // a pane places the tab
   safeDialogs: boolean; // Electron bounds the page's dialogs itself
   recent: number; // the page's dialogs that ended within DIALOG_BOUND_WINDOW_MS
+  leased: boolean; // A-53: a cua connection holds a debugger lease on the tab
+  personHolds: boolean; // control's `personHolds`: the tab is `human`, or the person touched it within the hand-back window
 }
 
 // The routing table (A-42 conditions 1 to 3; Decision Log 60).
-export function routeDialog({ type, control, placed, safeDialogs, recent }: DialogFacts): DialogRoute {
+export function routeDialog({ type, control, placed, safeDialogs, recent, leased, personHolds }: DialogFacts): DialogRoute {
   if (type !== 'alert' && type !== 'confirm') return 'native';
+  if (leased && (control === 'agent' || (control === 'idle' && !personHolds))) return 'held';
   if (control === 'agent') return 'agent';
   if (!placed) return 'hidden';
   if (!safeDialogs && recent >= DIALOG_BOUND_AFTER) return 'bounded';
@@ -88,16 +95,17 @@ interface PageDialogState {
 }
 
 export interface PageDialogsDeps {
-  store: Pick<TabStore, 'all' | 'entry' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
+  store: Pick<TabStore, 'all' | 'entry' | 'onViewCreated' | 'onUpdated'>;
   emit: BrowserEmit;
   log(line: string): void;
   now?(): number;
+  // A-53: cua's held route for a tab under a lease (absent: no cua backend, no such tab)
+  held?: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
 }
 
-export class PageDialogs implements AgentDialogs {
+export class PageDialogs {
   private readonly states = new WeakMap<TabEntry, PageDialogState>();
   private readonly wrapped = new WeakSet<object>();
-  private readonly agent = new Map<string, BrowserDialog[]>(); // per tab id, until a result reports them
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
@@ -108,19 +116,7 @@ export class PageDialogs implements AgentDialogs {
     this.unhook = [
       store.onViewCreated((entry) => this.install(entry)),
       store.onUpdated((entry) => this.shown(entry)),
-      store.onViewDestroying((entry) =>
-        queueMicrotask(() => {
-          if (store.entry(entry.tab.tabId) !== entry) this.agent.delete(entry.tab.tabId); // closed: nothing to report to
-        }),
-      ),
     ];
-  }
-
-  // AgentDialogs: the dialogs answered for the agent on this tab since its last result, forgotten once taken.
-  take(tabId: string): BrowserDialog[] {
-    const dialogs = this.agent.get(tabId) ?? [];
-    this.agent.delete(tabId);
-    return dialogs;
   }
 
   dispose(): void {
@@ -158,7 +154,10 @@ export class PageDialogs implements AgentDialogs {
       placed: entry.tab.placedIn !== null,
       safeDialogs: safeDialogsOf(contents),
       recent: state.ended.length,
+      leased: this.deps.held?.holds(entry.tab.tabId) === true,
+      personHolds: personHolds(entry, now),
     });
+    if (route === 'held') return this.deps.held!.hold(entry, info, callback);
     if (route === 'native') {
       if (type === 'alert' || type === 'confirm') state.bounding = false;
       // the page's dialog counts from when the person closed it (a slow loop is a loop all the same)
@@ -171,12 +170,8 @@ export class PageDialogs implements AgentDialogs {
     const dialogType = type as 'alert' | 'confirm';
     const message = info.messageText ?? '';
     switch (route) {
-      case 'agent': {
-        const kept = this.agent.get(entry.tab.tabId) ?? [];
-        kept.push({ type: dialogType, message: cut(message, BROWSER_DIALOG_MESSAGE_MAX_CHARS) });
-        this.agent.set(entry.tab.tabId, kept.slice(-BROWSER_DIALOGS_MAX));
+      case 'agent':
         return;
-      }
       case 'hidden':
         state.held.push({ type: dialogType, excerpt: cut(message, BROWSER_DIALOG_EXCERPT_MAX_CHARS) });
         state.held = state.held.slice(-BROWSER_DIALOGS_MAX);

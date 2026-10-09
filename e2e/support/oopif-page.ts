@@ -1,7 +1,7 @@
 // The OOPIF page of E11's sitting S4 case 7 and the owner's step F (docs/doperpowers/plans/2026-10-06-e11-finish.md,
 // Design §5 S4 and §6 F): `http://127.0.0.1:17393/oopif.html` frames `http://localhost:17393/field.html`, which holds
 // one text field labelled "Note" (`name="note"`). `127.0.0.1` and `localhost` are two sites under site isolation, so the
-// frame is out of process, as E4c's `/embed.html` is (e2e/support/browser-tools-server.ts); a public page was not chosen
+// frame is out of process, as E4c's `/embed.html` was (its e2e server, retired with the browser tools on 2026-10-08); a public page was not chosen
 // because no page with a cross-site text field stays put (the field must be there for the owner too, offline or not).
 // Listens on both 127.0.0.1 and [::1] so `localhost` resolves whichever family Chromium tries first; a busy port fails
 // loudly. The owner's step F serves it with no build and no dependency (Node strips the types), and stops it with ⌃C:

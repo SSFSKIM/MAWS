@@ -1,0 +1,109 @@
+{
+ "summary": {
+  "profiles": "PASS",
+  "createTab": "PASS",
+  "locator": "PASS",
+  "viewport": "PASS",
+  "popup": "PASS",
+  "download": "SKIP",
+  "alert": "SKIP",
+  "confirm": "SKIP",
+  "chooser": "SKIP",
+  "cleanup": "PASS",
+  "isolation": "PASS"
+ },
+ "status": "PASS",
+ "backends": [
+  "/tmp/mh13-live2/browser/cua/live-A.sock"
+ ],
+ "other": "/tmp/mh13-live2/browser/cua/live-B.sock",
+ "details": {
+  "profiles": {
+   "status": "ok",
+   "profiles": [
+    {
+     "key": "maws",
+     "ready": true,
+     "extensionInstanceId": "maws:live-A"
+    }
+   ]
+  },
+  "createTab": {
+   "instance": "maws:live-A",
+   "profileName": "MAWS",
+   "tabId": "1",
+   "markerMatches": true
+  },
+  "locator": {
+   "state": "submitted:x"
+  },
+  "viewport": {
+   "during": {
+    "format": "jpeg",
+    "width": 800,
+    "height": 600
+   },
+   "after": {
+    "format": "jpeg",
+    "width": 1280,
+    "height": 800
+   }
+  },
+  "popup": {
+   "added": [
+    {
+     "id": "2",
+     "url": "http://127.0.0.1:61132/popup"
+    }
+   ]
+  },
+  "download": "M3 adds this step",
+  "alert": "M3 adds this step",
+  "confirm": "M3 adds this step",
+  "chooser": "M3 adds this step",
+  "cleanup": {
+   "createdListed": false,
+   "popupListed": false
+  },
+  "isolation": {
+   "ours": {
+    "mawsInstances": [
+     "maws:live-A"
+    ],
+    "otherSelected": false,
+    "otherError": "The Chrome instance is unavailable."
+   },
+   "theirs": {
+    "mawsInstances": [
+     "maws:live-B"
+    ],
+    "otherSelected": false,
+    "otherError": "The Chrome instance is unavailable."
+   }
+  },
+  "serve": {
+   "code": 0,
+   "signal": null
+  },
+  "serveOther": {
+   "code": 0,
+   "signal": null
+  }
+ },
+ "elicitations": [
+  {
+   "method": "elicitation/create",
+   "kind": "origin-access",
+   "mode": "form",
+   "ownOrigin": true,
+   "answered": "accept (session)",
+   "reason": "the probe origin",
+   "text": "Allow Browser use to access <url>"
+  }
+ ],
+ "pageRequests": {
+  "total": 2,
+  "served": 2,
+  "refused": 0
+ }
+}

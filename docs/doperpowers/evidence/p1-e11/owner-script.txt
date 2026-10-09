@@ -271,3 +271,20 @@ Plus the E4 children's open owner items as A-35 to A-37 ruled them, overturnable
   10 s decay, the fixed cursor colours (A-37).
 Name any irritation across the new surfaces (each becomes a tracker row or a P2 line, never silent), and the P-3 measure:
   what, if anything, still sends the owner to a terminal.
+
+== 2026-10-08 note: the maws browser tools are retired (P1 A-54; E13 M4) ==
+The six mcp__maws__browser_* tools left the maws server on 2026-10-08; an agent drives the in-app browser through the cua
+plugin's cua_repl instead (`cua.getBrowser()` with no argument is the session's in-app browser, profile `maws`). The
+items above that prompt or check the old tools read as follows; the lines above are left as written.
+- A11 (A11.1 to A11.7) retired: the tools, their request queue and driver are gone. Their successors are the in-app
+  browser spec's acceptance 8 to 10 (takeover, cursor, activity rows), checked in its M5 through cua_repl. A11.2's
+  "Browser tool opens once" lapsed with `browser.agent.acting` (an open question for the owner).
+- D7 redirected: ask the agent to list and navigate the imported profile's tab with cua_repl (`listTabs`, `navigate`).
+- D11 redirected: drive a signed-in tab with cua_repl locator actions; the takeover reads as before ("You have the
+  page", hand back after 3 s idle or Hand back); a held action is refused with "A person is using this tab".
+- F1 redirected: open the OOPIF page with cua_repl (`createBrowserTab`) and loop `locator(...).fill` on the Note field
+  inside the frame while typing one key into it.
+- A12.1 redirected: the side thread's agent clicks the commented element through cua_repl, by the anchor's css.
+- A12.2 and Q8 retired: the browser_action row of a css-only act no longer arises; cua's activity rows label a click
+  from the page's node ("Clicked button Increment").
+- Q9 and Q10 retired with the tools' rows and request queue (Q9's fold rule lives on in the activity rows, M3).
