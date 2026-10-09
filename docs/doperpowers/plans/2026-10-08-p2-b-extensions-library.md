@@ -516,6 +516,11 @@ Consumed from P2-A (ledger §1): `useLoadedPlugins`, `Freshness`, `ObservedPlugi
   Rationale: the boundary's purpose is that a wrong answer is never quiet; each finding was reproduced by the reviewer's probe.
   Date/Author: 2026-10-09, P2-B's executor (controller).
 
+- Decision: M2's fix wave 1 (42c526b6) closed round 1's nine items. Its own decisions: a URL in a path field reads as `unknown shape` under the declaring file and is never resolved or echoed, while a declared relative path keeps its own label; every awaited `realpath`, `lstat`, `readdir`, `open` and read races the 2.5 s deadline, a stall ending the read as `partial` with late handles closed; nested agents are named `dir:name` like commands; `sourceKey` reads URLs as the engine does (`:443` dropped, unreserved escapes decoded; reserved or dot escapes, `https://ssh.github.com`, a backslash in the subpath refused).
+  Date/Author: 2026-10-09, P2-B's executor (controller).
+- Decision: M2's re-review (round 2, the same reviewer): 3 important, accepted. A dangling `else` let a non-array hooks `modules` read complete; `sourceKey` refuses a key for any non-null `ref` (the engine's exception is a separate `sha`, 2.1.292 :832443-832447, and the host already clears `ref` when one is present; the earlier "non-sha ref" wording read the engine wrongly); and the shared `Marketplace` row gains an optional `ref` (additive, B-local, the architect's ruling of 2026-10-09) so a relative entry of a ref-pinned marketplace gets no fold key (:832437-832440, :832459-832464), since without it Browse would fold distinct offers.
+  Date/Author: 2026-10-09, P2-B's executor (controller).
+
 ## 13. Outcomes & Retrospective
 
 Pending — written at finish.
