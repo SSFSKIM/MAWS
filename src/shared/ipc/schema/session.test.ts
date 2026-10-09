@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { validateCommandInput, validateCommandOutput } from '../validate';
 import { SessionDigestSchema, SessionPatchSchema } from './session';
 import { ArchiveOutcomeSchema, commands, DeleteOutcomeSchema, events } from './session'; // C10
+import { ACQUIRE_REASONS, AVAILABILITY } from './session'; // P2-A
+import { AcquireOutcomeSchema } from '../../sessions/setup'; // P2-A
 
 describe('session read side and the entries C5 consumes', () => {
   it('accepts the hover card’s two answers and nothing with a null message', () => {
@@ -23,12 +25,56 @@ describe('session read side and the entries C5 consumes', () => {
   it('validates a digest and refuses an unknown phase', () => {
     const digest = {
       appSessionId: 's1', phase: 'working', activity: 'Thinking', lastAssistantLine: null, turnStartedAt: null, lastTurnEndedAt: null,
-      context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 1,
+      context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 1, availability: 'usable' /* P2-A */,
     };
     expect(SessionDigestSchema.safeParse(digest).success).toBe(true);
     expect(SessionDigestSchema.safeParse({ ...digest, phase: 'sleeping' }).success).toBe(false);
   });
 });
+
+// P2-A start (2026-10-09; X16): the digest's availability and the one acquisition command
+describe('P2-A availability and session.acquire', () => {
+  const ID = '0b6a2d3e-8f1c-4a57-9b2e-1d3c4e5f6a7b';
+  const digest = {
+    appSessionId: ID, phase: 'exited', activity: null, lastAssistantLine: null, turnStartedAt: null, lastTurnEndedAt: null,
+    context: null, cost: null, childAgents: { active: 0, done: 0 }, pendingRequests: 0, revision: 1,
+  };
+
+  it('requires every digest to carry one of the eight availabilities', () => {
+    expect(AVAILABILITY).toEqual(['usable', 'starting', 'resumable', 'foreign_held', 'archived', 'missing_directory', 'needs_trust', 'failed']);
+    for (const availability of AVAILABILITY) expect(SessionDigestSchema.safeParse({ ...digest, availability }).success, availability).toBe(true);
+    expect(SessionDigestSchema.safeParse(digest).success).toBe(false);
+    expect(SessionDigestSchema.safeParse({ ...digest, availability: 'running' }).success).toBe(false);
+  });
+
+  it('owns session.acquire in main, with a reason from the seven and the start options', () => {
+    expect(commands['session.acquire'].owner).toBe('main');
+    expect(ACQUIRE_REASONS).toEqual(['send', 'chip', 'read', 'side', 'peer', 'resubmit', 'resume']);
+    for (const reason of ACQUIRE_REASONS) expect(validateCommandInput('session.acquire', { appSessionId: ID, reason }).ok, reason).toBe(true);
+    expect(validateCommandInput('session.acquire', { appSessionId: ID, reason: 'mount' }).ok).toBe(false);
+    expect(validateCommandInput('session.acquire', { appSessionId: ID, reason: 'send', options: { trust: 'accepted' } }).ok).toBe(true);
+    expect(validateCommandInput('session.acquire', { appSessionId: ID, reason: 'send', options: { gateway: 'direct', model: 'sonnet' } }).ok).toBe(true);
+    expect(validateCommandInput('session.acquire', { appSessionId: ID, reason: 'send', message: 'hi' }).ok).toBe(false);
+  });
+
+  it('answers ready, the start guards’ cards and refusals verbatim, or failed; never starting or already_live', () => {
+    const resources = { worktree: null, record: 'kept', transcript: 'kept' };
+    const ok = (value: unknown) => validateCommandOutput('session.acquire', value).ok;
+    expect(ok({ status: 'ready', appSessionId: ID, launched: true, joined: false })).toBe(true);
+    expect(ok({ status: 'ready', appSessionId: ID, launched: true })).toBe(false);
+    expect(ok({ status: 'archived', appSessionId: ID })).toBe(true);
+    expect(ok({ status: 'missing_directory', appSessionId: ID, directory: '/gone' })).toBe(true);
+    expect(ok({ status: 'held', appSessionId: ID, holder: { kind: 'terminal', pid: 4 }, attach: null })).toBe(true);
+    expect(ok({ status: 'refused', appSessionId: ID, reason: 'unknown_session', message: 'no record' })).toBe(true);
+    expect(ok({ status: 'failed', appSessionId: ID, message: 'the model is not available', resources })).toBe(true);
+    expect(ok({ status: 'starting', appSessionId: ID })).toBe(false);
+    expect(ok({ status: 'already_live', appSessionId: ID })).toBe(false);
+    expect(AcquireOutcomeSchema.options.map((o) => o.shape.status.value).sort()).toEqual(
+      ['archived', 'failed', 'held', 'invalid', 'missing_directory', 'needs_trust', 'ready', 'refused', 'relay_unreachable'],
+    );
+  });
+});
+// P2-A end
 
 // C10 start: the lifecycle commands and the setup events (C10 execution document, "X2 additions")
 describe('C10 session lifecycle entries', () => {

@@ -19,6 +19,7 @@ import { IndexSessionSource } from '../../src/main/index/source';
 import { BootstrapNotes, FileIntentStore } from '../../src/main/sessions/intents';
 import { SessionService } from '../../src/main/sessions/service';
 import type { SessionServiceDeps } from '../../src/main/sessions/context'; // C12
+import type { AcquisitionMemory } from '../../src/main/sessions/availability'; // P2-A
 import type { C10Settings } from '../../src/main/sessions/launch-mapping';
 import type { ReplaySeam } from '../../src/main/sessions/replay-seam';
 import { FakeEngineHost, type RestartOptions } from './session-host';
@@ -35,6 +36,8 @@ export interface HarnessOptions {
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
   seedIndex?: (path: string) => void; // writes the index file before the app opens it (an older build's history)
   browserBackend?: SessionServiceDeps['browserBackend']; // E13: the session's cua socket
+  exitWaitMs?: number; // P2-A: how long an acquisition waits out a process still exiting
+  takeOver?: SessionServiceDeps['takeOver']; // P2-A: the take-over's seams (`claude stop`, the registry wait)
 }
 
 export class SessionHarness {
@@ -69,6 +72,7 @@ export class SessionHarness {
   }
   host: FakeEngineHost;
   service!: SessionService;
+  readonly memory = new Map<string, AcquisitionMemory>(); // P2-A: what the service published for each session (the read model's input)
   worktrees!: WorktreeService; // the instance the service holds (a test may wrap its methods)
   private stopSource: () => void = () => {};
 
@@ -113,7 +117,9 @@ export class SessionHarness {
       launchGate: this.opts.launchGate, // C12
       browserBackend: this.opts.browserBackend, // E13
       userDefaults: this.opts.userDefaults, // W3
-      timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200 },
+      acquisitions: { observeAcquisition: (appSessionId, memory) => void this.memory.set(appSessionId, memory) }, // P2-A
+      takeOver: this.opts.takeOver, // P2-A
+      timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200, ...(this.opts.exitWaitMs !== undefined && { exitWaitMs: this.opts.exitWaitMs }) },
       log: () => {},
     });
   }

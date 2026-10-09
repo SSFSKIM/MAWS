@@ -369,6 +369,7 @@ void startWithProfileLock(app, () => {
     userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
     browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
+    acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
   });
   registerSessionServiceHandlers(sessionService);
   registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests

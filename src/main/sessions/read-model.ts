@@ -14,6 +14,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, withoutReleased, type CostLedger } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
+import { availabilityOf, type AcquisitionMemory } from './availability'; // P2-A
 
 export interface SessionSource {
   start(writer: ReadModelWriter): () => void;
@@ -25,7 +26,7 @@ export interface ReadModelWriter {
   observeRemoved(appSessionId: AppSessionId): void;
   observeProject(p: ProjectRecord): void;
   observeProjectRemoved(id: ProjectId): void;
-  setDigest(d: Omit<SessionDigest, 'revision'>): void; // stub and tests; C4's seed for sessions with no live fold; production digests come from fold()
+  setDigest(d: Omit<SessionDigest, 'revision' | 'availability'>): void; // stub and tests; C4's seed for sessions with no live fold; production digests come from fold(). P2-A: availability is the read model's own
   fold(appSessionId: AppSessionId, events: SessionEvent[]): void; // the digest reducer over a `session.eventBatch`
   applyEngineStatus(s: EngineSessionStatus): void; // C3's session.status: phase facts, and the process and turn state the quit guard reads
   forgetEngineStatus(appSessionId: AppSessionId): void; // no process is owned any more (the scenario's `engine: null`)
@@ -69,6 +70,7 @@ export class SessionReadModel {
   // C12: the launch whose released mark a terminal or background job holder, or an archive, cleared (null when no status
   // named one); the mark applies once per release, so nothing of that launch restores it, and the next launch forgets it
   private readonly clearedRelease = new Map<AppSessionId, string | null>();
+  private readonly acquisitions = new Map<AppSessionId, AcquisitionMemory>(); // P2-A: the session service's, this app run
   private readonly listeners: { [K in keyof ReadModelEvents]: Set<ReadModelEvents[K]> } = {
     record: new Set(), digest: new Set(), engine: new Set(), attention: new Set(),
   };
@@ -168,11 +170,31 @@ export class SessionReadModel {
     for (const listener of this.listeners[event]) (listener as (...a: Parameters<ReadModelEvents[K]>) => void)(...args);
   }
 
-  // Recomputes cost since seen, bumps the session's revision and emits, unless nothing changed.
-  private commit(next: SessionDigest): void {
+  // P2-A start (2026-10-09; X16): the session service publishes each session's acquisition memory here (its writer is the
+  // sources'); a session with a digest recommits, so the change rides the digest's revision order. Main's memory only.
+  observeAcquisition(appSessionId: AppSessionId, memory: AcquisitionMemory): void {
+    this.acquisitions.set(appSessionId, memory);
+    this.recommit(appSessionId);
+  }
+
+  private availability(appSessionId: AppSessionId): SessionDigest['availability'] {
+    const record = this.records.get(appSessionId);
+    const status = this.statuses.get(appSessionId) ?? null;
+    if (record === undefined) return status?.process === 'ready' ? 'usable' : 'resumable'; // a digest a source set before its record
+    return availabilityOf(record, status, this.acquisitions.get(appSessionId) ?? null);
+  }
+
+  private recommit(appSessionId: AppSessionId): void {
+    const current = this.digestsById.get(appSessionId);
+    if (current) this.commit(current);
+  }
+  // P2-A end
+
+  // Recomputes cost since seen and (P2-A) availability, bumps the session's revision and emits, unless nothing changed.
+  private commit(next: Omit<SessionDigest, 'availability'>): void {
     const prev = this.digestsById.get(next.appSessionId);
     const cost = next.cost && { totalUsd: next.cost.totalUsd, sinceSeenUsd: next.cost.totalUsd - (this.costAtSeen.get(next.appSessionId) ?? 0) };
-    const candidate = { ...next, cost, revision: prev?.revision ?? 0 };
+    const candidate: SessionDigest = { ...next, cost, availability: this.availability(next.appSessionId), revision: prev?.revision ?? 0 };
     if (prev && JSON.stringify(prev) === JSON.stringify(candidate)) return;
     const revision = (this.lastRevision.get(next.appSessionId) ?? 0) + 1;
     const committed = { ...candidate, revision };
@@ -221,6 +243,7 @@ export class SessionReadModel {
         this.commit({ ...withoutReleased(digest), phase: 'exited', activity: null });
       }
       // C12 end
+      this.recommit(r.appId); // P2-A: an archive or a holder change moves availability
     },
     observeRemoved: (appSessionId) => {
       this.records.delete(appSessionId);
@@ -234,6 +257,7 @@ export class SessionReadModel {
       this.appEventsById.delete(appSessionId); // debt wave 5
       this.visible.delete(appSessionId);
       this.clearedRelease.delete(appSessionId); // C12
+      this.acquisitions.delete(appSessionId); // P2-A
       this.fire('record', appSessionId, null);
     },
     observeProject: (p) => {
@@ -291,6 +315,7 @@ export class SessionReadModel {
     forgetEngineStatus: (appSessionId) => {
       if (!this.statuses.delete(appSessionId)) return;
       this.fire('engine', appSessionId, null);
+      this.recommit(appSessionId); // P2-A: no process is resumable
     },
     observeAttention: (appSessionId, items) => {
       this.attentionById.set(appSessionId, items);

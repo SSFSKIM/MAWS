@@ -26,6 +26,7 @@ export const commands = [
   'session.reloadSkills', // E8
   // P2-A start (2026-10-09)
   'session.observedFacts',
+  'session.acquire',
   // P2-A end
 ] as const;
 

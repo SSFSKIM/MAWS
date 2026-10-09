@@ -47,7 +47,7 @@ import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-
 // SessionRecordSchema with C4's)
 import { SessionHolderSchema } from '@shared/graph/session';
 import { FirstMessageSchema, ForkTargetSchema, LocationSchema, SetupIntentPatchSchema, SetupIntentSchema, TrustDecisionSchema } from '../../sessions/intent';
-import { SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup';
+import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup'; // P2-A: AcquireOutcomeSchema
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
@@ -298,6 +298,13 @@ export const SESSION_PHASES = ['starting', 'working', 'waiting', 'idle', 'exited
 // exited: no live process (resumable from disk) · failed: the last turn or the process ended in error and nothing ran since
 // foreign: holder is a terminal or background job (D-12) · starting: process launching, no turn yet
 export type SessionPhase = (typeof SESSION_PHASES)[number];
+// P2-A start (2026-10-09; X16, the P2 interface ledger §1): what an action can do with the session now, derived in main
+// from the record, the engine host's process status and main's acquisition memory (src/main/sessions/availability.ts).
+// Apart from the process status: an exited session is `resumable`, not an error. Declared here, before the digest that
+// carries it.
+export const AVAILABILITY = ['usable', 'starting', 'resumable', 'foreign_held', 'archived', 'missing_directory', 'needs_trust', 'failed'] as const;
+export type Availability = (typeof AVAILABILITY)[number];
+// P2-A end
 export const SessionDigestSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   phase: z.enum(SESSION_PHASES),
@@ -316,6 +323,7 @@ export const SessionDigestSchema = z.strictObject({
   // null: the renderer words the two apart.
   released: z.strictObject({ at: z.string(), reason: z.enum(['budget', 'idle']), limitKiB: z.number().int().nullable() }).optional(),
   // C12 end
+  availability: z.enum(AVAILABILITY), // P2-A (2026-10-09; X16): main's read model derives it at every commit
 });
 export type SessionDigest = z.infer<typeof SessionDigestSchema>;
 
@@ -550,12 +558,24 @@ const e8Commands = {
 export const E8_SESSION_COMMANDS = Object.keys(e8Commands) as (keyof typeof e8Commands)[];
 // E8 end ----------------------------------------------------------------------------------------------------------------
 
+// P2-A start (2026-10-09; X16): why an acquisition was asked for, logged by main (`[sessions] acquire <id> (<reason>)`).
+export const ACQUIRE_REASONS = ['send', 'chip', 'read', 'side', 'peer', 'resubmit', 'resume'] as const;
+export type AcquireReason = (typeof ACQUIRE_REASONS)[number];
+// P2-A end
 // P2-A start (2026-10-09; X17, the P2 interface ledger §1) --------------------------------------------------------------
 // What the engine last reported for a session (model, effort, mode, output style, plugins, context, engine version),
 // each fact with when and in which launch; null for a session MAWS never ran. Owner main, beside `session.digests`:
 // it relays the host's `engine.observedFacts` and answers null when the host cannot (src/main/sessions/observed.ts).
 const p2aCommands = {
   'session.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'main' },
+  // P2-A (2026-10-09; X16): the one acquisition entry. Answers at once for a ready session, joins a launch already in
+  // flight, or runs the guarded resume, and answers when the engine is ready or the attempt failed (service.ts
+  // `acquire`). `reason` is logged; nothing branches on it. `options`: a card's trust decision or route.
+  'session.acquire': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, reason: z.enum(ACQUIRE_REASONS), options: StartOptionsSchema.optional() }),
+    output: AcquireOutcomeSchema,
+    owner: 'main',
+  },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P2-A end --------------------------------------------------------------------------------------------------------------
 
