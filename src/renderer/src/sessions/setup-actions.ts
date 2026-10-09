@@ -127,11 +127,16 @@ export async function continueSetup(appSessionId: AppSessionId, options: StartOp
 // undocks the card and says why. A card a surface docked without a message only starts the session.
 // One continuation per card at a time: a second (a manual Continue racing the relay card's poll, a double press) does
 // nothing while the first holds the session's claim, which only it releases, once its message is accepted or refused.
+// The card may be dismissed (Cancel) while the acquisition runs: the session still starts, as the gesture asked, but the
+// continuation sends nothing and leaves the draft alone; it goes on only while its card is still the one docked.
 async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
   const release = useSetup.getState().claimContinuation(appSessionId);
   if (release === null) return { ok: false, error: 'This session is already continuing' };
+  const card = useSetup.getState().cards.get(appSessionId); // the card this continuation answers for (none for a bare call)
+  const current = () => useSetup.getState().cards.get(appSessionId) === card;
+  const dismissed: HookResult = { ok: false, error: 'The card was dismissed' };
   const refuse = (words: string): HookResult => {
-    useSetup.getState().undock(appSessionId);
+    if (current()) useSetup.getState().undock(appSessionId); // never another card docked since
     toast({ id: startNoticeId(appSessionId), level: 'danger', text: words, actions: [], dismissible: true });
     return { ok: false, error: words };
   };
@@ -139,9 +144,11 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
     const outcome = await acquireSession(appSessionId, docked === null ? 'resume' : 'send', { ...options, ...(docked !== null && { dockMessage: docked }) });
     if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { ok: true }; // a card again, docked by the acquisition
     if (outcome.status !== 'ready') return refuse(acquisitionWords(outcome) ?? 'The session could not start');
+    if (!current()) return dismissed; // the session started; its dismissed card's message is not sent
     if (docked !== null) {
       const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display });
       if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
+      if (!current()) return dismissed; // dismissed during the send: the draft is the owner's again, never cleared
       clearComposer(appSessionId);
     }
     useSetup.getState().undock(appSessionId);

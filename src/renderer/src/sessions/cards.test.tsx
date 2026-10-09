@@ -679,6 +679,52 @@ describe('a record’s trust card and its continuation', () => {
     }
   });
 
+  // M1's round-3 review: Cancel on a card whose continuation is active is honoured; the session may still start, but the
+  // dismissed card's message is not sent and the draft is left alone
+  it('a card cancelled while its continuation acquires: the session starts, nothing is sent, the composer is not cleared', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it('a relay card cancelled while its Run direct acquires sends nothing either', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
+  it('a card cancelled while its message is being sent leaves the draft alone', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.reply('session.send', { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+  });
+
   // M1's re-review: the continuation dies with its card; a Recheck whose read was out when the card went starts nothing
   it('a Recheck pending when the card is cancelled continues nothing once the relay answers', async () => {
     withMain({ 'session.queue.list': { entries: [], paused: false } });
