@@ -18,6 +18,7 @@ import { createServer, type Server } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { BrowserActivityStore } from '../../index/browser-activity';
 import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
@@ -42,6 +43,7 @@ export interface CuaBackendDeps {
   // M3: control's transitions, the takeover gate and the agent's cursor (absent: the bare server, no transitions)
   presence?: Omit<PresenceDeps, 'store'>;
   emit?: BrowserEmit; // M3: `browser.agent.activity` (and, since the final fix wave, `browser.agent.acting`) to the windows (absent: nothing told)
+  activityStore?: Pick<BrowserActivityStore, 'list' | 'append'>; // cua board #93: the activity kept across restarts (absent: the app's life)
   // M3: an agent's finished download to the session's engine host (`maws.download.recorded`), which records it once
   recordDownload?(download: MawsDownloadRecorded): Promise<unknown>;
   now?(): number;
@@ -57,7 +59,8 @@ export interface CuaBackend extends LeaseHolds {
   downloads: AgentDownloads; // M3: E4a's downloads ask whether a tab's download is the agent's, and report it
   // M3: the `-run-dialog` wrap's held route: a leased tab's alert or confirm, answered by the vendor or the 30 s default
   dialogs: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
-  // M3 fix wave: the session's agent activity kept for the app's life, oldest first (`browser.agent.activities.list`)
+  // M3 fix wave: the session's agent activity, oldest first (`browser.agent.activities.list`); since cua board #93 an
+  // earlier app run's too, from the index
   activities(appSessionId: AppSessionId): BrowserAgentActivity[];
   dispose(): void;
 }
@@ -78,7 +81,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const claims = new TabClaims<CuaConnection>();
   const sessions = new Map<AppSessionId, Listening>();
   const tooLong = new Set<AppSessionId>();
-  const feed = deps.emit ? new ActivityFeed({ emit: deps.emit, now: deps.now }) : null;
+  const feed = deps.emit ? new ActivityFeed({ emit: deps.emit, now: deps.now, store: deps.activityStore, log }) : null;
   const presence = deps.presence ? new AgentPresence({ ...deps.presence, store: deps.store }) : null;
   const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed, emit: deps.emit ?? null };
   const viewed = new WeakSet<TabEntry>();
@@ -141,7 +144,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       return path;
     },
     closeSession(appSessionId) {
-      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it
+      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its index rows with its record)
       const listening = sessions.get(appSessionId);
       if (!listening) return;
       sessions.delete(appSessionId);

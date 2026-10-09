@@ -1,6 +1,9 @@
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_ACTIVITIES_KEPT } from '@shared/browser/activity';
+import { BROWSER_ACTIVITIES_KEPT, type BrowserAgentActivity } from '@shared/browser/activity';
+import { summary, tempDir } from '../../../../test/support/index-fixture';
+import { Index } from '../../index/index';
 import { ACTIVITY_MAX_PER_SECOND, ActivityFeed, agentCapture, clickLabel, commandActivity, navigatedUrl, TYPED_COALESCE_MS, within } from './activity';
 
 const A = 'A' as AppSessionId;
@@ -141,5 +144,79 @@ describe('the windows\' feed', () => {
     activity.tell(A, T, { kind: 'screenshot' });
     await drain();
     expect(emitted).toHaveLength(ACTIVITY_MAX_PER_SECOND + 2);
+  });
+
+  // cua board #93: the kept activity survives an app restart through the index
+  it('loads a session\'s activity from the store on first use, then appends after it and writes each new one through', async () => {
+    const dir = tempDir();
+    const path = join(dir.path, 'index.sqlite');
+    try {
+      let index = new Index(path);
+      const B = index.sessions.upsertFromSummary(summary()).record.appId;
+      let now = 1_000_000;
+      const first = new ActivityFeed({ emit: () => {}, now: () => now, store: index.browserActivity });
+      for (let i = 0; i < BROWSER_ACTIVITIES_KEPT + 2; i++) {
+        first.tell(B, `b_${String(i % 7).padStart(12, '0')}`, { kind: 'key', key: `F${i}` });
+        now += 100; // under the rate bound
+        await drain();
+      }
+      const before = first.list(B);
+      first.dispose();
+      index.close();
+
+      // the app restarts: a new feed over the reopened index answers the same list, and what is told next joins it
+      index = new Index(path);
+      const emitted: BrowserAgentActivity[] = [];
+      const second = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload as BrowserAgentActivity), now: () => now, store: index.browserActivity });
+      expect(second.list(B)).toEqual(before);
+      expect(before[0]!.activity).toEqual({ kind: 'key', key: 'F2' });
+      second.tell(B, T, { kind: 'screenshot' });
+      await drain();
+      expect(emitted.map((a) => a.activity)).toEqual([{ kind: 'screenshot' }]); // only the new one is told live
+      const after = second.list(B);
+      expect(after).toHaveLength(BROWSER_ACTIVITIES_KEPT);
+      expect(after.slice(0, -1)).toEqual(before.slice(1));
+      expect(after.at(-1)).toEqual(emitted[0]);
+      expect(index.browserActivity.list(B)).toEqual(after); // written through, capped alike
+      second.dispose();
+      index.close();
+    } finally {
+      dir.dispose();
+    }
+  });
+
+  it('tells and keeps the live row when the store fails, logging once until it works again', async () => {
+    const log = vi.fn();
+    let failing = true;
+    const store = {
+      list: vi.fn((): BrowserAgentActivity[] => {
+        throw new Error('disk I/O error');
+      }),
+      append: vi.fn(() => {
+        if (failing) throw new Error('FOREIGN KEY constraint failed');
+      }),
+    };
+    const emitted: unknown[] = [];
+    let now = 1_000_000;
+    const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), now: () => now, store, log });
+    for (const key of ['F1', 'F2', 'F3']) {
+      activity.tell(A, T, { kind: 'key', key });
+      now += 100;
+      await drain();
+    }
+    expect(emitted).toHaveLength(3);
+    expect(activity.list(A).map((a) => a.activity)).toEqual(['F1', 'F2', 'F3'].map((key) => ({ kind: 'key', key })));
+    expect(store.list).toHaveBeenCalledTimes(1); // a failed load is not retried: the live ring stands
+    expect(store.append).toHaveBeenCalledTimes(3);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]![0]).toContain('disk I/O error');
+    failing = false;
+    activity.tell(A, T, { kind: 'screenshot' });
+    await drain();
+    failing = true;
+    activity.tell(A, T, { kind: 'screenshot' });
+    await drain();
+    expect(log).toHaveBeenCalledTimes(2); // a new failure after a success is told again
+    expect(log.mock.calls[1]![0]).toContain('FOREIGN KEY constraint failed');
   });
 });

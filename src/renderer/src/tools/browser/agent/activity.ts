@@ -1,8 +1,8 @@
 // E13 (the in-app browser spec of 2026-10-08, "Action rows"): what an agent did in the in-app browser through cua, as
 // main reports it (`browser.agent.activity`), kept per session for the transcript (transcript/model/browser-activity.ts
 // attaches each to the session's `js` call). Live state, as the waiting line's (progress.ts): never an X1 event. Main
-// keeps each session's last 500 for the app's life, and a session's transcript lists them when it mounts
-// (`listBrowserActivity`), so a window reload or a re-mount shows the rows again; an app restart loses them. Main sends
+// keeps each session's last 500, across app restarts since cua board #93, and a session's transcript lists them when it
+// mounts (`listBrowserActivity`), so a window reload, a re-mount or a restart shows the rows again. Main sends
 // at most 20 a second per tab, and a session keeps only its latest entries here too.
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
