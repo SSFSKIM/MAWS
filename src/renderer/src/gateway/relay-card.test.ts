@@ -71,6 +71,13 @@ describe('Run direct', () => {
     expect(calls).toEqual([{ name: 'session.acquire', input: { appSessionId: ID, reason: 'resume', options: { gateway: 'direct', model: 'sonnet' } } }]);
   });
 
+  // P2-A (M1's re-review): the card dismissed or replaced while the model pick was open ends the wait
+  it('a choice made after its card went starts nothing', async () => {
+    useSetup.setState({ intents: new Map([[ID, intent({ model: 'claude/astra' })]]) });
+    await runDirect(ID, MESSAGE, true, async () => ({ model: 'sonnet', effort: null }), () => false);
+    expect(calls).toEqual([]);
+  });
+
   it('a cancelled choice starts nothing', async () => {
     useSetup.setState({ intents: new Map([[ID, intent({ model: 'claude/astra' })]]) });
     await runDirect(ID, MESSAGE, true, async () => null);

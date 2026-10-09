@@ -97,6 +97,11 @@ function FailureHost({ appSessionId, failure, busy }: { appSessionId: AppSession
   );
 }
 
+// P2-A (M1's review): a card's asynchronous callbacks (a Recheck, the poll's tick, Run direct's model pick) continue only
+// the card they started from: one dismissed (Cancel), replaced (another answer docked a new card) or continued meanwhile
+// is no longer the docked one, and the wait ends with it.
+const stillDocked = (appSessionId: AppSessionId, card: WaitingCard) => useSetup.getState().cards.get(appSessionId) === card;
+
 // The relay card polls the relay while it is docked and starts routed by itself once the relay answers.
 function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; card: Extract<WaitingCard, { kind: 'relay' }>; busy: boolean }) {
   const [health, setHealth] = useState(card.health);
@@ -115,7 +120,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
     let live = true;
     const check = async () => {
       const result = await ipc.invoke('engine.relayHealth', { force: true });
-      if (!live) return;
+      if (!live || !stillDocked(appSessionId, card)) return; // P2-A: the card went while the read was out
       setNow(Date.now());
       if (!result.ok) return;
       setHealth(result.value);
@@ -134,12 +139,13 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
 
   const recheck = async () => {
     const result = await ipc.invoke('engine.relayHealth', { force: true });
+    if (!stillDocked(appSessionId, card)) return; // P2-A: dismissed or replaced while the read was out
     setNow(Date.now());
     if (!result.ok) return;
     setHealth(result.value);
     if (result.value.ok) void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);
   };
-  const direct = () => void runDirect(appSessionId, card.message, gatewayModel); // C11: a gateway model takes a Claude model first (pickDirectModel)
+  const direct = () => void runDirect(appSessionId, card.message, gatewayModel, undefined, () => stillDocked(appSessionId, card)); // C11: a gateway model takes a Claude model first (pickDirectModel); P2-A: the card still docked
   const decline = () => void releaseMessage(appSessionId, card.message);
   // C11 start: Enter runs Run direct on a gateway model too (C10 refused it there, `busy || gatewayModel`): it asks for a
   // Claude model first

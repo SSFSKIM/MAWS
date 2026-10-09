@@ -31,14 +31,15 @@ export function useOpenClaudeUsage(): (() => void) | null {
 // recovers under the open pick does not start the session routed while the human is choosing to run it direct.
 export const usePickingDirectModel = (appSessionId: AppSessionId): boolean => useDirectModelPick((s) => s.picking?.appSessionId === appSessionId);
 
-// Run direct from the card, with the message the card docked with.
-export async function runDirect(appSessionId: AppSessionId, docked: FirstMessage | null, gatewayModel: boolean, pick: typeof pickDirectModel = pickDirectModel): Promise<void> {
+// Run direct from the card, with the message the card docked with. P2-A: `current` says whether the card it started from
+// is still the docked one; a card dismissed or replaced while the model pick (or the intent's patch) was open ends here.
+export async function runDirect(appSessionId: AppSessionId, docked: FirstMessage | null, gatewayModel: boolean, pick: typeof pickDirectModel = pickDirectModel, current: () => boolean = () => true): Promise<void> {
   if (!gatewayModel) {
     await continueSetup(appSessionId, { gateway: 'direct' }, docked);
     return;
   }
   const choice = await pick(appSessionId);
-  if (choice === null) return;
+  if (choice === null || !current()) return;
   const chosen = { model: choice.model, ...(choice.effort !== null && { effort: choice.effort }) };
   if (useSetup.getState().intents.has(appSessionId)) {
     const patched = await patchIntent(appSessionId, chosen);
@@ -46,6 +47,7 @@ export async function runDirect(appSessionId: AppSessionId, docked: FirstMessage
       toast({ level: 'danger', text: patched.error, actions: [], dismissible: true });
       return;
     }
+    if (!current()) return;
     await continueSetup(appSessionId, { gateway: 'direct' }, docked);
     return;
   }

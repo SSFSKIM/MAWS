@@ -233,6 +233,22 @@ describe('relay card', () => {
 
 // C11 start: the docked card as C11 feeds it (C11's Asks of C10 (2) and (7)): the policy from settings v3, the hand-off
 // action once registered, and Run direct on a gateway model asking for a Claude model first.
+// P2-A (M1's re-review): an intent's relay card shares the path: a Recheck pending when it is cancelled starts nothing
+describe('relay card, a Recheck outliving its card', () => {
+  it('an intent’s card cancelled while its Recheck is out starts nothing once the relay answers', async () => {
+    withMain({ 'session.intent.release': () => intent() });
+    putIntent(intent({ message: MESSAGE }));
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(useSetup.getState().cards.has(ID)).toBe(false));
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.start')).toEqual([]);
+  });
+});
+
 describe('relay card, with C11', () => {
   let relayUp = false;
   const docked = async (over: Parameters<typeof intent>[0] = {}) => {
@@ -661,6 +677,31 @@ describe('a record’s trust card and its continuation', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // M1's re-review: the continuation dies with its card; a Recheck whose read was out when the card went starts nothing
+  it('a Recheck pending when the card is cancelled continues nothing once the relay answers', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.acquire')).toEqual([]);
+    expect(fake.invoked('session.send')).toEqual([]);
+  });
+
+  it('a Recheck pending when another answer replaces the card continues nothing for the replaced card', async () => {
+    withMain({ 'session.queue.list': { entries: [], paused: false } });
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fake.pending('engine.relayHealth')).toBe(1));
+    act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: null })); // a new card, its own wait
+    await act(() => fake.reply('engine.relayHealth', health({ ok: true, status: 200, error: null })));
+    expect(fake.invoked('session.acquire')).toEqual([]);
   });
 });
 // P2-A end
