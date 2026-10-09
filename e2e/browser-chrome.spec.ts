@@ -791,7 +791,8 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       // no `preferred-size-changed`; the same app without Playwright reports it), so the popup stays at Chrome's 25 px
       // minimum in this run; the resize on every report is the unit tests' and S1's (spikes/extension-popup)
       await probe.click();
-      await expect.poll(async () => (await popupOf(s))?.extensionId).toBe(probeId);
+      // the view's URL is read once its load committed: under load the seam can answer before it does
+      await expect.poll(async () => (await popupOf(s))?.url).toBe(popupUrl);
       const popup = (await popupOf(s))!;
       expect(popup).toMatchObject({ tabId: pageTab, extensionId: probeId, url: popupUrl });
       expect(popup.bounds.y).toBe(Math.round(icon!.y + icon!.height));
