@@ -3,7 +3,7 @@
 // so the widget can return that view from its detail to its list.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LibrarySwitch } from './LibraryHeader';
+import { LibrarySwitch, SearchField } from './LibraryHeader';
 
 afterEach(cleanup);
 
@@ -16,5 +16,19 @@ describe('LibrarySwitch', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
     expect(onChange).toHaveBeenLastCalledWith('myItems');
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+});
+
+// P2-B M6: an Escape an input method is composing with (a Korean syllable in progress) cancels the composition only;
+// the field keeps its text, as the dialog stays (WidgetDialog's host).
+describe('SearchField', () => {
+  it('clears its text on Escape, but not on an Escape that ends a composition', () => {
+    const onChange = vi.fn();
+    render(<SearchField label="Search skills" value="한" onChange={onChange} />);
+    const field = screen.getByRole('searchbox', { name: 'Search skills' });
+    fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(onChange).toHaveBeenCalledWith('');
   });
 });

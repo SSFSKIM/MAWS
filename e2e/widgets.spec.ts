@@ -390,10 +390,11 @@ test.describe('interactive', () => {
     await expect(widget(page, 'agents')).toBeHidden();
     await expect(message).toContainText('@agent-Explore');
 
-    await pick(page, 'skills'); // an empty get_skills_dialog (reads.jsonl seq 72): the catalogue's skills (seq 9)
+    await pick(page, 'skills'); // an empty get_skills_dialog (reads.jsonl seq 72): the catalogue's skills (seq 9), in one list
     const skills = widget(page, 'skills').getByRole('list', { name: 'Skills' }).getByRole('listitem');
     await expect(skills).toHaveCount(18);
-    await skills.filter({ hasText: '/deep-research' }).getByRole('button', { name: 'Use' }).click();
+    await widget(page, 'skills').locator('[data-skill-row="deep-research"]').getByRole('button', { name: 'Use in chat' }).click(); // P2-B M6
+    await expect(widget(page, 'skills')).toBeHidden();
     await expect(message).toContainText('/deep-research');
     expect(backend.consoleErrors()).toEqual([]);
   });
@@ -1381,6 +1382,68 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
+  // P2-B M6 (§5.10): `/skills` is the skills library: 2.1.295's dialog answer (U3 F4) in My items' groups, a plugin's skill
+  // under its plugin's group (the CLI stub's owner-shaped registry installs frontend-design for this project) with the
+  // plugin's name as its badge, and Use in chat putting `/<skill> ` at the composer's caret and sending nothing.
+  test('/skills groups the skills by where they come from, the plugin’s skill badged with its plugin; Use in chat inserts and sends nothing', async ({ backend }) => {
+    const { app, page, project, userData } = backend;
+    backend.cli.setState(ownerShapedState(project, join(userData, 'elsewhere')));
+    const skill = (name: string, source: string, description: string) => ({ name, display_name: name, description, source, tokens: 20, state: 'on', advertised: true, handles: {} });
+    const answer = {
+      skills: [
+        skill('frontend-design:frontend-design', 'plugin', 'Guidance for distinctive, intentional visual design'),
+        skill('p2b-project', 'project', 'A skill this project keeps in .claude/skills'),
+        skill('p2b-user', 'user', 'A skill of your own'),
+        skill('debug', 'built-in', 'Debug the session'),
+        skill('lookup', 'mcp', 'Look a thing up through a server'),
+      ],
+    };
+    await app.evaluate((_, dialog) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.script('session.getSkillsDialog', () => dialog), answer);
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await inProject(backend); // the CLI's listing runs in the scratch project, where frontend-design is installed
+    const message = page.getByRole('textbox', { name: 'Message' });
+    await expect(message).toBeVisible();
+    await pick(page, 'skills');
+    const w = widget(page, 'skills');
+    await expect(w).toHaveAttribute('data-widget-size', 'library');
+    const idsIn = (group: string) => w.locator(`[data-skills-group="${group}"] [data-skill-row]`).evaluateAll((rows) => rows.map((row) => row.getAttribute('data-skill-row')));
+    await expect.poll(() => idsIn('here')).toEqual(['frontend-design:frontend-design', 'p2b-project']);
+    expect(await idsIn('yours')).toEqual(['p2b-user']);
+    expect(await idsIn('anthropic')).toEqual(['debug']);
+    expect(await idsIn('added')).toEqual(['lookup']);
+    await expect(w.locator('[data-skills-list]').getByRole('heading')).toHaveText(['In this project', 'Created by you', 'From Anthropic & Partners', 'From marketplaces you added'].map((h) => new RegExp(`^${h}`)));
+    const design = w.locator('[data-skill-row="frontend-design:frontend-design"]');
+    await expect(design.locator('[data-skill-name]')).toHaveText('frontend-design');
+    await expect(design.locator('[data-skill-badge]')).toHaveText('Frontend design');
+    await expect(w.locator('[data-skill-row="lookup"] [data-skill-badge]')).toHaveText('mcp');
+
+    // Search, Sort › Plugin name (one list), and Escape clearing the search before it closes anything
+    const search = w.getByRole('searchbox', { name: 'Search skills' });
+    await search.fill('own');
+    await expect(w.locator('[data-skill-row]')).toHaveCount(1);
+    await search.press('Escape');
+    await expect(search).toHaveValue('');
+    await expect(w).toBeVisible();
+    await w.getByRole('button', { name: 'Sort by' }).click();
+    await page.getByRole('menuitemradio', { name: 'Plugin name' }).click();
+    await expect(w.locator('[data-skills-group]')).toHaveCount(1);
+    await expect(w.locator('[data-skill-row]').first()).toHaveAttribute('data-skill-row', 'frontend-design:frontend-design');
+    await w.getByRole('button', { name: 'Sort by' }).click();
+    await page.getByRole('menuitemradio', { name: 'Name', exact: true }).click();
+
+    // the detail, then Use in chat: the dialog closes and the composer holds the skill, nothing sent
+    await w.locator('[data-skill-row="frontend-design:frontend-design"]').click(); // the row is one target, View <name>
+    const detail = w.locator('[data-skill-detail]');
+    await expect(detail).toContainText('/frontend-design:frontend-design');
+    await expect(detail).toContainText('Guidance for distinctive, intentional visual design');
+    const sentBefore = (await commandsOf(backend)).filter((c) => c.command === 'session.send').length;
+    await detail.getByRole('button', { name: 'Use in chat' }).click();
+    await expect(w).toBeHidden();
+    await expect(message).toContainText('/frontend-design:frontend-design');
+    expect((await commandsOf(backend)).filter((c) => c.command === 'session.send')).toHaveLength(sentBefore);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
   test('the panel’s Plugins section counts the loaded plugins and reloads mods and skills; /skills reloads skills', async ({ appBackend: backend }) => {
     const { page } = backend;
     await holdOperations(backend, true);
@@ -1404,7 +1467,7 @@ test.describe('plugin management (E8)', () => {
     await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/skills');
     await page.keyboard.press('Enter');
     const skills = widget(page, 'skills');
-    await skills.getByRole('button', { name: 'Reload' }).click();
+    await skills.getByRole('button', { name: 'Reload skills' }).click(); // P2-B M6: the skills library's head
     await expect(skills.getByRole('status')).toHaveText('Working…');
     await expect.poll(() => settleOperations(backend)).toBe(1);
     await expect(skills.getByRole('status')).toHaveText('Reloaded · 15 skills');

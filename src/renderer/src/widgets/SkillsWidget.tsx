@@ -1,68 +1,87 @@
-// `/skills` (C11 execution document, the widget table): `get_skills_dialog` when it lists anything, else the
-// catalogue's skills from the init frame (the dialog answered empty in every recording while `system/init.skills` held
-// the owner's skills; §4.2). "Use" puts `/<skill> ` at the composer's caret through C7's insertion seam; Reload (E8)
-// asks the engine to reload its skills.
-import * as z from 'zod';
+// `/skills` (C11; E8 execution document, M2; P2-B execution document §5.10): the skills library, Claude Desktop's Skills
+// section in the library box (X19) with `/plugins`' header vocabulary: the title, then Search skills, Sort by ("Name",
+// the default, since the skills dialog carries no dates; "Plugin name") and Reload skills; no My items | Browse switch
+// (the engine offers no catalogue of uninstalled skills, and Browse in `/plugins` is where skills arrive, §10 Q5). The
+// skills are `get_skills_dialog`'s (2.1.295 answers it before any turn with each skill's source, U3 F4), in My items'
+// groups, joined with `plugins.list` and `marketplaces.list` (read as `/plugins` reads them) and the session's loaded
+// plugins to find a plugin's skill's plugin; an engine that answers the dialog empty leaves the catalogue's skills, in one
+// list. The list waits for the plugin list to answer (or fail) so no row moves under the pointer. Reload skills runs
+// `reload_skills` as an operation (`Reloaded · N skills`); the dialog read refetches on its completion, as `useEngineRead`
+// does on any `session.operation` naming the session. The frame's states are today's: a session with no ready process
+// reads nothing and says so (P2-A's dormant state, with Load now, reaches it through `WidgetFrame` when A lands).
+import { useContext, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { GetSkillsDialogResponse } from '@shared/wire/control';
+import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { insertComposerText } from '../composer';
-import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
-import { RELOAD, SKILLS, WIDGET_TITLE } from './copy';
+import { useSessionCatalog } from '../stores/catalog';
+import { useSessions } from '../stores/sessions';
+import { LIBRARY as L, SKILLS_LIBRARY as S, WIDGET_TITLE } from './copy';
 import { operationLine, useOperation } from './operation';
-import { parseEach, Row, Rows, TextButton } from './parts';
+import { identitiesOf, installationRef } from './plugins/library';
+import { useLibraryStore } from './plugins/library-store';
+import { useLoadedPlugins } from './plugins/loaded';
+import { usePluginManifests } from './plugins/manifests';
+import { usePluginsRead } from './plugins/read';
 import { lineFailed, skillsSummary } from './plugins/reload';
-import { useEngineRead } from './read';
+import { useEngineRead, WidgetReadPolicyContext } from './read';
+import { hasPluginSkills, skillGroups, skillsView } from './skills/skills';
+import { SkillsLibrary, SkillsToolbar } from './skills/SkillsLibrary';
 import { WidgetFrame } from './WidgetFrame';
 
-const DialogSkillSchema = z.looseObject({ name: z.string(), description: z.string().optional() });
+const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
+const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
-export interface SkillsView {
-  source: 'dialog' | 'catalogue';
-  skills: { name: string; description: string }[];
-}
+export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
+  const active = useContext(WidgetReadPolicyContext).mode === 'active';
+  const read = useEngineRead('session.getSkillsDialog', { appSessionId });
+  const catalog = useSessionCatalog(appSessionId);
+  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  const reload = useOperation(appSessionId, 'session.reloadSkills');
+  const line = operationLine(reload.state, skillsSummary);
 
-export function present(dialog: GetSkillsDialogResponse, catalog: SessionCatalog): SkillsView {
-  const listed = parseEach(DialogSkillSchema, dialog.skills);
-  if (listed.length > 0) return { source: 'dialog', skills: listed.map((s) => ({ name: s.name, description: s.description ?? '' })) };
-  const described = new Map(catalog.commands.map((c) => [c.name, c.description]));
-  return { source: 'catalogue', skills: catalog.skills.map((name) => ({ name, description: described.get(name) ?? '' })) };
-}
+  // the plugins a plugin's skill comes from: the CLI's listing in the session's directory, as `/plugins` reads it
+  const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  const installed = usePluginsRead('plugins.list', cwd);
+  const marketplaces = usePluginsRead('marketplaces.list', cwd);
+  const loaded = useLoadedPlugins(appSessionId);
+  const plugins = installed.data?.plugins;
+  const markets = marketplaces.data?.marketplaces;
+  const requests = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], NO_VIEWS, null).map(({ representative }) => ({ ...installationRef(representative), lastUpdated: representative.lastUpdated })), [plugins, markets]);
+  const { views } = usePluginManifests(cwd, requests); // a plugin's display name, as its My items row shows it
+  const loadedIds = useMemo(() => new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source]))), [loaded]);
+  const identities = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], views, loadedIds), [plugins, markets, views, loadedIds]);
+  const listed = !active || cwd === null || (installed.state !== 'loading' && marketplaces.state !== 'loading');
 
-export function SkillsBody({ view, appSessionId, close }: { view: SkillsView; appSessionId: AppSessionId; close(): void }) {
-  if (view.skills.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{SKILLS.none}</p>;
+  const groups = useMemo(() => (read.data && listed ? skillGroups(read.data, catalog, loaded.plugins, identities) : null), [read.data, listed, catalog, loaded, identities]);
+  const view = useLibraryStore((s) => s.skills);
+  const plugin = groups !== null && hasPluginSkills(groups);
+  const shown = useMemo(() => (groups === null ? null : skillsView(groups, { search: view.search, sort: plugin ? view.sort : 'name' })), [groups, view, plugin]);
+  const [inDetail, setInDetail] = useState(false);
+
   const use = (name: string) => {
     close();
     insertComposerText(appSessionId, `/${name} `);
   };
-  return (
-    <Rows label={SKILLS.list}>
-      {view.skills.map((s) => (
-        <Row key={s.name} main={`/${s.name}`} detail={s.description ? <span className="line-clamp-2">{s.description}</span> : null} actions={<TextButton onClick={() => use(s.name)}>{SKILLS.use}</TextButton>} />
-      ))}
-    </Rows>
-  );
-}
+  const failed = read.state === 'error';
+  const toolbar = inDetail ? null : <SkillsToolbar plugins={plugin} canReload={ready} reloading={reload.state.phase === 'working'} onReload={() => void reload.run({})} />;
 
-// E8: Reload runs `reload_skills` as an operation (`Reloaded · N skills`); the dialog read refetches on its completion,
-// as `useEngineRead` does on any `session.operation` naming the session.
-export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
-  const read = useEngineRead('session.getSkillsDialog', { appSessionId });
-  const catalog = useSessionCatalog(appSessionId);
-  const reload = useOperation(appSessionId, 'session.reloadSkills');
-  const line = operationLine(reload.state, skillsSummary);
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={read.state} error={read.error} close={close}>
-      <div className="mb-2 flex items-baseline gap-2">
-        <TextButton onClick={() => void reload.run({})} disabled={reload.state.phase === 'working'}>
-          {RELOAD.reload}
-        </TextButton>
-        {line !== null && (
-          <span role="status" className={`min-w-0 text-ui-sm ${lineFailed(reload.state) ? 'text-danger' : 'text-fg-muted'}`}>
-            {line}
-          </span>
-        )}
-      </div>
-      {read.data && <SkillsBody view={present(read.data, catalog)} appSessionId={appSessionId} close={close} />}
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={failed ? 'ready' : read.state} error={failed ? null : read.error} close={close} size="library" toolbar={toolbar}>
+      {line !== null && (
+        <p role="status" className={`m-0 px-2 pb-1 text-ui-sm ${lineFailed(reload.state) ? 'text-danger' : 'text-fg-muted'}`}>
+          {line}
+        </p>
+      )}
+      {failed && (
+        <div role="alert" className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+          <p className="m-0 text-ui font-medium text-fg">{S.failed}</p>
+          {read.error && <p className="m-0 max-w-md text-ui-sm text-fg-muted [overflow-wrap:anywhere]">{read.error}</p>}
+          <button type="button" className={SECONDARY} onClick={read.refetch}>
+            {L.retry}
+          </button>
+        </div>
+      )}
+      {groups !== null && shown !== null && <SkillsLibrary groups={groups} shown={shown} onUse={use} onDetail={setInDetail} />}
     </WidgetFrame>
   );
 }

@@ -47,22 +47,24 @@ export function LibrarySwitch({ tab, onChange }: { tab: LibraryTab; onChange(tab
   );
 }
 
-function SearchField({ value, onChange }: { value: string; onChange(value: string): void }) {
+// The libraries' search field (`/plugins`' two views and `/skills`): Escape clears it first, `/` focuses it.
+export function SearchField({ label = L.searchPlugins, value, onChange }: { label?: string; value: string; onChange(value: string): void }) {
   return (
     <label className="flex h-7 w-56 min-w-0 items-center gap-1.5 rounded-md border border-border bg-bg px-2 text-fg-muted focus-within:border-border-strong focus-within:text-fg">
       <SearchIcon className="size-3.5" />
       <input
         type="search"
-        aria-label={L.searchPlugins}
-        placeholder={L.searchPlugins}
+        aria-label={label}
+        placeholder={label}
         maxLength={200}
         value={value}
         data-widget-search
         data-escape-clears
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          // Desktop's rule: Escape in a field that holds text clears it, and the dialog stays (WidgetDialog's host)
-          if (event.key !== 'Escape' || value === '') return;
+          // Desktop's rule: Escape in a field that holds text clears it, and the dialog stays (WidgetDialog's host); an
+          // Escape an input method is composing with only cancels the composition (P2-B M6)
+          if (event.key !== 'Escape' || value === '' || event.nativeEvent.isComposing) return;
           event.preventDefault();
           onChange('');
         }}
@@ -108,7 +110,7 @@ function Radios<T extends string>({ value, values, words, onChange }: { value: T
   );
 }
 
-function Choice<T extends string>({ label, icon, value, values, words, isDefault, onChange }: { label: string; icon: ReactNode; value: T; values: readonly T[]; words: Record<T, string>; isDefault: boolean; onChange(value: T): void }) {
+export function Choice<T extends string>({ label, icon, value, values, words, isDefault, onChange }: { label: string; icon: ReactNode; value: T; values: readonly T[]; words: Record<T, string>; isDefault: boolean; onChange(value: T): void }) {
   return (
     <Menu label={label} icon={icon} pressed={!isDefault}>
       <DropdownMenu.Label className={LABEL}>{label}</DropdownMenu.Label>

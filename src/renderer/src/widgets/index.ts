@@ -54,8 +54,8 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
 
 // W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.
 const IN_MODEL_CHIP: ReadonlySet<WidgetCommandName> = new Set(['model', 'effort', 'fast']);
-// P2-B (2026-10-09; X19): the libraries open in the library box (`/skills` joins in M6).
-const LIBRARY: ReadonlySet<WidgetCommandName> = new Set(['plugins']);
+// P2-B (2026-10-09; X19): the libraries open in the library box.
+const LIBRARY: ReadonlySet<WidgetCommandName> = new Set(['plugins', 'skills']);
 
 export function registerAllWidgets(): () => void {
   const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) =>

@@ -102,4 +102,27 @@ describe('the widget dialog', () => {
       off();
     }
   });
+
+  // P2-B M6 (P2-D's review of the shared hunk): an Escape an input method is composing with (Korean, Japanese, Chinese)
+  // cancels the composition, never the dialog; Radix's layer hears it on document capture before the field can say so.
+  it('an Escape pressed while an input method composes keeps the dialog, in an empty field and in one with text', async () => {
+    const off = registerSlashWidget('plugins', { title: 'Plugins', size: 'library', component: () => <input aria-label="Search plugins" data-escape-clears defaultValue="" /> });
+    try {
+      render(<WidgetDialogHost />);
+      act(() => openWidgetDialog(A, 'plugins', ''));
+      const field = screen.getByRole('textbox', { name: 'Search plugins' });
+      fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      fireEvent.change(field, { target: { value: '한' } });
+      fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      fireEvent.keyDown(field, { key: 'Escape' }); // the composition over, Escape in a field holding text: still the field's
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      fireEvent.change(field, { target: { value: '' } });
+      fireEvent.keyDown(field, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    } finally {
+      off();
+    }
+  });
 });

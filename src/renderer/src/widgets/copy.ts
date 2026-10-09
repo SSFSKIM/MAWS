@@ -192,7 +192,6 @@ export const HOOKS = {
 export const MEMORY = { missing: 'does not exist yet', files: 'Files', fileList: 'Memory files', folders: 'Folders', folderList: 'Memory folders', autoMemory: (status: string) => `Auto memory · ${status}`, addNote: 'Add a note' };
 
 // Skills and agents.
-export const SKILLS = { use: 'Use', none: 'No skills in the catalogue', list: 'Skills' };
 export const AGENTS = { mention: 'Mention', none: 'No agents in the catalogue', list: 'Agents' };
 
 // Diff.
@@ -569,5 +568,18 @@ export const LIBRARY = {
   sourceHelper: 'A GitHub owner/repo, a Git repository URL or a folder on this Mac.',
   trustWarning:
     'Make sure you trust a plugin before installing, updating, or using it. Plugins installed from marketplaces are not controlled by Anthropic, and Anthropic cannot verify that they will work as intended or that they won’t change. See each plugin’s homepage for more information.',
+};
+// M6: the skills library (§5.10; Desktop's Skills section where it has words). Its groups are My items' (`LIBRARY.group`).
+export const SKILLS_LIBRARY = {
+  list: 'Skills',
+  search: 'Search skills',
+  sort: { name: 'Name', plugin: 'Plugin name' } as const,
+  useInChat: 'Use in chat',
+  firstTitle: 'Add your first skills',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Browse in /plugins lists what your marketplaces offer.',
+  failed: "Couldn't load your skills.",
+  invoke: 'Type',
+  plugin: 'Plugin',
+  source: 'Source',
 };
 // P2-B end

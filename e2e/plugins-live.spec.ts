@@ -404,13 +404,18 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       scratch.log(`loaded after the update's reload: ${(await loadedIds(w)).join(' · ')}`);
     });
 
-    await step('skills', '/skills after the next turn lists e8-probe:e8-hello', async () => {
+    // P2-B M6: the skills library: e8-probe's skill under its plugin's group (user scope, an added marketplace), named
+    // after `e8-probe:` with the plugin's name as its badge
+    await step('skills', '/skills after the next turn lists e8-probe:e8-hello under its plugin’s group, badged E8 probe', async () => {
       await send(page, 'Reply with exactly: E8 LIVE SKILLS');
       await idle(page, id);
       const w = await openWidget(page, 'skills');
-      await expect(w.getByRole('list', { name: 'Skills' })).toContainText('e8-probe:e8-hello', { timeout: 30_000 });
-      const skills = await w.getByRole('list', { name: 'Skills' }).getByRole('listitem').allInnerTexts();
-      scratch.log(`skills: ${skills.map((s) => s.split('\n')[0]).join(' · ')}`);
+      const hello = w.locator('[data-skills-group="added"] [data-skill-row="e8-probe:e8-hello"]');
+      await expect(hello).toBeVisible({ timeout: 30_000 });
+      await expect(hello.locator('[data-skill-name]')).toHaveText('e8-hello');
+      await expect(hello.locator('[data-skill-badge]')).toHaveText('E8 probe');
+      const skills = await w.locator('[data-skills-group]').evaluateAll((groups) => groups.map((g) => `${g.getAttribute('data-skills-group')}: ${Array.from(g.querySelectorAll('[data-skill-row]'), (r) => r.getAttribute('data-skill-row')).join(', ')}`));
+      scratch.log(`skills: ${skills.join(' · ')}`);
       scratch.observe('skills', skills);
     });
 
