@@ -591,7 +591,7 @@ describe('plugins widget: whole-branch review fixes', () => {
     const elsewhere = await waitFor(() => row('e8-probe@e8-scratch'));
     expect(elsewhere.textContent).toContain('In other · manage it from a session there');
     expect(elsewhere.outerHTML).not.toContain('/work/other'); // neither its words nor any attribute (a tooltip) names a path
-    expect(within(elsewhere).queryByRole('button')).toBeNull();
+    expect(within(elsewhere).queryByRole('button', { name: /^More actions for / })).toBeNull(); // read-only: only its detail opens
     expect(row('e8-tools@e8-scratch')).toBeNull();
     // this project's own installation keeps its actions and needs no naming
     act(() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'all' } })));
@@ -824,5 +824,128 @@ describe('plugins widget: the library', () => {
     await waitFor(() => expect(row('e8-probe@e8-scratch').textContent).toContain('by E8'));
     expect(within(section('my-items')).queryByText(/Couldn.t read your plugins. details/)).toBeNull();
     expect(invoked('plugins.manifest')).toHaveLength(2);
+  });
+});
+
+// P2-B M4 (the execution document §5.7): a row opens its detail in place of the list; the changes act at the chosen
+// chip's scope through E8's sheets; Back returns to the list as it was.
+describe('plugins widget: the detail', () => {
+  const view = (id: string) => within(section('my-items')).getByRole('button', { name: `View ${displayed(id)}` });
+  const displayed = (id: string) => ({ 'e8-probe@e8-scratch': 'E8 probe', 'e8-tools@e8-scratch': 'E8 tools' })[id] ?? id;
+  const detail = () => document.querySelector<HTMLElement>('[data-plugin-detail]');
+  const chips = () => within(detail()!).getAllByRole('radio').map((chip) => [chip.textContent, chip.getAttribute('aria-checked')]);
+  const switchOf = () => within(detail()!).getByRole('switch', { name: 'Enable plugin' });
+
+  it('a row’s click opens its detail in place of the list, without the list’s controls; Back returns with the search kept', async () => {
+    await ready();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'probe' } });
+    fireEvent.click(row('e8-probe@e8-scratch').querySelector('span')!); // anywhere on the row
+    expect(detail()!.getAttribute('data-plugin-detail')).toBe('e8-probe@e8-scratch');
+    expect(within(detail()!).getByRole('heading', { name: 'E8 probe' })).toBeTruthy();
+    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toBe('by E8 · 0.1.0 · e8-scratch'));
+    expect(section('my-items').closest('.hidden')).toBeTruthy(); // the list stays mounted, hidden
+    expect(screen.queryByRole('searchbox', { name: 'Search plugins' })).toBeNull();
+    expect(loadedLine().closest('.hidden')).toBeTruthy();
+    expect(chips()).toEqual([['User', 'true']]);
+    expect(within(detail()!).getByText('Enabled for this project')).toBeTruthy();
+    // e8-probe is not among the 11 plugins this ready session loaded: say so, and offer the reload
+    expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not loaded in this sessionReload plugins');
+    expect(within(detail()!).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Skills1']);
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to My items' }));
+    expect(detail()).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search plugins' })).toHaveProperty('value', 'probe');
+    expect(document.activeElement).toBe(view('e8-probe@e8-scratch'));
+  });
+
+  it('loaded now when the session’s list has it', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), plugins: [{ name: 'e8-probe', path: '/cfg/e8-probe', source: 'e8-probe@e8-scratch', version: '0.1.0' }] }]]) });
+    mount();
+    fireEvent.click(await waitFor(() => view('e8-probe@e8-scratch')));
+    expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Loaded in this session · Loaded now');
+  });
+
+  it('the chips: this project first and chosen, then the user’s; the switch, Update and Uninstall… act at the chosen chip’s scope', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true })];
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    expect(chips()).toEqual([
+      ['This project', 'true'],
+      ['User', 'false'],
+    ]);
+    expect(switchOf().getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(switchOf());
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'project', '--json']);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(within(detail()!).getByRole('radio', { name: 'User' }));
+    expect(detail()!.getAttribute('data-plugin-scope')).toBe('user');
+    fireEvent.click(switchOf());
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
+    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    await waitFor(() => expect(within(detail()!.querySelector<HTMLElement>('[data-plugin-op="user"]')!).getByRole('status').textContent).toBe('Working…'));
+    expect(within(detail()!).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true); // busy at this scope
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'disable', phase: 'done', outcome: { ok: true, result: { message: 'Successfully disabled plugin: e8-probe (scope: user)' } }, reload: { sessions: [] } })));
+    expect(within(detail()!.querySelector<HTMLElement>('[data-plugin-op="user"]')!).getByRole('status').textContent).toBe('Successfully disabled plugin: e8-probe (scope: user) · No running session to reload');
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Update' }));
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'update', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(within(detail()!).getByRole('radio', { name: 'This project' }));
+    fireEvent.keyDown(within(detail()!).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'uninstall', 'e8-probe@e8-scratch', '--scope', 'project', '--json']);
+  });
+
+  it('a chip not here or the user’s offers no change and says where the plugin is managed; other projects list read-only', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work', coversHere: true }), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other' })];
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    expect(chips()).toEqual([
+      ['User', 'true'],
+      ['work', 'false'],
+      ['1 other project', 'false'],
+    ]);
+    fireEvent.click(within(detail()!).getByRole('radio', { name: 'work' }));
+    expect(switchOf()).toHaveProperty('disabled', true);
+    expect(within(detail()!).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true);
+    expect(within(detail()!).getByText('In work · manage it from a session there')).toBeTruthy();
+    fireEvent.click(within(detail()!).getByRole('radio', { name: '1 other project' }));
+    const others = within(detail()!).getByRole('list', { name: 'Other projects' });
+    expect(others.textContent).toBe('other0.1.0manage it from a session there');
+    expect(switchOf()).toHaveProperty('disabled', true);
+    expect(invoked('plugins.disable')).toEqual([]);
+  });
+
+  it('Update names the marketplace’s newer version; an uninstall of the last installation returns to the list with its result', async () => {
+    backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => ({ ...manifestOf(key), marketplaceVersion: '0.2.0' })) }));
+    await ready();
+    await waitFor(() => expect(row('e8-probe@e8-scratch').textContent).toContain('by E8'));
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    expect(within(detail()!).getByRole('button', { name: 'Update' }).parentElement!.getAttribute('title')).toBe('Update to 0.2.0');
+    fireEvent.keyDown(within(detail()!).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Uninstall' }));
+    await waitFor(() => expect(invoked('plugins.uninstall')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    installed = [];
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(detail()).toBeNull());
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: e8-probe (scope: user)' } }, reload: { sessions: [] } })));
+    expect(within(section('my-items').querySelector<HTMLElement>('[data-plugin-result="e8-probe@e8-scratch"]')!).getByRole('status').textContent).toBe('Successfully uninstalled plugin: e8-probe (scope: user) · No running session to reload');
+  });
+
+  it('the row’s overflow keeps its own click: its menu opens and no detail does', async () => {
+    await ready();
+    expect(menuItems('e8-probe@e8-scratch')).toEqual(['Turn off', 'Update', 'Uninstall…']);
+    expect(detail()).toBeNull();
+    menu('e8-probe@e8-scratch', 'Update');
+    await resolved();
+    expect(detail()).toBeNull();
   });
 });

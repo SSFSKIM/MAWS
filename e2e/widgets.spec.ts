@@ -178,6 +178,20 @@ async function rowActions(row: Locator): Promise<string[]> {
   await expect(row).toBeVisible();
   return items;
 }
+// P2-B M4: a row's click opens its detail in place of the list (Back returns to it); the detail's switch, Update and
+// overflow (Uninstall…) act at the chosen scope chip's scope; a change's line sits under the chips, per scope.
+const detailOf = (w: Locator) => w.locator('[data-plugin-detail]');
+async function openDetail(w: Locator, id: string, scope = 'user'): Promise<Locator> {
+  await installedRow(w, id, scope).click();
+  await expect(detailOf(w)).toHaveAttribute('data-plugin-detail', id);
+  return detailOf(w);
+}
+const opLineOf = (detail: Locator, scope = 'user') => detail.locator(`[data-plugin-op="${scope}"]`).getByRole('status');
+const enableSwitch = (detail: Locator) => detail.getByRole('switch', { name: 'Enable plugin' });
+async function detailUninstall(detail: Locator): Promise<void> {
+  await detail.getByRole('button', { name: /^More actions for / }).click();
+  await detail.page().getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
+}
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
 const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-plugins-argv]').getAttribute('data-plugins-argv')) ?? 'null') as string[];
@@ -955,11 +969,10 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('the switch disables and enables after its sheet, its position from the read-back; Cancel runs nothing; Update shows the version change; Uninstall asks for the acknowledgement', async ({ backend }) => {
+  test('the detail’s switch disables and enables after its sheet, its position from the read-back; Cancel runs nothing; Update shows the version change; Uninstall asks for the acknowledgement', async ({ backend }) => {
     const { page } = backend;
     const w = await openPlugins(backend);
     const id = 'e8-tools@e8-scratch';
-    const row = installedRow(w, id);
     const shown: string[][] = [];
     const confirm = async (action: string, submit: string, expected: string[]) => {
       const sheet = sheetOf(page, action);
@@ -970,19 +983,26 @@ test.describe('plugin management (E8)', () => {
       await expect(sheet).toBeHidden();
     };
 
-    await rowAction(row, 'Turn off');
+    // P2-B M4 (§6.2): from the row's detail, at its one chip's scope (User)
+    const detail = await openDetail(w, id);
+    await expect(detail.getByRole('radio', { name: 'User' })).toHaveAttribute('aria-checked', 'true');
+    await expect(detail).toContainText('Enabled for this project');
+    const toggle = enableSwitch(detail);
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await toggle.click();
     await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`]);
     await confirm('disable', 'Disable', ['plugin', 'disable', id, '--scope', 'user', '--json']);
-    await expect(lineOf(row)).toHaveText('Successfully disabled plugin: e8-tools (scope: user) · No running session to reload');
-    await expectListed(w, id, 'user', false); // the read-back: Disabled
-    await rowAction(row, 'Turn on');
+    await expect(opLineOf(detail)).toHaveText('Successfully disabled plugin: e8-tools (scope: user) · No running session to reload');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // the read-back
+    await expect(detail).toContainText('Not enabled for this project');
+    await toggle.click();
     await confirm('enable', 'Enable', ['plugin', 'enable', id, '--scope', 'user', '--json']);
-    await expect(lineOf(row)).toHaveText('Successfully enabled plugin: e8-tools (scope: user) · No running session to reload');
-    await expectListed(w, id);
+    await expect(opLineOf(detail)).toHaveText('Successfully enabled plugin: e8-tools (scope: user) · No running session to reload');
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
 
     // Cancel: the sheet closes and the CLI never runs: the whole calls.log, reads included, is as it was
     const log = await settledLog(backend);
-    await rowAction(row, 'Update');
+    await detail.getByRole('button', { name: 'Update', exact: true }).click();
     await sheetOf(page, 'update').getByRole('button', { name: 'Cancel' }).click();
     await expect(sheetOf(page, 'update')).toBeHidden();
     await page.waitForTimeout(500);
@@ -992,21 +1012,23 @@ test.describe('plugin management (E8)', () => {
     // Update: the marketplace now offers 1.1.0
     const state = backend.cli.state();
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.map((p) => (p.name === 'e8-tools' ? { ...p, version: '1.1.0' } : p)) })) });
-    await rowAction(row, 'Update');
+    await detail.getByRole('button', { name: 'Update', exact: true }).click();
     await confirm('update', 'Update', ['plugin', 'update', id, '--scope', 'user', '--json']);
-    await expect(lineOf(row)).toHaveText('Plugin "e8-tools" updated from 1.0.0 to 1.1.0 for scope user. Restart to apply changes. · 1.0.0 → 1.1.0 · No running session to reload');
-    await expect(row).toContainText('1.1.0');
+    await expect(opLineOf(detail)).toHaveText('Plugin "e8-tools" updated from 1.0.0 to 1.1.0 for scope user. Restart to apply changes. · 1.0.0 → 1.1.0 · No running session to reload');
+    await expect(detail.locator('h3 + p')).toContainText('1.1.0');
 
-    // Uninstall: destructive, so the default button waits for the acknowledgement; the row leaves, its result stays
-    await rowAction(row, 'Uninstall…');
+    // Uninstall: destructive, so the default button waits for the acknowledgement; the plugin leaves the list, so the
+    // detail returns to it, where the result stays
+    await detailUninstall(detail);
     const sheet = sheetOf(page, 'uninstall');
     await expect(sheet.getByRole('button', { name: 'Uninstall', exact: true })).toBeDisabled();
     await page.keyboard.press('Enter'); // Enter never destroys without the acknowledgement
     await expect(sheet).toBeVisible();
     await sheet.getByRole('checkbox', { name: 'I understand' }).check();
     await confirm('uninstall', 'Uninstall', ['plugin', 'uninstall', id, '--scope', 'user', '--json']);
-    await expect(row).toHaveCount(0);
-    await expect(w.locator(`[data-plugin-result="${id}"]`)).toContainText('Successfully uninstalled plugin: e8-tools (scope: user) · No running session to reload');
+    await expect(detail).toHaveCount(0);
+    await expect(installedRow(w, id)).toHaveCount(0);
+    await expect(w.locator(`[data-plugins-section="my-items"] [data-plugin-result="${id}"]`)).toContainText('Successfully uninstalled plugin: e8-tools (scope: user) · No running session to reload');
     await expect(w.locator('[data-plugins-section="my-items"]')).toContainText('Add your first plugins');
     expect(mutations(backend)).toEqual(shown);
     expect(backend.consoleErrors()).toEqual([]);
@@ -1193,6 +1215,19 @@ test.describe('plugin management (E8)', () => {
     await expect(items.locator(`[data-plugin-row="${o('supabase')}"]`)).toContainText('other projects · manage it from a session there');
     await w.getByRole('button', { name: 'Show' }).click();
     await page.getByRole('menuitemradio', { name: 'All plugins' }).click();
+
+    // P2-B M4: a row low in the scrolled list opens its detail; Back returns to the list where it was, the row focused
+    const pane = w.locator('[data-library-pane]');
+    const eli5 = installedRow(w, 'eli5@claude-community');
+    await eli5.scrollIntoViewIfNeeded();
+    const scrolled = await pane.evaluate((el) => el.scrollTop);
+    expect(scrolled).toBeGreaterThan(0);
+    const detail = await openDetail(w, 'eli5@claude-community');
+    await expect(w.getByRole('searchbox', { name: 'Search plugins' })).toHaveCount(0);
+    await page.keyboard.press('Meta+BracketLeft');
+    await expect(detail).toHaveCount(0);
+    await expect.poll(() => pane.evaluate((el) => el.scrollTop)).toBe(scrolled);
+    await expect(eli5.getByRole('button', { name: /^View / })).toBeFocused();
 
     const shown: string[][] = [];
     const confirm = async (action: string, submit: string, expected: string[], acknowledge = false) => {

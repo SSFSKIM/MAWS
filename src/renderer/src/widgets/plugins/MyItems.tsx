@@ -31,6 +31,7 @@ export interface MyItemsProps {
   onRetry(): void;
   manifestError: string | null; // `plugins.manifest`'s refusal: the rows stay, without what their files say
   onRetryManifests(): void;
+  onOpen(id: string): void; // a row's click: its detail
 }
 
 function Centered({ children, role }: { children: ReactNode; role?: 'status' | 'alert' }) {
@@ -43,7 +44,7 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
-export function MyItems({ appSessionId, installed, identities, loaded, loadedIds, onRetry, manifestError, onRetryManifests }: MyItemsProps) {
+export function MyItems({ appSessionId, installed, identities, loaded, loadedIds, onRetry, manifestError, onRetryManifests, onOpen }: MyItemsProps) {
   const { ops } = useManage();
   const view = useLibraryStore((s) => s.plugins);
   const now = useNow();
@@ -102,7 +103,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
             ) : (
               <ul className="m-0 list-none p-0">
                 {rows.map((identity) => (
-                  <PluginRow key={identity.id} identity={identity} now={now} />
+                  <PluginRow key={identity.id} identity={identity} now={now} onOpen={onOpen} />
                 ))}
               </ul>
             )}

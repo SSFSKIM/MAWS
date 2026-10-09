@@ -118,16 +118,27 @@ async function openPlugins(page: Page): Promise<Locator> {
     return w;
   });
 }
-// P2-B M3: My items draws one row per plugin ("Disabled" when the CLI lists it not enabled here), its changes in the
-// row's overflow; what the session loaded is Show › "Loaded in this session" (installed plugins as their rows, the
-// engine's own and a folder's as plain rows), and the loaded line under the head counts them.
+// P2-B M3: My items draws one row per plugin ("Disabled" when the CLI lists it not enabled here); what the session
+// loaded is Show › "Loaded in this session" (installed plugins as their rows, the engine's own and a folder's as plain
+// rows), and the loaded line under the head counts them.
 const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"]`);
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
 const disabledBadge = (row: Locator) => row.getByText('Disabled', { exact: true });
-async function rowAction(row: Locator, item: string): Promise<void> {
-  await row.getByRole('button', { name: /^More actions for / }).click();
-  await row.page().getByRole('menuitem', { name: item, exact: true }).click();
+// P2-B M4: a row's click opens its detail in place of the list; its switch, Update and overflow (Uninstall…) act at the
+// chosen chip's scope, and a change's line sits under the chips (`data-plugin-op` per scope). Back returns to the list.
+const detailOf = (w: Locator) => w.locator('[data-plugin-detail]');
+async function openDetail(w: Locator, id = PLUGIN): Promise<Locator> {
+  if ((await detailOf(w).count()) === 0) await installedRow(w, id).click();
+  await expect(detailOf(w)).toHaveAttribute('data-plugin-detail', id);
+  return detailOf(w);
 }
+async function backToList(w: Locator): Promise<void> {
+  const back = w.getByRole('button', { name: 'Back to My items' });
+  if ((await back.count()) > 0) await back.click();
+  await expect(detailOf(w)).toHaveCount(0);
+}
+const opLineOf = (detail: Locator, scope = 'user') => detail.locator(`[data-plugin-op="${scope}"]`);
+const enableSwitch = (detail: Locator) => detail.getByRole('switch', { name: 'Enable plugin' });
 async function show(w: Locator, filter: 'All plugins' | 'Loaded in this session'): Promise<void> {
   await w.getByRole('button', { name: 'Show' }).click();
   await w.page().getByRole('menuitemradio', { name: filter }).click();
@@ -135,6 +146,7 @@ async function show(w: Locator, filter: 'All plugins' | 'Loaded in this session'
 // The ids (or, for a plugin the CLI does not list, the names) of what Show › "Loaded in this session" lists; the
 // filter is set back to All plugins after.
 async function loadedIds(w: Locator): Promise<string[]> {
+  await backToList(w);
   await show(w, 'Loaded in this session');
   const items = w.locator('[data-plugins-section="my-items"]');
   const ids = await items.locator('[data-plugin-row], [data-loaded-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-plugin-row') ?? row.getAttribute('data-loaded-row') ?? ''));
@@ -343,10 +355,12 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await step('update', 'plugin.json rewritten to 0.2.0, then Update: 0.1.0 → 0.2.0', async () => {
       scratch.setPluginVersion('0.2.0');
       const w = page.locator('[data-widget="plugins"]');
-      const row = installedRow(w);
-      const result = await action({ name: 'update', action: 'update', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'update', submit: 'Update', line: () => row }, () => rowAction(row, 'Update'));
+      const detail = await openDetail(w);
+      const result = await action({ name: 'update', action: 'update', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'update', submit: 'Update', line: () => opLineOf(detail) }, () => detail.getByRole('button', { name: 'Update', exact: true }).click());
       expect(result.text).toContain('0.1.0 → 0.2.0');
-      await expect(row).toContainText('0.2.0');
+      await expect(detail.locator('h3 + p')).toContainText('0.2.0');
+      await backToList(w);
+      await expect(installedRow(w)).toContainText('0.2.0');
       scratch.log(`loaded after the update's reload: ${(await loadedIds(w)).join(' · ')}`);
     });
 
@@ -360,32 +374,38 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       scratch.observe('skills', skills);
     });
 
-    await step('disable', 'the switch: disable; the Loaded list loses e8-probe', async () => {
+    await step('disable', 'the detail’s switch: disable; the Loaded list loses e8-probe', async () => {
       const w = await openPlugins(page);
-      const row = installedRow(w);
-      const result = await action({ name: 'disable', action: 'disable', scope: 'user', source: null, fill: {}, sheet: 'disable', submit: 'Disable', line: () => row }, () => rowAction(row, 'Turn off'));
+      const detail = await openDetail(w);
+      const result = await action({ name: 'disable', action: 'disable', scope: 'user', source: null, fill: {}, sheet: 'disable', submit: 'Disable', line: () => opLineOf(detail) }, () => enableSwitch(detail).click());
       expect(result.text).toBe('Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
-      await expect(disabledBadge(row)).toBeVisible();
+      await expect(enableSwitch(detail)).toHaveAttribute('aria-checked', 'false');
+      await backToList(w);
+      await expect(disabledBadge(installedRow(w))).toBeVisible();
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
-    await step('enable', 'the switch: enable; the Loaded list regains e8-probe', async () => {
+    await step('enable', 'the detail’s switch: enable; the Loaded list regains e8-probe', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const row = installedRow(w);
-      const result = await action({ name: 'enable', action: 'enable', scope: 'user', source: null, fill: {}, sheet: 'enable', submit: 'Enable', line: () => row }, () => rowAction(row, 'Turn on'));
+      const detail = await openDetail(w);
+      const result = await action({ name: 'enable', action: 'enable', scope: 'user', source: null, fill: {}, sheet: 'enable', submit: 'Enable', line: () => opLineOf(detail) }, () => enableSwitch(detail).click());
       expect(result.text).toBe('Successfully enabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
-      await expect(disabledBadge(row)).toHaveCount(0);
+      await expect(enableSwitch(detail)).toHaveAttribute('aria-checked', 'true');
+      await backToList(w);
+      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
     });
 
-    await step('uninstall', 'Uninstall…: the row leaves, its result stays; the Loaded list loses e8-probe', async () => {
+    await step('uninstall', 'the detail’s Uninstall…: the plugin leaves, the detail returns to the list, the result stays; the Loaded list loses e8-probe', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      const row = installedRow(w);
-      const result = await action({ name: 'uninstall', action: 'uninstall', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'uninstall', submit: 'Uninstall', acknowledge: true, line: () => w.locator(`[data-plugin-result="${PLUGIN}"]`) }, () =>
-        rowAction(row, 'Uninstall…'),
-      );
+      const detail = await openDetail(w);
+      const result = await action({ name: 'uninstall', action: 'uninstall', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'uninstall', submit: 'Uninstall', acknowledge: true, line: () => w.locator(`[data-plugins-section="my-items"] [data-plugin-result="${PLUGIN}"]`) }, async () => {
+        await detail.getByRole('button', { name: /^More actions for / }).click();
+        await page.getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
+      });
       expect(result.text).toBe('Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
-      await expect(row).toHaveCount(0);
+      await expect(detail).toHaveCount(0);
+      await expect(installedRow(w)).toHaveCount(0);
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 

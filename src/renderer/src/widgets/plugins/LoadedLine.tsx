@@ -29,17 +29,11 @@ export interface LoadedLineProps {
 const refusalOf = (outcome: AcquireOutcome): string | null =>
   outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable' ? cardWords(outcome) : acquisitionWords(outcome);
 
-export function LoadedLine({ appSessionId, availability, loaded, refresh, reloads, onShowLoaded, now: fixed }: LoadedLineProps) {
-  const clock = useNow();
-  const now = fixed ?? clock;
-  const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+// Refresh's click (acquire, then `reload_plugins`): pending while it runs, then the refusal in words when it did not end
+// ready. The loaded line and the detail's "Not loaded in this session" offer it; nothing calls it but a click.
+export function useRefresh(refresh: (() => Promise<AcquireOutcome>) | null): { pending: boolean; refusal: string | null; run(): Promise<void> } {
   const [pending, setPending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const { freshness } = loaded;
-  const problems = loaded.errors.length + loaded.warnings.length;
-  // a list with unknown freshness is a status's last report (A's stand-in); with nothing in it, nothing was observed
-  const observed = freshness.kind !== 'unknown' || loaded.plugins.length > 0 || problems > 0;
-
   const run = async () => {
     if (!refresh) return;
     setPending(true);
@@ -53,6 +47,18 @@ export function LoadedLine({ appSessionId, availability, loaded, refresh, reload
       setPending(false);
     }
   };
+  return { pending, refusal, run };
+}
+
+export function LoadedLine({ appSessionId, availability, loaded, refresh, reloads, onShowLoaded, now: fixed }: LoadedLineProps) {
+  const clock = useNow();
+  const now = fixed ?? clock;
+  const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+  const { pending, refusal, run } = useRefresh(refresh);
+  const { freshness } = loaded;
+  const problems = loaded.errors.length + loaded.warnings.length;
+  // a list with unknown freshness is a status's last report (A's stand-in); with nothing in it, nothing was observed
+  const observed = freshness.kind !== 'unknown' || loaded.plugins.length > 0 || problems > 0;
 
   let action: ReactNode = null;
   const holder = record?.holder;

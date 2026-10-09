@@ -28,14 +28,14 @@ export interface PluginIdentity {
 
 // The engine's built-in directory: Anthropic reviews its entries (U3 Method 1); the engine lists no marketplace row for it.
 export const BUILT_IN_DIRECTORY = 'anthropic-plugin-directory';
-const SKILLS_DIR = 'skills-dir';
+export const SKILLS_DIR = 'skills-dir';
 const CLI_SCOPES: ReadonlySet<string> = new Set(['user', 'project', 'local']);
 
 // A pseudo-scope installation: a `--plugin-dir` folder (session), a claude.ai sync, a skills-directory plugin (whose
 // scope reads user or project, U3 F1). The CLI's scopes do not reach it, so nothing from this session acts on it.
-const isPseudo = (p: InstalledPlugin): boolean => !CLI_SCOPES.has(p.scope) || p.marketplace === SKILLS_DIR;
-const isHere = (p: InstalledPlugin): boolean => p.here && (p.scope === 'project' || p.scope === 'local');
-const isActionable = (p: InstalledPlugin): boolean => !isPseudo(p) && (isHere(p) || p.scope === 'user');
+export const isPseudo = (p: InstalledPlugin): boolean => !CLI_SCOPES.has(p.scope) || p.marketplace === SKILLS_DIR;
+export const isHere = (p: InstalledPlugin): boolean => p.here && (p.scope === 'project' || p.scope === 'local');
+export const isActionable = (p: InstalledPlugin): boolean => !isPseudo(p) && (isHere(p) || p.scope === 'user');
 
 export function groupOfMarketplace(marketplace: string, marketplaces: readonly Marketplace[]): 'anthropic' | 'added' {
   if (marketplace === BUILT_IN_DIRECTORY) return 'anthropic';
@@ -71,6 +71,12 @@ export function displayNameOf(name: string, manifest: PluginManifestView | null)
   const text = words.join(' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+// A project's folder name: what a row or chip names a project by (a row shows no absolute path, acceptance 2).
+export const basename = (path: string): string => {
+  const trimmed = path.replace(/\/+$/, '');
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || path;
+};
 
 // The request's key for a manifest view, and the map key the views are kept under.
 export const manifestKeyOf = (ref: ManifestItemRef): string => (ref.kind === 'installation' ? JSON.stringify(['installation', ref.id, ref.scope, ref.projectPath]) : JSON.stringify(['available', ref.pluginId]));

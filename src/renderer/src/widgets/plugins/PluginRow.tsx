@@ -5,13 +5,15 @@
 // installation's scope. The row is one plugin, whatever its number of installations; a change acts on one installation,
 // so its operation key is that installation's (E8's `installedKey`), and a result whose installation left the list is
 // drawn by `Gone` beneath the list. An identity with no installation here and no user one offers no change and says
-// where it is managed. Opening the detail is M4's.
+// where it is managed. The whole row is one target, "View <name>", opening the detail (M4): a button under the row's
+// content, which sits above it so its tooltips show, a click on it still opening the detail; the row's own controls (the
+// overflow, an operation's Stop or Reload again, the menu's items) keep their clicks.
 import { DropdownMenu } from 'radix-ui';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
 import { LIBRARY as L } from '../copy';
 import { MoreIcon, PluginGlyph } from './icons';
-import { dateWords, displayNameOf, isNew, updatedOf, versionWords, type PluginIdentity } from './library';
+import { basename, dateWords, displayNameOf, isNew, updatedOf, versionWords, type PluginIdentity } from './library';
 import { OperationLine, useManage } from './manage';
 import { requestFor } from './present';
 
@@ -26,11 +28,6 @@ export const installationOf = (key: string): Installation => {
 };
 // The installation's own scope where the CLI takes it; a pseudo-scope falls back to user (E8).
 const scopeOfRow = (scope: string): PluginsScope => ((PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user');
-
-const basename = (path: string) => {
-  const trimmed = path.replace(/\/+$/, '');
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || path;
-};
 
 export function PluginTile() {
   return (
@@ -95,7 +92,11 @@ function managedWords(identity: PluginIdentity): { text: string; title?: string 
   return projects.length === 1 ? { text: L.managedIn(basename(projects[0])) } : { text: L.managedInMany(projects.length), title: [...new Set(projects.map(basename))].join('\n') };
 }
 
-export function PluginRow({ identity, now }: { identity: PluginIdentity; now: number }) {
+// A click inside the row opens the detail unless it landed on a control of its own (React carries a portalled menu
+// item's click through the row too).
+const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open]), a, [role="menuitem"]') !== null;
+
+export function PluginRow({ identity, now, onOpen }: { identity: PluginIdentity; now: number; onOpen(id: string): void }) {
   const { ops } = useManage();
   const target = identity.representative;
   const key = installedKey(target);
@@ -110,9 +111,17 @@ export function PluginRow({ identity, now }: { identity: PluginIdentity; now: nu
   const actionable = identity.actionable.length > 0;
   const managed = actionable ? null : managedWords(identity);
   return (
-    <li data-plugin-row={identity.id} data-plugin-scope={target.scope} className="flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0">
+    <li
+      data-plugin-row={identity.id}
+      data-plugin-scope={target.scope}
+      className="relative flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0 hover:bg-bg-hover"
+      onClick={(event) => {
+        if (!ownControl(event.target)) onOpen(identity.id);
+      }}
+    >
+      <button type="button" data-row-open aria-label={L.view(name)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
       <PluginTile />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium text-fg" title={identity.id}>
             {name}
@@ -140,7 +149,7 @@ export function PluginRow({ identity, now }: { identity: PluginIdentity; now: nu
         </div>
       </div>
       {(version !== null || date !== null) && (
-        <span className="shrink-0 text-ui-sm text-fg-muted tabular-nums">
+        <span className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums">
           {version}
           {version !== null && date !== null && ' · '}
           {date && (
@@ -150,7 +159,7 @@ export function PluginRow({ identity, now }: { identity: PluginIdentity; now: nu
           )}
         </span>
       )}
-      {actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7 shrink-0" />}
+      <span className="relative inline-flex shrink-0">{actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7" />}</span>
     </li>
   );
 }
