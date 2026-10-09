@@ -133,3 +133,134 @@ Note on line 8: the script reads only triage.txt's "Dispositions after M1" secti
   "open until 5.2" although "== Dispositions at 5.2 ==" closed row 32 (3f877e1b) and kept row 35 (owner P2); the true split
   is 71 original rows still in the tracker and 13 added after M0 (9 at 1.6, 2 at M4, 2 here), 84 in all. Row 32's check 7
   passes because tracker line 32 is still a row (another one). The PASS stands; the script's 5.2 reading is stale.
+
+== 7.3 ==
+2026-10-08, after the tracker edit (2614d7bf), owner-results.txt (4b313119) and triage.txt's "== Dispositions at 7.3 ==" and
+"== Rows added after 1.6 ==" sections (in the working tree, committed with this file). The script was revised to read the
+later disposition sections: the M6 note above found that it read only "Dispositions after M1", so rows 32 and 35 still
+counted as "open until 5.2". It now (a) lets each later "== Dispositions at <step> ==" section (5.2, 7.3) override a row's
+M1 entry ("closed at <commit>" or "kept, <owner>"); (b) fails when a row is still "open until" an E11 step; (c) counts the
+rows added after M0 from every "== Rows added after ..." section and fails unless kept original rows plus added rows equal
+the tracker's rows (check 9, which replaces line 8's old derived total). Run as /tmp/e11-73/acceptance4.py from the
+worktree root.
+E11 Acceptance 4 check, tracker and triage at HEAD 4b313119
+1. rows matching `^| 2026`: 92
+2. non-table lines inside the table (lines 22-115): none
+3. rows without exactly five cells: none
+4. kept rows whose "Closes when" names no owner: none
+5. "— closed" annotations left: none
+   later disposition sections read: 5.2, 7.3
+6. original rows in triage.txt: 159; with a disposition: 159; missing: none; unknown dispositions: none
+7. kept rows whose "now line" is not a tracker row: none; gone rows without an existing commit: none
+8. dispositions (latest entry per row): closed 4, dropped 1, fixed 79, kept 2, re-deferred 63, re-deferred, narrowed 3, removed 7
+   still open until an E11 step: none
+9. original rows kept: 68; rows added after M0 (triage.txt): 24; sum 92; tracker rows 92
+RESULT: PASS
+exit 0
+
+== The script at 7.3 (/tmp/e11-73/acceptance4.py) ==
+#!/usr/bin/env python3
+"""E11 Acceptance 4 as a script (Task 1.6; rerun at 5.2 and 7.3).
+
+Run from the worktree root: python3 acceptance4.py
+Checks docs/tech-debt-tracker.md against docs/doperpowers/evidence/p1-e11/triage.txt.
+7.3 revision: reads every later "== Dispositions at <step> ==" section (5.2, 7.3) over "Dispositions after M1", the
+latest entry for a row winning; counts the rows added after M0 from every "== Rows added after ..." section; fails if a
+row is still "open until" an E11 step, or if kept original rows plus added rows differ from the tracker's row count.
+"""
+import re
+import subprocess
+import sys
+
+TRACKER = 'docs/tech-debt-tracker.md'
+TRIAGE = 'docs/doperpowers/evidence/p1-e11/triage.txt'
+# An owner in "Closes when": a child id, P2, E11 (open until a later E11 step), or the owner with a question id or sitting step.
+OWNER = re.compile(r"[Oo]wner:? ?(P2|E11|the owner\b[^|]*?\b(Q\d{1,2}|step [A-J])|[CE]\d+[a-d]?\b)")
+DISPOSITIONS = ('fixed', 'removed', 'dropped', 're-deferred', 're-deferred, narrowed', 'open until 5.2', 'open until 7.3',
+                'closed', 'kept')
+KEPT = ('re-deferred', 'open until', 'kept')
+
+failures = []
+head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True).stdout.strip()
+print(f'E11 Acceptance 4 check, tracker and triage at HEAD {head}')
+
+lines = open(TRACKER).read().split('\n')
+rows = {i: l for i, l in enumerate(lines, 1) if l.startswith('| 2026')}
+print(f'1. rows matching `^| 2026`: {len(rows)}')
+
+# The table renders whole: from its header row to its last row, no line that is not a table line.
+start = next(i for i, l in enumerate(lines, 1) if l.startswith('| Logged | Owner |'))
+end = max(rows)
+gaps = [i for i in range(start, end + 1) if not lines[i - 1].startswith('|')]
+print(f'2. non-table lines inside the table (lines {start}-{end}): {gaps or "none"}')
+failures += [f'line {i} breaks the table' for i in gaps]
+
+bad_cells = [i for i, l in rows.items() if len(l[2:-2].split(' | ')) != 5]
+print(f'3. rows without exactly five cells: {bad_cells or "none"}')
+failures += [f'line {i} has a wrong cell count' for i in bad_cells]
+
+no_owner = [i for i, l in rows.items() if not OWNER.search(l[2:-2].split(' | ')[-1])]
+print(f'4. kept rows whose "Closes when" names no owner: {no_owner or "none"}')
+failures += [f'line {i} has no owner' for i in no_owner]
+
+closed = [i for i, l in enumerate(lines, 1) if '— closed' in l]
+print(f'5. "— closed" annotations left: {closed or "none"}')
+failures += [f'line {i} still annotated closed' for i in closed]
+
+text = open(TRIAGE).read()
+sections = [(p.split('\n', 1)[0], p.split('\n', 1)[1] if '\n' in p else '') for p in text.split('\n== ')[1:]]
+rows_part = text.split('== Rows ==', 1)[1].split('\n== ', 1)[0]
+original = [int(m.group(1)) for m in re.finditer(r'^(\d+) \| ', rows_part, re.M)]
+
+# The M1 dispositions, then every later section's entries over them (the latest entry for a row wins).
+m1 = {}
+disp_part = text.split('== Dispositions after M1', 1)[1].split('\n== ', 1)[0]
+for m in re.finditer(r'^(\d+) \| [^|]* \| [^|]* \| ([^|]+?) \| (.*)$', disp_part, re.M):
+    m1[int(m.group(1))] = (m.group(2), m.group(3), 'M1')
+disp = dict(m1)
+later = [(title[len('Dispositions at '):].split(' ', 1)[0], body) for title, body in sections if title.startswith('Dispositions at ')]
+for step, body in later:
+    for m in re.finditer(r'^(\d+) \| [^|]* \| (closed at |kept, )(.*)$', body, re.M):
+        disp[int(m.group(1))] = ('closed' if m.group(2) == 'closed at ' else 'kept', m.group(2) + m.group(3), step)
+print(f'   later disposition sections read: {", ".join(s for s, _ in later) or "none"}')
+missing = [o for o in original if o not in disp]
+unknown = [o for o, (d, _, _) in disp.items() if d not in DISPOSITIONS]
+print(f'6. original rows in triage.txt: {len(original)}; with a disposition: {len([o for o in original if o in disp])}; '
+      f'missing: {missing or "none"}; unknown dispositions: {unknown or "none"}')
+failures += [f'triage row {o} has no disposition' for o in missing] + [f'triage row {o}: unknown disposition' for o in unknown]
+
+# Kept rows point at a row that exists (a later entry without a line falls back to M1's); gone rows name a commit that exists.
+dangling, no_commit = [], []
+for o, (d, detail, step) in sorted(disp.items()):
+    if d.startswith(KEPT):
+        m = re.search(r'now line (\d+)', detail) or re.search(r'now line (\d+)', m1.get(o, ('', '', ''))[1])
+        if not m or int(m.group(1)) not in rows:
+            dangling.append(o)
+    else:
+        shas = re.findall(r'\b[0-9a-f]{8}\b', detail)
+        ok = shas and all(subprocess.run(['git', 'cat-file', '-e', s + '^{commit}'], capture_output=True).returncode == 0 for s in shas)
+        if not ok:
+            no_commit.append(o)
+print(f'7. kept rows whose "now line" is not a tracker row: {dangling or "none"}; '
+      f'gone rows without an existing commit: {no_commit or "none"}')
+failures += [f'triage row {o}: dangling line' for o in dangling] + [f'triage row {o}: no commit' for o in no_commit]
+
+counts = {}
+for d, _, _ in disp.values():
+    counts[d] = counts.get(d, 0) + 1
+print('8. dispositions (latest entry per row): ' + ', '.join(f'{k} {v}' for k, v in sorted(counts.items())))
+open_until = sorted(o for o, (d, _, _) in disp.items() if d.startswith('open until'))
+print(f'   still open until an E11 step: {open_until or "none"}')
+failures += [f'triage row {o}: still open until an E11 step' for o in open_until]
+
+# Every tracker row is an original row kept or a row triage.txt lists as added after M0.
+kept = len([o for o, (d, _, _) in disp.items() if d.startswith(KEPT)])
+added = sum(len(re.findall(r'^[0-9a-f]{8} \(', body, re.M)) for title, body in sections if title.startswith('Rows added after '))
+print(f'9. original rows kept: {kept}; rows added after M0 (triage.txt): {added}; sum {kept + added}; tracker rows {len(rows)}')
+if kept + added != len(rows):
+    failures.append(f'kept {kept} + added {added} != tracker rows {len(rows)}')
+
+print('RESULT: ' + ('PASS' if not failures else 'FAIL'))
+for f in failures:
+    print('  ' + f)
+sys.exit(1 if failures else 0)
