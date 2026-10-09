@@ -17,7 +17,9 @@
 // and the agent finds no such section. (5) The owner's real doperpowers (its installed tree copied read-only out of the
 // owner's plugin cache into a local marketplace under the scratch root, installed by the engine's own CLI for the
 // scratch home's user) with `outputStyle: "doperpowers:to-human"`: a new session appends nothing, the variable is set
-// and the mod's own band stays away; with the lane off for it, the variable is unset and the mod draws its band.
+// and the mod's own band stays away; with the mod active, a choice is answered at the engine's started and a must-read
+// marked read (the full flow ran once, in the clean home); with the lane off for it, the variable is unset and the mod
+// draws its band. A failed step stops the steps after it.
 //
 // Safety (P1's harness rules): the scratch config home only (the engine's CLI under `env -i`); nothing written under
 // ~/.claude or ~/.claude.json (the A-15 reading before and after, ~/.claude/settings.json's digest and the doperpowers
@@ -82,7 +84,11 @@ const PROMPTS = {
   instructions:
     'Look only at your system prompt, not at this conversation: does it contain a section titled "Messages to the human"? ' +
     'If it does, list the tag names that section defines, comma-separated. If it does not, answer exactly NO. Use no tool.',
-  style: 'Send me one short message about this repository and one note I must not miss, the way your instructions describe. Use no tool.',
+  style:
+    'Send me, the way your instructions describe: one short message about this repository, one note I must not miss, and one question I can ' +
+    'answer later while you go on working (never AskUserQuestion), with two options and the one you recommend, asking whether the README ' +
+    'should get a usage section. Use no tool, now or after my answer: when it arrives, reply with one short message and do not read, ' +
+    'list or change any file.',
   styleAgain: 'Send me one more short message, the way your instructions describe. Use no tool.',
 } as const;
 
@@ -426,11 +432,18 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
   let maws: MawsLaunch | null = null;
   let page!: Page;
   const shot = (name: string) => page?.screenshot({ path: join(OUT, `live-${name}.jpg`), type: 'jpeg', quality: 50, scale: 'css' }).catch(() => undefined);
+  const consoleErrors: string[] = []; // both launches'
+  // Every step builds on the ones before it (one session through its states, then the arms), so after a failure the
+  // rest are not run.
   const step = (name: string, title: string, body: () => Promise<void>) =>
     test.step(title, async () => {
       n += 1;
       log('');
       log(`=== ${String(n).padStart(2, '0')}-${name} · ${title}`);
+      if (failures.length > 0) {
+        line(`${name}: not run (an earlier step failed)`);
+        return;
+      }
       try {
         await body();
       } catch (error) {
@@ -556,25 +569,31 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
         records: await p.locator('.owner-record').count(),
       };
       const placement = await p.locator('.owner-insights').first().getAttribute('data-placement').catch(() => null);
+      // the sleep's tool row (a cell, or a group holding it), never the prompt that names the command
+      const toolRow = p.locator('.transcript-row[data-kind="cell"], .transcript-row[data-kind="group"]').filter({ hasText: 'sleep 40' });
       const record = p.locator('.owner-record button').first();
       const closed = (await record.innerText()).replaceAll('\n', ' ');
+      await expect(toolRow, 'level 0: the tool row folded into the record').toHaveCount(0);
       await record.click();
       await expect(record).toContainText('Fold to report');
       const divider = p.getByRole('button', { name: /^Worked for/ }).first();
       await expect(divider).toBeVisible();
       const dividerText = (await divider.innerText()).replaceAll('\n', ' ');
+      await expect(toolRow, 'level 1: the divider still closed').toHaveCount(0);
       await divider.click();
-      await expect(p.getByText(/sleep 40/).first()).toBeVisible();
+      await expect(toolRow.first(), 'level 2: the tool row shown').toBeVisible();
+      const toolText = (await toolRow.first().innerText()).replaceAll('\n', ' ');
       await shot('05-record-open');
       await record.click();
       await expect(record).toContainText('Working record');
-      log(`cards ${JSON.stringify(counts)}; insight placement ${placement}; record closed "${closed}"; divider "${dividerText}"; the sleep's tool row shown; folded back`);
-      observe('g3Report', { counts, placement, closed, dividerText });
+      await expect(toolRow, 'folded: the tool row gone again').toHaveCount(0);
+      log(`cards ${JSON.stringify(counts)}; insight placement ${placement}; record closed "${closed}"; divider "${dividerText}"; the tool row: absent at levels 0 and 1, "${toolText.slice(0, 120)}" at level 2, absent after the fold`);
+      observe('g3Report', { counts, placement, closed, dividerText, toolText });
       expect(counts.message).toBeGreaterThanOrEqual(1);
       expect(counts.mustRead).toBeGreaterThanOrEqual(1);
       expect(counts.insight).toBeGreaterThanOrEqual(1);
       expect(counts.question).toBeGreaterThanOrEqual(1);
-      line(`G3 report: ${counts.message} message, ${counts.mustRead} must-read, ${counts.insight} insight (${placement}), ${counts.question} question card(s) over "${closed}"; opened: "${dividerText}"; expanded: the sleep's tool row; "Fold to report" closes it`);
+      line(`G3 report: ${counts.message} message, ${counts.mustRead} must-read, ${counts.insight} insight (${placement}), ${counts.question} question card(s) over "${closed}"; the sleep's tool row absent; opened: "${dividerText}", the row still absent; expanded: the row "${toolText.slice(0, 40)}"; "Fold to report": absent again`);
     });
 
     await step('g4-reply', 'G4: Reply sends free text from the card; the composer’s draft is untouched and focused', async () => {
@@ -598,6 +617,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
     await step('restart', 'restart: the states and items restored silently; the must-read unread until Mark read', async () => {
       restoredBefore = (await items(page, s1)).map((i) => i.id).sort();
       await stop(page, s1);
+      consoleErrors.push(...maws!.consoleErrors());
       await maws!.cleanup(); // the profile is the run's: kept
       maws = await launch();
       page = maws.page;
@@ -680,8 +700,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
       expect([decided.desired, decided.recorded, decided.applied]).toEqual(['off', 'contract:1', 'off']);
-      expect(reply).toMatch(/\bNO\b/);
-      expect(reply).not.toMatch(/need-input/);
+      // the answer is its first word; the model may go on to disown what it said under the contract (one run did,
+      // naming the tags it no longer has)
+      expect(reply).toMatch(/^\W*NO\b/);
       line(`off arm: the mods row "${pendingWords}", then "${sourceWords}"; spawn --system-prompt-snapshot off, no append, ${NATIVE_TO_HUMAN_ENV}=<unset> (--settings env and the probe); ${decisionWords(decided)}; agent: ${JSON.stringify(reply.slice(0, 60))}`);
       await stop(page, s1);
     });
@@ -727,6 +748,35 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE}; no --append-system-prompt; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${NATIVE_TO_HUMAN_ENV}=1 logged; ${cards} MAWS card(s); the mod's band absent (deferred)`);
     });
 
+    // With the real mod active its press and prompt.submit hooks sit in the answer's way: the choice must still go out
+    // through the seam and turn Answered at the engine's started. (Reply, attention and restart ran in the clean home.)
+    await step('style-answer', 'style arm: a choice answered and a must-read marked read with the doperpowers mod active', async () => {
+      const question = pane(page).locator('[data-owner-card="need-input"]').first();
+      await expect(question).toBeVisible();
+      const choice = question.getByRole('group', { name: 'Choices' }).locator('button[data-recommended]');
+      const choiceText = (await choice.locator('.owner-question-choice-text').innerText()).trim();
+      const before = answerWrites(s2).length;
+      await choice.click();
+      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${choiceText}`, { timeout: 180_000 });
+      const answeredSeenAt = new Date().toISOString();
+      const write = answerWrites(s2)[before];
+      if (!write) throw new Error('no Answering prompt in the journal');
+      const started = lifecycle(s2, write.uuid, 'started');
+      await idle(page, s2);
+      const unread = pane(page).locator('[data-owner-card="essential"][data-state="unread"]');
+      const mustReads = await unread.count();
+      expect(mustReads, 'a must-read to mark').toBeGreaterThanOrEqual(1);
+      while ((await unread.count()) > 0) await unread.first().getByRole('button', { name: 'Mark read' }).click();
+      await expect(pane(page).locator('[data-owner-card="essential"][data-state="read"]').first()).toContainText('Read');
+      await expect.poll(async () => (await items(page, s2)).length).toBe(0);
+      log(`written ${write.at} as ${write.uuid}; the engine's started ${started}; Answered seen ${answeredSeenAt}; prompt ${JSON.stringify(write.text.slice(0, 160))}; ${mustReads} must-read(s) marked read`);
+      observe('styleAnswer', { write, started, answeredSeenAt, choiceText, mustReads });
+      await shot('11-style-answer');
+      expect(started, 'the engine started the answer').not.toBeNull();
+      expect(answeredSeenAt >= started!).toBe(true);
+      line(`style answer: with the mod active, the recommended choice Answered at the engine's started (${write.uuid} at ${started}; Answered seen at ${answeredSeenAt}); ${mustReads} must-read(s) Mark read → Read; no item left`);
+    });
+
     await step('style-off', 'style arm, lane off: the variable unset; the mod draws its own to-human band', async () => {
       await setOverride(page, 'Off');
       await closeWidgets(page);
@@ -744,7 +794,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const bandText = (await band.innerText()).replaceAll('\n', ' ');
       log(`budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}; probe ${probe}; the band: ${bandText}`);
       observe('styleOff', { spawn, row, probe, bandText });
-      await shot('11-style-off');
+      await shot('12-style-off');
       expect(spawn.append).toBeNull();
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
@@ -753,19 +803,25 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await stop(page, s2);
     });
 
-    log('');
-    log(`console errors: ${JSON.stringify(maws.consoleErrors())}`);
   } finally {
+    if (maws) consoleErrors.push(...maws.consoleErrors());
+    log('');
+    log(`console errors (both launches): ${JSON.stringify(consoleErrors)}`);
     await maws?.cleanup().catch(() => undefined);
     const after = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')), cache: treeDigest(plugin.installPath) };
     log(`owner files after: ~/.claude/settings.json sha256 ${after.settings} (${after.settings === owner.settings ? 'identical' : 'CHANGED'}); the doperpowers cache tree ${after.cache.files} files, listing sha256 ${after.cache.digest} (${after.cache.digest === owner.cache.digest ? 'identical' : 'CHANGED'})`);
-    line(`spend: US$${spent().toFixed(4)} across the run's journals (cap US$${cap}); ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; the doperpowers cache tree ${after.cache.digest === owner.cache.digest ? 'unchanged' : 'CHANGED'}`);
+    const total = spent();
+    line(`spend: US$${total.toFixed(4)} across the run's journals (cap US$${cap}); ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; the doperpowers cache tree ${after.cache.digest === owner.cache.digest ? 'unchanged' : 'CHANGED'}`);
     line(a15Line('after the run', owner.a15, after.a15, [root]));
-    observe('after', { a15: after.a15, settings: after.settings, cache: after.cache, failures });
+    observe('after', { a15: after.a15, settings: after.settings, cache: after.cache, failures, consoleErrors, spentUsd: total });
     console.log(`P2-C live: scratch root ${root}`);
     expect(after.settings, '~/.claude/settings.json unchanged').toBe(owner.settings);
     expect(after.cache.digest, 'the owner’s doperpowers cache tree unchanged').toBe(owner.cache.digest);
     expect(after.a15.keys.filter((k) => k.startsWith(root) || k.startsWith(root.replace(/^\/private\/tmp\//, '/tmp/'))), 'A-15: the owner file names none of the run’s scratch').toEqual([]);
+    expect(after.a15.keys, 'A-15: the same /tmp project keys after the run as before').toEqual(owner.a15.keys);
+    expect(after.a15.digest, 'A-15: the same digest after the run as before').toBe(owner.a15.digest);
+    expect(total, `the run's spend within its cap of US$${cap}`).toBeLessThanOrEqual(cap);
   }
   expect(failures, failures.join('\n')).toEqual([]);
+  expect(consoleErrors, 'no console error in either launch').toEqual([]);
 });
