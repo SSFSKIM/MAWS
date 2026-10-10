@@ -602,6 +602,23 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: ID, display: draft.display, pastedContents }]));
   });
 
+  // L118 review: the seam may acquire again inside the continuation's send (the renderer's status trails the process);
+  // the replacement card it docks keeps the pasted segments, so its own continuation writes them to history
+  it('a replacement card docked by the continuation’s own send keeps the pasted segments for the history row', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED, NEEDS_TRUST, ACCEPTED), 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }, 'session.history.append': undefined });
+    render(<Docked />);
+    const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
+    const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
+    expect(await act(() => submitHumanSerialized(fake.client, ID, draft))).toBe(false);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(3)); // the continuation's, then the seam's again
+    await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toEqual({ content: draft.content, display: draft.display, pastedContents }));
+    expect(fake.invoked('session.send')).toEqual([]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: draft.content }]));
+    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: ID, display: draft.display, pastedContents }]));
+  });
+
   it('a refused continuation undocks the card and says why; the composer keeps the text (nothing is handed back or cleared)', async () => {
     withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: ID, directory: '/gone' }) });
     render(<Docked />);

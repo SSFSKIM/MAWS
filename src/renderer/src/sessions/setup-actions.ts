@@ -152,7 +152,8 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
     if (outcome.status !== 'ready') return refuse(acquisitionWords(outcome) ?? 'The session could not start');
     if (!current()) return dismissed; // the session started; its dismissed card's message is not sent
     if (docked !== null) {
-      const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display });
+      // the pasted segments go along: a card the seam's own acquisition docks again keeps them for the history row
+      const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display, ...(docked.pastedContents !== undefined && { pastedContents: docked.pastedContents }) });
       if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
       appendHistory(ipc, appSessionId, { display: docked.display, pastedContents: docked.pastedContents ?? {} }); // P2-F (L118): the host accepted it
       if (!current()) return dismissed; // dismissed during the send: the draft is the owner's again, never cleared
