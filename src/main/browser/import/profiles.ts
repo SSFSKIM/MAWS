@@ -15,7 +15,8 @@ import { dirname, join } from 'node:path';
 import {
   ImportedProfileSchema,
   ImportedProfilesFileSchema,
-  ImportedProfilesFileV1Schema,
+  ReadImportedProfilesFileSchema,
+  ReadImportedProfilesFileV1Schema,
   PROFILES_FILE_VERSION,
   upgradeProfileV1,
   type ImportedProfile,
@@ -145,10 +146,10 @@ function readProfilesFile(file: string): ImportedProfile[] | 'broken' | { newer:
     if (typeof version === 'number' && Number.isInteger(version) && version > PROFILES_VERSION) return { newer: version }; // E11
     // cua #90: a version-1 file (E4b's) parses through its own schema and is upgraded in memory; the next write is version 2
     if (version === 1) {
-      const v1 = ImportedProfilesFileV1Schema.safeParse(json);
+      const v1 = ReadImportedProfilesFileV1Schema.safeParse(json);
       return v1.success ? v1.data.profiles.map(upgradeProfileV1) : 'broken';
     }
-    const parsed = ImportedProfilesFileSchema.safeParse(json);
+    const parsed = ReadImportedProfilesFileSchema.safeParse(json);
     return parsed.success ? parsed.data.profiles : 'broken';
   } catch {
     return 'broken'; // a SyntaxError quotes the file: never logged
