@@ -450,6 +450,32 @@ test.describe('the product in stub mode over a scratch repository', () => {
     });
   });
 
+  // Scale review D scalpel-4#1: the lead keeps a basename's width (up to 40 characters) and the bar is one line high, so
+  // in a narrow pane an image's zoom group and an SVG's Source ran past the bar's end, where the pane clips them.
+  test('in a narrow pane an image’s zoom controls and Source stay inside the bar, the basename whole', async () => {
+    const NAME = 'img/architecture-overview-diagram-v2.svg';
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, NAME);
+        await expect(viewer.locator('[data-image-view] img')).toHaveCount(1);
+        await viewer.evaluate((el: HTMLElement) => (el.style.width = '420px')); // a split pane's width
+        const frame = (await viewer.boundingBox())!;
+        expect(Math.round(frame.width)).toBe(420);
+        for (const name of ['Zoom out', 'Zoom in', 'Actual size', 'Fit', 'Source']) {
+          const box = (await viewer.getByRole('button', { name, exact: true }).boundingBox())!;
+          expect(box.x + box.width, `${name} inside the pane`).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
+        }
+        const name = viewer.locator('[data-path-name]');
+        const shown = await name.evaluate((el) => ({ width: el.getBoundingClientRect().width, needed: el.scrollWidth }));
+        expect(shown.width, 'the basename drawn whole').toBeGreaterThanOrEqual(shown.needed - 0.5);
+        await viewer.getByRole('button', { name: 'Fit', exact: true }).click();
+        await viewer.getByRole('button', { name: 'Source', exact: true }).click();
+        await expect(viewer.locator('[data-code-view] .cm-content')).toContainText(SVG_TEXT);
+      },
+      (scratch) => writeFileSync(scratch.path(NAME), readFileSync(scratch.path('img/label.svg'))),
+    );
+  });
+
   test('a PDF is an Open externally row', async () => {
     await withProduct(async (p) => {
       const viewer = await openInViewer(p, 'doc.pdf');

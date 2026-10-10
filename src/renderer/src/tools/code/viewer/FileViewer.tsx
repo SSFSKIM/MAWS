@@ -30,7 +30,9 @@ const CodeView = lazy(() => import('./CodeView'));
 
 type FileTab = Extract<TabRef, { kind: 'file' }>;
 
-const bar = 'flex h-8 shrink-0 items-center gap-2 border-b border-border bg-bg px-3 text-ui-sm';
+// The bar is one line while its parts fit, and wraps rather than clipping them (a pane clips its overflow): the lead
+// keeps the basename's width, so in a narrow pane the controls move to a second line (scale review D scalpel-4#1).
+const bar = 'flex min-h-8 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-bg px-3 py-1 text-ui-sm';
 const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';
 
 // The path at the bar's start: its directory truncates first and the basename stays whole, so the controls, which keep
@@ -168,7 +170,7 @@ function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zo
   const { tabId } = entry;
   const more = entry.kind === 'head' && entry.loaded < Math.min(CODE_CAP, entry.bytes);
   return (
-    <span className="flex shrink-0 items-center gap-1">
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
       {showsImage(entry) ? <ZoomControls zoom={zoom} /> : null}
       {more ? (
         <button type="button" className={toggle} disabled={entry.loadingMore} onClick={() => useViewer.getState().loadMore(tabId)}>
