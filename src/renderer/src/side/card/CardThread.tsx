@@ -127,7 +127,7 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
           rows={1}
           value={reply.text}
           disabled={blocked}
-          readOnly={reply.sending} // P2-F F-C1: not disabled, which would drop the focus typing and the card's Escape need
+          readOnly={reply.sending} // P2-F F-C1: a disabled field would drop the focus that typing and the card's Escape need
           onChange={(event) => reply.setText(event.target.value)}
           onKeyDown={reply.onKeyDown}
           className={`${FIELD} min-w-0 flex-1 max-h-[calc(4lh+0.5rem)] resize-none leading-snug field-sizing-content disabled:text-fg-muted read-only:text-fg-muted`}
