@@ -346,8 +346,9 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   void load(true);
 
   // P2-C start (2026-10-09)
+  // Not held back for an archived session (F-AB): the items are a live projection, never restored from the store, and
+  // the owner channel projects none while the record is archived, so a non-empty list means the session was unarchived.
   const setOwnerItems = (id: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]) => {
-    if (forgotten.has(id)) return;
     for (const itemId of silent) restoredIds.add(itemId);
     const state = stateOf(id);
     state.owner = items;

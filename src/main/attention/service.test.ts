@@ -542,16 +542,21 @@ describe('the owner channel projects its items as a third list (P2-C)', () => {
     service.stop();
   });
 
-  it('an archive retires them with the rest, and a later projection for the archived session is ignored', async () => {
+  it('an archive retires them with the rest; the archived projection (empty) changes nothing, and an unarchive\'s brings them back', async () => {
     const { service, fire, last, changed } = setup();
     await service.ready;
     service.setOwnerItems(APP, [ownerItem('async_input')], []);
     fire('session.forgotten', { appSessionId: APP });
     expect(last()).toEqual([]);
     const count = changed.length;
-    service.setOwnerItems(APP, [ownerItem('essential_unread')], []);
+    service.setOwnerItems(APP, [], []); // the owner channel projects nothing for an archived session
     expect(changed.length).toBe(count);
     expect(service.list()).toEqual([]);
+    // F-AB (scale review B sweep#1): unarchived, its owner items are live again (they are a projection, never restored)
+    const question = ownerItem('async_input');
+    service.setOwnerItems(APP, [question], [question.id]);
+    expect(last()).toEqual([question]);
+    expect(service.list()).toEqual([question]);
     service.stop();
   });
 });
