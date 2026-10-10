@@ -1,0 +1,110 @@
+{
+  "area": "A engine host and wire",
+  "run": {
+    "workflow": "doperpowers:code-review",
+    "runId": "wf_09c4e310-6dc",
+    "level": "max",
+    "lanes": {
+      "deriverModel": "opus",
+      "finderModel": "opus",
+      "verifierModel": "opus"
+    },
+    "agents": 7,
+    "durationMs": 397384,
+    "subagentTokens": 718276,
+    "logs": [
+      "panel (max: finders opus/high, verifier opus/high): sweep + 5 scalpel(s) against base @ 3214b61696 (HEAD 7dc1bd78f4)",
+      "pool: 3 candidate(s) from 6/6 lanes",
+      "panel verdict: incorrect — confirmed: Keep a fence glued to a mark tag from swallowing the rest of the block; Skip recovery's settle when the process exits during the journal read; Bring directory listings under the post-open identity check"
+    ]
+  },
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-5#1",
+      "priority": "P2",
+      "title": "Keep a fence glued to a mark tag from swallowing the rest of the block",
+      "file": "src/shared/owner/to-human-parser.ts",
+      "lines": "19-48",
+      "comment": "I reproduced this against the head parser with a temporary script, which I removed afterwards; the working tree is clean.\n\n- `parse('<to-human>Run this:\\n```bash\\nnpm test\\n```</to-human>\\n<need-input>Go?</need-input>')` returns a single `plain` part.\n- The same text with `</to-human>` on its own line parses correctly into to-human, plain and need-input parts.\n- `'<to-human>```bash\\nnpm test\\n```\\n</to-human>\\n<need-input>Go?</need-input>'` also returns a single plain part.\n\nThe cause is in `codeRegions`. `FENCE_CLOSE` (to-human-parser.ts:20) requires only whitespace after the fence run, and `FENCE_OPEN` needs the fence at the start of the line. A glued closing tag therefore leaves the fence open to the end of the text, and in the opening-tag case the later bare ``` line opens a fence that runs to the end. Every later tag is filtered out as code.\n\nThe CommonMark closing rule was a design choice (P2-C doc line 698). Even so, the contract (contract.ts:36) only says to keep marks out of code blocks. It never tells the model to put tags on their own lines. A plausible formatting variant therefore silently drops a need-input question and the mark structure of the whole block, which grammar 1 handled. That regression is P2.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-2#1",
+      "priority": "P3",
+      "title": "Skip recovery's settle when the process exits during the journal read",
+      "file": "src/engine-host/queue.ts",
+      "lines": "123-142",
+      "comment": "I traced this through the code and it holds. In queue.ts:117-145, `recover()` now awaits `deps.unsettled()` (prompt-history.ts `unsettledPrompts`, which walks earlier launches' journals and folds them) before it sets `this.loaded = true`. It is called from session.ts:706, after `handshakeDone = true`.\n\nIf the engine exits during that await, `handleExit` (session.ts:1094) calls `queue.onProcessExited`. That method returns at queue.ts:557 because `!this.loaded`. The exit row is then written and `journalClosed = true` is set (session.ts:1108-1109). When `recover()` resumes, `settleAfterExit()` calls `transition('abandon'|'retire'|'uncertain')`, and the RECOVERED_ACTION row is journaled after it. Each of these goes through `journal()` → `deps.meta` → `record()`, which throws `JournalClosed` (session.ts:573). The error is only logged (queue.ts:709-715). `persist()` still saves the settled state: `released` entries are dropped, `submitting` entries become queued with `uncertain: true`, and steers are cleared.\n\nThe next launch's walk does re-fold the steers, because this launch has no `recovered` row (prompt-history.ts:66-80). The `retire` and `uncertain` rows for the entries are lost for good, because the state file no longer holds those entries in their old state. P2-C introduced these rows in this diff, so this is new exposure, not pre-existing.\n\nThe window opens only when an exit lands during startup recovery, so P3 is right.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-4#1",
+      "priority": "P3",
+      "title": "Bring directory listings under the post-open identity check",
+      "file": "src/engine-host/plugins/manifest.ts",
+      "lines": "212-214",
+      "comment": "The mechanism is real. `list()` (manifest.ts:212-219) calls `readdir(found.real)` on a path that `find()` confined by realpath earlier, with no check afterwards. The new `sameFile` check (L136) covers only `read()`'s file descriptor. If an ancestor directory is swapped for a link between `find` and `readdir`, the reader lists an outside directory. Each name then goes back through `find()`, where `label = relative(anchor.real, lexical)` carries the outside name into a problem string such as `agents/<name>: outside the plugin`. That breaks the header's claim that a link may not leave the anchor.\n\nThe practical impact is close to nil, which keeps this at P3 and tracker-worthy rather than blocking:\n- Only names leak, never contents.\n- They reach the same user's UI.\n- The racer must be a same-user process. Such a process could already write arbitrary names into the plugin directory itself.\n\nThe P2-F plan's L136 scope (2026-10-09-p2-f-finish.md:101, Decision Log 20) was file reads after open. Directory listings were simply not addressed, so this is a gap in L136's reach, not a deliberate exclusion.",
+      "sources": [
+        "scalpel-4"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "The launch decision per U2 as built: `--append-system-prompt` and `--system-prompt-snapshot off` only where the binary declares it, never for foreign-live or probe launches, nothing stored in the state file.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "The queue's transitions and `session.promptHistory`: exactly once across crash, giveback, withdraw and promote, the recovery marker.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "X17's observed-facts file: per-field times, the journal recovery bounded and resumable, forget-safe, the tolerant reader; and the tolerant readers for deliverable records, the models cache, the queue, grant and nested launch objects.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The manifest service as a trust boundary: confinement, bounds, redaction to names, kinds and counts, no plugin code run; the re-realpath and fstat identity check.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "The owner grammar 2 and the preview: literal code spans, identity (appSessionId, uuid, block, span), finalized text only, linear pairing of inline-code spans.",
+      "status": "ok",
+      "candidates": 1
+    }
+  ],
+  "lenses": [
+    "The launch decision per U2 as built: `--append-system-prompt` and `--system-prompt-snapshot off` only where the binary declares it, never for foreign-live or probe launches, nothing stored in the state file.",
+    "The queue's transitions and `session.promptHistory`: exactly once across crash, giveback, withdraw and promote, the recovery marker.",
+    "X17's observed-facts file: per-field times, the journal recovery bounded and resumable, forget-safe, the tolerant reader; and the tolerant readers for deliverable records, the models cache, the queue, grant and nested launch objects.",
+    "The manifest service as a trust boundary: confinement, bounds, redaction to names, kinds and counts, no plugin code run; the re-realpath and fstat identity check.",
+    "The owner grammar 2 and the preview: literal code spans, identity (appSessionId, uuid, block, span), finalized text only, linear pairing of inline-code spans."
+  ],
+  "explanation": "confirmed: Keep a fence glued to a mark tag from swallowing the rest of the block; Skip recovery's settle when the process exits during the journal read; Bring directory listings under the post-open identity check",
+  "target": {
+    "base": "base",
+    "baseCommit": "3214b6169674999bcff07d759a579e7cdb6d7e9b",
+    "headCommit": "7dc1bd78f449652139a6f3585c70406509197ab9",
+    "repo": "/private/tmp/maws-p2f-review/A"
+  },
+  "level": "max"
+}

@@ -1,0 +1,161 @@
+{
+  "area": "D renderer tools and widgets",
+  "run": {
+    "workflow": "doperpowers:code-review",
+    "runId": "wf_048e1ef9-999",
+    "level": "max",
+    "lanes": "ladder defaults (sol deriver, astra finders and verifier)",
+    "agents": 7,
+    "durationMs": 516690,
+    "subagentTokens": 730259,
+    "logs": [
+      "panel (max: finders astra/high, verifier astra/high): sweep + 5 scalpel(s) against base @ 4e07e08e85 (HEAD 14753b8c24)",
+      "pool: 8 candidate(s) from 6/6 lanes",
+      "panel verdict: incorrect — confirmed: Bound bookmark favicon requests to the IPC limit; Keep stale-list warnings visible in plugin details; Preserve uninstall outcomes when returning to Browse"
+    ]
+  },
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "sweep#1",
+      "priority": "P2",
+      "title": "Bound bookmark favicon requests to the IPC limit",
+      "file": "src/renderer/src/tools/browser/chrome/BookmarksBar.tsx",
+      "lines": "47-48",
+      "comment": "cua-owned. src/renderer/src/tools/browser/chrome/BookmarksBar.tsx:47–48 requests origins from every top-level chip, including overflowed chips, and barOrigins does not cap them. I executed the helper against the actual IPC schema with a valid imported-profile partition: 500 distinct origins passed; 501 failed the origins-array limit. Such a bar is allowed by the 20,000-URL import limit. The entire favicon read fails, leaving even visible bookmarks with generic icons.",
+      "sources": [
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-1#1",
+      "priority": "P2",
+      "title": "Keep stale-list warnings visible in plugin details",
+      "file": "src/renderer/src/widgets/PluginsWidget.tsx",
+      "lines": "156-160",
+      "comment": "src/renderer/src/widgets/PluginsWidget.tsx:150–160 gives the frame error=null and passes no installed-list error to PluginDetail. After a successful enable/disable mutation followed by a failed plugins.list refresh, usePluginsRead retains the previous identity and supplies a stale-value warning, but that warning is rendered only in the hidden MyItems subtree. The visible detail therefore keeps the pre-mutation switch and enabled fact without disclosing the failed verification. The same omission affects installed details reached from Browse.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#2",
+      "priority": "P2",
+      "title": "Preserve uninstall outcomes when returning to Browse",
+      "file": "src/renderer/src/widgets/plugins/BrowsePane.tsx",
+      "lines": "80-83",
+      "comment": "src/renderer/src/widgets/PluginsWidget.tsx:132–135 dismisses an installed Browse detail when its final installation disappears. Its uninstall operation uses an installed: key, whereas src/renderer/src/widgets/plugins/BrowsePane.tsx:83 retains only available: results, and BrowseCard renders only available: operations. Consequently, the uninstall result and a subsequent failed-reload report/Reload again action have no visible host after the automatic return to Browse, even if the plugin reappears as an available card.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-2#1",
+      "priority": "P2",
+      "title": "Preserve unknown facts in the loaded-plugins filter",
+      "file": "src/renderer/src/widgets/plugins/MyItems.tsx",
+      "lines": "89-95",
+      "comment": "src/renderer/src/widgets/plugins/MyItems.tsx:75–95 treats an unknown loaded list as an empty filtered result. I executed myItems with installed identities, filter='loaded', and loadedIds=null; it returned no groups. With unknown observations, extras and problems are also empty, so the component displays 'Nothing matches these filters' and Reset filters. LoadedLine correctly says 'Not observed yet' above it, but that does not make the contradictory empty-result claim valid. The filter is selectable and persists across sessions.",
+      "sources": [
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "scalpel-3#1",
+      "priority": "P2",
+      "title": "Surface failures of Browse's installed and marketplace reads",
+      "file": "src/renderer/src/widgets/PluginsWidget.tsx",
+      "lines": "184-188",
+      "comment": "src/renderer/src/widgets/PluginsWidget.tsx:81–96 joins three independent reads, but line 188 passes only the available read's status/error to BrowsePane. I executed browseCards with a known installed marketplace identity and no marketplace answer; it omitted the identity. Thus a first marketplaces.list failure can make the Installed filter report no matches despite a successful installed read, without showing the dependency failure. A failed installed refresh likewise leaves cached Installed labels without a warning when the catalogue succeeds. Browse's retry only retries plugins.available.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-3#2",
+      "priority": "P2",
+      "title": "Reconcile folded cards with the installed official identity",
+      "file": "src/renderer/src/widgets/plugins/browse.ts",
+      "lines": "75-76",
+      "comment": "src/renderer/src/widgets/plugins/browse.ts:73–106 reconciles an offer only against its own ID, not its folded official twin. I executed the projection with retained directory and official frontend-design offers plus a newly installed official identity: it emitted both an uninstalled directory card and an installed official card. This is reachable when plugins.list refreshes successfully after an official installation while plugins.available fails and retains its earlier answer, and can also occur while the independent reads settle. It violates the documented one-card fold and exposes Install for the already-installed twin.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-4#1",
+      "priority": "P2",
+      "title": "Keep image controls reachable in narrow file panes",
+      "file": "src/renderer/src/tools/code/viewer/FileViewer.tsx",
+      "lines": "171-172",
+      "comment": "src/renderer/src/tools/code/viewer/FileViewer.tsx:171–172 adds non-shrinking ZoomControls beside PathLead, which still enforces a basename-width minimum of up to 40ch. The fixed-height toolbar cannot wrap or scroll, and src/renderer/src/main/Pane.tsx:60 clips overflow. In a narrow split pane, an ordinary long image basename plus the zoom group exceeds the available width, placing trailing Fit—and Source for SVGs—outside the visible pane. Split layout permits these widths; no pane minimum prevents the failure.",
+      "sources": [
+        "scalpel-4"
+      ]
+    },
+    {
+      "id": "scalpel-2#2",
+      "priority": "P3",
+      "title": "Advance cached-read ages while the widget remains open",
+      "file": "src/renderer/src/widgets/WidgetFrame.tsx",
+      "lines": "55-60",
+      "comment": "src/renderer/src/widgets/WidgetFrame.tsx:55–60 computes the cached-read age using Date.now() during rendering, without subscribing to a clock. Neither WidgetFrame nor DormantGesture provides periodic age updates. For an open HooksWidget whose session exits, useEngineRead disables queries, interval reads, and operation-triggered refetches; with no further relevant state changes, 'Read just now' can remain indefinitely. This is a display-freshness defect, not a reason to acquire or reread the session.",
+      "sources": [
+        "scalpel-2"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "The library: identity grouping, the two facts never merged (\"Enabled for this project\" against \"Loaded in this session\"), E8's sheets and the reload after a mutation, the stale-cache rule.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "DormantGesture and useEngineRead: no surface acquires on open, freshness labels truthful, unknown never shown as empty.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "Browse's truthfulness: installed state, counts only where the engine supplies them.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The deliverables viewer after the fit, zoom and actual-size work (MediaZoom, zoom.ts) and the comment card host inside it.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "The browser pane's dock strip and the native view's bounds (the chrome itself is cua-owned: mark any finding there as cua-owned).",
+      "status": "ok",
+      "candidates": 0
+    }
+  ],
+  "lenses": [
+    "The library: identity grouping, the two facts never merged (\"Enabled for this project\" against \"Loaded in this session\"), E8's sheets and the reload after a mutation, the stale-cache rule.",
+    "DormantGesture and useEngineRead: no surface acquires on open, freshness labels truthful, unknown never shown as empty.",
+    "Browse's truthfulness: installed state, counts only where the engine supplies them.",
+    "The deliverables viewer after the fit, zoom and actual-size work (MediaZoom, zoom.ts) and the comment card host inside it.",
+    "The browser pane's dock strip and the native view's bounds (the chrome itself is cua-owned: mark any finding there as cua-owned)."
+  ],
+  "explanation": "confirmed: Bound bookmark favicon requests to the IPC limit; Keep stale-list warnings visible in plugin details; Preserve uninstall outcomes when returning to Browse",
+  "target": {
+    "base": "base",
+    "baseCommit": "4e07e08e85f25441cbe7efff75130c12836afa44",
+    "headCommit": "14753b8c2409d8fec63f217214c14c14a5b516da",
+    "repo": "/private/tmp/maws-p2f-review/D"
+  },
+  "level": "max"
+}

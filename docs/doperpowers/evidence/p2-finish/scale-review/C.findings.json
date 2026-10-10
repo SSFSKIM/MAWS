@@ -1,0 +1,185 @@
+{
+  "area": "C renderer core",
+  "run": {
+    "workflow": "doperpowers:code-review",
+    "runId": "wf_c965f375-fe0",
+    "level": "max",
+    "lanes": "ladder defaults (sol deriver, astra finders and verifier)",
+    "agents": 7,
+    "durationMs": 526628,
+    "subagentTokens": 719696,
+    "logs": [
+      "panel (max: finders astra/high, verifier astra/high): sweep + 5 scalpel(s) against base @ 904f9c947a (HEAD a10cdc0c69)",
+      "pool: 12 candidate(s) from 6/6 lanes",
+      "panel verdict: incorrect — confirmed: Preserve card cancellation through the send helper's awaits; Preserve question-card identity when toggling the working record; Wait until the requested anchor is present before settling navigation"
+    ]
+  },
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-1#1",
+      "priority": "P1",
+      "title": "Preserve card cancellation through the send helper's awaits",
+      "file": "src/renderer/src/sessions/setup-actions.ts",
+      "lines": "153-156",
+      "comment": "In src/renderer/src/sessions/setup-actions.ts, continueRecord checks current() before calling sendHumanPrompt but does not pass that guard onward. src/renderer/src/composer/submit/send-human-prompt.ts can then await another acquisition when engine status still trails the first result, or await a queue snapshot. Dismissing the setup card during either wait does not prevent the subsequent session.send/session.steer; a second acquisition can also dock a replacement card after cancellation. The post-send check protects draft clearing, not dispatch.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "sweep#1",
+      "priority": "P2",
+      "title": "Preserve question-card identity when toggling the working record",
+      "file": "src/renderer/src/owner/report/OwnerReport.tsx",
+      "lines": "79-81",
+      "comment": "In src/renderer/src/owner/report/OwnerReport.tsx, plain parts enter items only when showRecord is true, but outer wrappers use the filtered array index as their key. For plain text followed by a question, opening the working record moves the question to another wrapper and remounts AnsweredQuestion/QuestionCard. The inner source-index key cannot preserve identity across different parents. This loses the open Reply field and its unsent draft.",
+      "sources": [
+        "sweep",
+        "scalpel-2"
+      ]
+    },
+    {
+      "id": "sweep#2",
+      "priority": "P2",
+      "title": "Wait until the requested anchor is present before settling navigation",
+      "file": "src/renderer/src/attention/anchor.ts",
+      "lines": "35-40",
+      "comment": "In src/renderer/src/attention/anchor.ts, settle marks navigation done before checking whether jumpToMessage succeeds. src/renderer/src/stores/transcript.ts retains the live entry on last detach, while reattachment and rehydration happen after the transcript mounts. Opening attention for a message produced while detached therefore encounters a stale live entry, fails to find the target, and returns without subscribing for the fresh history. The requested jump is lost.",
+      "sources": [
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-2#2",
+      "priority": "P2",
+      "title": "Retain unreported answers outside virtualized card instances",
+      "file": "src/renderer/src/owner/report/answering.ts",
+      "lines": "98-101",
+      "comment": "In src/renderer/src/owner/report/answering.ts, the failed answer report and its queueId exist only in useState. src/renderer/src/transcript/view/Transcript.tsx mounts only virtual items. If an answer is queued and ownerChannel.answered fails, scrolling its row out of range destroys the recovery record; remounting loses Record again and leaves the question without its queue association or Cancel action. Main's legacy recognition only recognizes taken prompts, so it does not recover an answer still waiting in the queue.",
+      "sources": [
+        "scalpel-2",
+        "scalpel-4"
+      ]
+    },
+    {
+      "id": "scalpel-3#1",
+      "priority": "P2",
+      "title": "Preserve reply failures after the card unmounts",
+      "file": "src/renderer/src/side/card/CardThread.tsx",
+      "lines": "210-214",
+      "comment": "In src/renderer/src/side/card/CardThread.tsx, useReply awaits sendHumanPrompt and handles refusals only with setRefusal. Closing the card or opening its thread as a tab unmounts that hook without stopping the asynchronous send. If acquisition or dispatch subsequently refuses, the local-state update has no visible recipient and the unsent reply is gone. Unlike src/renderer/src/side/comment-form.ts, this path has no post-dismissal refusal notification.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-3#2",
+      "priority": "P2",
+      "title": "Ignore Escape already handled by a nested layer",
+      "file": "src/renderer/src/side/card/CommentCard.tsx",
+      "lines": "69-72",
+      "comment": "In src/renderer/src/side/card/CommentCard.tsx, the Escape handler checks composition but ignores defaultPrevented and DOM containment. The embedded transcript's Turn summary in src/renderer/src/transcript/view/rows/Divider.tsx uses a Radix portal. Radix handles Escape and prevents its default, but React portal events still bubble through the card's React ancestry. The same Escape consequently dismisses the entire card, losing an unsent Reply when the intended action was only to close the summary.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-3#3",
+      "priority": "P2",
+      "title": "Bind transcript edit actions to the card's child session",
+      "file": "src/renderer/src/side/card/CardThread.tsx",
+      "lines": "79-81",
+      "comment": "In src/renderer/src/side/card/CardThread.tsx, useCardActions overrides artifact navigation and delivery captions but leaves editing to the registered defaults. src/renderer/src/composer/resubmit-seam.ts resolves those defaults through focusedSession(), which reads the main pane's active tab rather than the embedded transcript's child. An editable child-only message therefore has a visible Edit button that does nothing when the main tab is the parent session or a browser/deliverable.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-3#4",
+      "priority": "P2",
+      "title": "Retain keyboard focus through an asynchronous reply send",
+      "file": "src/renderer/src/side/card/CardThread.tsx",
+      "lines": "126-129",
+      "comment": "In src/renderer/src/side/card/CardThread.tsx, an Enter submission sets sending and disables the focused Reply textarea until the asynchronous send settles. A disabled textarea loses browser focus, and reenabling it does not restore focus. src/renderer/src/side/card/CommentCard.tsx only restores focus when entering thread phase, not after replies. Once a send spans a rendered disabled state, continued typing and the card-local Escape path no longer work without refocusing the card.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-5#1",
+      "priority": "P2",
+      "title": "Preserve the reply field when Escape cancels IME composition",
+      "file": "src/renderer/src/owner/report/QuestionCard.tsx",
+      "lines": "74-77",
+      "comment": "In src/renderer/src/owner/report/QuestionCard.tsx, Enter checks nativeEvent.isComposing but the Escape branch does not. An Escape dispatched during IME composition is prevented, stopped, and used to close the Reply field, unmounting the composing textarea and returning focus to Reply rather than allowing the input method to cancel composition.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-5#2",
+      "priority": "P2",
+      "title": "Scope the deferred widget close to its originating instance",
+      "file": "src/renderer/src/side/BtwWidget.tsx",
+      "lines": "35-39",
+      "comment": "In src/renderer/src/side/BtwWidget.tsx, Ask awaits startForSide and then invokes the captured close callback without an instance-lifetime check. src/renderer/src/composer/WidgetDialog.tsx supplies the global closeWidgetDialog, which clears whichever widget is currently open. Dismissing the original /btw during acquisition and opening a replacement widget allows the old continuation to close the replacement and discard its input when acquisition succeeds.",
+      "sources": [
+        "scalpel-5"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "X22: the five dispositions passed through, delivered only at the engine's `started`, a card's continuation dying with the card; the composer's history row and the delivered mark.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "The report view: the two-level fold, live and detached parity, the cards' states, Mark read, Reply leaving the draft untouched.",
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "The comment card's lifecycle and geometry: anchored and docked, re-dock (Show in browser / Show here), re-pin, Escape, focus.",
+      "status": "ok",
+      "candidates": 4
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "Follow mode after its three fix rounds (the known-offset rule, scrollToFn, the ResizeObserver baseline); the React Compiler hazard class (value-used post-increments, effects that run twice).",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "Tokens only in both themes, keyboard paths and accessible names of every new surface, IME-safe Escape in every dialog.",
+      "status": "ok",
+      "candidates": 2
+    }
+  ],
+  "lenses": [
+    "X22: the five dispositions passed through, delivered only at the engine's `started`, a card's continuation dying with the card; the composer's history row and the delivered mark.",
+    "The report view: the two-level fold, live and detached parity, the cards' states, Mark read, Reply leaving the draft untouched.",
+    "The comment card's lifecycle and geometry: anchored and docked, re-dock (Show in browser / Show here), re-pin, Escape, focus.",
+    "Follow mode after its three fix rounds (the known-offset rule, scrollToFn, the ResizeObserver baseline); the React Compiler hazard class (value-used post-increments, effects that run twice).",
+    "Tokens only in both themes, keyboard paths and accessible names of every new surface, IME-safe Escape in every dialog."
+  ],
+  "explanation": "confirmed: Preserve card cancellation through the send helper's awaits; Preserve question-card identity when toggling the working record; Wait until the requested anchor is present before settling navigation",
+  "target": {
+    "base": "base",
+    "baseCommit": "904f9c947a25219f2356432d0e0d3ae3e3c6e6b8",
+    "headCommit": "a10cdc0c699e6ab7fbff38911df1f21ede18558c",
+    "repo": "/private/tmp/maws-p2f-review/C"
+  },
+  "level": "max"
+}

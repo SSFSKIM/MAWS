@@ -1,0 +1,178 @@
+{
+  "area": "E e2e, tests, build, probes",
+  "run": {
+    "workflow": "doperpowers:code-review",
+    "runId": "wf_f1c5123e-35e",
+    "level": "max",
+    "lanes": "ladder defaults (sol deriver, astra finders and verifier)",
+    "agents": 7,
+    "durationMs": 422766,
+    "subagentTokens": 753022,
+    "logs": [
+      "panel (max: finders astra/high, verifier astra/high): sweep + 5 scalpel(s) against base @ fed9dcc84c (HEAD ce0b4c6ab6)",
+      "pool: 16 candidate(s) from 6/6 lanes",
+      "panel verdict: incorrect — confirmed: Trust the test process before connecting the fake cua host; Escape engine paths before embedding them in shell source; Check plugin freshness independently of the status being tested"
+    ]
+  },
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-1#1",
+      "priority": "P1",
+      "title": "Trust the test process before connecting the fake cua host",
+      "file": "e2e/browser.spec.ts",
+      "lines": "706-707",
+      "comment": "At the reviewed head, e2e/browser.spec.ts:706–707 connects without trusting the worker. Neither launchBrowserScene nor launchScene establishes a trusted root, and the scene only seeds transcripts. src/main/browser/cua/index.ts waits for a root and then destroys unauthorized sockets before constructing the connection that sends hello. Thus the new case fails during connectFakeHost rather than testing layout. This is the cua-owned #103 test's missing use of the existing trustRoot seam, not a defect in peer authentication.",
+      "sources": [
+        "scalpel-1",
+        "scalpel-4"
+      ]
+    },
+    {
+      "id": "sweep#1",
+      "priority": "P2",
+      "title": "Escape engine paths before embedding them in shell source",
+      "file": "e2e/to-human-live.spec.ts",
+      "lines": "170-174",
+      "comment": "In e2e/to-human-live.spec.ts:170–174, installedEngine() supplies a realpath without character restrictions. An installed path such as /tmp/owner's-tools/claude produces an invalid forwarding script; an independent /bin/sh syntax check reproduced this. The raw path in the comment also makes newline-containing paths executable shell source, including in e2e/support/live-budget.ts:55 despite its apostrophe rejection. A harmless printf reproduced that comment escape. Quote operands correctly and remove or encode dynamic comments.",
+      "sources": [
+        "sweep",
+        "scalpel-2",
+        "scalpel-3",
+        "scalpel-4",
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "scalpel-1#3",
+      "priority": "P2",
+      "title": "Check plugin freshness independently of the status being tested",
+      "file": "e2e/plugins-library-live.spec.ts",
+      "lines": "327-330",
+      "comment": "e2e/plugins-library-live.spec.ts:323–330 uses pluginsObservedAt—the fact under test—to decide whether to assert freshness. A regression that stamps the no-prompt handshake as an observation and presents an empty list as Loaded now skips both assertions. Stopping subsequently makes the line stale, and the explicit reload can restore the plugins, allowing the later refresh checks to pass. This therefore misses the exact no-prompt freshness regression described immediately above the condition.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#4",
+      "priority": "P2",
+      "title": "Wait for the submitted turn rather than an idle status snapshot",
+      "file": "e2e/plugins-library-live.spec.ts",
+      "lines": "109-114",
+      "comment": "e2e/plugins-library-live.spec.ts:109–114 treats absence of a current turn and pending control requests as proof that the submitted prompt completed. src/engine-host/session.ts:535–557 exposes those same values before a turn exists; pendingRequests does not represent the first-message setup lifecycle. A slow setup or a gap before the prompt starts can satisfy this predicate after 1.5 seconds, so the start step reads incomplete facts or stops before its promised turn finishes. Completion must be correlated with the submitted prompt, not merely a sampled idle state. The analogous helper in e2e/to-human-live.spec.ts has the same weakness.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#5",
+      "priority": "P2",
+      "title": "Capture restart notifications before restoring the profile",
+      "file": "e2e/to-human-live.spec.ts",
+      "lines": "622-626",
+      "comment": "In e2e/to-human-live.spec.ts:622–626, restart finishes launching and waits for visible UI before installing instrument(). Main starts the owner service and notifier during startup, and instrument() initializes an empty renderer event array without recovering prior notification attempts. A regression notifying restored items before instrumentation can therefore leave notes empty and pass the restart-silence assertion. The Notification.show replacement is also too late to intercept those attempts.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-3#2",
+      "priority": "P2",
+      "title": "Attribute A-15 changes to this run's scratch directories",
+      "file": "e2e/to-human-live.spec.ts",
+      "lines": "821-822",
+      "comment": "e2e/to-human-live.spec.ts:821–822 requires equality of every owner /tmp project key and their digest. If another owner session adds an unrelated scratch project during this lengthy live run, these assertions fail despite complete isolation of this run. test/support/owner-file.ts explicitly defines such unrelated changes as recorded, non-breaching activity; a15Line immediately above already uses that rule. The assertions contradict the shared A-15 attribution contract.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-3#3",
+      "priority": "P2",
+      "title": "Preserve teardown failures in the test result",
+      "file": "e2e/to-human-live.spec.ts",
+      "lines": "810",
+      "comment": "e2e/support/launch.ts:156–165 deliberately rethrows an app-close failure after attempting SIGKILL. e2e/to-human-live.spec.ts:810 and e2e/sessions-available-live.spec.ts suppress that failure, so otherwise successful runs can pass despite broken shutdown. e2e/sigusr1.spec.ts likewise logs and discards killScratchProcesses' explicit survivor exception, allowing a passing case with surviving scratch processes. Finish bookkeeping but preserve teardown failure in the result.",
+      "sources": [
+        "scalpel-3"
+      ]
+    },
+    {
+      "id": "scalpel-5#1",
+      "priority": "P2",
+      "title": "Gate report evidence capture behind an explicit flag",
+      "file": "e2e/transcript.spec.ts",
+      "lines": "1371-1373",
+      "comment": "e2e/transcript.spec.ts calls captureReportShot three times in the ordinary M5 case. Lines 1371–1378 unconditionally create /tmp/maws-p2c-m5-evidence and write fixed light/dark filenames, outside the case's scratch cleanup and without an evidence flag. An ordinary rerun overwrites previous review evidence; concurrent worktrees also share the same output files. Gate these review captures or use per-test output paths.",
+      "sources": [
+        "scalpel-5"
+      ]
+    },
+    {
+      "id": "sweep#2",
+      "priority": "P3",
+      "title": "Remove default_popup from the no-popup probe variant",
+      "file": "spikes/extension-popup/run.mjs",
+      "lines": "58-60",
+      "comment": "spikes/browser-probe/ext/test-ext/manifest.json now supplies action.default_popup. The mv3-nopopup callback in spikes/extension-popup/run.mjs:58–69 copies that manifest and never deletes the property. Applying its manifest edits leaves default_popup equal to popup.html, so a rerun does not exercise the documented popup-less action and cannot support that experiment's onClicked conclusion.",
+      "sources": [
+        "sweep",
+        "scalpel-4"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 2
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "The gates' truthfulness: assertions against notes, skipped cases, waits that hide timing, stand-ins that answer \"now\"; the wait fixes and the quiet e2e default.",
+      "status": "ok",
+      "candidates": 5
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "Fixture admission and provenance for the P2 fixtures under spikes/protocol-probe.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "The live specs' scratch isolation, the A-15 owner-file check, budgets and survivor checks (e2e/support/live-budget.ts).",
+      "status": "ok",
+      "candidates": 3
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "Harness seams only under MAWS_E2E, MAWS_HARNESS or the live flags, never on a product path; native/peer-auth/ and the smoke test's peerModule assertion are cua-owned (mark any finding there as cua-owned).",
+      "status": "ok",
+      "candidates": 3
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "Evidence writes only behind flags.",
+      "status": "ok",
+      "candidates": 2
+    }
+  ],
+  "lenses": [
+    "The gates' truthfulness: assertions against notes, skipped cases, waits that hide timing, stand-ins that answer \"now\"; the wait fixes and the quiet e2e default.",
+    "Fixture admission and provenance for the P2 fixtures under spikes/protocol-probe.",
+    "The live specs' scratch isolation, the A-15 owner-file check, budgets and survivor checks (e2e/support/live-budget.ts).",
+    "Harness seams only under MAWS_E2E, MAWS_HARNESS or the live flags, never on a product path; native/peer-auth/ and the smoke test's peerModule assertion are cua-owned (mark any finding there as cua-owned).",
+    "Evidence writes only behind flags."
+  ],
+  "explanation": "confirmed: Trust the test process before connecting the fake cua host; Escape engine paths before embedding them in shell source; Check plugin freshness independently of the status being tested",
+  "target": {
+    "base": "base",
+    "baseCommit": "fed9dcc84c32e21d8be5ff3fbfe14193d8d67a03",
+    "headCommit": "ce0b4c6ab6aa5dd04129d849c2bfb6d0909ffb7a",
+    "repo": "/private/tmp/maws-p2f-review/E"
+  },
+  "level": "max"
+}

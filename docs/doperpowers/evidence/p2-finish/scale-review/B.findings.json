@@ -1,0 +1,110 @@
+{
+  "area": "B main process",
+  "run": {
+    "workflow": "doperpowers:code-review",
+    "runId": "wf_31a72a94-9b5",
+    "level": "max",
+    "lanes": {
+      "deriverModel": "opus",
+      "finderModel": "opus",
+      "verifierModel": "opus"
+    },
+    "agents": 7,
+    "durationMs": 569757,
+    "subagentTokens": 953293,
+    "logs": [
+      "panel (max: finders opus/high, verifier opus/high): sweep + 5 scalpel(s) against base @ 8765955d7c (HEAD a7b242246d)",
+      "pool: 3 candidate(s) from 6/6 lanes",
+      "panel verdict: incorrect — confirmed: Let owner-channel items come back after a session is unarchived; Clear the acquisition memory when a non-acquisition launch succeeds; Guard the fold's read window when no answer is still on its way"
+    ]
+  },
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "sweep#1",
+      "priority": "P2",
+      "title": "Let owner-channel items come back after a session is unarchived",
+      "file": "src/main/attention/service.ts",
+      "lines": "349-354",
+      "comment": "src/main/attention/service.ts adds an id to `forgotten` in `retireSession` (line 172), which runs on `session.forgotten`, on an archive exit (line 220), and on startIndexAttention's archive transitions (index/attention-service.ts). Nothing ever removes an id from it. The new `setOwnerItems` (line 350) returns early when `forgotten.has(id)`. Unarchiving is a real path: ArchivedSessionsDialog.tsx:35 sends `session.update {archived:false}`. On that change, OwnerChannelService.recordChanged (owner/service.ts:383-391) sees the facts change from `x:true` to `x:false` and calls `project(id, true)`, and project then calls `setOwnerItems` with the session's unanswered `async_input` and unread `essential_unread` items. The attention service drops them. Every later projection for that session is dropped too, including questions raised after the session is resumed. So the session's owner items stay out of Needs you and the badge until the app restarts, while broker and derived items come back through `stateOf`. The guard is not needed: `project` already sends an empty list while the record is archived (line 721). The `forgotten` comment says it exists so that nothing *persisted* comes back, and owner items are a live projection, never restored from the store.",
+      "sources": [
+        "sweep"
+      ]
+    },
+    {
+      "id": "scalpel-1#1",
+      "priority": "P3",
+      "title": "Clear the acquisition memory when a non-acquisition launch succeeds",
+      "file": "src/main/sessions/service.ts",
+      "lines": "776-791",
+      "comment": "`lastAttempt` is cleared only at the top of `acquireOnce` (sessions/service.ts:778). The take-over path (lines 530/549) and the session.start/record-start path (lines 599/635) open registry entries but never touch `lastAttempt`. availabilityOf (availability.ts:25) falls through to `memory.last` once nothing is in flight and the status is not ready or launching. Concrete case: an acquisition remembers `failed` or `missing_directory`. The session is then launched through a take-over or a record start, runs, and exits (a stop, or the budget/idle release). Its digest now reads the stale `failed`/`missing_directory` with the old message instead of `resumable`. The P2-A document §5.2 line 69 says `failed` means \"MAWS's own last start of it in this app run ended in an error\", and availability.ts says \"the next attempt clears that\", so this contradicts the documented semantics. The impact is cosmetic: availabilityRefusal does not gate on these kinds, and the next acquisition clears the entry.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-2#1",
+      "priority": "P3",
+      "title": "Guard the fold's read window when no answer is still on its way",
+      "file": "src/main/owner/service.ts",
+      "lines": "578-582, 610-611",
+      "comment": "The `recover` loop (owner/service.ts:578-582) only checks `live.answers.size > 0`. `fold` (line 611) computes `Math.min(...all().filter(onItsWay)...)`, which is Infinity on an empty list, and `new Date(Infinity - LOG_WINDOW_MS).toISOString()` throws RangeError. Sequence: a recovery read is awaiting `session.promptHistory`. A report arrives whose `sentAt` the log cannot cover (lines 274-281). It sets `refold = true` and adds a queued answer, but does not start a second recover because `reading` matches the connection. The first fold's applyEvent and evidence calls can make every in-memory answer delivered or dead without calling `persist`, which is the only place `live.answers` is pruned (line 534). The loop then folds again with nothing on its way and throws. The catch logs the error and calls retryLater. Because nothing was persisted, `live.answers` keeps the same non-on-its-way answers, so every retry and every reconnect throws again at line 611. `recovering` is never cleared and `heldPrompts` are never processed until the app restarts. The trigger window is narrow (a late report has to land mid-read), but the failure is sticky. An early return or break when no answer is on its way fixes it.",
+      "sources": [
+        "scalpel-2"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "Acquisition (X16): the in-flight registry's joins and refusals, take-over, the trust and relay continuations, X4's request lifetime, nothing acquiring on mount, switch or timer.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "Main's owner channel: marks and answers, the two attention kinds, the watermark, notifications only from the live stream, foreign-held sessions never notified, index migration 8 and settings 13 as released; the settled verdict and the in-memory unconfirmed state.",
+      "status": "ok",
+      "candidates": 1
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "The side-thread artifact scope: the ancestor chain nearest first, one write chain per host process, the create refusal, artifact_screenshot.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "session.recentTurns: bounded, no follow, no launch, cycle-safe.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "The browser comment's position field and the pick's focus; the cua session's code in the range (bookmarks, extensions and chrome; the socket peer authentication in src/main/browser/cua/peer.ts and the SIGUSR1 listener; the profiles reader) read for its seams with the P2 children, each finding there marked as cua-owned.",
+      "status": "ok",
+      "candidates": 0
+    }
+  ],
+  "lenses": [
+    "Acquisition (X16): the in-flight registry's joins and refusals, take-over, the trust and relay continuations, X4's request lifetime, nothing acquiring on mount, switch or timer.",
+    "Main's owner channel: marks and answers, the two attention kinds, the watermark, notifications only from the live stream, foreign-held sessions never notified, index migration 8 and settings 13 as released; the settled verdict and the in-memory unconfirmed state.",
+    "The side-thread artifact scope: the ancestor chain nearest first, one write chain per host process, the create refusal, artifact_screenshot.",
+    "session.recentTurns: bounded, no follow, no launch, cycle-safe.",
+    "The browser comment's position field and the pick's focus; the cua session's code in the range (bookmarks, extensions and chrome; the socket peer authentication in src/main/browser/cua/peer.ts and the SIGUSR1 listener; the profiles reader) read for its seams with the P2 children, each finding there marked as cua-owned."
+  ],
+  "explanation": "confirmed: Let owner-channel items come back after a session is unarchived; Clear the acquisition memory when a non-acquisition launch succeeds; Guard the fold's read window when no answer is still on its way",
+  "target": {
+    "base": "base",
+    "baseCommit": "8765955d7c791dcecfeead4b22e2e1f486ba4160",
+    "headCommit": "a7b242246dc90397996749d28152119eeb939b8d",
+    "repo": "/private/tmp/maws-p2f-review/B"
+  },
+  "level": "max"
+}
