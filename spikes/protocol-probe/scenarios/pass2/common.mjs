@@ -15,7 +15,7 @@ export const SCRUB=Object.keys(process.env).filter(k=>/^CMUX_/.test(k)||['CLAUDE
 for(const k of SCRUB)delete process.env[k];
 export const scratch2=()=>realpathSync(scratch('/tmp/maws-probe2-'));
 let debugSeq=0;
-export const options=(o={})=>{const {debug,...rest}=o;const out={dir:'fixtures/pass2/',bin:BIN,mode:'auto',cwd:o.cwd||scratch2(),...rest};if(debug){out.debugFile='/tmp/maws-probe2-debug-'+process.pid+'-'+(++debugSeq)+'.log';out.flags=[...(out.flags||[]),'--debug-file',out.debugFile];}return out;};
+export const options=(o={})=>{const {debug,...rest}=o;const out={dir:'fixtures/pass2/',bin:BIN,mode:'auto',cwd:o.cwd||scratch2(),dropInheritedClaude:true,...rest};if(debug){out.debugFile='/tmp/maws-probe2-debug-'+process.pid+'-'+(++debugSeq)+'.log';out.flags=[...(out.flags||[]),'--debug-file',out.debugFile];}return out;};
 // Copies matching engine debug-log lines into the fixture as meta notes (the log itself stays in /tmp).
 export function debugLines(p,re){const f=p.debugFile;if(!f||!existsSync(f))return p.note({event:'debug_lines',file:null});const lines=execFileSync('cat',[f],{encoding:'utf8'}).split('\n').filter(l=>re.test(l)).map(l=>l.slice(0,400));p.note({event:'debug_lines',count:lines.length,lines:lines.slice(0,80)});}
 export const probe=(name,o)=>{const opts=options(o);const p=new Probe(name,opts);p.debugFile=opts.debugFile;p.note({event:'provenance',...PROVENANCE,scrubbedEnv:SCRUB});return p;};

@@ -13,12 +13,15 @@ export function redact(text){for(const v of secrets)text=text.split(v).join('[RE
 export const GATEWAY_ENV=/^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_DEFAULT_[A-Z_]*_MODEL)$/;
 export function processTree(root){const rows=execFileSync('ps',['-axo','pid=,ppid=,rss=,command='],{encoding:'utf8'}).trim().split('\n').map(l=>{const m=l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);return m&&{pid:+m[1],ppid:+m[2],rssKiB:+m[3],command:m[4]};}).filter(Boolean);const out=[];const walk=pid=>{for(const r of rows)if(r.ppid===pid){out.push(r);walk(r.pid);}};const self=rows.find(r=>r.pid===root);if(self)out.push(self);walk(root);return out.map(r=>({...r,command:redact(r.command).slice(0,140)}));}
 export class Probe {
- constructor(name,{cwd=scratch(),flags=[],model=process.env.PROBE_MODEL||'haiku',dir='fixtures/',bin='claude',unrouted=false,settingSources='',strictMcp=true,mode='default',env:extra={},noModel=false}={}){
+ constructor(name,{cwd=scratch(),flags=[],model=process.env.PROBE_MODEL||'haiku',dir='fixtures/',bin='claude',unrouted=false,settingSources='',strictMcp=true,mode='default',env:extra={},noModel=false,dropInheritedClaude=false}={}){
  mkdirSync(root+dir,{recursive:true});this.cwd=cwd;this.file=root+dir+name+'.jsonl';this.peakTreeRSSKiB=0;this.frames=[];this.handlers=new Map();this.pending=new Map();this.waiters=new Set();this.seq=0;this.peakRSSKiB=0;
  writeFileSync(this.file,'');
- const env={...process.env};for(const k of ['CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CLAUDE_CODE_SSE_PORT'])delete env[k];env.CLAUDE_CODE_ENTRYPOINT='sdk-ts';if(unrouted)for(const k of Object.keys(env))if(GATEWAY_ENV.test(k))delete env[k];Object.assign(env,extra);
+ const env={...process.env};for(const k of ['CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CLAUDE_CODE_SSE_PORT'])delete env[k];
+ // Pass 2 only (P2-F W-T): a probe launched from inside a Claude session would inherit its plugins and model switches; every inherited CLAUDE* variable goes but an explicit CLAUDE_CONFIG_DIR, and the probe's own `env` is applied after.
+ const droppedEnv=dropInheritedClaude?Object.keys(env).filter(k=>k.startsWith('CLAUDE')&&k!=='CLAUDE_CONFIG_DIR').sort():[];for(const k of droppedEnv)delete env[k];
+ env.CLAUDE_CODE_ENTRYPOINT='sdk-ts';if(unrouted)for(const k of Object.keys(env))if(GATEWAY_ENV.test(k))delete env[k];Object.assign(env,extra);
  const args=['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--permission-prompt-tool','stdio','--include-partial-messages',...(noModel?[]:['--model',model]),'--setting-sources',settingSources,...(strictMcp?['--strict-mcp-config']:[]),'--permission-mode',mode,...flags];
- this.child=spawn(bin,args,{cwd,env,stdio:['pipe','pipe','pipe']});this.note({event:'spawn',pid:this.child.pid,cwd,bin,args,routed:!unrouted&&!!env.ANTHROPIC_BASE_URL,extraEnv:Object.keys(extra),node:process.version});
+ this.child=spawn(bin,args,{cwd,env,stdio:['pipe','pipe','pipe']});this.note({event:'spawn',pid:this.child.pid,cwd,bin,args,routed:!unrouted&&!!env.ANTHROPIC_BASE_URL,extraEnv:Object.keys(extra),...(dropInheritedClaude?{droppedEnv}:{}),node:process.version});
  let buffer='';this.child.stdout.setEncoding('utf8');this.child.stdout.on('data',s=>{buffer+=s;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line.trim())continue;try{this.receive(JSON.parse(line));}catch(e){this.note({event:'parse_error',line,error:e.message});}}});
  this.child.stderr.setEncoding('utf8');this.child.stderr.on('data',text=>this.log('stderr',{text}));
  this.child.stdin.on('error',e=>this.note({event:'stdin_error',error:e.message}));
