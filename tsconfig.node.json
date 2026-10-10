@@ -38,6 +38,8 @@
     "e2e/support/oopif-page.ts",
     // E11 end
     // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
-    "e2e/support/live-budget.ts"
+    "e2e/support/live-budget.ts",
+    // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
+    "e2e/support/live-turns.ts"
   ]
 }
