@@ -1,6 +1,6 @@
 import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { readJsonWithRetry, RETRY_SCHEDULE_MS } from './sidecars';
 
@@ -23,12 +23,31 @@ describe('whole-file sidecars are parsed with retry', () => {
     expect(RETRY_SCHEDULE_MS).toEqual([0, 20, 50, 100, 250, 500]);
   });
 
+  // "At once" without a clock: the schedule waits only through setTimeout, so under fake timers a read that waits for
+  // a later attempt schedules a timer that never fires. The read's answer arriving with no timer ever scheduled is the
+  // proof, whatever the machine's load (no wall-clock bound to overrun); a scheduled timer fails the case at once.
+  const withoutWaiting = async <T>(read: () => Promise<T>): Promise<T> => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      let answer: { value: T } | null = null;
+      const reading = read().then((value) => { answer = { value }; });
+      while (answer === null) {
+        if (vi.getTimerCount() > 0) throw new Error('the read waited for a scheduled attempt');
+        await new Promise((resolve) => setImmediate(resolve)); // the real fs read settles across event-loop turns
+      }
+      await reading;
+      return (answer as { value: T }).value;
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
   it('reads a whole file on the first attempt', async () => {
     const path = join(fixture.configHome, 'title.json');
     await writeFile(path, '{"customTitle":"Named","extra":1}');
-    const started = Date.now();
-    expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'ok', value: 'Named' });
-    expect(Date.now() - started).toBeLessThan(20);
+    const parse = vi.fn(asTitle);
+    expect(await withoutWaiting(() => readJsonWithRetry(path, parse))).toEqual({ status: 'ok', value: 'Named' });
+    expect(parse).toHaveBeenCalledOnce();
   });
 
   it('keeps retrying a half-written file until the writer finishes', async () => {
@@ -76,8 +95,7 @@ describe('whole-file sidecars are parsed with retry', () => {
   });
 
   it('answers absent at once for a file that does not exist: a missing file is an answer, not a torn write', async () => {
-    const started = Date.now();
-    expect(await readJsonWithRetry(join(fixture.configHome, 'absent.json'), asTitle)).toEqual({ status: 'absent' });
-    expect(Date.now() - started).toBeLessThan(20);
+    const read = () => readJsonWithRetry(join(fixture.configHome, 'absent.json'), asTitle);
+    expect(await withoutWaiting(read)).toEqual({ status: 'absent' });
   });
 });
