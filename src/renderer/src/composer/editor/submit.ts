@@ -33,11 +33,13 @@ const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one not
 
 // The pre-check: whether the submission may go (a refusal is shown).
 export function precheck(s: Serialized): boolean {
-  if (s.empty) return false;
+  return !s.empty && sizeCheck(s);
+}
+const sizeCheck = (s: Serialized): boolean => {
   const tooLarge = s.mode === 'send' ? sendSizeRefusal(s.content) : null;
   if (tooLarge) warn(tooLarge);
   return tooLarge === null;
-}
+};
 
 // The mode's own dispatch: bash, memory, or a prompt sent (or steered with priority 'next').
 export async function dispatchByMode(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, how: 'send' | 'steer', target: MemoryTarget | null): Promise<string | null> {
@@ -67,12 +69,20 @@ export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s:
 // P2-0: the composer's human prompt goes through X22, with its existing pre-check, history and Retry notice.
 // P2-A: an acquisition's refusal says why with Retry (the text stays); a card holding the message (`held`) keeps the
 // text in the draft quietly, the card being on screen; a session with no record refuses quietly, as before.
+// P2-F (L116): the size bound is checked by the seam once it has decided the prompt may go, so a session it refuses by
+// state keeps an oversized draft as quietly as any other.
 export async function submitHumanSerialized(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
-  if (!precheck(s)) return false;
+  if (s.empty) return false;
+  let tooLarge = false;
+  const fits = () => {
+    tooLarge = !sizeCheck(s);
+    return !tooLarge;
+  };
   try {
-    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display }, client);
+    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display, precheck: fits }, client);
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
+      if (tooLarge) return false; // the pre-check said why
       if (useSessions.getState().records.has(appSessionId)) warn(result.reason ?? 'The message was not sent', retry, startNoticeId(appSessionId));
       return false;
     }

@@ -173,6 +173,38 @@ describe('the human send seam', () => {
   });
   // P2-A end
 
+  // P2-F (L116): a caller's pre-check runs once the seam has decided the prompt may go, so a state refusal comes first
+  describe("a caller's pre-check", () => {
+    it.each(['exited', 'starting'] as const)('is not consulted when the seam refuses by state (no record, %s)', async (process) => {
+      ready({ process });
+      const precheck = vi.fn(() => true);
+      const fake = makeClient();
+      expect(await sendHumanPrompt(APP, 'hi', { origin: 'composer', precheck }, fake.client)).toMatchObject({ disposition: 'refused', started: false });
+      expect(precheck).not.toHaveBeenCalled();
+    });
+
+    it('runs once before a dispatch; declining it sends nothing and answers refused with no reason', async () => {
+      ready();
+      const fake = makeClient();
+      const precheck = vi.fn(() => true);
+      expect(await sendHumanPrompt(APP, 'hi', { origin: 'composer', precheck }, fake.client)).toMatchObject({ disposition: 'sent' });
+      expect(precheck).toHaveBeenCalledTimes(1);
+      expect(await sendHumanPrompt(APP, 'hi', { origin: 'composer', precheck: () => false }, fake.client)).toEqual({ disposition: 'refused', started: false });
+      expect(fake.invoked('session.send')).toHaveLength(1);
+    });
+
+    it('runs once before an acquisition; declining it starts nothing', async () => {
+      useSessions.setState({ records: new Map([[APP, record(APP)]]) });
+      ready({ process: 'exited' });
+      const fake = fakeClient({ 'session.acquire': { status: 'ready', appSessionId: APP, launched: true, joined: false }, 'session.send': sendResult });
+      expect(await sendHumanPrompt(APP, 'hi', { origin: 'composer', precheck: () => false }, fake.client)).toEqual({ disposition: 'refused', started: false });
+      expect(fake.invoked('session.acquire')).toEqual([]);
+      const precheck = vi.fn(() => true);
+      expect(await sendHumanPrompt(APP, 'hi', { origin: 'composer', precheck }, fake.client)).toMatchObject({ disposition: 'sent', started: true });
+      expect(precheck).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('propagates the host error rather than claiming the message was delivered', async () => {
     ready();
     const fake = fakeClient({ 'session.queue.list': { entries: [], paused: false } });

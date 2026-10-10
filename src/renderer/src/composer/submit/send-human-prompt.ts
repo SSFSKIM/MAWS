@@ -18,6 +18,9 @@ export type HumanPromptOrigin = 'composer' | 'answer' | 'reply' | 'comment' | 'p
 export interface HumanPromptOptions {
   origin: HumanPromptOrigin; // the caller's provenance; not a plugin-origin submission or a new engine/written field
   display?: string; // C12's first-message display: the composer preserves its pasted-segment markers
+  // P2-F (L116): the caller's own check (the composer's size bound), consulted once the seam has decided the prompt may
+  // go, before an acquisition or a dispatch, never when the seam refuses by state; false refuses it with no reason
+  precheck?: () => boolean;
 }
 export interface HumanPromptResult {
   disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
@@ -35,6 +38,7 @@ export const dispatchHumanPrompt = (client: MawsBridge, appSessionId: AppSession
     : client.invoke('session.send', { appSessionId, content });
 
 const notReady = (process: string | undefined): HumanPromptResult => ({ disposition: 'refused', started: false, reason: process === 'starting' || process === 'initializing' ? STARTING : ENDED });
+const declined = (options: HumanPromptOptions): HumanPromptResult | null => (options.precheck === undefined || options.precheck() ? null : { disposition: 'refused', started: false });
 
 export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendContent, options: HumanPromptOptions, client: MawsBridge = ipc): Promise<HumanPromptResult> {
   let status = useSessions.getState().engine.get(appSessionId) ?? null;
@@ -51,6 +55,8 @@ export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendC
   // The unmounted caller's queue read may have spanned a process exit or launch. Never send using an older status.
   status = useSessions.getState().engine.get(appSessionId) ?? status;
   if (status.process !== 'ready') return hasRecord() ? sendAcquiring(appSessionId, content, options, client) : notReady(status.process);
+  const refusal = declined(options);
+  if (refusal !== null) return refusal;
   const how = isBusy(status, queue.entries) ? 'steer' : 'send';
   const result = await dispatchHumanPrompt(client, appSessionId, content, how);
   if (!result.ok) throw new Error(result.error.message); // the composer shows the host error with its existing Retry
@@ -60,6 +66,8 @@ export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendC
 // P2-A start: acquire, then `session.send` (never a steer: the renderer's status may trail the acquisition's answer,
 // and the host's queue orders a send behind whatever the joined launch already submitted).
 async function sendAcquiring(appSessionId: AppSessionId, content: SendContent, options: HumanPromptOptions, client: MawsBridge): Promise<HumanPromptResult> {
+  const refusal = declined(options);
+  if (refusal !== null) return refusal;
   const composer = options.origin === 'composer';
   const display = options.display ?? (typeof content === 'string' ? content : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n'));
   const outcome = await acquireSession(appSessionId, 'send', composer ? { dockMessage: { content, display } } : {}, client);

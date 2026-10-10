@@ -1024,6 +1024,41 @@ describe('Send on a session with a record and no ready process', () => {
 });
 // P2-A end
 
+// P2-F (L116): the seam's state refusal comes before the size pre-check, so an oversized Enter on a session that can
+// neither send nor start (no record; its process ended or starting) keeps the draft quietly, as a normal one does
+describe('an oversized draft on a session the seam refuses by state', () => {
+  it.each(['exited', 'starting'] as const)('Enter on a session %s with no record keeps the draft, with no warning and nothing dispatched', async (process) => {
+    useSessions.setState({ engine: new Map(useSessions.getState().engine).set(A, { ...status(A), process }) });
+    mount([{ index: 0, id: A }]);
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    await type(oversized);
+    await key(editorOf(), { key: 'Enter' });
+    await act(async () => {});
+    expect(editorOf().editor.getText()).toBe(oversized);
+    expect(useNotices.getState().notices).toEqual([]);
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
+    expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('a ready session, and one with a record that would start, refuse it with the size warning before any dispatch or start', async () => {
+    live(A);
+    live(B, { status: { process: 'exited' } });
+    mount([{ index: 0, id: A }, { index: 1, id: B }]);
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    for (const pane of [0, 1] as const) {
+      await type(oversized, pane);
+      await key(editorOf(pane), { key: 'Enter' });
+    }
+    await waitFor(() => expect(useNotices.getState().notices.filter((n) => n.text.startsWith('Message too large'))).toHaveLength(2));
+    expect(editorOf(0).editor.getText()).toBe(oversized);
+    expect(editorOf(1).editor.getText()).toBe(oversized);
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
+    expect(invoked('session.acquire')).toEqual([]);
+  });
+});
+
 // E9 start: push-to-talk dictation through the composer (E9 execution document, Design §6 to §8): the one app-level hold
 // resolves the focused pane's session, writes into that composer only, and shows its state in that toolbar; the
 // toolbar's microphone toggles a capture for its own session on click (the owner's ruling, 2026-10-06).
