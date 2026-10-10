@@ -250,7 +250,7 @@ export const MODEL = {
   group: { claude: 'Claude', gateway: 'Gateway' } as const,
   list: (group: string) => `${group} models`,
   oneM: '1M',
-  cannotHoldAuto: `Cannot hold auto mode · runs in ${PERMISSION_MODE_LABELS.default}`,
+  cannotHoldAuto: 'Cannot hold auto mode', // L99: the mode it runs in is the chip's (and the setup note's), which the launch's fallback decides
   current: 'current',
   pending: 'set · the next init frame confirms it',
   none: 'The engine listed no models',

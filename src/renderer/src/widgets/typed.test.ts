@@ -57,7 +57,7 @@ describe('model', () => {
   it('/model haiku in auto appends the widget’s Cannot hold auto mode caption to its toast', async () => {
     setStatus({ permissionMode: { requested: 'auto', effective: 'auto', refusal: null } });
     expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);
-    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it · Cannot hold auto mode · runs in Manual']]);
+    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it · Cannot hold auto mode']]);
     useNotices.setState({ notices: [] });
     setStatus({ permissionMode: { requested: 'default', effective: 'default', refusal: null } });
     expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);

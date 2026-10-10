@@ -115,8 +115,19 @@ export function intentProjectName(intent: Pick<SetupIntent, 'projectId' | 'locat
 // ride along unchecked: `supportedEffortLevels` is kept when it is a list of strings, so the model widget lowers an
 // effort the chosen model does not list, as it does for a live session. W3: the resolved model, the description and
 // `supportsEffort` too, each when it has its type (the model selector names `default`'s model and shows "From gateway").
+// L99 (P2-F): a model's auto verdict comes from the engine alone. The built-in list stands for the pinned engine without
+// the launch's model environment: the owner's ANTHROPIC_DEFAULT_HAIKU_MODEL makes `haiku` Haiku 5.5, which holds auto
+// (a session switched to it from auto ran its next turn in auto, docs/doperpowers/evidence/p2-finish/
+// l99-model-change-from-auto.jsonl), while the list's row is Haiku 4.5's. So its rows claim nothing: every model is
+// offered auto, as an unknown one is (statusline/mode-menu.ts), and a refusal at launch is the host's fallback and the
+// composer's notice.
+function autoVerdictOf(catalogue: ModelCatalogue, entry: ModelCatalogueEntry): ModelCatalogueEntry {
+  return catalogue.source === 'builtin' ? { ...entry, supportsAutoMode: true } : entry;
+}
+
 export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
-  return catalogue.models.map((entry) => {
+  return catalogue.models.map((listed) => {
+    const entry = autoVerdictOf(catalogue, listed);
     const info: ModelInfo = { value: entry.value, displayName: entry.displayName };
     if (typeof entry.resolvedModel === 'string') info.resolvedModel = entry.resolvedModel;
     if (typeof entry.description === 'string') info.description = entry.description;
@@ -133,7 +144,8 @@ export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
 // to the engine).
 export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>, fallback: PermissionMode = 'acceptEdits'): string | null {
   const value = intent.model ?? 'default';
-  const entry: ModelCatalogueEntry | null = catalogue.models.find((m) => m.value === value) ?? (intent.model === null ? null : { value: intent.model, displayName: intent.model });
+  const listed = catalogue.models.find((m) => m.value === value);
+  const entry: ModelCatalogueEntry | null = listed ? autoVerdictOf(catalogue, listed) : intent.model === null ? null : { value: intent.model, displayName: intent.model };
   return autoModeNote(entry, intent.permissionMode, fallback); // W3: the mode MAWS sets when auto is refused
 }
 

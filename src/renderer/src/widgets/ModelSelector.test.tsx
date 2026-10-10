@@ -116,7 +116,7 @@ describe('the model view: Select model, Default with its recommendation, the cat
     expect(names(claude)).toEqual(['Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']); // `default` is the entry above, not a row
     expect(within(screen.getByRole('group', { name: 'Gateway models' })).getAllByRole('menuitemradio')).toHaveLength(7);
     expect(item(/^astra/).textContent).toContain('From gateway');
-    expect(item(/^Haiku/).textContent).toContain('Cannot hold auto mode');
+    expect(within(item(/^Haiku/)).getByText('Cannot hold auto mode')).toBeTruthy(); // L99: the mode it runs in is the chip's and the note's, not the caption's
     const fallback = item(/Default/);
     expect(fallback.querySelector('.truncate')?.textContent).toBe('Default');
     expect(within(fallback).getByText('Recommended set of models')).toBeTruthy();

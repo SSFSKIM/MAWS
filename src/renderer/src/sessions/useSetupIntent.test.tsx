@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
-import { GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
+import { BUILTIN_MODELS, GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -209,6 +209,23 @@ describe('setup intent hook', () => {
     expect(result.current!.options.autoModeNote).toBe(GATEWAY_AUTO_NOTE);
     act(() => putIntent(intent({ model: 'claude/astra', permissionMode: 'default', updatedAt: '2026-09-29T10:00:02.000Z' })));
     expect(result.current!.options.autoModeNote).toBeNull();
+  });
+
+  // L99 (P2-F): the built-in list is the pinned engine's rows without the launch's model environment; the owner's
+  // environment makes `haiku` Haiku 5.5, which the engine ran in auto after a change from auto
+  // (docs/doperpowers/evidence/p2-finish/l99-model-change-from-auto.jsonl), so the list claims no verdict on auto mode
+  it('claims nothing about auto mode from the built-in list: Haiku in auto has no note and keeps auto offered', async () => {
+    withMain({ 'engine.models': () => ({ models: [...BUILTIN_MODELS], source: 'builtin', at: null }) satisfies ModelCatalogue });
+    putIntent(intent({ model: 'haiku', permissionMode: 'auto' }));
+    const { result } = renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']));
+    expect(result.current!.options.autoModeNote).toBeNull();
+    expect(result.current!.options.models.find((m) => m.value === 'haiku')!.supportsAutoMode).toBe(true); // offered, as an unknown model is
+  });
+
+  it('keeps the engine’s own verdict: a cached Haiku row that cannot hold auto still names the fallback', () => {
+    expect(modelsOf(CATALOGUE).find((m) => m.value === 'haiku')!.supportsAutoMode).toBe(false);
+    expect(modelsOf({ ...CATALOGUE, source: 'builtin' }).find((m) => m.value === 'haiku')!.supportsAutoMode).toBe(true);
   });
 
   it("surfaces the validator's message from patch", async () => {
