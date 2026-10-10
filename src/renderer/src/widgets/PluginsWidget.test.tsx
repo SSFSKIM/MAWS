@@ -1426,6 +1426,36 @@ describe('plugins widget: Browse', () => {
     await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
   });
 
+  it('a failed marketplace or installed read says so above the grid with its own Retry, never a silent Installed filter (scale review D scalpel-3#1)', async () => {
+    let refuse = true;
+    const markets = () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }, official] });
+    backend.script('marketplaces.list', () => {
+      if (refuse) throw new WidgetBackendError({ code: 'internal', message: 'marketplaces unreadable' });
+      return markets();
+    });
+    await ready();
+    await toBrowse();
+    const warnings = () => [...section('browse').querySelectorAll<HTMLElement>('[data-browse-dependency]')];
+    // no marketplace answer: the installed official identities are not joined in, and Browse says why
+    expect(section('browse').querySelector('[data-browse-card="code-review@claude-plugins-official"]')).toBeNull();
+    expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['marketplaces']);
+    expect(warnings()[0].textContent).toContain("Couldn't load your marketplaces.");
+    expect(warnings()[0].textContent).toContain('marketplaces unreadable');
+    refuse = false;
+    const asked = invoked('marketplaces.list').length;
+    fireEvent.click(within(warnings()[0]).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(invoked('marketplaces.list').length).toBe(asked + 1));
+    await waitFor(() => expect(card('code-review@claude-plugins-official')).toBeTruthy());
+    expect(warnings()).toEqual([]);
+    // a later failed installed read keeps the last Installed labels, and says they are the last read's
+    backend.script('plugins.list', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
+    });
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['installed']));
+    expect(warnings()[0].textContent).toContain('Path does not exist: /nope · showing the last value it reported');
+  });
+
   it('a zero install count is never shown, and Most popular is not offered when 0 is the only count', async () => {
     backend.script('plugins.available', () => ({ plugins: [offered('zero', 0), directory('alpha')] }));
     await ready();

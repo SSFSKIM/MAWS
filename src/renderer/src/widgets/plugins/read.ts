@@ -36,7 +36,9 @@ export const pluginsReadKey = (command: PluginsRead, cwd: string | null) => ['ma
 
 // `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
 // rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.
-export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true): PluginsReadResult<CommandOutput<N>> {
+// `retry` reads again through this observer: the client's `refetchQueries` may run another observer's options for the
+// key (the manifests' `skipToken` follower of `marketplaces.list`), which is no read.
+export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const on = active && enabled && cwd !== null;
   const client = useQueryClient();
@@ -63,7 +65,8 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
     owed.current = false;
     void refetch();
   }, [isFetching, on, shown, refetch]);
-  return resultOf(query.data, query.error, query.isError);
+  const retry = useCallback(() => void refetch(), [refetch]);
+  return { ...resultOf(query.data, query.error, query.isError), retry };
 }
 
 // The binary the CLI runs (the launcher's probe; null when it fails), the config home it writes and the engine's global

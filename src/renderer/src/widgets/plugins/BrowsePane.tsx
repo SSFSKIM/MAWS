@@ -5,7 +5,9 @@
 // About 3,300 cards on a home with the official marketplace added, so the grid is virtualised by rows (a section's
 // heading is a row; a row holds two cards, or one where the pane is narrow). Desktop's states: pulsing placeholder cards
 // while the first read runs; "Couldn't load the plugins to browse." with the read's words and Retry; a later failed read
-// keeps the last cards with one line saying so (E8's rule); "Nothing matches these filters." with Reset filters. An
+// keeps the last cards with one line saying so (E8's rule); "Nothing matches these filters." with Reset filters. The
+// cards join two more reads (the installed list's Installed labels and cards, the marketplaces' sections and joins): a
+// failure of either says so above the grid with its own Retry, since the grid alone cannot show what it lacks. An
 // install whose card the next read no longer offers keeps its result above the grid, as does an uninstall from an
 // installed card's detail, which returns here once the installation leaves the list. The pane stays mounted beneath an
 // open detail and returns with its scroll and focus.
@@ -26,6 +28,13 @@ const TWO_COLUMNS = 600; // the pane's width from which cards sit two to a row
 const HEADING_HEIGHT = 36;
 const ROW_HEIGHT = 124; // a card row's first guess; rows are measured as drawn
 const GAP = 'gap-3';
+
+// A read the cards join besides the catalogue's: the installed list, or the marketplaces.
+export interface BrowseJoin {
+  key: 'installed' | 'marketplaces';
+  read: PluginsReadResult<unknown>;
+  onRetry(): void;
+}
 
 type Line = { kind: 'heading'; key: string; section: BrowseSection; count: number } | { kind: 'cards'; key: string; cards: Card[] };
 
@@ -72,13 +81,14 @@ export interface BrowsePaneProps {
   read: PluginsReadResult<{ plugins: AvailablePlugin[] }>;
   cards: readonly Card[]; // every card, before the view's filters
   installed: readonly InstalledPlugin[] | undefined; // the installed list as last read
+  joins: readonly BrowseJoin[];
   view: BrowseViewResult;
   hidden: boolean; // a detail opened from Browse stands in its place
   onOpen(card: Card): void;
   onRetry(): void;
 }
 
-export function BrowsePane({ read, cards, installed, view, hidden, onOpen, onRetry }: BrowsePaneProps) {
+export function BrowsePane({ read, cards, installed, joins, view, hidden, onOpen, onRetry }: BrowsePaneProps) {
   const { ops } = useManage();
   const offered = new Set(cards.map((c) => c.pluginId));
   // an install whose card left (the engine no longer offers it, and nothing installed it): its result above the grid
@@ -125,6 +135,17 @@ export function BrowsePane({ read, cards, installed, view, hidden, onOpen, onRet
         <p role="status" className="m-0 px-3 pb-1 text-ui-sm text-warning">
           {read.error}
         </p>
+      )}
+      {joins.map(({ key, read: join, onRetry: retry }) =>
+        join.error === null ? null : (
+          <p key={key} role="status" data-browse-dependency={key} className="m-0 flex flex-wrap items-baseline gap-x-2 px-3 pb-1 text-ui-sm text-warning">
+            {!join.data && <span>{key === 'installed' ? L.failed : L.marketplacesFailed}</span>}
+            <span className={`min-w-0 [overflow-wrap:anywhere] ${join.data ? '' : 'text-fg-muted'}`}>{join.error}</span>
+            <button type="button" className="rounded-sm text-fg outline-accent hover:underline focus-visible:outline-2" onClick={retry}>
+              {L.retry}
+            </button>
+          </p>
+        ),
       )}
       {gone.map((key) => (
         <div key={key} className="px-2">

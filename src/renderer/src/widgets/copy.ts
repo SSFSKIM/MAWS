@@ -479,6 +479,7 @@ export const LIBRARY = {
   loadedUnknown: 'What this session loaded is not observed yet.', // Show › Loaded in this session with nothing observed
   showAll: 'Show all plugins',
   failed: "Couldn't load your plugins.",
+  marketplacesFailed: "Couldn't load your marketplaces.", // Browse: the read its sections and installed cards join
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
   // a row

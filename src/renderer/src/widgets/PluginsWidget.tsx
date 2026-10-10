@@ -185,7 +185,19 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
           <>
             {picked !== null && pickedIdentity !== null && pluginDetail(pickedIdentity, L.browse, () => setPicked(null))}
             {picked !== null && !picked.installed && card !== null && <BrowseDetail key={card.pluginId} card={card} onBack={() => setPicked(null)} />}
-            <BrowsePane read={available} cards={cards} installed={plugins} view={shown} hidden={browseDetail !== null} onOpen={pick} onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.available', { cwd }] })} />
+            <BrowsePane
+              read={available}
+              cards={cards}
+              installed={plugins}
+              joins={[
+                { key: 'installed', read: installed, onRetry: installed.retry },
+                { key: 'marketplaces', read: marketplaces, onRetry: marketplaces.retry },
+              ]}
+              view={shown}
+              hidden={browseDetail !== null}
+              onOpen={pick}
+              onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.available', { cwd }] })}
+            />
           </>
         )}
       </WidgetFrame>
