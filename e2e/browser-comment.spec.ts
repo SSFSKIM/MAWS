@@ -1049,20 +1049,21 @@ test('10. the control gate: under the agent the toggle is disabled and an arm is
 
 // ---- (11) evidence in both themes ----------------------------------------------------------------------------------------------
 
-const SHOTS = process.env.MAWS_E4D_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e4d') : null;
+const SHOTS = process.env.MAWS_E4D_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence') : null;
 const THEMES = ['light', 'dark'] as const;
 
-// `e4d-<surface>-<theme>.png` in each theme, then back to light (E4a's `shootBrowser` technique, which writes under
-// p1-e4a alone): with `page`, the view's own screenshot is laid into `pane` for the shot (a view is not in the renderer's
-// screenshot), and removed after. Each theme's window is checked for colours of the other theme (tokens only). The
-// flow runs without MAWS_E4D_SHOTS too; only the files are skipped.
-async function shoot(s: BrowserScene, surface: string, opts: { pane?: Locator; page?: Page } = {}): Promise<void> {
-  if (SHOTS !== null) mkdirSync(SHOTS, { recursive: true });
+// `<dir>/<name>-<theme>.png` under the evidence directory in each theme, then back to light (E4a's `shootBrowser`
+// technique): the case names the child whose evidence the shot is (P2-F W-T: the card is P2-E2's, the rest E4d's). With
+// `page`, the view's own screenshot is laid into `pane` for the shot (a view is not in the renderer's screenshot), and
+// removed after. Each theme's window is checked for colours of the other theme (tokens only). The flow runs without
+// MAWS_E4D_SHOTS too; only the files are skipped.
+async function shoot(s: BrowserScene, dir: string, name: string, opts: { pane?: Locator; page?: Page } = {}): Promise<void> {
+  if (SHOTS !== null) mkdirSync(join(SHOTS, dir), { recursive: true });
   await clearToasts(s.page);
   for (const theme of THEMES) {
     value(await invoke(s.page, 'settings.set', { theme }));
     await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
-    expect(await otherThemeColours(s.page), `${theme}: ${surface}`).toEqual([]);
+    expect(await otherThemeColours(s.page), `${theme}: ${name}`).toEqual([]);
     if (SHOTS === null) continue;
     if (opts.page && opts.pane) {
       const picture = `data:image/png;base64,${(await opts.page.screenshot()).toString('base64')}`;
@@ -1080,7 +1081,7 @@ async function shoot(s: BrowserScene, surface: string, opts: { pane?: Locator; p
       );
     }
     await s.page.waitForTimeout(250);
-    await s.page.screenshot({ path: join(SHOTS, `e4d-${surface}-${theme}.png`) });
+    await s.page.screenshot({ path: join(SHOTS, dir, `${name}-${theme}.png`) });
     if (opts.pane) await opts.pane.evaluate((el) => el.querySelector('img[data-e4d-shot]')?.remove());
   }
   value(await invoke(s.page, 'settings.set', { theme: 'light' }));
@@ -1096,7 +1097,7 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
     await t.page.mouse.move(centre(button).x, centre(button).y);
     await expect(t.page.locator('maws-comment-badge')).toBeVisible();
     await s.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()); // no focus ring from the toggle's click
-    await shoot(s, 'chrome-armed', { pane: paneIn(t.panel), page: t.page });
+    await shoot(s, 'p1-e4d', 'e4d-chrome-armed', { pane: paneIn(t.panel), page: t.page });
     await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'true');
 
     await t.page.mouse.down();
@@ -1104,13 +1105,13 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
     const card = cardOf(s, INCREMENT_LABEL);
     await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
     await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
-    await shoot(s, 'card', { pane: paneIn(t.panel), page: t.page }); // P2-E2: the page over the docked card
+    await shoot(s, 'p2-e2', 'browser-card', { pane: paneIn(t.panel), page: t.page }); // P2-E2: the page over the docked card
     await dismiss(s, t, card);
 
     await show(s, disk);
     const chip = s.page.locator('[data-region="main"] [data-chip="anchor"][data-anchor-kind="browser-element"]');
     await expect(chip).toHaveText(INCREMENT_LABEL);
     await s.page.mouse.move(700, 20);
-    await shoot(s, 'transcript-chip');
+    await shoot(s, 'p1-e4d', 'e4d-transcript-chip');
   });
 });
