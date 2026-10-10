@@ -68,7 +68,8 @@ export function QuestionCard({ text, choices, state, live, held, actions = {}, b
     }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (event.nativeEvent.isComposing) return; // the input method's own Enter and Escape (commit, cancel composition)
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void sendReply();
     } else if (event.key === 'Escape') {

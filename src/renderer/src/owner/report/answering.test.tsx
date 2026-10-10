@@ -219,6 +219,20 @@ describe('Reply', () => {
     expect((screen.getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('Half a thought');
   });
 
+  it('Escape while an input method composes leaves the field open for the input method to cancel', () => {
+    withMarks([question({ state: 'unanswered' })]);
+    draw();
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    const field = screen.getByRole('textbox', { name: 'Your answer' });
+    fireEvent.change(field, { target: { value: '한' } });
+    const composing = new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true });
+    field.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect((screen.getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('한');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Your answer' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
   it('a refused reply keeps the field and its text, and says why; Escape closes the field', async () => {
     withMarks([question({ state: 'delivered', answer: { text: 'Answering "Which backend?": Postgres', origin: 'answer', at: '2026-10-09T10:02:00.000Z' } })]);
     seam({ disposition: 'refused', started: false, reason: 'Trust this folder in the session to continue' });
