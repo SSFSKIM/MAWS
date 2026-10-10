@@ -392,6 +392,33 @@ describe('needs you', () => {
   });
 });
 
+// P2-F F-C1 (C scalpel-3#2): a nested layer's Escape (the turn summary's Radix popover, portalled out of the card's DOM
+// but bubbling through its React tree) closes that layer only; the card and its unsent Reply stay
+describe('Escape in a nested layer', () => {
+  it('closes the turn summary and leaves the card open with its draft; the next Escape dismisses the card', async () => {
+    const b = builder(); // a turn with a tool call, so its divider offers the summary
+    b.turn('t1', anchoredMessage({ anchor: ANCHOR, text: COMMENT, destination: 'thread', screenshot: false }));
+    b.toolUse('x1', 'Bash', { command: 'ls' }, 'm0', 0);
+    b.result('x1', 'a');
+    b.text('m1', 0, REPLY);
+    b.end(['t1'], { durationMs: 4_000 });
+    snapshot = b.events;
+    await intoThread();
+    withRecord();
+    await waitFor(() => expect(within(card()!).getByText(REPLY)).toBeTruthy());
+    await userEvent.type(replyField(), 'Unsent');
+    await userEvent.click(within(card()!).getAllByRole('button', { name: 'Turn summary' })[0]!);
+    const popover = await waitFor(() => document.querySelector<HTMLElement>('.transcript-popover')!);
+    expect(card()!.contains(popover)).toBe(false);
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(document.querySelector('.transcript-popover')).toBeNull());
+    expect(card()).not.toBeNull();
+    expect(replyField().value).toBe('Unsent');
+    fireEvent.keyDown(replyField(), { key: 'Escape' });
+    expect(card()).toBeNull();
+  });
+});
+
 describe('where the thread is drawn', () => {
   it('Open as tab opens the thread as a main tab and closes the card', async () => {
     await intoThread();

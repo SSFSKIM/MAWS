@@ -6,8 +6,9 @@
 // its header then leading with the thread's phase glyph and offering Open as tab; the card takes its placement's whole
 // height then, the thread being a bounded scroll. A thread whose card went before the fork answered is revealed as the
 // sheet reveals one. Escape with focus inside dismisses it, answered here so the viewer's picking listener (which skips
-// an answered Escape) never sees it; a composition's Escape is the input method's. No focus trap and no `aria-modal`:
-// the person reads the page while the card is open.
+// an answered Escape) never sees it; a composition's Escape is the input method's, and a nested layer's (answered, or
+// from a portal outside the card's DOM) that layer's. No focus trap and no `aria-modal`: the person reads the page while
+// the card is open.
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
@@ -66,8 +67,10 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
   useEffect(() => {
     if (inThread && !ref.current?.contains(document.activeElement)) ref.current?.focus();
   }, [inThread]);
+  // P2-F F-C1: an Escape a nested layer answered (the turn summary's Radix popover), or one from a portal that bubbles
+  // through the card's React tree from outside its DOM, is that layer's, not the card's
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
     event.preventDefault();
     onDismiss();
   };
