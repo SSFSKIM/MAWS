@@ -282,11 +282,13 @@ test('a Read request flagged requires_user_interaction offers no quick approval 
 
 // L114: each answer waits on the harness's event stream, never on what a card shows. The n-th `dialog.requested` of
 // the session names the request; main's attention item for it names its card (`data-request-card`); the key goes to
-// that card's frame while its control is enabled, again until the card takes it: the card binds its keys in an effect
-// after the render that shows it, so a key can land before them, and a key it takes turns the card busy before the
-// press returns (`submit` sets `answering` in the key's handler), so only a key it did not take is pressed again, and
-// never on the next request's card (which docks only after this one's answer). A failure of the case prints the
-// sessions' dialog events and attention items, so the gate's log keeps what the next group's run would sweep.
+// that card's frame while its control is enabled, and the answer is the request's `dialog.resolved` on the stream.
+// The key is pressed again only while the card shows its control enabled: the card binds its keys in an effect after
+// the render that shows it, so a key can land before them, and a key it takes disables the control before the press
+// returns (`submit` sets `answering` in the key's handler), so a taken key is never repeated, and never reaches the
+// next request's card (which docks only after this one's answer). Every locator read in the loop has a short timeout,
+// so a card mid-render is read again rather than waited on. A failure of the case prints the sessions' dialog events
+// and attention items, so the gate's log keeps what the next group's run would sweep.
 async function answerDialog(page: Page, pane: Locator, appSessionId: string, n: number, control: string, key: 'Enter' | 'Escape'): Promise<void> {
   const requested = () => resolved(page, appSessionId, 'dialog.requested');
   await expect.poll(async () => (await requested()).length, { message: `${appSessionId}: dialog request ${n} on the event stream` }).toBeGreaterThanOrEqual(n);
@@ -300,14 +302,16 @@ async function answerDialog(page: Page, pane: Locator, appSessionId: string, n: 
   const cardSelector = `[data-request-card="${itemId}"]`;
   const frame = pane.locator('[data-docked-frame]').filter({ has: page.locator(cardSelector) }); // `has` is relative to the frame
   const button = frame.locator(cardSelector).getByRole('button', { name: control, exact: true });
+  const answered = async () => (await resolved(page, appSessionId, 'dialog.resolved')).some((e) => e.requestId === requestId);
   await expect(button, `${appSessionId}: request ${n}'s card docked with ${control}`).toBeEnabled();
   await expect(async () => {
-    if ((await button.count()) > 0 && (await button.isEnabled())) {
-      await frame.focus();
+    if (await answered()) return;
+    if (await button.isEnabled({ timeout: 500 }).catch(() => false)) {
+      await frame.focus({ timeout: 1_000 });
       await page.keyboard.press(key);
     }
-    expect((await button.count()) === 0 || !(await button.isEnabled()), `${appSessionId}: request ${n}'s card took ${key}`).toBe(true);
-  }).toPass({ timeout: 10_000 });
+    expect(await answered(), `${appSessionId}: request ${n} answered by ${key}`).toBe(true);
+  }).toPass({ timeout: 15_000 });
 }
 
 test('the two declared dialogs answer with the pinned result strings', async ({ cards }) => {
