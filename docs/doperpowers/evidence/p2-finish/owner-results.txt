@@ -1,0 +1,139 @@
+P2-F - the owner's sitting: results (Design section 7's template; the owner fills it, the executor routes it at M4.4)
+Script: docs/doperpowers/evidence/p2-finish/owner-script.txt (the step ids below are its sub-step ids).
+Each step row: step | surface or check | pass | fail | note | owner: not run | what was seen (your words where given) | screenshot path
+  Mark one of the four middle cells with an x. Leave the rest empty. Write "n/a (<why>)" for a surface not reachable.
+  Every fail and note is routed afterwards (see the route column note at the end).
+
+== Header ==
+Date of the sitting:
+Sessions (one or two, with times):
+The build's commit (master): [M4.2: the master commit the owner builds from]
+The final head the re-runs ran on: [M4.2: the final head]
+The codesign Authority line:
+The codesign TeamIdentifier:
+claude --version (the re-runs ran on [M4.2: the re-runs' engine version]):
+The system locale:
+The display width:
+The theme order (light then dark, or the reverse):
+
+== Steps ==
+step | surface or check | pass | fail | note | owner: not run | what was seen | screenshot path
+
+-- Before --
+pre.1 | build, stale-build notice (N2.7b), then open the new app | [ ] | [ ] | [ ] | [ ] | |
+pre.2 | codesign Authority and TeamIdentifier (header); Diagnostics' build identity names the final head | [ ] | [ ] | [ ] | [ ] | |
+pre.3 | relay answers 200; Claude Desktop open and signed in; locale and display width recorded | [ ] | [ ] | [ ] | [ ] | |
+pre.4 | claude --version recorded | [ ] | [ ] | [ ] | [ ] | |
+pre.5 | the two terminal sessions prepared (one exited and never opened by MAWS, one left running) | [ ] | [ ] | [ ] | [ ] | |
+pre.6 | scratch keys to clean in ~/.claude.json (none expected) | [ ] | [ ] | [ ] | [ ] | |
+
+-- A. Section 2 items 1 to 6 --
+A1.1 | item 1: a session MAWS never ran shows at once, nothing starts | [ ] | [ ] | [ ] | [ ] | |
+A1.2 | item 1: /plugins, context ring, Session info show saved facts with when, or "never observed"; never "not running" | [ ] | [ ] | [ ] | [ ] | |
+A1.3 | item 1: opening /plugins and the context popover starts nothing; Refresh does | [ ] | [ ] | [ ] | [ ] | |
+A1.4 | item 1: Send continues the session with no Resume step; the trust card only if never trusted, its prompt in history | [ ] | [ ] | [ ] | [ ] | |
+A1.5 | item 1: a model chosen on an idle exited session: "Starting...", then applied, requested value until acknowledged | [ ] | [ ] | [ ] | [ ] | |
+A1.6 | item 1: Haiku chosen from Auto: the mode chip reads the engine's mode; captions without "runs in ..." | [ ] | [ ] | [ ] | [ ] | |
+A1.7 | item 1: the running terminal session is read-only with Take over | [ ] | [ ] | [ ] | [ ] | |
+A2.1 | item 2: My items in three groups, one row per plugin, one sort order | [ ] | [ ] | [ ] | [ ] | |
+A2.2 | item 2: the detail (scope chips, enable, Update, Uninstall confirmation cancelled, Enabled for this project beside Loaded in this session, What's inside, the manifest notice) | [ ] | [ ] | [ ] | [ ] | |
+A2.3 | item 2: Browse (configured sources, installed state) and Manage marketplaces | [ ] | [ ] | [ ] | [ ] | |
+A2.4 | item 2: /skills, same header and groups, Use in chat | [ ] | [ ] | [ ] | [ ] | |
+A2.5 | item 2: /sandbox true, no toggle, the line "Runs outside it: ..." | [ ] | [ ] | [ ] | [ ] | |
+A2.6 | item 2: "MAWS mods - Built in" lists To-human with its switch | [ ] | [ ] | [ ] | [ ] | |
+A3.1 | item 3: the prompt (four marks and a three-choice question) | [ ] | [ ] | [ ] | [ ] | |
+A3.2 | item 3: report view cards; the working record folds to "Worked for ... - N tool calls" | [ ] | [ ] | [ ] | [ ] | |
+A3.3 | item 3: the essential unread until Mark read | [ ] | [ ] | [ ] | [ ] | |
+A3.4 | item 3: a choice click sends the next prompt (Queued while busy, Answered when delivered) | [ ] | [ ] | [ ] | [ ] | |
+A3.5 | item 3: Reply on the card; composer draft untouched; the reply's delivered mark | [ ] | [ ] | [ ] | [ ] | |
+A3.6 | item 3: the sidebar and Needs you show the open question and the unread essential | [ ] | [ ] | [ ] | [ ] | |
+A3.7 | item 3: window unfocused, an OS notification for those two only | [ ] | [ ] | [ ] | [ ] | |
+A3.8 | item 3: quit, relaunch, resume: every state kept | [ ] | [ ] | [ ] | [ ] | |
+A3.9 | item 3: a choice on a session whose engine has exited starts it and delivers | [ ] | [ ] | [ ] | [ ] | |
+A3.10 | item 3: one report toggle, one question handler, no doubled instructions (and any "unconfirmed" seen) | [ ] | [ ] | [ ] | [ ] | |
+A4.1 | item 4: /resume and Resume...: search by title word, folder, branch | [ ] | [ ] | [ ] | [ ] | |
+A4.2 | item 4: Today, Yesterday, week groups; project and branch badges | [ ] | [ ] | [ ] | [ ] | |
+A4.3 | item 4: preview, cached facts at once, recent turns after a moment, nothing starting | [ ] | [ ] | [ ] | [ ] | |
+A4.4 | item 4: Enter opens in the current tab, Command-Enter in a new one | [ ] | [ ] | [ ] | [ ] | |
+A4.5 | item 4: current project with All projects one click away; "Showing N of M. Scroll for more..." and paging | [ ] | [ ] | [ ] | [ ] | |
+A5.1 | item 5: the prompt for an HTML artifact; the comment card beside the element in the viewer | [ ] | [ ] | [ ] | [ ] | |
+A5.2 | item 5: the comment goes to a side thread; the reply in the card; Reply from the card | [ ] | [ ] | [ ] | [ ] | |
+A5.3 | item 5: main conversation untouched, no main tab, the Side pane lists the thread | [ ] | [ ] | [ ] | [ ] | |
+A5.4 | item 5: the thread's own to-human marks draw in the card | [ ] | [ ] | [ ] | [ ] | |
+A5.5 | item 5: the thread edits the artifact and the artifact shows its next version | [ ] | [ ] | [ ] | [ ] | |
+A5b.1 | item 5, browser page: the card docked in a strip, caret under the element, page live, typing goes to the card | [ ] | [ ] | [ ] | [ ] | |
+A5b.2 | item 5: Show in browser / "Shown in the card under the page - Show here"; the needs-you strip and Open in Side pane still hand off | [ ] | [ ] | [ ] | [ ] | |
+A6.1 | item 6: the prompt for a small PNG and a short video; each fills the pane | [ ] | [ ] | [ ] | [ ] | |
+A6.2 | item 6: zoom in, actual size, fit again (image bar, click toggle, video bar) | [ ] | [ ] | [ ] | [ ] | |
+A6.3 | item 6: in the panel, in a main tab and in the Files route | [ ] | [ ] | [ ] | [ ] | |
+
+-- B. The taste sitting (light, then dark, beside Claude Desktop) --
+B1 | library: /plugins, /skills, Manage marketplaces, dialog size, copy strings, the sandbox line (L104) | [ ] | [ ] | [ ] | [ ] | |
+B2 | the resume chooser against Desktop's picker (rows, groups, preview, legend, the Showing N of M line) | [ ] | [ ] | [ ] | [ ] | |
+B3 | the comment card against Desktop's; L147 (strip hiding the element); L120 (card stays while the artifact scrolls); the strip's shadow | [ ] | [ ] | [ ] | [ ] | |
+B4 | the report view: report bar 35 px vs 32 (L156); the default view and the ask card (L155); insight margin at 768 px and near 1280 px; a plain reply after an answer (L96) | [ ] | [ ] | [ ] | [ ] | |
+B5 | dates and times on the Korean locale read one clock (L129, Q2) | [ ] | [ ] | [ ] | [ ] | |
+B6 | the error card's dwell (L102); N2.4b: Dismiss clears, the row keeps "ended with an error" with its time | [ ] | [ ] | [ ] | [ ] | |
+B7 | anything invented, off or outside the token system on a P2 surface; the usage pill's popover lists every account | [ ] | [ ] | [ ] | [ ] | |
+
+-- C. The native hands --
+C1 | Korean IME in a Terminal tab; L98: the same `cat` sequence in Terminal.app | [ ] | [ ] | [ ] | [ ] | |
+C2 | Korean IME in the composer | [ ] | [ ] | [ ] | [ ] | |
+C3 | Korean IME in an editor tab, the /plugins search and the chooser's search; Escape ends the composition, the dialog stays | [ ] | [ ] | [ ] | [ ] | |
+C4 | keep-quit on the owner's profile (L31): session live and streaming after relaunch, no stall; the Option-key "Quit and Keep Windows" outcome | [ ] | [ ] | [ ] | [ ] | |
+C5 | Command-click a URL in the terminal: where it opens | [ ] | [ ] | [ ] | [ ] | |
+C6 | sleep and wake: terminal reattaches, the turn streams or says why, the supervisor row reads connected | [ ] | [ ] | [ ] | [ ] | |
+
+-- D. Decisions (answered in the decisions block below; mark the row when the ruling is heard) --
+D1 | Q1 the catalogue key's approximation | [ ] | [ ] | [ ] | [ ] | |
+D2 | Q2 dates in the display locale, one clock | [ ] | [ ] | [ ] | [ ] | |
+D3 | Q3 separate-git-dir checkouts out of scope | [ ] | [ ] | [ ] | [ ] | |
+D4 | Q5 one idle time for row release and the supervisor's exit | [ ] | [ ] | [ ] | [ ] | |
+D5 | Q7 typed values never in an anchor's name | [ ] | [ ] | [ ] | [ ] | |
+D6 | Q11 the imported profile's extensions load at every boot | [ ] | [ ] | [ ] | [ ] | |
+D7 | Q12 side threads and --max-budget-usd | [ ] | [ ] | [ ] | [ ] | |
+D8 | A-35 the in-app browser's rules | [ ] | [ ] | [ ] | [ ] | |
+D9 | A-36 the wallet extension list | [ ] | [ ] | [ ] | [ ] | |
+D10 | P-23 a successful import activates the profile | [ ] | [ ] | [ ] | [ ] | |
+D11 | A-37 how agents and you share a browser page | [ ] | [ ] | [ ] | [ ] | |
+D12 | TESTED_ENGINE_VERSION | [ ] | [ ] | [ ] | [ ] | |
+D13 | the taste calls of step B (the taste-calls line below) | [ ] | [ ] | [ ] | [ ] | |
+D14 | macOS's "Quit and Keep Windows" | [ ] | [ ] | [ ] | [ ] | |
+
+-- E. Optional --
+E1 | voice in the signed app (two TCC dialogs, "hello world", a language switch) | [ ] | [ ] | [ ] | [ ] | |
+E2 | a commit, push of a throwaway branch and a draft PR with the owner's credentials | [ ] | [ ] | [ ] | [ ] | |
+E3 | one plugin installed, disabled, enabled and reloaded from MAWS | [ ] | [ ] | [ ] | [ ] | |
+
+-- F. The measure --
+F1 | what still sends the owner to Desktop or a terminal (see the measure line below) | [ ] | [ ] | [ ] | [ ] | |
+
+== The decisions block ==
+item | proposal | the owner's answer
+D1 Q1 the catalogue key's approximation | final |
+D2 Q2 dates beside the engine's English | the display (system) locale, one clock everywhere |
+D3 Q3 separate-git-dir checkouts | out of scope for the worktree service |
+D4 Q5 one idle time for row release and supervisor exit | keep |
+D5 Q7 typed values in an anchor's name | never: keep privacy over label richness |
+D6 Q11 imported profile's extensions | keep eager loading; the question passes to the cua session |
+D7 Q12 side threads and --max-budget-usd | a thread inherits its parent's budget when the parent has one |
+D8 A-35 the in-app browser | as built (clipboard carve-out, Google default, 12-tab and 2 GiB caps, beforeunload never blocking) |
+D9 A-36 the wallet extension list | as built (14 ids and the name heuristic) |
+D10 P-23 import activates the profile | as built (the consent says agents' tabs will be signed in as it) |
+D11 A-37 sharing a browser page | as built (reads proceed while you hold the page, Browser tool opens once, 10 s decay, fixed cursor colours) |
+D12 TESTED_ENGINE_VERSION | move to the newest version where R1 to R4 pass ([M4.2: the version]), fixtures' pin unchanged (wave S) |
+D13 the taste calls of step B | per call, see the taste-calls line |
+D14 "Quit and Keep Windows" (종료 및 윈도우 유지) | maps to MAWS's keep option (wave S, after verifying the hook) |
+
+Taste calls: L96 [ ] keep [ ] fix now [ ] P3 | L102 [ ] keep [ ] fix now [ ] P3 | L147 [ ] keep [ ] fix now (highlight / scroll) [ ] P3 | L155 [ ] keep report default + ask card (wave S) [ ] transcript default [ ] P3 | L156 [ ] keep 35 px [ ] fix now (32 px) [ ] P3
+
+== Irritations (each note, fail and anything else you disliked becomes a tracker row, a wave-S fix or a P3 line, never silent) ==
+observation | words | route
+
+== The measure ==
+What, if anything, still sends me to Claude Desktop or a terminal today:
+
+== Route column note ==
+Routes are filled at M4.4, not by the owner: wave S (small, the owner wants it now), a tracker row tagged `taste` or carrying the
+owner's words, a P3 Deferred line, or an architect question. Mark each of your own notes keep, fix now, or P3 in the irritations
+block; the route follows your mark.

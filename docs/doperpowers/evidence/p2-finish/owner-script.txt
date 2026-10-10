@@ -1,0 +1,302 @@
+P2-F - the owner's one sitting (M4): the ordered checklist
+Plan: docs/doperpowers/plans/2026-10-09-p2-f-finish.md, Design section 7 (the steps) and section 4 (the rulings sheet).
+Spec: docs/doperpowers/plans/2026-10-08-p2-daily-driver.md section 2 (items 1 to 7, the clauses A observes).
+Rows this script settles: docs/doperpowers/evidence/p2-finish/triage.txt (the "sitting" lines); the Coverage list at the end maps each.
+
+Who runs it: you, on your own Mac, with your own hands and profile. No agent runs any step of this script. The agents' half
+  is done: the four live re-runs R1 to R4 on the final head (logs at docs/doperpowers/evidence/p2-finish/live-r<n>.txt).
+Where results go: owner-results.txt, one row per sub-step. Mark pass, fail or note; write what you saw in your own words;
+  add a screenshot path if it helps. A step you did not do stays "owner: not run". Nothing you note is lost: each note and
+  fail is routed afterwards (a small fix now, a tracker row with your words, a P3 line, or a question to the architect).
+Time: about two and a half hours. You may split it at the step boundaries (B is its own hour).
+Ids: the sub-step ids below (pre.1, A1.1, B4, D7 ...) are the row ids in owner-results.txt.
+Order, and why: the build first, while the old MAWS is still running; the scenes of section 2 while attention is fresh; the
+  taste comparisons beside Claude Desktop; the native hands last, because sleep and wake disrupt everything; then the
+  decisions, the optional items, and the measure.
+
+The facts of this build (filled in when the script is finalised, M4.2):
+  Final head: [M4.2: the final head's commit id after the last gates and any wave S already merged]
+  Build commit to record (master after the architect's merge): [M4.2: the master commit the owner builds from]
+  Engine of the re-runs R1 to R4: [M4.2: claude --version on which R1 to R4 all passed, 2.1.296 at authoring]
+  Re-runs' result and spend: [M4.2: R1 to R4 verdicts and the summed spend, from owner-file-check.txt]
+
+== Before (about 15 minutes) ==
+
+pre.1 Build the new MAWS while the current one is still running. In the MAWS checkout on master, after the architect's merge:
+        pnpm install --frozen-lockfile                     (the lockfile may have moved)
+        MAWS_SIGN_IDENTITY="Apple Development: ..." pnpm build:app          (the identity is yours)
+      Then open dist/mac-arm64/MAWS.app.
+      This also runs P1's stale-build check (N2.7b). It counts only if the running MAWS was built at or after fbd8a12e
+      (Diagnostics' build identity says). If it was built earlier, write "owner: not run (the running build predates the
+      notice)" and go on.
+      Look for: "An older MAWS is running, built <time>; the build on disk is newer; quit to use it", shown once. Choose
+      Keep running: nothing quits, and the notice does not come back for the same build.
+      Then quit the old MAWS and open the new one.
+pre.2 Check the signing:
+        codesign -dv --verbose=2 dist/mac-arm64/MAWS.app 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier)'
+      Put the Authority and TeamIdentifier lines in the results header. Open Diagnostics: its build identity must name the
+      final head [M4.2: the final head]. Every step below runs in this signed app, never under pnpm dev.
+pre.3 The relay answers 200:  curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8641/api/hello
+      Claude Desktop is open and signed in, on a screen comparable to MAWS's. Record the system locale (Korean, as you use
+      it) and the display width in the header.
+pre.4 Record `claude --version` in the header. The re-runs ran on [M4.2: the re-runs' engine version]; say if yours differs.
+pre.5 Prepare two terminal sessions for A1. First, in a project, run `claude`, say one thing, and exit; MAWS must never have
+      opened this session. Second, in another terminal, start `claude` in a project and leave it running (A1.7 needs it).
+pre.6 Scratch keys to clean in ~/.claude.json: none expected. The re-runs' A-15 readings are in owner-file-check.txt
+      [M4.2: baseline after R1 to R4, key count and shasum]. Write "none" if nothing is there.
+
+== A. Section 2 items 1 to 6 as scenes (about 40 minutes) ==
+Each sub-step names the clause of section 2 it observes. Mark pass or note; if a clause fails, write what happened.
+
+A1 Item 1, sessions available. Use the terminal session from pre.5 (the one MAWS never opened).
+  A1.1 [item 1: a session MAWS never ran shows at once, nothing starts] Open it from the sidebar. The transcript shows at
+       once. Look for anything starting (a spinner, an engine row appearing): nothing should.
+  A1.2 [item 1: saved facts, not "not running"] Open /plugins, the context ring and Session info. Each shows what was last
+       observed with when, or says it was never observed. Nothing may read "not running".
+  A1.3 [item 1: reads start nothing, Refresh does] Open /plugins and the context popover and look for anything starting:
+       nothing should. Then press Refresh: only that starts the engine.
+  A1.4 [item 1: Send continues, no Resume step] Type a short message and send. The session continues with no Resume step.
+       The trust card appears only if the folder was never trusted. If it does appear, answer it, then press Up in the
+       composer: the prompt you just sent is in the history (the trust card's send writes its own history row).
+  A1.5 [item 1: a model chosen on an idle session] On an idle session whose engine has exited, choose a model in the chip.
+       Look for: "Starting..." in the chip, then your choice applied. Until the engine acknowledges, the chip shows the
+       value you asked for.
+  A1.6 [item 1, and the mode chip after a model change] In a session on Auto mode, choose Haiku. Look for: the mode chip
+       reads the mode the engine really runs (not a stale Auto and not a "Cannot hold auto mode" claim). The model list's
+       captions no longer say "runs in ...". Note which mode the chip shows and what a following tool call does (does it
+       ask?).
+  A1.7 [item 1: terminal-held stays read-only] The session you left running in the second terminal (pre.5) opens read-only
+       with a Take over button. Do not press it unless you want to.
+A2 Item 2, the library.
+  A2.1 [item 2: My items] Open /plugins. My items shows three groups, one row per plugin with name, description, author,
+       version and date. Sorting follows one order across plugins and the rows that only loaded.
+  A2.2 [item 2: the detail] Open a plugin's detail: scope chips, the enable control, Update, and Uninstall (open its
+       confirmation, then cancel). "Enabled for this project" sits beside "Loaded in this session". What's inside lists
+       the parts. If a notice about the manifest appears, note whether the plugin's manifest really is unreadable.
+  A2.3 [item 2: Browse and marketplaces] Browse lists the configured sources with installed state. Open Manage marketplaces.
+  A2.4 [item 2: skills] /skills has the same header and groups, with Use in chat.
+  A2.5 [item 2: sandbox] /sandbox shows the state as true, with no toggle. Read the line about what runs outside the
+       sandbox: it begins "Runs outside it: ...".
+  A2.6 [item 2: built-in mods] "MAWS mods - Built in" lists To-human with its switch.
+A3 Item 3, to-human, with your own doperpowers active. In a real project.
+  A3.1 [item 3: the four marks and a question] Send this prompt: [M4.2: the prompt that asks the agent to report once with
+       each of the four marks and to ask one question with three choices, one recommended].
+  A3.2 [item 3: the report view] The report view shows message cards. The working record folds to "Worked for ... - N tool
+       calls", and opens to the tool rows.
+  A3.3 [item 3: the essential stays unread] The essential card stays unread until you press Mark read.
+  A3.4 [item 3: a choice sends as the next prompt] Click one choice. It is sent as the next prompt. While the agent is busy
+       it reads Queued; when delivered, Answered.
+  A3.5 [item 3: Reply] Type free text in Reply on the card and send. The composer's own draft is untouched. Your reply's
+       row shows a delivered mark once the engine has it (only replies sent from the open card carry it).
+  A3.6 [item 3: where it shows] The sidebar and Needs you show the open question and the unread essential.
+  A3.7 [item 3: notifications] Unfocus the window and trigger both again [M4.2: the prompt that repeats the question and an
+       essential mark]. An OS notification arrives for those two only, nothing else.
+  A3.8 [item 3: persistence] Quit, relaunch and resume the session. Every state is kept (question open or answered, essential
+       unread or read).
+  A3.9 [item 3: a choice on an exited engine] On a session whose engine has exited, click a choice. It starts the engine and
+       delivers.
+  A3.10 [item 3: no doubling] With doperpowers active there is one report toggle and one question handler, and no doubled
+       instructions in the prompt. If an answer ever reads "unconfirmed", write down when.
+A4 Item 4, the chooser.
+  A4.1 [item 4: search] Open /resume, then the sidebar's Resume.... Search by a word of a title, then by a folder, then by a
+       branch.
+  A4.2 [item 4: groups] Rows are grouped Today, Yesterday and the week groups, with project and branch badges.
+  A4.3 [item 4: the preview] The preview shows cached facts at once and the recent turns after a moment. Nothing starts.
+  A4.4 [item 4: opening] Enter opens in the current tab; Command-Enter opens in a new one.
+  A4.5 [item 4: scope and paging] The current project is the scope, with All projects one click away. In a long list, scroll
+       to the end: more rows load, under a line "Showing N of M. Scroll for more...". A new search or scope starts the list
+       over.
+A5 Item 5, comments on a deliverable.
+  A5.1 [item 5: the card in the viewer] Send this prompt, which delivers an HTML artifact: [M4.2: the prompt that makes a
+       small HTML artifact with an element worth commenting on]. Comment on an element. The card opens beside the element in
+       the viewer.
+  A5.2 [item 5: the thread] Send the comment. It goes to a side thread. The agent's reply appears in the card; press Reply
+       on the card and answer.
+  A5.3 [item 5: the main conversation is left alone] The main conversation is untouched and no main tab opened. The Side
+       pane lists the thread.
+  A5.4 [item 5: the thread's own marks] If the thread's agent uses a to-human mark, it draws inside the card.
+  A5.5 [item 5: the artifact's next version] The thread edits the artifact, and the artifact shows its next version.
+  A5b.1 [item 5, the browser half] Do the same on a web page in the Browser tab. The card is docked in a strip under the
+       page, the caret under the picked element, the page live above it. Typing in the card goes to the card, not the page.
+  A5b.2 [item 5: one drawing of a thread] Open that thread in the Side pane. The thread's header offers "Show in browser":
+       it re-docks the thread into the pane showing its page (no caret). While the card shows it, the Side pane reads
+       "Shown in the card under the page - Show here"; press Show here and the Side pane takes it back. Also try the card's
+       needs-you strip and "Open in Side pane": they still move the thread to the pane and close the card.
+A6 Item 6, the viewer (L95's acceptance).
+  A6.1 [item 6: a PNG and a short video] Send this prompt: [M4.2: the prompt that delivers a small PNG and a short video].
+       Each fills the pane (grown or shrunk, aspect kept).
+  A6.2 [item 6: zoom] On the image, use the zoom bar: zoom in, actual size, fit again. A click on the image toggles actual
+       size and fit. On the video, use the bar under the header; a click on the video stays the player's.
+  A6.3 [item 6: panel and main tab] Repeat A6.1 and A6.2 in the panel and in a main tab. Open an image in the Files route too:
+       it has the same zoom bar.
+
+== B. The taste sitting (60 to 75 minutes), light then dark, beside Claude Desktop ==
+For each surface mark pass or a note: anything invented, off, or outside the token system, naming the Desktop surface it falls
+short of. Do each in light, then in dark. For every note, say whether to keep it, fix it now (before P2 closes), or send it to
+P3.
+
+B1 Library copy and look. /plugins and /skills against Desktop's library (if Desktop's Code surface hides it, compare against
+   what Desktop shows; say so). Manage marketplaces against Desktop's sheet. Judge the dialog size and the copy strings as
+   drawn, including the sandbox line "Runs outside it: ..." (L104).
+B2 The resume chooser against Desktop's picker: rows, groups, preview, keyboard legend, and the "Showing N of M. Scroll for
+   more..." line.
+B3 The comment card against Desktop's artifact comment card (300 px, clamped, flipping), in the deliverable viewer and docked
+   in the browser pane. Two taste calls ride here:
+   - L147: when the strip takes the band at the bottom of the page, an element there leaves the view while the caret still
+     points at it. Choose: a page-side highlight of the element, a scroll into the shrunk view, or keep as is.
+   - L120: the card stays put while the artifact scrolls (a stored, content-anchored pin is P3's). Say if you want it
+     otherwise.
+   Also look at the card's shadow in the strip (it should no longer be clipped).
+B4 The report view.
+   - The report bar: built as 32 px, measuring 35 px (L156). Choose: keep 35 px and change the document, or make it 32 px.
+   - The report view as a lane-on session's default (L155): the blocking ask's capsule is not drawn there. Choose: keep the
+     report as the default and draw the ask as a card in the report (wave S), the transcript as the default, or P3.
+   - The insight margin at the default 768 px column, and in a pane near 1280 px wide.
+   - A plain reply after an answered question is folded into the working record ("- 1 message") (L96). Choose: keep, draw it
+     in the report view, or P3.
+B5 Dates and times on the Korean locale. Look at the transcript's prompt time, the chooser, Scheduled rows, the budget's
+   released mark and the supervisor rows. They should read one clock (for example "오후 2:05", not a fixed "14:02" beside it)
+   after L129. Say if you want it otherwise: this is Q2 (D2).
+B6 The error card's dwell (L102). An error seen in its open session leaves Needs you within about 500 ms. Choose: keep, or a
+   dwell before it leaves. P1's check N2.4b rides here: Dismiss clears the card; the session row keeps "ended with an error"
+   with its time.
+B7 Anything invented, off, or outside the token system on any P2 surface, with the Desktop surface it falls short of. Open
+   the usage pill's popover too: it should list every account (section 9's all-accounts view).
+
+== C. The native hands (about 15 minutes) ==
+C1 Korean (2-set) IME in a Terminal tab: syllables appear once, Backspace removes a jamo, Enter commits. Then L98's comparison:
+   run the same `cat` sequence in Terminal.app and compare. Same residue means it is the PTY's behaviour; a difference is a
+   MAWS fix.
+C2 Korean IME in the composer.
+C3 Korean IME in an editor tab, in the /plugins search and in the chooser's search. Press Escape while composing: it ends the
+   composition and leaves the dialog open.
+C4 Keep-quit on your own profile (L31, P1's step G). With a turn in flight, press Command-Q and choose "Quit and keep sessions
+   running". Relaunch: the session is listed live and still streaming, with no stall. A stall keeps the row open; save the
+   capture. Then, at the quit menu, try the Option-key item "Quit and Keep Windows" (the Korean "종료 및 윈도우 유지") and
+   record what happens (today an ordinary quit; D14 asks what it should do).
+C5 Command-click a URL printed in the terminal. Record where it opens.
+C6 Sleep and wake. Start a terminal running `sleep 300` and a live turn streaming under the detached supervisor, then run
+   `pmset sleepnow`. Wake after a minute. The terminal reattaches; the turn still streams or its row says what happened;
+   Diagnostics' supervisor row reads connected.
+
+== D. Decisions (about 15 minutes) ==
+Each ruling below has the architect's proposal as the default answer. Answer in owner-results.txt's decisions block (tick
+"as proposed" or write what you want). D13 asks keep, fix now, or P3 for the five taste calls. After D14, go back to the notes
+you wrote in A and B and mark each keep, fix now, or P3 (write the mark in the irritations block's route column).
+
+Source of the sheet: docs/doperpowers/plans/2026-10-09-p2-f-finish.md, Design section 4. Each item has the architect's proposal as the default answer. Questions Q1 to Q12 were collected for the owner in docs/doperpowers/plans/2026-10-06-e11-finish.md ("Questions for the owner"); the parent plan (docs/doperpowers/plans/2026-10-08-p2-daily-driver.md, Decision Log 10) deferred them to this sitting. Q4, Q6, Q8, Q9 and Q10 are already decided or retired and are not on the sheet.
+
+D1 Q1 — The model-list cache key stays an approximation
+  Proposal (default answer): Final. The approximation is accepted as it is.
+  Background: This is Q1 of docs/doperpowers/plans/2026-10-06-e11-finish.md and tracker row L32 ("The catalogue key's model environment ..."). When the model chip asks the engine for its list of models, MAWS files the answer under a key built from the environment the engine would see (src/engine-host/models-cache.ts, `catalogueKey`). That key models only what Claude Code 2.1.283 did with a fully trusted project: it does not read managed settings or the env block in ~/.claude.json, and it does not model the safe-mode subset an untrusted project gets. A mismatch can only file a list under the wrong key or file a spurious one; it never serves another route's list. Also, the first model request in a folder before any launch can wait up to 5.25 s for the login-shell capture, then it is cached. Accepting closes L32 and adds a section 19 line; overturning means someone hunts for a real case where the chip shows a list the launch then contradicts.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D2 Q2 — Dates beside the engine's English, and one clock everywhere
+  Proposal (default answer): Show dates in the app's display locale (your system locale, Korean on your machine) beside the engine's English schedule wording, through app/date-format.ts, with one clock everywhere (wave W-C's L129).
+  Background: This is Q2 of the E11 document and tracker row L53 ("Scheduled rows mix the engine's English `humanSchedule` with dates formatted in the app's locale"). The Scheduled rows (src/renderer/src/tools/agents/background/ScheduledRows.tsx) show the engine's English cron wording next to dates in the Korean locale. P2-D already formats Scheduled rows through app/date-format.ts (commit 455720a0). A second clock remains: the memory budget's released mark and the supervisor rows use a fixed 24-hour clockTime (budget/copy.ts, "14:02") while everything else uses the system-locale formatClock ("오후 2:05"); tracker row L129 makes clockTime delegate to formatClock, and you judge the result in taste step B5. Accepting closes L53 with 455720a0 as its evidence and adds a section 19 line stating the UI-wide rule (display locale for every date and time); overturning (English throughout, or MAWS describing the cron itself) changes the one helper in a wave-S commit.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D3 Q3 — Separate-git-dir checkouts are out of scope for worktrees
+  Proposal (default answer): Checkouts made with a separate git dir (`--separate-git-dir`) and their linked worktrees are out of scope for the worktree service.
+  Background: This is Q3 of the E11 document and tracker rows L36 and L37. A "separate git dir" checkout keeps its repository data in a different folder from its working files. L36: a linked worktree of such a repository, placed outside its main checkout (`git worktree add ../x`), is treated by the worktree service as a project of its own, because git records no path from the repository back to the checkout. L37: the sidebar's sibling-worktree grouping (src/main/index/projects.ts) cannot fold such a worktree under its main checkout unless a directory MAWS already knows names that git dir, and in a very unlikely layout could fold it wrongly. Both rows say the layouts are hypothetical for your repositories. Accepting closes L36 and L37 with a section 19 line recording git's limit; overturning means building the discovery-based fold that L37 describes, which is P3-sized work.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D4 Q5 — One idle time for row release and the supervisor's exit
+  Proposal (default answer): Keep.
+  Background: This is Q5 of the E11 document (E10, the detachable supervisor); no tracker row carries it. When you quit MAWS and choose to keep sessions running, a background process (the supervisor) holds your engines. As built there is one setting, `supervisor.idleExitMinutes` (default 10; src/engine-host/supervision.ts, src/main/settings/host-configure.ts; designed in docs/doperpowers/plans/2026-10-06-e10-supervisor.md, Task 2.3). With no app connected, an idle session row is released after that time and the supervisor exits on the same clock; there are not two separate times. Accepting records a section 19 line and changes nothing; overturning would add a second setting and a new settings version.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D5 Q7 — Typed values never enter an anchor's name
+  Proposal (default answer): Keep privacy over label richness.
+  Background: This is Q7 of the E11 document and A-45 (docs/doperpowers/plans/2026-10-05-p1-extension.md, the decisions table; E4d, comment mode). When you comment on an element of a page, MAWS names the element for the agent (for example `button "Increment"`). A-45 rules that no typed form value ever reaches that name: a table row is named `row`, not `row "PIN ..."`, and text boxes are read as doubt. The cost is a plainer label for rows and controls whose visible content is a typed value. Accepting adds a section 19 line and changes nothing; overturning would let typed values into names, which means they can reach the agent's prompt and the logs.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D6 Q11 — The imported Chrome profile's extensions load at every boot
+  Proposal (default answer): Keep eager loading; the question passes to the cua session, whose board item #90 owns the extensions bar.
+  Background: This is Q11 of the E11 document and A-46 (P1 decisions table; E4b, profile import). When you have imported a Chrome profile and made it active, MAWS loads that profile's extensions at every launch and holds the first page until they have settled, so content-script extensions work from the first page. Other profiles load lazily; the eager path is a deliberate departure for the one active profile (E4b Decision Log 39). The cost is a slower first page when an extension is slow to start. Accepting adds a section 19 line, and the architect tells the cua session; overturning (lazy loading) would move the load to first use and make early pages run without extensions.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D7 Q12 — Side threads and the dollar cap (--max-budget-usd)
+  Proposal (default answer): A side thread inherits its parent's budget when the parent has one.
+  Background: This is Q12 of the E11 document and tracker row L82 ("A side thread's launch carries no `--max-budget-usd`"). A side thread is a forked child of your session. As built, a fork takes no dollar cap from its parent, so a parent's cap binds only the parent (seen in E4d's live run, where the thread was unbounded). Said plainly: product launches carry no budget today (src/main/sessions/launch-mapping.ts sets `maxBudgetUsd: null`; only the test harness's launches set one, via src/engine-host/launch.ts), so this ruling changes nothing you would see in the app. It only makes harness launches (the live test runs, which do cap spend) behave consistently. Accepting turns L82 into one wave-S commit in the side-thread launch path (src/main/side/ and launch-mapping.ts) and adds a line to X6. If you want threads capped in the product, a default per-thread cap is a separate P3 product decision (a setting and a settings version), not part of this ruling.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D8 A-35 — The in-app browser's rules (E4a)
+  Proposal (default answer): As built: the clipboard carve-out, Google as the default search with the field in Settings > Browser, the 12-tab and 2 GiB caps, `beforeunload` never blocking.
+  Background: A-35 (P1 decisions table; E4a's author-level residue, which lists these as items "for the owner, non-blocking") and tracker row L57 ("The browser's memory soft cap ..."). As built: a page may write to the clipboard within 2 s of your own input, while reading the clipboard stays denied (Chrome allows the first with no prompt, and a strict denial breaks every site's Copy button); the search default is Google, editable in Settings > Browser (src/shared/settings/defaults.ts, `searchUrl`); at most 12 tabs stay loaded (BROWSER_LOADED_TABS_MAX in src/shared/browser/tab.ts), older ones suspended, never force-closed, once memory summed over loaded tabs passes 2 GiB (src/main/browser/memory.ts); and a page's "leave site?" prompt (`beforeunload`) never blocks in P1. L57's own point (a placed or agent-held tab above 2 GiB suspends every other eligible tab, one notice each) is the spec's rule, not a slip. Accepting settles L57's owner half, re-defers its notice-coalescing refinement to P3 (the in-app browser) and adds a section 19 line; overturning means choosing different values, which are constants and one default.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D9 A-36 — The wallet extension list (E4b)
+  Proposal (default answer): As built: the wallet seed list (14 extension ids plus a name heuristic).
+  Background: A-36 (P1 decisions table; E4b, Chrome profile import; the owner item is the wallet seed list). When you import a Chrome profile, extensions that look like crypto wallets are left unchecked by default so a wallet is not copied by accident. "Looks like a wallet" is a list of 14 extension ids verified on the Chrome Web Store on 2026-10-06 plus a name heuristic (Binance Wallet was dropped from the id list because its store page came back empty; the heuristic still catches it). The cost of the approach is a possible miss or false catch for a wallet outside the list. Accepting adds a section 19 line; overturning means editing the list or the heuristic in the import module (src/main/browser/import/).
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D10 P-23 — A successful profile import activates the profile
+  Proposal (default answer): As built: a successful import activates the profile, the consent saying that agents' tabs will then be signed in as it.
+  Background: P-23 (P1 decisions table). You ruled it on 2026-10-06 ("Activate automatically (as written): you imported it to use it; the consent sheet states the consequence and the chrome pill shows the profile on every tab"); A-36 also lists "automatic activation after import" among the items for the owner, and the sheet asks you to confirm it now that you can see it on a build. As built: after import every new tab, including tabs an agent opens, browses signed in as your Chrome profile, the consent sheet states this beforehand, and a pill in the browser chrome names the profile on every tab. Accepting adds a section 19 line and changes nothing; overturning means an explicit "Use this profile" step after import (E4b named this as the alternative), a small change in the import flow.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D11 A-37 — How agents and you share a browser page (E4c, as E13 carries it)
+  Proposal (default answer): As built, as E13 carries them on cua's route (src/main/browser/agent/control.ts): reads proceed while you hold the page, the Browser tool opens once per session, the 10 s `agent` to `idle` decay, the fixed cursor colours.
+  Background: A-37 (P1 decisions table; E4c, browser tools) says the author's four owner questions were "ruled as written (reads proceed while the human holds the page; the Browser tool opens once per session; 10 s decay; fixed cursor colours), overturnable". As built: an agent may read a page (snapshot, screenshot, tab list) while you are using it, but actions wait for you; the Browser tool opens once per session and never moves your selection off a tab you are using; a tab's control returns from `agent` to `idle` 10 s after the agent's last action (BROWSER_AGENT_IDLE_MS, read by src/main/browser/agent/control.ts) and from `human` to `idle` 3 s after your last input; the agent's cursor uses a fixed colour. Source ambiguity: A-37 was written for E4c's design, and E13 (the cua in-app browser) later superseded the browser tools; this draft confirmed the 10 s and 3 s timers in control.ts, but did not re-read the read, open-once and cursor-colour rules against E13's code. Accepting adds a section 19 line; overturning means changing constants or rules on cua's route.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D12 TESTED_ENGINE_VERSION — Which Claude Code version MAWS says it was verified on
+  Proposal (default answer): Move it to the newest version on which the four live re-runs R1 to R4 pass (2.1.296 expected, the version installed now), applied in wave S; the fixtures' pin stays unchanged.
+  Background: src/engine-host/engine-compat.ts holds `TESTED_ENGINE_VERSION = '2.1.293'`, the version E11's live sittings ran on (charter D-1 as amended, W13). Settings > Engine shows it, and a session on a newer engine gets one notice if it sends something MAWS does not understand ("Claude Code X is newer than the version MAWS was verified against (2.1.293); some events were not understood"). The installed engine is now 2.1.296, and P2's own live runs passed on 2.1.295 (A, E1) and 2.1.296 (C). The recorded fixtures keep their older pin, and a unit test requires the fixtures' version to be at most the tested one (src/engine-host/binary-info.test.ts); moving the tested version keeps that true. The product never refuses a version, so this changes only the notice and the Engine settings text. Accepting is a wave-S commit (engine-compat.ts and its comment, the Settings > Engine copy test) plus a section 19 line amending D-1/W13's tested version, after R1 to R4 pass on the final head. The alternative is to keep 2.1.293 until a dedicated live sitting re-records the fixtures.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+D13 The taste calls of step B — keep, fix now (wave S), or P3
+  Proposal (default answer): per call, as marked on each line; you mark each one. Source rows: docs/tech-debt-tracker.md.
+  Background: Step B puts these on screen beside Claude Desktop. Each is a tracker row waiting for your taste. "Fix now" means one wave-S commit before P2 closes; "P3" means recorded as deferred work.
+    L96 "after an answered blocking question ..." (E1 · to-human): in the report view, the agent's plain reply after you answer a blocking question is folded into the working record ("· 1 message") and shows only in the full transcript, so the answer's result can look missing (P2-C Design section 7 chose this). Keep: closes the row, the report stays as built. Fix now: the plain reply is drawn in the report view. P3: deferred.
+    L102 "an error seen in its open session leaves Needs you ..." (C3, taste): an error card leaves Needs you within about 500 ms of being seen in its open session, so a glance away can lose it before you read it (your 2026-10-08 decision 1 asked for clearing on view, an explicit Dismiss, and an "ended with an error" badge with the time on the row). Keep: as built. Fix now: require a dwell (the notice in view for a time) before it leaves; the attention unit suite and e2e:supervisor are updated. P3: deferred.
+    L147 "An element in the bottom part of the page that the strip takes ..." (P2-E2): with a comment card open in the browser, the strip under the page takes the page's bottom band, so an element there leaves the view while the caret still points at it. Keep: leave as is. Fix now: highlight the picked element on the page side, or scroll it into the shrunk view (you choose which). P3: deferred.
+    L155 "A lane-on session opens in the report view by default ..." (P2-F · E1): the report view does not draw E1's blocking-ask capsule, so the pane shows no inline record of an ask or its answer until you switch to the transcript (the Question sheet, Needs you and the Overview do carry it). Architect's recommendation: keep the report view as the default and draw the owner-directed ask as a card in the report (wave S), because the capsule's absence hides E1's affordance. The alternative, the transcript as the default, closes the row with no code but undoes P2-C Design section 7. P3: leave the gap and defer.
+    L156 "The view-toggle bar measures 35 px ..." (P2-C): the report bar measures 35 px in the app although C's document says 32 px. Keep: change the document to 35 px (no code). Fix now: make the bar 32 px. P3: deferred.
+  Answer: L96 [ ] keep  [ ] fix now  [ ] P3   |   L102 [ ] keep  [ ] fix now  [ ] P3   |   L147 [ ] keep  [ ] fix now (highlight / scroll)  [ ] P3   |   L155 [ ] keep report default + ask card (wave S)  [ ] transcript default  [ ] P3   |   L156 [ ] keep 35 px  [ ] fix now (32 px)  [ ] P3
+
+D14 macOS's "Quit and Keep Windows" (종료 및 윈도우 유지) — what it does in MAWS
+  Proposal (default answer): it maps to MAWS's keep option: the sessions kept running and the windows restored at the next launch.
+  Background: tracker row L113 (E10 · C12) recorded that on the development build you pressed "종료 및 윈도우 유지" expecting your sessions kept. That item is not MAWS's: it is macOS's own Option-key variant of Quit in the app menu (AppKit's MenuCommands.loctable: "Quit and Keep Windows" → ko "종료 및 윈도우 유지"), and MAWS treats it today as an ordinary quit, so the supervisor stopped and your sessions ended. W-H confirmed MAWS's own quit question offers "Quit and keep sessions running" whenever the host runs detached, which the development build does (a unit test pins it by host mode). The architect recommends the mapping because you reached for the system gesture that means exactly that. Accepting makes it one wave-S commit, promised only after it is verified that the menu item reaches Electron's quit path distinguishably (its selector or title is the hook). Overturning keeps today's behaviour: macOS's item quits ordinarily and MAWS's keep stays in its own quit question.
+  Answer: [ ] as proposed   [ ] otherwise: ____
+
+== E. Optional, your choice (P1's items that never ran on a signed build) ==
+E1 Voice in the signed app. The first mic click raises the Microphone dialog, then the Speech Recognition dialog (two TCC
+   dialogs). After allowing, say "hello world": greyed words that settle on the second click. Switch the language in
+   Settings > Voice and dictate in it. Dictation starts where your caret was, and a failed open of the dictation notice
+   raises a toast.
+E2 A commit, then a push of a throwaway branch and a draft PR, with your own credentials (close the PR and delete the branch
+   after).
+E3 One plugin installed, disabled, enabled and reloaded from MAWS.
+
+== F. The measure ==
+F1 What, if anything, still sends you to Claude Desktop or a terminal today? Write it in your own words in owner-results.txt.
+   The declaration itself comes a week later.
+
+== Coverage (the sitting rows of triage.txt and the architect's taste points, each mapped to the step that settles it) ==
+Sitting rows (docs/doperpowers/evidence/p2-finish/triage.txt):
+  L31  resume stall (needs the owner-profile keep-quit and relaunch) -> C4
+  L32  the catalogue key's environment approximation (Q1) -> D1
+  L36  separate-git-dir linked worktree as a project (Q3) -> D3
+  L37  sibling-worktree fold for separate-git-dir (Q3) -> D3
+  L53  Scheduled rows: the engine's English beside the app's dates (Q2) -> D2, and B5 shows the result
+  L57  the browser's 2 GiB soft cap counting held tabs (A-35) -> D8
+  L82  a side thread's launch carries no --max-budget-usd (Q12) -> D7
+  L96  the plain reply after an answered question folded away -> B4, answered at D13
+  L98  Korean under `cat` in a Terminal tab -> C1 (the Terminal.app comparison)
+  L102 the error card leaving Needs you within about 500 ms -> B6, answered at D13
+  L147 the strip hiding the picked element -> B3, answered at D13
+  L155 the report view as default, no ask capsule -> B4, answered at D13
+  L156 the report bar's 35 px against 32 px -> B4, answered at D13
+The architect's taste points for M4:
+  the report bar (32 px built, 35 px measured) -> B4
+  the report view as a lane-on session's default -> B4
+  the insight margin at 768 px and near 1280 px -> B4
+  B's copy strings -> B1 (and B2 for the chooser's)
+  D's dates on the system locale ("오후 2:05" beside "14:02") -> B5, with D2
+  E2's strip hiding the picked element -> B3
+  the TESTED_ENGINE_VERSION call -> D12
+Also carried: L104 -> A2.5, B1; L120 -> B3; L129 -> B5; L131 -> A4.5, B2; L95 -> A6; L146 -> A5b.2; L121 -> A3.5;
+  L99 -> A1.6; L113 -> C4, D14; P1's N2.7b -> pre.1; P1's N2.4b -> B6; section 9's all-accounts usage view -> B7;
+  Q5, Q7, Q11, A-36, P-23, A-37 -> D4, D5, D6, D9, D10, D11; Q12 and A-35 -> D7, D8.
