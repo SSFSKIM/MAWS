@@ -43,9 +43,9 @@ function positionOf(style: CardStyle): CSSProperties {
 
 // The corner touching the pin is squared (Desktop's card at its click point).
 // P2-F L148: in the browser's strip the card is in flow under the page, with 8 px of margin the strip clips at (its
-// half-column cap): it casts the in-flow card's shadow (the composer's), whose visible layer lies within that margin,
-// where the floating shadow's wide blurs were trimmed at the sides and bottom. Over a frame it floats.
-const shadowOf = (style: CardStyle) => (style.mode === 'strip' ? 'shadow-composer' : 'shadow-float');
+// half-column cap): it casts the strip's shadow, whose every layer reaches at most 8 px, where the floating shadow's wide
+// blurs (and the composer's 80 px light layer) were trimmed at the sides and bottom. Over a frame it floats.
+const shadowOf = (style: CardStyle) => (style.mode === 'strip' ? 'shadow-strip' : 'shadow-float');
 const cornerOf = (style: CardStyle, pinned: boolean) => (!pinned ? '' : style.mode === 'below' ? 'rounded-tl-none' : style.mode === 'above' ? 'rounded-bl-none' : '');
 
 interface Props {

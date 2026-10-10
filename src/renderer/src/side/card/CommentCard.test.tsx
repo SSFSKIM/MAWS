@@ -133,14 +133,14 @@ describe('the card’s placement', () => {
     expect(document.querySelector<HTMLElement>('[data-card-caret]')!.dataset.cardCaret).toBe('24'); // the pick's x
   });
 
-  // P2-F L148: the strip clips (its half-column cap) and gives the card 8 px of margin, where the floating shadow's 24 and
-  // 64 px blurs were trimmed at the sides and bottom; in the strip the card is in flow, so it takes the in-flow card's
-  // shadow (the composer's), whose visible layer lies within the margin. Anchored and docked over a frame, it floats.
-  it('in the strip the card casts the in-flow shadow, which fits its margin; over a frame the floating one', () => {
+  // P2-F L148: the strip clips (its half-column cap) and gives the card 8 px of margin. The floating shadow's 24 and 64 px
+  // blurs, and the composer's 80 px light layer, overflow it; the strip's own token reaches at most 8 px (e2e case 1
+  // measures the computed shadow against the strip in both themes). Anchored and docked over a frame, the card floats.
+  it('in the strip the card casts the strip’s shadow, which fits its margin; over a frame the floating one', () => {
     mount('docked');
     pick();
-    expect(card()!.className).toContain('shadow-composer');
-    expect(card()!.className).not.toContain('shadow-float');
+    expect(card()!.className).toContain('shadow-strip');
+    expect(card()!.className).not.toMatch(/shadow-(float|composer)/);
     cleanup();
     mount();
     pick();

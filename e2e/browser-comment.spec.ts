@@ -147,6 +147,19 @@ const toggleOf = (view: Locator): Locator => view.locator('[data-browser-comment
 // sheet; the card's form is the sheet's (`CommentFormParts`), so the sheet's locators find it.
 const cardOf = (s: BrowserScene, label: string): Locator => s.page.locator('[data-card-dock] [data-comment-card]').and(s.page.getByRole('dialog', { name: `Comment on ${label}` }));
 const commentNodes = (page: Page) => page.locator('maws-comment-shield, maws-comment-overlay, maws-comment-badge');
+// P2-F L148: the outer layers of a strip card's computed `box-shadow` that paint past the strip's box, which clips; each
+// layer reaches its offset plus its spread plus its blur from the card's edge
+const shadowOutsideStrip = (card: Locator) =>
+  card.evaluate((el) => {
+    const strip = el.closest('[data-card-dock]')!.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    const layers = getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map((layer) => layer.trim()).filter((layer) => layer !== 'none' && !layer.includes('inset'));
+    return layers.flatMap((layer) => {
+      const [x = 0, y = 0, blur = 0, spread = 0] = (layer.replace(/rgba?\([^)]*\)|#[0-9a-f]+/gi, '').match(/-?[\d.]+px/g) ?? []).map(parseFloat);
+      const past = { left: strip.left - (box.left + x - spread - blur), right: box.right + x + spread + blur - strip.right, top: strip.top - (box.top + y - spread - blur), bottom: box.bottom + y + spread + blur - strip.bottom };
+      return Object.values(past).some((px) => px > 0.5) ? [{ layer, past }] : [];
+    });
+  });
 
 type Rect = { x: number; y: number; width: number; height: number };
 const rectOf = (target: Locator): Promise<Rect> =>
@@ -332,6 +345,13 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     expect(cardBox.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);
     expect(cardBox.y + cardBox.height, 'inside the column').toBeLessThanOrEqual(fullPane.y + fullPane.height + 1);
     expect(near(cardBox.x, fullPane.x + 8, 1) && near(cardBox.width, fullPane.width - 16, 1), `the column’s width less 16 px: ${JSON.stringify(cardBox)}`).toBe(true);
+    // P2-F L148: the strip clips, so every outer layer of the card's computed shadow lies inside it, in both themes
+    for (const theme of THEMES) {
+      value(await invoke(s.page, 'settings.set', { theme }));
+      await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+      expect(await shadowOutsideStrip(card), `${theme}: the card's shadow past the strip's edges`).toEqual([]);
+    }
+    value(await invoke(s.page, 'settings.set', { theme: 'light' }));
 
     // the crop is removable with one click (A-31)
     await chip.getByRole('button', { name: 'Remove screenshot' }).click();
