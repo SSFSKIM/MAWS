@@ -9,6 +9,11 @@ import { pauseTakeOver, until } from './pause-take-over';
 import { readProcesses, type PaneProcess } from './pane-holder';
 
 // Real job control and line editors, no owner profiles, config, history or engine. sleep is the CLI stand-in.
+// Every wait, the test's and the transaction's (`waitMs`), polls the shell's own readiness (its prompt, the typed line
+// echoed, the job's state and foreground group in `ps`) and returns the moment it holds; READY_MS bounds only how long
+// a shell slowed by the machine's load may take to get there, so the product's 3 s budget (PAUSE_WAIT_MS) is not what
+// these cases measure. They run in vitest.config.ts's node-timing project (30 s per case).
+const READY_MS = 10_000;
 it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].map((cursor) => ({ shell, cursor }))))(
   'clears an unfinished line at $cursor in $shell emacs mode before returning the CLI to the foreground',
   async ({ shell, cursor }) => {
@@ -24,7 +29,7 @@ it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].
     pty.onData((data) => { output += data; });
     const exited = new Promise<void>((resolve) => pty.onExit(() => resolve()));
     let holder: PaneProcess | undefined;
-    const wait = async (test: () => Promise<boolean>) => expect(await until(test, 3_000, 25), output).toBe(true);
+    const wait = async (test: () => Promise<boolean>) => expect(await until(test, READY_MS, 25), output).toBe(true);
     try {
       await wait(async () => output.includes('READY> '));
       pty.write(`${shell.endsWith('bash') ? 'set -o emacs' : 'bindkey -e'}; /bin/sleep 60\n`);
@@ -53,7 +58,7 @@ it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].
           await wait(async () => output.includes('unintended'));
           throw new Error('simulated resume refusal');
         },
-        waitMs: 3_000, pollMs: 25,
+        waitMs: READY_MS, pollMs: 25,
       }, { appSessionId: 'scratch' as AppSessionId, engineSessionId: 'scratch' as SessionId }, target);
       expect(result).toMatchObject({ status: 'refused', message: expect.stringContaining('back in the foreground') });
       const restored = (await readProcesses()).get(holder!.pid)!;
@@ -66,12 +71,12 @@ it.each(['/bin/bash', '/bin/zsh'].flatMap((shell) => ['start', 'middle', 'end'].
         if (p.ppid === pty.pid) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* already exited */ } }
       }
       pty.write('\x03\x15\x0bwait; exit\n');
-      const timeout = setTimeout(() => pty.kill('SIGKILL'), 3_000);
+      const timeout = setTimeout(() => pty.kill('SIGKILL'), READY_MS);
       await exited;
       clearTimeout(timeout);
       if (holder) expect((await readProcesses()).has(holder.pid)).toBe(false);
       vi.unstubAllEnvs();
       rmSync(home, { recursive: true, force: true });
     }
-  }, 15_000,
+  },
 );

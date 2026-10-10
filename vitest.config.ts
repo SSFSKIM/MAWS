@@ -31,6 +31,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
   'src/main/git/watcher.test.ts',
   'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service
+  'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
