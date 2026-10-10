@@ -268,4 +268,25 @@ describe('the comment card’s dock', () => {
     expect(useCommentCard.getState().open).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comment' }));
   });
+
+  it('Escape in the docked card gives focus to the chrome’s address field while the Comment toggle is disabled', async () => {
+    render(
+      <div data-browser-view="panel">
+        <div data-address-box="">
+          <input role="combobox" aria-label="Address" />
+        </div>
+        <button type="button" data-browser-comment="" disabled>
+          Comment
+        </button>
+        <BrowserPane tab={tab()} surface="panel" />
+      </div>,
+    );
+    await frames();
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)! } }));
+    const field = screen.getByRole('textbox', { name: 'Comment' });
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(useCommentCard.getState().open).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Address' }));
+  });
 });

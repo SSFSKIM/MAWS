@@ -122,8 +122,14 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
   const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId }), [tabId]);
   const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
-  // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick
-  const restoreFocus = () => element.current?.closest('[data-browser-view]')?.querySelector<HTMLElement>('[data-browser-comment]')?.focus({ preventScroll: true });
+  // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick, or its address
+  // field while the toggle is disabled (the agent took the page)
+  const restoreFocus = () => {
+    const view = element.current?.closest('[data-browser-view]');
+    const toggle = view?.querySelector<HTMLButtonElement>('[data-browser-comment]');
+    const target = toggle && !toggle.disabled ? toggle : view?.querySelector<HTMLElement>('[data-address-box] input');
+    target?.focus({ preventScroll: true });
+  };
 
   return (
     <div data-browser-column="" className="flex h-full w-full flex-col">

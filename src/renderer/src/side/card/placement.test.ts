@@ -94,10 +94,17 @@ describe('stripCard', () => {
 
 describe('caretOf', () => {
   const COLUMN = { width: 600, height: 800 };
-  it('stands under the pin’s x, kept on the card’s straight top edge', () => {
+  it('stands under the pin’s x, kept on the card’s own top edge (its 8 px margin plus half the caret’s square)', () => {
     expect(caretOf({ x: 250, y: 90, top: 60 }, COLUMN)).toBe(250);
-    expect(caretOf({ x: 0, y: 90, top: 60 }, COLUMN)).toBe(20);
-    expect(caretOf({ x: 900, y: 90, top: 60 }, COLUMN)).toBe(580);
+    expect(caretOf({ x: 14, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 586, y: 90, top: 60 }, COLUMN)).toBe(586);
+    expect(caretOf({ x: 0, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 900, y: 90, top: 60 }, COLUMN)).toBe(586);
+  });
+  it('keeps the caret inside an element only partly visible at the viewport’s edge', () => {
+    // main pins a visible span 0..16 at its centre, 8; the caret's 12 px square at 14 spans 8..20, over the span
+    expect(caretOf({ x: 8, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 592, y: 90, top: 60 }, COLUMN)).toBe(586);
   });
   it('is none without a pin or with a non-finite x', () => {
     expect(caretOf(null, COLUMN)).toBeNull();

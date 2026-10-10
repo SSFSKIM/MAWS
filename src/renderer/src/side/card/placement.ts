@@ -61,14 +61,16 @@ export function stripCard(column: Box): CardStyle {
 // (its padding, border and margin) the strip clips the card rather than take the page's half.
 export const stripMax = (column: Box): number => Math.floor(column.height / 2);
 
-const CARET_INSET = 12; // the caret stays on the card's straight top edge, clear of its rounded corners
+const CARET_HALF = 6; // half the caret's 12 px square (CardHost's `Caret`)
 
-// P2-E2: the caret's x in the strip (whose left edge is the view's), under the pin and kept on the card's top edge; null
-// with no pin or a non-finite one.
+// P2-E2: the caret's x in the strip (whose left edge is the view's), under the pin and kept on the card's own top edge
+// (the card's margin plus half the caret), no further in: main pins an element cut by the viewport's edge at its visible
+// span's centre, which can lie within 16 px of the edge, and a caret held clear of the card's rounded corner would stand
+// outside that span; null with no pin or a non-finite one.
 export function caretOf(pin: CardPin | null, column: Box): number | null {
   if (pin === null || !Number.isFinite(pin.x)) return null;
-  const min = INSET + CARET_INSET;
-  return clamp(pin.x, min, Math.max(min, column.width - INSET - CARET_INSET));
+  const min = INSET + CARET_HALF;
+  return clamp(pin.x, min, Math.max(min, column.width - INSET - CARET_HALF));
 }
 
 // D4's table, row by row.
