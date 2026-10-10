@@ -10,6 +10,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
+import { formatClock } from '../app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -174,14 +175,15 @@ describe('overview board', () => {
 // C12 start: the released mark on a card (C12 execution document, Interfaces "Surfaces of the budget"): the card stays on
 // the board in its idle presentation with one muted word.
 describe('a released session’s card', () => {
+  const AT_RELEASE = new Date(2026, 8, 29, 14, 2).toISOString();
   it('stays on the board, idle, with the muted word released', () => {
     const id = idOf('Settings idle probe');
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: new Date(2026, 8, 29, 14, 2).toISOString(), reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
     expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');
-    expect(within(released).getByText('released').getAttribute('title')).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(within(released).getByText('released').getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(AT_RELEASE))} to stay under the 8 GB memory budget · Send resumes it`);
     expect(cardTitles(group('Needs you'))).not.toContain('Settings idle probe');
   });
 });

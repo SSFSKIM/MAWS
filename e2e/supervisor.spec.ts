@@ -33,6 +33,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
+import { CLOCK } from './support/clock'; // L129
 
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs under pnpm e2e:supervisor (MAWS_SUPERVISOR_E2E=1)');
 
@@ -619,7 +620,7 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
 
     await menu(run.maws, 'settings.open');
     const group = run.page.getByRole('group', { name: 'Background supervisor' });
-    await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since \\d\\d:\\d\\d · pid ${old} · 1 session · exits 10 min after the last session ends$`));
+    await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`));
     await shots(run.maws, 'settings-supervisor', () => group);
 
     await group.getByRole('button', { name: 'Stop all sessions and the supervisor…' }).click();

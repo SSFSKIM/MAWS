@@ -10,8 +10,10 @@ import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
 import { describeSupervisor, SupervisorRow } from './SupervisorRow';
+import { formatClock } from './date-format'; // L129
 
-const AT = new Date(2026, 9, 6, 14, 2).toISOString(); // 14:02 local
+const AT = new Date(2026, 9, 6, 14, 2).toISOString();
+const CLOCK = formatClock(Date.parse(AT)); // L129: the system locale's clock
 const crashed = (over: Partial<HostStatus> = {}) => hostStatus({ state: 'crashed', supervisor: null, matches: null, ...over });
 
 describe('the supervisor row’s text', () => {
@@ -45,11 +47,11 @@ describe('the supervisor row’s text', () => {
   it('reads the states between and after supervisors, with the last unexpected exit', () => {
     expect(describeSupervisor(hostStatus({ state: 'starting', supervisor: null, matches: null }))).toBe('supervisor · detached · starting · no unexpected exit');
     expect(describeSupervisor(crashed({ reason: 'held_lock' }))).toBe('supervisor · detached · not running · another supervisor holds its lock and does not answer · no unexpected exit');
-    expect(describeSupervisor(crashed({ lastExit: { code: 1, signal: null, at: AT, interrupted: 2 } }))).toBe('supervisor · detached · not running · last unexpected exit 14:02 (exit 1) · 2 interrupted');
+    expect(describeSupervisor(crashed({ lastExit: { code: 1, signal: null, at: AT, interrupted: 2 } }))).toBe(`supervisor · detached · not running · last unexpected exit ${CLOCK} (exit 1) · 2 interrupted`);
     expect(describeSupervisor(hostStatus({ state: 'restarting', supervisor: null, matches: null, lastExit: { code: null, signal: 'SIGKILL', at: AT, interrupted: 1 } }))).toBe(
-      'supervisor · detached · restarting · last unexpected exit 14:02 (SIGKILL) · 1 interrupted',
+      `supervisor · detached · restarting · last unexpected exit ${CLOCK} (SIGKILL) · 1 interrupted`,
     );
-    expect(describeSupervisor(hostStatus({ lastExit: { code: null, signal: null, at: AT, interrupted: 0 } }))).toContain('· last unexpected exit 14:02 · 0 interrupted');
+    expect(describeSupervisor(hostStatus({ lastExit: { code: null, signal: null, at: AT, interrupted: 0 } }))).toContain(`· last unexpected exit ${CLOCK} · 0 interrupted`);
   });
 });
 

@@ -24,6 +24,7 @@ import { useResumeChooser } from '../resume/host'; // P2-D
 import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
 import { Sidebar } from './Sidebar';
+import { formatClock } from '../app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -918,7 +919,7 @@ describe('a released session’s row', () => {
     expand('proj-claude-usage-menubar');
     render(<Sidebar />);
     const mark = within(row('Settings idle probe')).getByText('released');
-    expect(mark.getAttribute('title')).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(mark.getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(at))} to stay under the 8 GB memory budget · Send resumes it`);
     expect(within(row('Settings idle probe')).getByRole('img', { name: 'Idle' }).textContent).toBe('○'); // the idle glyph, unchanged
     expect(within(row('Settings idle probe')).queryByLabelText('Unread')).toBeNull();
     expect(screen.getAllByText('released')).toHaveLength(1);

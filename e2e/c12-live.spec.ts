@@ -27,6 +27,7 @@ import { c12LiveSkipReason, c12Scratch, lsPin, ownerFileCheck, psRead, spend, tr
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
+import { CLOCK } from './support/clock'; // L129
 
 const skip = c12LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -400,7 +401,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       await page.getByRole('menuitem', { name: 'Session info' }).click();
       const info = page.locator(`[data-session-info="${ids.B1}"]`);
       const dd = (term: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
-      await expect(dd('Process')).toHaveText(/^Released at \d\d:\d\d to stay under [\d.]+ GB$/);
+      await expect(dd('Process')).toHaveText(new RegExp(String.raw`^Released at ${CLOCK} to stay under [\d.]+ GB$`));
       record('releasedSurfaces', {
         released, markTitle, sessionInfo: { process: await dd('Process').innerText(), memoryBudget: await dd('Memory budget').innerText() },
         attention: { before: attentionBefore.map((a) => a.id), after: attentionAfter.map((a) => a.id) }, notified: { before: notifiedBefore, after: notifiedAfter },

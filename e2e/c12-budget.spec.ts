@@ -14,6 +14,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page, type T
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { projectRow, sidebarRow } from './support/sidebar';
+import { CLOCK } from './support/clock'; // L129
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the budget replay runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -67,7 +68,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await advanceTo(app, 2000);
     const mark = row.getByText('released', { exact: true });
     await expect(mark).toBeVisible();
-    await expect(mark).toHaveAttribute('title', /^Released at \d\d:\d\d to stay under the 2 GB memory budget · Send resumes it$/);
+    await expect(mark).toHaveAttribute('title', new RegExp(`^Released at ${CLOCK} to stay under the 2 GB memory budget · Send resumes it$`));
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
     await expect(row.getByLabel('Unread')).toHaveCount(0);
     // W5: the Overview floats over the main area from the toolbar's button rather than showing as the first tab.
@@ -100,7 +101,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await page.getByRole('menuitem', { name: 'Session info' }).click();
     const info = page.locator(`[data-session-info="${RELEASED}"]`);
     await expect(dd(info, 'Memory budget')).toHaveText('2.6 GB of 2 GB · 3 sessions');
-    await expect(dd(info, 'Process')).toHaveText(/^Released at \d\d:\d\d to stay under 2 GB$/);
+    await expect(dd(info, 'Process')).toHaveText(new RegExp(`^Released at ${CLOCK} to stay under 2 GB$`));
     await shoot(page, testInfo, 'session-info');
 
     // The host's second sample over budget with no candidate: one banner.

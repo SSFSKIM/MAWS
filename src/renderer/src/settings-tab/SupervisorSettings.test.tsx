@@ -13,10 +13,12 @@ import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { EngineSection } from './EngineSection';
 import { SupervisorSettings } from './SupervisorSettings';
+import { formatClock } from '../app/date-format';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
 
-const STARTED = new Date(2026, 9, 6, 14, 2).toISOString(); // 14:02 local
+const STARTED = new Date(2026, 9, 6, 14, 2).toISOString();
+const CLOCK = formatClock(Date.parse(STARTED)); // L129: the system locale's clock
 const supervisor = (over: Partial<SupervisorStatus> = {}): SupervisorStatus => ({
   mode: 'detached',
   pid: 48213,
@@ -83,17 +85,17 @@ afterEach(() => {
 describe('the status line, from host.status', () => {
   it('reads running since, the pid, the live count and the idle exit the supervisor holds', async () => {
     await renderGroup();
-    await statusLine('Running since 14:02 · pid 48213 · 3 sessions · exits 10 min after the last session ends');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
     expect(b.calls.map((c) => c.name)).toContain('host.status');
   });
 
   it('says one session, never for no idle exit, and when it exits with its last session (exit-when-idle armed)', async () => {
     await renderGroup(status({ supervisor: supervisor({ liveSessions: 1, idleExitMs: null }) }));
-    await statusLine('Running since 14:02 · pid 48213 · 1 session · never exits on its own');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · 1 session · never exits on its own`);
     event(status({ supervisor: supervisor({ liveSessions: 0, exitWhenIdle: true }) }));
-    await statusLine('Running since 14:02 · pid 48213 · no sessions · exits when its last session ends');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · no sessions · exits when its last session ends`);
     event(status({ supervisor: supervisor({ idleExitMs: 1_500 }) })); // the e2e seam pushes seconds
-    await statusLine('Running since 14:02 · pid 48213 · 3 sessions · exits 2 s after the last session ends');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 2 s after the last session ends`);
   });
 
   it('reads Starting, Restarting and Not running, and inside the app in utility mode', async () => {
@@ -119,7 +121,7 @@ describe('the status line, from host.status', () => {
     await statusLine('Not running · another supervisor holds its lock and does not answer');
     expect(within(row('Status')).getByRole('button', { name: 'Restart now' })).toBeTruthy();
     event(status());
-    await statusLine('Running since 14:02 · pid 48213 · 3 sessions · exits 10 min after the last session ends');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
     expect(within(row('Status')).queryByRole('button')).toBeNull();
   });
 
@@ -327,6 +329,6 @@ describe('inside Settings › Engine', () => {
     expect(within(group).getByRole('group', { name: 'Exit when idle' })).toBeTruthy();
     expect(within(group).getByRole('group', { name: 'When quitting with work in flight' })).toBeTruthy();
     expect(within(group).getByRole('group', { name: 'Stop all' })).toBeTruthy();
-    await statusLine('Running since 14:02 · pid 48213 · 3 sessions · exits 10 min after the last session ends');
+    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
   });
 });

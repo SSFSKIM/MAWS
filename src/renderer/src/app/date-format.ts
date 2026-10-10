@@ -1,7 +1,7 @@
 // Dates and times as the system writes them: the renderer's words are English and its dates and times follow the
 // system locale, as macOS and the rest of MAWS do (the architect's ruling for P2-D, 2026-10-09; the owner runs a Korean
 // locale). One formatter per shape, built once. Relative ages ("2h", "2 hours ago") are `sidebar/derive.ts`'s
-// `formatAge` and `relative-age.ts`; the budget's 24-hour `clockTime` (budget/copy.ts) is its own fixed format.
+// `formatAge` and `relative-age.ts`; the budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129).
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const WEEKDAY_CLOCK = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const SHORT_DATE = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });

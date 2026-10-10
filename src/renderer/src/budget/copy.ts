@@ -2,6 +2,7 @@
 // §4.4 as amended by D1): the released mark on a row and a card, Session info's two lines, the banner, the blocked
 // sessions sheet and the stop sheet. A release is quiet (D-18, §5.7): these words inform, they never ask.
 import type { EngineSessionStatus, HardReason } from '@shared/engine/status';
+import { formatClock } from '../app/date-format';
 
 const KIB_PER_GB = 1024 * 1024;
 
@@ -11,10 +12,10 @@ export function gb(kib: number): string {
   return `${Number.isInteger(tenths) ? tenths.toFixed(0) : tenths.toFixed(1)} GB`;
 }
 
-// A clock time on the host's day, 24-hour: 14:02.
+// A clock time on the host's day, as the system locale writes it (2:02 PM; 오후 2:02): one clock with every other time
+// the app shows (L129, Q2's ruling proposed at P2-F: the app's dates and times follow the system locale).
 export function clockTime(iso: string): string {
-  const at = new Date(iso);
-  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  return formatClock(Date.parse(iso));
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
