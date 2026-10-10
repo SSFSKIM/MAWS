@@ -89,8 +89,8 @@ export interface AttentionService {
   readonly ready: Promise<void>; // the persisted items are loaded (pending while every load attempt fails)
   list(): AttentionItem[];
   // P2-C (2026-10-09): the owner channel's items for a session, whole (replacing its last projection); `silent` ids join
-  // `restoredIds` before the change is emitted, so the notifier announces none of them. Ignored for a session archived
-  // in this run.
+  // `restoredIds` before the change is emitted, so the notifier announces none of them. Taken as given: the producer
+  // supplies a live, archive-aware projection (empty while the session is archived, its items again once unarchived).
   setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   settled(): Promise<void>; // every change so far has reached the store
   stop(): void;
