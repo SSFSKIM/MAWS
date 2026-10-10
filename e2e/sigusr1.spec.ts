@@ -15,7 +15,7 @@ import { expect, test } from '@playwright/test';
 import { writeReplayEngine } from '../test/support/replay-engine';
 import { writeScratchShellHome } from '../test/support/shell-home';
 import { REPO_ROOT } from './support/launch';
-import { isAlive, killScratchProcesses, tcpListeners } from './support/processes';
+import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, tcpListeners } from './support/processes';
 import { launchEnvironment } from './support/scratch-env';
 
 test('a same-user SIGUSR1 opens no inspector in MAWS main', async () => {
@@ -38,12 +38,13 @@ test('a same-user SIGUSR1 opens no inspector in MAWS main', async () => {
   try {
     // main is past its entry once the browser has made the cua socket directory
     await expect.poll(() => existsSync(join(userData, 'browser', 'cua')), { timeout: 30_000, message: 'main started its browser' }).toBe(true);
+    expect(inspectorPortHolders(), 'something already listens on 127.0.0.1:9229: free it, or an inspector could not bind and this check would pass falsely').toEqual([]);
     const before = tcpListeners(pid);
     process.kill(pid, 'SIGUSR1');
     await new Promise((settle) => setTimeout(settle, 1_500));
     expect(isAlive(pid), 'main survives SIGUSR1').toBe(true);
     expect(tcpListeners(pid), 'no inspector opened in main').toEqual(before);
-    expect(stderr).not.toContain('Debugger listening');
+    expect(stderr, 'no inspector started or tried to start').not.toMatch(INSPECTOR_LINE);
   } finally {
     // main lingers on SIGTERM (no handler of its own), so it is killed; its helpers name the profile and are swept
     child.kill('SIGKILL');

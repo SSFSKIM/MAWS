@@ -394,7 +394,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         privateDirectory(dir);
         logFd = fs.openSync(join(dir, SUPERVISOR_FILES.log), 'a', 0o600);
         fs.fchmodSync(logFd, 0o600);
-        const child = spawn(process.execPath, [options.modulePath, '--detached', dir], {
+        // `--disable-sigusr1`: a same-user SIGUSR1 opens no Node inspector in the supervisor from exec on, before its
+        // entry's listener runs (cua spec 2026-10-09-maws-socket-peer-auth-design.md, Decision Log 2026-10-10)
+        const child = spawn(process.execPath, ['--disable-sigusr1', options.modulePath, '--detached', dir], {
           detached: true, // its own session and process group: no terminal's SIGHUP or app exit reaches it
           stdio: ['ignore', logFd, logFd], // not connected to main, so it outlives main
           env: supervisorEnv(options.env?.() ?? process.env, { userData, packaged: options.packaged() }),

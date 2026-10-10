@@ -66,3 +66,17 @@ export function tcpListeners(pid: number): string[] {
     return []; // lsof exits 1 when nothing matches
   }
 }
+
+// The pids listening on 127.0.0.1:9229, Node's default inspector address; [] for none. A SIGUSR1 check needs it free:
+// an unprotected process whose inspector cannot bind prints "Starting inspector on 127.0.0.1:9229 failed" and adds no
+// listener, which would pass for no inspector.
+export function inspectorPortHolders(): number[] {
+  try {
+    return execFileSync('lsof', ['-nP', '-iTCP@127.0.0.1:9229', '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number);
+  } catch {
+    return []; // lsof exits 1 when nothing matches
+  }
+}
+
+// An inspector's start or its failed start, in a process's output.
+export const INSPECTOR_LINE = /Starting inspector|Debugger listening/;
