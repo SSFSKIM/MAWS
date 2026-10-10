@@ -19,7 +19,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { TRUST_FIRST } from '../../sessions/acquire';
 import { OwnerReport } from './OwnerReport';
 import { ReportBar } from './ReportBar';
-import { reportOf } from './answering';
+import { reportOf, resetUnreportedAnswers } from './answering';
 
 const hold = vi.hoisted(() => ({
   client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null,
@@ -55,6 +55,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetOwnerChannelStore();
+  resetUnreportedAnswers();
   useSessions.setState({ records: new Map(), engine: new Map() });
   useComposerStore.setState({ focusTargets: new Map() });
   useNotices.setState({ notices: [] });
@@ -299,6 +300,41 @@ describe('a report main never got is said on the card and can be made again, wit
     expect(focusFrame).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reply' }));
     expect(screen.getByRole('alert').textContent).toContain('Sent, but MAWS couldn’t record it: the bridge is gone');
+  });
+
+  it('outlives its card: a card scrolled out of the transcript and back still says it and can make it again', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    seam({ disposition: 'queued', started: false, queueId: 'q-7' });
+    failing('ownerChannel.answered', 'envelope');
+    const first = draw();
+    fireEvent.click(choice(/^Postgres/));
+    await settle();
+    first.unmount(); // the transcript mounts only the rows in view
+    draw();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Sent, but MAWS couldn’t record it: the index is unavailable');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Record again' }));
+    await settle();
+    expect(sends).toHaveLength(1);
+    expect(reports()).toHaveLength(2);
+    expect(reports()[1]).toEqual(reports()[0]); // its queueId included, for main to follow and Cancel
+    expect(reports()[1]!.queueId).toBe('q-7');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a send still out when its card leaves the view is kept when its report fails', async () => {
+    withMarks([question({ state: 'unanswered' })]);
+    let answer!: (result: HumanPromptResult) => void;
+    seam(() => new Promise<HumanPromptResult>((resolve) => (answer = resolve)));
+    failing('ownerChannel.answered', 'reject', 'the bridge is gone');
+    const first = draw();
+    fireEvent.click(choice(/^Postgres/));
+    first.unmount();
+    await act(async () => answer({ disposition: 'sent', started: false, messageUuid: 'u-11' as MessageUuid }));
+    await settle();
+    draw();
+    expect(screen.getByRole('alert').textContent).toContain('Sent, but MAWS couldn’t record it: the bridge is gone');
+    expect(screen.getByRole('button', { name: 'Record again' })).toBeTruthy();
   });
 
   it('a refusal whose report failed is still said on the card, with nothing to record', async () => {

@@ -8,8 +8,11 @@
 // session has no ready process and the send acquires it first (P2-A). After a Reply the session's composer takes the
 // keyboard, its draft untouched. Cancel and Mark read are main's commands. No action's failure escapes or goes unsaid:
 // a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is said where it was asked,
-// and a sent answer whose report failed is kept so that the report alone can be made again, never the prompt.
+// and a sent answer whose report failed is kept so that the report alone can be made again, never the prompt. It is
+// kept outside the card, since the transcript mounts only the rows in view: a card scrolled away and back, or one that
+// left while its send was out, still says it and can make it again.
 import { useState } from 'react';
+import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, MawsBridge } from '@shared/ipc/schema';
 import { answerText } from '@shared/owner/answer';
@@ -91,6 +94,20 @@ export interface Answering {
 // Kept until main has the report: through a Record again in flight too, so nothing offers to send the answer again
 interface Unreported { report: AnswerReport; error: string; recording: boolean }
 
+// Each question's kept report, by its mark (a mark id names its session), for the life of the window
+const useUnreported = create<{ byMark: ReadonlyMap<MarkId, Unreported> }>(() => ({ byMark: new Map() }));
+function setUnreportedOf(markId: MarkId, update: (now: Unreported | null) => Unreported | null) {
+  useUnreported.setState(({ byMark }) => {
+    const next = update(byMark.get(markId) ?? null);
+    if (next === (byMark.get(markId) ?? null)) return { byMark };
+    const changed = new Map(byMark);
+    if (next === null) changed.delete(markId);
+    else changed.set(markId, next);
+    return { byMark: changed };
+  });
+}
+export const resetUnreportedAnswers = () => useUnreported.setState({ byMark: new Map() });
+
 // A question's actions for its card: null without a mark main knows (a block still streaming, or not derived yet),
 // since main can follow only a question it has.
 export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId | null, head: string, client: MawsBridge = ipc): Answering {
@@ -98,7 +115,7 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
   const [busy, setBusy] = useState<Answering['busy']>(null);
   const [note, setNote] = useState<string | null>(null);
   const [last, setLast] = useState<AnswerSend | null>(null);
-  const [unreported, setUnreported] = useState<Unreported | null>(null);
+  const unreported = useUnreported((s) => (markId === null ? null : (s.byMark.get(markId) ?? null)));
   if (markId === null) return { actions: {}, busy: null, note: null, unreported: null };
 
   const send = async (answer: AnswerSend): Promise<AnswerOutcome | null> => {
@@ -116,7 +133,7 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
       if (result.disposition === 'held') setNote(QUESTION.held(result.reason));
       // a sent answer main never heard of is kept until its report is made; a newer sent answer's report supersedes it
       // (the older prompt is still the engine's, and main's legacy recognition reads it, Design §6)
-      if (wentOut(result)) setUnreported(outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported, recording: false });
+      if (wentOut(result)) setUnreportedOf(markId, () => outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported, recording: false });
       return outcome;
     } finally {
       setBusy(null);
@@ -127,9 +144,9 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
   const recordAgain = async (pending: Unreported) => {
     if (pending.recording) return;
     const mine = (now: Unreported | null) => now?.report === pending.report;
-    setUnreported((now) => (mine(now) ? { ...pending, recording: true } : now));
+    setUnreportedOf(markId, (now) => (mine(now) ? { ...pending, recording: true } : now));
     const error = await reportAnswer(pending.report, client);
-    setUnreported((now) => (!mine(now) ? now : error === null ? null : { ...pending, error, recording: false }));
+    setUnreportedOf(markId, (now) => (!mine(now) ? now : error === null ? null : { ...pending, error, recording: false }));
   };
   const foreign = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holder : null;
 
