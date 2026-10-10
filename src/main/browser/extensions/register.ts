@@ -68,7 +68,8 @@ export function registerExtensionHandlers({ store, actions, popups, pages, menus
     'browser.extensions.action.click',
     known(({ tabId, extensionId, anchor }) => {
       const entry = store.require(tabId);
-      if (loaded(entry, extensionId).hasPopup) popups.open(entry, extensionId, anchor);
+      const action = loaded(entry, extensionId);
+      if (action.hasPopup && !action.inert) popups.open(entry, extensionId, anchor);
     }),
   );
   register(

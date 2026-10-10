@@ -13,7 +13,7 @@
 // within the extension's own origin.
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { Extension, Session } from 'electron';
-import { EXTENSION_ICON_MAX_BYTES, EXTENSION_ICON_SIZE, type ExtensionAction } from '@shared/browser/extensions';
+import { EXTENSION_ICON_MAX_BYTES, EXTENSION_ICON_SIZE, extensionBackgroundFailure, type ExtensionAction } from '@shared/browser/extensions';
 import { IMPORT_NAME_MAX } from '@shared/browser/import';
 import { readCappedBytesNoFollow } from '../import/chrome/read-capped';
 import type { BrowserEmit } from '../tabs';
@@ -99,7 +99,7 @@ export async function readExtensionIcon(extensionPath: string, path: string): Pr
 // loosely: `id` is Electron's loaded id, `chromeId` Chrome's directory id when Electron derived another).
 export interface ActionRecord {
   partition: string;
-  extensions?: readonly { id: string; name: string; chromeId?: string | null }[];
+  extensions?: readonly { id: string; name: string; chromeId?: string | null; background?: string; backgroundError?: string | null }[];
 }
 
 // An action and where its pages are, for the popup and the options tab.
@@ -153,13 +153,14 @@ export class ExtensionActions {
   // `browser.extensions.actions`: the partition's loaded extensions as actions, in Settings' order.
   async list(partition: string): Promise<ExtensionAction[]> {
     return Promise.all(
-      this.loaded(partition).map(async ({ extensionId, name, title, hasPopup, hasOptions, iconPath, path }) => ({
+      this.loaded(partition).map(async ({ extensionId, name, title, hasPopup, hasOptions, inert, iconPath, path }) => ({
         extensionId,
         name,
         title,
         icon: iconPath === null ? null : await this.readIcon(path, iconPath).catch(() => null),
         hasPopup,
         hasOptions,
+        inert,
       })),
     );
   }
@@ -204,8 +205,9 @@ export class ExtensionActions {
       const manifest = readManifestAction(extension.manifest);
       const popupUrl = extensionPageUrl(extension.url, manifest.popup);
       const optionsUrl = extensionPageUrl(extension.url, manifest.options);
+      const inert = entry.background === 'failed' ? extensionBackgroundFailure(entry.backgroundError ?? null) : null;
       const name = entry.name.slice(0, IMPORT_NAME_MAX);
-      return [{ extensionId: extension.id, name, title: (manifest.title ?? name).slice(0, IMPORT_NAME_MAX), hasPopup: popupUrl !== null, hasOptions: optionsUrl !== null, popupUrl, optionsUrl, iconPath: manifest.icon, path: extension.path }];
+      return [{ extensionId: extension.id, name, title: (manifest.title ?? name).slice(0, IMPORT_NAME_MAX), hasPopup: popupUrl !== null, hasOptions: optionsUrl !== null, inert, popupUrl, optionsUrl, iconPath: manifest.icon, path: extension.path }];
     });
   }
 }

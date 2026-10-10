@@ -78,6 +78,20 @@ const action = (id: string) => document.querySelector<HTMLButtonElement>(`[data-
 const puzzle = () => document.querySelector<HTMLButtonElement>('[data-extensions-puzzle]');
 
 describe('the extensions action bar', () => {
+  it('mutes a background-failed action even with a declared popup, explains it, and retains its right-click menu', async () => {
+    actions[0] = { ...actions[0]!, inert: 'Loaded · background failed: unsupported API' };
+    show();
+    await vi.waitFor(() => expect(bar()).not.toBeNull());
+    const button = action(PROBE);
+    expect(button.getAttribute('aria-description')).toBe(actions[0]!.inert);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.querySelector('.opacity-50')).not.toBeNull();
+    fireEvent.click(button);
+    expect(main.callsOf('browser.extensions.action.click')).toEqual([]);
+    fireEvent.contextMenu(button);
+    expect(main.callsOf('browser.extensions.action.menu')).toHaveLength(1);
+  });
+
   it('shows each action right of the address field, its icon or the puzzle piece, its title as the tooltip', async () => {
     show();
     await vi.waitFor(() => expect(bar()).not.toBeNull());

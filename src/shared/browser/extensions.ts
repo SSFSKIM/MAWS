@@ -5,7 +5,7 @@
 // Settings' order of the profile's extensions, recomputed on every load and unload and never persisted. Every string
 // here is the extension's own and is shown as text; the icon only as an image.
 import * as z from 'zod';
-import { ExtensionIdSchema, IMPORT_NAME_MAX } from './import';
+import { ExtensionIdSchema, IMPORT_NAME_MAX, IMPORT_TEXT_MAX } from './import';
 
 export const EXTENSION_ICON_SIZE = 32; // px: the icon picked is the largest at or under this
 export const EXTENSION_ICON_MAX_BYTES = 256 * 1024; // an icon file larger than this is no icon
@@ -23,9 +23,14 @@ export const ExtensionActionSchema = z.strictObject({
   title: z.string().max(IMPORT_NAME_MAX), // the action's `default_title`, else the name
   icon: z.string().startsWith('data:image/').max(ICON_DATA_URL_MAX).nullable(), // null: the generic puzzle piece
   hasPopup: z.boolean(), // a `default_popup` MAWS hosts under the icon; false: the button is present but inert
+  inert: z.string().max(IMPORT_TEXT_MAX + 32).nullable().optional(), // cua #103: the import report's background failure; absent on older producers
   hasOptions: z.boolean(), // `options_ui.page` or `options_page`, opened as an internal tab
 });
 export type ExtensionAction = z.infer<typeof ExtensionActionSchema>;
 
 // The title an extension's options tab shows, in its tab and in its address field.
 export const optionsTabTitle = (name: string): string => `${name} · Options`;
+
+// cua #103: one failure sentence in the import report and the action's menu/tooltip.
+export const extensionBackgroundFailure = (error: string | null): string =>
+  error === null ? 'Loaded · background failed' : `Loaded · background failed: ${error}`;

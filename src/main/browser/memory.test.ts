@@ -1,7 +1,7 @@
 import type { WebContentsView } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_TABS_MEMORY_MAX_MIB, DEFAULT_PARTITION } from '@shared/browser/tab';
+import { BROWSER_HANDBACK_IDLE_MS, BROWSER_TABS_MEMORY_MAX_MIB, DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { MEMORY_SAMPLE_MS, MemorySampler } from './memory';
 import { TabStore } from './tabs';
@@ -40,7 +40,8 @@ function harness() {
   };
   const pidOf = (entry: ReturnType<typeof loaded>) => entry.view!.webContents.getOSProcessId();
   const notices = () => emitted.filter((e) => e.name === 'browser.notice').map((e) => e.payload);
-  return { store, sampler, metrics, workingSets, loaded, pidOf, notices };
+  const tick = (ms: number) => void (clock += ms);
+  return { store, sampler, metrics, workingSets, loaded, pidOf, notices, tick };
 }
 
 describe('MemorySampler: the sample (E4a Design §12)', () => {
@@ -101,6 +102,32 @@ describe('MemorySampler: the soft cap (Design §2, Decision Log 6)', () => {
     expect(middle.view).not.toBeNull();
     expect(newest.view).not.toBeNull();
     expect(h.notices()).toEqual([{ appSessionId: B, tabId: oldest.tab.tabId, kind: 'tabsCap' }]); // no count: the memory cap
+  });
+
+  it('cua #103: the memory cap reclaims a hidden human-owned tab only after takeover grace', () => {
+    const h = harness();
+    try {
+      const human = h.loaded(1);
+      const placed = h.loaded(2);
+      h.store.setControl(human.tab.tabId, 'human');
+      const controlSince = human.tab.controlSince;
+      human.input.emit({ kind: 'key', source: 'human', at: Date.parse(controlSince) });
+      h.store.update(placed.tab.tabId, { placedIn: { paneId: 'p', surface: 'main' } });
+      h.workingSets.set(h.pidOf(human), 1.5 * GIB).set(h.pidOf(placed), 1.5 * GIB);
+      h.sampler.sample();
+      h.tick(BROWSER_HANDBACK_IDLE_MS - 1);
+      h.sampler.sample();
+      expect(human.view).not.toBeNull();
+      expect(h.notices()).toEqual([]);
+      h.tick(1);
+      h.sampler.sample();
+      expect(human.view).toBeNull();
+      expect(human.tab).toMatchObject({ suspended: true, control: 'human', controlSince, memoryKiB: null });
+      expect(placed.view).not.toBeNull();
+      expect(h.notices()).toEqual([{ appSessionId: A, tabId: human.tab.tabId, kind: 'tabsCap' }]);
+    } finally {
+      h.sampler.stop();
+    }
   });
 
   it('cua #90: closes an internal tab (an extension\'s options page) instead of suspending it', () => {

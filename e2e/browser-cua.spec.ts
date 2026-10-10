@@ -263,8 +263,9 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
     expect(await send('Page.captureScreenshot', { format: 'jpeg' })).toHaveProperty('data');
     expect(await app.control(tab)).toBe('human');
 
-    // 3 s after the person's last input the page is handed back, and the same command goes through
-    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    // cua #103: after 3 s the takeover grace ends, but human ownership stays until the same command resumes
+    await maws.page.waitForTimeout(3_100); // exercise expiry without an acting command
+    expect(await app.control(tab)).toBe('human');
     expect(Date.now() - clickedAt).toBeGreaterThanOrEqual(2_900);
     expect(await evaluate(send, `document.querySelector('#state').textContent`)).toBe('clicked'); // the person's click; the refused command never ran
     expect(await send('Runtime.evaluate', click, { timeoutMs: 3_000 })).toMatchObject({ result: { value: 1 } });
@@ -458,7 +459,8 @@ test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, a
     expect(await kinds()).toEqual(['tabOpened']); // no agent row for the person's bookmark
 
     // handed back, the agent's own navigation makes its row
-    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    await maws.page.waitForTimeout(3_100); // exercise expiry without an acting command
+    expect(await app.control(tab)).toBe('human');
     await send('Page.navigate', { url: pages.url('/frames.html') });
     await expect.poll(kinds, { timeout: 5_000 }).toEqual(['tabOpened', 'navigated']);
   } finally {
