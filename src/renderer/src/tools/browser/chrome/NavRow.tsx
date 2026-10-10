@@ -33,7 +33,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }:
   // swaps its root element between an internal tab's and a page's, and the bar must measure the one on screen
   const [addressBox, setAddressBox] = useState<HTMLDivElement | null>(null);
   return (
-    <div className="relative flex h-9 shrink-0 items-center gap-0.5 px-1">
+    <div data-browser-nav="" className="relative flex h-9 shrink-0 items-center gap-0.5 px-1">
       <IconButton label={BROWSER_COPY.back} disabled={!tab?.canGoBack} onClick={() => tab && navigate(tab.tabId, 'back')}>
         <BackIcon />
       </IconButton>
@@ -52,7 +52,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }:
       <AddressField appSessionId={appSessionId} surface={surface} tab={tab} inputRef={addressRef} boxRef={setAddressBox} />
       {tab && <ActionBar tab={tab} addressBox={addressBox} /> /* cua #90 */}
       <PartitionPill appSessionId={appSessionId} surface={surface} partition={tab?.partition ?? DEFAULT_PARTITION} />
-      {tab && <ControlSlot tab={tab} />}
+      {tab?.control === 'agent' && <ControlSlot tab={tab} />}
       {tab && extras.map((Extra, index) => <Extra key={index} tab={tab} appSessionId={appSessionId} surface={surface} />)}
       <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} onFind={onFind} />
       {loading && (

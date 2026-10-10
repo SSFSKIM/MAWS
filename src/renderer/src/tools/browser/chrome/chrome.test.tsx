@@ -70,6 +70,34 @@ const show = (props: Partial<ChromeProps> & { tab: BrowserTab | null }) =>
   render(<Chrome appSessionId={A} surface="panel" tabs={props.tab ? [props.tab] : []} {...props} />);
 
 describe('the control slot', () => {
+  it('keeps a separate human ownership strip visible past 3 s, until control is handed back or resumes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = show({ tab: tab({ control: 'human' }) });
+      const strip = () => document.querySelector('[data-browser-control="human"]');
+      expect(strip()?.parentElement?.matches('[data-browser-chrome]')).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(screen.getByRole('button', { name: BROWSER_COPY.control.handBack })).toBeTruthy();
+      rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ control: 'agent' })} tabs={[]} />);
+      expect(strip()).toBeNull();
+      rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ control: 'human' })} tabs={[]} />);
+      rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ control: 'idle' })} tabs={[]} />);
+      expect(strip()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('at 379 px keeps the ownership icon and usable Hand back, without the long label', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 379, height: 36 }));
+    show({ tab: tab({ control: 'human' }) });
+    expect(screen.queryByText(BROWSER_COPY.control.humanHasPage)).toBeNull();
+    expect(document.querySelector('[data-browser-control="human"] svg')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.control.handBack }));
+    await wait(0);
+    expect(calls('browser.control.handBack')).toEqual([{ tabId: T1 }]);
+  });
+
   it('is empty while idle, says the agent is browsing, and offers Hand back while the human has the page', async () => {
     const { rerender } = show({ tab: tab() });
     expect(document.querySelector('[data-browser-control]')).toBeNull();

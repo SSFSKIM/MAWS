@@ -1,7 +1,7 @@
 import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_LOADED_TABS_MAX, BrowserTabSchema, DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MAX, BrowserTabSchema, DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabDebugger } from './debugger';
 import { TabStore, UnknownTabError, type TabEntry } from './tabs';
@@ -264,6 +264,35 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     expect(h.store.entry(tabs[0]!.tabId)!.view).not.toBeNull();
     expect(h.store.entry(tabs[1]!.tabId)!.view).toBeNull();
     expect(h.store.capVictim()?.tab.tabId).toBe(tabs[2]!.tabId);
+  });
+
+  it('cua #103: caps protect takeover grace, renewed input, placement, leases and other active resources', () => {
+    const driven = new Set<string>();
+    const h = harness({ driven: (tabId) => driven.has(tabId) });
+    const entries = fill(h).map(({ tabId }) => {
+      h.store.update(tabId, { loading: false });
+      h.store.setControl(tabId, 'human');
+      return h.entry(tabId);
+    });
+    expect(h.store.capVictim()).toBeUndefined();
+    expect(h.store.hasRoomForView()).toBe(false);
+    h.tick(BROWSER_HANDBACK_IDLE_MS - 1);
+    expect(h.store.capVictim()).toBeUndefined();
+    h.tick(1);
+    const [recent, placed, leased, loading, downloading, acting, eligible, next] = entries;
+    recent!.input.emit({ kind: 'wheel', source: 'human', at: Date.parse(recent!.tab.controlSince) + BROWSER_HANDBACK_IDLE_MS });
+    h.store.update(placed!.tab.tabId, { placedIn: { paneId: 'p', surface: 'panel' } });
+    driven.add(leased!.tab.tabId);
+    h.store.update(loading!.tab.tabId, { loading: true });
+    h.store.update(downloading!.tab.tabId, { download: { name: 'f', state: 'progressing', received: 1, total: 2, path: null } });
+    h.store.setControl(acting!.tab.tabId, 'agent');
+    expect(h.store.capVictim()?.tab.tabId).toBe(eligible!.tab.tabId);
+    expect(h.store.capVictim(eligible!)?.tab.tabId).toBe(next!.tab.tabId); // the spared tab remains protected too
+    expect(h.store.hasRoomForView()).toBe(true);
+    const added = open(h, 'https://new.test/').tab;
+    expect(added.suspended).toBe(false);
+    expect(eligible!.view).toBeNull();
+    expect(entries.slice(0, 6).every((entry) => entry.view !== null)).toBe(true);
   });
 
   it('with no eligible victim a commanded open opens suspended, its URL kept, and nothing is closed', () => {

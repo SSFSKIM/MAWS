@@ -8,7 +8,8 @@
 // The inputs: E4a's input seam (`entry.input.on`, the classifier's `{ kind, source }`), the agent's acting command
 // (`markActing`) and its end (`actionEnded`), and two timers:
 //   - the hand-back timer, armed while `human` for the person's last input plus BROWSER_HANDBACK_IDLE_MS (3 s) and
-//     re-armed by every further human input; it returns the tab to `idle`, and held commands resume (`whenReleased`);
+//     re-armed by every further human input; held commands may resume (`whenReleased`), but `human` stays visible until
+//     Hand back or the agent resumes (cua #103);
 //   - the agent-idle timer, armed for BROWSER_AGENT_IDLE_MS (10 s) when an action ends, so an agent thinking between two
 //     commands does not flicker the chrome; it returns the tab to `idle`.
 // Human input takes the page only when it conflicts with the agent: while the agent holds the tab. A click on a page no
@@ -32,15 +33,16 @@ interface TabControlState {
   seen: BrowserControl; // the control last observed, to tell a transition from any other patch
   handBack: ReturnType<typeof setTimeout> | null;
   agentIdle: ReturnType<typeof setTimeout> | null;
-  releases: Set<() => void>; // held commands, released when control leaves `human`
+  releases: Set<() => void>; // held commands, released when the grace ends or control leaves `human`
   unsubscribe(): void; // from the tab's input seam
 }
 
-// The person is using the tab (Design §6 step 3, §8): they hold it, or touched it within the hand-back window though no
-// agent held it. The one statement of the rule: the takeover gate, the dialog route and the activity's navigations.
+// cua #103: recent input holds off an acting command; visible human ownership outlasts that takeover grace.
+// The one statement of the rule: the takeover gate, dialog route, activity navigations and resource caps.
 export function personHolds(entry: TabEntry, now: number): boolean {
   const { lastHumanAt } = entry.input;
-  return entry.tab.control === 'human' || (lastHumanAt !== null && now - lastHumanAt < BROWSER_HANDBACK_IDLE_MS);
+  const last = lastHumanAt ?? (entry.tab.control === 'human' ? Date.parse(entry.tab.controlSince) : null);
+  return last !== null && now - last < BROWSER_HANDBACK_IDLE_MS;
 }
 
 // Told after every control transition (`from`: the state it left).
@@ -79,12 +81,12 @@ export class TabControls {
 
   // ---- the agent (cua/presence.ts) --------------------------------------------------------------------------------
 
-  // Resolves when the tab leaves `human` (the hand-back timer or the chrome's button); at once when it is not there.
+  // Resolves when the takeover grace expires or the tab leaves `human` (Hand back); visible ownership does not time out.
   // Rejects with the signal's reason when the held command is cancelled first.
   whenReleased(entry: TabEntry, signal: AbortSignal): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (signal.aborted) return reject(signal.reason);
-      if (entry.tab.control !== 'human') return resolve();
+      if (entry.tab.control !== 'human' || !this.personHolds(entry)) return resolve();
       const { releases } = this.stateOf(entry);
       const finish = (settle: () => void) => {
         releases.delete(release);
@@ -164,7 +166,7 @@ export class TabControls {
         if (this.deps.store.entry(entry.tab.tabId) !== entry || entry.tab.control !== 'human') return;
         const since = this.now() - (entry.input.lastHumanAt ?? 0);
         if (since < BROWSER_HANDBACK_IDLE_MS) return this.armHandBack(entry, state);
-        this.deps.store.setControl(entry.tab.tabId, 'idle');
+        for (const release of [...state.releases]) release(); // cua #103: grace ends, not visible human ownership
       },
       Math.max(0, last + BROWSER_HANDBACK_IDLE_MS - this.now()),
     );

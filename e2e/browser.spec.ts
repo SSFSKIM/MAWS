@@ -9,10 +9,12 @@
 // themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { connectFakeHost } from '../test/support/cua-fake-host';
 import type { AppSessionId } from '@shared/graph/ids';
+import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
@@ -680,4 +682,87 @@ test('the chrome in both themes: the empty state, a loaded page, the zoom banner
     await expect(pane.locator('[data-browser-page="error-refused"]')).toBeVisible();
     await shootBrowser(s, 'error');
   });
+});
+
+// cua #103: the human control slot must not push the trailing controls out of the 380 px panel.
+test('cua #103: human control in a 380 px panel keeps the icon, Hand back and every toolbar control in bounds', async () => {
+  const scratch = scratchProject({ titles: ['cua #103: control chrome'] });
+  scratch.userData = mkdtempSync('/tmp/m103-'); // a short Unix socket path for cua's real lease
+  const server = await startBrowserServer();
+  const s = await launchBrowserScene(scratch, server);
+  try {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const url = s.server.url('/a.html');
+    await address(panel, url);
+    const tab = await tabAt(s, id, url);
+    interface ControlSeam {
+      __maws_browser: {
+        cua: { socketPathFor(id: string): string };
+        agent: { sendInput(tab: string, input: Record<string, unknown>): boolean };
+      };
+    }
+    const socket = await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as ControlSeam).__maws_browser.cua.socketPathFor(id), id);
+    const host = await connectFakeHost(socket);
+    try {
+      const native = (await host.request<{ id: number; url: string }[]>('tabs.query')).find((t) => t.url === url)!;
+      await host.request('debugger.attach', { tabId: native.id });
+      await s.page.waitForTimeout(3_100); // the address navigation is a human touch; let its takeover grace expire
+      await host.request('debugger.sendCommand', { debuggee: { tabId: native.id }, method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 10, y: 10 } });
+      await s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as ControlSeam).__maws_browser.agent.sendInput(tab, { type: 'mouseDown', x: 10, y: 10, button: 'left', clickCount: 1 }), tab);
+      const slot = panel.locator('[data-browser-control="human"]');
+      await expect(slot).toBeVisible();
+      await expect(slot.locator('svg')).toBeVisible();
+      await expect(slot).not.toContainText('You have the page');
+      const chrome = panel.locator('[data-browser-chrome]');
+      const bounds = (await chrome.boundingBox())!;
+      expect(Math.round(bounds.width)).toBe(379); // one panel border pixel
+      const controls = chrome.locator('button:visible');
+      let right = bounds.x;
+      for (const button of await controls.all()) {
+        const box = (await button.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(bounds.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+        // Only compare buttons sharing the navigation row; tab-strip buttons live above it.
+        if (await button.evaluate((el) => el.closest('[data-browser-nav]') !== null)) {
+          expect(box.x).toBeGreaterThanOrEqual(right);
+          right = box.x + box.width;
+        }
+      }
+      await s.page.waitForTimeout(4_000); // ownership is still visible after the former 3 s timeout
+      await expect(slot).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        value(await invoke(s.page, 'settings.set', { theme }));
+        await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(slot).toBeVisible();
+        await test.info().attach(`human-control-380-${theme}`, { body: await chrome.screenshot(), contentType: 'image/png' });
+      }
+      value(await invoke(s.page, 'settings.set', { theme: 'light' }));
+      await host.request('debugger.sendCommand', { debuggee: { tabId: native.id }, method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 10, y: 10 } });
+      await expect(slot).toHaveCount(0); // the agent resumed
+      await s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as ControlSeam).__maws_browser.agent.sendInput(tab, { type: 'mouseDown', x: 10, y: 10, button: 'left', clickCount: 1 }), tab);
+      await expect(slot).toBeVisible();
+      await overflow(s, panel, 'Open in tab');
+      const main = browserIn(s, 'main');
+      const wide = main.locator('[data-browser-control="human"]');
+      for (const theme of ['light', 'dark'] as const) {
+        value(await invoke(s.page, 'settings.set', { theme }));
+        await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(wide).toContainText('You have the page');
+        expect((await wide.boundingBox())!.width).toBeGreaterThan(480);
+        await test.info().attach(`human-control-wide-${theme}`, { body: await main.locator('[data-browser-chrome]').screenshot(), contentType: 'image/png' });
+      }
+      await wide.getByRole('button', { name: 'Hand back' }).click();
+      await expect(wide).toHaveCount(0);
+      await expect(slot).toHaveCount(0); // both surfaces follow the same ownership transition
+    } finally {
+      await host.close();
+    }
+  } finally {
+    await closeScene(s);
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+    rmSync(scratch.userData, { recursive: true, force: true });
+  }
 });
