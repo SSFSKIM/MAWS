@@ -10,6 +10,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { DeletionManifestView } from '@shared/ipc/schema/session';
+import type { PastedContent } from '@shared/composer/history-entry';
 import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
@@ -22,7 +23,10 @@ import { returnMessage } from './message-return';
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
 // is not here: it is read from the setup's `failed` event or, after a restart, the intent's `progress.lastFailure`
 // (failureOf below).
-export type WaitingCard = ({ kind: 'trust'; trust: TrustState } | { kind: 'relay'; health: RelayHealth }) & { message: FirstMessage | null };
+// P2-F (L118): a composer message a record's card holds keeps its pasted segments, so the continuation that sends it writes
+// the history row the composer would have; renderer-only (a record's card message never crosses to main)
+export type HeldMessage = FirstMessage & { pastedContents?: Record<string, PastedContent> };
+export type WaitingCard = ({ kind: 'trust'; trust: TrustState } | { kind: 'relay'; health: RelayHealth }) & { message: HeldMessage | null };
 
 export interface SetupFailure {
   message: string;

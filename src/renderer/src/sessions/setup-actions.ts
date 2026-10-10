@@ -7,6 +7,7 @@ import type { StartOptions } from '@shared/ipc/schema/session';
 import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
+import { appendHistory } from '../composer/editor/submit'; // P2-F (L118)
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt'; // P2-A
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
@@ -19,7 +20,7 @@ import { heldToast } from './attach';
 import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
-import { isStarting, startNoticeId, useSetup } from './store'; // P2-A: startNoticeId
+import { isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
@@ -103,7 +104,7 @@ export async function startIntent(appSessionId: AppSessionId, first: FirstMessag
 // A card's continuation (Trust and start, Start without trusting, Run direct, the relay's own restart, Retry): the
 // same start with the retained message (`message: null`) and only the option the human chose. A refusal or a failure
 // clears the retained message in main, so the card returns the message it docked with to the editor first.
-export async function continueSetup(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
+export async function continueSetup(appSessionId: AppSessionId, options: StartOptions, docked: HeldMessage | null): Promise<HookResult> {
   if (isRecordCard(appSessionId)) return continueRecord(appSessionId, options, docked); // P2-A
   const outcome = await start(appSessionId, null, options);
   if ('error' in outcome && outcome.error.startsWith('starting:')) {
@@ -124,14 +125,15 @@ export async function continueSetup(appSessionId: AppSessionId, options: StartOp
 // P2-A start (2026-10-09; the execution document §5.4): a record's card continuation. The session is acquired with the
 // option the owner chose, then the docked composer message is sent through the human seam, and the composer clears
 // only once the host accepted it: until then the text stays in the composer's draft, so a refusal or a host error only
-// undocks the card and says why. A card a surface docked without a message only starts the session.
+// undocks the card and says why. Once accepted, the message gets the history row the composer's own send writes (P2-F,
+// L118), even if the card went during the send. A card a surface docked without a message only starts the session.
 // One continuation per card at a time: a second (a manual Continue racing the relay card's poll, a double press) does
 // nothing while the first holds the session's claim, which only it releases, once its message is accepted or refused.
 // The card may be dismissed (Cancel) or replaced while the continuation runs: the session may still start, as the
 // gesture asked, but every side effect after the first await (a card docked again, a refusal's toast and undock, the
 // send, the clear, the final undock) happens only while its card is still the one docked; the claim alone is released
 // whatever happened.
-async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
+async function continueRecord(appSessionId: AppSessionId, options: StartOptions, docked: HeldMessage | null): Promise<HookResult> {
   const release = useSetup.getState().claimContinuation(appSessionId);
   if (release === null) return { ok: false, error: 'This session is already continuing' };
   const card = useSetup.getState().cards.get(appSessionId); // the card this continuation answers for (none for a bare call)
@@ -152,6 +154,7 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
     if (docked !== null) {
       const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display });
       if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
+      appendHistory(ipc, appSessionId, { display: docked.display, pastedContents: docked.pastedContents ?? {} }); // P2-F (L118): the host accepted it
       if (!current()) return dismissed; // dismissed during the send: the draft is the owner's again, never cleared
       clearComposer(appSessionId);
     }

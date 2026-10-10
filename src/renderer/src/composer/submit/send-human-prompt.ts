@@ -5,6 +5,7 @@
 // acquired first (`session.acquire`, joining a start in flight) and then sent; `started` says this call launched the
 // engine or joined its launch, beside the host's own answer. A trust or relay card holds a composer message (`held`,
 // the text staying in the composer's draft until the host accepts it); no other origin's text is handed to a card.
+import type { PastedContent } from '@shared/composer/history-entry';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
@@ -21,6 +22,7 @@ export interface HumanPromptOptions {
   // P2-F (L116): the caller's own check (the composer's size bound), consulted once the seam has decided the prompt may
   // go, before an acquisition or a dispatch, never when the seam refuses by state; false refuses it with no reason
   precheck?: () => boolean;
+  pastedContents?: Record<string, PastedContent>; // P2-F (L118): the composer's pasted segments, held with its message for the history row
 }
 export interface HumanPromptResult {
   disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
@@ -70,7 +72,8 @@ async function sendAcquiring(appSessionId: AppSessionId, content: SendContent, o
   if (refusal !== null) return refusal;
   const composer = options.origin === 'composer';
   const display = options.display ?? (typeof content === 'string' ? content : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n'));
-  const outcome = await acquireSession(appSessionId, 'send', composer ? { dockMessage: { content, display } } : {}, client);
+  const dockMessage = { content, display, ...(options.pastedContents !== undefined && { pastedContents: options.pastedContents }) };
+  const outcome = await acquireSession(appSessionId, 'send', composer ? { dockMessage } : {}, client);
   if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') {
     if (composer) return { disposition: 'held', started: false, reason: outcome.status === 'needs_trust' ? 'trust' : 'relay' };
     return { disposition: 'refused', started: false, reason: cardWords(outcome) };

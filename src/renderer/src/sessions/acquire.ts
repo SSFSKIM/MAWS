@@ -6,12 +6,11 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { AcquireReason, StartOptions } from '@shared/ipc/schema/session';
-import type { FirstMessage } from '@shared/sessions/intent';
 import type { AcquireOutcome, StartOutcome } from '@shared/sessions/setup';
 import { ARCHIVED } from '../composer/submit/submit-state';
 import { ipc } from '../ipc/client';
 import { holderWords } from './holder-words';
-import { useSetup } from './store';
+import { useSetup, type HeldMessage } from './store';
 
 // What a surface other than the composer says when the attempt docked a card in the session's composer (its own text
 // never goes to that card, which would send it later out of its context)
@@ -20,7 +19,7 @@ export const RELAY_FIRST = 'The relay is unreachable · the session offers Run d
 
 // `current`: whether the caller still wants the card the answer may dock (a card's continuation whose card the owner
 // dismissed meanwhile docks nothing); absent, it always does.
-export type AcquireOptions = StartOptions & { dockMessage?: FirstMessage; current?: () => boolean };
+export type AcquireOptions = StartOptions & { dockMessage?: HeldMessage; current?: () => boolean };
 
 // Throws when the command itself fails (main or the host unreachable), as the send seam does, so a caller's Retry applies.
 export async function acquireSession(appSessionId: AppSessionId, reason: AcquireReason, options: AcquireOptions = {}, client: MawsBridge = ipc): Promise<AcquireOutcome> {
@@ -66,7 +65,7 @@ export const refusalWords = (outcome: AcquireOutcome): string | null =>
 // starts the session). The store keeps one card per session, and every joiner of one attempt gets the same card
 // answer, so a card without a message never replaces a docked card of the same kind that carries one: the composer's
 // card wins, the other surfaces' answers point at it.
-export function dockFor(appSessionId: AppSessionId, outcome: StartOutcome | AcquireOutcome, message: FirstMessage | null): void {
+export function dockFor(appSessionId: AppSessionId, outcome: StartOutcome | AcquireOutcome, message: HeldMessage | null): void {
   if (outcome.status !== 'needs_trust' && outcome.status !== 'relay_unreachable') return;
   const store = useSetup.getState();
   const kind = outcome.status === 'needs_trust' ? 'trust' : 'relay';

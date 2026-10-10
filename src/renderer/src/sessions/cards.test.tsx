@@ -20,6 +20,7 @@ import { continueSetup, isContinuing, releaseMessage, resumeSession, startIntent
 import { record, status } from '../../../../test/support/builders';
 import { RELAY_POLL_MS } from './SetupCard';
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
+import { submitHumanSerialized } from '../composer/editor/submit'; // P2-F (L118)
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { acquireSession } from './acquire';
@@ -586,6 +587,21 @@ describe('a record’s trust card and its continuation', () => {
     expect(fake.invoked('session.intent.release')).toEqual([]);
   });
 
+  // P2-F (L118): the composer's history row for a held message is written by the continuation once the host accepts it,
+  // with the draft as the composer serialized it (its display and its pasted segments), and never for a held one
+  it('a composer message sent through the card gets its prompt-history row, as the composer serialized it, once the host accepts it', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED), 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }, 'session.history.append': undefined });
+    render(<Docked />);
+    const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
+    const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
+    expect(await act(() => submitHumanSerialized(fake.client, ID, draft))).toBe(false);
+    await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toMatchObject({ content: draft.content, display: draft.display }));
+    expect(fake.invoked('session.history.append')).toEqual([]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: draft.content }]));
+    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: ID, display: draft.display, pastedContents }]));
+  });
+
   it('a refused continuation undocks the card and says why; the composer keeps the text (nothing is handed back or cleared)', async () => {
     withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: ID, directory: '/gone' }) });
     render(<Docked />);
@@ -594,6 +610,7 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(dockedIds()).toBe(''));
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Directory not found: /gone']);
     expect(fake.invoked('session.send')).toEqual([]);
+    expect(fake.invoked('session.history.append')).toEqual([]);
     expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
     expect(returned).toEqual([]);
   });
@@ -608,6 +625,7 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(dockedIds()).toBe(''));
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['write failed']);
     expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(fake.invoked('session.history.append')).toEqual([]);
   });
 
   it('Cancel (Back to editing) only undocks: no hand-back to main, the text stays where it was typed', async () => {

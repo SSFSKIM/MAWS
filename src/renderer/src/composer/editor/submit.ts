@@ -60,6 +60,12 @@ export async function dispatchByMode(client: MawsBridge, appSessionId: AppSessio
 // After the host accepted: what was left out is said, and the prompt goes into MAWS's history.
 export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, project: string | null = null): void {
   if (s.omitted > 0) warn(s.omitted === 1 ? '1 pasted segment was unavailable and was left out' : `${s.omitted} pasted segments were unavailable and were left out`);
+  appendHistory(client, appSessionId, s, project);
+}
+
+// The prompt's row in MAWS's history; P2-F (L118): also written by a record card's continuation once the host accepted
+// the composer message the card held (its display and pasted segments as the composer serialized them).
+export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s: Pick<Serialized, 'display' | 'pastedContents'>, project: string | null = null): void {
   const input = { appSessionId, display: s.display, pastedContents: s.pastedContents, ...(project === null ? {} : { project }) };
   void client.invoke('session.history.append', input).then((result) => {
     if (!result.ok) console.warn('[composer] session.history.append failed', result.error);
@@ -79,7 +85,7 @@ export async function submitHumanSerialized(client: MawsBridge, appSessionId: Ap
     return !tooLarge;
   };
   try {
-    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display, precheck: fits }, client);
+    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits }, client);
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why
