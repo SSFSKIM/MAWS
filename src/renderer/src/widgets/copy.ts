@@ -7,6 +7,10 @@ import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels'
 import type { WidgetCommandName } from '../composer';
 import { STARTING_SESSION } from '../statusline/mode-menu';
 import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
+// P2-C start (2026-10-09)
+import type { ModRow } from '@shared/mods/registry';
+import type { LaneOverride } from '@shared/owner/state';
+// P2-C end
 
 export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   model: 'Model & effort',
@@ -497,9 +501,30 @@ export const LIBRARY = {
   loadedFromFolder: 'Loaded from a folder',
   // MAWS mods · Built in (X20)
   builtIn: 'Built in',
-  throughStyle: 'Through your output style',
-  thisSession: (on: boolean) => `This session: ${on ? 'on' : 'off'}`,
-  modSwitch: (name: string) => `Turn ${name} on or off`,
+  // P2-C start (2026-10-09): the section's words (the P2-C document, §9 and its M6 Decision Log), in place of P2-B's interim words
+  mod: {
+    version: (n: number) => `Version ${n}`,
+    unavailable: (reason: string) => `MAWS mods can’t be read right now: ${reason}`,
+    refused: (reason: string) => `Not saved: ${reason}`,
+    appSwitch: (name: string) => `${name} in every session`,
+    session: 'This session',
+    sessionOverride: (name: string) => `${name} in this session`,
+    override: (appOn: boolean): { value: LaneOverride; label: string }[] => [
+      { value: 'inherit', label: `Default (${appOn ? 'On' : 'Off'})` },
+      { value: 'on', label: 'On' },
+      { value: 'off', label: 'Off' },
+    ],
+    source: {
+      'maws-contract': 'MAWS gives the agent its instructions',
+      'external-compatible-style': 'The output style gives the agent its instructions',
+      off: 'Off: the agent is not asked to mark anything',
+    } satisfies Record<ModRow['source'], string>,
+    pending: {
+      'next-launch': 'Applies the next time this session starts',
+      'next-compaction': 'Applies after this session’s next compaction',
+    } satisfies Record<NonNullable<ModRow['pending']>, string>,
+  },
+  // P2-C end
   // the detail (§5.7; Desktop's words where it has them, c24c8737b-BY-86Rbf.js)
   view: (name: string) => `View ${name}`,
   myItems: 'My items',

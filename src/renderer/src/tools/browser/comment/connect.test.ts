@@ -14,6 +14,7 @@ import { noticeText } from '../chrome/Notices';
 import { browser, resetBrowser } from '../store';
 import { connectBrowserComment } from './connect';
 import { COMMENT_COPY } from './copy';
+import { registerDock } from './dock';
 import { resetCommentMode, useCommentMode } from './store';
 
 const A = 'app-a' as AppSessionId;
@@ -124,6 +125,52 @@ describe('connectBrowserComment', () => {
       ['warning', COMMENT_COPY.cropTooLarge],
       ['warning', COMMENT_COPY.cropFailed],
     ]);
+  });
+
+  // P2-E2: the pane holding the tab's view docks the card; the page stays on screen, so a missing crop is a chrome line
+  it('a pick on a tab a pane of this window holds opens the card in that pane’s dock, a missing crop said in the chrome', () => {
+    const undock = registerDock(T1, 'pane-1');
+    try {
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'attached' });
+      expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'tooLarge' });
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'failed' });
+      expect(notices()).toEqual([
+        { appSessionId: A, tabId: T1, kind: 'commentCropTooLarge' },
+        { appSessionId: A, tabId: T1, kind: 'commentCropFailed' },
+      ]);
+      expect(noticeText({ kind: 'commentCropTooLarge' })).toBe(COMMENT_COPY.cropTooLarge);
+      expect(noticeText({ kind: 'commentCropFailed' })).toBe(COMMENT_COPY.cropFailed);
+      expect(toasts()).toEqual([]);
+      // another tab, no dock: the sheet
+      fake.event('browser.comment.picked', { tabId: T2, appSessionId: B, anchor: ANCHOR, crop: 'none' });
+      expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: B });
+    } finally {
+      undock();
+    }
+  });
+
+  it('the pick’s position is the docked card’s pin, a rect of no size at the element’s point; none, no pin', () => {
+    const undock = registerDock(T1, 'pane-1');
+    try {
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none', position: { x: 296, y: 342 } });
+      expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1', rect: { x: 296, y: 342, width: 0, height: 0 } } });
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none' });
+      expect(opened.mock.lastCall![1].placement).not.toHaveProperty('rect');
+    } finally {
+      undock();
+    }
+  });
+
+  it('a dock is the latest registration, and a disposer removes only its own', () => {
+    const first = registerDock(T1, 'pane-1');
+    const second = registerDock(T1, 'pane-2');
+    first();
+    fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none' });
+    expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-2' } });
+    second();
+    fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none' });
+    expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: A });
   });
 
   it('stops listening when disconnected', () => {

@@ -4,9 +4,10 @@
 // change with `rowsOf`, whose per-turn memo keeps unchanged rows by reference; a streaming block's later deltas change
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
-import type { AgentId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
+import { foldedInReport, reportViewOf } from '../owner/report/project'; // P2-C (2026-10-09)
 import { applyEvents, createState, RECEIPT_APPLIED, withReaderState, withUi, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -66,6 +67,16 @@ export interface TranscriptStore {
   setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void; // the receipt row's state, canUndo and canReapply follow
   setSpill(key: string, path: string, patch: Partial<SpillLoad>): void; // the spill's state and content in its cell detail follow
   toggleBoundary(key: string, boundary: RowId): void; // a rewind boundary reveals or hides the branch it hid
+  // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane as main reports it (a
+  // marked commentary then stays in view when its turn folds); the view the reader chose for the tab; and a marked
+  // turn's working record in the report, opened at level 1 (its divider folded) or closed again
+  setOwnerLane(key: string, on: boolean): void;
+  setView(key: string, view: 'report' | 'transcript'): void;
+  toggleReportRecord(key: string, turn: TurnId): void;
+  // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
+  // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
+  jumpToMessage(key: string, anchor: { messageUuid: MessageUuid; blockIndex: number }): boolean;
+  // P2-C end
 }
 
 const NO_ROWS: Row[] = [];
@@ -110,6 +121,7 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
     expandedTurns: new Set(ui.expandedTurns), collapsedTurns: new Set(ui.collapsedTurns), expandedGroups: new Set(ui.expandedGroups),
     expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
     global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
+    ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), reportOpenTurns: new Set(ui.reportOpenTurns), // P2-C
   };
 }
 
@@ -256,13 +268,16 @@ export function createTranscriptStore() {
       const attached = attachments.get(key);
       if (attached?.restartUi) attached.stagedJump = { focus: id, align: options.align ?? 'center' }; // staging: resolved again at install
       const visible = locate(current.rows, id);
-      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded))) {
+      // P2-C: in the report a row of a marked turn's closed working record is out of sight: the jump opens the record
+      const folded = (row: Row) => reportViewOf(current.state.ui) && row.turnId !== null && !current.state.ui.reportOpenTurns?.has(row.turnId) && foldedInReport(row);
+      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && !folded(visible.row)) {
         put(key, { jump: request(visible.row.id) });
         return;
       }
       const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
       if (!found) return;
       const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : [found.row.turnId]);
+      if (folded(found.row)) ui.reportOpenTurns!.add(found.row.turnId!); // P2-C
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
       if (found.group) ui.expandedGroups.add(found.group.id);
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
@@ -410,6 +425,35 @@ export function createTranscriptStore() {
         put(key, { state: withReaderState(current.state, { spills }) });
       },
       toggleBoundary: (key, boundary) => changeUi(key, () => 'all', (ui) => toggle(ui.revealedBoundaries, boundary)),
+
+      // P2-C start (2026-10-09)
+      setOwnerLane(key, on) {
+        if ((entry(key)?.state.ui.ownerLane ?? false) !== on) changeUi(key, () => 'all', (ui) => void (ui.ownerLane = on));
+      },
+      setView(key, view) {
+        if (entry(key)?.state.ui.view !== view) changeUi(key, () => [], (ui) => void (ui.view = view));
+      },
+      toggleReportRecord(key, turn) {
+        changeUi(key, () => [turn], (ui, state) => {
+          if (ui.reportOpenTurns!.delete(turn)) return;
+          ui.reportOpenTurns!.add(turn);
+          // Opened at level 1: the turn as the full transcript draws it folded, its divider the next disclosure.
+          if (isExpanded(state, turn)) {
+            ui.expandedTurns.delete(turn);
+            ui.collapsedTurns.add(turn);
+          }
+        });
+      },
+      jumpToMessage(key, { messageUuid, blockIndex }) {
+        const current = entry(key);
+        if (!current) return false;
+        const text = (row: Row) => row.kind === 'assistant_text' && row.messageUuid === messageUuid && row.blockIndex === blockIndex;
+        const row = current.rows.find(text) ?? allExpandedRows(current.state).find(text);
+        if (!row) return false;
+        jump(key, row.id, { ...(row.turnId !== null && { turnId: row.turnId }) }, false);
+        return true;
+      },
+      // P2-C end
 
       expandAll(key, options = {}) {
         changeUi(key, () => 'all', (ui, state) => {

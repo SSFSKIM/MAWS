@@ -15,6 +15,7 @@ const RELEASED: readonly { version: number; sha256: string }[] = [
   { version: 5, sha256: '95c75547a8bc8a48c9ddfe17aa4dbdbe26cd1608ec91270050c63c78811abb31' }, // E4a: browser history (X15)
   { version: 6, sha256: '261027e33d3c4806180a8b704ba75169d06b86fb1ed63c172de608c967fb6390' }, // cua board #93: the agent's browser activity (X15)
   { version: 7, sha256: 'e5dbe799d588c31efa19def80e2c8b54bec78b138b2e1fe3d3c789fb214fce90' }, // cua board #90: an imported profile's bookmarks (X15), pinned by its merging PR
+  { version: 8, sha256: 'f9fddca0854e85afd12688f9d4a2661ad034ab61097058a8e794979fa7a0abc8' }, // P2-C: the owner channel's sessions and marks (X15), pinned at its landing merge
 ];
 
 const digest = (sql: string) => createHash('sha256').update(sql).digest('hex');

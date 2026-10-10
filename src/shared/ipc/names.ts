@@ -39,6 +39,10 @@ import * as host from './names/host';
 // E4a start
 import * as browser from './names/browser';
 // E4a end
+// P2-C start (2026-10-09)
+import * as mods from './names/mods';
+import * as ownerChannel from './names/owner-channel'; // P2-C M4 (2026-10-09)
+// P2-C end
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -67,6 +71,10 @@ export const NAMESPACES = [
   // E4a start
   'browser',
   // E4a end
+  // P2-C start (2026-10-09)
+  'mods',
+  'ownerChannel', // M4
+  // P2-C end
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -82,6 +90,8 @@ export const NAMES = {
   deliverables, // E2
   host, // E10
   browser, // E4a
+  mods, // P2-C (2026-10-09)
+  ownerChannel, // P2-C M4 (2026-10-09)
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;

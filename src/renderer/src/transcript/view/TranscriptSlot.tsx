@@ -11,9 +11,12 @@
 // P2-E1: three additive options for a mount that shows a session in a smaller place (the comment card's thread): the
 // first row to show (`startAt`), actions overriding the registered ones for this mount, and the presentation forced
 // local (`Transcript`'s). Absent, the slot draws as before.
+// P2-C (2026-10-09): a session's slot follows its owner channel (`stores/owner-channel.ts`) and tells the transcript
+// whether the lane is on, which the report view and the report module read.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useEffect, useMemo } from 'react';
 import { useShownEffort } from '../../composer/effective-effort';
+import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { heldRow } from '../model/derive';
@@ -50,6 +53,7 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   const tail = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain).map(heldRow), [queue.entries]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
+  const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
   return (
     <Transcript
       source={source}
@@ -64,6 +68,7 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       effort={agentId === undefined ? effort : null}
       startAt={startAt}
       presentation={presentation}
+      ownerLane={agentId === undefined ? ownerLane : undefined}
     />
   );
 }

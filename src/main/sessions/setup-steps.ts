@@ -19,6 +19,7 @@ import type { BootstrapNotes, IntentStore } from './intents';
 import type { C10Settings } from './launch-mapping';
 import type { LaunchWatch } from './launch-watch';
 import type { ReplaySeam } from './replay-seam';
+import type { OwnerChannelLaunches } from '../owner/launch'; // P2-C (2026-10-09)
 
 // The service's dependencies, resolved (the engine's environment in hand).
 export interface Setup {
@@ -37,6 +38,7 @@ export interface Setup {
   userDefaults: () => Promise<UserEngineDefaults>; // W3
   launchGate: LaunchGate; // C12
   browserBackend: (appSessionId: AppSessionId) => string | null; // E13: the session's cua socket
+  owner: OwnerChannelLaunches | null; // P2-C (2026-10-09): the to-human lane's launch decision; null, launches go as they are
   now: () => string;
   log: (message: string) => void;
   watchdogMs: number;

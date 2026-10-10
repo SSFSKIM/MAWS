@@ -11,7 +11,7 @@
 // tested one never does (`testedVersion` is information).
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, realpath, stat } from 'node:fs/promises';
+import { access, open, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
@@ -77,9 +77,10 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
   const home = deps.home ?? homedir();
   const env = deps.env ?? process.env;
   const versions = new Map<string, Promise<string>>(); // by real path, size and mtime; a failure is dropped
+  const declarations = new Map<string, Promise<boolean>>(); // P2-C: by the same key; the scan never fails
   return async () => {
     const started = now();
-    const fail = (path: string, error: string): BinaryCheck => ({ path, testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error });
+    const fail = (path: string, error: string): BinaryCheck => ({ path, testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error, declaresSystemPromptSnapshot: false /* P2-C */ });
     let captured: Promise<Record<string, string> | undefined> | undefined; // read at most once a call, only when needed
     const shellEnv = () => (captured ??= deps.captureEnv ? deps.captureEnv() : Promise.resolve(undefined));
     const candidate = await candidateOf({ home, env, shellEnv });
@@ -95,6 +96,13 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
     } catch (error) {
       return fail(candidate.path, `no executable engine binary at ${candidate.path}: ${messageOf(error)}`);
     }
+    // P2-C start (2026-10-09): the flag's declaration, scanned once per file beside --version; never a refusal
+    let declares = declarations.get(key);
+    if (!declares) {
+      declares = binaryDeclares(path, SYSTEM_PROMPT_SNAPSHOT_FLAG);
+      declarations.set(key, declares);
+    }
+    // P2-C end
     let pending = versions.get(key);
     if (!pending) {
       pending = shellEnv()
@@ -108,12 +116,48 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
       pending.catch(() => versions.delete(key));
     }
     try {
-      return { path, testedVersion: TESTED_ENGINE_VERSION, version: await pending, ok: true, error: null };
+      return { path, testedVersion: TESTED_ENGINE_VERSION, version: await pending, ok: true, error: null, declaresSystemPromptSnapshot: await declares /* P2-C */ };
     } catch (error) {
       return fail(path, `${path} --version failed: ${messageOf(error)}`);
     }
   };
 }
+
+// P2-C start (2026-10-09): the flag `--system-prompt-snapshot` (the P2-C document, Design §2, "The flag's
+// availability"). The CLI's help does not list it, so its declaration is read from the binary's own bytes, where its
+// option table carries this literal (2.1.295). The scan reads in chunks, never the whole file at once, keeping the
+// literal's length less one byte between chunks so a match across a boundary is found. Unreadable reads as undeclared.
+export const SYSTEM_PROMPT_SNAPSHOT_FLAG = '--system-prompt-snapshot <on|off>';
+const SCAN_CHUNK_BYTES = 1024 * 1024;
+
+export async function binaryDeclares(path: string, literal: string, chunkBytes = SCAN_CHUNK_BYTES): Promise<boolean> {
+  const needle = Buffer.from(literal);
+  let file;
+  try {
+    file = await open(path, 'r');
+  } catch {
+    return false;
+  }
+  try {
+    const buffer = Buffer.alloc(chunkBytes + needle.length - 1);
+    let kept = 0; // bytes carried over from the previous chunk, at the buffer's start
+    let position = 0;
+    for (;;) {
+      const { bytesRead } = await file.read(buffer, kept, chunkBytes, position);
+      if (bytesRead === 0) return false;
+      const filled = kept + bytesRead;
+      if (buffer.subarray(0, filled).includes(needle)) return true;
+      position += bytesRead;
+      kept = Math.min(needle.length - 1, filled);
+      buffer.copy(buffer, 0, filled - kept, filled);
+    }
+  } catch {
+    return false;
+  } finally {
+    await file.close();
+  }
+}
+// P2-C end
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

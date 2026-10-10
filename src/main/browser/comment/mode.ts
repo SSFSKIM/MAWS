@@ -14,7 +14,8 @@
 // logged with its payload, and disarms nothing. A message that does answer is then checked whole (the strict schema,
 // the css grammar, the page URL main reads itself, X10's and E4c's schemas through `browserElementAnchor`); failing any
 // of it is a refusal, which ends the mode on the tab with `refused` so the toggle never stays pressed after a pick.
-// An accepted pick is cropped, and sent to the window whose pane owns the tab only if nothing ended the mode meanwhile.
+// An accepted pick is cropped, and sent to the window whose pane owns the tab only if nothing ended the mode meanwhile,
+// with the element's point in the pane's pixels for the comment card's pin (P2-E2).
 import { randomBytes } from 'node:crypto';
 import type { Event, Input, WebContents, WebContentsView } from 'electron';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -23,6 +24,7 @@ import { ARM_ACK_MS, COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload 
 import type { BrowserCommentSetResult } from '@shared/ipc/schema/browser';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { Crop } from './crop';
+import { pickPosition } from './position';
 import { ownerAlive, pickedPayload, sendPicked } from './send';
 
 const CURSOR_CSS = '* { cursor: crosshair !important }';
@@ -187,7 +189,9 @@ export class CommentMode {
     }
     // checked against the X2 registry before the mode ends, so a payload it refuses ends as a refusal the renderer
     // toasts rather than as a silent pick
-    const payload = pickedPayload({ tabId, appSessionId: entry.tab.appSessionId, anchor, crop: outcome });
+    // P2-E2: the card's pin, the element's point in the pane's pixels (`position.ts`)
+    const position = pickPosition(report.rect, report.viewport, view.webContents.getZoomFactor());
+    const payload = pickedPayload({ tabId, appSessionId: entry.tab.appSessionId, anchor, crop: outcome, ...(position && { position }) });
     if (payload === null) {
       if (screenshot && outcome === 'attached') this.deps.discard(screenshot.path);
       return this.refuse(tabId, state, via);

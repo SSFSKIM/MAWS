@@ -3,7 +3,7 @@
 // flipped above the element near the bottom, capped at 60 % of the host, docked when the host is too small, and the
 // top-right corner when there is no pin.
 import { describe, expect, it } from 'vitest';
-import { CARD_MIN_HEIGHT, dockCard, pinOf, placeCard } from './placement';
+import { CARD_MIN_HEIGHT, caretOf, dockCard, pinOf, placeCard, stripCard } from './placement';
 
 const BOX = { width: 600, height: 800 };
 const IDENTITY = { scale: 1, offset: { x: 0, y: 0 } };
@@ -79,5 +79,35 @@ describe('dockCard', () => {
   it('is the host’s full width less 16 px at its bottom, at most 320 high', () => {
     expect(dockCard({ width: 600, height: 800 })).toEqual({ mode: 'docked', width: 584, maxHeight: 320 });
     expect(dockCard({ width: 600, height: 200 })).toEqual({ mode: 'docked', width: 584, maxHeight: 184 });
+  });
+});
+
+// P2-E2: the strip under a native view, and its caret under the element
+describe('stripCard', () => {
+  it('is the column’s full width less 16 px, at most half its height less 16 and never over 320', () => {
+    expect(stripCard({ width: 600, height: 800 })).toEqual({ mode: 'strip', width: 584, maxHeight: 320 });
+    expect(stripCard({ width: 600, height: 500 })).toEqual({ mode: 'strip', width: 584, maxHeight: 234 });
+    expect(stripCard({ width: 600, height: 501 })).toEqual({ mode: 'strip', width: 584, maxHeight: 234 }); // half rounded down, as the strip's own cap
+    expect(stripCard({ width: 10, height: 20 })).toEqual({ mode: 'strip', width: 0, maxHeight: 0 });
+  });
+});
+
+describe('caretOf', () => {
+  const COLUMN = { width: 600, height: 800 };
+  it('stands under the pin’s x, kept on the card’s own top edge (its 8 px margin plus half the caret’s square)', () => {
+    expect(caretOf({ x: 250, y: 90, top: 60 }, COLUMN)).toBe(250);
+    expect(caretOf({ x: 14, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 586, y: 90, top: 60 }, COLUMN)).toBe(586);
+    expect(caretOf({ x: 0, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 900, y: 90, top: 60 }, COLUMN)).toBe(586);
+  });
+  it('keeps the caret inside an element only partly visible at the viewport’s edge', () => {
+    // main pins a visible span 0..16 at its centre, 8; the caret's 12 px square at 14 spans 8..20, over the span
+    expect(caretOf({ x: 8, y: 90, top: 60 }, COLUMN)).toBe(14);
+    expect(caretOf({ x: 592, y: 90, top: 60 }, COLUMN)).toBe(586);
+  });
+  it('is none without a pin or with a non-finite x', () => {
+    expect(caretOf(null, COLUMN)).toBeNull();
+    expect(caretOf({ x: Number.NaN, y: 0, top: 0 }, COLUMN)).toBeNull();
   });
 });

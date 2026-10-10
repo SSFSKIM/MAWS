@@ -145,6 +145,40 @@ CREATE INDEX browser_bookmarks_tree ON browser_bookmarks (partition, parent_id, 
 CREATE INDEX browser_bookmarks_url ON browser_bookmarks (partition, url);
 `,
   },
+  // P2-C start (2026-10-09)
+  {
+    version: 8,
+    // P2-C (the P2-C document, §10; X15's slot): the owner channel. `owner_channel_sessions` holds per session the
+    // to-human lane's override, the watermark from which marks may raise attention items, the last decided launch (its
+    // desired, recorded and applied states, the flags passed, whether a wanted `--system-prompt-snapshot off` was
+    // unavailable so the change waits for a compaction, the resolved style) and the style the engine reported;
+    // `owner_channel_marks` holds per question and essential its state, its delivered answer (text, origin, members, time),
+    // the answers still on their way (`answer_attempts`, JSON) and its times. `attention_items`
+    // stays a projection of the marks: it cannot keep a delivered answer, a read time or an override once its item
+    // retires. Both go with the session's record.
+    sql: `
+CREATE TABLE owner_channel_sessions (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE,
+  override TEXT NOT NULL DEFAULT 'inherit' CHECK (override IN ('inherit','on','off')),
+  enabled_at TEXT,
+  launch_id TEXT, launched_at TEXT,
+  desired TEXT CHECK (desired IN ('maws-contract','external-compatible-style','off')),
+  recorded TEXT,
+  appended INTEGER NOT NULL DEFAULT 0, snapshot_off INTEGER NOT NULL DEFAULT 0, off_unavailable INTEGER NOT NULL DEFAULT 0,
+  applied TEXT CHECK (applied IN ('maws-contract','external-compatible-style','off')),
+  style TEXT, observed_style TEXT, style_mismatch INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE owner_channel_marks (id TEXT PRIMARY KEY,
+  app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('need-input','essential')),
+  message_uuid TEXT NOT NULL, block_index INTEGER NOT NULL, span INTEGER NOT NULL, grammar INTEGER NOT NULL,
+  head TEXT NOT NULL, at TEXT NOT NULL, item INTEGER NOT NULL, live INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('unanswered','queued','unconfirmed','delivered','unread','read','retired')),
+  answer_text TEXT, answer_origin TEXT CHECK (answer_origin IN ('answer','reply','legacy')),
+  answer_members TEXT NOT NULL DEFAULT '[]',
+  answered_at TEXT, answer_attempts TEXT NOT NULL DEFAULT '[]', read_at TEXT, state_changed_at TEXT NOT NULL);
+CREATE INDEX owner_channel_marks_session ON owner_channel_marks(app_session_id, state);
+`,
+  },
+  // P2-C end
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

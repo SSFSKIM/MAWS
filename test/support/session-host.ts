@@ -68,6 +68,7 @@ export class FakeEngineHost {
   renameError: string | null = null; // E3: session.renameSession refused (a process that cannot rename)
   launchHangs: boolean | ((spec: LaunchSpec) => boolean) = false; // a crash point: `session.launch` never answers and nothing is reserved
   binaryPath = '/opt/engine/2.1.283';
+  declaresSystemPromptSnapshot = true; // P2-C: whether the binary declares --system-prompt-snapshot
   unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
   onCall: ((name: string) => void) | null = null; // E10: runs as each command arrives, before it is answered
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
@@ -176,7 +177,7 @@ export class FakeEngineHost {
       case 'engine.sessions':
         return [...this.table.values()];
       case 'engine.binaryInfo':
-        return { path: this.binaryPath, testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
+        return { path: this.binaryPath, testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null, declaresSystemPromptSnapshot: this.declaresSystemPromptSnapshot };
       case 'engine.relayHealth':
         if (this.relayError !== null) throw new Error(this.relayError);
         return this.relay;

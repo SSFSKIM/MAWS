@@ -57,6 +57,7 @@ export const rowId = {
   // E4c end
   // E13: a browser activity standing alone, keyed by the number the window gave it on arrival
   browserActivity: (seq: number) => row(`browser-activity:${seq}`),
+  ownerRecord: (turn: TurnId) => row(`owner-record:${turn}`), // P2-C (2026-10-09): a marked turn's working record in the report view
 };
 
 export const cellId = {

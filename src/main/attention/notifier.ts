@@ -28,6 +28,7 @@ const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
   plan: 'planReviews',
   error: 'errors', interrupted: 'errors', auto_mode_unavailable: 'errors',
   held_peer_message: 'heldPeerMessages', // not actionable, so it never notifies today; the flag is honoured if that changes
+  async_input: 'asyncInput', essential_unread: 'essential', // P2-C (2026-10-09): settings 12's two groups
 };
 
 function wanted(item: AttentionItem, settings: Settings): boolean {

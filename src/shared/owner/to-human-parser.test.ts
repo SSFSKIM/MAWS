@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parse } from './to-human-parser';
+import { parse, parseLive, TO_HUMAN_GRAMMAR_VERSION } from './to-human-parser';
 
 // Re-expressed from the owner's mod's marked-text cases, with S0's stored-text rule for unbalanced marks.
 describe('stored owner marks', () => {
@@ -47,10 +47,10 @@ describe('stored owner marks', () => {
       { kind: 'plain', text: '<to-human>Done.\n' }, { kind: 'essential', text: 'Tests fail.' }, { kind: 'plain', text: '\n<need-input>Which' },
     ]);
   });
-  it('mirrors the mod limit: balanced tag mentions inside code still parse as marks', () => {
-    expect(parse('Mention `<insight>why</insight>` here.')).toEqual([
-      { kind: 'plain', text: 'Mention `' }, { kind: 'insight', text: 'why' }, { kind: 'plain', text: '` here.' },
-    ]);
+  it('grammar 2: balanced tag mentions inside inline code stay literal', () => {
+    expect(TO_HUMAN_GRAMMAR_VERSION).toBe(2);
+    const text = 'Mention `<insight>why</insight>` here.';
+    expect(parse(text)).toEqual([{ kind: 'plain', text }]);
   });
   it('keeps unknown and unbalanced inner tags for the Markdown literal-tag pipeline', () => {
     expect(parse('<to-human><script>x</script> and <choice>A</to-human>')).toEqual([
@@ -64,3 +64,82 @@ describe('stored owner marks', () => {
     expect(parse('<need-input>Q<choice> </choice></need-input>')).toEqual([{ kind: 'need-input', text: 'Q' }]);
   });
 });
+
+// Grammar 2 (P2-C Design §4): tag tokens inside a code region (a fenced block, or an inline code span within a paragraph)
+// are literal; everything else is S0's grammar.
+describe('grammar 2: code regions', () => {
+  it('a fenced example of the vocabulary stays literal, with backticks or tildes', () => {
+    for (const fence of ['```', '~~~~']) {
+      const text = `The vocabulary:\n${fence}md\n<need-input>Which?\n<choice recommended>A</choice>\n</need-input>\n${fence}\nDone.`;
+      expect(parse(text)).toEqual([{ kind: 'plain', text }]);
+    }
+  });
+  it('an unclosed fence runs to the end of the text', () => {
+    const text = 'Intro\n```\n<to-human>x</to-human>';
+    expect(parse(text)).toEqual([{ kind: 'plain', text }]);
+  });
+  it('a mark that contains a fenced block stays a mark and keeps the block', () => {
+    expect(parse('<to-human>Run this:\n```sh\npnpm test\n```\nThen tell me.</to-human>')).toEqual([
+      { kind: 'to-human', text: 'Run this:\n```sh\npnpm test\n```\nThen tell me.' },
+    ]);
+  });
+  it('a closing tag quoted in a fence inside a mark does not close the mark', () => {
+    expect(parse('<to-human>Example:\n```\n</to-human>\n```\nEnd.</to-human>')).toEqual([
+      { kind: 'to-human', text: 'Example:\n```\n</to-human>\n```\nEnd.' },
+    ]);
+  });
+  it('a fence closes only on the same character, at least as long', () => {
+    expect(parse('````\n```\n~~~~\n<to-human>quoted</to-human>\n````\n<to-human>Shown.</to-human>')).toEqual([
+      { kind: 'plain', text: '````\n```\n~~~~\n<to-human>quoted</to-human>\n````\n' }, { kind: 'to-human', text: 'Shown.' },
+    ]);
+  });
+  it('a backtick line whose info string holds a backtick is an inline span, not a fence', () => {
+    expect(parse('```<to-human>x</to-human>```\n<to-human>Shown.</to-human>')).toEqual([
+      { kind: 'plain', text: '```<to-human>x</to-human>```\n' }, { kind: 'to-human', text: 'Shown.' },
+    ]);
+  });
+  it('an inline span of N backticks closes only on a run of exactly N', () => {
+    const text = 'Use ``a ` <to-human>x</to-human>`` ok';
+    expect(parse(text)).toEqual([{ kind: 'plain', text }]);
+  });
+  it('a backtick run with no partner is literal and hides nothing', () => {
+    expect(parse('A stray ` then <to-human>Done.</to-human>')).toEqual([
+      { kind: 'plain', text: 'A stray ` then ' }, { kind: 'to-human', text: 'Done.' },
+    ]);
+  });
+  it('an inline span does not cross a blank line', () => {
+    expect(parse('A ` start\n\n<to-human>Done.</to-human> and ` end')).toEqual([
+      { kind: 'plain', text: 'A ` start\n\n' }, { kind: 'to-human', text: 'Done.' }, { kind: 'plain', text: ' and ` end' },
+    ]);
+  });
+  it('choice markup quoted in code inside a question stays in its text', () => {
+    expect(parse('<need-input>Which form?\nWrite `<choice>A</choice>` lines.\n<choice recommended>Yes</choice>\n</need-input>')).toEqual([
+      { kind: 'need-input', text: 'Which form?\nWrite `<choice>A</choice>` lines.', choices: [{ text: 'Yes', recommended: true }] },
+    ]);
+  });
+});
+
+// Display only (Design §4): while a block streams, a final unclosed mark reads as open so its card fills in.
+describe('parseLive', () => {
+  it('reads an unclosed trailing to-human as open, which parse keeps literal', () => {
+    expect(parseLive('Working.\n<to-human>Plan: first the schema')).toEqual([
+      { kind: 'plain', text: 'Working.\n' }, { kind: 'to-human', text: 'Plan: first the schema' },
+    ]);
+    expect(parse('Working.\n<to-human>Plan: first the schema')).toEqual([{ kind: 'plain', text: 'Working.\n<to-human>Plan: first the schema' }]);
+  });
+  it('keeps every mark still open, outer and inner', () => {
+    expect(parseLive('<to-human>Done.\n<essential>Tests')).toEqual([{ kind: 'to-human', text: 'Done.' }, { kind: 'essential', text: 'Tests' }]);
+  });
+  it('drops a tag still arriving at the end', () => {
+    expect(parseLive('<to-human>Plan</to-hu')).toEqual([{ kind: 'to-human', text: 'Plan' }]);
+    expect(parseLive('<to-human>Done.</to-human>\n<need-in')).toEqual([{ kind: 'to-human', text: 'Done.' }, { kind: 'plain', text: '\n' }]);
+  });
+  it('a mark open around a fence still streaming stays the mark', () => {
+    expect(parseLive('<to-human>Run:\n```sh\npnpm')).toEqual([{ kind: 'to-human', text: 'Run:\n```sh\npnpm' }]);
+  });
+  it('a balanced text reads as parse reads it', () => {
+    const text = 'Intro\n<to-human>Done.\n<essential>Tests fail.</essential></to-human>\n<need-input>Q<choice>A</choice></need-input>';
+    expect(parseLive(text)).toEqual(parse(text));
+  });
+});
+

@@ -591,7 +591,7 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the resolved 
     const spawn = vi.fn();
     const host = engineHost({ spawn, binaryProbe: probe(), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
     const info = await host.call('engine.configure', { binaryPath: '/nonexistent' });
-    expect(info).toEqual({ path: '/nonexistent', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent') });
+    expect(info).toEqual({ path: '/nonexistent', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent'), declaresSystemPromptSnapshot: false /* P2-C */ });
     expect(await host.call('engine.binaryInfo', undefined)).toEqual(info);
     expect(await host.call('session.launch', { spec: spec() })).toEqual({ status: 'refused', reason: 'binary_missing', message: expect.stringContaining('/nonexistent') });
     expect(spawn).not.toHaveBeenCalled();
@@ -600,7 +600,7 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the resolved 
   it('null restores the installed binary and answers its real path and version, whatever the tested version', async () => {
     const host = engineHost({ binaryProbe: probe() });
     await host.call('engine.configure', { binaryPath: '/nonexistent' });
-    expect(await host.call('engine.configure', { binaryPath: null })).toEqual({ path: INSTALLED, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null });
+    expect(await host.call('engine.configure', { binaryPath: null })).toEqual({ path: INSTALLED, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null, declaresSystemPromptSnapshot: false /* P2-C */ });
     expect(getBinaryConfig()).toEqual({ binaryPath: null });
   });
 
@@ -1164,3 +1164,36 @@ describe('the removed browser bridge over IPC (E4c)', () => {
   });
 });
 // E4c end
+// P2-C start (2026-10-09; the P2-C document, Interfaces X2): the steer cancel and the prompt record's read
+describe('session.steer.cancel and session.promptHistory (P2-C M3)', () => {
+  it('each has a handler and one deadline shape, owned by the engine host', async () => {
+    const { P2C_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
+    const { P2C_DEADLINE_SHAPES } = await import('./ipc');
+    const { handlers } = engineHost();
+    expect(Object.keys(P2C_DEADLINE_SHAPES).sort()).toEqual([...P2C_SESSION_COMMANDS].sort());
+    expect(P2C_DEADLINE_SHAPES).toEqual({ 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' });
+    for (const name of P2C_SESSION_COMMANDS) {
+      expect(handlers.has(name), name).toBe(true);
+      expect(commands[name].owner).toBe('engine-host');
+    }
+  });
+
+  it('promptHistory reads the session’s journal directory under userData; a steer cancel for a session the host does not hold fails internal', async () => {
+    const host = engineHost();
+    const dir = join(userData, 'engine-host', 'journal', 'app-ph');
+    mkdirSync(dir, { recursive: true });
+    const rows = [
+      { seq: 1, direction: 'meta', at: '2026-01-09T10:00:00.000Z', frame: { event: 'spawn', args: [] } },
+      { seq: 2, direction: 'meta', at: '2026-01-09T10:00:01.000Z', frame: { event: 'queue', action: 'withdraw', messageUuid: 'u-1' } },
+      { seq: 3, direction: 'meta', at: '2026-01-09T10:00:02.000Z', frame: { event: 'queue', action: 'cancel', messageUuid: 'u-1' } },
+      { seq: 4, direction: 'meta', at: '2026-01-09T10:00:03.000Z', frame: { event: 'exit', code: 0, signal: null, reason: 'quit' } }, // fix wave 1: an ended launch, complete
+    ];
+    writeFileSync(join(dir, 'L1.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const answer = await host.call('session.promptHistory', { appSessionId: 'app-ph' as AppSessionId, since: '2026-01-09T10:00:00.500Z' });
+    expect(answer.complete).toBe(true);
+    expect(answer.events.map((e) => (e.kind === 'queue.transition' ? `${e.action} ${e.messageUuid}` : e.kind))).toEqual(['withdraw u-1', 'cancel u-1']);
+    await expect(host.call('session.promptHistory', { appSessionId: 'app-none' as AppSessionId, since: '2026-01-09T10:00:00.500Z' })).resolves.toEqual({ events: [], complete: false });
+    await expect(host.call('session.steer.cancel', { appSessionId: 'app-none' as AppSessionId, messageUuid: 'u-1' as never })).rejects.toThrow('unknown session app-none');
+  });
+});
+// P2-C end

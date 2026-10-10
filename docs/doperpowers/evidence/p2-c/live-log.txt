@@ -1,0 +1,59 @@
+>> setup: engine 2.1.296 (~/.local/share/claude/versions/2.1.296, declares --system-prompt-snapshot <on|off>: yes) through /private/tmp/maws-p2c-live-7wOqml/engine/claude (adds --max-budget-usd, cap US$1); relay http://127.0.0.1:8641; scratch /private/tmp/maws-p2c-live-7wOqml
+>> plugin precondition: doperpowers 7.144.0 at user scope (installPath ~/.claude/plugins/cache/doperpowers/doperpowers/7.144.0, lastUpdated 2026-10-09T09:41:08.535Z); output-styles/to-human.md declares maws-to-human-contract: 1; hooks/mods/to-human.tsx and hooks/to-human-stream.sh read MAWS_NATIVE_TO_HUMAN
+>> A-15 before the run: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files before: ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04; the doperpowers cache tree 892 files, listing sha256 cc3c9a3622393bba7d6607d07bd52c0c5b117fa969087582e5fda912427a2760
+
+=== 01-g1-new · G1: a new session in the clean home carries the contract, the variable, and records maws-contract
+session 8da9739c-8650-4b09-8fdd-9aede1b09b8d (engine a3891368-a95f-42d8-a6a3-caf887650f73): model claude-haiku-5-5[1m], gateway routed, budget US$1.0000; spawn --append-system-prompt (contract 1, byte for byte); no --system-prompt-snapshot; --settings env MAWS_NATIVE_TO_HUMAN=1; desired maws-contract, recorded unrecorded, applied maws-contract; appended 1, snapshot_off 0, style default, enabled_at 2026-10-09T21:11:03.008Z; probe MAWS_NATIVE_TO_HUMAN=1
+>> G1 new: spawn has --append-system-prompt (contract 1 header; the contract byte for byte); no --system-prompt-snapshot; MAWS_NATIVE_TO_HUMAN=1 in --settings env and logged by the SessionStart probe; desired maws-contract, recorded unrecorded, applied maws-contract
+
+=== 02-g6-notify · G6: with the window unfocused, one notification per item: the question and the must-read
+window focused at the items: none; items [["essential_unread","Must read — Warning: the snapshot shows the repo has one commit, 'seed', so there is no commit history to draw entries from. Until …"],["async_input","Question — Should the changelog follow the Keep a Changelog format?"]]; attention.notified [["essential_unread","fallback"],["async_input","fallback"]]
+>> G6 notify: attention.notified x2 (fallback) for async_input and essential_unread, the window unfocused; none for to-human or insight
+
+=== 03-g6-leave · G6: leaving the tab, the sidebar row shows the question glyph and Needs you lists the items
+turn running when leaving: true; Needs you row: p2c-repo · CHANGELOG.md Keep a Changelog format · Must read — Warning: the snapshot shows the repo has one commit, 'seed', so there is no commit history to draw entries from. Until …; items: ["Must read — Warning: the snapshot shows the repo has one commit, 'seed', so there is no commit history to draw entries from. Until …","Question — Should the changelog follow the Keep a Changelog format?"]
+>> G6 leave tab: sidebar '?' (Question waiting) and Needs you "p2c-repo · CHANGELOG.md Keep a Changelog format · Must read — Warning: the snapshot shows the repo has one commit, 'seed"; items "Must read — Warning: the snapshot shows the repo has one commit, 'seed", "Question — Should the changelog follow the Keep a Changelog format?"
+
+=== 04-g4-choice · G4: the recommended choice clicked while the agent runs reads Queued, then Answered when the engine starts it
+turn running at the click: true; clicked 2026-10-09T21:11:12.456Z; Queued seen 2026-10-09T21:11:12.489Z (answer prompts written by then: 1); written 2026-10-09T21:11:12.454Z as 10b21b34-4dc5-4a14-899e-8ac22f896e09; the engine's started 2026-10-09T21:11:50.690Z; Answered seen 2026-10-09T21:11:51.023Z; prompt "Answering \"Should the changelog follow the Keep a Changelog format?\": Keep a Changelog: fixed headings (Added, Changed, Fixed, and so on) and an Unreleased sect"
+>> G4 choice mid-turn: Queued → Answered (command_lifecycle started 10b21b34-4dc5-4a14-899e-8ac22f896e09 at 2026-10-09T21:11:50.690Z; written at 2026-10-09T21:11:12.454Z, Answered seen at 2026-10-09T21:11:51.023Z); composer draft unchanged
+
+=== 05-g3-report · G3: the marked turn reads as cards over one Working record; opened, the divider; expanded, the tool rows; folded again
+cards {"message":2,"mustRead":1,"insight":1,"question":1,"records":1}; insight placement inline; record closed "Working record · 1 tool call · 1 message"; divider "Worked for 49s · 1 tool call"; the tool row: absent at levels 0 and 1, "Ran sleep 40 in 40s" at level 2, absent after the fold
+>> G3 report: 2 message, 1 must-read, 1 insight (inline), 1 question card(s) over "Working record · 1 tool call · 1 message"; the sleep's tool row absent; opened: "Worked for 49s · 1 tool call", the row still absent; expanded: the row "Ran sleep 40 in 40s"; "Fold to report": absent again
+
+=== 06-g4-reply · G4: Reply sends free text from the card; the composer’s draft is untouched and focused
+reply written 2026-10-09T21:11:53.938Z as 004e9e99-ce66-4ac6-8837-0e9aa227e856, started 2026-10-09T21:11:53.940Z; prompt "Answering \"Should the changelog follow the Keep a Changelog format?\": Use plain Markdown headings, no fixed format."
+>> G4 Reply: Answered: Use plain Markdown headings, no fixed format. (started 004e9e99-ce66-4ac6-8837-0e9aa227e856); composer draft unchanged and focused
+
+=== 07-restart · restart: the states and items restored silently; the must-read unread until Mark read
+items before ["8da9739c-8650-4b09-8fdd-9aede1b09b8d:essential_unread:8da9739c-8650-4b09-8fdd-9aede1b09b8d:e67f567b-3946-4100-8b01-67c8c143a673:1:e0"]; after ["8da9739c-8650-4b09-8fdd-9aede1b09b8d:essential_unread:8da9739c-8650-4b09-8fdd-9aede1b09b8d:e67f567b-3946-4100-8b01-67c8c143a673:1:e0"]; attention.notified since the page loaded: 0; unread must-reads 1
+>> restart: 1 item(s) restored, 0 notified; the question reads "Answered: Use plain Markdown headings, no fixed format."; 1 must-read(s) unread until Mark read, then Read
+
+=== 08-resume · resume: the contract passed again and the recorded snapshot reused; the agent names the marks
+budget US$0.9975; spawn --append-system-prompt (contract 1, byte for byte); no --system-prompt-snapshot; --settings env MAWS_NATIVE_TO_HUMAN=1; resume a3891368-a95f-42d8-a6a3-caf887650f73; desired maws-contract, recorded contract:1, applied maws-contract; probe 1; before the resume 2 prompt snapshot(s) [contract:1, contract:1], 0 compact boundaries, after its turn 2 prompt snapshot(s) [contract:1, contract:1], 0 compact boundaries; reply "<to-human>\nYes. The system prompt has a section titled \"Messages to the human (MAWS to-human contract 1)\". It defines these tag names: to-human, essential, need-input, insight, choice.\n</to-human>"
+>> resume: spawn has --append-system-prompt, no --system-prompt-snapshot; desired maws-contract, recorded contract:1, applied maws-contract; no second append in the snapshot (the resume recorded none: 2 prompt snapshot(s) [contract:1, contract:1], 0 compact boundaries before and after); agent names to-human, essential, need-input, insight
+
+=== 09-off · off arm: the session’s override Off; the resume passes --system-prompt-snapshot off, no contract and no variable; the agent finds none
+row: "Applies the next time this session starts", then "Off: the agent is not asked to mark anything"; budget US$0.9946; spawn no --append-system-prompt; --system-prompt-snapshot off; --settings env MAWS_NATIVE_TO_HUMAN=<unset>; desired off, recorded contract:1, applied off, snapshot_off 1, override off; probe <unset>; reply "NO\n\nMy previous answer was wrong. I cited a \"Messages to the human\" section and tag names that are not in my system prompt. Those tags came from my own earlier reasoning, not from my instructions."
+>> off arm: the mods row "Applies the next time this session starts", then "Off: the agent is not asked to mark anything"; spawn --system-prompt-snapshot off, no append, MAWS_NATIVE_TO_HUMAN=<unset> (--settings env and the probe); desired off, recorded contract:1, applied off; agent: "NO\n\nMy previous answer was wrong. I cited a \"Messages to the"
+
+=== 10-style · style arm: the owner’s doperpowers installed in the scratch home with its to-human style selected; no contract appended; the variable set; the mod’s band stays away
+setup · marketplace add: Adding marketplace…✔ Successfully added marketplace: doperpowers (declared in user settings) · install: Installing plugin "doperpowers@doperpowers"...✔ Successfully installed plugin: doperpowers@doperpowers (scope: user)
+the scratch home: doperpowers@doperpowers 7.144.0 at user scope (/private/tmp/maws-p2c-live-7wOqml/claude-config/plugins/cache/doperpowers/doperpowers/7.144.0); enabledPlugins {"doperpowers@doperpowers":true}; outputStyle doperpowers:to-human
+session 24e351a1-daf6-442b-9b86-6275b799c9ae (engine 82bce65a-f3b6-4841-ade3-319ba8ba1162): budget US$0.9904; plugins ["doperpowers@doperpowers","cc-plugin-agents-md@builtin","cc-plugin-telemetry@builtin","cc-plugin-plugin-authoring@builtin"]; spawn no --append-system-prompt; no --system-prompt-snapshot; --settings env MAWS_NATIVE_TO_HUMAN=1; desired external-compatible-style, recorded unrecorded, applied external-compatible-style, style doperpowers:to-human, observed doperpowers:to-human, mismatch 0; probe 1; MAWS cards 3; the band: (no band); reply "<to-human>This repo is on `master` with a clean working tree and one commit, \"seed.\" I have not opened any of its files, so I can't yet describe what it does.</to-human>\n\n<essential>I haven't read any file in this repo, so nothing I've said about its contents is verified. The only facts I have are t"
+>> style arm: doperpowers 7.144.0 installed for the scratch home's user from a local marketplace, outputStyle doperpowers:to-human; no --append-system-prompt; desired external-compatible-style, recorded unrecorded, applied external-compatible-style (engine reports doperpowers:to-human); MAWS_NATIVE_TO_HUMAN=1 logged; 3 MAWS card(s); the mod's band absent (deferred)
+
+=== 11-style-answer · style arm: a choice answered and a must-read marked read with the doperpowers mod active
+written 2026-10-09T21:12:18.747Z as 32974611-4d5b-4728-aa0e-e1ee96620ccf; the engine's started 2026-10-09T21:12:18.752Z; Answered seen 2026-10-09T21:12:18.766Z; prompt "Answering \"Should the README get a usage section?\": Add a short usage section: install and run commands, plus one example"; 1 must-read(s) marked read
+>> style answer: with the mod active, the recommended choice Answered at the engine's started (32974611-4d5b-4728-aa0e-e1ee96620ccf at 2026-10-09T21:12:18.752Z; Answered seen at 2026-10-09T21:12:18.766Z); 1 must-read(s) Mark read → Read; no item left
+
+=== 12-style-off · style arm, lane off: the variable unset; the mod draws its own to-human band
+budget US$0.9882; spawn no --append-system-prompt; no --system-prompt-snapshot; --settings env MAWS_NATIVE_TO_HUMAN=<unset>; desired off, recorded none, applied off; probe <unset>; the band: to-human view ·  full transcript
+>> style arm, lane off: no --append-system-prompt; no --system-prompt-snapshot; --settings env MAWS_NATIVE_TO_HUMAN=<unset>; desired off, recorded none, applied off; MAWS_NATIVE_TO_HUMAN=<unset> logged; the mod draws its band "to-human view ·  full transcript"
+
+console errors (both launches): []
+owner files after: ~/.claude/settings.json sha256 5841094d567caa76dd1d1032b5b7492040540b8fd83bec5645659ae632b83e04 (identical); the doperpowers cache tree 892 files, listing sha256 cc3c9a3622393bba7d6607d07bd52c0c5b117fa969087582e5fda912427a2760 (identical)
+>> spend: US$0.0142 across the run's journals (cap US$1); ~/.claude/settings.json unchanged; the doperpowers cache tree unchanged
+>> A-15 after the run: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)

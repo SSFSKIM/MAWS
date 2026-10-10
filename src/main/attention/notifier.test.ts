@@ -3,7 +3,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { item, project, record } from '../../../test/support/builders';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 
 // A stand-in for Electron's Notification: records every instance, and lets a test fire its events.
 const electron = vi.hoisted(() => {
@@ -42,7 +42,7 @@ type Writer = import('../sessions/read-model').ReadModelWriter;
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
-const SETTINGS: Settings = SETTINGS_DEFAULTS_V12;
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V13;
 
 function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void } = {}) {
   const model = new SessionReadModel('index');
@@ -124,7 +124,7 @@ describe('notifier fires once per item when unfocused', () => {
   });
 
   it('with C11’s notifications.kinds, posts only for a group that is on (approvals, questions, plan reviews, errors)', () => {
-    const kinds = { approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true };
+    const kinds = { approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: true, essential: true /* P2-C */ };
     const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds } };
     const h = harness({ settings });
     const at = (n: number) => `2026-09-28T10:0${n}:00Z`;
@@ -139,6 +139,18 @@ describe('notifier fires once per item when unfocused', () => {
     // A held peer message is not actionable, so its flag being on changes nothing today.
     h.set(LOOSE, [item(LOOSE, 'held_peer_message', T)]);
     expect(posted()).toHaveLength(4);
+  });
+
+  it('P2-C: posts an owner-channel question and must-read under their own groups (asyncInput, essential), and counts them in the badge', () => {
+    for (const [asyncInput, essential, bodies] of [[true, false, ['async_input']], [false, true, ['essential_unread']]] as const) {
+      electron.FakeNotification.instances = [];
+      const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds: { ...SETTINGS.notifications.kinds, asyncInput, essential } } };
+      const h = harness({ settings });
+      h.set(CHARTER, [item(CHARTER, 'async_input', T), item(CHARTER, 'essential_unread', '2026-09-28T10:01:00Z')]);
+      expect(posted().map((n) => n.options.body)).toEqual(bodies.map((kind) => `${kind} for ${CHARTER}`));
+      expect(electron.setBadge).toHaveBeenLastCalledWith('1');
+      h.stop();
+    }
   });
 
   it('never posts for the items that were already waiting when it started', () => {

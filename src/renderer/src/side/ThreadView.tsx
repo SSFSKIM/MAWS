@@ -44,7 +44,7 @@ const COPY = SIDE_COPY.pane;
 // P2-E1 start (2026-10-09): the re-dock (D7)
 function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: Anchor): void {
   const target = targetOf(anchor);
-  if (target === null) return;
+  if (target?.kind !== 'deliverable') return;
   openDeliverable(target.appSessionId, target.deliverableId); // no version: the latest; activated, so this pane yields the panel
   openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
 }
@@ -82,7 +82,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d start
   const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
   // E4d end
-  const redocks = anchor !== null && targetOf(anchor) !== null; // P2-E1: an artifact element whose page names a deliverable
+  const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable (P2-E2: a page's thread has no re-dock)
 
   return (
     <div data-side-thread-view={child} className="flex h-full min-h-0 flex-col">

@@ -39,9 +39,9 @@ describe('bash mode echo and receipt', () => {
     const ended = ofKind(run.events, 'turn.ended');
     expect(ended.map((e) => e.isEchoReceipt)).toEqual([true, false]);
     expect(ofKind(run.events, 'turn.started')).toMatchObject([{ origin: 'human', userMessageUuid: prompt }]);
-    // the receipt released nothing: the only queue row is the prompt's own submission
+    // the receipt released nothing: the only queue rows are the recovery's (P2-C) and the prompt's own submission
     const queueRows = run.journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { event: string }).event === 'queue').map((r) => r.frame as { action: string; trigger: string });
-    expect(queueRows).toEqual([{ event: 'queue', action: 'release', trigger: 'send', queueId: expect.any(String), messageUuid: prompt }]);
+    expect(queueRows).toEqual([{ event: 'queue', action: 'recovered' }, { event: 'queue', action: 'release', trigger: 'send', queueId: expect.any(String), messageUuid: prompt }]);
     expect(run.rebuilt()).toEqual(run.events);
   });
 

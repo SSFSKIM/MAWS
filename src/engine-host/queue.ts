@@ -14,9 +14,16 @@
 // W1: a `next` steer (Enter while a turn runs) is a pending steer until the engine starts it or drops it, published
 // with the queue so the composer can offer "Hold until the turn ends": `hold` withdraws it from the engine
 // (`cancel_async_message`, pass3/steer-next-cancelled) and appends it to the app queue, remembering its uuid.
+// P2-C: every transition of a prompt through the queue is a `meta queue` row (`transition`; the P2-C document, Design
+// §6's row table), journaled at the transition and before the change is published, so the normaliser's
+// `queue.transition` for it precedes any snapshot showing its effect. The exception is `release` and `promote`: each is
+// journaled after the persist that makes the submission durable, which already publishes the entry `submitting` with
+// its uuid, and before the write (that snapshot shows the entry alive, which the row then says too). Every steer the
+// engine was handed ends on record: a lifecycle, a row, or `abandon` at the exit or at the next launch's recovery when
+// the host died with it. `cancelSteer` drops a pending steer unqueued.
 import { randomUUID } from 'node:crypto';
 import { queueTransaction } from './store/queue-transaction';
-import type { SessionEvent } from '@shared/graph/events';
+import type { QueueDropReason, QueueTransitionAction, SessionEvent } from '@shared/graph/events'; // P2-C: the transition names
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { SendContentSchema, WITHDRAWN_MAX, type PendingSteer, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { UserInputFrame } from '@shared/wire/frames';
@@ -26,6 +33,9 @@ export const ACK_TIMEOUT_MS = 5_000;
 // (8 s, under main's 10 s deadline) however long the engine leaves a cancel unanswered (each has its own 8 s timeout).
 export const HOLD_ALL_DEADLINE_MS = 2_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
+// P2-C: the `meta queue` row a recovery journals once it has stated what the launches before it left (not a prompt's
+// transition: the normaliser maps nothing for it); the journal read of unsettled steers takes it as its boundary
+export const RECOVERED_ACTION = 'recovered';
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // `hold`: a host sequence or steer withdrawal stopped holding the queue
 export type SteerPriority = 'now' | 'next';
@@ -45,6 +55,9 @@ export interface MessageQueueDeps {
   log?: (message: string) => void;
   ackTimeoutMs?: number;
   holdAllDeadlineMs?: number; // W1: HOLD_ALL_DEADLINE_MS by default
+  // P2-C: the steers an earlier launch wrote and left unstated (its host died with it; prompt-history.ts
+  // `unsettledPrompts`), read at recovery, each abandoned as a row; absent, none
+  unsettled?: () => Promise<MessageUuid[]>;
 }
 
 export class QueueEntryError extends Error {
@@ -67,6 +80,9 @@ export class MessageQueue {
   private steers: PendingSteer[] = []; // W1: `next` steers written and not yet started or dropped, in write order
   private withdrawn: MessageUuid[] = []; // W1: the steers held back into the app queue, the last WITHDRAWN_MAX
   private readonly withdrawing = new Set<MessageUuid>(); // W1: steers one hold or stop has claimed and not yet settled
+  // P2-C: every steer written (any priority, a promotion's included) whose end no lifecycle or row has stated yet; the
+  // exit abandons what is left, so no prompt the engine was handed outlives the process unrecorded
+  private readonly unended = new Set<MessageUuid>();
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -101,11 +117,19 @@ export class MessageQueue {
   async recover(): Promise<void> {
     await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
       const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
+      // P2-C: what an earlier launch that died with its host left unstated, abandoned with the stored pending steers
+      // A failed read keeps startup going but leaves no `recovered` row: that row certifies the leftovers were read and
+      // stated, so the next launch's walk goes on past this one and reads them again.
+      const prior = await (this.deps.unsettled?.() ?? Promise.resolve([])).catch((error: unknown) => {
+        this.log(`the earlier launches' unsettled steers could not be read: ${messageOf(error)}`);
+        return null;
+      });
+      for (const uuid of prior ?? []) this.unended.add(uuid);
       this.entries = loaded.entries;
       this.paused = loaded.paused;
       this.releasePaused = this.paused;
       this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
-      this.steers = []; // W1: a pending steer lived in the engine process that is gone
+      this.steers = loaded.steers ?? []; // W1: a pending steer lived in the engine process that is gone; P2-C: settleAfterExit abandons each as a row
       this.withdrawn = loaded.withdrawn ?? [];
       this.loaded = true;
       if (loaded.corrupt !== null) {
@@ -114,6 +138,7 @@ export class MessageQueue {
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
       }
       this.settleAfterExit();
+      if (prior !== null) this.journal({ event: 'queue', action: RECOVERED_ACTION }); // P2-C: the earlier launches' leftovers are on record from here
       await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
       this.deps.onPauseChange?.(this.releasePaused);
     });
@@ -153,13 +178,14 @@ export class MessageQueue {
     return structuredClone(entry);
   }
 
-  // A removal that cannot be saved is undone and rejects.
+  // A removal that cannot be saved is undone and rejects. P2-C: its row is written once the removal is saved, before it
+  // is published, since an undone removal states nothing.
   async remove(queueId: string): Promise<void> {
     const entry = this.queued(queueId);
     const index = this.entries.indexOf(entry);
     this.entries = this.entries.filter((e) => e !== entry);
     try {
-      await this.persist();
+      await this.persist(() => this.transition('remove', { queueId }));
     } catch (error) {
       this.entries.splice(index, 0, entry);
       throw error;
@@ -208,9 +234,11 @@ export class MessageQueue {
     const uuid = randomUUID() as MessageUuid;
     const next = opts.priority === 'next';
     if (next) this.registerSteer(uuid, content);
+    this.unended.add(uuid); // P2-C: before the write, whose settle may drain its lifecycle
     try {
       await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' }, opts.preface ? { preface: opts.preface } : undefined);
     } catch (error) {
+      this.unended.delete(uuid); // P2-C: never written
       if (next) {
         this.steers = this.steers.filter((s) => s.messageUuid !== uuid);
         await this.announceSteers(); // a save during the write may have published it
@@ -304,17 +332,56 @@ export class MessageQueue {
 
   // Named withdrawn before the cancel, so the engine's `cancelled` for it (which arrives before the answer) never reads
   // as a message that was not sent; and claimed, so no other hold or stop withdraws it meanwhile.
+  // P2-C: each claim is a `withdraw` row, so the engine's own `cancelled` that follows reads as the host's withdrawal.
   private claim(uuids: MessageUuid[]): void {
-    for (const uuid of uuids) this.withdrawing.add(uuid);
+    for (const uuid of uuids) {
+      this.withdrawing.add(uuid);
+      this.transition('withdraw', { messageUuid: uuid });
+    }
     this.withdrawn = [...this.withdrawn, ...uuids].slice(-WITHDRAWN_MAX);
   }
 
-  // A claim whose withdrawal did not happen, taken back by the one that made it (the steer stays the engine's).
+  // A claim whose withdrawal did not happen, taken back by the one that made it (the steer stays the engine's). P2-C: a
+  // `giveback` row for each claim still held; one an exit settled meanwhile was abandoned there and gives nothing back.
   private async giveBack(uuids: MessageUuid[]): Promise<void> {
     const gone = new Set(uuids);
-    for (const uuid of uuids) this.withdrawing.delete(uuid);
+    for (const uuid of uuids) if (this.withdrawing.delete(uuid)) this.transition('giveback', { messageUuid: uuid });
+    for (const uuid of uuids) if (!this.steers.some((s) => s.messageUuid === uuid)) this.unended.delete(uuid); // P2-C: the engine ended it meanwhile (its lifecycle)
     this.withdrawn = this.withdrawn.filter((u) => !gone.has(u));
     await this.persist().catch((error: unknown) => this.log(`withdrawal's end not saved: ${messageOf(error)}`));
+  }
+
+  // P2-C (the P2-C document, Design §6 "Cancel"): a pending steer withdrawn from the engine and dropped, never appended to
+  // the app queue, so a cancelled answer is never sent by its own cancellation (`hold` would release it into a turn that
+  // ended during the round trip). Refused like `hold` while a hold, a stop or another cancel withdraws it;
+  // `already_started` when it is not a pending steer (the engine took it, or never had it) or the engine answers it had
+  // nothing to withdraw, the claim then given back; a failed cancel gives it back and rejects. On success its uuid stays
+  // withdrawn (the transcript hides the dropped bubble as for a held steer). The head of the app queue is then considered
+  // under the usual gates, as after a hold: a turn that ended while this steer was unstarted released nothing.
+  async cancelSteer(messageUuid: MessageUuid): Promise<{ outcome: 'cancelled' | 'already_started' }> {
+    if (this.withdrawing.has(messageUuid)) throw new QueueEntryError('This message is already being withdrawn');
+    if (!this.steers.some((s) => s.messageUuid === messageUuid)) return { outcome: 'already_started' };
+    if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
+    this.claim([messageUuid]);
+    await this.persist().catch((error: unknown) => this.log(`cancel not announced: ${messageOf(error)}`));
+    let cancelled: boolean;
+    try {
+      cancelled = await this.deps.cancel(messageUuid);
+    } catch (error) {
+      await this.giveBack([messageUuid]);
+      throw error;
+    }
+    if (!cancelled) {
+      await this.giveBack([messageUuid]);
+      return { outcome: 'already_started' };
+    }
+    this.withdrawing.delete(messageUuid);
+    this.unended.delete(messageUuid);
+    this.steers = this.steers.filter((s) => s.messageUuid !== messageUuid); // the engine's `cancelled` may have removed it already
+    this.transition('cancel', { messageUuid });
+    await this.persist().catch((error: unknown) => this.log(`cancelled steer not saved: ${messageOf(error)}`)); // a pending steer is the engine's: a lost save loses nothing
+    await this.releaseHead('hold');
+    return { outcome: 'cancelled' };
   }
 
   // A claimed steer withdrawn from the engine (`cancel_async_message`): on `cancelled: true` a held entry, saved before
@@ -334,6 +401,7 @@ export class MessageQueue {
       return null;
     }
     this.withdrawing.delete(steer.messageUuid);
+    this.unended.delete(steer.messageUuid); // P2-C: the hold row ends it
     const entry = this.appendHeld(steer);
     try {
       await this.persist();
@@ -370,9 +438,12 @@ export class MessageQueue {
     if (!current()) throw new QueueEntryError('the session ended before the steer was written');
     const next = opts.priority === 'next';
     if (next) this.registerSteer(uuid, entry.content); // W1: a pending steer from before its write, as in steer()
+    this.transition('promote', { queueId, messageUuid: uuid }); // P2-C: before the write, whose settle may drain U's start
+    this.unended.add(uuid); // P2-C: whatever its priority, until a lifecycle or a row ends it
     try {
       await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
     } catch (error) {
+      this.unended.delete(uuid); // P2-C: the revert states it
       if (next) this.steers = this.steers.filter((s) => s.messageUuid !== uuid); // taken back, published with the revert
       if (current()) {
         this.revert(entry);
@@ -393,6 +464,8 @@ export class MessageQueue {
   // (not paused, idle, ready): no turn.ended will come to release it; a `refused` drop pauses the queue instead. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
   // its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
+    // P2-C: a start ends a written steer; so does a drop, unless the host is withdrawing it (its outcome row ends it)
+    if (event.state === 'started' || event.state === 'completed' || (DROPPED_BEFORE_START.has(event.state) && !this.withdrawing.has(event.commandUuid))) this.unended.delete(event.commandUuid);
     // W1: a pending steer ends at any lifecycle past `queued`: started (folded into the turn, or a turn of its own), or
     // dropped (cancelled, discarded, refused)
     if (event.state !== 'queued' && this.steers.some((s) => s.messageUuid === event.commandUuid)) {
@@ -406,6 +479,7 @@ export class MessageQueue {
       this.entries = this.entries.filter((e) => e !== entry);
       this.clearAck(entry.queueId);
       this.started.delete(entry.queueId);
+      this.transition('drop', { queueId: entry.queueId, messageUuid: entry.messageUuid, reason: event.state as QueueDropReason }); // P2-C
       // A refusal may describe the engine's state rather than this message: with messages waiting, pause instead of
       // draining the queue into it (coordinator ruling); resume is one click. An empty queue is not paused, or it would
       // silently hold the next send.
@@ -501,13 +575,21 @@ export class MessageQueue {
 
   private settleAfterExit(): void {
     this.started.clear(); // whatever the process started went with it
+    // P2-C: each pending steer, each one a hold, a stop or a cancel was withdrawing, and each other steer written and not
+    // ended (a `now` steer or a promotion not yet started; at recovery, what an earlier launch left unstated) is abandoned
+    // as a row; the claims go too, so a withdrawal answered after the exit gives nothing back
+    for (const uuid of new Set([...this.steers.map((s) => s.messageUuid), ...this.withdrawing, ...this.unended])) this.transition('abandon', { messageUuid: uuid });
+    this.withdrawing.clear();
+    this.unended.clear();
     this.steers = []; // W1: and so did the engine's queue, pending steers in it
     const uncertain: QueueEntry[] = [];
     const kept: QueueEntry[] = [];
     for (const entry of this.entries) {
       if (entry.state === 'released') {
+        this.transition('retire', { queueId: entry.queueId, messageUuid: entry.messageUuid }); // P2-C
         this.interruptedNotice(entry);
       } else if (entry.state === 'submitting') {
+        this.transition('uncertain', { queueId: entry.queueId, messageUuid: entry.messageUuid }); // P2-C
         uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false });
         this.notice(`queue:uncertain:${entry.queueId}`, 'A message may not have been delivered before the session ended. Check the transcript, then resume the queue to send it or remove it.');
       } else {
@@ -575,7 +657,10 @@ export class MessageQueue {
   }
   // C7 end
 
+  // P2-C: a `revert` row names the uuid that never reached the engine (a submission or a promotion whose persist or write
+  // failed, or whose process stopped being ready before the write).
   private revert(entry: QueueEntry): void {
+    this.transition('revert', { queueId: entry.queueId, messageUuid: entry.messageUuid });
     Object.assign(entry, { state: 'queued', messageUuid: null, submittedAt: null, steer: false });
   }
 
@@ -629,14 +714,23 @@ export class MessageQueue {
     }
   }
 
-  // Saved through the store, then announced with what was saved; a failed save rejects and announces nothing.
-  private async persist(): Promise<void> {
+  // P2-C start (2026-10-09; the P2-C document, Design §6's row table): one row of a prompt's transition, journaled before
+  // the persist that publishes its effect. The ids are the ones the row names; a drop carries the lifecycle that dropped it.
+  private transition(action: QueueTransitionAction, ids: { queueId?: string; messageUuid?: MessageUuid | null; reason?: QueueDropReason }): void {
+    this.journal({ event: 'queue', action, ...ids });
+  }
+  // P2-C end
+
+  // Saved through the store, then announced with what was saved; a failed save rejects and announces nothing. P2-C:
+  // `saved` runs once the save landed and before the announcement (a row for a change a failed save would undo).
+  private async persist(saved?: () => void): Promise<void> {
     const snapshot = this.state;
     const save = this.deps.store.saveQueue(this.deps.appSessionId, snapshot);
     this.saving.add(save);
     const done = () => void this.saving.delete(save);
     save.then(done, done);
     await save;
+    saved?.();
     try {
       this.deps.onChange(snapshot);
     } catch (error) {

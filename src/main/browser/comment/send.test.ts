@@ -13,15 +13,17 @@ const payload: BrowserCommentPicked = {
 
 function owner({ destroyed = false, contentsDestroyed = false } = {}) {
   const send = vi.fn();
-  const win: PickOwner = { isDestroyed: () => destroyed, webContents: { isDestroyed: () => contentsDestroyed, send } };
-  return { win, send };
+  const focus = vi.fn();
+  const win: PickOwner = { isDestroyed: () => destroyed, webContents: { isDestroyed: () => contentsDestroyed, send, focus } };
+  return { win, send, focus };
 }
 
 describe('sendPicked (Design §8, Decision Log 14): the owner window alone, or nobody', () => {
-  it('sends the validated payload to the owner window on the event channel', () => {
-    const { win, send } = owner();
+  it('sends the validated payload to the owner window on the event channel, and gives its page the native focus (P2-E2)', () => {
+    const { win, send, focus } = owner();
     expect(sendPicked(win, payload)).toBe(true);
     expect(send).toHaveBeenCalledExactlyOnceWith(eventChannel('browser.comment.picked'), payload);
+    expect(focus).toHaveBeenCalledOnce();
   });
 
   it('answers false and sends nothing with no owner window, or one closed', () => {
@@ -29,6 +31,7 @@ describe('sendPicked (Design §8, Decision Log 14): the owner window alone, or n
     for (const gone of [owner({ destroyed: true }), owner({ contentsDestroyed: true })]) {
       expect(sendPicked(gone.win, payload)).toBe(false);
       expect(gone.send).not.toHaveBeenCalled();
+      expect(gone.focus).not.toHaveBeenCalled();
     }
   });
 

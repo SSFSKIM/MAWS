@@ -5,7 +5,8 @@
 // editor out). The oldest open item that is actionable but not answerable here (an undeclared dialog, a request main
 // no longer holds, an error, an interruption, auto mode unavailable) shows as a notice above the frame instead. E1 M4b:
 // a blocking `maws` ask (a question item read as `maws.ask.opened`) is answered in the Question sheet, not here, so it
-// is a notice too and the editor stays. Pure.
+// is a notice too and the editor stays. P2-C (2026-10-10): a question an agent left or a must-read is neither: its card
+// stands in the session's transcript. Pure.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
@@ -46,6 +47,7 @@ export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<At
       notices.push(item);
       continue;
     }
+    if (item.kind === 'async_input' || item.kind === 'essential_unread') continue; // P2-C: the session's own card in its transcript carries it
     if (request?.kind === 'maws.ask.opened') notices.push(item);
     else if (item.kind === 'dialog') {
       const declared = request?.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok;

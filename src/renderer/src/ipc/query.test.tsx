@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { IpcCommandError, QUERY_COMMANDS, useCommand } from './query';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,7 +21,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V13, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

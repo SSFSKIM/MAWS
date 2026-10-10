@@ -235,3 +235,29 @@ describe('the re-dock and the card’s close rule', () => {
     expect(useCommentCard.getState().open).toBeNull();
   });
 });
+
+// P2-E2: the docked strip under a native view never takes more than half its column, even where the card's own floor
+// (its padding, border and margin) is taller than that half, so the page keeps at least the other half.
+describe('the docked strip', () => {
+  function Column() {
+    return (
+      <div data-column="">
+        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+      </div>
+    );
+  }
+  const strip = () => document.querySelector<HTMLElement>('[data-card-dock]')!;
+
+  it('caps itself at half the column, rounded down, and clips the card while one shows; with none it sets no cap', async () => {
+    HOST_BOX.height = 51;
+    render(<Column />);
+    expect(strip().style.maxHeight).toBe('');
+    pick();
+    expect(card()).not.toBeNull();
+    expect(strip().style.maxHeight).toBe('25px');
+    expect(strip().className).toContain('overflow-hidden');
+    act(() => useCommentCard.setState({ open: null }));
+    expect(strip().style.maxHeight).toBe('');
+    expect(strip().className).not.toContain('overflow-hidden');
+  });
+});

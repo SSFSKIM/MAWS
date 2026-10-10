@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS } from './names';
-import { commandChannel, commands, eventChannel, events, NAMESPACES, type Namespace } from './schema';
+import { commandChannel, commands, eventChannel, events, HOST_EVENTS, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
 import * as fs from './schema/fs';
@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V12 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -52,9 +52,13 @@ import * as browser from './schema/browser';
 // E4b start
 import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 // E4b end
+// P2-C start (2026-10-09)
+import * as mods from './schema/mods';
+import * as ownerChannel from './schema/owner-channel'; // M4
+// P2-C end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -328,7 +332,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V13, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -363,7 +367,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V12, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V13, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -588,13 +592,13 @@ describe('ipc schema validates both directions', () => {
       // `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V12, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V13, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1555,4 +1559,84 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4c end
+  // P2-C start (2026-10-09): the built-in mods (X20; the P2-C document, §9) and the binary's flag declaration
+  describe('P2-C entries', () => {
+    const row = { id: 'maws.to-human', name: 'To-human', description: 'd', version: 1, enabled: true, source: 'maws-contract' };
+    it('adds the mods namespace: two main commands, no event', () => {
+      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'main', 'mods.setSessionOverride': 'main' });
+      expect([...NAMES.mods.commands]).toEqual(Object.keys(mods.commands));
+      expect(Object.keys(mods.events)).toEqual([]);
+    });
+
+    it('lists the mods with or without a session, and answers rows of the registry’s shape', () => {
+      expect(validateCommandInput('mods.list', {}).ok).toBe(true);
+      expect(validateCommandInput('mods.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandInput('mods.list', { appSessionId: 'a', all: true }).ok).toBe(false);
+      expect(validateCommandOutput('mods.list', [row, { ...row, perSession: 'off', pending: 'next-compaction', mismatch: { resolved: 'report', observed: 'default' } }]).ok).toBe(true);
+      expect(validateCommandOutput('mods.list', [{ ...row, source: 'style' }]).ok).toBe(false);
+      expect(validateCommandOutput('mods.list', [{ ...row, id: 'maws.other' }]).ok).toBe(false);
+    });
+
+    it('sets a session’s override of a known mod to inherit, on or off', () => {
+      for (const value of ['inherit', 'on', 'off']) expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'maws.to-human', value }).ok).toBe(true);
+      expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'maws.to-human', value: 'default' }).ok).toBe(false);
+      expect(validateCommandInput('mods.setSessionOverride', { appSessionId: 'a', id: 'other', value: 'on' }).ok).toBe(false);
+      expect(validateCommandInput('mods.setSessionOverride', { id: 'maws.to-human', value: 'on' }).ok).toBe(false);
+    });
+
+    it('engine.binaryInfo answers whether the binary declares --system-prompt-snapshot, absent from an older host', () => {
+      const info = { path: '/b', testedVersion: '2.1.293', version: '2.1.295', ok: true, error: null };
+      expect(validateCommandOutput('engine.binaryInfo', { ...info, declaresSystemPromptSnapshot: true }).ok).toBe(true);
+      expect(validateCommandOutput('engine.binaryInfo', info).ok).toBe(true);
+      expect(validateCommandOutput('engine.binaryInfo', { ...info, declaresSystemPromptSnapshot: 'yes' }).ok).toBe(false);
+    });
+
+    // M4 (2026-10-09): main's owner channel
+    it('adds the ownerChannel namespace: four main commands and its changed event', () => {
+      expect(Object.fromEntries(Object.entries(ownerChannel.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
+        'ownerChannel.state': 'main', 'ownerChannel.answered': 'main', 'ownerChannel.cancel': 'main', 'ownerChannel.markRead': 'main',
+      });
+      expect([...NAMES.ownerChannel.commands]).toEqual(Object.keys(ownerChannel.commands));
+      expect([...NAMES.ownerChannel.events]).toEqual(Object.keys(ownerChannel.events));
+      expect(HOST_EVENTS as readonly string[]).not.toContain('ownerChannel.changed'); // main's own, never across the host wire
+    });
+
+    it('takes the seam’s result per disposition, and refuses an unknown one or an origin the card does not send', () => {
+      const report = { appSessionId: 'a', markId: 'a:m1:0:q0', text: 'Answering "Which backend?": Postgres', origin: 'answer' };
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', started: false, messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: true, queueId: 'q-1' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'steered', started: false, messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'refused', started: false, reason: 'Session ended' }).ok).toBe(true);
+      // X22's final shape (P2-A): `started` is a field, never a disposition; all five dispositions mirrored, `held` included
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'reply', disposition: 'started', started: true }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'held', started: false, reason: 'trust' }).ok).toBe(true);
+      // the seam's call time, for a report main's late-report log no longer covers
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: false, queueId: 'q-1', sentAt: '2026-10-09T10:00:00.000Z' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'queued', started: false, queueId: 'q-1', sentAt: 'yesterday' }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'sent', messageUuid: '11111111-1111-4111-8111-111111111111' }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, disposition: 'delivered', started: false }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.answered', { ...report, origin: 'legacy', disposition: 'sent', started: false }).ok).toBe(false);
+      expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: 'all' }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: ['a:m1:0:e0'] }).ok).toBe(true);
+      expect(validateCommandInput('ownerChannel.markRead', { appSessionId: 'a', markIds: 'some' }).ok).toBe(false);
+      expect(validateCommandOutput('ownerChannel.cancel', { outcome: 'already_delivering' }).ok).toBe(true);
+      expect(validateCommandOutput('ownerChannel.cancel', { outcome: 'already_started' }).ok).toBe(false);
+    });
+
+    it('states a session’s lane and marks, a question with its members, an essential with its read time', () => {
+      const anchor = { messageUuid: '11111111-1111-4111-8111-111111111111', blockIndex: 0, span: 0 };
+      const state = {
+        appSessionId: 'a', lane: { on: true, override: 'inherit', applied: 'maws-contract', pending: null, mismatch: null },
+        marks: [
+          { id: 'a:m:0:q0', kind: 'need-input', anchor, head: 'Which backend?', at: '2026-10-09T10:00:00.000Z', item: true, question: { state: 'queued', text: 'Answering "Which backend?": Postgres', origin: 'answer', members: [{ kind: 'entry', id: 'q-1', life: 'alive' }] } },
+          { id: 'a:m:0:e0', kind: 'essential', anchor, head: 'Rotate the key', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'read', readAt: '2026-10-09T10:05:00.000Z' } },
+          { id: 'a:m:0:q1', kind: 'need-input', anchor: { ...anchor, span: 1 }, head: 'Which port?', at: '2026-10-09T10:00:00.000Z', item: true, question: { state: 'unanswered', held: { reason: 'trust' } } },
+        ],
+      };
+      expect(validateEventPayload('ownerChannel.changed', { appSessionId: 'a', state }).ok).toBe(true);
+      expect(validateCommandOutput('ownerChannel.state', state).ok).toBe(true);
+      expect(validateEventPayload('attention.changed', { appSessionId: 'a', items: [] }).ok).toBe(true);
+    });
+  });
+  // P2-C end
 });

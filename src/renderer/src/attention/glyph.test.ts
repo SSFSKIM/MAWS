@@ -14,6 +14,10 @@ describe('session glyphs', () => {
       [[record('s', { holder: { kind: 'self', contestedBy: { kind: 'terminal', pid: 7 } } }), digest('s', { phase: 'working' }), [item('s', 'question', at)]], { char: '⇄', tone: 'warning', label: 'Contested: also live in terminal', pulse: false }],
       [[record('s', { holder: { kind: 'self', contestedBy: { kind: 'background_job', pid: 8, jobId: 'abcd1234' } } }), digest('s'), []], { char: '⇄', tone: 'warning', label: 'Contested: also live as background job', pulse: false }],
       [[r, digest('s'), [item('s', 'question', at), item('s', 'permission', at)]], { char: '?', tone: 'warning', label: 'Question', pulse: false }],
+      // P2-C (M6): the owner channel's question and must-read, after the blocking question and before the plan review
+      [[r, digest('s'), [item('s', 'async_input', at), item('s', 'question', at)]], { char: '?', tone: 'warning', label: 'Question', pulse: false }],
+      [[r, digest('s', { phase: 'working' }), [item('s', 'plan', at), item('s', 'essential_unread', at), item('s', 'async_input', at)]], { char: '?', tone: 'info', label: 'Question waiting', pulse: false }],
+      [[r, digest('s', { phase: 'working' }), [item('s', 'plan', at), item('s', 'essential_unread', at)]], { char: '◆', tone: 'accent', label: 'Must read', pulse: false }],
       [[r, digest('s'), [item('s', 'plan', at), item('s', 'permission', at)]], { char: '◇', tone: 'info', label: 'Plan review', pulse: false }],
       [[r, digest('s'), [item('s', 'error', at)]], { char: '!', tone: 'danger', label: 'Needs you: error', pulse: false }],
       [[r, digest('s'), [item('s', 'interrupted', at)]], { char: '!', tone: 'danger', label: 'Needs you: interrupted', pulse: false }],

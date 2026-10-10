@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsPatchSchema, SettingsSchema, type Settings } from '../ipc/schema/settings';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V12 } from './defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V13 } from './defaults';
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/settings', name), 'utf8'));
 // W13: the pin every version from 3 to 7 wrote (version 8 drops it)
 const PIN = { pinnedVersion: '2.1.283' };
 // W7: the engine section every version from 4 to 6 wrote (version 7 adds the budget's switch), with the pin
-const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V12.engine;
+const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V13.engine;
 void _switch;
 const ENGINE_BEFORE_V7 = { ...ENGINE_V8_LESS_SWITCH, ...PIN };
 // W13: an engine section as version 8 holds it: the pin gone
@@ -17,9 +17,27 @@ const unpinned = <E extends { pinnedVersion?: string }>(engine: E): Omit<E, 'pin
   void _pin;
   return rest;
 };
-// E4a: the sections version 10 wrote (version 11 adds the browser section); `version` still says 11, so an object
-// built from them names its own
-const { browser: _browser, ...SECTIONS_V10 } = SETTINGS_DEFAULTS_V12;
+// P2-C: the sections version 12 wrote (version 13 adds the mods section and the owner channel's two notification
+// groups); `version` still says 13, so an object built from them names its own
+const { mods: _mods, ...SECTIONS_V12_LESS_KINDS } = SETTINGS_DEFAULTS_V13;
+void _mods;
+const { asyncInput: _asyncInput, essential: _essential, ...KINDS_V12 } = SETTINGS_DEFAULTS_V13.notifications.kinds;
+void _asyncInput;
+void _essential;
+const SECTIONS_V12 = { ...SECTIONS_V12_LESS_KINDS, notifications: { ...SETTINGS_DEFAULTS_V13.notifications, kinds: KINDS_V12 } };
+// P2-C: what every object migrated from before 13 gains: the to-human lane on and its two notification groups on
+const toV13 = <T extends { notifications: { kinds: object } }>(earlier: T) => ({
+  ...earlier,
+  version: 13,
+  notifications: { ...earlier.notifications, kinds: { ...earlier.notifications.kinds, asyncInput: true, essential: true } },
+  mods: { toHuman: { enabled: true } },
+});
+// cua #90: the sections version 11 wrote (version 12 adds the bookmarks bar's switch)
+const { bookmarksBar: _bar, ...BROWSER_V11 } = SECTIONS_V12.browser;
+void _bar;
+const SECTIONS_V11 = { ...SECTIONS_V12, browser: BROWSER_V11 };
+// E4a: the sections version 10 wrote (version 11 adds the browser section)
+const { browser: _browser, ...SECTIONS_V10 } = SECTIONS_V12;
 void _browser;
 // E10: the sections version 9 wrote (version 10 adds the supervisor section)
 const { supervisor: _supervisor, ...SECTIONS_V9 } = SECTIONS_V10;
@@ -38,11 +56,11 @@ const BROWSER = { browser: { profile: null, searchUrl: 'https://www.google.com/s
 
 describe('settings migrate v1 and v2 to v3', () => {
   it('holds the defaults the document states, and they validate', () => {
-    expect(SETTINGS_DEFAULTS_V12).toEqual({
-      version: 12, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12
+    expect(SETTINGS_DEFAULTS_V13).toEqual({
+      version: 13, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13
       theme: 'light',
       keymap: {},
-      notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
+      notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
       engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pin
       gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
       usage: { nearLimitPercent: 90 },
@@ -51,32 +69,33 @@ describe('settings migrate v1 and v2 to v3', () => {
       voice: { locale: null }, // E9: the system locale
       supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: exits 10 minutes after its last session; keep is the quit's default
       browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition, Google, links in the app; cua #90: the bar shown
+      mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on
     });
-    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V12)).toEqual(SETTINGS_DEFAULTS_V12);
+    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V13)).toEqual(SETTINGS_DEFAULTS_V13);
   });
 
   it('migrates the v1 fixture to the defaults with its theme', () => {
-    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V12, theme: 'dark' });
+    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V13, theme: 'dark' });
   });
 
   it('migrates the v2 fixture keeping its theme, its keymap override and its notification policy', () => {
     const migrated = migrateSettings(fixture('v2.json'));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     expect(migrated).toEqual({
-      ...SETTINGS_DEFAULTS_V12,
+      ...SETTINGS_DEFAULTS_V13,
       theme: 'system',
       keymap: { 'attention.next': 'Cmd+Alt+J' },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V12.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V13.notifications.kinds },
     });
   });
 
   // W10: ⌥Enter's hold (`composer.steer`) is gone; a file that overrode it keeps everything else
   it('drops an override of a retired action instead of refusing the file, at the current version and an earlier one', () => {
-    const current = { ...SETTINGS_DEFAULTS_V12, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
-    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V12, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
+    const current = { ...SETTINGS_DEFAULTS_V13, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
+    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V13, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
     const v2 = { version: 2, theme: 'system', keymap: { 'composer.steer': null }, notifications: { enabled: true, sound: false } };
     expect(migrateSettings(v2).keymap).toEqual({});
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V12, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
+    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V13, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
   });
 
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
@@ -85,67 +104,70 @@ describe('settings migrate v1 and v2 to v3', () => {
   // identity moves to v9, and every earlier object gains the voice section. E10: the identity moves to v10, and every
   // earlier object gains the supervisor section. E4a: the identity moves to v11, and every earlier object gains the
   // browser section. cua #90: the identity moves to v12, and every earlier object gains the bookmarks bar's switch.
-  it('is the identity over a v12 object', () => {
-    const v12: Settings = {
-      ...SETTINGS_DEFAULTS_V12,
+  // P2-C: the identity moves to v13, and every earlier object gains the mods section and two kinds.
+  it('is the identity over a v13 object', () => {
+    const v13: Settings = {
+      ...SETTINGS_DEFAULTS_V13,
       theme: 'dark',
       gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
       appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
-      engine: { ...SETTINGS_DEFAULTS_V12.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
+      engine: { ...SETTINGS_DEFAULTS_V13.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
       permissions: { autoFallback: 'default' },
       voice: { locale: 'en-US' },
       supervisor: { idleExitMinutes: null, keepRunningDefault: false }, // E10
       browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' }, // E4a; cua #90
+      notifications: { ...SETTINGS_DEFAULTS_V13.notifications, kinds: { ...SETTINGS_DEFAULTS_V13.notifications.kinds, asyncInput: false, essential: false } }, // P2-C
+      mods: { toHuman: { enabled: false } }, // P2-C
     };
-    expect(migrateSettings(structuredClone(v12))).toEqual(v12);
+    expect(migrateSettings(structuredClone(v13))).toEqual(v13);
   });
 
-  it('migrates a v3 object to v11 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
+  it('migrates a v3 object to v13 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
     const { memoryBudgetMiB: _m, statefulMcpServers: _s, ...engineV3 } = { ...ENGINE_BEFORE_V7, binaryPath: '/opt/claude', subagentModel: 'haiku' };
     void _m;
     void _s;
     const v3 = { ...BEFORE_V6, version: 3, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, engine: engineV3, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v3));
-    expect(migrated).toEqual({ ...v3, version: 12, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual(toV13({ ...v3, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } }));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // C12 end
 
   // W2 start
-  it('migrates a v4 object to v11 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
+  it('migrates a v4 object to v13 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
     const v4 = { ...BEFORE_V6, version: 4, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 }, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v4));
-    expect(migrated).toEqual({ ...v4, version: 12, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual(toV13({ ...v4, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } }));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // W2 end
 
   // W3 start
-  it('migrates a v5 object to v11 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
+  it('migrates a v5 object to v13 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
     const v5 = { ...BEFORE_V6, version: 5, theme: 'dark', appearance: { monoFont: 'Hack', transcriptWidth: 960 } };
     const migrated = migrateSettings(structuredClone(v5));
-    expect(migrated).toEqual({ ...v5, version: 12, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual(toV13({ ...v5, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } }));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('takes any engine mode but auto as the fallback', () => {
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'plan' } }).success).toBe(true);
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'auto' } }).success).toBe(false);
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V12, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V13, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
   });
   // W3 end
 
   // W7 start
-  it('migrates a v6 object to v11 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
+  it('migrates a v6 object to v13 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
     const v6 = { ...SECTIONS_BEFORE_V6, version: 6, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'] }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v6));
-    expect(migrated).toEqual({ ...v6, version: 12, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v6.engine), ...ON } });
+    expect(migrated).toEqual(toV13({ ...v6, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v6.engine), ...ON } }));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('takes the switch as one object a patch replaces whole, and nothing but a boolean in it', () => {
-    const off = applySettingsPatch(SETTINGS_DEFAULTS_V12, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
-    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V12.engine, memoryBudget: { enabled: false } });
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
+    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V13.engine, memoryBudget: { enabled: false } });
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: {} } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: 'off' } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: true, limitMiB: 1 } } }).success).toBe(false);
@@ -153,11 +175,11 @@ describe('settings migrate v1 and v2 to v3', () => {
   // W7 end
 
   // W13 start: v7 → v8 drops the pin (charter D-1 as amended 2026-10-01); a chosen binary stays chosen, any pin is dropped
-  it('migrates a v7 object to v11 dropping its pin and keeping every other value, a chosen binary path included', () => {
+  it('migrates a v7 object to v13 dropping its pin and keeping every other value, a chosen binary path included', () => {
     for (const pinnedVersion of ['2.1.283', '2.1.290']) {
       const v7 = { ...SECTIONS_V8, version: 7, theme: 'dark', engine: { ...SECTIONS_V8.engine, binaryPath: '/opt/claude', pinnedVersion, memoryBudget: { enabled: false } } };
       const migrated = migrateSettings(structuredClone(v7));
-      expect(migrated).toEqual({ ...v7, version: 12, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: unpinned(v7.engine) });
+      expect(migrated).toEqual(toV13({ ...v7, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: unpinned(v7.engine) }));
       expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     }
   });
@@ -166,7 +188,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('never shares the defaults object with a migrated result', () => {
     const migrated = migrateSettings(fixture('v1.json'));
     migrated.notifications.kinds.errors = false;
-    expect(SETTINGS_DEFAULTS_V12.notifications.kinds.errors).toBe(true);
+    expect(SETTINGS_DEFAULTS_V13.notifications.kinds.errors).toBe(true);
   });
 });
 
@@ -175,7 +197,7 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
   it('migrates a v8 object to v9 with the system locale and every other value unchanged', () => {
     const v8 = { ...SECTIONS_V8, version: 8, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v8));
-    expect(migrated).toEqual({ ...v8, version: 12, voice: { locale: null }, ...SUPERVISOR, ...BROWSER }); // E10: then v9 → v10; E4a: then v10 → v11
+    expect(migrated).toEqual(toV13({ ...v8, voice: { locale: null }, ...SUPERVISOR, ...BROWSER })); // E10: then v9 → v10; E4a: then v10 → v11; cua #90: then v11 → v12; P2-C: then v12 → v13
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
@@ -192,14 +214,14 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
     ];
     for (const raw of earlier) {
       const migrated = migrateSettings(JSON.parse(JSON.stringify(raw)));
-      expect(migrated.version).toBe(12); // E10: 10; E4a: 11; cua #90: 12
+      expect(migrated.version).toBe(13); // E10: 10; E4a: 11; cua #90: 12; P2-C: 13
       expect(migrated.voice).toEqual({ locale: null });
     }
   });
 
   it('validates a v9 object as it is and refuses a locale outside its bounds', () => {
-    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V12, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
-    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, voice }).success;
+    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V13, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
+    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, voice }).success;
     expect(valid({ locale: null })).toBe(true);
     expect(valid({ locale: 'en' })).toBe(true);
     expect(valid({ locale: 'e' })).toBe(false);
@@ -210,9 +232,9 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 
   it('patches the locale alone and leaves every other section as it was', () => {
     const patch = SettingsPatchSchema.parse({ voice: { locale: 'en-US' } });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V12, patch)).toEqual({ ...SETTINGS_DEFAULTS_V12, voice: { locale: 'en-US' } });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V12, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V12, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V12);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V13, patch)).toEqual({ ...SETTINGS_DEFAULTS_V13, voice: { locale: 'en-US' } });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V13, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V13, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V13);
     expect(SettingsPatchSchema.safeParse({ voice: { locale: 'e' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ voice: { language: 'en-US' } }).success).toBe(false);
   });
@@ -222,15 +244,15 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 // E10 start: version 10, the background supervisor (E10 execution document, Interfaces "Settings version 10"; ruled by
 // A-29 (4))
 describe('settings v9 → v10 adds the supervisor section', () => {
-  it('migrates a v9 object to v11 with the supervisor’s defaults and every other value unchanged', () => {
+  it('migrates a v9 object to v13 with the supervisor’s defaults and every other value unchanged', () => {
     const v9 = { ...SECTIONS_V9, version: 9, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, voice: { locale: 'en-GB' }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v9));
-    expect(migrated).toEqual({ ...v9, version: 12, supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, ...BROWSER }); // E4a: then v10 → v11
+    expect(migrated).toEqual(toV13({ ...v9, supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, ...BROWSER })); // E4a: then v10 → v11; cua #90: then v11 → v12; P2-C: then v12 → v13
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('holds the idle time to whole minutes from 1 to 1440, or null for never, and the quit default to a boolean', () => {
-    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, supervisor }).success;
+    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, supervisor }).success;
     expect(valid({ idleExitMinutes: 1, keepRunningDefault: true })).toBe(true);
     expect(valid({ idleExitMinutes: 1440, keepRunningDefault: false })).toBe(true);
     expect(valid({ idleExitMinutes: null, keepRunningDefault: true })).toBe(true);
@@ -243,10 +265,10 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const never = applySettingsPatch(SETTINGS_DEFAULTS_V12, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
-    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V12, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    const never = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
+    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V13, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
     expect(applySettingsPatch(never, { supervisor: { keepRunningDefault: false } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: false });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V12, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V12);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V13, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V13);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMinutes: 0 } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMs: 60_000 } }).success).toBe(false);
   });
@@ -255,20 +277,20 @@ describe('settings v9 → v10 adds the supervisor section', () => {
 
 // E4a start: version 11, the in-app browser (E4a execution document, Interfaces "X15: settings 11"; Decision Log 10, 11)
 describe('settings v10 → v11 adds the browser section', () => {
-  it('migrates a v10 object to v11 with the browser’s defaults and every other value unchanged (cua #90: then to v12)', () => {
+  it('migrates a v10 object to v11 with the browser’s defaults and every other value unchanged (cua #90: then to v12; P2-C: then to v13)', () => {
     const v10 = { ...SECTIONS_V10, version: 10, theme: 'dark', voice: { locale: 'en-GB' }, supervisor: { idleExitMinutes: null, keepRunningDefault: false } };
     const migrated = migrateSettings(structuredClone(v10));
-    expect(migrated).toEqual({ ...v10, version: 12, ...BROWSER }); // cua #90: then v11 → v12
+    expect(migrated).toEqual(toV13({ ...v10, ...BROWSER })); // cua #90: then v11 → v12; P2-C: then v12 → v13
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
-  it('chains a v9 object through v10 to v11', () => {
+  it('chains a v9 object through v10, v11 and v12 to v13', () => {
     const v9 = { ...SECTIONS_V9, version: 9, voice: { locale: 'ko-KR' } };
-    expect(migrateSettings(structuredClone(v9))).toEqual({ ...v9, version: 12, ...SUPERVISOR, ...BROWSER });
+    expect(migrateSettings(structuredClone(v9))).toEqual(toV13({ ...v9, ...SUPERVISOR, ...BROWSER }));
   });
 
   it('holds the profile to a name or null, the search URL to an http(s) template with %s, and the link target to its two values', () => {
-    const valid = (browser: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, ...browser } }).success;
+    const valid = (browser: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, ...browser } }).success;
     expect(valid({ profile: 'Profile 1' })).toBe(true);
     expect(valid({ profile: '' })).toBe(false);
     expect(valid({ profile: 'x'.repeat(201) })).toBe(false);
@@ -285,15 +307,15 @@ describe('settings v10 → v11 adds the browser section', () => {
     expect(valid({ linkTarget: 'external' })).toBe(true);
     expect(valid({ linkTarget: 'tab' })).toBe(false);
     expect(valid({ passwords: false })).toBe(false); // strict
-    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, browser: { profile: null, linkTarget: 'in-app' } }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, browser: { profile: null, linkTarget: 'in-app' } }).success).toBe(false);
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const external = applySettingsPatch(SETTINGS_DEFAULTS_V12, SettingsPatchSchema.parse({ browser: { linkTarget: 'external' } }));
-    expect(external).toEqual({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, linkTarget: 'external' } });
+    const external = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ browser: { linkTarget: 'external' } }));
+    expect(external).toEqual({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, linkTarget: 'external' } });
     expect(applySettingsPatch(external, { browser: { profile: 'Profile 1' } }).browser).toEqual({ profile: 'Profile 1', searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'external', bookmarksBar: 'shown' });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, profile: 'Profile 1' } }, { browser: { profile: null } }).browser.profile).toBeNull();
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V12, { browser: {} })).toEqual(SETTINGS_DEFAULTS_V12);
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, profile: 'Profile 1' } }, { browser: { profile: null } }).browser.profile).toBeNull();
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V13, { browser: {} })).toEqual(SETTINGS_DEFAULTS_V13);
     expect(SettingsPatchSchema.safeParse({ browser: { searchUrl: 'https://duckduckgo.com/' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ browser: { homepage: 'https://example.com/' } }).success).toBe(false);
   });
@@ -302,35 +324,76 @@ describe('settings v10 → v11 adds the browser section', () => {
 
 // cua #90 start: version 12, the bookmarks bar's switch (cua board #90's spec, Interfaces "Settings version 12")
 describe('settings v11 → v12 adds the bookmarks bar switch', () => {
-  it('migrates a v11 object to v12 with the bar shown and every other value unchanged', () => {
+  it('migrates a v11 object to v12 with the bar shown and every other value unchanged (P2-C: then to v13)', () => {
     const v11 = { ...SECTIONS_V10, version: 11, theme: 'dark', browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external' } };
     const migrated = migrateSettings(structuredClone(v11));
-    expect(migrated).toEqual({ ...v11, version: 12, browser: { ...v11.browser, bookmarksBar: 'shown' } });
+    expect(migrated).toEqual(toV13({ ...v11, browser: { ...v11.browser, bookmarksBar: 'shown' } })); // P2-C: then v12 → v13
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('refuses a v11 file with the switch, and a v12 file without it', () => {
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V12, version: 11 })).toThrow(); // v11 never had it
-    const { bookmarksBar: _bar, ...browser } = SETTINGS_DEFAULTS_V12.browser;
-    void _bar;
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V12, browser })).toThrow(); // every v12 file writes it
+    expect(() => migrateSettings({ ...SECTIONS_V12, version: 11 })).toThrow(); // v11 never had it
+    expect(() => migrateSettings({ ...SECTIONS_V11, version: 12 })).toThrow(); // every v12 file writes it
   });
 
   it('holds the switch to its two values and patches it alone', () => {
-    const valid = (bookmarksBar: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, bookmarksBar } }).success;
+    const valid = (bookmarksBar: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, bookmarksBar } }).success;
     expect(valid('hidden')).toBe(true);
     expect(valid(false)).toBe(false);
-    const hidden = applySettingsPatch(SETTINGS_DEFAULTS_V12, SettingsPatchSchema.parse({ browser: { bookmarksBar: 'hidden' } }));
-    expect(hidden).toEqual({ ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, bookmarksBar: 'hidden' } });
+    const hidden = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ browser: { bookmarksBar: 'hidden' } }));
+    expect(hidden).toEqual({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, bookmarksBar: 'hidden' } });
   });
 });
 // cua #90 end
 
+// P2-C start (2026-10-09): version 13, the built-in mods and the owner channel's two notification groups (the P2-C
+// document, §9; X15's slot)
+describe('settings v12 → v13 adds the mods section and two notification groups', () => {
+  it('migrates a v12 object to v13 with the to-human lane on, both groups on, and every other value unchanged', () => {
+    const v12 = {
+      ...SECTIONS_V12, version: 12, theme: 'dark', voice: { locale: 'en-GB' },
+      notifications: { enabled: false, sound: true, kinds: { ...KINDS_V12, questions: false, heldPeerMessages: true } },
+      browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' },
+    };
+    const migrated = migrateSettings(structuredClone(v12));
+    expect(migrated).toEqual({
+      ...v12, version: 13,
+      notifications: { enabled: false, sound: true, kinds: { ...KINDS_V12, questions: false, heldPeerMessages: true, asyncInput: true, essential: true } },
+      mods: { toHuman: { enabled: true } },
+    });
+    expect(SettingsSchema.safeParse(migrated).success).toBe(true);
+    // the round trip: the migrated file, written and read back, is the identity
+    expect(migrateSettings(JSON.parse(JSON.stringify(migrated)))).toEqual(migrated);
+  });
+
+  it('chains a v11 object through v12 to v13', () => {
+    const v11 = { ...SECTIONS_V11, version: 11 };
+    expect(migrateSettings(structuredClone(v11))).toEqual(toV13({ ...v11, browser: { ...v11.browser, bookmarksBar: 'shown' } }));
+  });
+
+  it('patches the to-human switch alone, and each owner-channel group alone, leaving every sibling as it was', () => {
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ mods: { toHuman: { enabled: false } } }));
+    expect(off).toEqual({ ...SETTINGS_DEFAULTS_V13, mods: { toHuman: { enabled: false } } });
+    expect(applySettingsPatch(off, { mods: {} })).toEqual(off);
+    expect(applySettingsPatch(off, { mods: { toHuman: {} } })).toEqual(off);
+    const quiet = applySettingsPatch(SETTINGS_DEFAULTS_V13, SettingsPatchSchema.parse({ notifications: { kinds: { essential: false } } }));
+    expect(quiet.notifications.kinds).toEqual({ ...SETTINGS_DEFAULTS_V13.notifications.kinds, essential: false });
+    expect(SettingsPatchSchema.safeParse({ mods: { toHuman: { enabled: 'yes' } } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ mods: { other: { enabled: true } } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ mods: { toHuman: { perSession: 'off' } } }).success).toBe(false); // the override lives in the index
+  });
+});
+// P2-C end
+
 describe('settings v3 validates and refuses unknown versions', () => {
   it.each([
-    ['a v13 object', { ...SETTINGS_DEFAULTS_V12, version: 13 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10; E4a: v11; cua #90: v12
+    ['a v14 object', { ...SETTINGS_DEFAULTS_V13, version: 14 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10; E4a: v11; cua #90: v12; P2-C: v13
+    ['a v13 file without its mods section', { ...SECTIONS_V12, version: 13 }], // P2-C: every v13 file writes one
+    ['a v13 file without the two owner-channel kinds', { ...SETTINGS_DEFAULTS_V13, notifications: SECTIONS_V12.notifications }], // P2-C
+    ['a v12 file with a mods section', { ...SETTINGS_DEFAULTS_V13, version: 12, notifications: SECTIONS_V12.notifications }], // P2-C: v12 never had it
+    ['a v12 file with the two owner-channel kinds', { ...SECTIONS_V12, version: 12, notifications: SETTINGS_DEFAULTS_V13.notifications }], // P2-C
     ['a v11 file without its browser section', { ...SECTIONS_V10, version: 11 }], // E4a: every v11 file writes one
-    ['a v10 file with a browser section', { ...SETTINGS_DEFAULTS_V12, version: 10 }], // E4a: v10 never had it
+    ['a v10 file with a browser section', { ...SECTIONS_V11, version: 10 }], // E4a: v10 never had it
     ['a v10 file without its supervisor section', { ...SECTIONS_V9, version: 10 }], // E10: every v10 file writes one
     ['a v9 file with a supervisor section', { ...SECTIONS_V10, version: 9 }], // E10: v9 never had it
     ['a v9 file without its voice section', { ...SECTIONS_V8, version: 9 }], // E9: every v9 file writes one
@@ -345,14 +408,14 @@ describe('settings v3 validates and refuses unknown versions', () => {
     ['not an object', 'settings'],
     ['an invalid v1 file', { version: 1, theme: 'sepia' }],
     ['a v2 file with a key v2 never had', { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false }, engine: {} }],
-    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V12, appearance: undefined }],
+    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V13, appearance: undefined }],
   ])('refuses %s', (_, raw) => {
     expect(() => migrateSettings(raw)).toThrow();
   });
 
   // C12 start: the budget's fields
   it('holds each v4 field to its range', () => {
-    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, engine: { ...SETTINGS_DEFAULTS_V12.engine, ...engine } }).success;
+    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, engine: { ...SETTINGS_DEFAULTS_V13.engine, ...engine } }).success;
     expect(bad({ memoryBudgetMiB: 511 })).toBe(false);
     expect(bad({ memoryBudgetMiB: 512 })).toBe(true);
     expect(bad({ memoryBudgetMiB: 1024.5 })).toBe(false);
@@ -365,11 +428,11 @@ describe('settings v3 validates and refuses unknown versions', () => {
   // C12 end
 
   it('holds each v3 field to its range', () => {
-    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V12, ...patch }).success;
+    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V13, ...patch }).success;
     expect(bad({ usage: { nearLimitPercent: 49 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 101 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 90.5 } })).toBe(false);
-    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V12.gateway, relayUnreachable: 'retry' } })).toBe(false);
+    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V13.gateway, relayUnreachable: 'retry' } })).toBe(false);
     expect(bad({ appearance: { monoFont: '' } })).toBe(false);
     expect(bad({ appearance: { monoFont: 'x'.repeat(201) } })).toBe(false);
     expect(bad({ appearance: { monoFont: null, transcriptWidth: 800 } })).toBe(false); // W2: Claude Desktop's three widths only
@@ -379,8 +442,8 @@ describe('settings v3 validates and refuses unknown versions', () => {
 });
 
 describe('settings patch merges one kind and keeps its siblings', () => {
-  const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true };
-  const state: Settings = { ...SETTINGS_DEFAULTS_V12, notifications: { enabled: true, sound: false, kinds: siblings } };
+  const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
+  const state: Settings = { ...SETTINGS_DEFAULTS_V13, notifications: { enabled: true, sound: false, kinds: siblings } };
 
   it('validates a patch of one kind and changes that kind alone', () => {
     const patch = SettingsPatchSchema.parse({ notifications: { kinds: { errors: false } } });

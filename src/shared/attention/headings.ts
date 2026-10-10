@@ -2,7 +2,7 @@
 // preview and C7's request card read alike. Typed per kind, so a new kind fails typecheck until it has a line.
 import type { AttentionItem } from '../graph/attention';
 
-export type AttentionTone = 'warning' | 'info' | 'danger';
+export type AttentionTone = 'warning' | 'info' | 'danger' | 'accent'; // P2-C (2026-10-10): accent, the must-read's
 
 export const ATTENTION_HEADINGS: Readonly<Record<AttentionItem['kind'], { char: string; tone: AttentionTone; text: string }>> = {
   permission: { char: '◐', tone: 'warning', text: 'Approval needed' },
@@ -14,4 +14,8 @@ export const ATTENTION_HEADINGS: Readonly<Record<AttentionItem['kind'], { char: 
   error: { char: '!', tone: 'danger', text: 'Error' },
   interrupted: { char: '!', tone: 'danger', text: 'Interrupted' },
   held_peer_message: { char: '✉', tone: 'info', text: 'Held message' },
+  // P2-C start (2026-10-09; the P2-C document, M6's glyphs): the owner channel's two kinds
+  async_input: { char: '?', tone: 'info', text: 'Question waiting' },
+  essential_unread: { char: '◆', tone: 'accent', text: 'Must read' },
+  // P2-C end
 };

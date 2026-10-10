@@ -152,6 +152,7 @@ export class SessionService {
       userDefaults: this.deps.userDefaults ?? (async () => NO_USER_DEFAULTS), // W3
       launchGate: this.deps.launchGate ?? (async () => null), // C12
       browserBackend: this.deps.browserBackend ?? (() => null), // E13
+      owner: this.deps.ownerChannel ?? null, // P2-C (2026-10-09)
       now: this.now,
       log: this.log,
       watchdogMs: this.deps.timing?.watchdogMs ?? WATCHDOG_MS,

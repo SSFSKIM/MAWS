@@ -45,11 +45,12 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
       // with no engine pin. E9: to version 9, with the system locale for dictation. E10: to version 10, with the
       // supervisor's defaults. E4a: to version 11, with the browser's defaults. cua #90: to version 12, the bookmarks bar shown.
+      // P2-C: to version 13, with the to-human lane and its two notification groups on.
       expect(readSettings(userData)).toMatchObject({
-        version: 12, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12
+        version: 13, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
-        notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
+        notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
         engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
@@ -58,6 +59,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         voice: { locale: null }, // E9
         supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
         browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a; cua #90
+        mods: { toHuman: { enabled: true } }, // P2-C
       });
       expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 
@@ -121,6 +123,40 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       await expect(panel(page).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name: 'System' })).toBeChecked();
       await expect(panel(page).getByRole('region', { name: 'Notifications' }).getByRole('switch', { name: 'Notify while MAWS is not focused' })).toHaveAttribute('aria-checked', 'false');
       expect(await accelerator(app, 'attention.next')).toBe('Cmd+Shift+J');
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+// P2-C (M6; the P2-C document, G7): Settings › Notifications carries the to-human mod's app switch and the owner
+// channel's two groups, each written alone to the settings file.
+test('settings: the to-human switch and the two notification groups for an agent’s marks', async () => {
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-settings-')));
+  try {
+    const maws = await launchMaws({ userData });
+    try {
+      const { app, page } = maws;
+      await menu(app, 'settings.open');
+      const notifications = panel(page).getByRole('region', { name: 'Notifications' });
+      const toHuman = notifications.getByRole('group', { name: 'Messages to you' }).getByRole('switch', { name: 'To-human' });
+      await expect(toHuman).toHaveAttribute('aria-checked', 'true');
+      const kinds = notifications.getByRole('group', { name: 'For' });
+      await expect(kinds.getByRole('checkbox', { name: 'questions an agent left for you' })).toBeChecked();
+      await expect(kinds.getByRole('checkbox', { name: 'must-read messages' })).toBeChecked();
+      await toHuman.click();
+      await expect(toHuman).toHaveAttribute('aria-checked', 'false');
+      await kinds.getByRole('checkbox', { name: 'must-read messages' }).uncheck();
+      await expect(kinds.getByRole('checkbox', { name: 'must-read messages' })).not.toBeChecked();
+      await expect
+        .poll(() => {
+          const file = readSettings(userData) as unknown as { mods: { toHuman: { enabled: boolean } }; notifications: { kinds: { asyncInput: boolean; essential: boolean } } };
+          return [file.mods.toHuman.enabled, file.notifications.kinds.asyncInput, file.notifications.kinds.essential];
+        })
+        .toEqual([false, true, false]);
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
       await maws.cleanup();

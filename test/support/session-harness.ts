@@ -37,6 +37,7 @@ export interface HarnessOptions {
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
   seedIndex?: (path: string) => void; // writes the index file before the app opens it (an older build's history)
   browserBackend?: SessionServiceDeps['browserBackend']; // E13: the session's cua socket
+  ownerChannel?: (index: Index) => NonNullable<SessionServiceDeps['ownerChannel']>; // P2-C: the to-human lane's launch decision over the index
   exitWaitMs?: number; // P2-A: how long an acquisition waits out a process still exiting
   takeOver?: SessionServiceDeps['takeOver']; // P2-A: the take-over's seams (`claude stop`, the registry wait)
   readModel?: SessionReadModel; // P2-A M3: main's read model, fed by the index source and the service's acquisition memory (its digests carry availability)
@@ -118,6 +119,7 @@ export class SessionHarness {
       settings: this.opts.settings,
       launchGate: this.opts.launchGate, // C12
       browserBackend: this.opts.browserBackend, // E13
+      ownerChannel: this.opts.ownerChannel?.(this.index), // P2-C
       userDefaults: this.opts.userDefaults, // W3
       acquisitions: {
         observeAcquisition: (appSessionId, memory) => {

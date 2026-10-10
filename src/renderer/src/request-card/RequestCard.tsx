@@ -45,6 +45,13 @@ import { PlanBody } from './variants/Plan';
 import { QuestionBody } from './variants/Question';
 import type { CardKeys, Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
+// P2-C start (2026-10-10)
+import { isOpen } from '@shared/attention/kinds';
+import { markIdOf } from '@shared/owner/marks';
+import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
+import { markRead } from '../owner/report/answering';
+import { ESSENTIAL } from '../owner/report/copy';
+// P2-C end
 
 export type { Placement } from './variants/types';
 
@@ -58,7 +65,7 @@ export interface RequestCardProps {
 
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
 export const HEADINGS = ATTENTION_HEADINGS;
-const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
+const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 const NOT_PENDING_MS = 2_000;
 
 type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
@@ -264,7 +271,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const collapsed = phase === 'delivered' || (phase === 'pending' && item.state === 'delivered' && failed === null);
   const hover = placement === 'hover';
   const canAnswerHover = hover && hoverApproval(item, request) && record?.holder.kind !== 'terminal' && record?.holder.kind !== 'background_job';
-  const openSession = () => useLayout.getState().openSession(item.appSessionId);
+  // P2-C start (2026-10-10; M6): a question an agent left or a must-read opens at its mark in the report, and a must-read
+  // offers Mark read; neither is answered here (the card in the session answers a question)
+  const anchor = ownerAnchorOf(item);
+  const openSession = () => (anchor !== null ? openAnchor(item.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(item.appSessionId));
+  // P2-C end
   const variant = { item, placement, busy: busy || concealed, submit, bindKeys };
 
   let body: ReactNode;
@@ -361,6 +372,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           <CardButton onClick={openSession} className="mr-auto">
             Open session
           </CardButton>
+          {/* P2-C start (2026-10-10) */}
+          {item.kind === 'essential_unread' && anchor !== null && isOpen(item) && (
+            <MarkRead appSessionId={item.appSessionId} anchor={anchor} />
+          )}
+          {/* P2-C end */}
           {canAnswerHover && !collapsed && request?.kind === 'permission.requested' && (
             <>
               <CardButton
@@ -394,3 +410,24 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     </DockedCardFrame>
   );
 }
+
+// P2-C start (2026-10-10; M6's fix wave): a must-read's Mark read; one that failed is said on the card beside it, the
+// button staying to try again
+function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSessionId']; anchor: ItemAnchor }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const read = async () => {
+    setFailed(null);
+    setFailed(await markRead(appSessionId, [markIdOf(appSessionId, 'essential', anchor)]));
+  };
+  return (
+    <>
+      {failed !== null && (
+        <span role="alert" className="text-danger">
+          {ESSENTIAL.notMarked(failed)}
+        </span>
+      )}
+      <CardButton onClick={() => void read()}>{ESSENTIAL.markRead}</CardButton>
+    </>
+  );
+}
+// P2-C end

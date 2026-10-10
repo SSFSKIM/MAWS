@@ -35,6 +35,7 @@ import {
 } from './setup-steps';
 import { trustStateOf } from './trust';
 import { openedEvent, sideThreadTitle } from '../side/side-threads'; // E3
+import { inheritOwnerOverride, ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
 
 export { SetupFailure, type Setup } from './setup-steps';
@@ -220,14 +221,26 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);
+    // P2-C start (2026-10-09): a fork and a side thread take their parent's to-human override with their record
+    const parent = intent.kind === 'fork' ? (intent.source?.appSessionId ?? null) : null;
+    if (created.ok && parent !== null) inheritOwnerOverride(s, appSessionId, parent);
+    // P2-C end
     run.event('launching', 'Starting');
     const fixture = takeReplay(s, 'launching');
     if (fixture) await run.progress({ engineSessionId: fixture.sessionId });
-    const spec = intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings());
+    // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
+    const decided = await ownerChannelLaunch(
+      s,
+      intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings()),
+      { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent },
+    );
+    const spec = decided.spec;
+    // P2-C end
     watch = new LaunchWatch(s, appSessionId);
     const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
+    ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09): before any event of the launch
     await run.progress({ launch: { launchId: answer.session.launchId, at: s.now() } });
     if (attempt.directFallback) directFallbackNotice(s, appSessionId, run.intent.progress.engineSessionId);
     const end = await watch.untilReady();

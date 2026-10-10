@@ -5,6 +5,8 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
+import { withOwnerChannel } from './launch-mapping'; // P2-C
+import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT } from '@shared/owner/contract'; // P2-C
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -123,3 +125,30 @@ describe('home directory attests without a bootstrap', () => {
     expect(intentLaunchSpec(intent({ location: { kind: 'directory', path: HOME }, trust: 'accepted', trustKey: HOME }), { cwd: HOME, trust: mapping.attestation, replay: null }).trust).toEqual({ accepted: true, directory: HOME });
   });
 });
+
+// P2-C start (2026-10-09): the owner channel's decision applied to a spec (the P2-C document, Design §2, §3)
+describe('withOwnerChannel', () => {
+  const socket = '/u/browser/cua/a.sock';
+  const spec = (extraSettings: Record<string, unknown> | null) => ({ ...toLaunchSpec({ ...base, browserBackend: null }), extraSettings });
+
+  it('advertises the contract version beside the browser socket while the lane is on, and sets the two keys as decided', () => {
+    const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: true, snapshotOff: true });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: '1' }, enableWorkflows: true });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
+    expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
+  });
+
+  it('sets the variable alone when the lane is on and a compatible style carries the instructions', () => {
+    const decided = withOwnerChannel(spec(null), { laneOn: true, append: false, snapshotOff: false });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } });
+    expect(decided).not.toHaveProperty('appendSystemPrompt');
+    expect(decided).not.toHaveProperty('systemPromptSnapshot');
+  });
+
+  it('omits the variable when the lane is off, leaving the other settings as they were', () => {
+    expect(withOwnerChannel(spec(null), { laneOn: false, append: false, snapshotOff: false }).extraSettings).toBeNull();
+    expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { laneOn: false, append: false, snapshotOff: true })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
+    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } }), { laneOn: false, append: false, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
+  });
+});
+// P2-C end

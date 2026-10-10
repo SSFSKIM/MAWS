@@ -27,6 +27,7 @@ import { replayEngine } from './replay-transport';
 import { EngineSession } from './session';
 import { FileDeliverableStore, SessionChains } from './deliverables/store'; // E1; P2-E1: SessionChains
 import type { EngineTransport } from './transport';
+import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
@@ -74,7 +75,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
-    let engine: { bin: string; engineVersion: string };
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }; // P2-C: the flag's declaration
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -87,7 +88,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       if (relay && !relay.ok) return { status: 'relay_unreachable', health: relay };
       captured = env;
       relayHealth = relay ?? undefined;
-      engine = { bin: binary.path, engineVersion: binary.version };
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
     }
 
     let plan: LaunchPlan;
@@ -110,6 +111,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         // C12 end
         deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten, chains /* P2-E1 */ }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
+        unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
         observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1
       });

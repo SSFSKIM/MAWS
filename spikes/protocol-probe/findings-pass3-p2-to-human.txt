@@ -824,3 +824,106 @@ const summary=run=>Object.fromEntries(Object.entries(records(run)).map(([f,rs])=
 }catch(e){console.error('s16',e.message);out.s16Error=e.message;}}
 writeFileSync(join(HERE,'verdicts-6.json'),JSON.stringify(out,null,1)+'\n');
 console.log('DONE');
+
+M4 DISK EVIDENCE (2026-10-09, the P2-C M4 executor; execution document M4's Decisions and Design §6)
+
+Question: when main must settle an answer's uuid from disk (Design §6's transcript evidence: a recovery read with
+`complete: false`, an `uncertain` entry after an exit), what does the engine write for a human prompt it took, and does a
+`next` steer the engine cancelled leave a `user` record? Fixture: pass3/p2-to-human-steer-cancel-disk.jsonl (one launch,
+2.1.295, Haiku; scenario C.1 below, run from /tmp/maws-p2c-m4/; sha256 572c9c9d6a8c21eb157375bbd04f56cbeb077ec61c4a875c3557ccb7672a5cd3).
+
+Safety: p1-common's `launch` (scratch CLAUDE_CONFIG_DIR under /tmp checked by assertScratch, the environment rebuilt from
+the base keys, so no inherited CLAUDE_* reached the engine; the scenario itself ran under `env -i` with PATH, HOME, USER,
+LOGNAME, SHELL, TMPDIR and LANG only), the relay's /api/hello answered 200 before the launch, --max-budget-usd 0.5 (the
+run cost US$0.0037), the owner's ~/.claude.json /tmp project keys 26 before and after, sha1 f34550d616197d8dad75edfbbc01d05fa49cbad7
+unchanged (the fixture's owner_file_check rows: same true). The scratch root was removed after the verdict was read;
+the fixture's `transcript_evidence` note keeps the summaries (record type, attachment type, uuid, parentUuid; no text).
+
+What the engine did on the wire: U0 (idle) queued, started, completed. UA (`next`, sent during the first Bash call)
+queued, then `cancel_async_message {message_uuid: UA}` → `command_lifecycle cancelled` and `{cancelled: true}`. UB
+(`next`, sent after the cancel) queued, started (folded mid-turn), completed.
+
+VERDICT (the transcript after the exit, 50 records):
+- An idle prompt the engine took: a `user` record whose `uuid` is the prompt's uuid (line 3, origin {kind: human}),
+  named as a later record's `parentUuid`.
+- A `next` steer the engine cancelled: NO record carries its uuid. Its only trace is a `queue-operation` `enqueue`
+  (content "Reply STEER_A") and a bare `dequeue` (lines 32 and 33), neither naming the uuid. As pass 2 found on 2.1.283.
+- A `next` steer the engine took: NO `user` record carries its uuid either. It is an `attachment` record of type
+  `queued_command` whose `attachment.source_uuid` is the steer's uuid (line 36, origin {kind: human}), then a
+  `queue-operation` `remove`. As pass 2's steer-next-disk-live found on 2.1.283 (findings-pass2.md, "W1 probes").
+So the uuid-bearing records are exactly the taken prompts. `transcriptEvidence` therefore reads a uuid as taken when
+the transcript holds a `user` record with that `uuid`, or a `queued_command` attachment with that `source_uuid`; no
+`parentUuid` condition is needed (Design §6's conservative fallback is not taken). Design §6's "a `user` record with that
+uuid" alone would read every delivered steer as not taken; the attachment is the steer's record.
+Not observed here: a prompt the engine `discarded` or `refused` (e.g. a hook's block). A refused idle prompt that left a
+`user` record would read as taken; the live path never consults the disk for a uuid whose lifecycle it saw.
+
+APPENDIX C — the M4 scenario, verbatim
+
+C.1 p2-to-human-steer-cancel-disk.mjs (sha256 572c9c9d6a8c21eb157375bbd04f56cbeb077ec61c4a875c3557ccb7672a5cd3)
+
+// P2-C M4's disk-evidence gate (docs/doperpowers/plans/2026-10-08-p2-c-to-human.md, M4's Decisions and Design §6;
+// parent docs/doperpowers/plans/2026-10-08-p2-daily-driver.md, child P2-C, pin 07da9092fadd3d1ddf9266a38fc965ccdce43657).
+// Question: what does the engine write to the transcript for a human prompt it took and for a `next` steer it cancelled,
+// so main can read "the engine took this uuid" back from disk (transcriptEvidence)? One session, one launch:
+//   U0  an idle prompt, answered                                   (taken: the ordinary user record?)
+//   UA  a `next` steer sent while a Bash call runs, then withdrawn with cancel_async_message {message_uuid}
+//                                                                  (cancelled: does any record carry UA?)
+//   UB  a second `next` steer sent after UA's cancel, left to fold mid-turn (taken: which record carries UB?)
+// After the exit, every transcript record naming U0, U1, UA or UB (as uuid, source_uuid, or anywhere in the record) is
+// summarised (line, type, attachment type, uuid, parentUuid, whether a later record names it as parentUuid), with the
+// queue-operation records; the transcript itself is not kept.
+// Safety (P1's live-harness rules, E0a's helpers through p1-common's launch): a scratch CLAUDE_CONFIG_DIR under /tmp
+// (refused when it resolves to the owner's), the environment rebuilt from the base keys (every inherited CLAUDE_* dropped),
+// the relay's /api/hello gate, the owner's ~/.claude.json /tmp project keys compared before and after, --max-budget-usd
+// 0.5, Haiku, no plugin. Run from outside the repository:  node /tmp/maws-p2c-m4/p2-to-human-steer-cancel-disk.mjs <worktree>
+import {readFileSync,existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+
+const WT=process.argv[2];if(!WT||!existsSync(join(WT,'spikes/protocol-probe/harness.mjs')))throw new Error('usage: node p2-to-human-steer-cancel-disk.mjs <worktree>');
+const P=join(WT,'spikes/protocol-probe');
+const {ENGINE_VERSION,BIN,scratchRun,launch,transcriptPath,success,endAsStop,initPayload,records}=await import(join(P,'scenarios/pass3/p1-common.mjs'));
+
+const SELF=fileURLToPath(import.meta.url);
+const PROVENANCE={charter:'docs/charter.md',child:'P2-C',pin:'07da9092fadd3d1ddf9266a38fc965ccdce43657',spec:'docs/doperpowers/plans/2026-10-08-p2-daily-driver.md',document:'docs/doperpowers/plans/2026-10-08-p2-c-to-human.md',spike:'M4 disk evidence',engine:BIN,engineVersion:ENGINE_VERSION,scenario:'run from outside the repository; its text is quoted in spikes/protocol-probe/findings-pass3-p2-to-human.txt',scenarioSha256:createHash('sha256').update(readFileSync(SELF)).digest('hex')};
+
+const U0=randomUUID(),UA=randomUUID(),UB=randomUUID(),U1=randomUUID();
+const human=(uuid,content,priority)=>({type:'user',uuid,message:{role:'user',content},parent_tool_use_id:null,origin:{kind:'human'},...(priority?{priority}:{})});
+const lifecycle=(p,uuid,states,after=0)=>p.wait(f=>f.type==='command_lifecycle'&&f.command_uuid===uuid&&states.includes(f.state),{after,timeout:90000});
+
+const run=scratchRun('p2c-m4-steer');
+let sid;
+const p=await launch('p2-to-human-steer-cancel-disk',run,{spendCap:'0.5',provenance:{...PROVENANCE,question:'Does a cancelled next steer leave a user record (or any record) in the transcript; which record carries an idle prompt and a delivered steer?',ids:{U0,U1,UA,UB}}},async(p,{sessionId})=>{
+ sid=sessionId;
+ p.on('can_use_tool',r=>({behavior:'allow',updatedInput:r.input}));
+ success(await p.init(initPayload(run.cwd)),'initialize');
+ // U0: idle
+ let after=p.seq;p.send(human(U0,'Reply with exactly OK.'));await p.wait(f=>f.type==='result',{after});
+ // U1: a turn kept busy by three sequential sleeps
+ after=p.seq;
+ p.send(human(U1,'Make exactly three Bash calls, one at a time and never in parallel: `sleep 5 && echo 1`, then `sleep 5 && echo 2`, then `sleep 5 && echo 3`. Then reply with exactly DONE.'));
+ await p.wait(f=>f.type==='assistant'&&(f.message?.content||[]).some(b=>b.type==='tool_use'),{after});
+ // UA: steer, then withdraw it
+ const beforeA=p.seq;p.send(human(UA,'Reply STEER_A','next'));
+ await lifecycle(p,UA,['queued','started'],beforeA);
+ const cancel=await p.request('cancel_async_message',{message_uuid:UA});
+ p.note({event:'cancel_answer',uuid:UA,response:cancel});
+ // UB: steer, left to fold
+ const beforeB=p.seq;p.send(human(UB,'Also reply STEER_B','next'));
+ await lifecycle(p,UB,['started','cancelled','discarded','refused'],beforeB);
+ await p.wait(f=>f.type==='result',{after:beforeB,timeout:120000});
+ await endAsStop(p);
+});
+// The transcript's records naming the four prompts, and the queue operations (summaries only).
+const file=transcriptPath(run,sid);
+const recs=records(file);
+const parents=new Set(recs.map(r=>r.parentUuid).filter(Boolean));
+const ids={U0,U1,UA,UB};
+const naming=Object.fromEntries(Object.entries(ids).map(([k,id])=>[k,recs.flatMap((r,i)=>JSON.stringify(r).includes(id)?[{line:i+1,type:r.type,subtype:r.subtype??null,attachmentType:r.attachment?.type??null,uuid:r.uuid??null,uuidIsId:r.uuid===id,sourceUuidIsId:r.attachment?.source_uuid===id,parentUuid:r.parentUuid??null,namedAsParent:r.uuid?parents.has(r.uuid):false,operation:r.operation??null,isMeta:r.isMeta??null,promptOrigin:r.origin??r.attachment?.origin??null}]:[])]));
+const queueOps=recs.flatMap((r,i)=>r.type==='queue-operation'?[{line:i+1,operation:r.operation,content:typeof r.content==='string'?r.content.slice(0,40):null}]:[]);
+const verdict={transcriptLines:recs.length,naming,queueOps,userRecordsForUA:recs.filter(r=>r.type==='user'&&r.uuid===UA).length};
+p.note({event:'transcript_evidence',file:file.split(run.root).join('<root>'),...verdict});
+console.log(JSON.stringify(verdict,null,1));
+console.log('scratch root kept for inspection:',run.root);

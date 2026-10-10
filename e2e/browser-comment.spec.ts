@@ -1,11 +1,14 @@
 // E4d's `browser-comment` group (docs/doperpowers/plans/2026-10-06-e4d-comment-mode.md, Acceptance G1, G2 and "Also
 // pinned"): comment mode on the real Electron, over E4a's scene (the product app over the replay, a local server on
 // loopback; support/browser-scene.ts, support/browser-server.ts with E4d's `/comment.html`). The first run of the
-// browser preload with a body: its shield, outline and pick, main's gate and crop, E3's sheet opened through E5's seam.
+// browser preload with a body: its shield, outline and pick, main's gate and crop, the comment opened through E5's seam
+// (since P2-E2 the comment card docked in the pane's strip under the page, E3's sheet before).
 //
-// (1) G1: the toggle, the hover outline, a click pick, the sheet with the crop, no click reaching the page; (2) G1: Send
-// to main and a Side thread from a pick on a live parent (E3's replay journals): the written prompts, the transcript's
-// chip and image, the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
+// (1) G1: the toggle, the hover outline, a click pick, the card with the crop, no click reaching the page (P2-E2: the
+// card docked in the pane's strip, the view's bounds shrunk to the page's element, no cover, the pick's position and the
+// caret under it); (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
+// written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
+// pane at the thread's permission), the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -22,7 +25,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
-import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, pageAt, paneIn, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
+import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, pageAt, paneIn, paneRect, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
@@ -117,7 +120,7 @@ const reportFor = (epoch: number) => ({
 
 // ---- the app window's record of comment mode's events ------------------------------------------------------------------
 
-type Picked = { tabId: string; appSessionId: string; anchor: Anchor; crop: 'attached' | 'none' | 'tooLarge' | 'failed' };
+type Picked = { tabId: string; appSessionId: string; anchor: Anchor; crop: 'attached' | 'none' | 'tooLarge' | 'failed'; position?: { x: number; y: number } };
 type Changed = { at: number; payload: { tabId: string; on: boolean; reason: string } };
 type Recorded = { picked: Picked[]; changed: Changed[] };
 
@@ -137,10 +140,12 @@ async function lastPicked(s: BrowserScene, count: number): Promise<Picked> {
   return (await recorded(s)).picked.at(-1)!;
 }
 
-// ---- the chrome, the page, the sheet ------------------------------------------------------------------------------------
+// ---- the chrome, the page, the card -------------------------------------------------------------------------------------
 
 const toggleOf = (view: Locator): Locator => view.locator('[data-browser-comment]');
-const sheetOf = (s: BrowserScene, label: string): Locator => s.page.getByRole('dialog', { name: `Comment on ${label}` });
+// P2-E2: a pick on a tab whose view a pane of the window holds opens the comment card in that pane's strip, not E3's
+// sheet; the card's form is the sheet's (`CommentFormParts`), so the sheet's locators find it.
+const cardOf = (s: BrowserScene, label: string): Locator => s.page.locator('[data-card-dock] [data-comment-card]').and(s.page.getByRole('dialog', { name: `Comment on ${label}` }));
 const commentNodes = (page: Page) => page.locator('maws-comment-shield, maws-comment-overlay, maws-comment-badge');
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -190,10 +195,11 @@ async function clickAt(page: Page, at: { x: number; y: number }): Promise<void> 
   await page.mouse.up();
 }
 
-// The sheet cancelled; the view comes back on the pane.
-async function cancel(s: BrowserScene, t: CommentTab, sheet: Locator): Promise<void> {
-  await sheet.getByRole('button', { name: 'Cancel' }).click();
-  await expect(sheet).toHaveCount(0);
+// The card closed (P2-E2); the view keeps to the pane, which has its whole height back.
+async function dismiss(s: BrowserScene, t: CommentTab, card: Locator): Promise<void> {
+  await card.getByRole('button', { name: 'Close' }).click();
+  await expect(card).toHaveCount(0);
+  await expect(t.panel.locator('[data-card-dock]')).toHaveJSProperty('offsetHeight', 0);
   await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
 }
 
@@ -236,19 +242,19 @@ const cropsOf = (s: BrowserScene): string[] => {
 const pngSize = (bytes: Buffer) => ({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-// ---- (1) G1: the toggle, the outline, the pick, the sheet --------------------------------------------------------------
+// ---- (1) G1: the toggle, the outline, the pick, the card ---------------------------------------------------------------
 
 
-// E11 F2b (Q4, owner-decided): the sheet shows the crop as a thumbnail named "Screenshot · W × H" (main reads the file
+// E11 F2b (Q4, owner-decided): the composer (the sheet's form, the card's since P2-E2) shows the crop as a thumbnail named "Screenshot · W × H" (main reads the file
 // for it through the send's own checks); its size, from that name.
-async function thumbnailSize(sheet: Locator): Promise<[string, string]> {
-  const thumbnail = sheet.locator('[data-comment-screenshot]').getByRole('img', { name: /^Screenshot · \d+ × \d+$/ });
+async function thumbnailSize(card: Locator): Promise<[string, string]> {
+  const thumbnail = card.locator('[data-comment-screenshot]').getByRole('img', { name: /^Screenshot · \d+ × \d+$/ });
   await expect(thumbnail, 'the screenshot shows as a thumbnail').toBeVisible();
   const [, w, h] = /Screenshot · (\d+) × (\d+)/.exec((await thumbnail.getAttribute('alt'))!)!;
   return [w!, h!];
 }
 
-test('1. the Comment toggle arms the page: the hover outline names the button, a click opens E3’s sheet with the label, the locator and the crop, and no event reaches the page', async () => {
+test('1. the Comment toggle arms the page: the hover outline names the button, a click opens the comment card docked under the page (no cover, the view’s bounds shrunk to the page’s element) with the label, the locator and the crop, and no event reaches the page', async () => {
   await commentScene({ titles: ['E4d: pick'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
     const t = await openCommentPage(s, id);
@@ -276,16 +282,20 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     expect(near(outline.x, button.x, 1) && near(outline.y, button.y, 1) && near(outline.width, button.width, 1) && near(outline.height, button.height, 1), JSON.stringify({ outline, button })).toBe(true);
     await expect(page.locator('maws-comment-badge')).toHaveText(`${INCREMENT_LABEL}\nClick to comment · drag for an area · Esc leaves`);
 
-    // the click: E3's sheet in the app window, titled by the label, the locator shown, the crop attached
+    // the click: the comment card docked in the pane's strip (P2-E2), titled by the label, the locator in its title, the
+    // crop attached, its field taking the typing
+    const fullPane = await paneRect(paneIn(t.panel));
     await page.mouse.down();
     await page.mouse.up();
-    const sheet = sheetOf(s, INCREMENT_LABEL);
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toHaveAttribute('data-anchor-kind', 'browser-element');
-    await expect(sheet).toHaveAttribute('data-anchor-locator', '#increment');
-    await expect(sheet.getByText('#increment', { exact: true }), 'the locator shown').toBeVisible();
-    const chip = sheet.locator('[data-comment-screenshot]');
-    const [w, h] = await thumbnailSize(sheet);
+    const card = cardOf(s, INCREMENT_LABEL);
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-kind', 'browser-element');
+    await expect(card).toHaveAttribute('data-anchor-locator', '#increment');
+    await expect(card).toHaveAttribute('data-placement', 'strip');
+    await expect(card.getByRole('heading', { name: INCREMENT_LABEL }), 'the locator in the heading’s title').toHaveAttribute('title', `${INCREMENT_LABEL}\n#increment`);
+    await expect(card.getByRole('textbox', { name: 'Comment' })).toBeFocused();
+    const chip = card.locator('[data-comment-screenshot]');
+    const [w, h] = await thumbnailSize(card);
     expect(Number(w)).toBeGreaterThan(0);
     expect(Number(h)).toBeGreaterThan(0);
     const crops = cropsOf(s);
@@ -298,19 +308,35 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     expect(near(Number(w), button.width * dpr, 2 * dpr + 1) && near(Number(h), button.height * dpr, 2 * dpr + 1), `the crop is the button: ${w}×${h} at DPR ${dpr} for ${JSON.stringify(button)}`).toBe(true);
     const picked = await lastPicked(s, 1);
     expect(picked).toMatchObject({ tabId: t.tabId, appSessionId: id, crop: 'attached' });
+    // G2 (P2-E2): the pick's position is the button's centre across and its bottom, in the pane's pixels (zoom 1), and the
+    // docked card points at it: a caret on the strip's top edge right under the button
+    const position = picked.position!;
+    expect(near(position.x, button.x + button.width / 2, 1) && near(position.y, button.y + button.height, 1), `position ${JSON.stringify(position)} for ${JSON.stringify(button)}`).toBe(true);
+    const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
+    await expect(caret).toHaveAttribute('data-card-caret', String(position.x));
+    const caretBox = (await caret.boundingBox())!;
+    expect(near(caretBox.x + caretBox.width / 2, fullPane.x + position.x, 1.5), `the caret under the button: ${JSON.stringify({ caretBox, fullPane, position })}`).toBe(true);
 
     // one pick per arm: the toggle is off, the page holds none of MAWS's nodes, and the page heard nothing of the pick
     await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'false');
     await expect(commentNodes(page)).toHaveCount(0);
     await expectPageHeardNothing(page, 'the hover and the pick: no pointer, mouse or wheel event reached the page while armed');
-    // the sheet covers the page: E4a's cover hides the view while it is open
-    await expect.poll(async () => (await tabState(s, t.tabId)).tab?.covered).toBe(true);
-    expect((await viewOf(s, t.tabId))?.visible).toBe(false);
+    // G1 (P2-E2): the card is never over the page. No cover: the view stays visible; the page's element shrank by the
+    // strip, the view's bounds followed it (DOM-measured), and the card lies wholly under the view, inside the pane's column
+    expect((await tabState(s, t.tabId)).tab?.covered, 'no cover for a card').toBe(false);
+    await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+    const [view, shrunk, cardBox, strip] = [(await viewOf(s, t.tabId))!, await paneRect(paneIn(t.panel)), (await card.boundingBox())!, (await t.panel.locator('[data-card-dock]').boundingBox())!];
+    expect(view.visible).toBe(true);
+    expect(shrunk.y, 'the page keeps its top').toBe(fullPane.y);
+    expect(near(shrunk.height + strip.height, fullPane.height, 1), `the strip takes what the page gave up: ${JSON.stringify({ fullPane, shrunk, strip })}`).toBe(true);
+    expect(cardBox.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);
+    expect(cardBox.y + cardBox.height, 'inside the column').toBeLessThanOrEqual(fullPane.y + fullPane.height + 1);
+    expect(near(cardBox.x, fullPane.x + 8, 1) && near(cardBox.width, fullPane.width - 16, 1), `the column’s width less 16 px: ${JSON.stringify(cardBox)}`).toBe(true);
 
     // the crop is removable with one click (A-31)
     await chip.getByRole('button', { name: 'Remove screenshot' }).click();
     await expect(chip).toHaveCount(0);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
     await expectPageHeardNothing(page);
     expect(await page.evaluate(() => document.getElementById('count')!.textContent)).toBe('0');
   });
@@ -342,7 +368,7 @@ function expectBox(box: Anchor['box'], want: Rect, slack = 2): void {
   expect(near(box!.x, want.x, slack) && near(box!.y, want.y, slack) && near(box!.width, want.width, slack) && near(box!.height, want.height, slack), `box ${JSON.stringify(box)} against ${JSON.stringify(want)}`).toBe(true);
 }
 
-test('2. a pick sent to main writes [image, anchored text] whose tag round-trips to the page’s anchor; a pick sent as a Side thread forks with it, and the thread header opens the page in the parent’s tab', async () => {
+test('2. a pick sent to main writes [image, anchored text] whose tag round-trips to the page’s anchor; a pick sent as a Side thread forks with it and the docked card becomes the thread, handed off to the Side pane at its request, whose header opens the page in the parent’s tab', async () => {
   test.setTimeout(240_000);
   let parentJournal = '';
   await commentScene(
@@ -361,6 +387,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
         const thread = new SideJournal(CHILD, scratch.repo);
         const first = thread.prompt();
         thread.rename(INCREMENT_LABEL); // `finishBinding` names a comment's thread by its anchor's label
+        thread.permission(first, 'Bash', { command: 'echo the-count', description: 'Read the count' }); // P2-E2: the hand-off
         thread.reply(first, THREAD_REPLY);
         thread.completed(first);
         return [thread.write(dir, 'thread')]; // the parent is launched directly (below); the fork takes the seam's one journal
@@ -377,14 +404,14 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await arm(s, t);
       const { expected, box } = await incrementAnchor(t);
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
-      let sheet = sheetOf(s, INCREMENT_LABEL);
-      await expect(sheet).toBeVisible();
-      await expect(sheet.locator('[data-comment-screenshot]')).toBeVisible();
-      await sheet.locator('[data-destination="main"]').click();
-      await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeChecked();
-      await sheet.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
-      await sheet.getByRole('button', { name: 'Send' }).click();
-      await expect(sheet).toHaveCount(0);
+      let card = cardOf(s, INCREMENT_LABEL);
+      await expect(card).toBeVisible();
+      await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
+      await card.locator('[data-destination="main"]').click();
+      await expect(card.getByRole('radio', { name: /Send to main/ })).toBeChecked();
+      await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
+      await card.getByRole('button', { name: 'Send' }).click();
+      await expect(card).toHaveCount(0);
       await expect.poll(() => writtenUsers(s, parent).length, { timeout: 20_000 }).toBe(1);
       const [image, text] = contentOf(writtenUsers(s, parent)[0]!);
       expect(image?.type, 'the image block first').toBe('image');
@@ -409,16 +436,28 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(bubble.locator('img.transcript-attachment-image')).toBeVisible();
       await expect(main.getByText('Comment on "button', { exact: false }), 'the lead line is not drawn').toHaveCount(0);
 
-      // ---- a Side thread (the sheet's default): the fork's first prompt carries the anchor and the picture
+      // ---- a Side thread (the composer's default): the fork's first prompt carries the anchor and the picture; the card
+      // becomes the thread, still docked under the page (P2-E2), with no Side tab opened
       await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
       await arm(s, t);
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
-      sheet = sheetOf(s, INCREMENT_LABEL);
-      await expect(sheet).toBeVisible();
-      await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
-      await sheet.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
-      await sheet.getByRole('button', { name: 'Send' }).click();
-      await expect(sheet).toHaveCount(0);
+      card = cardOf(s, INCREMENT_LABEL);
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
+      await card.getByRole('button', { name: 'Send' }).click();
+      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+      await expect(card.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]')).toHaveText(INCREMENT_LABEL);
+      await expect(card.locator('[data-needs-you]'), 'the thread’s request, said in the card').toContainText('Waiting for your permission', { timeout: 20_000 });
+      await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+      const [threadView, threadCard] = [(await viewOf(s, t.tabId))!, (await card.boundingBox())!];
+      expect(threadView.visible && !(await tabState(s, t.tabId)).tab?.covered, 'the page stays up beside the thread').toBe(true);
+      expect(threadCard.y, 'the thread card under the view').toBeGreaterThanOrEqual(threadView.bounds!.y + threadView.bounds!.height);
+      await expect(s.panel.locator('[data-side-thread-view]'), 'no Side pane opened').toHaveCount(0);
+
+      // the hand-off: the strip's Open in Side pane closes the card, and the Side pane draws the thread with its request
+      await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
+      await expect(card).toHaveCount(0);
       let child = '';
       await expect
         .poll(async () => {
@@ -429,6 +468,10 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
         .not.toBe('');
       const pane = s.panel.locator(`[data-side-thread-view="${child}"]`);
       await expect(pane, 'the Side pane opens on the thread').toBeVisible();
+      const request = pane.getByRole('group', { name: 'Approval needed' });
+      await expect(request).toContainText('echo the-count');
+      await request.getByRole('radio', { name: 'Allow once' }).click();
+      await request.getByRole('button', { name: 'Allow', exact: true }).click();
       await expect(pane.getByText(THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
       const [threadImage, threadText] = contentOf(writtenUsers(s, child)[0]!);
       expect(threadImage?.type).toBe('image');
@@ -489,9 +532,9 @@ test('3. G2’s proof without E4c: for each target picked, css alone matches exa
       await arm(s, t);
       await clickAt(page, centre(await rectOf(element)));
       const { anchor } = await lastPicked(s, k + 1);
-      const sheet = sheetOf(s, anchor.label);
-      await expect(sheet, `${want.target}: the sheet`).toBeVisible();
-      await expect(sheet).toHaveAttribute('data-anchor-locator', anchor.css!);
+      const card = cardOf(s, anchor.label);
+      await expect(card, `${want.target}: the card`).toBeVisible();
+      await expect(card).toHaveAttribute('data-anchor-locator', anchor.css!);
       expect(anchor.locator, `${want.target}: locator is the css`).toBe(anchor.css);
       if (want.css !== undefined) expect(anchor.css, want.target).toBe(want.css);
       if (want.role !== undefined) expect(anchor.role ?? null, `${want.target}: role`).toBe(want.role);
@@ -507,7 +550,7 @@ test('3. G2’s proof without E4c: for each target picked, css alone matches exa
         await expect(full, `${want.target}: css and getByRole(${anchor.role}, ${anchor.name})`).toHaveCount(1);
       }
       found.push(`${want.target}: ${anchor.label} | ${anchor.css} | ${anchor.role ?? '-'} | ${anchor.name ?? '-'}`);
-      await cancel(s, t, sheet);
+      await dismiss(s, t, card);
     }
     test.info().annotations.push({ type: 'anchors', description: found.join('\n') });
   });
@@ -539,23 +582,23 @@ test('4. a drag picks an area: the smallest element holding the marquee is named
     const scroll = await scrollOf(page);
     await page.mouse.up();
 
-    const sheet = sheetOf(s, 'list');
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toHaveAttribute('data-anchor-locator', 'body > main > section:nth-of-type(2) > ul');
+    const card = cardOf(s, 'list');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-locator', 'body > main > section:nth-of-type(2) > ul');
     const { anchor } = await lastPicked(s, 1);
     expect(anchor).toMatchObject({ kind: 'browser-element', label: 'list', css: 'body > main > section:nth-of-type(2) > ul', role: 'list' });
     expect(anchor.name, 'a list has no name: omitted').toBeUndefined();
     expect(scroll.y, 'the page is scrolled, so the box is in document coordinates').toBeGreaterThan(0);
     expectBox(anchor.box, { ...marquee, x: marquee.x + scroll.x, y: marquee.y + scroll.y });
     const dpr = await page.evaluate(() => window.devicePixelRatio);
-    const [w, h] = await thumbnailSize(sheet);
+    const [w, h] = await thumbnailSize(card);
     expect(near(Number(w), marquee.width * dpr, 2) && near(Number(h), marquee.height * dpr, 2), `crop ${w}×${h} for the marquee ${marquee.width}×${marquee.height} at DPR ${dpr}`).toBe(true);
     // G2's expression on the one anchor with a role and no name (`getByRole(role, {})`): css alone, then css and role
     const byCss = page.locator(`css=${anchor.css}`);
     await expect(byCss).toHaveCount(1);
     expect(await byCss.getAttribute('data-target')).toBe('list');
     await expect(byCss.and(page.getByRole('list'))).toHaveCount(1);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
     await expectPageHeardNothing(page);
   });
 });
@@ -601,16 +644,16 @@ test('6. the context menu’s Comment picks the element at the point without arm
     const t = await openCommentPage(s, id);
     const at = centre(await rectOf(t.page.locator('#name')));
     expect(await seamPickAt(s, t.tabId, at.x, at.y)).toBe(true);
-    const sheet = sheetOf(s, 'textbox “Name”');
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toHaveAttribute('data-anchor-locator', '#name');
-    await thumbnailSize(sheet);
+    const card = cardOf(s, 'textbox “Name”');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-locator', '#name');
+    await thumbnailSize(card);
     const { anchor } = await lastPicked(s, 1);
     expect(anchor).toMatchObject({ css: '#name', role: 'textbox', name: 'Name', label: 'textbox “Name”' });
     expect((await recorded(s)).changed, 'no arm, no disarm').toEqual([]);
     await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'false');
     await expect(commentNodes(t.page)).toHaveCount(0);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
   });
 });
 
@@ -692,10 +735,10 @@ test('7b. armed means acknowledged: a tab whose preload never confirms the arm i
     await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as { __maws_browser_comment: CommentSeam }).__maws_browser_comment.ignoreAcks(id, false), t.tabId);
     await arm(s, t);
     await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
-    const sheet = sheetOf(s, INCREMENT_LABEL);
-    await expect(sheet).toBeVisible();
+    const card = cardOf(s, INCREMENT_LABEL);
+    await expect(card).toBeVisible();
     await expectPageHeardNothing(t.page);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
   });
 });
 
@@ -764,12 +807,12 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     let picked = await lastPicked(s, 1);
     expect(picked.anchor.label, 'a frame is named by its title (Design §8)').toBe('iframe “Frame B”');
     expect(picked.anchor.role, 'a frame has no role').toBeUndefined();
-    let sheet = sheetOf(s, picked.anchor.label);
-    await expect(sheet).toBeVisible();
+    let card = cardOf(s, picked.anchor.label);
+    await expect(card).toBeVisible();
     await expect(page.locator(`css=${picked.anchor.css}`)).toHaveAttribute('data-target', 'frame');
     expect(await frame!.evaluate(() => (window as unknown as { __heard: string[] }).__heard), 'the frame’s page heard no pointer event at all').toEqual([]);
     await expectPageHeardNothing(page);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
 
     // the shadow host: a click over its inner button names the host
     const host = page.locator('[data-target="shadow-host"]');
@@ -778,10 +821,10 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     await clickAt(page, centre(await rectOf(page.locator('[data-target="shadow-host"] button'))));
     picked = await lastPicked(s, 2);
     expect(picked.anchor.css).toBe('#shadow-host');
-    sheet = sheetOf(s, picked.anchor.label);
-    await expect(sheet).toHaveAttribute('data-anchor-locator', '#shadow-host');
+    card = cardOf(s, picked.anchor.label);
+    await expect(card).toHaveAttribute('data-anchor-locator', '#shadow-host');
     await expectPageHeardNothing(page);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
 
     // the top layer: a modal dialog paints above the shield; its button is still picked, and the page hears nothing
     await page.evaluate(() => (document.getElementById('modal') as HTMLDialogElement).showModal());
@@ -791,11 +834,11 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     await clickAt(page, centre(await rectOf(confirm)));
     picked = await lastPicked(s, 3);
     expect(picked.anchor).toMatchObject({ css: '#modal-confirm', role: 'button', name: 'Confirm', label: 'button “Confirm”' });
-    sheet = sheetOf(s, 'button “Confirm”');
-    await expect(sheet).toBeVisible();
+    card = cardOf(s, 'button “Confirm”');
+    await expect(card).toBeVisible();
     await expectPageHeardNothing(page, 'no event reached the page through the top layer');
     expect(await page.evaluate(() => (document.getElementById('modal') as HTMLDialogElement).open), 'the dialog is still open: its button (which closes it) was not pressed').toBe(true);
-    await cancel(s, t, sheet);
+    await dismiss(s, t, card);
   });
 });
 
@@ -945,7 +988,7 @@ async function shoot(s: BrowserScene, surface: string, opts: { pane?: Locator; p
   await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
 }
 
-test('11. both themes: the chrome with the toggle pressed over the outlined page, the sheet with the crop chip, the transcript’s chip (MAWS_E4D_SHOTS=1 writes them)', async () => {
+test('11. both themes: the chrome with the toggle pressed over the outlined page, the card docked with the crop chip, the transcript’s chip (MAWS_E4D_SHOTS=1 writes them)', async () => {
   await commentScene({ titles: ['E4d: shots'], seed: seedDiskComment }, async (s) => {
     const [id, disk] = s.ids as [AppSessionId, AppSessionId];
     const t = await openCommentPage(s, id);
@@ -959,11 +1002,11 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
 
     await t.page.mouse.down();
     await t.page.mouse.up();
-    const sheet = sheetOf(s, INCREMENT_LABEL);
-    await expect(sheet.locator('[data-comment-screenshot]')).toBeVisible();
-    await sheet.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
-    await shoot(s, 'sheet');
-    await cancel(s, t, sheet);
+    const card = cardOf(s, INCREMENT_LABEL);
+    await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
+    await shoot(s, 'card', { pane: paneIn(t.panel), page: t.page }); // P2-E2: the page over the docked card
+    await dismiss(s, t, card);
 
     await show(s, disk);
     const chip = s.page.locator('[data-region="main"] [data-chip="anchor"][data-anchor-kind="browser-element"]');

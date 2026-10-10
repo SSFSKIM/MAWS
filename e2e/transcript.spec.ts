@@ -236,6 +236,118 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// P2-C (2026-10-09): a viewport that shrinks with no scroll is not a scroll upward, even right after the browser clamped
+// the offset upward as the viewport grew (a permission card leaving the composer, then the ask notice growing it): the
+// follower stays in follow mode and the end in view, however far past the 80 px threshold the shrink moves it.
+test('a viewport that grows and then shrinks with no scroll keeps a follower at the end', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const frames = async (n: number) => {
+      for (let k = 0; k < n; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    const full = scroller.clientHeight;
+    scroller.style.height = '120px'; // shrinks: the follower is kept at the end
+    await frames(3);
+    scroller.style.height = `${full}px`; // grows: the browser clamps the offset upward, at the end
+    await frames(2);
+    scroller.style.height = '120px'; // shrinks again before that scroll settles, by more rows than the overscan
+  });
+  await expect.poll(() => distanceFromEnd(page), { message: 'the end is kept in view' }).toBeLessThanOrEqual(1);
+  expect((await metrics(page)).following, 'still following').toBe(true);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ })).toHaveCount(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// P2-C (2026-10-09): a viewport that shrinks while a scroll is still settling, which the virtualiser need not report,
+// does not hide the owner's next scroll upward: it leaves follow mode, shows the control, and the stream leaves the
+// reader where they are.
+test('a scroll upward after a viewport shrinks mid-scroll leaves follow mode', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const frames = async (n: number) => {
+      for (let k = 0; k < n; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    scroller.scrollBy(0, -1); // within the threshold: still following, and the virtualiser now scrolling
+    await frames(1);
+    scroller.style.height = `${scroller.clientHeight - 80}px`; // shrinks while that scroll settles
+    await frames(3);
+    scroller.scrollBy(0, -200); // the owner scrolls up
+  });
+  const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  await expect.poll(async () => (await metrics(page)).following, { message: 'the scroll up leaves follow mode' }).toBe(false);
+  await expect(jump).toBeVisible();
+  const readingAt = await scrollerTop(page);
+  const batches = (await metrics(page)).batches;
+  await play(page, 1);
+  await expect.poll(async () => (await metrics(page)).batches).toBeGreaterThan(batches + 30);
+  expect(await scrollerTop(page), 'the stream does not move the reader').toBe(readingAt);
+  expect((await metrics(page)).following, 'still not following').toBe(false);
+  await expect(jump).toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// P2-C (2026-10-09): the list's own scroll to the end (a row growing under a follower) moves the offset a frame before
+// its scroll event arrives; a scroll upward in that interval is measured from where the list put the reader, not from
+// before, so it leaves follow mode and the stream leaves the reader where they are.
+test('a scroll upward right after the list follows a row growth leaves follow mode', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  const offsets = await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    // A fixed viewport, so no resize is involved; the follower's scroll to the end for this one settles first.
+    scroller.style.height = `${scroller.clientHeight}px`;
+    for (let k = 0; k < 5; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    // The first row mounted, above the viewport and outside the turn the stream replays; a style rule keeps it grown
+    // across a remount.
+    const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]'));
+    const first = rows.reduce((a, b) => (Number(b.dataset.index) < Number(a.dataset.index) ? b : a));
+    const before = scroller.scrollTop;
+    return new Promise<{ before: number; followed: number; scrolled: number }>((resolve) => {
+      // Observed after the list's own observer, so this runs in the same frame, after the list has followed the growth
+      // to the end and before that scroll's event.
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        const followed = scroller.scrollTop;
+        scroller.scrollBy(0, -200); // the owner scrolls up
+        resolve({ before, followed, scrolled: scroller.scrollTop });
+      });
+      const grow = document.createElement('style');
+      grow.textContent = `[data-row-id="${first.dataset.rowId}"] { padding-bottom: 400px; }`; // the row grows by 400 px
+      document.head.append(grow);
+      observer.observe(first);
+    });
+  });
+  expect(offsets.followed, 'the list followed the growth to the end').toBeGreaterThan(offsets.before + 200);
+  expect(offsets.scrolled, 'the scroll up still lands below where the list was before').toBeGreaterThan(offsets.before);
+  const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  await expect.poll(async () => (await metrics(page)).following, { message: 'the scroll up leaves follow mode' }).toBe(false);
+  await expect(jump).toBeVisible();
+  const readingAt = await scrollerTop(page);
+  const batches = (await metrics(page)).batches;
+  await play(page, 1);
+  await expect.poll(async () => (await metrics(page)).batches).toBeGreaterThan(batches + 30);
+  expect(await scrollerTop(page), 'the stream does not move the reader').toBe(readingAt);
+  expect((await metrics(page)).following, 'still not following').toBe(false);
+  await expect(jump).toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('collapsing a divider keeps its position', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
@@ -823,7 +935,8 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
 // from the sites R2 recorded on the installed 2.1.287 (pass3/mods-surface-*) replayed through the replay transport into
 // the product app's session tab. The replay answers the surface's renders from the fixture by site and instance; the
 // person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
-// so C4 indexes a record the sidebar shows; no engine runs.
+// so C4 indexes a record the sidebar shows; no engine runs. P2-C (2026-10-09): these record P1's drawing of the owner's
+// mod, so the owner channel's lane is switched off first (with it on, MAWS draws the marks itself: the M5 case below).
 type SurfaceSeed = (base: { repo: string; engineId: string }) => Record<string, unknown>[];
 async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']>; userData: string }) => Promise<void>, seed?: SurfaceSeed, beforeLaunch?: (pane: ReturnType<Page['locator']>) => Promise<void>, attached = true) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
@@ -843,6 +956,7 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
   try {
     const { page } = maws;
+    value(await invoke(page, 'settings.set', { mods: { toHuman: { enabled: false } } })); // P2-C: P1's drawing
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
     await (await sidebarRow(page, { appSessionId: id })).click();
@@ -1125,6 +1239,148 @@ test('M1 marked commentary is visible at full contrast before and after folding 
   });
 });
 
+
+// P2-C M5 (2026-10-09; the P2-C document, Design §7 and §8, acceptance G3 and G5's presentation): with the owner
+// channel's lane on (the default), a replayed turn whose reply carries the four marks nested as U2 S13 recorded them,
+// after one Bash call and one unmarked sentence (test/fixtures/engine/p2c-report-marks.jsonl), reads as the report:
+// the prompt, one "Working record" row, the cards. The record opens to the ordinary divider, the divider to the tool
+// row, "Fold to report" closes it; an unmarked turn draws as the full transcript; the header's toggle shows the full
+// transcript with the marks still as cards. With room for the margin, a long insight after a short message keeps its
+// height in its row: it ends above the next insight and the next transcript row. No engine runs.
+test('M5 the report view folds a marked turn into its working record and draws the four marks as cards', async () => {
+  test.setTimeout(120_000);
+  const fixture = 'test/fixtures/engine/p2c-report-marks.jsonl';
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-report-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const engineId = randomUUID();
+  const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session that reports' }, uuid: randomUUID(), timestamp: '2026-10-09T07:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.295' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { page } = maws;
+    let id = '';
+    await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    await page.mouse.move(0, 0);
+    const pane = page.locator('[data-region="main"] [data-pane="0"]');
+    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await launchReady(page, id, fixture, { cwd: repo });
+    const prompts = readFileSync(join(REPO_ROOT, fixture), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; message?: { content?: string } } }).filter((row) => row.direction === 'out' && row.frame.type === 'user').map((row) => row.frame.message!.content!);
+    for (const content of prompts) {
+      value(await invoke(page, 'session.send', { appSessionId: id as never, content }));
+      await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).turn, { timeout: 20_000 }).toBeNull();
+    }
+    await expect(pane.getByText('Nothing else for now.', { exact: true })).toBeVisible();
+
+    // The header: the view toggle at the trailing end, on the report
+    const toggle = pane.getByRole('group', { name: 'Session view' });
+    await expect(toggle.getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
+
+    // Level 0: the prompt, one working record that counts what it holds, the cards in the reply's order
+    const record = pane.getByRole('button', { name: /^Working record/ });
+    await expect(record).toHaveText('Working record · 1 tool call · 1 message');
+    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    const report = pane.locator('[data-owner-report]').filter({ hasText: "I haven't opened any files" });
+    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
+    await expect(report.locator('[data-owner-card="to-human"]')).toContainText("I haven't opened any files");
+    await expect(report.locator('[data-owner-card="essential"]')).toContainText('The README above is unverified.');
+    const question = report.locator('[data-owner-card="need-input"]');
+    await expect(question).toContainText('Which tone should the README use?');
+    await expect(question.getByRole('group', { name: 'Choices' }).getByRole('button')).toHaveText([/^Concise reference style.*Recommended$/, /^Friendly guide style/]);
+    await expect(question.getByRole('button', { name: 'Reply' })).toBeEnabled(); // M6: main knows the mark, so the card answers
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0); // the unmarked turn has no work: no divider either
+    // the insight beside the message when the pane leaves a 240 px margin, else under it in reading order
+    const placement = await report.locator('.owner-insights').evaluate((el) => {
+      const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
+      const column = el.closest('.thread-column') as HTMLElement;
+      return { placement: el.getAttribute('data-placement'), room: (scroller.clientWidth - column.offsetWidth) / 2 };
+    });
+    expect(placement.placement).toBe(placement.room >= 256 ? 'margin' : 'inline');
+    await captureReportShot(page, 'report-level0');
+
+    // Level 1: the turn as the full transcript draws it folded, the record above it
+    await record.click();
+    const fold = pane.getByRole('button', { name: 'Fold to report' });
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    const divider = pane.locator('[data-kind="divider"] .transcript-divider > .transcript-disclosure');
+    await expect(divider).toHaveAttribute('aria-expanded', 'false');
+    await expect(divider).toContainText('1 tool call');
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
+    // Level 2: the divider expanded shows the tool row
+    await divider.click();
+    await expect(pane.getByText('git status --short', { exact: false }).first()).toBeVisible();
+    await captureReportShot(page, 'report-level2');
+    await fold.click();
+    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toHaveCount(0);
+
+    // The full transcript: no record, every word, the marks still as cards
+    await toggle.getByRole('button', { name: 'Transcript' }).click();
+    await expect(pane.getByRole('button', { name: /^Working record/ })).toHaveCount(0);
+    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
+    await expect(report.locator('.owner-card-label')).toHaveText(['Message', 'Insight', 'Must read', 'Question']);
+    await toggle.getByRole('button', { name: 'Report' }).click();
+    await expect(pane.getByRole('button', { name: /^Working record/ })).toBeVisible();
+
+    // The margin keeps an insight's height (the M5 fix wave): widen the window and narrow the column until the pane
+    // leaves the margin's room, then a long insight after a short message ends above the next message's insight, inside
+    // its own transcript row, and the next row starts below that row.
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000));
+    const notes = pane.locator('[data-owner-report]').filter({ hasText: 'Keep the README short.' });
+    await notes.scrollIntoViewIfNeeded();
+    await notes.evaluate((el) => {
+      const scroller = el.closest('[data-transcript-scroller]') as HTMLElement;
+      document.documentElement.style.setProperty('--measure', `${Math.max(240, scroller.clientWidth - 2 * 272)}px`);
+    });
+    await expect.poll(() => notes.locator('.owner-insights').evaluateAll((els) => els.map((el) => el.getAttribute('data-placement')))).toEqual(['margin', 'margin']);
+    await expect.poll(() => notes.evaluate((el) => {
+      const box = (node: Element | null | undefined) => node?.getBoundingClientRect() ?? null;
+      const [tall, short] = Array.from(el.querySelectorAll('.owner-insights'), (node) => node.getBoundingClientRect());
+      const first = el.querySelector('.owner-report-item');
+      const message = box(first?.querySelector('[data-owner-card="to-human"]'));
+      const column = box(el.closest('.thread-column'));
+      const row = el.closest('[data-index]')!;
+      const next = box(row.parentElement?.querySelector(`[data-index="${Number(row.getAttribute('data-index')) + 1}"]`));
+      const own = row.getBoundingClientRect();
+      const wrong: string[] = [];
+      if (!message || message.height >= tall.height) wrong.push(`the message (${message?.height}) is not shorter than its insight (${tall.height})`);
+      if (column && tall.left < column.right) wrong.push(`the insight (left ${tall.left}) is not in the margin (column right ${column.right})`);
+      if (first && first.getBoundingClientRect().bottom < tall.bottom - 0.5) wrong.push(`the item (bottom ${first.getBoundingClientRect().bottom}) does not hold its insight (bottom ${tall.bottom})`);
+      if (short.top < tall.bottom) wrong.push(`the next insight (top ${short.top}) overlaps the long one (bottom ${tall.bottom})`);
+      const lowest = Math.max(tall.bottom, short.bottom);
+      if (own.bottom < lowest - 0.5) wrong.push(`the row (bottom ${own.bottom}) does not hold its insights (bottom ${lowest})`);
+      if (!next || next.top < own.bottom - 0.5) wrong.push(`the next row (top ${next?.top}) starts above this row's end (${own.bottom})`);
+      return wrong;
+    })).toEqual([]);
+    await captureReportShot(page, 'report-margin');
+    await page.evaluate(() => document.documentElement.style.removeProperty('--measure'));
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Light and dark shots of the report for M5's review, outside the repository.
+async function captureReportShot(page: Page, name: string) {
+  const dir = '/tmp/maws-p2c-m5-evidence';
+  mkdirSync(dir, { recursive: true });
+  try {
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(dir, `${name}-${theme}.png`), animations: 'disabled' });
+    }
+  } finally {
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+  }
+}
 
 const sittingReplays = [
   { fixture: 'mods-surface-sitting', headers: false },

@@ -51,6 +51,9 @@ import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutc
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+// P2-C start (2026-10-09)
+import { PromptHistoryEventSchema } from '../../graph/events';
+// P2-C end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
 // R2 start
 import { PaneRosterSchema, RenderAnswerSchema, ScrollSiteSchema, SURFACE_SITES, SurfaceAnswerSchema, SurfaceElementSchema, SurfaceViewportSchema } from '../../engine/surface';
@@ -561,6 +564,19 @@ const e8Commands = {
 export const E8_SESSION_COMMANDS = Object.keys(e8Commands) as (keyof typeof e8Commands)[];
 // E8 end ----------------------------------------------------------------------------------------------------------------
 
+// P2-C start (2026-10-09; the P2-C document, Interfaces X2 and Design §6) ------------------------------------------------
+// Owner engine-host. `session.steer.cancel` withdraws a pending `next` steer from the engine and drops it, never
+// re-queueing it (`already_started` when it is not a pending steer: the engine took it, or it is unknown); refused while
+// a hold or another cancel withdraws it. `session.promptHistory` reads the session's retained journals through the
+// normaliser in launch order and answers only `queue.transition` and `command.lifecycle` events at or after `since` (an
+// ISO-8601 instant on the host's clock, the clock the rows carry); `complete` is false when the oldest retained launch
+// began after `since`, or a launch could not be read to its end.
+const p2cCommands = {
+  'session.steer.cancel': host(input({ messageUuid: MessageUuidSchema }), z.strictObject({ outcome: z.enum(['cancelled', 'already_started']) })),
+  'session.promptHistory': host(input({ since: z.iso.datetime() }), z.strictObject({ events: z.array(PromptHistoryEventSchema), complete: z.boolean() })),
+} as const;
+export const P2C_SESSION_COMMANDS = Object.keys(p2cCommands) as (keyof typeof p2cCommands)[];
+// P2-C end --------------------------------------------------------------------------------------------------------------
 // P2-A start (2026-10-09; X16): why an acquisition was asked for, logged by main (`[sessions] acquire <id> (<reason>)`).
 export const ACQUIRE_REASONS = ['send', 'chip', 'read', 'side', 'peer', 'resubmit', 'resume'] as const;
 export type AcquireReason = (typeof ACQUIRE_REASONS)[number];
@@ -616,6 +632,7 @@ export const commands = {
   ...newChatCommands, // New chat
   ...r2Commands, // R2
   ...e8Commands, // E8
+  ...p2cCommands, // P2-C (2026-10-09)
   ...p2aCommands, // P2-A
   ...p2dCommands, // P2-D
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

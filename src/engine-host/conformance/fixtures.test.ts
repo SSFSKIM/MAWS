@@ -4,7 +4,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
 import { ArtifactCreateResultSchema, ArtifactListResultSchema, ArtifactScreenshotResultSchema, ArtifactUpdateResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
-import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
+import { FIXTURE_PASSES, listJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
 import { RELAY_URL } from '../launch';
 import { replayFixture, type ConformanceRun } from './harness';
@@ -99,7 +99,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // P2 start (2026-10-09): U1, P2-A's M0 on the installed 2.1.295 (a stopped session resumed with no user frame, and its
     // setup turn); U2, P2-C's M0 on the same engine (the system-prompt snapshot across new, resume and fork, the output
     // style as attachments, --system-prompt-snapshot off, the contract's convergence runs, the shapes); all under scratch homes
-    const p2 = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup', 'p2-to-human-converge-s10-new', 'p2-to-human-converge-s10-resume', 'p2-to-human-converge-s10-then', 'p2-to-human-converge-s11-fork', 'p2-to-human-converge-s11-new', 'p2-to-human-converge-s12-new', 'p2-to-human-converge-s12-resume', 'p2-to-human-converge-s13-new', 'p2-to-human-fork', 'p2-to-human-new', 'p2-to-human-off', 'p2-to-human-resume', 'p2-to-human-shapes-s14-compact', 'p2-to-human-shapes-s14-new', 'p2-to-human-shapes-s15-new', 'p2-to-human-shapes-s16-new', 'p2-to-human-snapoff-s6-new', 'p2-to-human-snapoff-s6-resume', 'p2-to-human-snapoff-s6-then', 'p2-to-human-snapoff-s7-new', 'p2-to-human-snapoff-s7-resume', 'p2-to-human-snapoff-s8-new', 'p2-to-human-snapoff-s8-resume', 'p2-to-human-snapoff-s9-fork', 'p2-to-human-snapoff-s9-new', 'p2-to-human-snapshot-s1-new', 'p2-to-human-snapshot-s1-resume', 'p2-to-human-snapshot-s2-new', 'p2-to-human-snapshot-s2-resume', 'p2-to-human-snapshot-s3-new', 'p2-to-human-snapshot-s3-resume', 'p2-to-human-snapshot-s4-new', 'p2-to-human-snapshot-s4-resume', 'p2-to-human-snapshot-s5-fork', 'p2-to-human-snapshot-s5-new', 'p2-to-human-style'];
+    const p2 = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup', 'p2-to-human-converge-s10-new', 'p2-to-human-converge-s10-resume', 'p2-to-human-converge-s10-then', 'p2-to-human-converge-s11-fork', 'p2-to-human-converge-s11-new', 'p2-to-human-converge-s12-new', 'p2-to-human-converge-s12-resume', 'p2-to-human-converge-s13-new', 'p2-to-human-fork', 'p2-to-human-new', 'p2-to-human-off', 'p2-to-human-resume', 'p2-to-human-shapes-s14-compact', 'p2-to-human-shapes-s14-new', 'p2-to-human-shapes-s15-new', 'p2-to-human-shapes-s16-new', 'p2-to-human-snapoff-s6-new', 'p2-to-human-snapoff-s6-resume', 'p2-to-human-snapoff-s6-then', 'p2-to-human-snapoff-s7-new', 'p2-to-human-snapoff-s7-resume', 'p2-to-human-snapoff-s8-new', 'p2-to-human-snapoff-s8-resume', 'p2-to-human-snapoff-s9-fork', 'p2-to-human-snapoff-s9-new', 'p2-to-human-snapshot-s1-new', 'p2-to-human-snapshot-s1-resume', 'p2-to-human-snapshot-s2-new', 'p2-to-human-snapshot-s2-resume', 'p2-to-human-snapshot-s3-new', 'p2-to-human-snapshot-s3-resume', 'p2-to-human-snapshot-s4-new', 'p2-to-human-snapshot-s4-resume', 'p2-to-human-snapshot-s5-fork', 'p2-to-human-snapshot-s5-new', 'p2-to-human-steer-cancel-disk' /* M4 */, 'p2-to-human-style'];
     // P2 end
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2].sort());
   });
@@ -649,6 +649,9 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E4c start: M4's pass3/p1-maws-browser (open, two snapshots, two fills, a click, a screenshot)
       'maws.browser.action',
       // E4c end
+      // P2-C start (2026-10-09): the queue's recorded `release` rows (pass3/steer-next and the other C3/W1 live records)
+      'queue.transition',
+      // P2-C end
     ].sort());
     void kinds;
   });
@@ -1104,3 +1107,30 @@ describe('normaliser: the browser tools recorded live (E4c M4, pass3/p1-maws-bro
   });
 });
 // E4c end
+
+// P2-C start (2026-10-09)
+// The report view's synthetic replay (test/fixtures/engine/p2c-report-marks.jsonl, P2-C M5) conforms as a probe
+// fixture does, and each turn's result names that turn's own prompt and carries that turn's last text. The fixture has
+// no exit row (the e2e session stays alive after it), so the replay here ends at one appended.
+describe('the P2-C report fixture replays into the X1 graph', () => {
+  it('engine/p2c-report-marks', async () => {
+    const label = 'engine/p2c-report-marks';
+    const journal = loadEngineJournal('p2c-report-marks');
+    const exit = { seq: journal.length + 1, direction: 'meta' as const, at: journal.at(-1)!.at, frame: { event: 'exit', code: 0, signal: null } };
+    const result = await replayFixture([...journal, exit], { label });
+    const events = result.events;
+    expect(events.filter((e) => !SessionEventSchema.safeParse(e).success).map((e) => `${label} seq ${e.seq} ${e.kind}`)).toEqual([]);
+    expect(ofKind(events, 'frame.unknown').map((e) => `${label} seq ${e.seq}: ${e.frameType}/${e.subtype}`)).toEqual([]);
+    expect(ofKind(events, 'error.raised').filter((e) => e.code === 'invalid_frame').map((e) => `${label}: ${e.message}`)).toEqual([]);
+    expect(result.problems.map((p) => `${label}: ${p.message}`)).toEqual([]);
+    expect(result.writeErrors).toEqual([]);
+    expect(result.warnings.filter((w) => w.event === 'block_pairing')).toEqual([]);
+    expect(result.requests.filter((r) => !r.ok)).toEqual([]);
+    const prompts = ofKind(events, 'turn.started').map((e) => e.userMessageUuid);
+    const lastText = (prompt: string | null) =>
+      ofKind(events, 'assistant.block.complete').filter((e) => e.block.type === 'text' && e.userMessageUuids.includes(prompt as never)).map((e) => e.block.text).at(-1);
+    expect(ofKind(events, 'turn.ended').map((e) => [e.userMessageUuids, e.resultText])).toEqual(prompts.map((prompt) => [[prompt], lastText(prompt)]));
+    expect(prompts).toHaveLength(3); // the marked turn, the insight-margin turn, the unmarked turn
+  });
+});
+// P2-C end

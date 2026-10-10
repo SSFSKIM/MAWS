@@ -1,8 +1,9 @@
 // The index (C4 execution document, Interfaces "Index"; charter §4.4 as amended): main's one SQLite file holding what
 // the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures,
-// (E3) the side-thread rows, (E4a) the browser's history, (cua board #93) the agent's browser activity and (cua board
-// #90) an imported Chrome profile's bookmarks — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything
-// main-side (the session source, C3's attention service, C5's read model, C10) reaches it through these stores.
+// (E3) the side-thread rows, (E4a) the browser's history, (cua board #93) the agent's browser activity, (cua board
+// #90) an imported Chrome profile's bookmarks and (P2-C) the owner channel's sessions and marks — opened at
+// `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source, C3's attention service,
+// C5's read model, C10) reaches it through these stores.
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, type Db } from './db';
 import { DraftStore } from './drafts';
@@ -14,6 +15,7 @@ import { SideThreadStore } from './side-threads'; // E3
 import { BrowserHistoryStore } from './browser-history'; // E4a
 import { BrowserActivityStore } from './browser-activity'; // cua board #93
 import { BrowserBookmarksStore } from './browser-bookmarks'; // cua board #90
+import { OwnerChannelStore } from '../owner/store'; // P2-C (2026-10-09)
 
 export class Index {
   readonly sessions: SessionStore;
@@ -25,6 +27,7 @@ export class Index {
   readonly browserHistory: BrowserHistoryStore; // E4a
   readonly browserActivity: BrowserActivityStore; // cua board #93: the agent's browser activity across restarts
   readonly browserBookmarks: BrowserBookmarksStore; // cua board #90: an imported Chrome profile's bookmarks
+  readonly ownerChannel: OwnerChannelStore; // P2-C (2026-10-09): the to-human lane's sessions and marks (migration 8)
   private readonly db: Db;
   private stamped = 0;
 
@@ -42,6 +45,7 @@ export class Index {
     this.browserHistory = new BrowserHistoryStore(this.db); // E4a
     this.browserActivity = new BrowserActivityStore(this.db, path); // cua board #93: writes over a connection of its own
     this.browserBookmarks = new BrowserBookmarksStore(this.db); // cua board #90
+    this.ownerChannel = new OwnerChannelStore(this.db); // P2-C (2026-10-09)
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.

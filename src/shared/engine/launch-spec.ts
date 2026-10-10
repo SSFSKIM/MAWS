@@ -38,5 +38,13 @@ export const LaunchSpecSchema = z.strictObject({
   // attempt of `maxAttempts` with the reason, and a notice saying MAWS is trying once more. Absent on every other launch.
   retry: z.strictObject({ attempt: z.number().int().positive(), maxAttempts: z.number().int().positive(), reason: z.string() }).optional(),
   // C3 corrective end
+  // P2-C start (2026-10-09; additive X6, the P2-C document, Design §2 and Interfaces X6): the to-human contract MAWS
+  // appends to the engine's system prompt (`--append-system-prompt`), and `--system-prompt-snapshot off`, which makes
+  // the launch render its system prompt live rather than reuse the one the transcript recorded; `buildLaunch` passes
+  // "off" only when the binary declares the flag. Main's launch decision (src/main/owner/launch.ts) sets both. Neither
+  // is saved with the host's stored spec, so the state file an older build reads gains no key.
+  appendSystemPrompt: z.string().min(1).max(16_384).nullable().optional(),
+  systemPromptSnapshot: z.literal('off').nullable().optional(),
+  // P2-C end
 });
 export type LaunchSpec = z.infer<typeof LaunchSpecSchema>;

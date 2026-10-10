@@ -8,7 +8,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
+import { FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { synthesise } from '../../../../../test/support/synth-transcript';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
@@ -120,6 +120,13 @@ describe('presentation model snapshots', () => {
     expect(rows.find((row) => row.kind === 'divider')).toMatchObject({ state: 'working' });
     expect(rows.find((row) => row.kind === 'subagent')).toMatchObject({ status: 'working' });
   });
+
+  // P2-C start (2026-10-09): the report view's synthetic replay (test/fixtures/engine/p2c-report-marks.jsonl, M5)
+  it('engine/p2c-report-marks', async () => {
+    const rows = await snapshot('engine/p2c-report-marks', journalToEvents(loadEngineJournal('p2c-report-marks')));
+    expect(rows.filter((row) => row.kind === 'user').length).toBe(3);
+  });
+  // P2-C end
 
   it('synthetic/500', async () => {
     const rows = await snapshot('synthetic/500', synthesise({ turns: 500, seed: 1 }));

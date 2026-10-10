@@ -135,6 +135,13 @@ export type Row = RowBase &
     // MAWS answered by default). Never derived from X1 events: the transcript view places it (browser-activity.ts)
     | { kind: 'browser_activity'; toolUseId: ToolUseId | null; appSessionId: AppSessionId; tabId: string; activity: BrowserActivity }
     // E13 end
+    // P2-C start (2026-10-09): a marked turn's working record in the report view (the P2-C document, Design §7), one
+    // row in place of everything between the prompt and the marks: never derived here, placed by the report projection
+    // (`owner/report/project.ts`). `open` once the reader opened it (the turn then draws as the full transcript does);
+    // `working` while the turn runs; the counts are the divider's tool calls and the turn's assistant text blocks with
+    // text outside any mark
+    | { kind: 'owner_record'; open: boolean; working: boolean; toolCalls: number; messages: number }
+    // P2-C end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

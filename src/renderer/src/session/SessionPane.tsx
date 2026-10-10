@@ -19,6 +19,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { HolderNotice } from './HolderNotice';
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
+import { ReportBar } from '../owner/report/ReportBar'; // P2-C
 
 type PaneIndex = 0 | 1;
 
@@ -64,6 +65,8 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
 
   return (
     <div className="flex h-full flex-col">
+      {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
+      <ReportBar appSessionId={id} />
       <div className="min-h-0 flex-1 overflow-auto">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />

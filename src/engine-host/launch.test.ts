@@ -359,3 +359,50 @@ describe('LaunchSpecSchema', () => {
     expect(spec({ trust: { accepted: true, directory: '/x' } }).trust).toEqual({ accepted: true, directory: '/x' });
   });
 });
+
+// P2-C start (2026-10-09): the to-human contract's two flags (the P2-C document, Design §2; Interfaces X6)
+describe('the owner channel’s flags (P2-C)', () => {
+  const CONTRACT = '# Messages to the human (MAWS to-human contract 1)\n\nbody';
+  const tail = (args: string[]) => args.slice(ENGINE_FLAGS.length);
+
+  it('emits --append-system-prompt and --system-prompt-snapshot off after --max-budget-usd and before --settings', () => {
+    const plan = buildLaunch(spec({ maxBudgetUsd: 0.5, appendSystemPrompt: CONTRACT, systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
+    expect(tail(plan.args)).toEqual([
+      '--session-id', plan.sessionId,
+      '--max-budget-usd', '0.5',
+      '--append-system-prompt', CONTRACT,
+      '--system-prompt-snapshot', 'off',
+      SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' }),
+    ]);
+  });
+
+  it('omits "off" for a binary that does not declare the flag, and keeps the append', () => {
+    for (const declares of [false, undefined]) {
+      const plan = buildLaunch(spec({ appendSystemPrompt: CONTRACT, systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: declares });
+      expect(plan.args).not.toContain('--system-prompt-snapshot');
+      expect(plan.args).toContain('--append-system-prompt');
+    }
+  });
+
+  it('passes neither when the spec carries neither (absent or null)', () => {
+    for (const keys of [{}, { appendSystemPrompt: null, systemPromptSnapshot: null }]) {
+      const plan = buildLaunch(spec(keys), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
+      expect(plan.args).not.toContain('--append-system-prompt');
+      expect(plan.args).not.toContain('--system-prompt-snapshot');
+    }
+  });
+
+  it('passes "off" alone, without an append (a lane switched off on a session that recorded the contract)', () => {
+    const plan = buildLaunch(spec({ systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
+    expect(tail(plan.args).slice(-4)).toEqual(['--system-prompt-snapshot', 'off', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
+    expect(plan.args).not.toContain('--append-system-prompt');
+  });
+
+  it('bounds the appended text to 16 384 characters and admits only "off" for the snapshot', () => {
+    expect(() => spec({ appendSystemPrompt: '' })).toThrow();
+    expect(() => spec({ appendSystemPrompt: 'x'.repeat(16_385) })).toThrow();
+    expect(spec({ appendSystemPrompt: 'x'.repeat(16_384) }).appendSystemPrompt).toHaveLength(16_384);
+    expect(() => spec({ systemPromptSnapshot: 'on' as unknown as 'off' })).toThrow();
+  });
+});
+// P2-C end

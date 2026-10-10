@@ -36,7 +36,7 @@ export interface SessionTabs {
 export type ChromeNoticeKind = BrowserNotice['kind'] | 'urlCopied' | CommentNoticeKind /* E4d */;
 // E4d start: comment mode's own lines (E4d execution document, Decision Log 35): an arm the page never confirmed, and a
 // pick main refused, said where the person is looking with no sheet over the page.
-export type CommentNoticeKind = 'commentUnavailable' | 'commentCannotName';
+export type CommentNoticeKind = 'commentUnavailable' | 'commentCannotName' | /* P2-E2: a card's missing crop, the card leaving the page uncovered */ 'commentCropTooLarge' | 'commentCropFailed';
 // E4d end
 export interface ChromeNotice {
   id: number;

@@ -11,6 +11,9 @@ import { openSettingsStore, resolveTheme } from './store';
 
 export interface SettingsService {
   state(): SettingsState;
+  // P2-C M4 (2026-10-09): main's own readers of a setting that acts at once (the to-human lane's switch), told after
+  // every publish
+  onChange(listener: (state: SettingsState) => void): () => void;
 }
 
 export function startSettings(file: string): SettingsService {
@@ -20,11 +23,13 @@ export function startSettings(file: string): SettingsService {
     resolvedTheme: resolveTheme(store.settings.theme, nativeTheme.shouldUseDarkColors),
   });
 
+  const listeners = new Set<(state: SettingsState) => void>(); // P2-C M4
   let published: SettingsState | null = null;
   const publish = (): SettingsState => {
     published = state();
     applyWindowBackground(published.resolvedTheme);
     emit('settings.changed', published);
+    for (const listener of listeners) listener(published); // P2-C M4
     return published;
   };
 
@@ -51,5 +56,11 @@ export function startSettings(file: string): SettingsService {
 
   setThemeSource(store.settings.theme);
   publish();
-  return { state };
+  return {
+    state,
+    onChange: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
 }

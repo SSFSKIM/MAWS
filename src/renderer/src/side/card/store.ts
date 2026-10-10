@@ -11,8 +11,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { parseDeliverableUrl } from '@shared/maws/deliverable';
 import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
 
-// What the card is about, as a host recognises it. P2-E2 adds { kind: 'browser'; … }.
-export type CardTarget = { kind: 'deliverable'; appSessionId: AppSessionId; deliverableId: string; version: number };
+// What the card is about, as a host recognises it: a delivered record's version, or (P2-E2) a browser page by its URL.
+export type CardTarget = { kind: 'deliverable'; appSessionId: AppSessionId; deliverableId: string; version: number } | { kind: 'browser'; pageUrl: string };
 export type CardPhase = { kind: 'composing' } | { kind: 'thread'; child: AppSessionId; echo: string | null };
 export type CardHostKind = 'deliverable' | 'browser';
 export type CardHostMode = 'panel' | 'tab';
@@ -44,7 +44,9 @@ export const useCommentCard = create<{ open: OpenCard | null; shownThread: Shown
 let serials = 0;
 
 export function targetOf(anchor: Anchor): CardTarget | null {
-  if (anchor.kind !== 'artifact-element' || anchor.pageUrl === undefined) return null;
+  if (anchor.pageUrl === undefined) return null;
+  if (anchor.kind === 'browser-element') return { kind: 'browser', pageUrl: anchor.pageUrl }; // P2-E2
+  if (anchor.kind !== 'artifact-element') return null;
   const parsed = parseDeliverableUrl(anchor.pageUrl);
   return parsed && { kind: 'deliverable', appSessionId: parsed.appSessionId, deliverableId: parsed.id, version: parsed.version };
 }

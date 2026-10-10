@@ -195,7 +195,8 @@ describe('queue release never follows an engine-initiated turn', () => {
     const [submitted] = userOuts(run.journal.rows);
     const cancelled = run.journal.rows.findIndex((r) => (r.frame as { type?: string; state?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { state: string }).state === 'cancelled');
     expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);
-    const notice = run.journal.rows[cancelled + 1]!.frame as { event: string; key: string };
+    expect(run.journal.rows[cancelled + 1]!.frame).toMatchObject({ event: 'queue', action: 'drop', messageUuid: submitted!.uuid, reason: 'cancelled' }); // P2-C: the drop's row, at the lifecycle
+    const notice = run.journal.rows[cancelled + 2]!.frame as { event: string; key: string };
     expect(notice).toMatchObject({ event: 'notice', key: expect.stringMatching(/^queue:dropped:/) }); // at the lifecycle, not at the exit
     expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:dropped:'))).toHaveLength(1);
     expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:interrupted:'))).toEqual([]); // the live session did not end
@@ -237,7 +238,8 @@ describe('a submission the engine drops before it started releases the next queu
     const releaseRow = s.journal.rows.findIndex((r) => (r.frame as { event?: string; trigger?: string }).event === 'queue' && (r.frame as { trigger?: string }).trigger === 'dropped');
     expect(releaseRow).toBeGreaterThan(cancelledRow);
     const tail = s.events.slice(s.events.findIndex((e) => e.kind === 'command.lifecycle' && e.state === 'cancelled'));
-    expect(tail.map((e) => (e.kind === 'notice.posted' ? `notice:${e.key!.split(':').slice(0, 2).join(':')}` : e.kind))).toEqual(['command.lifecycle', 'notice:queue:dropped', 'user.message']); // the notice, then the released head
+    // the notice, then the released head; P2-C: the drop's and the release's transitions at their rows
+    expect(tail.map((e) => (e.kind === 'notice.posted' ? `notice:${e.key!.split(':').slice(0, 2).join(':')}` : e.kind === 'queue.transition' ? `transition:${e.action}` : e.kind))).toEqual(['command.lifecycle', 'transition:drop', 'notice:queue:dropped', 'transition:release', 'user.message']);
     expect(ofKind(s.events, 'turn.started')).toEqual([]);
     expect(s.session.status().queue).toEqual({ length: 0, paused: false }); // nothing left waiting: the head is submitting
     expect(statuses.at(-1)).toEqual({ turn: null, queue: { length: 0, paused: false } });
@@ -259,7 +261,7 @@ describe('a submission the engine drops before it started releases the next queu
     await flush();
     await flush();
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['first']);
-    expect(metaRows(s.journal.rows, 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`)).toEqual(['release:send', 'pause:interrupt']);
+    expect(metaRows(s.journal.rows, 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`)).toEqual(['recovered:undefined', 'release:send', 'pause:interrupt', 'drop:cancelled']); // P2-C: the recovery's row, the drop's row
     expect(s.session.status().queue).toEqual({ length: 1, paused: true });
     expect(s.session.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['waiting', 'queued']]);
     expect(ofKind(s.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:dropped:'))).toHaveLength(1);

@@ -22,7 +22,14 @@ import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
 // W13 (charter D-1 as amended 2026-10-01): `path` is the real path the next launch spawns (the installed Claude Code
 // unless Settings names a binary), `version` its `--version`, `testedVersion` the version MAWS was verified
 // against (E11: its live sittings; the replay fixtures are this release or older; information, never a refusal); `ok` false only for a missing binary or one that prints no version.
-export const BinaryInfoSchema = z.strictObject({ path: z.string(), testedVersion: z.string(), version: z.string().nullable(), ok: z.boolean(), error: z.string().nullable() });
+export const BinaryInfoSchema = z.strictObject({
+  path: z.string(), testedVersion: z.string(), version: z.string().nullable(), ok: z.boolean(), error: z.string().nullable(),
+  // P2-C start (2026-10-09; additive, the P2-C document, Design §2 "The flag's availability"): whether the binary's bytes
+  // carry `--system-prompt-snapshot <on|off>`, which its help does not list; main asks for "off" only when true. Optional
+  // so an older host's answer still parses (absent reads as false).
+  declaresSystemPromptSnapshot: z.boolean().optional(),
+  // P2-C end
+});
 export type BinaryInfo = z.infer<typeof BinaryInfoSchema>;
 
 const c3Commands = {

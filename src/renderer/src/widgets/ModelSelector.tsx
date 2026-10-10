@@ -15,7 +15,7 @@ import { EffortSchema } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isGatewayModel } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
 import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, rowFor } from '@shared/sessions/model-label';
@@ -120,7 +120,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
   // C10's intent carries the route C7's hook type does not name; it is read from C10's store and written by its patch
   const gateway = useSetup((s) => s.intents.get(appSessionId)?.gateway ?? null);
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V12;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V13;
   const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }, defaults).model;

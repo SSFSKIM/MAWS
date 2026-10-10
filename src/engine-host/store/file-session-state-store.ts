@@ -71,8 +71,15 @@ export class FileSessionStateStore implements SessionStateStore {
     });
   }
 
+  // P2-C: the owner channel's two keys are left out (the P2-C document, Design §2, R5): no production code reads the
+  // stored spec back, and a key an older build's strict reader does not know would move its whole state file aside.
   saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {
-    return this.update(id, (file) => ({ ...file, launchSpec: LaunchSpecSchema.parse(spec) }));
+    return this.update(id, (file) => {
+      const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, ...stored } = LaunchSpecSchema.parse(spec); // P2-C
+      void _append;
+      void _snapshot;
+      return { ...file, launchSpec: stored };
+    });
   }
 
   // Archive: the session's journal directory only. The state file with the queue and the grant snapshot survives, so an

@@ -24,6 +24,9 @@ export const commands = [
   'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
   'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer',
   'session.reloadSkills', // E8
+  // P2-C start (2026-10-09): the host queue's steer cancel and the prompt record's read
+  'session.steer.cancel', 'session.promptHistory',
+  // P2-C end
   // P2-A start (2026-10-09)
   'session.observedFacts',
   'session.acquire',

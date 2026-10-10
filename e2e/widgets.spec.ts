@@ -908,6 +908,31 @@ test.describe('replay conformance', () => {
   });
 });
 
+// ---- P2-C (M6; the P2-C document, G7): MAWS's built-in mods in /plugins ---------------------------------------------
+// The section is the last group of the library's My items (P2-B's mount) and draws `mods.list` for the session. The
+// scenario's session is the read model's, not the index's, so its override cannot be written here (the unit tests and
+// main's own cover that write); the app's switch is the settings file's, and a new launch's source follows it.
+test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its source, the app switch and this session’s override; no Uninstall', async ({ backend }) => {
+  const w = await openPlugins(backend);
+  const myItems = w.locator('[data-plugins-section="my-items"]');
+  await expect(myItems.locator('[data-plugins-group]').last()).toHaveAttribute('data-plugins-group', 'builtIn');
+  const row = myItems.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
+  await expect(row).toContainText('To-human');
+  await expect(row).toContainText('Built in');
+  await expect(row).toContainText('Version 1');
+  await expect(row).toContainText('MAWS gives the agent its instructions');
+  await expect(row.getByRole('radiogroup', { name: 'To-human in this session' }).getByRole('radio')).toHaveCount(3);
+  await expect(row.getByRole('radio', { name: 'Default (On)' })).toBeChecked();
+  const appSwitch = row.getByRole('switch', { name: 'To-human in every session' });
+  await expect(appSwitch).toHaveAttribute('aria-checked', 'true');
+  await appSwitch.click();
+  await expect(appSwitch).toHaveAttribute('aria-checked', 'false');
+  await expect(row).toContainText('Off: the agent is not asked to mark anything');
+  await expect(row.getByRole('radio', { name: 'Default (Off)' })).toBeChecked();
+  await expect(row.getByRole('button', { name: /Uninstall|More actions/ })).toHaveCount(0); // the installed plugins above have theirs, in their overflow
+  expect(backend.consoleErrors()).toEqual([]);
+});
+
 // ---- E8: plugins and marketplaces, managed through the engine's CLI ----------------------------------------------------
 // E8 execution document, M3's action-to-proof matrix, the stub e2e column. The host runs the plugin CLI stub as the
 // engine binary (MAWS_E2E_ENGINE_BIN), so the widget, the confirm sheet, the X2 surface, the host's runner and its result
@@ -1261,8 +1286,8 @@ test.describe('plugin management (E8)', () => {
     await expect.poll(() => idsIn('here')).toEqual(['doperpowers@doperpowers', ...['feature-dev', 'code-review', 'frontend-design', 'claude-code-setup', 'claude-md-management', 'security-guidance', 'context7', 'typescript-lsp', 'plugin-dev'].map(o)]);
     expect(await idsIn('anthropic')).toEqual(['chrome-devtools-mcp', 'telegram', 'code-modernization', 'pyright-lsp', 'rust-analyzer-lsp', 'swift-lsp'].map(o));
     expect(await idsIn('added')).toEqual(['ptc@ptc-tool', 'designer@designer', 'cua@cua', 'eli5@claude-community']);
-    await expect(items.locator('[data-plugins-group]')).toHaveCount(3);
-    await expect(items.getByRole('heading')).toHaveText(['In this project', 'From Anthropic & Partners', 'From marketplaces you added'].map((h) => new RegExp(`^${h}`)));
+    await expect(items.locator('[data-plugins-group]')).toHaveCount(4); // P2-C: MAWS's built-in mods close the list
+    await expect(items.getByRole('heading')).toHaveText(['In this project', 'From Anthropic & Partners', 'From marketplaces you added', 'MAWS mods · Built in'].map((h) => new RegExp(`^${h}`)));
     await expect(items).not.toContainText('unknown');
     await expect(items).not.toContainText(project);
     await expect(items.locator('[data-plugin-row="doperpowers@doperpowers"]')).toHaveCount(1); // 47 installations, one row

@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBinaryProbe, INSTALLED_LINK } from './binary-info';
+import { binaryDeclares, createBinaryProbe, INSTALLED_LINK, SYSTEM_PROMPT_SNAPSHOT_FLAG } from './binary-info';
 import { compareVersions, TESTED_ENGINE_VERSION } from './engine-compat';
 import { setBinaryConfig } from './launch';
 import { FIXTURE_ENGINE_VERSION } from '../../test/support/engine-pin';
@@ -47,7 +47,7 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
     const v288 = engine(version('2.1.288'), '2.1.288 (Claude Code)');
     link(v287);
     const probe = probeWith();
-    expect(await probe()).toEqual({ path: v287, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null });
+    expect(await probe()).toEqual({ path: v287, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null, declaresSystemPromptSnapshot: false /* P2-C */ });
     link(v288);
     expect(await probe()).toMatchObject({ path: v288, version: '2.1.288', ok: true });
   });
@@ -123,7 +123,7 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
   it('names a missing install without running anything, and a chosen path that is gone', async () => {
     expect(await probeWith()()).toEqual({
       path: join(home, INSTALLED_LINK), testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false,
-      error: expect.stringContaining('Claude Code is not installed'),
+      error: expect.stringContaining('Claude Code is not installed'), declaresSystemPromptSnapshot: false, // P2-C
     });
     setBinaryConfig({ binaryPath: join(root, 'gone/claude') });
     expect(await probeWith()()).toMatchObject({ path: join(root, 'gone/claude'), ok: false, error: expect.stringContaining('no executable engine binary') });
@@ -154,3 +154,37 @@ it('the fixtures’ pin is never newer than the tested version MAWS reports', ()
   expect(TESTED_ENGINE_VERSION).toBe('2.1.293');
   expect(compareVersions(FIXTURE_ENGINE_VERSION, TESTED_ENGINE_VERSION)).toBeLessThanOrEqual(0);
 });
+
+// P2-C start (2026-10-09): whether the binary declares `--system-prompt-snapshot` (the P2-C document, Design §2, "The
+// flag's availability"): a chunked byte scan for the literal its help table carries, cached with `--version` per file
+describe('engine.binaryInfo says whether the binary declares --system-prompt-snapshot (P2-C)', () => {
+  it('is the literal the installed 2.1.295 carries', () => {
+    expect(SYSTEM_PROMPT_SNAPSHOT_FLAG).toBe('--system-prompt-snapshot <on|off>');
+  });
+
+  it('answers true for a binary holding the literal and false for one without it, scanning once per file', async () => {
+    const declares = engine(version('2.1.295'), '2.1.295 (Claude Code)');
+    writeFileSync(declares, `${readFileSync(declares, 'utf8')}# .option("${SYSTEM_PROMPT_SNAPSHOT_FLAG}")\n`);
+    link(declares);
+    const probe = probeWith();
+    expect(await probe()).toMatchObject({ path: declares, version: '2.1.295', ok: true, declaresSystemPromptSnapshot: true });
+    link(engine(version('2.1.287'), '2.1.287 (Claude Code)'));
+    expect(await probe()).toMatchObject({ version: '2.1.287', declaresSystemPromptSnapshot: false });
+    link(declares);
+    expect(await probe()).toMatchObject({ declaresSystemPromptSnapshot: true });
+    expect(runs()).toEqual([declares, version('2.1.287')]); // cached per file with --version
+  });
+
+  it('finds the literal across a chunk boundary, at the file’s start and end, and nowhere when it is cut short', async () => {
+    const at = (offset: number, tail = 64, literal = SYSTEM_PROMPT_SNAPSHOT_FLAG) => {
+      const path = join(root, `scan-${offset}-${tail}-${literal.length}`);
+      writeFileSync(path, Buffer.concat([Buffer.alloc(offset, 0x61), Buffer.from(literal), Buffer.alloc(tail, 0x62)]));
+      return path;
+    };
+    for (const offset of [0, 1, 15, 16, 17, 40, 100]) expect(await binaryDeclares(at(offset), SYSTEM_PROMPT_SNAPSHOT_FLAG, 16)).toBe(true);
+    expect(await binaryDeclares(at(37, 0), SYSTEM_PROMPT_SNAPSHOT_FLAG, 16)).toBe(true); // the literal ends the file
+    expect(await binaryDeclares(at(37, 0, SYSTEM_PROMPT_SNAPSHOT_FLAG.slice(0, -1)), SYSTEM_PROMPT_SNAPSHOT_FLAG, 16)).toBe(false);
+    expect(await binaryDeclares(join(root, 'missing'), SYSTEM_PROMPT_SNAPSHOT_FLAG, 16)).toBe(false); // unreadable reads as undeclared
+  });
+});
+// P2-C end

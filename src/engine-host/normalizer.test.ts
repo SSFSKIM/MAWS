@@ -849,3 +849,40 @@ describe('maws.browser.action (E4c)', () => {
   });
 });
 // E4c end
+
+// P2-C start (2026-10-09; the P2-C document, Design §6): the host queue's `meta queue` rows of a prompt's transitions are
+// `queue.transition` events, the ids and a drop's reason as the row names them; its pause and resume rows stay silent.
+describe('queue.transition (P2-C)', () => {
+  it('maps each transition row to one event, and the pause and resume rows to none', () => {
+    const events = feed(make(), [
+      metaRow({ event: 'queue', action: 'release', trigger: 'send', queueId: 'q-1', messageUuid: 'u-1' }),
+      metaRow({ event: 'queue', action: 'pause', reason: 'refused' }),
+      metaRow({ event: 'queue', action: 'drop', queueId: 'q-1', messageUuid: 'u-1', reason: 'refused' }),
+      metaRow({ event: 'queue', action: 'withdraw', messageUuid: 'u-2' }),
+      metaRow({ event: 'queue', action: 'hold', queueId: 'q-2', messageUuid: 'u-2' }),
+      metaRow({ event: 'queue', action: 'remove', queueId: 'q-2' }),
+      metaRow({ event: 'queue', action: 'resume', reason: 'user' }),
+    ]);
+    expect(kinds(events)).toEqual(['queue.transition', 'queue.transition', 'queue.transition', 'queue.transition', 'queue.transition']);
+    expect(only(events, 'queue.transition').map(({ action, queueId, messageUuid, reason, seq }) => ({ action, queueId, messageUuid, reason, seq }))).toEqual([
+      { action: 'release', queueId: 'q-1', messageUuid: 'u-1', reason: null, seq: 1 },
+      { action: 'drop', queueId: 'q-1', messageUuid: 'u-1', reason: 'refused', seq: 3 },
+      { action: 'withdraw', queueId: null, messageUuid: 'u-2', reason: null, seq: 4 },
+      { action: 'hold', queueId: 'q-2', messageUuid: 'u-2', reason: null, seq: 5 },
+      { action: 'remove', queueId: 'q-2', messageUuid: null, reason: null, seq: 6 },
+    ]);
+    expect(events[0]).toMatchObject({ id: 'app-1:LAUNCH01:1:0', at: AT, parentToolUseId: null, agentId: null });
+  });
+
+  it('reads every recorded release row of a probe fixture as a transition naming its entry and prompt', () => {
+    const rows = loadJournal('pass3', 'steer-next-cancelled');
+    const n = make();
+    const events = rows.flatMap((row) => n.push(row));
+    const releases = rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'queue' && (r.frame as { action?: string }).action === 'release');
+    expect(releases.length).toBeGreaterThan(0);
+    expect(only(events, 'queue.transition').map(({ action, queueId, messageUuid, seq }) => ({ action, queueId, messageUuid, seq }))).toEqual(
+      releases.map((r) => ({ action: 'release', queueId: (r.frame as { queueId: string }).queueId, messageUuid: (r.frame as { messageUuid: string }).messageUuid, seq: r.seq })),
+    );
+  });
+});
+// P2-C end
