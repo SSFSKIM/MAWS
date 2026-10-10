@@ -3,7 +3,7 @@
 // orders, over hand-built rows and views shaped as the host answers them.
 import { describe, expect, it } from 'vitest';
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
-import { chipLabel, chipsOf, insideItems, insideSummary, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, projectLabels, updateOffer } from './detail';
+import { chipLabel, chipsOf, insideItems, insideSummary, insideTabs, loadedFactOf, OTHER_PROJECTS, projectCount, projectLabels, unreadNotice, updateOffer } from './detail';
 import { identitiesOf } from './library';
 import type { LoadedPlugins } from '../../sessions/observed';
 
@@ -158,5 +158,40 @@ describe('the detail: What’s inside', () => {
       { name: '1 hooks module', description: null },
     ]);
     expect(insideItems(components, 'lspServers')).toEqual([{ name: 'pyright', description: null }]);
+  });
+});
+
+// P2-F W-V (L134): the detail's "Couldn't read this plugin's details." is this plugin's, never another's or a batch's
+describe('the detail: the unread notice', () => {
+  const ref = { kind: 'installation' as const, id: 'p@m', scope: 'user', projectPath: null };
+  const viewOf = (state: PluginManifestView['state'], problems: string[] = []): PluginManifestView => ({
+    key: ref,
+    state,
+    name: null,
+    displayName: null,
+    version: null,
+    marketplaceVersion: null,
+    description: null,
+    author: null,
+    license: null,
+    keywords: [],
+    components: EMPTY,
+    partial: false,
+    problems,
+  });
+
+  it('says so when the plugin’s own view could not be read, with its problems as the words', () => {
+    expect(unreadNotice(viewOf('unknown'), { error: null })).toBe('');
+    expect(unreadNotice(viewOf('unknown', ['plugin.json: could not be read']), { error: null })).toBe('plugin.json: could not be read');
+  });
+
+  it('says so with the read’s words when the read that would have answered it was refused and gave it nothing', () => {
+    expect(unreadNotice(null, { error: 'plugins.manifest unanswered after 10 s' })).toBe('plugins.manifest unanswered after 10 s');
+  });
+
+  it('says nothing for a plugin whose view was read, or is missing, whatever the batch’s error; nor while the read runs', () => {
+    expect(unreadNotice(viewOf('read'), { error: 'plugins.manifest unanswered after 10 s' })).toBeNull();
+    expect(unreadNotice(viewOf('missing'), { error: 'plugins.manifest unanswered after 10 s' })).toBeNull();
+    expect(unreadNotice(null, { error: null })).toBeNull();
   });
 });

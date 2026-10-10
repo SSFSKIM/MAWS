@@ -108,6 +108,17 @@ export function updateOffer(installed: string | null, marketplace: string | null
   return have === offered ? { available: false, latest: true, title: L.onLatest } : { available: true, latest: false, title: L.updateTo(offered) };
 }
 
+// ---- The unread notice (P2-F L134) ----------------------------------------------------------------------------------
+
+// The words of "Couldn't read this plugin's details." for the shown installation, or null for none. It keys on the
+// plugin's own view: one the host could not read (`unknown`, its problems as the words), or none at all because the read
+// that would have answered it was refused (the read's words). A view that was read, or whose directory is missing,
+// draws no notice whatever the rest of the batch met; nor does a read still running.
+export function unreadNotice(view: PluginManifestView | null, read: { error: string | null }): string | null {
+  if (view === null) return read.error;
+  return view.state === 'unknown' ? view.problems.join(' · ') : null;
+}
+
 // ---- What's inside --------------------------------------------------------------------------------------------------
 
 export type InsideKind = keyof typeof L.kind;

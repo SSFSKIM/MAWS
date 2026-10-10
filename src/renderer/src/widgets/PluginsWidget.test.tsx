@@ -1198,6 +1198,21 @@ describe('plugins widget: the detail', () => {
     expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
   });
 
+  // P2-F W-V (L134): the notice keys on the plugin's own view, not on the read that carried every plugin's
+  it('a plugin whose own files could not be read says so in its detail; another read in the same answer does not', async () => {
+    backend.script('plugins.manifest', (input) => ({
+      manifests: (input as { items: ManifestItemRef[] }).items.map((key) => (key.kind === 'installation' && key.id === 'e8-tools@e8-scratch' ? { ...manifestOf(key), state: 'unknown' as const } : manifestOf(key))),
+    }));
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-tools@e8-scratch')];
+    await ready();
+    await waitFor(() => expect(row('e8-probe@e8-scratch').textContent).toContain('by E8'));
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to My items' }));
+    fireEvent.click(view('e8-tools@e8-scratch'));
+    expect(within(detail()!).getByText(/Couldn.t read this plugin.s details/).closest('[role="status"]')).toBeTruthy();
+  });
+
   it('Update names the marketplace’s newer version; an uninstall of the last installation returns to the list with its result', async () => {
     backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => ({ ...manifestOf(key), marketplaceVersion: '0.2.0' })) }));
     await ready();

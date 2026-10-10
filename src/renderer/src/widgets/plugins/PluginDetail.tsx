@@ -19,7 +19,7 @@ import { useNow } from '../../app/use-now';
 import { FRESHNESS } from '../../sessions/observed';
 import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
-import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, updateOffer } from './detail';
+import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, unreadNotice, updateOffer } from './detail';
 import { MoreIcon, PluginGlyph } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
 import { RefreshGesture, useRefresh, type SessionPlugins } from './LoadedLine';
@@ -70,8 +70,10 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const own = usePluginManifests(cwd === '' ? null : cwd, requests);
   const ownRead = chip !== null && chip.key !== representative;
   const view = ownRead ? (own.views.get(manifestKeyOf(installationRef(chip.installation))) ?? null) : identity.manifest;
-  // a refused read of the shown installation's files is nonfatal: the listing's controls and facts stay, and it says so
+  // a refused read of the shown installation's files is nonfatal: the listing's controls and facts stay, and it says so;
+  // the notice is this installation's own (P2-F L134), never the batch's that another plugin's read failed in
   const read = ownRead ? own : listManifests;
+  const unread = unreadNotice(view, read);
 
   const name = displayNameOf(identity.name, view ?? identity.manifest);
   const installation = chip?.installation ?? identity.representative;
@@ -185,7 +187,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
                 ))}
               </ul>
             )}
-            {read.error !== null && <ReadFailed words={read.error} onRetry={read.retry} />}
+            {unread !== null && <ReadFailed words={unread} onRetry={read.retry} />}
             <InsideSummary view={view} onOpen={openTab} />
           </>
         )}
@@ -199,7 +201,7 @@ export function ReadFailed({ words, onRetry }: { words: string; onRetry(): void 
   return (
     <p role="status" className="m-0 flex flex-wrap items-baseline gap-x-2 text-ui-sm text-warning">
       <span>{L.detailsFailed}</span>
-      <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{words}</span>
+      {words !== '' && <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{words}</span>}
       <button type="button" className="rounded-sm text-fg outline-accent hover:underline focus-visible:outline-2" onClick={onRetry}>
         {L.retry}
       </button>
