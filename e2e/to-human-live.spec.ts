@@ -49,6 +49,7 @@ import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript } from './support/live-budget';
+import { promptsEnded, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -309,8 +310,12 @@ const launch = () => launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engineSc
 const pane = (page: Page) => page.locator('[data-region="main"] [data-pane="0"]');
 const composer = (page: Page) => pane(page).getByRole('textbox', { name: 'Message' });
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
-async function idle(page: Page, id: string, timeout = 300_000): Promise<void> {
-  await page.waitForTimeout(1_500);
+// How many prompts MAWS has written to the session's engine: a gesture's count, taken before it.
+const written = (id: string) => writtenPrompts(journal(id)).length;
+// The submitted turn's end: every prompt written after `before` ended at the engine (support/live-turns.ts), then the
+// session with no open turn and no pending request.
+async function settle(page: Page, id: string, before: number, timeout = 300_000): Promise<void> {
+  await expect.poll(() => promptsEnded(writtenPrompts(journal(id)), before), { timeout, intervals: [500] }).toBe(true);
   await expect.poll(async () => {
     const s = await status(page, id);
     return s.turn === null && s.pendingRequests === 0;
@@ -548,7 +553,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
     });
 
     await step('g3-report', 'G3: the marked turn reads as cards over one Working record; opened, the divider; expanded, the tool rows; folded again', async () => {
-      await idle(page, s1);
+      await settle(page, s1, 0); // every prompt of the session: the marks prompt and the answer, both written by now (g4-choice)
       const p = pane(page);
       const counts = {
         message: await p.locator('[data-owner-card="to-human"]').count(),
@@ -587,6 +592,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
 
     await step('g4-reply', 'G4: Reply sends free text from the card; the composer’s draft is untouched and focused', async () => {
       const question = pane(page).locator('[data-owner-card="need-input"]').first();
+      const prompts = written(s1);
       await question.getByRole('button', { name: 'Reply' }).click();
       await question.getByRole('textbox', { name: 'Your answer' }).fill(REPLY);
       await page.keyboard.press('Enter');
@@ -594,7 +600,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await expect(composer(page)).toHaveText(DRAFT);
       await expect(composer(page)).toBeFocused();
       const write = answerWrites(s1).at(-1)!;
-      await idle(page, s1);
+      await settle(page, s1, prompts);
       log(`reply written ${write.at} as ${write.uuid}, started ${lifecycle(s1, write.uuid, 'started')}; prompt ${JSON.stringify(write.text)}`);
       await shot('06-reply');
       line(`G4 Reply: Answered: ${REPLY} (started ${write.uuid}); composer draft unchanged and focused`);
@@ -639,8 +645,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await expect.poll(() => spawns(s1).length, { timeout: 30_000 }).toBe(2);
       const spawn = spawns(s1)[1]!;
       const row = await decision(s1, spawn.launchId);
+      const prompts = written(s1);
       await send(page, PROMPTS.instructions);
-      await idle(page, s1);
+      await settle(page, s1, prompts);
       const probe = await probed(s1Engine, spawn.at);
       const reply = lastReply(s1);
       const snap = snapshots(s1Engine);
@@ -677,8 +684,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await expect(after.locator('[data-mod-pending]')).toHaveCount(0);
       const sourceWords = await after.locator('[data-mod-source]').innerText();
       await closeWidgets(page);
+      const prompts = written(s1);
       await send(page, PROMPTS.instructions);
-      await idle(page, s1);
+      await settle(page, s1, prompts);
       const probe = await probed(s1Engine, spawn.at);
       const reply = lastReply(s1);
       log(`row: "${pendingWords}", then "${sourceWords}"; budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(decided)}, snapshot_off ${decided.snapshot_off}, override ${decided.override}; probe ${probe}; reply ${JSON.stringify(reply.slice(0, 400))}`);
@@ -710,13 +718,14 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(enabled[OWNER_PLUGIN]).toBe(true);
       s2 = await newSession(page);
       const left = budget(cap);
+      const prompts = written(s2);
       await send(page, PROMPTS.style);
       await expect.poll(() => spawns(s2).length, { timeout: 60_000 }).toBe(1);
       const spawn = spawns(s2)[0]!;
       const row = await decision(s2, spawn.launchId);
       await expect.poll(async () => (s2Engine = (await status(page, s2)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s2Engine, spawn.at);
-      await idle(page, s2);
+      await settle(page, s2, prompts);
       const observed = await observedStyle(s2);
       const s = await status(page, s2);
       const cards = await pane(page).locator('[data-owner-card]').count();
@@ -745,13 +754,14 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const choice = question.getByRole('group', { name: 'Choices' }).locator('button[data-recommended]');
       const choiceText = (await choice.locator('.owner-question-choice-text').innerText()).trim();
       const before = answerWrites(s2).length;
+      const prompts = written(s2);
       await choice.click();
       await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${choiceText}`, { timeout: 180_000 });
       const answeredSeenAt = new Date().toISOString();
       const write = answerWrites(s2)[before];
       if (!write) throw new Error('no Answering prompt in the journal');
       const started = lifecycle(s2, write.uuid, 'started');
-      await idle(page, s2);
+      await settle(page, s2, prompts);
       const unread = pane(page).locator('[data-owner-card="essential"][data-state="unread"]');
       const mustReads = await unread.count();
       expect(mustReads, 'a must-read to mark').toBeGreaterThanOrEqual(1);
@@ -775,8 +785,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await expect.poll(() => spawns(s2).length, { timeout: 30_000 }).toBe(2);
       const spawn = spawns(s2)[1]!;
       const row = await decision(s2, spawn.launchId);
+      const prompts = written(s2);
       await send(page, PROMPTS.styleAgain);
-      await idle(page, s2);
+      await settle(page, s2, prompts);
       const probe = await probed(s2Engine, spawn.at);
       const band = pane(page).locator('[data-plugin-band]').filter({ hasText: 'to-human view' });
       await expect(band).toBeVisible({ timeout: 30_000 });

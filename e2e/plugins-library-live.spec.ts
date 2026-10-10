@@ -26,6 +26,7 @@ import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
 import { cappedEngine, capWords } from './support/live-budget';
+import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
 
@@ -106,8 +107,10 @@ test.beforeAll(() => {
 // ---- the page ------------------------------------------------------------------------------------------------------
 
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
-async function idle(page: Page, id: string): Promise<void> {
-  await page.waitForTimeout(1_500);
+// The submitted turn's end: every prompt written after `before` (counted before the gesture) ended at the engine
+// (support/live-turns.ts), then the session with no open turn and no pending request.
+async function settle(page: Page, userData: string, id: string, before: number): Promise<void> {
+  await expect.poll(() => promptsEnded(writtenPrompts(sessionJournal(userData, id)), before), { timeout: 240_000, intervals: [500] }).toBe(true);
   await expect.poll(async () => {
     const s = await status(page, id);
     return s.turn === null && s.pendingRequests === 0;
@@ -228,8 +231,9 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       const model = await openWidget(page, 'model');
       await model.getByRole('menuitemradio', { name: HAIKU }).click();
       await expect.poll(async () => value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => i.appSessionId === id)?.model ?? '').toMatch(/haiku/);
+      const written = writtenPrompts(sessionJournal(maws.userData, id)).length;
       await send(page, 'Reply with OK');
-      await idle(page, id);
+      await settle(page, maws.userData, id, written);
       const s = await status(page, id);
       scratch.log(`session ${id}: ${s.process} · model ${s.model.resolved} · gateway ${s.gateway.verified} · plugins loaded: ${s.plugins.map((p) => p.source ?? p.name).join(', ')}`);
       scratch.observe('start', { id, model: s.model.resolved, plugins: s.plugins.map((p) => p.source ?? p.name) });
