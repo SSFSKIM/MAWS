@@ -106,6 +106,21 @@ describe('grammar 2: code regions', () => {
       { kind: 'essential', text: '```\n</essential>\n```' },
     ]);
   });
+  // Decision Log 27 (amended): the glued-tag reading is a recovery, taken only when the strict reading leaves a mark tag
+  // unpaired and it pairs them all; a report the strict reading already balances parses exactly as before.
+  it('a balanced report quoting a fenced example with a glued line keeps the example literal', () => {
+    const text = '<to-human>Example syntax:\n```text\n```</to-human>\n<need-input>Example only?</need-input>\n```\nEnd of example.</to-human>';
+    expect(parse(text)).toEqual([{ kind: 'to-human', text: 'Example syntax:\n```text\n```</to-human>\n<need-input>Example only?</need-input>\n```\nEnd of example.' }]);
+  });
+  it('a multiline inline span opening right after a tag stays an inline span, and the marks after it count', () => {
+    expect(parse('<to-human>```foo\nbar```</to-human>\n<essential>Do not miss this.</essential>')).toEqual([
+      { kind: 'to-human', text: '```foo\nbar```' }, { kind: 'plain', text: '\n' }, { kind: 'essential', text: 'Do not miss this.' },
+    ]);
+  });
+  it('a glued reading that still leaves a tag unpaired is not taken', () => {
+    const text = '<to-human>A:\n```\nx\n```</to-human>\n<need-input>Go?';
+    expect(parse(text)).toEqual([{ kind: 'plain', text }]);
+  });
   it('text other than tags beside a fence keeps the line from being a fence', () => {
     expect(parse('x <essential>```\n<to-human>Shown.</to-human>')).toEqual([
       { kind: 'plain', text: 'x <essential>```\n' }, { kind: 'to-human', text: 'Shown.' },

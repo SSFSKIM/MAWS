@@ -16,13 +16,24 @@ export type Part = { kind: 'plain'; text: string } | { kind: Kind; text: string;
 // Code regions (grammar 2): half-open [start, end) offsets into the text, in order.
 export type CodeRegion = readonly [start: number, end: number];
 
-// Mark tags are transparent at a fence line's edges (F-AB): a model that glues `<to-human>` before an opening fence or
-// `</to-human>` after a closing one still means the fence, and the tags stay outside the code region.
+// A fence line's two patterns: group 1 the fence run, group 2 what follows it on the line (an opening fence's info string;
+// a closing fence's trailing mark tags, empty in the strict reading).
+type Fences = { open: RegExp; close: RegExp };
+const STRICT: Fences = { open: /^[ \t]*(`{3,}|~{3,})(.*)$/, close: /^[ \t]*(`{3,}|~{3,})[ \t]*()$/ };
+// The glued reading (F-AB; Decision Log 27): mark tags are transparent at a fence line's edges, so `<to-human>` glued
+// before an opening fence or `</to-human>` after a closing one still means the fence, the tags outside the region. It
+// is a recovery only (`partsOf`): a report the strict reading balances never reads through it.
 const MARK_TAGS = String.raw`(?:<\/?(?:to-human|essential|need-input|insight)>[ \t]*)*`;
-const FENCE_OPEN = new RegExp(String.raw`^[ \t]*${MARK_TAGS}(\x60{3,}|~{3,})(.*)$`);
-const FENCE_CLOSE = new RegExp(String.raw`^[ \t]*(\x60{3,}|~{3,})[ \t]*(${MARK_TAGS})$`);
+const GLUED: Fences = {
+  open: new RegExp(String.raw`^[ \t]*${MARK_TAGS}(\x60{3,}|~{3,})(.*)$`),
+  close: new RegExp(String.raw`^[ \t]*(\x60{3,}|~{3,})[ \t]*(${MARK_TAGS})$`),
+};
 
 export function codeRegions(text: string): CodeRegion[] {
+  return regionsOf(text, STRICT);
+}
+
+function regionsOf(text: string, fences: Fences): CodeRegion[] {
   const regions: CodeRegion[] = [];
   let paragraph: [number, number] | null = null;
   let fence: { char: string; length: number; start: number } | null = null;
@@ -35,13 +46,13 @@ export function codeRegions(text: string): CodeRegion[] {
     const end = newline === -1 ? text.length : newline;
     const line = text.slice(at, end);
     if (fence !== null) {
-      const close = FENCE_CLOSE.exec(line);
+      const close = fences.close.exec(line);
       if (close !== null && close[1][0] === fence.char && close[1].length >= fence.length) {
         regions.push([fence.start, end - close[2].length]);
         fence = null;
       }
     } else {
-      const open = FENCE_OPEN.exec(line);
+      const open = fences.open.exec(line);
       // A backtick fence's info string holds no backtick; such a line is an inline span instead.
       if (open !== null && !(open[1][0] === '`' && open[2].includes('`'))) {
         closeParagraph();
@@ -102,9 +113,10 @@ export function parse(text: string): Part[] {
   return partsOf(text, false);
 }
 
-function partsOf(text: string, live: boolean): Part[] {
-  // Grammar 2: tags inside code are literal.
-  const inCode = insideCode(codeRegions(text));
+// The mark tags outside one reading's code regions and which of them pair; `balanced` when every one does (a streaming
+// block's marks still open at its end counting as paired).
+function readingOf(text: string, regions: readonly CodeRegion[], live: boolean) {
+  const inCode = insideCode(regions);
   const tokens = [...text.matchAll(/<(\/?)(to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index));
   const stack: number[] = [];
   const paired = new Set<number>();
@@ -119,6 +131,18 @@ function partsOf(text: string, live: boolean): Part[] {
   }
   // parseLive: a streaming block's marks still open at its end read as open.
   if (live) for (const open of stack) paired.add(open);
+  return { inCode, tokens, paired, balanced: paired.size === tokens.length };
+}
+
+function partsOf(text: string, live: boolean): Part[] {
+  // Grammar 2: tags inside code are literal. The glued reading is taken only when the strict one leaves a tag unpaired
+  // and it pairs them all, so every report the strict reading balances parses as it always did (Decision Log 27).
+  let reading = readingOf(text, codeRegions(text), live);
+  if (!reading.balanced) {
+    const glued = readingOf(text, regionsOf(text, GLUED), live);
+    if (glued.balanced) reading = glued;
+  }
+  const { inCode, tokens, paired } = reading;
   const parts: Part[] = [];
   const starts: number[] = []; // each part's text is the slice of `text` from its start
   const open: Kind[] = [];
