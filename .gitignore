@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+*.tsbuildinfo
 build/voice-helper/
 .DS_Store
 *.log
