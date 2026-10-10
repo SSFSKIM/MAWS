@@ -53,6 +53,8 @@ describe('previewLine', () => {
     expect(previewLine('<to-human>Quote `<essential>\na` here.</to-human>', 160)).toBe('Quote `<essential>');
     // A blank line ends the paragraph, so a backtick before it pairs with nothing and hides no tag.
     expect(previewLine('A stray ` <insight>\n\nthen ` end', 160)).toBe('A stray `');
+    // Plain runs a mark separates are read apart: their backticks never pair across the mark's paragraphs.
+    expect(previewLine('A stray ` <to-human><insight>\n\nNote\n\n</insight>then ` end', 160)).toBe('A stray `');
   });
 });
 

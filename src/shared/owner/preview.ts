@@ -31,7 +31,8 @@ export function previewLine(text: string, max: number): string | null {
     question === undefined ? null : (firstLine(question.text) ?? (question.kind === 'need-input' && question.choices ? question.choices.map((c) => c.text).join(' · ') : null)),
     ...of('essential').map((part) => firstLine(part.text)),
     ...of('to-human').map((part) => firstLine(part.text)),
-    firstLine(of('plain').map((part) => part.text).join('\n')),
+    // each plain run apart: joined, backticks from runs a mark separates could pair across it
+    of('plain').map((part) => firstLine(part.text)).find((line) => line !== null) ?? null,
     ...of('insight').map((part) => firstLine(part.text)),
   ];
   const line = candidates.find((candidate) => candidate !== null) ?? null;
