@@ -169,3 +169,14 @@ async function closeOrKill(app: ElectronApplication): Promise<void> {
     throw new Error(`MAWS did not close cleanly (pid ${child.pid}; killed)`, { cause: error });
   }
 }
+
+// P2-F F-E: a run's last cleanup that must not cut its bookkeeping short (the owner-file readings, the spend): the
+// failure's words, or null once the app closed (or nothing was launched). The run fails on them after the bookkeeping.
+export async function cleanupFailure(launch: MawsLaunch | null | undefined): Promise<string | null> {
+  try {
+    await launch?.cleanup();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}

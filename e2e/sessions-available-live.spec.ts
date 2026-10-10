@@ -29,7 +29,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { journalCost } from '../test/live/support/live';
 import { invoke, value } from './support/c7-replay';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { cleanupFailure, launchMaws, type MawsLaunch } from './support/launch';
 import { cappedEngine, capWords, spentUnder, type CappedEngine } from './support/live-budget';
 import { a15Line, a15Reading } from './support/p1-live';
 import { seedTranscript, transcript } from './support/side-replay';
@@ -280,16 +280,19 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
       observe('relaunch', { ...lines, running: live.length, launches });
     });
   } finally {
-    await maws?.cleanup().catch(() => undefined);
+    // A close that fails (launchMaws kills the app, then throws) is kept for the result after the bookkeeping below.
+    const teardown = await cleanupFailure(maws);
     const a15Now = a15Reading();
     const ownerAfter = ownerFiles();
     log('');
+    log(`teardown: ${teardown ?? 'MAWS closed cleanly'}`);
     log(a15Line('after', a15First, a15Now, [root]));
     log(`owner files after: ~/.claude.json sha256 ${ownerAfter.claudeJson} · ~/.claude/settings.json sha256 ${ownerAfter.settingsJson}`);
     log(`~/.claude.json keys whose digest moved: ${JSON.stringify(changedKeys(ownerBefore.keys, ownerAfter.keys))} · mtime ${new Date(statSync(join(homedir(), '.claude.json')).mtimeMs).toISOString()}`);
     log(`spend: US$${spent.toFixed(5)} (the sent session's receipts; the two no-prompt starts made no model request)`);
-    observe('after', { a15: a15Now, owner: { claudeJson: ownerAfter.claudeJson, settingsJson: ownerAfter.settingsJson, changedKeys: changedKeys(ownerBefore.keys, ownerAfter.keys) }, spentUsd: spent });
+    observe('after', { a15: a15Now, owner: { claudeJson: ownerAfter.claudeJson, settingsJson: ownerAfter.settingsJson, changedKeys: changedKeys(ownerBefore.keys, ownerAfter.keys) }, spentUsd: spent, teardown });
     console.log(`P2-A live: scratch root ${root}`);
+    expect.soft(teardown, 'MAWS closed cleanly at the end of the run').toBeNull(); // soft: fails the run without hiding an error the run threw
   }
   expect(a15Reading().keys.filter((k) => k.startsWith(root) || k.startsWith(root.replace(/^\/private\/tmp\//, '/tmp/'))), 'A-15: the owner file names none of the run’s scratch').toEqual([]);
   expect(failures, failures.join('\n')).toEqual([]);

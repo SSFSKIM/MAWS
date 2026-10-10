@@ -48,7 +48,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
-import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript } from './support/live-budget';
 import { promptsEnded, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
@@ -829,13 +829,16 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
     if (maws) consoleErrors.push(...maws.consoleErrors());
     log('');
     log(`console errors (both launches): ${JSON.stringify(consoleErrors)}`);
-    await maws?.cleanup().catch(() => undefined);
+    // A close that fails (launchMaws kills the app, then throws) is kept for the result after the bookkeeping below.
+    const teardown = await cleanupFailure(maws);
+    log(`teardown: ${teardown ?? 'MAWS closed cleanly'}`);
     const after = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')), cache: treeDigest(plugin.installPath) };
     log(`owner files after: ~/.claude/settings.json sha256 ${after.settings} (${after.settings === owner.settings ? 'identical' : 'CHANGED'}); the doperpowers cache tree ${after.cache.files} files, listing sha256 ${after.cache.digest} (${after.cache.digest === owner.cache.digest ? 'identical' : 'CHANGED'})`);
     const total = spent();
     line(`spend: US$${total.toFixed(4)} across the run's journals (cap US$${cap}); ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; the doperpowers cache tree ${after.cache.digest === owner.cache.digest ? 'unchanged' : 'CHANGED'}`);
     line(a15Line('after the run', owner.a15, after.a15, [root]));
-    observe('after', { a15: after.a15, settings: after.settings, cache: after.cache, failures, consoleErrors, spentUsd: total });
+    observe('after', { a15: after.a15, settings: after.settings, cache: after.cache, failures, consoleErrors, spentUsd: total, teardown });
+    expect.soft(teardown, 'MAWS closed cleanly at the end of the run').toBeNull(); // soft: fails the run without hiding an error the run threw
     console.log(`P2-C live: scratch root ${root}`);
     expect(after.settings, '~/.claude/settings.json unchanged').toBe(owner.settings);
     expect(after.cache.digest, 'the owner’s doperpowers cache tree unchanged').toBe(owner.cache.digest);
