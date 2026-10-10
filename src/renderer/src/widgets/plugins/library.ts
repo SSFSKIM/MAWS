@@ -204,6 +204,16 @@ export function loadedOnlyShown(extras: readonly LoadedOnly[], search: string): 
   return extras.filter((p) => needle === '' || [p.name, p.source].some((text) => text.toLowerCase().includes(needle))).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
 }
 
+// Show › "Loaded in this session" under Name sort (P2-F L133): the plugins of the list and the loaded-only rows in one
+// alphabetical list, by the name each row shows.
+export type NamedRow = { kind: 'identity'; identity: PluginIdentity } | { kind: 'loaded'; plugin: LoadedOnly };
+
+export function byNameTogether(rows: readonly PluginIdentity[], extras: readonly LoadedOnly[]): NamedRow[] {
+  const nameOf = (row: NamedRow) => (row.kind === 'identity' ? displayNameOf(row.identity.name, row.identity.manifest) : row.plugin.name);
+  const together: NamedRow[] = [...rows.map((identity) => ({ kind: 'identity' as const, identity })), ...extras.map((plugin) => ({ kind: 'loaded' as const, plugin }))];
+  return together.sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'en', { sensitivity: 'base' }));
+}
+
 // The init's problems under the plugins shown: all of them when the view is not searched (a plugin that failed to load is
 // no row), else those whose plugin is a shown row or matches the search. The engine names a problem's plugin by name.
 export function problemsShown<P extends { plugin: string }>(problems: readonly P[], search: string, rows: readonly PluginIdentity[], extras: readonly LoadedOnly[]): P[] {

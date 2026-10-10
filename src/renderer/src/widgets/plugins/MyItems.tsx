@@ -4,7 +4,8 @@
 // head while the first read runs; "Add your first plugins" when nothing is installed; "Nothing matches these filters."
 // with Reset filters; "Couldn't load your plugins." with the read's words and Retry; a later failed read keeps the last
 // list with one line saying so (E8's rule). Show › "Loaded in this session" adds the init's problems and the loaded
-// plugins that are no row of the list, both through the same search and sort. "Nothing matches" is only a searched or
+// plugins that are no row of the list, both through the same search and sort (under Name sort, one list with the rows:
+// P2-F L133). "Nothing matches" is only a searched or
 // filtered view's; the default view keeps "In this project" saying it has none. A failed read of what the plugins say
 // about themselves keeps the rows (their names come from the listing) and says so with Retry. A change's result whose
 // installation left the list stays beneath it.
@@ -14,10 +15,10 @@ import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { useNow } from '../../app/use-now';
 import { LIBRARY as L } from '../copy';
 import { BuiltInMods } from './BuiltInMods';
-import { isNarrowed, loadedOnly, loadedOnlyShown, myItems, problemsShown, type PluginIdentity } from './library';
+import { byNameTogether, isNarrowed, loadedOnly, loadedOnlyShown, myItems, problemsShown, type PluginIdentity } from './library';
 import { useLibraryStore } from './library-store';
 import type { LoadedPlugins } from '../../sessions/observed';
-import { LoadedBody, present } from './LoadedView';
+import { LoadedBody, loadedKey, LoadedRow, present } from './LoadedView';
 import { Gone, useManage } from './manage';
 import { GroupHeading, INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from './PluginRow';
 import type { PluginsReadResult } from './read';
@@ -93,6 +94,27 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
           {L.resetFilters}
         </button>
       </Centered>
+    );
+  } else if (loadedView && view.sort === 'name') {
+    // P2-F L133: Name sort orders the plugins of the list and the loaded-only rows as one list
+    body = (
+      <>
+        <LoadedBody problems={problems} extras={[]} />
+        <section aria-label={L.list} data-plugins-group="all">
+          <ul className="m-0 list-none p-0">
+            {byNameTogether(
+              groups.flatMap((g) => g.rows),
+              extras,
+            ).map((row) =>
+              row.kind === 'identity' ? (
+                <PluginRow key={row.identity.id} identity={row.identity} now={now} onOpen={onOpen} />
+              ) : (
+                <LoadedRow key={loadedKey(row.plugin)} plugin={row.plugin} />
+              ),
+            )}
+          </ul>
+        </section>
+      </>
     );
   } else {
     body = (

@@ -966,6 +966,7 @@ describe('plugins widget: the library', () => {
               { name: 'zeta-tools', path: 'builtin', source: 'zeta-tools@builtin', version: null },
               { name: 'mid-thing', path: '/cfg/plugins/cache/far/mid-thing/1.0.0', source: 'mid-thing@far', version: '1.0.0' },
               { name: 'alpha-dir', path: '/Users/me/.claude/skills/alpha-dir', source: 'alpha-dir@skills-dir', version: null },
+              { name: 'e8-probe', path: '/cfg/plugins/cache/e8-scratch/e8-probe/0.1.0', source: 'e8-probe@e8-scratch', version: '0.1.0' },
             ],
             pluginErrors: [{ plugin: 'zeta-tools', type: 'load', message: 'zeta failed', path: null }],
             pluginWarnings: [{ plugin: 'alpha-dir', type: 'manifest', message: 'alpha warned' }],
@@ -975,16 +976,20 @@ describe('plugins widget: the library', () => {
     });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    fireEvent.click(within(loadedLine()).getByRole('button', { name: '3 plugins loaded in this session' }));
+    fireEvent.click(within(loadedLine()).getByRole('button', { name: '4 plugins loaded in this session' }));
     const loadedRows = () => [...section('my-items').querySelectorAll('[data-loaded-row]')].map((r) => r.getAttribute('data-loaded-row'));
+    const allRows = () => [...section('my-items').querySelectorAll('[data-plugin-row], [data-loaded-row]')].map((r) => r.getAttribute('data-plugin-row') ?? r.getAttribute('data-loaded-row'));
     const problemText = () => section('my-items').querySelector('[data-plugins-group="problems"]')?.textContent ?? '';
-    // Last updated: none of them has a date, so the name decides (Desktop's tie-breaker)
-    expect(loadedRows()).toEqual(['alpha-dir@skills-dir', 'mid-thing@far', 'zeta-tools@builtin']);
+    // Last updated: the installed plugin in its group, then the loaded-only rows, which have no date, so the name decides
+    // (Desktop's tie-breaker)
+    expect(allRows()).toEqual(['e8-probe@e8-scratch', 'alpha-dir@skills-dir', 'mid-thing@far', 'zeta-tools@builtin']);
     expect(problemText()).toContain('zeta failed');
     expect(problemText()).toContain('alpha warned');
+    // Name: one alphabetical list over the installed plugin and the loaded-only rows (P2-F L133)
     fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Name' }));
-    expect(loadedRows()).toEqual(['alpha-dir@skills-dir', 'mid-thing@far', 'zeta-tools@builtin']);
+    expect(allRows()).toEqual(['alpha-dir@skills-dir', 'e8-probe@e8-scratch', 'mid-thing@far', 'zeta-tools@builtin']);
+    expect(section('my-items').querySelectorAll('[data-plugins-group]:not([data-plugins-group="problems"])')).toHaveLength(1);
     const search = screen.getByRole('searchbox', { name: 'Search plugins' });
     fireEvent.change(search, { target: { value: 'ZETA' } });
     expect(loadedRows()).toEqual(['zeta-tools@builtin']);
