@@ -87,6 +87,7 @@ describe('stripCard', () => {
   it('is the column’s full width less 16 px, at most half its height less 16 and never over 320', () => {
     expect(stripCard({ width: 600, height: 800 })).toEqual({ mode: 'strip', width: 584, maxHeight: 320 });
     expect(stripCard({ width: 600, height: 500 })).toEqual({ mode: 'strip', width: 584, maxHeight: 234 });
+    expect(stripCard({ width: 600, height: 501 })).toEqual({ mode: 'strip', width: 584, maxHeight: 234 }); // half rounded down, as the strip's own cap
     expect(stripCard({ width: 10, height: 20 })).toEqual({ mode: 'strip', width: 0, maxHeight: 0 });
   });
 });

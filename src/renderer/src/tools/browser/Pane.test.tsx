@@ -231,4 +231,41 @@ describe('the comment card’s dock', () => {
     expect(dockOf(T1)).toBeNull();
     expect(useCommentCard.getState().open).toBeNull();
   });
+
+  it('a second pane that claims and unmounts before its echo reaches the first leaves the first pane the dock', async () => {
+    const first = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    const paneA = places()[0]!.paneId as string;
+    first.rerender(<BrowserPane tab={tab({ placedIn: { paneId: paneA, surface: 'panel' } })} surface="panel" />);
+    const hostA = dockOf(T1);
+    expect(hostA).not.toBeNull();
+    const second = render(<BrowserPane tab={tab({ placedIn: { paneId: paneA, surface: 'panel' } })} surface="main" />);
+    await frames();
+    expect(places().at(-1)).toMatchObject({ surface: 'main', claim: true });
+    expect(dockOf(T1)).not.toBe(hostA);
+    second.unmount();
+    await frames();
+    // main's listing coalesced: the first pane sees no owner (never the second's name), claims back and stays owner
+    first.rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" />);
+    expect(places().at(-1)).toMatchObject({ paneId: paneA, claim: true });
+    expect(dockOf(T1)).toBe(hostA);
+  });
+
+  it('Close or Escape in the docked card gives focus back to its chrome’s Comment toggle', async () => {
+    render(
+      <div data-browser-view="panel">
+        <button type="button" data-browser-comment="">
+          Comment
+        </button>
+        <BrowserPane tab={tab()} surface="panel" />
+      </div>,
+    );
+    await frames();
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)! } }));
+    const field = screen.getByRole('textbox', { name: 'Comment' });
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(useCommentCard.getState().open).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comment' }));
+  });
 });

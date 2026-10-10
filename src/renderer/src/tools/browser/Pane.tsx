@@ -122,13 +122,15 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
   const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId }), [tabId]);
   const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
+  // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick
+  const restoreFocus = () => element.current?.closest('[data-browser-view]')?.querySelector<HTMLElement>('[data-browser-comment]')?.focus({ preventScroll: true });
 
   return (
     <div data-browser-column="" className="flex h-full w-full flex-col">
       <div ref={element} data-browser-pane="" className={PAGE}>
         {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
       </div>
-      {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} />}
+      {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
     </div>
   );
 }

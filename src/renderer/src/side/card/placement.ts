@@ -52,10 +52,14 @@ export function dockCard(box: Box): CardStyle {
 }
 
 // P2-E2: the strip under a native view, from the column it shares with the view: its full width less 16 px, at most
-// half its height less the strip's own 16 px of margin, and never over DOCK_MAX.
+// half its height (`stripMax`) less the strip's own 16 px of margin, and never over DOCK_MAX.
 export function stripCard(column: Box): CardStyle {
-  return { mode: 'strip', width: Math.max(0, column.width - 2 * INSET), maxHeight: clamp(Math.round(column.height / 2) - 2 * INSET, 0, DOCK_MAX) };
+  return { mode: 'strip', width: Math.max(0, column.width - 2 * INSET), maxHeight: clamp(stripMax(column) - 2 * INSET, 0, DOCK_MAX) };
 }
+
+// P2-E2: the most the strip itself takes of its column, a hard limit: in a column too short for the card's own floor
+// (its padding, border and margin) the strip clips the card rather than take the page's half.
+export const stripMax = (column: Box): number => Math.floor(column.height / 2);
 
 const CARET_INSET = 12; // the caret stays on the card's straight top edge, clear of its rounded corners
 

@@ -18,12 +18,13 @@
 // P2-E2 (the docked layout): a host beside a native view (the browser pane's page) cannot overlay it, since the view lies
 // above the whole renderer. Docked, the host is no overlay but a strip in flow, the last child of the column it shares
 // with the view's box: it measures that column, draws the card in flow (`stripCard`), so the strip grows with the card
-// and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element.
+// and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element. The strip
+// never takes more than half the column (`stripMax`), clipping a card whose floor is taller than that.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import { CommentCard } from './CommentCard';
-import { caretOf, pinOf, placeCard, stripCard } from './placement';
+import { caretOf, pinOf, placeCard, stripCard, stripMax } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
 
 export interface CardFrame {
@@ -93,7 +94,13 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   if (layout === 'docked') {
     const caret = card ? caretOf(pin, box) : null;
     return (
-      <div ref={ref} data-card-host={host} data-card-dock="" className="relative shrink-0 bg-bg">
+      <div
+        ref={ref}
+        data-card-host={host}
+        data-card-dock=""
+        style={card ? { maxHeight: stripMax(box) } : undefined}
+        className={`relative shrink-0 bg-bg ${card ? 'overflow-hidden' : ''}`}
+      >
         {caret !== null && <Caret x={caret} />}
         {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
       </div>
