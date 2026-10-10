@@ -83,6 +83,25 @@ describe('opening an owner-channel item at its mark', () => {
     expect(entry.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
   });
 
+  it('waits past a kept transcript that predates the anchored text, and jumps once the fresh history holds it', async () => {
+    const before = history().filter((event) => !JSON.stringify(event).includes(uuid('m2-u0')));
+    const stale = laterSource(before);
+    const first = useTranscriptStore.getState().attach(APP, stale.source);
+    stale.release();
+    await act(() => first);
+    useTranscriptStore.getState().detach(APP); // the tab closed: its entry is kept, live, without the newer text
+    useTranscriptStore.getState().setOwnerLane(APP, true);
+    openAnchor(APP, anchor);
+    expect(useTranscriptStore.getState().entries[APP]!.jump).toBeNull(); // the kept history has nothing to jump to yet
+    const fresh = laterSource(history());
+    const attached = useTranscriptStore.getState().attach(APP, fresh.source); // the tab's transcript mounts again
+    fresh.release();
+    await act(() => attached);
+    const entry = useTranscriptStore.getState().entries[APP]!;
+    expect(entry.state.ui.view).toBe('report');
+    expect(entry.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
+  });
+
   it('a notification’s click on an owner item opens it at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
