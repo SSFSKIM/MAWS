@@ -1219,10 +1219,11 @@ describe('keeping sessions running at quit', () => {
       electron.app.reset();
       expect(hostModeFromEnv(env)).toBe(mode);
       const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode }) };
-      const { deps } = guard(modelWith(midTurn(1)), engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V13));
+      const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
+      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V13) });
       electron.app.attempt();
       await settle();
-      const keep = deps.ask.mock.calls[0]![2] as Parameters<typeof quitQuestion>[3];
+      const keep = (ask.mock.calls[0] as unknown[])[2] as Parameters<typeof quitQuestion>[3];
       expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), keep).buttons, mode).toEqual(buttons);
     }
   });

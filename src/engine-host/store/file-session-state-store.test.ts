@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
-import type { QueueEntry } from '@shared/engine/session-state-store';
+import type { QueueEntry, QueueState } from '@shared/engine/session-state-store';
 import { FileSessionStateStore } from './file-session-state-store';
 
 const ID = 'app-store-1' as AppSessionId;
@@ -83,7 +83,7 @@ describe('FileSessionStateStore', () => {
     const queue = { entries: [entry()], paused: false, steers: [steer] };
     const grants = { allow: ['Bash(touch granted.txt)'] };
     const nested = { ...spec, resume: { sessionId: '33333333-3333-4333-8333-333333333333', fork: false }, trust: { accepted: true as const, directory: '/tmp/x' }, retry: { attempt: 1, maxAttempts: 2, reason: 'no_output' } };
-    const later = (value: object) => ({ ...value, futureKey: 1 });
+    const later = <T extends object>(value: T) => ({ ...value, futureKey: 1 });
     const text = JSON.stringify({
       version: 1,
       queue: later({ ...queue, entries: [later(entry())], steers: [later(steer)] }),
@@ -103,7 +103,7 @@ describe('FileSessionStateStore', () => {
 
     await store.saveGrants(ID, grants);
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 1, queue, grants, launchSpec: nested });
-    await expect(store.saveQueue(ID, later(queue) as typeof queue)).rejects.toThrow(); // writes remain strict
+    await expect(store.saveQueue(ID, later(queue) as unknown as QueueState)).rejects.toThrow(); // writes remain strict
     await expect(store.saveGrants(ID, later(grants) as typeof grants)).rejects.toThrow();
   });
 
