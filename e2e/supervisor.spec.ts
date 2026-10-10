@@ -591,7 +591,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     const strip = await openDiagnostics(run.maws);
     const supervisorRow = strip.getByRole('status', { name: 'supervisor' });
     await expect(supervisorRow).toContainText(`pid ${fresh}`);
-    await expect(supervisorRow).toContainText(/last unexpected exit \d\d:\d\d \(SIGKILL\) · 1 interrupted/);
+    await expect(supervisorRow).toContainText(new RegExp(`last unexpected exit ${CLOCK} \\(SIGKILL\\) · 1 interrupted`));
     const rowText = (await supervisorRow.textContent())!;
     await shots(run.maws, 'diagnostics-supervisor', () => strip);
     expect(run.maws.consoleErrors()).toEqual([]);
