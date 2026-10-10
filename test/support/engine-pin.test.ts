@@ -97,10 +97,7 @@ it('records the resolved version even when a probe exits before system/init', ()
     await p.closed;
     console.log(JSON.stringify(readFileSync(p.file, 'utf8').trim().split('\\n').map(JSON.parse)));
   `, { HOME: s.home, MAWS_E2E_ENGINE_BIN: bin }, {
-    timeout: 10_000,
-    // The probe runner also imports the product's src/shared/engine/initialize.ts, whose package (the app's) declares no
-    // type; that one warning, of this one child, is the product tree's and not the pin's.
-    flags: ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON'],
+    timeout: 10_000, // The runner also imports the product's src/shared/engine/initialize.ts: its directory declares its module type too.
   });
   const rows = JSON.parse(output) as { frame: Record<string, unknown> }[];
   expect(rows.some(({ frame }) => frame.type === 'system' && frame.subtype === 'init')).toBe(false);
