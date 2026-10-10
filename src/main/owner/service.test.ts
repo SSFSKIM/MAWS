@@ -498,6 +498,40 @@ describe('answers follow their members (Design §6)', () => {
 });
 
 describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
+  // F-AB (scale review B scalpel-2#1): a report the log cannot cover lands while the read is out, and the read then
+  // settles every answer; the second fold has nothing on its way to read back from and is not run.
+  it('a late report during the read, then nothing left on its way: the read concludes and states the deliveries', async () => {
+    const t = await harness();
+    const early = t.ask('Which region?');
+    t.ask('Which region?'); // a twin: legacy recognition never settles either, so only the late report can
+    const q = t.ask('Which backend?');
+    const late = answerText('Which region?', 'eu');
+    const text = answerText('Which backend?', 'Postgres');
+    const sentAt = t.sim.nowIso();
+    const first = await t.sim.queue.send(late); // its report never reached main (it failed)
+    t.sim.engine(first.entry.messageUuid!, 'started');
+    await t.sim.turnEnded([first.entry.messageUuid!]);
+    const { entry } = await t.sim.queue.send(text);
+    expect(entry.messageUuid).not.toBeNull();
+    t.report(q, { disposition: 'sent', messageUuid: entry.messageUuid!, text });
+    expect(t.question(q).state).toBe('queued');
+    const dispatch = t.sim.dispatch;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    Object.defineProperty(t.sim, 'dispatch', { value: async (...args: Parameters<typeof dispatch>) => (args[1] === 'session.promptHistory' && (await held), dispatch(...args)) });
+    await t.restart();
+    t.sim.engine(entry.messageUuid!, 'started');
+    const reading = t.service.hostStreaming();
+    await flush();
+    t.report(early, { disposition: 'sent', messageUuid: first.entry.messageUuid!, text: late, sentAt }); // made again, from before the log's reach
+    release();
+    await reading;
+    await t.service.settled();
+    expect(t.question(q)).toMatchObject({ state: 'delivered', answer: { text } });
+    expect(t.question(early)).toMatchObject({ state: 'delivered', answer: { text: late } });
+    expect(index.ownerChannel.openAnswers().map((row) => row.id)).toEqual([]); // stated, so a restart reads nothing back
+  });
+
   it('main disconnected while the engine crashed with a pending steer: the abandon row in the recovery read settles it unanswered', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');

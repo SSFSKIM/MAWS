@@ -574,8 +574,10 @@ export class OwnerChannelService {
     const live = this.liveOf(appSessionId);
     this.reading.set(appSessionId, connection);
     try {
-      // folded again while a report the log could not cover arrived during the read (its window reaches back further)
-      while (live.answers.size > 0) {
+      // folded again while a report the log could not cover arrived during the read (its window reaches back further);
+      // not once nothing is on its way (F-AB): a fold reads back from the oldest such answer, and the read that settled
+      // them all left the answers unpruned (only `persist`, below, prunes them)
+      while ([...live.answers.values()].some((answers) => answers.some(onItsWay))) {
         live.refold = false;
         await this.fold(appSessionId, live);
         if (!live.refold) break;
