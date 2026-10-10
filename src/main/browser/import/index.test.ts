@@ -22,7 +22,11 @@ const record: ImportedProfile = {
   storageDirName: 'maws-chrome-default',
   userDataDir: '/chrome',
   extensions: [{ id: 'a'.repeat(32), chromeId: null, name: 'Probe', version: '1.0', enabled: true, wallet: false, unsupportedPermissions: [], status: 'loaded', error: null, background: 'running', backgroundError: null, checkedAt: AT }],
-  report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: AT, finishedAt: AT, outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+  report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: AT, finishedAt: AT, outcome: 'done', failure: null, history: null, cookies: null, extensions: [], bookmarks: null },
+  bookmarks: null, // cua #90: profiles.json version 2
+  gaiaName: null,
+  userName: null,
+  avatar: { kind: 'initials' },
 };
 
 describe('startBrowserImport (E4b Interfaces "Main"; Decision Log 31, 32, 34)', () => {
@@ -64,7 +68,7 @@ describe('startBrowserImport (E4b Interfaces "Main"; Decision Log 31, 32, 34)', 
     const started = startBrowserImport({
       userData,
       settings: () => ({ profile }),
-      index: { browserHistory: {} as never },
+      index: { browserHistory: {} as never, browserBookmarks: {} as never },
       register: (name, handler) => void handlers.set(name, handler),
       emit: vi.fn(),
       env,
@@ -88,7 +92,8 @@ describe('startBrowserImport (E4b Interfaces "Main"; Decision Log 31, 32, 34)', 
   it('registers browser.import.*, its partition step and its view hook', () => {
     const { handlers, partitions, store } = harness();
     expect([...handlers.keys()].filter((name) => name.startsWith('browser.import.'))).toHaveLength(9);
-    expect(partitions.registerPreparer).toHaveBeenCalledTimes(1);
+    expect(partitions.registerPreparer).toHaveBeenCalledTimes(2); // the extensions' boot load and (cua #90) the bookmarks sync
+    expect([...handlers.keys()].filter((name) => name.startsWith('browser.bookmarks.'))).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync']); // cua #90
     expect(store.onViewCreated).toHaveBeenCalledTimes(1);
   });
 
@@ -128,6 +133,14 @@ describe('startBrowserImport (E4b Interfaces "Main"; Decision Log 31, 32, 34)', 
     expect(globalThis.__maws_browser_import).toBeUndefined();
     expect(unhookViews).toHaveBeenCalled();
     expect(partitions.registerPreparer.mock.results[0]!.value).toHaveBeenCalled();
+  });
+
+  // cua #90: the Chrome account's names are shown in the popover and the picker only
+  it('answers a record through the seam without the Chrome account’s names', async () => {
+    await profiles.put({ ...record, gaiaName: 'Probe Owner', userName: 'probe@example.test' });
+    harness({ env: { MAWS_E2E: '1' } });
+    expect(globalThis.__maws_browser_import?.record('Default')).toEqual({ ...record, gaiaName: null, userName: null });
+    expect(profiles.get('Default')).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test' });
   });
 
   it('exposes nothing outside e2e', () => {

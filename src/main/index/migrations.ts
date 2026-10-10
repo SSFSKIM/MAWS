@@ -124,9 +124,30 @@ CREATE TABLE browser_activity (id INTEGER PRIMARY KEY, app_session_id TEXT NOT N
 CREATE INDEX browser_activity_session ON browser_activity(app_session_id, id);
 `,
   },
-  // P2-C start (2026-10-09)
   {
     version: 7,
+    // cua board #90 (P1 ledger §4, taken 2026-10-08): an imported Chrome profile's bookmarks, a read-only mirror of its
+    // `Bookmarks` file, one row per node keyed per partition and replaced whole at every sync. The three roots have no
+    // parent; `(partition, parent_id, position)` serves the tree, `(partition, url)` the address field's suggestions.
+    sql: `
+CREATE TABLE browser_bookmarks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  partition TEXT NOT NULL,
+  parent_id INTEGER,            -- NULL for the three roots
+  root TEXT NOT NULL CHECK (root IN ('bar','other','mobile')),
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('url','folder')),
+  name TEXT NOT NULL,
+  url TEXT,                     -- NULL for folders
+  added_at_ms INTEGER
+);
+CREATE INDEX browser_bookmarks_tree ON browser_bookmarks (partition, parent_id, position);
+CREATE INDEX browser_bookmarks_url ON browser_bookmarks (partition, url);
+`,
+  },
+  // P2-C start (2026-10-09)
+  {
+    version: 8,
     // P2-C (the P2-C document, §10; X15's slot): the owner channel. `owner_channel_sessions` holds per session the
     // to-human lane's override, the watermark from which marks may raise attention items, the last decided launch (its
     // desired, recorded and applied states, the flags passed, whether a wanted `--system-prompt-snapshot off` was

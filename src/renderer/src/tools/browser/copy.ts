@@ -3,6 +3,8 @@
 // own elsewhere. The Settings section keeps its own (`settings-tab/copy.ts`).
 import type { LoadErrorKind } from '@shared/browser/errors';
 
+const UNREADABLE = 'Chrome의 북마크 파일을 읽지 못함'; // cua #90: the profile popover's line for a failed bookmarks read
+
 export const BROWSER_COPY = {
   title: 'Browser',
   newTab: 'New tab',
@@ -103,6 +105,7 @@ export const BROWSER_COPY = {
   refusedScheme: (scheme: string) => `Can’t open ${scheme || 'that'} addresses here; the browser opens http and https only`,
   // main's transient notices (`browser.notice`) and the chrome's own `urlCopied` (Decision Log 37, 44 (b))
   tabsCap: (n: number) => `At most ${n} pages stay loaded at once, so a tab was left unloaded`,
+  tabsCapOptions: (n: number, name: string) => `At most ${n} pages stay loaded at once, so the options of ${name} could not open`, // cua #90
   tabsCapMemory: 'Loaded pages passed the browser’s memory limit, so a tab was unloaded',
   profileMissing: (name: string | undefined) => `${profileNamed(name)} was not found; this tab browses with the default profile`,
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,
@@ -118,6 +121,45 @@ export const BROWSER_COPY = {
   acting: 'The agent is using this tab',
   agentBadge: 'Opened by an agent', // E13: the badge on a tab an agent created through cua
   // E4c end
+
+  // cua #90 start: the bookmarks bar (Chrome's words) and the address field's bookmark rows
+  bookmarks: {
+    bar: 'Bookmarks bar',
+    more: 'More bookmarks', // the » slot (Chrome's tooltip names the hidden ones "bookmarks")
+    chipTitle: (name: string, url: string) => (name === '' ? url : `${name}\n${url}`),
+    folderTitle: (name: string) => name,
+    suggestion: 'Bookmark', // the star's label on an address suggestion
+  },
+  // the pill's avatar and its popover (Chrome's profile bubble); the Korean lines are the spec's, as the owner's own
+  profile: {
+    label: (name: string) => `Profile: ${name}`, // the popover's accessible name
+    defaultName: 'Default profile', // the Default partition's popover heading
+    defaultRow: 'Default', // the Default partition in Switch profile
+    signedIn: (parts: string[]) => `로그인: ${parts.join(' · ')}`,
+    notSignedIn: 'Chrome에 로그인되지 않은 프로필',
+    switchProfile: 'Switch profile',
+    appliesToNewTabs: '새 탭에 적용', // a switch sets the profile new tabs open in; this tab keeps its own
+    switchTo: (name: string) => `Open a new tab as ${name}`,
+    syncNow: 'Sync bookmarks now',
+    syncing: 'Syncing bookmarks…',
+    lastSynced: (age: string) => `마지막 동기화 ${age}`,
+    unreadableShort: UNREADABLE,
+    unreadable: (age: string | null) => `${UNREADABLE} · 마지막 동기화 ${age ?? '없음'}`, // the record's error, with the last good read
+    indexUnavailable: 'Unavailable in this build',
+    syncFailed: (why: string) => `Bookmarks could not be synced: ${why}`,
+    reimport: 'Re-import this profile…',
+    settings: 'Browser settings',
+  },
+  // the extensions action bar (Chrome's words) and its notices
+  extensions: {
+    bar: 'Extensions',
+    puzzle: 'Extensions', // Chrome's puzzle button
+    noPopup: 'This extension has no popup here',
+    actionTitle: (title: string, hasPopup: boolean) => (hasPopup ? title : `${title}\nThis extension has no popup here`),
+    popupFailed: (name: string | undefined) => `${name || 'An extension'}’s popup could not be shown`,
+    pageClosed: (name: string | undefined) => `${name || 'An extension'} is no longer loaded, so its options tab closed`,
+  },
+  // cua #90 end
 
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----
   sessionInfoLabel: 'Browser tabs',

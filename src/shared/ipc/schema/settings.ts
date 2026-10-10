@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (P2-C): the built-in mods and the owner channel's two notification groups. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -29,7 +29,7 @@ export const ChordSchema = z.string().regex(CHORD_PATTERN); // Electron accelera
 // The groups C5's notifier maps X1's attention kinds to (src/main/attention/notifier.ts GROUP): approvals = permission,
 // dialog, elicitation; questions = question; planReviews = plan; errors = error, interrupted, auto_mode_unavailable;
 // heldPeerMessages = held_peer_message (not actionable, so it never notifies in P0).
-// P2-C (version 12): asyncInput = async_input (a question an agent left), essential = essential_unread (a must-read).
+// P2-C (version 13): asyncInput = async_input (a question an agent left), essential = essential_unread (a must-read).
 export const NotificationKindsSchema = z.strictObject({
   approvals: z.boolean(), questions: z.boolean(), planReviews: z.boolean(), errors: z.boolean(), heldPeerMessages: z.boolean(),
   // P2-C start (2026-10-09)
@@ -96,17 +96,19 @@ export const BrowserSettingsSchema = z.strictObject({
   profile: z.string().min(1).max(200).nullable(),
   searchUrl: z.string().max(2048).refine(isSearchUrlTemplate, { message: 'not an http or https URL with %s' }),
   linkTarget: z.enum(['in-app', 'external']),
+  // cua #90: version 12, whether an imported profile's tabs show its bookmarks bar (⌘⇧B in the browser, Settings › Browser)
+  bookmarksBar: z.enum(['shown', 'hidden']),
 });
 export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
 // E4a end
-// P2-C start (2026-10-09): version 12, the built-in mods (the P2-C document, §9; X20): the to-human lane's app switch.
+// P2-C start (2026-10-09): version 13, the built-in mods (the P2-C document, §9; X20): the to-human lane's app switch.
 // A session's own override lives in the index (`owner_channel_sessions`), never here.
 export const ModsSettingsSchema = z.strictObject({ toHuman: z.strictObject({ enabled: z.boolean() }) });
 export type ModsSettings = z.infer<typeof ModsSettingsSchema>;
 // P2-C end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(12), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); P2-C: version 12 (mods, notifications.kinds.asyncInput and .essential)
+  version: z.literal(13), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

@@ -44,10 +44,10 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
       // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
       // with no engine pin. E9: to version 9, with the system locale for dictation. E10: to version 10, with the
-      // supervisor's defaults. E4a: to version 11, with the browser's defaults. P2-C: to version 12, with the to-human
-      // lane and its two notification groups on.
+      // supervisor's defaults. E4a: to version 11, with the browser's defaults. cua #90: to version 12, the bookmarks bar shown.
+      // P2-C: to version 13, with the to-human lane and its two notification groups on.
       expect(readSettings(userData)).toMatchObject({
-        version: 12, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; P2-C: 12
+        version: 13, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
@@ -58,7 +58,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         permissions: { autoFallback: 'acceptEdits' }, // W3
         voice: { locale: null }, // E9
         supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
-        browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' }, // E4a
+        browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a; cua #90
         mods: { toHuman: { enabled: true } }, // P2-C
       });
       expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13

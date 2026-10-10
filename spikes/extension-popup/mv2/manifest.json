@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "MAWS probe extension (MV2)",
+  "version": "1.0",
+  "description": "S1 of board #90: the probe's popup and options pages under a Manifest V2 background page.",
+  "permissions": ["storage", "tabs"],
+  "background": { "page": "background.html", "persistent": true },
+  "browser_action": { "default_title": "MAWS probe MV2", "default_popup": "popup.html" },
+  "options_page": "options.html"
+}

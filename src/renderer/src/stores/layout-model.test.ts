@@ -3,7 +3,7 @@ import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dropSession, focusPane, fromV1, moveTab, openSession, openTab, refile, reopenClosed, repairMain,
-  replaceActive, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
+  replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -191,6 +191,39 @@ describe('layout store transitions', () => {
 
 // I2 (§5.2 as amended 2026-10-01): a session opened from the sidebar, the Overview or the palette replaces the focused
 // pane's session.
+// cua #90: an options tab main replaced with a page (`browser.extensions.reveal`'s replacement)
+describe('retargeting a tab', () => {
+  const W = (browserTabId: string) => ({ kind: 'browser' as const, appSessionId: A_ID, browserTabId });
+
+  it('the tab takes the new target in place: its position, its pin and its being active; nothing joins ⌘⇧T', () => {
+    const m = openTab(openTab(abc(), W('opt')), S('d')); // a, b, c, opt, d with d active
+    const r = retargetTab(m, 'browser:a:opt', W('page'));
+    expect(ids(r)).toEqual([['session:a', 'session:b', 'session:c', 'browser:a:page', 'session:d']]);
+    expect(active(r)).toEqual(['session:d']);
+    expect(r.closedTabs).toEqual([]);
+    const shown = retargetTab(activateTab(m, 'browser:a:opt'), 'browser:a:opt', W('page'));
+    expect(active(shown)).toEqual(['browser:a:page']);
+    expect(currentSet(shown).panes[0].tabs[3]).toEqual({ id: 'browser:a:page', ...W('page'), pinned: false });
+    const pinned = retargetTab(togglePinned(m, 'browser:a:opt'), 'browser:a:opt', W('page'));
+    expect(currentSet(pinned).panes[0].tabs[0]).toMatchObject({ id: 'browser:a:page', pinned: true });
+  });
+
+  it('in whichever pane and set holds it, the strip and the focus staying where they are', () => {
+    const m = focusPane(openTab(split(), W('opt'), { pane: 1 }), 0); // pane 1: d, opt
+    const r = retargetTab(m, 'browser:a:opt', W('page'));
+    expect(ids(r)).toEqual([['session:a', 'session:b', 'session:c'], ['session:d', 'browser:a:page']]);
+    expect(currentSet(r).focusedPane).toBe(0);
+    const other = { ...m, current: 'proj-z' as TabSetKey, sets: { ...m.sets, ['proj-z' as TabSetKey]: EMPTY_TAB_SET } };
+    expect(retargetTab(other, 'browser:a:opt', W('page')).current).toBe('proj-z');
+  });
+
+  it('a tab not open anywhere, or a target already open, leaves the layout as it was', () => {
+    const m = openTab(abc(), W('opt'));
+    expect(retargetTab(m, 'browser:a:gone', W('page'))).toBe(m);
+    expect(retargetTab(m, 'browser:a:opt', S('a'))).toBe(m);
+  });
+});
+
 describe('replacing the active session', () => {
   it('an unpinned session tab active in the focused pane gives its place to the session, remembered for ⌘⇧T', () => {
     const m = replaceActive(activateTab(abc(), 'session:b'), 'x' as AppSessionId);

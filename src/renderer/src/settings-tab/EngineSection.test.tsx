@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -20,7 +20,7 @@ let unsubscribe = () => {};
 const settings = () => useSettings.getState().state!.settings;
 
 // The host as main configures it: the chosen path, else the installed binary's real path.
-function renderSection(initial: Settings = SETTINGS_DEFAULTS_V12, answers: SettingsBridge['answers'] = {}) {
+function renderSection(initial: Settings = SETTINGS_DEFAULTS_V13, answers: SettingsBridge['answers'] = {}) {
   b = settingsBridge(initial);
   b.answers['engine.binaryInfo'] = () => ({ ...BINARY, path: settings().engine.binaryPath ?? BINARY.path });
   Object.assign(b.answers, answers);
@@ -61,7 +61,7 @@ describe('Settings › Engine writes settings; main configures the host', () => 
   });
 
   it('"Use installed" puts launches back on the installed binary, and the row reads it', async () => {
-    renderSection({ ...SETTINGS_DEFAULTS_V12, engine: { ...SETTINGS_DEFAULTS_V12.engine, binaryPath: '/opt/claude' } });
+    renderSection({ ...SETTINGS_DEFAULTS_V13, engine: { ...SETTINGS_DEFAULTS_V13.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
     fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use installed' }));
     expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
@@ -101,7 +101,7 @@ describe('the binary row and the update', () => {
   });
 
   it('a binary that is missing says why, in the warning colour', async () => {
-    renderSection(SETTINGS_DEFAULTS_V12, {
+    renderSection(SETTINGS_DEFAULTS_V13, {
       'engine.binaryInfo': () => ({ ...BINARY, path: '/Users/owner/.local/bin/claude', version: null, ok: false, error: 'Claude Code is not installed: nothing at /Users/owner/.local/bin/claude' }),
     });
     expect(await within(row('Binary')).findByText('Claude Code is not installed: nothing at /Users/owner/.local/bin/claude')).toBeTruthy();
@@ -116,7 +116,7 @@ describe('the binary row and the update', () => {
   });
 
   it('with a chosen binary, the notes say new sessions stay on it until Use installed', async () => {
-    renderSection({ ...SETTINGS_DEFAULTS_V12, engine: { ...SETTINGS_DEFAULTS_V12.engine, binaryPath: '/opt/claude' } });
+    renderSection({ ...SETTINGS_DEFAULTS_V13, engine: { ...SETTINGS_DEFAULTS_V13.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
     expect(within(row('Binary')).getByText('New sessions start on the binary you chose. Running sessions keep the binary they started on.', { exact: false })).toBeTruthy();
     expect(within(row('Update')).getByText('Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.')).toBeTruthy();

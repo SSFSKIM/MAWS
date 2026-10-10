@@ -503,7 +503,7 @@ void startWithProfileLock(app, () => {
   // the sweep of what a crash, a quit mid-import or a removal left (staging, unlisted partition folders, storage
   // directories and history rows).
   const browserProfiles = ImportedProfiles.open(app.getPath('userData'));
-  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: index.browserHistory });
+  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: index.browserHistory, bookmarks: index.browserBookmarks /* cua #90 */ });
   // E4b end
 
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over

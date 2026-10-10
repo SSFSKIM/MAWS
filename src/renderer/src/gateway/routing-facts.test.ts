@@ -6,7 +6,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../test/support/scenario';
 import { paceLine, paceRunsOutAt, routingFacts, unstartedRoute } from './routing-facts';
@@ -28,7 +28,7 @@ const snapshot = (pinsFor: Record<string, string> = {}): UsageSnapshot => ({
   available: true, dataDir: '/x', readAt: '2026-09-29T07:36:17Z', error: null, drainTarget: 'u3', drainTargetIsManual: false,
   accounts: [account('u1', '1@example.test'), account('u3', '3@example.test')], pinsFor, gateway: null, codex: null, activity: null,
 });
-const settings = (patch: Partial<Settings['gateway']> = {}): Settings => ({ ...SETTINGS_DEFAULTS_V12, gateway: { ...SETTINGS_DEFAULTS_V12.gateway, ...patch } });
+const settings = (patch: Partial<Settings['gateway']> = {}): Settings => ({ ...SETTINGS_DEFAULTS_V13, gateway: { ...SETTINGS_DEFAULTS_V13.gateway, ...patch } });
 
 describe('routingFacts names the account and the switch', () => {
   it('a routed session: the relay sentence, the pinned account when pinsFor names it, Switch to Direct…', () => {

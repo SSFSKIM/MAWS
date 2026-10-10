@@ -74,7 +74,7 @@ describe('startAgentPresence', () => {
       newTabId: () => `b_${String(++ids).padStart(12, '0')}`,
       schedule: () => {},
     });
-    const views = { park: vi.fn() };
+    const views = { park: vi.fn(), staging: () => false }; // cua #90: no view is ever staged here
     const controls = new TabControls({ store });
     const cursor = new AgentCursor({ store, controls });
     const leased = new Set<string>();

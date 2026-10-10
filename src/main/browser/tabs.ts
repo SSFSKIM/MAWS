@@ -124,6 +124,9 @@ export interface OpenRequest {
   partition?: string; // a tab opened from a page (its context menu) opens in that page's partition, not the setting's
   opener?: TabEntry; // a tab a page opened itself (a modifier-clicked link): that page's, never suspended for it
   load?: LoadURLOptions; // E11: such a tab's first load, with the link's referrer and post body (window-open.ts)
+  // cua #90: an extension's options page (extensions/pages.ts): `url` is its `chrome-extension://` page, which only this
+  // path loads in a tab, and the tab is titled and marked as `internal` says
+  internal?: NonNullable<BrowserTab['internal']>;
 }
 
 const normalised = (url: string) => {
@@ -232,9 +235,11 @@ export class TabStore {
     return { tabs, selected };
   }
 
-  // What tabs.json keeps (Design §2).
+  // What tabs.json keeps (Design §2). cua #90: never an internal tab (an extension's options page), which no launch
+  // restores; a session whose selected tab is one keeps the tab its closing would select (the next, else the previous).
   snapshot(): TabsFile {
-    const tabs = this.all().map(({ tab }): PersistedTab => ({
+    const kept = this.all().filter(({ tab }) => tab.internal === null);
+    const tabs = kept.map(({ tab }): PersistedTab => ({
       tabId: tab.tabId,
       appSessionId: tab.appSessionId,
       partition: tab.partition,
@@ -245,7 +250,18 @@ export class TabStore {
       createdAt: tab.createdAt,
       lastShownAt: tab.lastShownAt,
     }));
-    return { version: 1, tabs, selected: Object.fromEntries(this.selected) };
+    const selected = [...this.selected].map(([appSessionId, tabId]) => [appSessionId, tabId === null ? null : this.keptSelection(appSessionId, tabId)]);
+    return { version: 1, tabs, selected: Object.fromEntries(selected) };
+  }
+
+  // cua #90: the session's selection as tabs.json keeps it: the tab itself unless it is internal, else its nearest
+  // ordinary neighbour (the next, else the previous), as a close of it would select.
+  private keptSelection(appSessionId: AppSessionId, tabId: string): string | null {
+    const siblings = this.all().filter(({ tab }) => tab.appSessionId === appSessionId);
+    const at = siblings.findIndex(({ tab }) => tab.tabId === tabId);
+    if (at === -1 || siblings[at]!.tab.internal === null) return tabId;
+    const ordinary = ({ tab }: TabEntry) => tab.internal === null;
+    return (siblings.slice(at + 1).find(ordinary) ?? siblings.slice(0, at).reverse().find(ordinary))?.tab.tabId ?? null;
   }
 
   // ---- commands -------------------------------------------------------------------------------------------------------
@@ -270,6 +286,7 @@ export class TabStore {
 
     const tabId = this.mintTabId();
     const entry = this.blankEntry(this.newTab(tabId, appSessionId, request.partition ?? this.deps.resolvePartition(appSessionId, tabId)));
+    if (request.internal) entry.tab = { ...entry.tab, internal: request.internal, title: request.internal.title }; // cua #90
     entry.openerTabId = request.opener?.tab.tabId ?? null;
     this.entries.set(tabId, entry);
     this.changed(entry);
@@ -337,6 +354,17 @@ export class TabStore {
   // False when the tab could not be loaded: left suspended by the cap, or its view could not be created.
   load(tabId: string, url: string): boolean {
     return this.loadInto(this.require(tabId), url);
+  }
+
+  // cua #90: what a cap does to its victim: an ordinary tab is suspended; an internal tab, which has no page to come back
+  // to, is closed (no empty-state tab is left behind).
+  evict(tabId: string): 'suspended' | 'closed' {
+    if (this.require(tabId).tab.internal === null) {
+      this.suspend(tabId);
+      return 'suspended';
+    }
+    this.close(tabId);
+    return 'closed';
   }
 
   // Unloads the tab: its view closed, {url, title, favicon, zoom} kept, the page's transient state dropped.
@@ -474,6 +502,13 @@ export class TabStore {
   private ensureView(entry: TabEntry, url: string, opener?: TabEntry): boolean {
     if (entry.view) return true;
     if (!this.makeRoom(entry, opener)) {
+      if (entry.tab.internal) {
+        // cua #90: an internal tab is never left suspended (it would be an empty-state tab on an extension's URL): it is
+        // not kept, and its session is told without it (ExtensionPages checks the room first, so this is the backstop)
+        this.drop(entry, { close: true, selectNext: null });
+        this.deps.emit('browser.notice', { appSessionId: entry.tab.appSessionId, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
+        return false;
+      }
       this.update(entry.tab.tabId, { suspended: true, url, loading: false });
       this.capNotice(entry);
       return false;
@@ -487,7 +522,7 @@ export class TabStore {
     if (this.loadedCount() < BROWSER_LOADED_TABS_MAX) return true;
     const victim = this.capVictim(entry, ...(opener ? [opener] : []));
     if (!victim) return false;
-    this.suspend(victim.tab.tabId);
+    this.evict(victim.tab.tabId); // cua #90: an internal tab is closed instead
     this.capNotice(entry);
     return true;
   }
@@ -631,6 +666,7 @@ export class TabStore {
       createdAt: at,
       lastShownAt: at,
       agentBadge: null, // E13: an agent's badge is live, never restored
+      internal: null, // cua #90: an extension's page is opened by MAWS only, never restored
     };
   }
 

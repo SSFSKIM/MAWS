@@ -103,6 +103,25 @@ describe('MemorySampler: the soft cap (Design §2, Decision Log 6)', () => {
     expect(h.notices()).toEqual([{ appSessionId: B, tabId: oldest.tab.tabId, kind: 'tabsCap' }]); // no count: the memory cap
   });
 
+  it('cua #90: closes an internal tab (an extension\'s options page) instead of suspending it', () => {
+    const h = harness();
+    const { tab } = h.store.open({
+      appSessionId: A,
+      url: 'chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html',
+      select: true,
+      internal: { kind: 'extension', extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'Probe · Options' },
+    });
+    h.store.update(tab.tabId, { loading: false, lastShownAt: '2026-10-06T12:00:00.000Z' });
+    const options = h.store.entry(tab.tabId)!;
+    const newer = h.loaded(5);
+    h.workingSets.set(h.pidOf(options), 1.5 * GIB);
+    h.workingSets.set(h.pidOf(newer), 1.5 * GIB);
+    h.sampler.sample();
+    expect(h.store.entry(tab.tabId)).toBeUndefined();
+    expect(newer.view).not.toBeNull();
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: null, kind: 'tabsCap' }]); // the tab is gone: told to its session
+  });
+
   it('suspends as many as it takes, and never a placed, loading, downloading or driven tab', () => {
     const h = harness();
     const placed = h.loaded(1);

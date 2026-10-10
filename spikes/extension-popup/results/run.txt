@@ -1,0 +1,65 @@
+[spike] electron 44.4.5 chrome 152.0.7977.130 show=false
+[spike] tab page loaded: http://127.0.0.1:62301/tab (webContents id 1); preload ran there: yes
+[spike] [mv3] loadExtension: ok id nenbjdahllkkbfanbpfmmdacjencdfpg
+[spike] [mv3-nopopup] loadExtension: ok id pjdfphhinlfaggogelipjegmpenbflhe
+[spike] [mv2] loadExtension: ok id ofmpefonpiifpjlopbcacdiahhnegimn
+[spike] [darkreader-mv3] loadExtension: ok id fonofeidpjmchfhemoogdjokpnljnngf
+[spike] [darkreader-mv2] loadExtension: ok id afjgadpldkooaikabpfcfhjfinponmip
+[spike] [refined-github] loadExtension: ok id mgolgdppcgfbmmncohkepaemhibcbdnd
+[spike] running service workers: ["chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/","chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/","chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/"]
+[spike] background pages: ["chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html"]
+[spike] [mv3] manifest: v3 "MAWS probe extension" 1.0 background={"service_worker":"sw.js"} popup="popup.html" options="options.html"
+[spike] [mv3] loaded: yes url=chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html
+[spike] [mv3] ping reply: {"value":{"echo":{"ping":1},"fromTab":6,"swSawMessage":true}}
+[spike] [mv3] connect reply: {"value":{"pong":1,"from":"service-worker","via":"port"}}
+[spike] [mv3] tabs.query: {"value":[]}
+[spike] [mv3] tabs.query({}): {"value":[{"id":6,"windowId":0,"active":false,"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html"},{"id":5,"windowId":0,"active":false,"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/offscreen.html"},{"id":4,"windowId":0,"active":false,"url":"chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/offscreen.html"},{"id":3,"windowId":0,"active":false,"url":"chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html"},{"id":2,"windowId":0,"active":false,"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html"},{"id":1,"windowId":0,"active":false,"url":"http://127.0.0.1:62301/tab"}]}
+[spike] [mv3] popup sees: {"action":"object","browserAction":"undefined","tabs":"object","windows":"undefined","openOptionsPage":"function"}
+[spike] [mv3] preferred size: 344x104 (events: 344x104; view bounds {"x":640,"y":44,"width":344,"height":104})
+[spike] [mv3] preload ran: yes
+[spike] [mv3] still: capturePage failed (UnknownVizError)
+[spike] [mv3] setWindowOpenHandler saw: [{"url":"http://127.0.0.1:62301/from-popup?via=window.open","disposition":"foreground-tab"},{"url":"http://127.0.0.1:62301/from-popup?via=target-blank","disposition":"foreground-tab"},{"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html","disposition":"foreground-tab"}]
+[spike] [mv3] will-navigate saw: ["http://127.0.0.1:62301/from-popup?via=same-frame-link"]
+[spike] [mv3] openOptionsPage: lastError: Could not create an options page.; new webContents: []; opener view handler saw since: []
+[spike] [mv3] options page in a view: loaded yes; title "MAWS probe options"; page says {"name":"MAWS probe extension","href":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html"}; preload ran: yes
+[spike] [mv2] manifest: v2 "MAWS probe extension (MV2)" 1.0 background={"page":"background.html","persistent":true} popup="popup.html" options="options.html"
+[spike] [mv2] loaded: yes url=chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html
+[spike] [mv2] ping reply: {"value":{"pong":1,"from":"background-page","fromTab":8}}
+[spike] [mv2] connect reply: {"value":{"pong":1,"from":"background-page","via":"port"}}
+[spike] [mv2] tabs.query: {"value":[]}
+[spike] [mv2] tabs.query({}): {"value":[{"id":8,"windowId":0,"active":false,"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html"},{"id":5,"windowId":0,"active":false,"url":"chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/offscreen.html"},{"id":4,"windowId":0,"active":false,"url":"chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/offscreen.html"},{"id":3,"windowId":0,"active":false,"url":"chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html"},{"id":2,"windowId":0,"active":false,"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html"},{"id":1,"windowId":0,"active":false,"url":"http://127.0.0.1:62301/tab"}]}
+[spike] [mv2] popup sees: {"action":"undefined","browserAction":"undefined","tabs":"object","windows":"undefined","openOptionsPage":"function"}
+[spike] [mv2] preferred size: 344x104 (events: 344x104; view bounds {"x":640,"y":44,"width":344,"height":104})
+[spike] [mv2] preload ran: yes
+[spike] [mv2] still: capturePage failed (UnknownVizError)
+[spike] [mv2] setWindowOpenHandler saw: [{"url":"http://127.0.0.1:62301/from-popup?via=window.open","disposition":"foreground-tab"},{"url":"http://127.0.0.1:62301/from-popup?via=target-blank","disposition":"foreground-tab"},{"url":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html","disposition":"foreground-tab"}]
+[spike] [mv2] will-navigate saw: ["http://127.0.0.1:62301/from-popup?via=same-frame-link"]
+[spike] [mv2] openOptionsPage: lastError: Could not create an options page.; new webContents: []; opener view handler saw since: []
+[spike] [mv2] options page in a view: loaded yes; title "MAWS probe options"; page says {"name":"MAWS probe extension (MV2)","href":"chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html"}; preload ran: yes
+[spike] [darkreader-mv3] manifest: v3 "Dark Reader" 4.9.133 background={"service_worker":"background/index.js"} popup="ui/popup/index.html" options="ui/popup/index.html"
+[spike] [darkreader-mv3] loaded: yes url=chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/ui/popup/index.html
+[spike] [darkreader-mv3] page: Dark Reader settings | body text 20 chars
+[spike] [darkreader-mv3] preferred size: 276x516 (events: 276x516; view bounds {"x":640,"y":44,"width":276,"height":516})
+[spike] [darkreader-mv3] preload ran: yes
+[spike] [darkreader-mv3] still: capturePage failed (UnknownVizError)
+[spike] [darkreader-mv3] console (1): error: Unrecognized Content-Security-Policy directive 'navigate-to'.
+[spike] [darkreader-mv3] options page in a view: loaded yes; title "Dark Reader settings"; page says "Dark Reader settings"; preload ran: yes
+[spike] [darkreader-mv3] options console (1): error: Unrecognized Content-Security-Policy directive 'navigate-to'.
+[spike] [darkreader-mv2] manifest: v2 "Dark Reader" 4.9.133 background={"page":"background/index.html","persistent":true} popup="ui/popup/index.html" options=null
+[spike] [darkreader-mv2] loaded: yes url=chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/ui/popup/index.html
+[spike] [darkreader-mv2] page: Dark Reader settings | body text 20 chars
+[spike] [darkreader-mv2] preferred size: 276x516 (events: 276x516; view bounds {"x":640,"y":44,"width":276,"height":516})
+[spike] [darkreader-mv2] preload ran: yes
+[spike] [darkreader-mv2] still: capturePage failed (UnknownVizError)
+[spike] [refined-github] manifest: v3 "Refined GitHub" 26.10 background={"scripts":["assets/background.js"],"service_worker":"assets/background.js","type":"module"} popup=null options="assets/options.html"
+[spike] [refined-github] loaded: n/a (no default_popup in the manifest)
+[spike] [refined-github] options page in a view: loaded yes; title "Refined GitHub options"; page says "Refined GitHub options"; preload ran: yes
+[spike] [refined-github] options console (4): error: Uncaught ElementNotFoundError: Expected element not found: details || error: Uncaught (in promise) Error: "sync" is not available in this instance of Chrome || error: Uncaught (in promise) Error: "sync" is not available in this instance of Chrome
+[spike] [mv3-nopopup] session.extensions members: ["addListener","emit","eventNames","getAllExtensions","getExtension","getMaxListeners","listenerCount","listeners","loadExtension","off","on","once","prependListener","prependOnceListener","rawListeners","removeAllListeners","removeExtension","removeListener","setMaxListeners"]
+[spike] [mv3-nopopup] ServiceWorkerMain for the extension: yes; members ["ipc","isDestroyed","scope","scriptURL","send","startTask","versionId"]
+[spike] [mv3-nopopup] CDP Extensions.triggerAction: error: 'Extensions.triggerAction' wasn't found
+[spike] [mv3-nopopup] sw sees chrome.action.onClicked.addListener as: "function"; clicks recorded: []
+[spike] [mv3-nopopup] onClicked: no API
+[spike] preload documents (all): ["http://127.0.0.1:62301/tab","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/background.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/background/index.html","chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/offscreen.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/offscreen.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/popup.html","chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/popup.html","chrome-extension://ofmpefonpiifpjlopbcacdiahhnegimn/options.html","chrome-extension://fonofeidpjmchfhemoogdjokpnljnngf/ui/popup/index.html","chrome-extension://afjgadpldkooaikabpfcfhjfinponmip/ui/popup/index.html","chrome-extension://mgolgdppcgfbmmncohkepaemhibcbdnd/assets/options.html","chrome-extension://pjdfphhinlfaggogelipjegmpenbflhe/options.html"]
+[spike] done
+[spike] electron exited: code 0

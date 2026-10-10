@@ -2,8 +2,10 @@
 // the application menu, the renderer's key dispatcher, the ⌘K palette and every tooltip. `menu` actions are registered
 // as accelerators of the macOS application menu, which dispatches them as `layout.action`; `renderer` actions are
 // matched by the renderer's dispatcher. The split is forced by Electron: `registerAccelerator: false` is Windows and
-// Linux only, so a chord shown in the macOS menu is always registered there and the page never sees its keydown; a
-// chord that must know the focused element therefore stays out of the menu. Defaults are §5.8's; overrides live in
+// Linux only, so a chord shown in the macOS menu is always registered there. The focused page sees the keydown first and
+// the menu acts on it only when the page did not prevent it (cua #90's ⌘⇧B relies on that in the browser chrome), so a
+// renderer handler would have to prevent every such chord itself; a chord that must know the focused element therefore
+// stays out of the menu. Defaults are §5.8's; overrides live in
 // `settings.keymap`.
 
 export type Sink = 'menu' | 'renderer';

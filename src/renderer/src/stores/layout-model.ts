@@ -293,6 +293,23 @@ export function replaceActive(main: LayoutMain, appSessionId: AppSessionId, set?
   });
 }
 
+// cua #90: tab `id` shows `target` from now on, in its place, with its pin and its being active (an options tab main
+// replaced with a page: the tab it showed is gone, so nothing joins the closed-tab history); the strip and the focus stay.
+// A tab not open, or a target open already (an id lives once), leaves the layout as it was.
+export function retargetTab(main: LayoutMain, id: string, target: TabTarget): LayoutMain {
+  const found = locateTab(main, id);
+  if (!found || isOpen(main, tabId(target))) return main;
+  return onSet(main, found.set, (v) => {
+    const pane = paneAt(v, found.pane);
+    const tab = { ...toRef(target), pinned: pane.tabs[found.index].pinned } as TabRef;
+    const retargeted = replaceTab(v, found.pane, found.index, tab);
+    if (pane.activeTabId !== id) return retargeted;
+    const panes = [...retargeted.panes] as PaneState[];
+    panes[found.pane] = { ...panes[found.pane], activeTabId: tab.id };
+    return { ...retargeted, panes: panes as TabSet['panes'] };
+  });
+}
+
 // Activates tab `id` wherever it is, the strip moving to its set.
 export function activateTab(main: LayoutMain, id: string): LayoutMain {
   const found = locateTab(main, id);

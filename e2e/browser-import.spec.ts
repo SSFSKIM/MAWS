@@ -31,11 +31,12 @@ test.describe.configure({ timeout: 240_000 });
 
 const DEFAULT = profilePartition('Default');
 const WORK = profilePartition('Profile 1');
+// cua #90: the fixture's Default has a Bookmarks file (46 kept, a bookmarklet skipped), checked by default
 const REPORT_DONE =
-  "4 cookies, 4 history entries, 3 extensions · 3 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open";
+  "4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported";
 const FAILS_STATUS = 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS';
 
-const pill = (view: Locator) => view.locator('[data-browser-partition]');
+const pill = (view: Locator) => view.locator('[data-browser-partition] [data-browser-partition-name]'); // cua #90: the name, beside the avatar
 
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {
@@ -101,7 +102,7 @@ test('the full import: picker, consent, phases, report, active profile, cookies,
       // the run: the sheet shows it, and main reports its phases in order
       await expect(sheet).toHaveAttribute('data-browser-import', 'running');
       const done = await report(s);
-      expect(await phasesHeard(s)).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'extensions', 'cleaning']);
+      expect(await phasesHeard(s)).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
 
       // the report
       await expect(s.page.getByRole('dialog', { name: 'Imported from Person 1' })).toBeVisible();
@@ -196,7 +197,7 @@ test('a wrong Safe Storage password fails every cookie and says so; history and 
     try {
       const done = await importThrough(s);
       await expect(done.locator('[data-import-summary]')).toHaveText(
-        "0 cookies, 4 history entries, 3 extensions · 7 skipped: 5 could not be decrypted: the Safe Storage password did not match this profile, 1 hidden page, 1 page MAWS's browser can't open",
+        "0 cookies, 4 history entries, 46 bookmarks, 3 extensions · 8 skipped: 5 could not be decrypted: the Safe Storage password did not match this profile, 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported",
       );
       await expect(done.locator('[data-import-keychain="wrongKey"]')).toHaveText('The Safe Storage password did not match this profile; no cookie was imported');
       expect(profilesFile(s.maws.userData)!.profiles[0]!.report.cookies).toMatchObject({ imported: 0, keychain: 'wrongKey', skipped: { wrongKey: 5 } });
@@ -229,7 +230,7 @@ test('the Keychain denied skips cookies only; a second profile cancelled during 
     try {
       const denied = await importThrough(s);
       await expect(denied.locator('[data-import-keychain="denied"]')).toHaveText('Keychain access was not allowed; cookies were not imported');
-      await expect(denied.locator('[data-import-summary]')).toContainText('0 cookies, 4 history entries, 3 extensions');
+      await expect(denied.locator('[data-import-summary]')).toContainText('0 cookies, 4 history entries, 46 bookmarks, 3 extensions');
       await closeSheet(s);
 
       const cancelled = await importThrough(s, { profileDir: 'Profile 1', cancelDuring: 'extensions' });
@@ -294,7 +295,7 @@ test('extension toggles load and unload at once; Remove closes the profile’s t
       await remove.click();
       await expect(confirm).toHaveCount(0);
       await expect(record).toHaveCount(0);
-      expect(profilesFile(s.maws.userData)).toEqual({ version: 1, profiles: [] });
+      expect(profilesFile(s.maws.userData)).toEqual({ version: 2, profiles: [] }); // cua #90: profiles.json version 2
       await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBeNull();
       expect(await suggest(s, DEFAULT, '')).toEqual([]);
       expect(existsSync(join(s.maws.userData, 'browser', 'maws-chrome-Default'))).toBe(false);
@@ -393,7 +394,7 @@ test('the consent with twenty extensions keeps Import on screen and scrolls its 
       await shootImport(s, 'consent');
       await importButton.click();
       const done = await report(s);
-      await expect(done.locator('[data-import-summary]')).toContainText(`4 cookies, 4 history entries, ${3 + extras.length} extensions`);
+      await expect(done.locator('[data-import-summary]')).toContainText(`4 cookies, 4 history entries, 46 bookmarks, ${3 + extras.length} extensions`);
       await expect(done.getByRole('button', { name: 'Done' })).toBeInViewport({ ratio: 1 });
       await shootImport(s, 'report');
       await closeSheet(s);

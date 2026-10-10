@@ -63,6 +63,40 @@ describe('tabs and windows', () => {
     expect(h.cdp(mine).attached).toBe(false);
   });
 
+  // cua #90 (the whole-branch review): an extension's options page MAWS opened as a tab runs in the extension's origin, with
+  // its storage, its background and its host permissions; the agent never names or reaches it, as it never reaches the
+  // extension's popups, background pages or service workers
+  it('never lists, names or leases an internal tab (an extension\'s options page); its replacement by an ordinary tab is an ordinary tab', async () => {
+    const h = harness();
+    const options = h.store.entry(h.store.open({
+      appSessionId: A, url: 'chrome-extension://nenbjdahllkkbfanbpfmmdacjencdfpg/options.html', select: true,
+      internal: { kind: 'extension', extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'MAWS probe extension · Options' },
+    }).tab.tabId)!;
+    const person = h.personTab(A, 'https://a.test/');
+    const a = await h.host(A);
+    expect((await a.request<{ id: number; url: string }[]>('tabs.query')).map((t) => [t.id, t.url])).toEqual([[1, 'https://a.test/']]);
+    expect((await a.request<{ tabId: number }[]>('debugger.getTargets')).map((t) => t.tabId)).toEqual([1]);
+    for (const tabId of [0, 2, 3]) {
+      await expect(a.request('tabs.get', { tabId })).rejects.toThrow(`No tab with id: ${tabId}`);
+      await expect(a.request('debugger.attach', { tabId })).rejects.toThrow(`No tab with id: ${tabId}`);
+    }
+    h.store.update(options.tab.tabId, { title: 'Options' });
+    await settle();
+    expect(a.notifications.filter((n) => n.method === 'tabs.updated')).toEqual([]);
+    expect(h.cdp(options).attached).toBe(false);
+    // Navigator.leaveInternal: a new ordinary tab opens, then the internal tab closes; the host never heard of it
+    const { tab } = h.store.open({ appSessionId: A, url: 'https://docs.test/help', select: true });
+    h.store.close(options.tab.tabId);
+    await settle();
+    expect(a.notifications.filter((n) => n.method === 'tabs.removed')).toEqual([]);
+    const listed = await a.request<{ id: number; url: string }[]>('tabs.query');
+    expect(listed.map((t) => t.url)).toEqual(['https://a.test/', 'https://docs.test/help']);
+    const replacement = listed.find((t) => t.url === 'https://docs.test/help')!;
+    expect(await a.request('debugger.attach', { tabId: replacement.id })).toEqual({ alreadyHeld: false });
+    expect(h.cdp(h.store.entry(tab.tabId)!).attached).toBe(true);
+    expect(h.cdp(person).attached).toBe(false);
+  });
+
   it('creates a tab in the session\'s panel unselected, reserved to the connection, in its group; windows are the app\'s', async () => {
     const h = harness();
     const person = h.personTab();

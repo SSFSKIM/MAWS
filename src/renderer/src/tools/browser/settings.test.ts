@@ -1,7 +1,7 @@
 // E4a (Task 3.5): the address field's search template comes from settings 11's browser section, live (X15).
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V12 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import { useSettings } from '../../stores/settings';
 import { useSearchUrl } from './settings';
 
@@ -14,7 +14,7 @@ describe('useSearchUrl', () => {
   });
 
   it('answers the setting, and follows a change', () => {
-    const at = (searchUrl: string) => ({ settings: { ...SETTINGS_DEFAULTS_V12, browser: { ...SETTINGS_DEFAULTS_V12.browser, searchUrl } }, resolvedTheme: 'light' as const });
+    const at = (searchUrl: string) => ({ settings: { ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, searchUrl } }, resolvedTheme: 'light' as const });
     useSettings.setState({ state: at('https://duckduckgo.com/?q=%s') });
     const { result } = renderHook(() => useSearchUrl());
     expect(result.current).toBe('https://duckduckgo.com/?q=%s');

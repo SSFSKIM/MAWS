@@ -1,8 +1,10 @@
 // The import service (E4b Design §1, §4 to §10, §13, §14): the inspection the consent sheet shows, and the run the
 // owner confirmed. One inspection and one run at a time, app-wide. The inspection stages Chrome's two stores into
 // `<userData>/browser/import/<uuid>/`, counts them and lists the profile's extensions in place; the run takes that
-// staging over and walks its phases in order: copying (the partition opened, its storage directory recorded), history,
-// keychain, cookies, verifying (the partitioned rows confirmed), extensions, cleaning. Each phase checks the abort
+// staging over and walks its phases in order: copying (the partition opened, its storage directory recorded; cua board
+// #90: the profile's picture written as its avatar), history,
+// keychain, cookies, verifying (the partitioned rows confirmed), bookmarks (cua board #90: read in place from the profile,
+// as every later sync reads it), extensions, cleaning. Each phase checks the abort
 // signal between rows, batches and extensions. A `done` run writes the profile's record once, at its end; a cancelled
 // or failed run writes none and rolls back whole (the partition is fresh at every start, Decision Log 2); the staging is
 // deleted on every exit. All of that lives in the run's one `finally`. Every dependency is injected (Task 2.5 wires
@@ -10,7 +12,7 @@
 // view's factory, and the extensions phase (extensions-loader.ts, Task 2.4).
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Session } from 'electron';
@@ -25,14 +27,17 @@ import {
   type ImportPhase,
   type ImportReport,
 } from '@shared/browser/import';
-import { partitionDirName, type ImportedProfile } from '@shared/browser/profiles';
+import { partitionDirName, type ImportedBookmarks, type ImportedProfile, type ProfileAvatar } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
+import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
 import type { BrowserHistoryStore } from '../../index/browser-history';
 import type { Partitions } from '../partition';
 import type { BrowserEmit } from '../tabs';
+import { AVATAR_FILE, avatarPng, readChromePicture, type AvatarImage, type PictureRead } from './avatar';
 import { importPartitionedCookies, type CreateImportView } from './chips-import';
 import { classifyHistoryRow, historyStoreCounts, readHistoryRows, type ImportedHistoryRow } from './chrome/history';
 import { cookieStoreCounts, readCookieRows } from './chrome/cookies';
+import { readChromeBookmarks, type BookmarksRead } from './chrome/bookmarks';
 import { inspectExtensions, type InspectedExtension } from './chrome/extensions';
 import { readChromeProfiles } from './chrome/local-state';
 import { importCookies, planCookies, type CookiePlan, type CookiesBlock } from './cookies-import';
@@ -71,6 +76,13 @@ export interface BrowserImportDeps {
   keychain: (signal: AbortSignal) => Promise<KeychainResult>; // readSafeStorageKey, bound to the environment
   createImportView: CreateImportView;
   extensions: ImportExtensions;
+  // cua #90: the mirror's store and its in-place read (chrome/bookmarks.ts by default)
+  bookmarks: Pick<BrowserBookmarksStore, 'replace' | 'removePartition'>;
+  readBookmarks?: (userDataDir: string, profileDir: string) => Promise<BookmarksRead>;
+  // cua #90: the avatar's picture decoder (Electron's `nativeImage.createFromBuffer`; without one the initial stands and
+  // nothing is read) and its in-place read (avatar.ts by default)
+  decodeImage?: (bytes: Buffer) => AvatarImage;
+  readPicture?: (userDataDir: string, profileDir: string) => Promise<PictureRead>;
   now?: () => number;
 }
 
@@ -157,9 +169,13 @@ export class BrowserImportService {
   private inspection: Inspection | null = null;
   private current: Run | null = null;
   private readonly now: () => number;
+  private readonly readBookmarks: (userDataDir: string, profileDir: string) => Promise<BookmarksRead>;
+  private readonly readPicture: (userDataDir: string, profileDir: string) => Promise<PictureRead>;
 
   constructor(private readonly deps: BrowserImportDeps) {
     this.now = deps.now ?? Date.now;
+    this.readBookmarks = deps.readBookmarks ?? readChromeBookmarks;
+    this.readPicture = deps.readPicture ?? readChromePicture;
   }
 
   // The run under way and its last phase, for `browser.import.list` (a window reloaded mid-run), the e2e seam and for
@@ -190,6 +206,7 @@ export class BrowserImportService {
         return rows;
       });
       const extensions = await inspectExtensions(profilePath);
+      const bookmarks = await this.readBookmarks(userDataDir, profileDir); // cua #90: counted, not kept; the run reads again
       const answer: BrowserImportInspection = {
         inspectionId: staging.id,
         profile,
@@ -197,6 +214,7 @@ export class BrowserImportService {
         history: history.ok ? { rows: history.rows } : { error: history.code },
         cookies: cookies.ok ? { rows: cookies.rows, ...cookieCounts } : { error: cookies.code },
         extensions: extensions.map((extension) => extension.candidate),
+        bookmarks: bookmarks.ok ? { count: bookmarks.urls } : null,
       };
       await this.dropInspection(); // a second inspection finished meanwhile: this one is the newer
       this.inspection = { id: staging.id, staging, userDataDir, answer, history, cookies, extensions };
@@ -218,7 +236,7 @@ export class BrowserImportService {
     if (this.deps.profiles.readOnly) throw new ImportRefused('profilesReadOnly'); // W-B review M8: before the Keychain
     const inspection = this.inspection;
     if (!inspection || inspection.id !== inspectionId) throw new ImportRefused('unknownInspection');
-    if (!categories.history && !categories.cookies && !categories.extensions) throw new ImportRefused('noCategory');
+    if (!categories.history && !categories.cookies && !categories.extensions && !categories.bookmarks) throw new ImportRefused('noCategory');
     // Nothing from the profile runs before the owner acknowledged the unverified files (Design §15).
     if (categories.extensions && !allowUnverifiedExtensions) throw new ImportRefused('unverified');
     const chosen: ChosenExtension[] = [];
@@ -275,7 +293,10 @@ export class BrowserImportService {
       history: null,
       cookies: null,
       extensions: null,
+      bookmarks: null,
     };
+    let bookmarks: ImportedBookmarks | null = null; // cua #90: the record's mirror state, once the phase ran
+    let avatar: ProfileAvatar = { kind: 'initials' }; // cua #90: the picture, once copying wrote it
     let ses: Session | null = null;
     let storageDirName = '';
     await nextTurn(); // `start` answers `{ importId }` before any event of the run
@@ -291,10 +312,16 @@ export class BrowserImportService {
         ses = null; // a session the guard refused is never rolled back: it may not be this profile's
         throw new RunFailure('partitionUnavailable');
       }
+      avatar = await this.importAvatar(inspection, partitionFolder); // cua #90
       progress('copying', 1, 1);
 
       if (categories.history && !signal.aborted) report.history = await this.importHistory(inspection.history, partition, signal, progress);
       if (categories.cookies && !signal.aborted) report.cookies = await this.importCookies(inspection.cookies, ses, partition, run, progress);
+      if (categories.bookmarks && !signal.aborted) {
+        const imported = await this.importBookmarks(inspection, partition, report.startedAt, progress);
+        report.bookmarks = imported.block;
+        bookmarks = imported.state;
+      }
       if (categories.extensions && !signal.aborted) {
         report.extensions =
           chosen.length === 0
@@ -319,7 +346,7 @@ export class BrowserImportService {
       report.finishedAt = this.iso();
       if (report.outcome === 'done') {
         try {
-          await this.deps.profiles.put(this.recordOf(report, inspection, storageDirName));
+          await this.deps.profiles.put(this.recordOf(report, inspection, storageDirName, bookmarks, avatar));
         } catch (error) {
           report.outcome = 'failed';
           report.failure = 'recordUnwritable';
@@ -374,6 +401,65 @@ export class BrowserImportService {
     return block();
   }
 
+  // cua #90: Bookmarks, read in place from the profile directory (the read every later sync makes) and written whole to
+  // the partition's rows. A read that fails, or an index that refuses the rows, is this category's error; the owner's
+  // consent stands on the record, so the next sync tries again.
+  private async importBookmarks(
+    inspection: Inspection,
+    partition: string,
+    consentedAt: string,
+    progress: Progress,
+  ): Promise<{ block: NonNullable<ImportReport['bookmarks']>; state: ImportedBookmarks }> {
+    progress('bookmarks', 0, 1);
+    const read = await this.readBookmarks(inspection.userDataDir, inspection.answer.profile.profileDir);
+    const at = this.iso();
+    const outcome = ((): { block: NonNullable<ImportReport['bookmarks']>; state: ImportedBookmarks } => {
+      const failed = (error: NonNullable<ImportedBookmarks['error']>, skipped = 0) => ({
+        block: { imported: 0, skipped, error },
+        state: { consentedAt, syncedAt: null, count: 0, error, errorAt: at },
+      });
+      if (!read.ok) return failed(read.error);
+      try {
+        this.deps.bookmarks.replace(partition, read.tree);
+      } catch (error) {
+        this.log({ kind: 'error', where: 'bookmarks', code: errorCode(error) });
+        return failed('indexUnavailable', read.skipped);
+      }
+      try {
+        this.deps.emit('browser.bookmarks.changed', { partition });
+      } catch (error) {
+        this.log({ kind: 'error', where: 'bookmarks_changed', code: errorCode(error) });
+      }
+      return { block: { imported: read.urls, skipped: read.skipped, error: null }, state: { consentedAt, syncedAt: at, count: read.urls, error: null, errorAt: null } };
+    })();
+    progress('bookmarks', 1, 1);
+    return outcome;
+  }
+
+  // cua #90: the profile's Google picture, read in place and written as the partition folder's 64 px avatar.png (the
+  // rollback and the removal delete that folder whole). Any failure leaves the initial and never fails the run; one that
+  // is not the plain absence of a picture logs its code.
+  private async importAvatar(inspection: Inspection, partitionFolder: string): Promise<ProfileAvatar> {
+    const initials: ProfileAvatar = { kind: 'initials' };
+    const decode = this.deps.decodeImage;
+    if (!decode) return initials;
+    const failed = (code: string) => {
+      this.log({ kind: 'error', where: 'avatar', code });
+      return initials;
+    };
+    try {
+      const read = await this.readPicture(inspection.userDataDir, inspection.answer.profile.profileDir);
+      if (!read.ok) return read.error === 'none' || read.error === 'missing' ? initials : failed(read.error);
+      const png = avatarPng(read.bytes, decode);
+      if (png === null) return failed('undecodable');
+      await mkdir(partitionFolder, { recursive: true });
+      await writeFile(join(partitionFolder, AVATAR_FILE), png);
+      return { kind: 'picture' };
+    } catch (error) {
+      return failed(errorCode(error));
+    }
+  }
+
   // Cookies (Design §5, §7, §8): the staged copy read, the Keychain asked once, every row decoded with the key, the key
   // zeroed at once, then the plan set into the partition. Only `allowed` goes on; the Keychain's own `cancelled` (the
   // abort killed the child) is a cancelled run.
@@ -419,6 +505,7 @@ export class BrowserImportService {
     const roots = [partitionFolder, realOrNull(partitionFolder)].filter((root): root is string => root !== null).map((root) => root + sep);
     const steps: [string, () => unknown][] = [
       ['history', () => this.deps.history.removePartition(partition)],
+      ['bookmarks', () => this.deps.bookmarks.removePartition(partition)], // cua #90
       [
         'extensions',
         () => {
@@ -483,9 +570,11 @@ export class BrowserImportService {
       report.cookies = emptyCookies('skipped', null, rows);
     }
     if (categories.extensions && report.extensions === null) report.extensions = [];
+    if (categories.bookmarks && report.bookmarks === null) report.bookmarks = { imported: 0, skipped: 0, error: null }; // cua #90
   }
 
-  private recordOf(report: ImportReport, inspection: Inspection, storageDirName: string): ImportedProfile {
+  private recordOf(report: ImportReport, inspection: Inspection, storageDirName: string, bookmarks: ImportedBookmarks | null, avatar: ProfileAvatar): ImportedProfile {
+    const { gaiaName, userName } = inspection.answer.profile;
     return {
       profileDir: report.profileDir,
       name: report.name,
@@ -495,6 +584,11 @@ export class BrowserImportService {
       userDataDir: inspection.userDataDir,
       extensions: report.extensions ?? [],
       report,
+      // cua #90: profiles.json version 2's fields
+      bookmarks,
+      gaiaName,
+      userName,
+      avatar,
     };
   }
 

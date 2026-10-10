@@ -149,3 +149,36 @@ describe('Favicons: fetch in order, sniff, bound, cache', () => {
     }
   });
 });
+
+// cua #90: the bookmarks bar's icons, from what the partition's pages already showed (never a fetch of its own)
+describe('Favicons: the icon a page origin showed', () => {
+  it('remembers the icon of the page it was resolved for, by origin and per partition, and answers it without a fetch', async () => {
+    const fetchIn = vi.fn(async () => response(ICO));
+    const favicons = new Favicons(fetchIn);
+    const icon = `data:image/x-icon;base64,${base64(ICO)}`;
+    expect(await favicons.resolve('persist:p', ['https://s.test/favicon.ico'], 'https://s.test/some/page?q=1')).toBe(icon);
+    expect(fetchIn).toHaveBeenCalledTimes(1);
+    expect(favicons.forOrigins('persist:p', ['https://s.test', 'https://other.test', 'not a url'])).toEqual({ 'https://s.test': icon });
+    expect(favicons.forOrigins('persist:q', ['https://s.test'])).toEqual({}); // another partition's pages showed nothing
+    expect(fetchIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets an origin whose page now has no icon, and keeps nothing for a lookup without a page', async () => {
+    let bytes: Uint8Array = PNG;
+    const favicons = new Favicons(async () => response(bytes));
+    await favicons.resolve('persist:p', ['https://s.test/a.png'], 'https://s.test/');
+    expect(Object.keys(favicons.forOrigins('persist:p', ['https://s.test']))).toEqual(['https://s.test']);
+    bytes = HTML;
+    await favicons.resolve('persist:p', ['https://s.test/b.html'], 'https://s.test/');
+    expect(favicons.forOrigins('persist:p', ['https://s.test'])).toEqual({});
+    await favicons.resolve('persist:p', ['https://t.test/a.png']);
+    await favicons.resolve('persist:p', ['https://u.test/a.png'], null);
+    expect(favicons.forOrigins('persist:p', ['https://t.test', 'https://u.test'])).toEqual({});
+  });
+
+  it('keeps at most FAVICON_CACHE_MAX origins, the least recently shown out first', async () => {
+    const favicons = new Favicons(async () => response(PNG));
+    for (let k = 0; k <= FAVICON_CACHE_MAX; k++) await favicons.resolve('persist:p', [`https://s${k}.test/i.png`], `https://s${k}.test/`);
+    expect(Object.keys(favicons.forOrigins('persist:p', ['https://s0.test', 'https://s1.test', `https://s${FAVICON_CACHE_MAX}.test`]))).toEqual(['https://s1.test', `https://s${FAVICON_CACHE_MAX}.test`]);
+  });
+});

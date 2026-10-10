@@ -36,7 +36,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function harness({ listeners = 1, leased = new Set<string>() }: { listeners?: number; leased?: Set<string> } = {}) {
+function harness({ listeners = 1, leased = new Set<string>(), staged = new Set<string>() }: { listeners?: number; leased?: Set<string>; staged?: Set<string> } = {}) {
   vi.useFakeTimers({ now: Date.parse('2026-10-07T09:00:00.000Z') });
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
@@ -55,7 +55,7 @@ function harness({ listeners = 1, leased = new Set<string>() }: { listeners?: nu
   const lines: string[] = [];
   const heldCalls: { tabId: string; type: string; message: string; callback: Callback }[] = [];
   const held = { holds: (tabId: string) => leased.has(tabId), hold: (entry: TabEntry, dialog: RunDialogInfo, callback: Callback) => void heldCalls.push({ tabId: entry.tab.tabId, type: dialog.dialogType, message: dialog.messageText, callback }) };
-  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line), held });
+  const dialogs = new PageDialogs({ store, emit, log: (line) => void lines.push(line), held, staged: (entry) => staged.has(entry.tab.tabId) });
   const open = () => {
     const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId)!;
     return { entry, wc: contents.at(-1)! };
@@ -229,6 +229,24 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     wc.dialog('alert', `${'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1)}😀tail`);
     h.place(entry);
     expect(h.notices()).toEqual([expect.objectContaining({ excerpt: 'x'.repeat(BROWSER_DIALOG_EXCERPT_MAX_CHARS - 1) })]);
+  });
+
+  // cua #90: Electron's box would belong to the hidden staging window the view is in for its cover's still
+  it('a placed tab whose view is in the staging window for its still is unplaced meanwhile: answered, told once it is out', () => {
+    const staged = new Set<string>();
+    const h = harness({ staged });
+    const { entry, wc } = h.open();
+    h.place(entry);
+    staged.add(entry.tab.tabId);
+    expect(wc.dialog('confirm', 'Leave?')).toHaveBeenCalledWith(false, '');
+    expect(wc.native).not.toHaveBeenCalled();
+    h.store.update(entry.tab.tabId, { title: 'still staged' });
+    expect(h.notices()).toEqual([]);
+    staged.delete(entry.tab.tabId);
+    h.store.update(entry.tab.tabId, { covered: false });
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: entry.tab.tabId, kind: 'dialogAnswered', dialogType: 'confirm', excerpt: 'Leave?', count: 1 }]);
+    wc.dialog('alert');
+    expect(wc.native).toHaveBeenCalledTimes(1); // out again: Electron's own
   });
 
   it('a released tab is unplaced too: its dialog is answered rather than raised over a window that does not show it', () => {

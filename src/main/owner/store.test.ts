@@ -1,4 +1,4 @@
-// The owner channel's two tables (the P2-C document, §10; index migration 7): per session the lane's override, the
+// The owner channel's two tables (the P2-C document, §10; index migration 8): per session the lane's override, the
 // watermark and the last decided launch with its resolved and observed style; per question and essential its state.
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';

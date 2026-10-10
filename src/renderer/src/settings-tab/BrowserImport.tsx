@@ -4,8 +4,10 @@
 // - "Chrome profile": Import a Chrome profile… opens the import sheet; while a run goes on (started here, in another
 //   window, or before a reload) the row says its step and Show reopens the running sheet. A run that ended cancelled
 //   or failed with no sheet showing it is offered beside the button, with Show, until a sheet shows its report.
-// - One group per imported record: its date, the report's summary with Show report, an On/Off toggle per extension
-//   (main loads or unloads it at once when the profile's partition is open; wallets start off), and Remove imported
+// - One group per imported record: its date, the report's summary with Show report (cua board #90: and, when its
+//   bookmarks were imported, Sync bookmarks now with the mirror's last read), an On/Off toggle per extension
+//   (main loads or unloads it at once when the profile's partition is open; wallets start off; cua #90: under a muted
+//   line saying what their popups cannot see here), and Remove imported
 //   profile behind its confirm sheet.
 //
 // The records and the run come from the import store (App.tsx connects it); the toggles live in `profiles.json`, never
@@ -13,12 +15,15 @@
 import { useState } from 'react';
 import type { ImportedExtension } from '@shared/browser/import';
 import { summaryWords } from '@shared/browser/import-summary';
-import type { ImportedProfile } from '@shared/browser/profiles';
+import type { ImportedBookmarks, ImportedProfile } from '@shared/browser/profiles';
+import { useNow } from '../app/use-now';
+import { syncLine } from '../tools/browser/chrome/profile';
+import { BROWSER_COPY } from '../tools/browser/copy';
 import { importDate, IMPORT_COPY } from '../tools/browser/import/copy';
 import { ImportSheet } from '../tools/browser/import/ImportSheet';
 import { RemoveSheet } from '../tools/browser/import/RemoveSheet';
 import { StatusChip } from '../tools/browser/import/Report';
-import { openImport, setExtension, showReport, useBrowserImport } from '../tools/browser/import/store';
+import { openImport, setExtension, showReport, syncBookmarks, useBrowserImport } from '../tools/browser/import/store';
 import { BROWSER } from './copy';
 import { Segment, Setting, TEXT_ACTION } from './parts';
 
@@ -70,11 +75,13 @@ export function BrowserImport() {
             <button type="button" className={TEXT_ACTION} disabled={running !== null} onClick={() => open(() => showReport(record.report))}>
               {BROWSER.showReport}
             </button>
+            {record.bookmarks !== null && <SyncBookmarks profileDir={record.profileDir} bookmarks={record.bookmarks} />}
             <button type="button" className={DANGER_ACTION} onClick={() => setRemoving(record)}>
               {BROWSER.remove}
             </button>
           </Setting>
           {record.extensions.length > 0 && <p className="m-0 mt-1 text-ui-sm font-medium text-fg-muted">{BROWSER.extensions}</p>}
+          {record.extensions.length > 0 && <p data-extension-popup-limit="" className="m-0 text-ui-sm text-fg-muted">{BROWSER.popupLimit}</p> /* cua #90 */}
           {record.extensions.map((extension) => (
             <ExtensionToggle key={extension.id} profileDir={record.profileDir} extension={extension} />
           ))}
@@ -82,6 +89,25 @@ export function BrowserImport() {
       ))}
       {sheet && <ImportSheet onClose={() => setSheet(false)} />}
       {removing && <RemoveSheet record={removing} onClose={() => setRemoving(null)} />}
+    </>
+  );
+}
+
+// cua #90: Sync bookmarks now, the last read's time (or why it failed) before it, as the profile popover says it
+function SyncBookmarks({ profileDir, bookmarks }: { profileDir: string; bookmarks: ImportedBookmarks }) {
+  const [syncing, setSyncing] = useState(false);
+  const line = syncLine(bookmarks, useNow());
+  const sync = async () => {
+    setSyncing(true);
+    await syncBookmarks(profileDir);
+    setSyncing(false);
+  };
+  return (
+    <>
+      {line && <span className={bookmarks.error === null ? 'text-fg-muted' : 'text-warning'}>{line}</span>}
+      <button type="button" className={TEXT_ACTION} disabled={syncing} onClick={() => void sync()}>
+        {syncing ? BROWSER_COPY.profile.syncing : BROWSER_COPY.profile.syncNow}
+      </button>
     </>
   );
 }

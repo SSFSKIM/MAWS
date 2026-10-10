@@ -3,10 +3,11 @@
 // a struck lock for http, centered as Codex's is; an empty tab shows the placeholder. Focused (a click, or main's
 // `focusAddress` for ⌘L pressed in the page) it holds the whole URL selected; typing opens the suggestions: the typed
 // address, then the partition's history (`browser.history.suggest`, 60 ms after the last keystroke, the newest query's
-// answer only). ↑ and ↓ move, Enter runs the highlighted row (the typed address by default), Esc puts the URL back and
-// leaves. What goes to main is always a parsed URL, never the typed text; a refused scheme raises the chrome's line and
-// keeps the text. A tab-less surface opens a tab for the address.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+// answer only; cua #90: an imported profile's bookmarks first, with the bookmark star). cua #90: an internal tab (an
+// extension's options page) shows "<extension name> · Options", read-only, with no suggestions; its URL is never drawn. ↑ and ↓ move, Enter runs the
+// highlighted row (the typed address by default), Esc puts the URL back and leaves. What goes to main is always a parsed
+// URL, never the typed text; a refused scheme raises the chrome's line and keeps the text. A tab-less surface opens a tab for the address.
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { displayUrl, resolveAddress } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -14,7 +15,7 @@ import { ipc } from '../../../ipc/client';
 import { navigate, openMainTab, openTab } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { holdCover } from '../covering';
-import { InsecureIcon, LockIcon } from '../icons';
+import { InsecureIcon, LockIcon, PuzzleIcon } from '../icons';
 import { useSearchUrl } from '../settings';
 import { raiseNotice } from '../store';
 import { optionId, Suggestions } from './Suggestions';
@@ -27,9 +28,41 @@ export interface AddressFieldProps {
   surface: 'panel' | 'main';
   tab: BrowserTab | null;
   inputRef: RefObject<HTMLInputElement | null>;
+  boxRef?: Ref<HTMLDivElement>; // cua #90: the field's slot, which the action bar measures
 }
 
-export function AddressField({ appSessionId, surface, tab, inputRef }: AddressFieldProps) {
+export function AddressField(props: AddressFieldProps) {
+  const internal = props.tab?.internal ?? null; // cua #90
+  return internal ? <InternalAddress title={internal.title} inputRef={props.inputRef} boxRef={props.boxRef} /> : <WebAddress {...props} />;
+}
+
+// cua #90: an internal tab's field: its title beside a puzzle piece, centred as an address is, read-only (⌘L still
+// focuses it; Esc leaves it); no URL, no suggestions.
+function InternalAddress({ title, inputRef, boxRef }: { title: string; inputRef: AddressFieldProps['inputRef']; boxRef: AddressFieldProps['boxRef'] }) {
+  return (
+    <div ref={boxRef} data-address-box="" className="relative min-w-0 flex-1 px-1">
+      <div data-address-internal="" className="relative flex h-7 items-center rounded-md border border-transparent px-2" title={title}>
+        <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-ui whitespace-nowrap">
+          <PuzzleIcon className="size-3.5 shrink-0 text-fg-muted" />
+          <span className="min-w-0 truncate text-fg">{title}</span>
+        </span>
+        <input
+          ref={inputRef}
+          readOnly
+          aria-label={BROWSER_COPY.address}
+          value={title}
+          spellCheck={false}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') event.currentTarget.blur();
+          }}
+          className="h-full w-full min-w-0 bg-transparent text-ui text-transparent caret-transparent outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+function WebAddress({ appSessionId, surface, tab, inputRef, boxRef }: AddressFieldProps) {
   const searchUrl = useSearchUrl();
   const listId = useId();
   const [draft, setDraft] = useState<string | null>(null); // the field's text while focused; null unfocused
@@ -117,7 +150,7 @@ export function AddressField({ appSessionId, surface, tab, inputRef }: AddressFi
 
   const display = displayUrl(url);
   return (
-    <div className="relative min-w-0 flex-1 px-1">
+    <div ref={boxRef} data-address-box="" className="relative min-w-0 flex-1 px-1">
       <div
         className={`relative flex h-7 items-center rounded-md border px-2 ${focused ? 'border-border-strong bg-bg' : 'border-transparent hover:bg-bg-hover'}`}
         title={focused ? undefined : url || undefined}

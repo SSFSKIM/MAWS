@@ -425,6 +425,71 @@ describe('TabStore: restore (G4) and the view hooks', () => {
   });
 });
 
+// cua #90: an extension's options page MAWS opened as a tab (its spec's "The popup view", options)
+describe('TabStore: internal tabs (cua #90)', () => {
+  const PROBE = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+  const OPTIONS = `chrome-extension://${PROBE}/options.html`;
+  const internal = { kind: 'extension' as const, extensionId: PROBE, title: 'MAWS probe · Options' };
+  const openOptions = (h: ReturnType<typeof harness>, select = true) =>
+    h.store.open({ appSessionId: A, url: OPTIONS, select, partition: 'persist:maws-chrome-Default', internal }).tab;
+
+  it('opens an internal tab at its extension page, marked, titled, in the partition asked', () => {
+    const h = harness();
+    const t = openOptions(h);
+    expect(t).toMatchObject({ url: OPTIONS, internal, title: 'MAWS probe · Options', partition: 'persist:maws-chrome-Default' });
+    expect(h.views[0]!.webContents.loadURL).toHaveBeenCalledWith(OPTIONS);
+    expect(open(h, 'https://a.test/').tab.internal).toBeNull();
+  });
+
+  it('is left out of the snapshot, and so of the next launch; a selection on it is kept as the neighbour its closing would select', () => {
+    const h = harness();
+    const page = open(h, 'https://a.test/').tab;
+    const options = openOptions(h);
+    expect(h.store.list(A).selected[A]).toBe(options.tabId);
+    let snapshot = h.store.snapshot();
+    expect(snapshot.tabs.map((tab) => tab.tabId)).toEqual([page.tabId]);
+    expect(snapshot.selected).toEqual({ [A]: page.tabId }); // the previous, none being next
+    const next = open(h, 'https://b.test/', { select: false }).tab;
+    snapshot = h.store.snapshot();
+    expect(snapshot.selected).toEqual({ [A]: next.tabId }); // the next first
+    h.store.close(page.tabId);
+    h.store.close(next.tabId);
+    expect(h.store.snapshot().selected).toEqual({ [A]: null }); // no ordinary tab left
+  });
+
+  it('with no tab the cap could unload, an internal tab is not kept, never left suspended on its extension\'s URL', () => {
+    const h = harness();
+    for (let i = 0; i < BROWSER_LOADED_TABS_MAX; i++) open(h, `https://${i}.test/`); // all still loading: no victim
+    const before = h.store.list(A).selected[A];
+    const t = openOptions(h);
+    expect(h.store.entry(t.tabId)).toBeUndefined();
+    expect(h.store.all().some((entry) => entry.tab.internal !== null || entry.tab.url.startsWith('chrome-extension:'))).toBe(false);
+    expect(h.store.list(A).selected[A]).toBe(before);
+    expect(h.notices().at(-1)).toEqual({ appSessionId: A, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
+  });
+
+  it('the cap closes an internal tab rather than suspending it: no empty-state tab is left', () => {
+    const h = harness();
+    const options = openOptions(h);
+    h.store.update(options.tabId, { loading: false });
+    h.tick(1000);
+    for (let i = 1; i < BROWSER_LOADED_TABS_MAX; i++) {
+      h.store.update(open(h, `https://${i}.test/`).tab.tabId, { loading: false });
+      h.tick(1000);
+    }
+    open(h, 'https://new.test/');
+    expect(h.store.entry(options.tabId)).toBeUndefined();
+    expect(h.views[0]!.webContents.close).toHaveBeenCalled();
+    expect(h.store.loadedCount()).toBe(BROWSER_LOADED_TABS_MAX);
+    // evict: an ordinary tab is suspended, an internal one closed
+    const other = openOptions(h, false);
+    expect(h.store.evict(other.tabId)).toBe('closed');
+    const page = h.store.all().find((entry) => entry.view && !entry.tab.internal)!;
+    expect(h.store.evict(page.tab.tabId)).toBe('suspended');
+    expect(page.tab.suspended).toBe(true);
+  });
+});
+
 describe('TabStore: adopting a page\'s window.open child (Design §14, Decision Log 24)', () => {
   // A createView that adopts the child webContents it is given, as view.ts does.
   function adopting() {

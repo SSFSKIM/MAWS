@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ImportReport } from './import';
-import { CANCELLED_REPORT, DONE_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../test/support/import-reports';
+import { BOOKMARKS_REPORT, CANCELLED_REPORT, DONE_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../test/support/import-reports';
 import { summaryWords } from './import-summary';
 
 describe('summaryWords (E4b Design §10: "N cookies, M history entries, K extensions · J skipped: reasons")', () => {
@@ -64,5 +64,15 @@ describe('summaryWords (E4b Design §10: "N cookies, M history entries, K extens
     expect(summaryWords({ ...DONE_REPORT, cookies: null, history: null, extensions })).toBe(
       "1 extension · 2 skipped: 1 extension couldn't be copied, 1 extension couldn't load",
     );
+  });
+
+  // cua #90
+  it('counts bookmarks after history, and the bookmarks the import left out among the skipped', () => {
+    expect(summaryWords(BOOKMARKS_REPORT)).toBe(
+      "4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open, 1 bookmark not imported",
+    );
+    const only = { ...DONE_REPORT, cookies: null, history: null, extensions: null };
+    expect(summaryWords({ ...only, bookmarks: { imported: 1, skipped: 0, error: null } })).toBe('1 bookmark');
+    expect(summaryWords({ ...only, bookmarks: { imported: 0, skipped: 3, error: 'indexUnavailable' } })).toBe('0 bookmarks · 3 skipped: 3 bookmarks not imported');
   });
 });

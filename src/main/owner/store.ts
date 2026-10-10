@@ -1,4 +1,4 @@
-// The owner channel's two tables (the P2-C document, §10; index migration 7). `owner_channel_sessions`: per session the
+// The owner channel's two tables (the P2-C document, §10; index migration 8). `owner_channel_sessions`: per session the
 // lane's override (`mods.setSessionOverride`; a fork and a side thread inherit their parent's), the watermark
 // (`enabled_at`, Design §5), the last decided launch (Design §2: desired, recorded, the flags passed, applied, the
 // resolved style) and the style the engine reported at that launch's first `session.init` (the mismatch check).

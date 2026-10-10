@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -8,9 +10,11 @@ vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fro
 
 const { CommandFailure } = await import('../ipc/router');
 const { TabStore } = await import('./tabs');
-const { registerBrowserHandlers } = await import('./register');
+const { mergeSuggestions, registerBrowserHandlers } = await import('./register');
 const { ViewManager } = await import('./view');
 const { Navigator } = await import('./navigation');
+const { BookmarkBar } = await import('./bookmarks/bar'); // cua #90
+const { ProfileAvatars } = await import('./profile-avatars'); // cua #90
 
 const A = 'App-A' as AppSessionId;
 
@@ -27,18 +31,32 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const views = { place: vi.fn(), cover: vi.fn(async () => {}) };
   const navigator = { navigate: vi.fn(() => true), zoom: vi.fn<(tabId: string) => number>(() => 1.1), find: vi.fn(), dismiss: vi.fn(), devtools: vi.fn() };
   const history = { suggest: vi.fn(() => [{ url: 'https://a.test/', title: 'A' }]) };
+  const bookmarks = { suggest: vi.fn((): { url: string; title: string | null }[] => []) }; // cua #90
   const downloads = { reveal: vi.fn(() => ({ revealed: true })) };
+  // cua #90: the bar's commands, a window for the sender, the favicon cache's origins
+  const bar = { open: vi.fn(), menu: vi.fn() };
+  const window = { id: 3 };
+  const windowOf = vi.fn((): unknown => window);
+  const favicons = { forOrigins: vi.fn(() => ({ 'https://a.test': 'data:image/png;base64,QQ==' })) };
   registerBrowserHandlers({
     store,
     views: makeViews?.(store) ?? views,
     navigator,
     downloads,
     history,
-    profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
+    bookmarks,
+    bar,
+    favicons,
+    windowOf: windowOf as never,
+    profiles: () => [
+      { profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', gaiaName: null, userName: null, avatar: { kind: 'initials' } },
+      { profileDir: 'Default', name: 'Person 1', partition: 'persist:maws-chrome-Default', importedAt: 't', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'picture' } },
+    ],
+    avatars: new ProfileAvatars(join(tmpdir(), 'maws-cua90-no-such-user-data')), // cua #90: no avatar.png anywhere
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
-  return { store, views, navigator, downloads, history, handlers, call };
+  return { store, views, navigator, downloads, history, bookmarks, bar, favicons, window, windowOf, handlers, call };
 }
 
 // What a handler threw, as the router's CommandFailure (undefined when it did not throw one).
@@ -60,8 +78,33 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       'browser.history.suggest',
       'browser.profiles.list', 'browser.view.place', 'browser.view.cover',
       'browser.control.handBack',
+      'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons', // cua #90
     ]);
   });
+
+  // cua #90 start
+  it('hands the bar\'s chip clicks and menus to the bar for a known tab, the menu with the sender\'s window', async () => {
+    const { UnknownBookmarkError } = await import('./bookmarks/bar');
+    const { call, bar, window, windowOf } = setup();
+    call('browser.bookmarks.open', { tabId: 'b_000000000001', nodeId: 4, how: 'newTab' });
+    expect(bar.open).toHaveBeenCalledWith('b_000000000001', 4, 'newTab');
+    call('browser.bookmarks.menu', { tabId: 'b_000000000001', request: { kind: 'overflow', hiddenFrom: 3 }, anchor: { x: 1, y: 2 } });
+    expect(bar.menu).toHaveBeenCalledWith('b_000000000001', { kind: 'overflow', hiddenFrom: 3 }, { x: 1, y: 2 }, window);
+    windowOf.mockReturnValueOnce(null);
+    call('browser.bookmarks.menu', { tabId: 'b_000000000001', request: { kind: 'folder', nodeId: 4 }, anchor: { x: 1, y: 2 } });
+    expect(bar.menu).toHaveBeenCalledTimes(1); // no window of the app's to pop it on
+    bar.open.mockImplementationOnce(() => {
+      throw new UnknownBookmarkError(4);
+    });
+    expect(failure(() => call('browser.bookmarks.open', { tabId: 'b_000000000001', nodeId: 4, how: 'current' }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown bookmark 4' });
+  });
+
+  it('answers the favicon cache\'s icons for the bar\'s origins', () => {
+    const { call, favicons } = setup();
+    expect(call('browser.bookmarks.favicons', { partition: DEFAULT_PARTITION, origins: ['https://a.test'] })).toEqual({ icons: { 'https://a.test': 'data:image/png;base64,QQ==' } });
+    expect(favicons.forOrigins).toHaveBeenCalledWith(DEFAULT_PARTITION, ['https://a.test']);
+  });
+  // cua #90 end
 
   it('browser.control.handBack returns any tab to idle; an unknown tab answers invalid_input', () => {
     const { call, store } = setup();
@@ -105,11 +148,19 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       navigator,
       downloads: { reveal: vi.fn() },
       history: { suggest: vi.fn(() => []) },
+      bookmarks: { suggest: vi.fn(() => []) },
+      // cua #90: the real bar over the store
+      bar: new BookmarkBar({ tabs: store, navigator, bookmarks: { tree: vi.fn() }, menus: { present: vi.fn() }, confirmOpenAll: vi.fn() }),
+      favicons: { forOrigins: vi.fn() },
+      windowOf: () => ({}) as never,
       profiles: () => [],
+      avatars: { list: () => [] },
       register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
     });
     const tabId = 'b_ffffffffffff';
     const inputs: [string, unknown][] = [
+      ['browser.bookmarks.open', { tabId, nodeId: 1, how: 'current' }], // cua #90
+      ['browser.bookmarks.menu', { tabId, request: { kind: 'folder', nodeId: 1 }, anchor: { x: 0, y: 0 } }], // cua #90
       ['browser.tabs.navigate', { tabId, to: 'reload' }],
       ['browser.tabs.zoom', { tabId, action: 'in' }],
       ['browser.tabs.find', { tabId, text: 'x' }],
@@ -125,7 +176,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
 
   it('suggests from the history, and nothing when the index fails', () => {
     const { call, history } = setup();
-    expect(call('browser.history.suggest', { partition: DEFAULT_PARTITION, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A' }] });
+    expect(call('browser.history.suggest', { partition: DEFAULT_PARTITION, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A', kind: 'history' }] });
     expect(history.suggest).toHaveBeenCalledWith(DEFAULT_PARTITION, 'a');
     history.suggest.mockImplementation(() => {
       throw new Error('index unavailable: busy');
@@ -137,6 +188,57 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       warned.mockRestore();
     }
   });
+
+  // cua #90 start: bookmarks beside history
+  it('suggests the partition’s bookmarks first (at most 3), then its history, and one failing store leaves the other', () => {
+    const { call, history, bookmarks } = setup();
+    const P = 'persist:maws-chrome-Default';
+    bookmarks.suggest.mockReturnValue([{ url: 'https://f1.test/', title: 'F1' }]);
+    expect(call('browser.history.suggest', { partition: P, query: 'f1' })).toEqual({
+      suggestions: [{ url: 'https://f1.test/', title: 'F1', kind: 'bookmark' }, { url: 'https://a.test/', title: 'A', kind: 'history' }],
+    });
+    expect(bookmarks.suggest).toHaveBeenCalledWith(P, 'f1', 3);
+    expect(history.suggest).toHaveBeenCalledWith(P, 'f1');
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      bookmarks.suggest.mockImplementation(() => {
+        throw new Error('index unavailable: busy');
+      });
+      expect(call('browser.history.suggest', { partition: P, query: 'a' })).toEqual({ suggestions: [{ url: 'https://a.test/', title: 'A', kind: 'history' }] });
+      bookmarks.suggest.mockReturnValue([{ url: 'https://f1.test/', title: 'F1' }]);
+      history.suggest.mockImplementation(() => {
+        throw new Error('index unavailable: busy');
+      });
+      expect(call('browser.history.suggest', { partition: P, query: 'f' })).toEqual({ suggestions: [{ url: 'https://f1.test/', title: 'F1', kind: 'bookmark' }] });
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  describe('mergeSuggestions', () => {
+    const rows = (prefix: string, n: number) => Array.from({ length: n }, (_, k) => ({ url: `https://${prefix}${k}.test/`, title: `${prefix}${k}` }));
+
+    it('puts at most 3 bookmarks above the history rows, 8 in all', () => {
+      const merged = mergeSuggestions(rows('b', 5), rows('h', 10));
+      expect(merged.map((row) => [row.kind, row.title])).toEqual([
+        ['bookmark', 'b0'], ['bookmark', 'b1'], ['bookmark', 'b2'],
+        ['history', 'h0'], ['history', 'h1'], ['history', 'h2'], ['history', 'h3'], ['history', 'h4'],
+      ]);
+    });
+
+    it('shows a bookmarked URL once, as the bookmark, and lets history fill the rows bookmarks leave', () => {
+      const history = [{ url: 'https://same.test/', title: 'Same page (history)' }, ...rows('h', 9)];
+      const merged = mergeSuggestions([{ url: 'https://same.test/', title: 'Same' }], history);
+      expect(merged).toHaveLength(8);
+      expect(merged.filter((row) => row.url === 'https://same.test/')).toEqual([{ url: 'https://same.test/', title: 'Same', kind: 'bookmark' }]);
+      expect(merged.slice(1).every((row) => row.kind === 'history')).toBe(true);
+    });
+
+    it('answers history alone when there are no bookmarks, unchanged but for its kind', () => {
+      expect(mergeSuggestions([], rows('h', 2))).toEqual(rows('h', 2).map((row) => ({ ...row, kind: 'history' })));
+    });
+  });
+  // cua #90 end
 
   it('hands placement and cover to the view manager with the sender, without waiting on the placeholders', () => {
     const { views, handlers } = setup();
@@ -183,7 +285,13 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(thrown?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
   });
 
-  it('lists the imported profiles by directory and name', () => {
-    expect(setup().call('browser.profiles.list', undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
+  // cua #90: with the account's names and the avatar (a picture whose file is gone falls back to the initial)
+  it('lists the imported profiles by directory and name, with the account’s names and the avatar', () => {
+    expect(setup().call('browser.profiles.list', undefined)).toEqual({
+      profiles: [
+        { profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } },
+        { profileDir: 'Default', name: 'Person 1', gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'initials', letter: 'P' } },
+      ],
+    });
   });
 });

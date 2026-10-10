@@ -8,6 +8,7 @@ import {
   BROWSER_SUGGESTIONS_MAX,
   BrowserPartitionSchema,
   BrowserTabSchema,
+  isExtensionPage,
   DEFAULT_PARTITION,
   profilePartition,
 } from './tab';
@@ -23,9 +24,24 @@ const TAB = {
   memoryKiB: null, placedIn: null, covered: false,
   createdAt: '2026-10-06T00:00:00.000Z', lastShownAt: '2026-10-06T00:00:00.000Z',
   agentBadge: null, // E13
+  internal: null, // cua #90
 } as const;
 
 describe('BrowserTab (E4a, the cross-child model)', () => {
+  it('cua #90: carries an internal tab\'s extension and title, or null', () => {
+    const internal = { kind: 'extension', extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'MAWS probe · Options' };
+    expect(BrowserTabSchema.parse({ ...TAB, internal }).internal).toEqual(internal);
+    expect(BrowserTabSchema.safeParse({ ...TAB, internal: { ...internal, extensionId: 'x' } }).success).toBe(false);
+    expect(BrowserTabSchema.safeParse({ ...TAB, internal: { ...internal, kind: 'settings' } }).success).toBe(false);
+    expect(BrowserTabSchema.safeParse({ ...TAB, internal: undefined }).success).toBe(false);
+  });
+
+  it('cua #90: isExtensionPage admits that extension\'s own pages only', () => {
+    const id = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+    expect(isExtensionPage(`chrome-extension://${id}/options.html`, id)).toBe(true);
+    for (const url of [`chrome-extension://${'a'.repeat(32)}/options.html`, `https://${id}/options.html`, 'not a url', `chrome-extension://${id}.evil/`]) expect(isExtensionPage(url, id), url).toBe(false);
+  });
+
   it('E13: carries an agent tab\'s badge, bounded, or null', () => {
     expect(BrowserTabSchema.parse({ ...TAB, agentBadge: 'agent' }).agentBadge).toBe('agent');
     expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: 'x'.repeat(41) }).success).toBe(false);
