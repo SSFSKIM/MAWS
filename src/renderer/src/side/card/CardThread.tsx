@@ -9,7 +9,7 @@
 // Side pane or a main tab draws the thread (one place draws a session with an input), and publishes its thread while on
 // screen, so the unread rule and attention navigation count it as the Side pane's.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { failureOf, useSetup } from '../../sessions/store';
@@ -26,6 +26,7 @@ import { openSideThread } from '../actions';
 import { SIDE_COPY } from '../copy';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { CardFrame } from './CardHost';
+import { useDeliveredReplies } from './delivered'; // P2-F L121
 import { closeCard, hideCardThread, showCardThread, type OpenCard } from './store';
 import { needsYouOf, replyOutcomeOf, threadStartOf } from './thread';
 import './card.css';
@@ -75,8 +76,9 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
     return () => hideCardThread(child);
   }, [visible, parent, child]);
 
-  const actions = useCardActions(card, frame);
-  const reply = useReply(child);
+  const replies = useDeliveredReplies(child); // P2-F L121
+  const actions = useCardActions(card, frame, replies.delivered);
+  const reply = useReply(child, replies.track);
 
   const setupCard = useSetup((s) => s.cards.get(child));
   const setupFailed = useSetup((s) => failureOf(s, child) !== null);
@@ -159,8 +161,9 @@ function Echo({ text }: { text: string }) {
 }
 
 // The thread's artifact row opening the card's own record shows that version in the card's viewer (null for the latest,
-// so the viewer keeps following new ones); any other record goes the registered way (the panel's tool).
-function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptActions> {
+// so the viewer keeps following new ones); any other record goes the registered way (the panel's tool). P2-F L121: a
+// reply of this card's the engine took is marked "Sent to Claude" on its row.
+function useCardActions(card: OpenCard, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
     showVersion.current = frame.showVersion;
@@ -178,14 +181,16 @@ function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptAct
         const latest = lookup?.status === 'ready' ? (lookup.record?.versions.length ?? null) : null;
         show(version === undefined || version === latest ? null : version);
       },
+      userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
     }),
-    [target],
+    [target, delivered],
   );
 }
 
 // The Reply field: Enter sends (Shift+Enter breaks a line, a composition keeps its Enter), through the seam; a host
-// error thrown by the send reads as a refusal with its message. No other send is taken while one is in flight.
-function useReply(child: AppSessionId) {
+// error thrown by the send reads as a refusal with its message. No other send is taken while one is in flight. A reply
+// the seam took is handed to `delivered` to watch (P2-F L121).
+function useReply(child: AppSessionId, delivered: (result: HumanPromptResult) => void) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -208,6 +213,7 @@ function useReply(child: AppSessionId) {
       setRefusal(outcome.reason);
       return;
     }
+    delivered(result);
     setText('');
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

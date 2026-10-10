@@ -37,6 +37,9 @@ export interface TranscriptActions {
   // E4c start: a browser action row's Open tab (tools/browser/agent/actions.ts, registered from App.tsx's E4c block)
   openBrowserTab(appSessionId: AppSessionId, tabId: string): void; // the Browser tool on that tab
   // E4c end
+  // P2-F L121: a mark under a user row that its mount knows of (the comment card's "Sent to Claude" on a reply the engine
+  // took); none when omitted
+  userRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,

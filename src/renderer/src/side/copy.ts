@@ -40,6 +40,7 @@ export const SIDE_COPY = {
     starting: 'Starting…',
     retry: 'Retry',
     replyRefused: 'The reply was not sent', // a refusal the seam gave no reason for
+    sentToClaude: 'Sent to Claude', // P2-F L121: a reply's row once the engine took it (Desktop's mark)
     openInSidePane: 'Open in Side pane',
     openAsTab: 'Open as tab',
     // the needs-you strip above Reply

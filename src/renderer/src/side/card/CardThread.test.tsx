@@ -28,7 +28,7 @@ import { resetSetupStore, trustState } from '../../test-support/setup-intents';
 import { deliverables, lookupKey } from '../../tools/deliverables/store';
 import { openCommentComposer, registerCommentComposer } from '../../tools/code/anchor/anchor';
 import { registerRequestRenderer, registerTranscriptActions, useTranscriptStore } from '../../transcript';
-import { builder, request, tool } from '../../transcript/model/test-events';
+import { builder, request, tool, uuid } from '../../transcript/model/test-events';
 import { SIDE_TOOL_ID } from '../actions';
 import { openComment, registerSidePane } from '../register';
 import { showSideChild, sidePaneOf, useSidePane } from '../store';
@@ -265,6 +265,42 @@ describe('Reply through the human send seam', () => {
     push(b.events);
     await waitFor(() => expect(heldBubble()).toBeNull());
     expect(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!.textContent).toContain('Also the subtitle');
+  });
+
+  // L121 (P2-F): Desktop's "Sent to Claude" on the reply's row, by X22's delivered rule (the engine's `started` for the
+  // uuid beside the host's own row, or a replayed one), never by the host's optimistic write alone
+  it('marks a sent reply’s row “Sent to Claude” once the engine starts it, and not before', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false, messageUuid: uuid('t2') });
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await waitFor(() => expect(replyField().value).toBe(''));
+    const b = threadTurn();
+    b.turn('t2', 'Also the subtitle');
+    push(b.events.slice(-2)); // the host's own row: not delivered yet
+    const replyRow = () => within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!;
+    await waitFor(() => expect(replyRow().textContent).toContain('Also the subtitle'));
+    await act(async () => {});
+    expect(replyRow().textContent).not.toContain('Sent to Claude');
+    push([b.emit('command.lifecycle', { commandUuid: uuid('t2'), state: 'started' })]);
+    await waitFor(() => expect(replyRow().textContent).toContain('Sent to Claude'));
+    const rows = within(card()!).getAllByRole('region', { name: 'Your message' });
+    expect(rows[0]!.textContent, 'the comment the card did not send this time carries no mark').not.toContain('Sent to Claude');
+  });
+
+  it('a queued reply is marked once the host submits it under its minted uuid and the engine starts it', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'queued', started: false, queueId: 'q3' });
+    await userEvent.type(replyField(), 'Later then{Enter}');
+    await waitFor(() => expect(replyField().value).toBe(''));
+    const entry = { queueId: 'q3', appSessionId: child, content: 'Later then', createdAt: new Date().toISOString(), messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, entries: [{ ...entry, state: 'queued' }] }));
+    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, entries: [{ ...entry, state: 'submitting', messageUuid: uuid('t3'), submittedAt: new Date().toISOString() }] }));
+    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE }));
+    const b = threadTurn();
+    b.turn('t3', 'Later then');
+    b.emit('command.lifecycle', { commandUuid: uuid('t3'), state: 'started' });
+    push(b.events.slice(-3));
+    await waitFor(() => expect(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!.textContent).toContain('Sent to Claude'));
   });
 
   // P2-A's final shape: the seam starts a released thread first and then sends, so a started reply is already the host's

@@ -50,7 +50,8 @@ export function UserRow({ row }: { row: UserRowData }) {
   const content = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
   const files = row.attachments.filter((a) => a.kind !== 'text');
-  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : null;
+  // P2-F L121: the mount's own mark (the card's "Sent to Claude") stands where no caption already says the row's state
+  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
 
   // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
   // measurement is this mount's, so an open bubble always offers Show less (a virtualiser remount resets the
