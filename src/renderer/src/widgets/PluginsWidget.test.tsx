@@ -1441,6 +1441,16 @@ describe('plugins widget: Browse', () => {
     expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['marketplaces']);
     expect(warnings()[0].textContent).toContain("Couldn't load your marketplaces.");
     expect(warnings()[0].textContent).toContain('marketplaces unreadable');
+    // Installed alone: without the marketplaces the installed identities cannot be joined, so no empty result is claimed
+    // (review round 1)
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Not installed' }));
+    fireEvent.keyDown(screen.getAllByRole('menuitemcheckbox')[0], { key: 'Escape' });
+    expect(section('browse').querySelector('[data-browse-card]')).toBeNull();
+    expect(within(section('browse')).queryByText('Nothing matches these filters.')).toBeNull();
+    expect(within(section('browse')).queryByText('Nothing to browse yet. Add a marketplace to see what it offers.')).toBeNull();
+    const unknown = section('browse').querySelector<HTMLElement>('[data-browse-unknown]')!;
+    expect(unknown.textContent).toContain("Can't say what matches until the lists above are read.");
     refuse = false;
     const asked = invoked('marketplaces.list').length;
     fireEvent.click(within(warnings()[0]).getByRole('button', { name: 'Retry' }));
@@ -1454,6 +1464,28 @@ describe('plugins widget: Browse', () => {
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['installed']));
     expect(warnings()[0].textContent).toContain('Path does not exist: /nope · showing the last value it reported');
+  });
+
+  it('no cards while the marketplaces are unread is not "nothing to browse": the body says it cannot tell, with Retry (review round 1 of D scalpel-3#1)', async () => {
+    let refuse = true;
+    backend.script('marketplaces.list', () => {
+      if (refuse) throw new WidgetBackendError({ code: 'internal', message: 'marketplaces unreadable' });
+      return { marketplaces: [official] };
+    });
+    backend.script('plugins.available', () => ({ plugins: [] }));
+    await ready();
+    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
+    const unknown = await waitFor(() => {
+      const shown = section('browse').querySelector<HTMLElement>('[data-browse-unknown]');
+      expect(shown).toBeTruthy();
+      return shown!;
+    });
+    expect(within(section('browse')).queryByText('Nothing to browse yet. Add a marketplace to see what it offers.')).toBeNull();
+    expect(within(section('browse')).queryByText('Nothing matches these filters.')).toBeNull();
+    refuse = false;
+    fireEvent.click(within(unknown).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(card('code-review@claude-plugins-official')).toBeTruthy());
+    expect(section('browse').querySelector('[data-browse-unknown]')).toBeNull();
   });
 
   it('a zero install count is never shown, and Most popular is not offered when 0 is the only count', async () => {

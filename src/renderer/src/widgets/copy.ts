@@ -480,6 +480,7 @@ export const LIBRARY = {
   showAll: 'Show all plugins',
   failed: "Couldn't load your plugins.",
   marketplacesFailed: "Couldn't load your marketplaces.", // Browse: the read its sections and installed cards join
+  browseUnknown: "Can't say what matches until the lists above are read.", // Browse empty while a joined read failed
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
   // a row

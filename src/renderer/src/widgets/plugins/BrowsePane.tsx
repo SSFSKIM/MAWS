@@ -7,7 +7,9 @@
 // while the first read runs; "Couldn't load the plugins to browse." with the read's words and Retry; a later failed read
 // keeps the last cards with one line saying so (E8's rule); "Nothing matches these filters." with Reset filters. The
 // cards join two more reads (the installed list's Installed labels and cards, the marketplaces' sections and joins): a
-// failure of either says so above the grid with its own Retry, since the grid alone cannot show what it lacks. An
+// failure of either says so above the grid with its own Retry, since the grid alone cannot show what it lacks; and
+// while either has no answer, an empty result is not established, so the body claims none (no "Nothing to browse",
+// no "Nothing matches"): it waits while the read runs, and says it cannot tell, with Retry, once it failed. An
 // install whose card the next read no longer offers keeps its result above the grid, as does an uninstall from an
 // installed card's detail, which returns here once the installation leaves the list. The pane stays mounted beneath an
 // open detail and returns with its scroll and focus.
@@ -96,6 +98,8 @@ export function BrowsePane({ read, cards, installed, joins, view, hidden, onOpen
   // a change whose installation left the installed list (an uninstall): no card hosts an installed key's result
   const listed = installed ? new Set(installed.map(installedKey)) : null;
   const uninstalled = listed ? [...ops.entries.keys()].filter((key) => key.startsWith(INSTALLED_PREFIX) && !listed.has(key)) : [];
+  // the joins with no answer: the cards may lack what they add, so no empty result is established without them
+  const unjoined = joins.filter((join) => !join.read.data);
   const reset = () => useLibraryStore.setState((s) => ({ browse: { ...s.browse, search: '', status: { installed: true, notInstalled: true }, source: null } }));
 
   let body: ReactNode;
@@ -112,6 +116,19 @@ export function BrowsePane({ read, cards, installed, joins, view, hidden, onOpen
       ) : (
         <Placeholders />
       );
+  } else if ((cards.length === 0 || view.sections.length === 0) && unjoined.length > 0) {
+    body = unjoined.some((join) => join.read.state === 'error') ? (
+      <Centered role="status">
+        <div data-browse-unknown className="flex flex-col items-center gap-2">
+          <p className="m-0 max-w-sm text-ui text-fg-muted">{L.browseUnknown}</p>
+          <button type="button" className={SECONDARY} onClick={() => unjoined.forEach((join) => join.onRetry())}>
+            {L.retry}
+          </button>
+        </div>
+      </Centered>
+    ) : (
+      <Placeholders />
+    );
   } else if (cards.length === 0) {
     body = (
       <Centered>
