@@ -18,7 +18,9 @@
 //   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles, and no
 //   withdrawal a complete record shows pending explains, is read from the transcript, and what that cannot settle reads
 //   `unconfirmed`, never a guess; that verdict stands at later reads while a whole record shows nothing new of the
-//   answer. A read that fails leaves the session waiting, and is tried again after a backoff or at the next reconnect.
+//   answer. A read that fails leaves the session waiting, and is tried again after a backoff or at the next reconnect;
+//   after three failed transcript reads in a row an answer waiting on them shows `unconfirmed` (not stored) until a read
+//   succeeds and settles it as it would have at once.
 // - Legacy recognition. A human prompt the engine took that answers `Answering "<head>": …` settles the one question of
 //   the session with that head (an answer given in a terminal through the doperpowers mod, or one whose report never
 //   arrived), unless the prompt is itself a member of an answer. While the session waits for its recovery read, whose
@@ -54,6 +56,9 @@ const RECENT_MAX = 2048; // the prompts and user messages remembered per session
 // A failed recovery read is tried again after this, doubling up to the cap, while the host streams (and at every reconnect).
 const RECOVERY_RETRY_MS = 1000;
 const RECOVERY_RETRY_MAX_MS = 60_000;
+// After this many failed transcript reads in a row, an answer whose confirmation waits on them shows `unconfirmed`, in
+// memory only: confirmation is no longer in sight, and the reads go on at the same cadence (L158, the architect's ruling).
+const UNREADABLE_AFTER = 3;
 
 export interface OwnerChannelServiceDeps {
   store: OwnerChannelStore;
@@ -338,7 +343,7 @@ export class OwnerChannelService {
         on, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
       },
-      marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId))),
+      marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId), this.unreadable(appSessionId, mark.id as MarkId))),
     };
   }
 
@@ -545,12 +550,14 @@ export class OwnerChannelService {
         (taken) => {
           for (const uuid of unknown) live.checking.delete(uuid);
           if (!live.answers.get(markId)?.includes(answer)) return; // settled meanwhile
+          answer.failedReads = 0;
           settleUnknown(answer, unknown, taken, this.now());
           this.persist(appSessionId, markId);
           this.changed(appSessionId);
         },
         (error: unknown) => {
           for (const uuid of unknown) live.checking.delete(uuid);
+          this.readFailed(appSessionId, [answer]);
           this.log(`${appSessionId}: the transcript could not be read; its answers wait for the next read: ${messageOf(error)}`);
           this.recovering.add(appSessionId);
           this.retryLater(appSessionId);
@@ -583,6 +590,7 @@ export class OwnerChannelService {
     if (connection !== this.connection) return;
     this.retries.delete(appSessionId);
     this.recovering.delete(appSessionId);
+    for (const answers of live.answers.values()) for (const answer of answers) answer.failedReads = 0; // every read succeeded
     // an answer reported while the read was out takes the log now (an event the fold applied is skipped by its id)
     const seen = live.log.map((entry) => entry.event);
     for (const answers of live.answers.values()) for (const answer of answers) seen.forEach((event, i) => applyEvent(answer, event, () => seen.slice(0, i)));
@@ -617,13 +625,19 @@ export class OwnerChannelService {
     const withdrawals = new Set(history.complete ? events.flatMap((e) => (e.kind === 'queue.transition' && e.action === 'withdraw' && e.messageUuid !== null ? [e.messageUuid as string] : [])) : []);
     const placed = (member: AnswerMember) => shown.has(member.id) || (member.life === 'withdrawing' && withdrawals.has(member.id));
     const reads: Promise<() => void>[] = [];
+    const failed = new Set<Answer>(); // the answers a transcript read failed for
+    const evidence = (answer: Answer, uuids: readonly MessageUuid[]) =>
+      this.deps.transcriptEvidence(appSessionId, uuids).catch((error: unknown) => {
+        failed.add(answer);
+        throw error;
+      });
     for (const answer of all()) {
       if (statusOf(answer) === 'delivered') continue;
       for (const member of answer.members) if ((member.life === 'alive' || member.life === 'unknown') && shown.has(member.id)) member.life = 'alive';
       // an exit's uncertain submission is read from the transcript within the fold, so a read that fails keeps the gate
       // closed and is tried again with the fold
       const unknown = answer.members.filter((m) => m.kind === 'uuid' && m.life === 'unknown').map((m) => m.id as MessageUuid);
-      if (unknown.length > 0) reads.push(this.deps.transcriptEvidence(appSessionId, unknown).then((taken) => () => settleUnknown(answer, unknown, taken, this.now())));
+      if (unknown.length > 0) reads.push(evidence(answer, unknown).then((taken) => () => settleUnknown(answer, unknown, taken, this.now())));
       // a member still alive by the record but placed by neither the record's end nor the snapshot: what became of it is
       // read from the transcript, and an answer it cannot settle reads unconfirmed (an entry removed from a saved queue
       // no process held, which writes no row, for one)
@@ -638,13 +652,33 @@ export class OwnerChannelService {
       answer.unconfirmed = false;
       const uuids = unsettled.filter((m) => m.kind === 'uuid').map((m) => m.id as MessageUuid);
       reads.push(
-        (uuids.length === 0 ? Promise.resolve(null) : this.deps.transcriptEvidence(appSessionId, uuids)).then((taken) => () => {
+        (uuids.length === 0 ? Promise.resolve(null) : evidence(answer, uuids)).then((taken) => () => {
           if (taken !== null) answer.deliveredAt = this.now();
           else answer.unconfirmed = true;
         }),
       );
     }
-    for (const settle of await Promise.all(reads)) settle();
+    const outcomes = await Promise.allSettled(reads);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (rejected !== undefined) {
+      this.readFailed(appSessionId, [...failed]);
+      throw rejected.reason;
+    }
+    for (const outcome of outcomes) if (outcome.status === 'fulfilled') outcome.value();
+  }
+
+  // Transcript reads for these answers' confirmation failed: once one has failed UNREADABLE_AFTER times in a row, the
+  // session's state is stated again (its card now reads unconfirmed).
+  private readFailed(appSessionId: AppSessionId, answers: readonly Answer[]): void {
+    let crossed = false;
+    for (const answer of answers) crossed = ++answer.failedReads === UNREADABLE_AFTER || crossed;
+    if (crossed) this.changed(appSessionId);
+  }
+
+  // Whether a question's answer on its way, the one its card reads, waits on a transcript that keeps failing to be read.
+  private unreadable(appSessionId: AppSessionId, markId: MarkId): boolean {
+    const answers = this.live.get(appSessionId)?.answers.get(markId);
+    return answers !== undefined && (settleAnswers(answers).open.at(-1)?.failedReads ?? 0) >= UNREADABLE_AFTER;
   }
 
   private retryLater(appSessionId: AppSessionId): void {
@@ -731,7 +765,7 @@ function settleUnknown(answer: Answer, unknown: readonly MessageUuid[], taken: M
 }
 
 // A question's state as main reports it (src/shared/owner/state.ts).
-function ownerMarkOf(mark: OwnerMarkRow, unsent: Unsent | undefined): OwnerMark {
+function ownerMarkOf(mark: OwnerMarkRow, unsent: Unsent | undefined, unreadable: boolean): OwnerMark {
   const base = { id: mark.id as MarkId, kind: mark.kind, anchor: { messageUuid: mark.messageUuid as MessageUuid, blockIndex: mark.blockIndex, span: mark.span }, head: mark.head, at: mark.at, item: mark.item };
   if (mark.kind === 'essential') return { ...base, essential: { state: mark.state === 'read' || mark.state === 'retired' ? mark.state : 'unread', readAt: mark.readAt } };
   let question: QuestionState;
@@ -739,7 +773,8 @@ function ownerMarkOf(mark: OwnerMarkRow, unsent: Unsent | undefined): OwnerMark 
     case 'queued':
     case 'unconfirmed': {
       const shown = mark.answerAttempts.at(-1); // the newest answer, on its way (never a legacy one: it is born taken)
-      question = { state: mark.state, text: shown?.text ?? '', origin: shown?.origin === 'reply' ? 'reply' : 'answer', members: shown?.members ?? [] };
+      // a queued answer whose confirmation waits on a transcript that keeps failing to be read shows unconfirmed (L158)
+      question = { state: mark.state === 'queued' && unreadable ? 'unconfirmed' : mark.state, text: shown?.text ?? '', origin: shown?.origin === 'reply' ? 'reply' : 'answer', members: shown?.members ?? [] };
       break;
     }
     case 'delivered':

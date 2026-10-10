@@ -804,7 +804,7 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     await vi.waitFor(() => expect(t.question(q).state).toBe('delivered'));
   });
 
-  it('a transcript that cannot be read leaves an answer the history cannot settle queued, never unconfirmed, until a read succeeds', async () => {
+  it('a transcript that cannot be read leaves an answer the history cannot settle queued, then shows it unconfirmed after three failed reads (not stored), until a read succeeds', async () => {
     const t = await harness();
     const q = t.ask('Which backend?');
     t.sim.turn = true;
@@ -819,11 +819,42 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     t.sim.listening = true;
     const file = transcript;
     transcript = dir.path;
-    await t.service.hostStreaming();
-    await t.service.settled();
+    await t.service.hostStreaming(); // the first read fails: confirmation is still possible
+    expect(t.evidenceReads).toHaveLength(1);
     expect(t.question(q)).toMatchObject({ state: 'queued', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
-    transcript = file;
+    // the retries fail too (the cadence unchanged): after three failed reads the answer reads unconfirmed, and says so
     await vi.waitFor(() => expect(t.question(q).state).toBe('unconfirmed'));
+    expect(t.evidenceReads.length).toBeGreaterThanOrEqual(3);
+    expect(t.states.at(-1)!.marks.find((m) => m.id === q)!.question).toMatchObject({ state: 'unconfirmed', members: [{ kind: 'uuid', id: messageUuid, life: 'alive' }] });
+    // shown, not stored: the table keeps the answer queued and its not-taken verdict unset, so the reads go on
+    expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'queued', answerAttempts: [expect.objectContaining({ unconfirmed: false })] });
+    const reads = t.evidenceReads.length;
+    await vi.waitFor(() => expect(t.evidenceReads.length).toBeGreaterThan(reads));
+    transcript = file;
+    t.taken(messageUuid); // a later read succeeds: it confirms the answer as it would have at once
+    await vi.waitFor(() => expect(t.question(q).state).toBe('delivered'));
+  });
+
+  it('a later read that succeeds settles an answer shown unconfirmed for failed reads as it would have at once: not taken, the verdict', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    await t.restart();
+    t.sim.listening = false;
+    await t.sim.exit('crash');
+    await t.sim.launch();
+    t.sim.launches.splice(0, t.sim.launches.length - 1);
+    t.sim.historyComplete = false;
+    t.sim.listening = true;
+    const file = transcript;
+    transcript = dir.path;
+    await t.service.hostStreaming();
+    await vi.waitFor(() => expect(t.question(q).state).toBe('unconfirmed'));
+    transcript = file;
+    await vi.waitFor(() => expect(index.ownerChannel.mark(q)).toMatchObject({ state: 'unconfirmed', answerAttempts: [expect.objectContaining({ unconfirmed: true })] }));
+    expect(t.question(q).state).toBe('unconfirmed');
   });
 
   it('a restart restores open answers from the table and folds the history before anything else', async () => {

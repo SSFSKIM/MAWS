@@ -27,6 +27,9 @@ export interface Answer {
   deliveredAt: string | null;
   failed: { reason: string } | null; // the last refused send (in memory only)
   reportedAt: string; // when main learnt of it: the recovery read starts a window before it
+  // the transcript reads for its confirmation that failed in a row (in memory only; a read that succeeds clears it):
+  // after a few, the answer shows `unconfirmed` without storing it (the service's UNREADABLE_AFTER; L158)
+  failedReads: number;
   readonly applied: Set<string>; // the event ids already applied (a log replay and a recovery fold overlap)
   readonly droppedWhileWithdrawing: Set<string>; // uuids the engine cancelled while the host withdrew them
   readonly ended: Set<string>; // uuids the engine itself ended (discarded, refused, cancelled unasked): no row revives them
@@ -53,7 +56,7 @@ export interface StoredAnswer {
 }
 
 export function newAnswer(seed: StoredAnswer): Answer {
-  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: seed.deliveredAt ?? null, failed: null, applied: new Set(), droppedWhileWithdrawing: new Set(), ended: new Set() };
+  return { ...seed, members: seed.members.map((member) => ({ ...member })), deliveredAt: seed.deliveredAt ?? null, failed: null, failedReads: 0, applied: new Set(), droppedWhileWithdrawing: new Set(), ended: new Set() };
 }
 
 export const storedOf = (answer: Answer): StoredAnswer => ({
