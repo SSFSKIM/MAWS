@@ -1,0 +1,140 @@
+P2-F gates, stage postdebt, head ad89b580 (ad89b580914efa9571537f1872c9cdd7329ea921)
+started 2026-10-10T10:48:07Z; load { 9.01 9.69 10.62 }; front: ASN:0x0-0x8d6bd63:
+steps: typecheck lint test --maxWorkers=4 test:probes build e2e e2e:transcript e2e:terminal e2e:panel e2e:c7 e2e:voice e2e:code e2e:agents e2e:widgets e2e:settings e2e:c12 e2e:tools e2e:scm e2e:side e2e:deliverables e2e:supervisor e2e:browser e2e:browser-comment e2e:browser-import e2e:browser-cua e2e:browser-chrome e2e:to-human e2e:available
+
+== typecheck: exit 0, 59 s, eligible: load 9.01 after 0s
+== lint: exit 0, 32 s, eligible: load 11.31 after 0s
+== test --maxWorkers=4: exit 0, 231 s, eligible: load 11.13 after 0s
+    Test Files  811 passed | 1 skipped (812)
+         Tests  11537 passed | 1 skipped (11538)
+== test:probes: exit 0, 1 s, eligible: load 15.04 after 0s
+   # tests 217
+   # pass 217
+   # fail 0
+== build: exit 0, 30 s, eligible: load 15.04 after 0s
+   ✓ built in 1.74s
+   ✓ built in 42ms
+   ✓ built in 27.34s
+== e2e: exit 0, 258 s, eligible: load 16.71 after 0s
+     142 skipped
+     64 passed (4.3m)
+== e2e:transcript: exit 0, 262 s, eligible: load 14.25 after 0s
+   ✓ built in 1.75s
+   ✓ built in 35ms
+   ✓ built in 29.25s
+     35 passed (3.8m)
+== e2e:terminal: exit 0, 151 s, eligible: load 9.15 after 0s
+   ✓ built in 1.74s
+   ✓ built in 76ms
+   ✓ built in 31.28s
+     15 passed (1.9m)
+== e2e:panel: exit 0, 74 s, eligible: load 6.95 after 0s
+   ✓ built in 1.80s
+   ✓ built in 45ms
+   ✓ built in 30.45s
+     23 passed (40.7s)
+== e2e:c7: exit 0, 100 s, eligible: load 9.88 after 0s
+   ✓ built in 1.78s
+   ✓ built in 35ms
+   ✓ built in 29.04s
+     29 passed (1.1m)
+== e2e:voice: exit 0, 57 s, eligible: load 12.80 after 0s
+   ✓ built in 1.72s
+   ✓ built in 38ms
+   ✓ built in 27.97s
+     1 skipped
+     14 passed (26.0s)
+== e2e:code: exit 0, 115 s, eligible: load 11.74 after 0s
+   ✓ built in 1.60s
+   ✓ built in 35ms
+   ✓ built in 27.40s
+     36 passed (1.4m)
+== e2e:agents: exit 0, 104 s, eligible: load 8.77 after 0s
+   ✓ built in 1.68s
+   ✓ built in 32ms
+   ✓ built in 28.08s
+     23 passed (1.2m)
+== e2e:widgets: exit 0, 82 s, eligible: load 9.02 after 0s
+   ✓ built in 1.70s
+   ✓ built in 47ms
+   ✓ built in 28.75s
+     28 passed (50.4s)
+== e2e:settings: exit 0, 50 s, eligible: load 11.25 after 0s
+   ✓ built in 1.71s
+   ✓ built in 54ms
+   ✓ built in 28.46s
+     10 passed (18.8s)
+== e2e:c12: exit 0, 39 s, eligible: load 12.89 after 0s
+   ✓ built in 1.63s
+   ✓ built in 46ms
+   ✓ built in 24.97s
+     4 passed (11.1s)
+== e2e:tools: exit 0, 46 s, eligible: load 12.39 after 0s
+   ✓ built in 1.66s
+   ✓ built in 37ms
+   ✓ built in 28.17s
+     8 passed (14.3s)
+== e2e:scm: exit 0, 60 s, eligible: load 8.73 after 0s
+   ✓ built in 1.61s
+   ✓ built in 36ms
+   ✓ built in 25.27s
+     8 passed (32.1s)
+== e2e:side: exit 0, 73 s, eligible: load 8.90 after 0s
+   ✓ built in 1.56s
+   ✓ built in 43ms
+   ✓ built in 27.84s
+     12 passed (42.5s)
+== e2e:deliverables: exit 0, 82 s, eligible: load 7.25 after 0s
+   ✓ built in 1.62s
+   ✓ built in 33ms
+   ✓ built in 27.30s
+     11 passed (51.2s)
+== e2e:supervisor: exit 0, 161 s, eligible: load 15.55 after 0s
+   ✓ built in 1.67s
+   ✓ built in 39ms
+   ✓ built in 25.24s
+     8 passed (2.2m)
+== e2e:browser: exit 1, 59 s, eligible: load 6.46 after 0s
+   ✓ built in 1.87s
+   ✓ built in 34ms
+   ✓ built in 28.11s
+       Error: no hello from /tmp/m103-Xyx0wD/browser/cua/fd5c960d-6b0e-4e60-80cf-225ff9790fff.sock within 5000 ms
+     1 failed
+     8 passed (27.1s)
+== e2e:browser-comment: exit 0, 61 s, eligible: load 6.87 after 0s
+   ✓ built in 1.72s
+   ✓ built in 38ms
+   ✓ built in 27.42s
+     14 passed (30.8s)
+== e2e:browser-import: exit 0, 59 s, eligible: load 16.21 after 0s
+   ✓ built in 1.67s
+   ✓ built in 48ms
+   ✓ built in 27.68s
+     6 passed (27.8s)
+== e2e:browser-cua: exit 0, 58 s, eligible: load 14.63 after 0s
+   ✓ built in 1.82s
+   ✓ built in 36ms
+   ✓ built in 29.14s
+     7 passed (26.3s)
+== e2e:browser-chrome: exit 0, 56 s, eligible: load 14.14 after 0s
+   ✓ built in 1.87s
+   ✓ built in 36ms
+   ✓ built in 27.55s
+     7 passed (25.3s)
+== e2e:to-human: exit 0, 33 s, eligible: load 17.71 after 0s
+   ✓ built in 1.64s
+   ✓ built in 35ms
+   ✓ built in 27.37s
+     1 passed (2.5s)
+== e2e:available: exit 0, 35 s, eligible: load 14.71 after 0s
+   ✓ built in 1.58s
+   ✓ built in 38ms
+   ✓ built in 26.69s
+     2 passed (4.8s)
+
+finished 2026-10-10T11:28:36Z; failed steps: 1
+
+Retry of e2e:browser alone (2026-10-10, load 10.03): exit 1, same single failure, 8 passed; deterministic, not load.
+  e2e/browser.spec.ts:688 'cua #103: human control in a 380 px panel ...': Error: no hello from <userData>/browser/cua/<id>.sock within 5000 ms (test/support/cua-fake-host.ts:43).
+  Reading: the case (cua #103, MAWS PR #9) connects the test process as cua's fake host without the peer-auth trust seam that PR #7 (cua #95) added and e2e/browser-cua.spec.ts calls (`trustThisProcess` -> `__maws_browser.cua.trustRoot(pid)`), so #7's socket peer check refuses it; the two cua PRs crossed on master. Cua-owned (Constraint 8, Design §9): routed to the cua session through the architect; no §2 item depends on it; the stage is not held.
+  Post-debt stage: 28 steps, 27 green on first run; the e2e:browser case above is the one red, routed.
