@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parse, parseLive, TO_HUMAN_GRAMMAR_VERSION } from './to-human-parser';
+import { codeRegions, parse, parseLive, TO_HUMAN_GRAMMAR_VERSION } from './to-human-parser';
 
 // Re-expressed from the owner's mod's marked-text cases, with S0's stored-text rule for unbalanced marks.
 describe('stored owner marks', () => {
@@ -111,6 +111,20 @@ describe('grammar 2: code regions', () => {
     expect(parse('A ` start\n\n<to-human>Done.</to-human> and ` end')).toEqual([
       { kind: 'plain', text: 'A ` start\n\n' }, { kind: 'to-human', text: 'Done.' }, { kind: 'plain', text: ' and ` end' },
     ]);
+  });
+  it('pairs each run with the next run of its length, past unpaired runs of other lengths', () => {
+    // `` opens and closes around the lone `; the ``` before them has no partner and stays literal.
+    expect(codeRegions('``` x `` a ` b `` y ` z `')).toEqual([[6, 17], [20, 25]]);
+  });
+  it('pairing is linear: a long line of many spans reads in well under a second', () => {
+    // Pinned (L152): the earlier pairing rescanned every run for each opener, about 5 s for this line.
+    const line = '`a` '.repeat(50_000);
+    const started = performance.now();
+    const regions = codeRegions(line);
+    const elapsed = performance.now() - started;
+    expect(regions).toHaveLength(50_000);
+    expect(regions.at(-1)).toEqual([4 * 49_999, 4 * 49_999 + 3]);
+    expect(elapsed).toBeLessThan(500);
   });
   it('choice markup quoted in code inside a question stays in its text', () => {
     expect(parse('<need-input>Which form?\nWrite `<choice>A</choice>` lines.\n<choice recommended>Yes</choice>\n</need-input>')).toEqual([

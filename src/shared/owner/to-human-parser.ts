@@ -54,13 +54,20 @@ export function codeRegions(text: string): CodeRegion[] {
 }
 
 // A run of N backticks opens a span closed by the next run of exactly N; a run with no partner is literal backticks.
+// Linear in the runs (L152): one pass links each run to the next run of its length, then the walk pairs left to right.
 function inlineSpans(text: string, start: number, end: number, regions: CodeRegion[]) {
   const runs = [...text.slice(start, end).matchAll(/`+/g)];
+  const next: number[] = runs.map(() => -1);
+  const latest = new Map<number, number>();
+  runs.forEach((run, i) => {
+    const previous = latest.get(run[0].length);
+    if (previous !== undefined) next[previous] = i;
+    latest.set(run[0].length, i);
+  });
   for (let i = 0; i < runs.length; i++) {
-    const length = runs[i][0].length;
-    const close = runs.findIndex((run, j) => j > i && run[0].length === length);
+    const close = next[i];
     if (close === -1) continue;
-    regions.push([start + runs[i].index, start + runs[close].index + length]);
+    regions.push([start + runs[i].index, start + runs[close].index + runs[close][0].length]);
     i = close;
   }
 }
