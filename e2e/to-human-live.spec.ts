@@ -50,7 +50,7 @@ import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript } from './support/live-budget';
-import { promptsEnded, writtenPrompts } from './support/live-turns';
+import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -195,14 +195,7 @@ function cli(args: string[]): string {
 
 // ---- journals, the index, the transcript, the probe ------------------------------------------------------------------
 
-function journal(id: string): JournalRow[] {
-  const dir = join(userData, 'engine-host', 'journal', id);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow))
-    .sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
-}
+const journal = (id: string): JournalRow[] => sessionJournal(userData, id);
 function spent(): number {
   const dir = join(userData, 'engine-host', 'journal');
   if (!existsSync(dir)) return 0;
