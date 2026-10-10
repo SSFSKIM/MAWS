@@ -1295,6 +1295,34 @@ describe('no steer outlives its process unrecorded (P2-C)', () => {
     expect(transitions(next.rows)).toEqual([tr('abandon', null, messageUuid)]);
   });
 
+  it('a process that exits while recovery reads the journals leaves the stored queue for the next launch to recover', async () => {
+    const store = new MemorySessionStateStore();
+    const dead = await harness({ store });
+    dead.h.turn = true;
+    const { messageUuid: steer } = await dead.queue.steer('pending', { priority: 'next' });
+    dead.h.turn = false;
+    await dead.queue.send('in flight'); // written, never acknowledged: the host dies here
+    const stored = await store.loadQueue(ID);
+    expect(stored.entries.map((e) => e.state)).toEqual(['submitting']);
+    expect(stored.steers?.map((s) => s.messageUuid)).toEqual([steer]);
+
+    let answer!: (uuids: MessageUuid[]) => void;
+    const exiting = await harness({ store, recovered: false, unsettled: () => new Promise((resolve) => { answer = resolve; }) });
+    const recovering = exiting.queue.recover();
+    await flush();
+    await exiting.queue.onProcessExited('crash'); // the exit lands during the journal read
+    answer([]);
+    await recovering;
+    expect(exiting.queue.recovered).toBe(false);
+    expect(transitions(exiting.rows)).toEqual([]);
+    expect(exiting.rows).not.toContainEqual(RECOVERED);
+    expect(await store.loadQueue(ID)).toEqual(stored);
+
+    const next = await harness({ store, recovered: false });
+    await next.queue.recover();
+    expect(transitions(next.rows).map((t) => t.action)).toEqual(['abandon', 'uncertain']);
+  });
+
   it('a steer the engine started, or dropped while nothing withdrew it, is not abandoned; nor is one never written', async () => {
     const t = await harness({ failWrite: (frame) => frame.message.content === 'never' });
     t.h.turn = true;

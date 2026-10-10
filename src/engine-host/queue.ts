@@ -74,6 +74,7 @@ export class MessageQueue {
   private pauseVersion = 0; // a later Stop/Resume supersedes an earlier in-flight Resume
   private pauseReason: PauseReason | null = null; // C7: set with every pause, cleared on resume; null for a paused queue loaded from a state file older than the field
   private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
+  private exitedUnloaded = false; // the process exited before recovery finished: recovery stops before it settles anything (F-AB)
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly started = new Set<string>(); // queue ids whose submission the engine started
   private readonly saving = new Set<Promise<void>>(); // store saves not yet settled
@@ -124,6 +125,12 @@ export class MessageQueue {
         this.log(`the earlier launches' unsettled steers could not be read: ${messageOf(error)}`);
         return null;
       });
+      // The process exited while the store or the journals were read: its exit row is written and the journal closed, so
+      // nothing settled now could be stated. The stored queue stays as it was and the next launch recovers it whole.
+      if (this.exitedUnloaded) {
+        this.log('the process exited before the queue was recovered; the stored queue is left for the next launch');
+        return;
+      }
       for (const uuid of prior ?? []) this.unended.add(uuid);
       this.entries = loaded.entries;
       this.paused = loaded.paused;
@@ -554,7 +561,10 @@ export class MessageQueue {
   // the returned promise's persist, so the session can call this right before it writes the exit row.
   onProcessExited(reason: ExitKind): Promise<void> {
     for (const queueId of [...this.ackTimers.keys()]) this.clearAck(queueId);
-    if (!this.loaded) return Promise.resolve(); // the process never reached recovery: the stored queue stays as it was
+    if (!this.loaded) {
+      this.exitedUnloaded = true; // the process never finished recovery: the stored queue stays as it was
+      return Promise.resolve();
+    }
     this.settleAfterExit();
     // only when something is left to hold back: a paused empty queue would silently hold the resumed session's next queue
     if ((reason === 'crash' || reason === 'unknown') && !this.paused && this.entries.length > 0) this.pauseFor('exit'); // C7: through pauseFor
