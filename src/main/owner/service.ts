@@ -17,8 +17,8 @@
 //   reconnect, each session holding an answer on its way reads the host's prompt record (`session.promptHistory`) and
 //   folds it before anything else, then reads the queue's snapshot as positive evidence; what neither settles, and no
 //   withdrawal a complete record shows pending explains, is read from the transcript, and what that cannot settle reads
-//   `unconfirmed`, never a guess. A read that fails leaves the session waiting, and is tried again after a backoff or at
-//   the next reconnect.
+//   `unconfirmed`, never a guess; that verdict stands at later reads while a whole record shows nothing new of the
+//   answer. A read that fails leaves the session waiting, and is tried again after a backoff or at the next reconnect.
 // - Legacy recognition. A human prompt the engine took that answers `Answering "<head>": …` settles the one question of
 //   the session with that head (an answer given in a terminal through the doperpowers mod, or one whose report never
 //   arrived), unless the prompt is itself a member of an answer. While the session waits for its recovery read, whose
@@ -603,6 +603,8 @@ export class OwnerChannelService {
     const since = new Date(Math.min(...all().filter(onItsWay).map((answer) => Date.parse(answer.reportedAt))) - LOG_WINDOW_MS).toISOString();
     const history = await hostCall(this.deps.dispatch, 'session.promptHistory', { appSessionId, since });
     const queue = await hostCall(this.deps.dispatch, 'session.queue.list', { appSessionId });
+    // the settled verdicts this fold starts from: an answer an earlier read left unconfirmed, with its members' lives then
+    const verdicts = new Map(all().filter((answer) => answer.unconfirmed).map((answer) => [answer, livesOf(answer)]));
     const events = [...history.events, ...live.log.map((entry) => entry.event)];
     events.forEach((event, i) => {
       for (const answer of all()) applyEvent(answer, event, () => events.slice(0, i));
@@ -628,6 +630,10 @@ export class OwnerChannelService {
       if (answer.members.some(placed)) continue;
       const unsettled = answer.members.filter((m) => m.life === 'alive' || m.life === 'withdrawing');
       if (unsettled.length === 0) continue;
+      // an earlier read found it not taken (unconfirmed): with the record whole and none of its members' lives moved by
+      // it, nothing happened to the answer while main was away, and what happened while main listened it heard; the
+      // verdict stands without reading the transcript again. A record that is not whole may have lost what did happen.
+      if (history.complete && verdicts.get(answer) === livesOf(answer)) continue;
       const uuids = unsettled.filter((m) => m.kind === 'uuid').map((m) => m.id as MessageUuid);
       reads.push(
         (uuids.length === 0 ? Promise.resolve(null) : this.deps.transcriptEvidence(appSessionId, uuids)).then((taken) => () => {
@@ -711,6 +717,9 @@ function followContent(live: SessionLive, entries: readonly QueueEntry[]): Set<M
   }
   return touched;
 }
+
+// An answer's members and their lives, comparable: what a fold's events moved.
+const livesOf = (answer: Answer): string => JSON.stringify(answer.members);
 
 // The transcript's word on an answer's `unknown` members: one of them taken delivers it; none taken, they are dead.
 function settleUnknown(answer: Answer, unknown: readonly MessageUuid[], taken: MessageUuid | null, now: string): void {

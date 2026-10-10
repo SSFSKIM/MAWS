@@ -61,6 +61,7 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
   const projections: Projection[] = [];
   const states: OwnerChannelState[] = [];
   const h = { appEnabled: opts.appEnabled ?? true };
+  const evidenceReads: (readonly MessageUuid[])[] = []; // every transcript read for evidence, across restarts
   let service!: OwnerChannelService;
   const sim = new OwnerHostSim(app, SID, (events) => service.onEvents(app, events));
   const make = () => {
@@ -70,7 +71,7 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
       appEnabled: () => h.appEnabled,
       attention: { setOwnerItems: (id, items, silent) => void (id === app && projections.push({ items, silent: [...silent] })) },
       dispatch: sim.dispatch,
-      transcriptEvidence: (_id, uuids) => transcriptEvidence(transcript, uuids),
+      transcriptEvidence: (_id, uuids) => (evidenceReads.push(uuids), transcriptEvidence(transcript, uuids)),
       transcriptChain: (_id, uuid) => transcriptChain(transcript, uuid),
       emit: (_name, payload) => void states.push(payload.state),
       now: () => sim.nowIso(),
@@ -102,7 +103,7 @@ async function harness(opts: { appEnabled?: boolean; launch?: boolean } = {}) {
   const items = () => projections.at(-1)?.items ?? [];
   // what the engine wrote to its transcript for a prompt it took (M4's probe: an idle prompt's user record)
   const taken = (uuid: string) => appendFileSync(transcript, `${JSON.stringify({ type: 'user', uuid, message: { role: 'user', content: 'x' }, origin: { kind: 'human' } })}\n`);
-  return { sim, h, projections, states, get service() { return service; }, restart, state, mark, question, ask, report, items, taken };
+  return { sim, h, projections, states, evidenceReads, get service() { return service; }, restart, state, mark, question, ask, report, items, taken };
 }
 const flush = () => new Promise((r) => setImmediate(r));
 
@@ -696,6 +697,69 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     t.sim.listening = true;
     await t.service.hostStreaming();
     expect(t.question(q)).toMatchObject({ state: 'unconfirmed' });
+  });
+
+  it('an answer a recovery read found not taken keeps that verdict at the next start while the whole record shows nothing new of it; a record that is not whole reads the transcript again', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    await t.restart();
+    t.sim.listening = false;
+    await t.sim.queue.cancelSteer(messageUuid);
+    // the steer's withdrawal left no trace in the record: nothing places its uuid, and the transcript decides
+    loseRows(t.sim, (row) => (row.direction === 'meta' && (row.frame.action === 'withdraw' || row.frame.action === 'cancel')) || (row.direction === 'in' && row.frame.command_uuid === messageUuid));
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q).state).toBe('unconfirmed');
+    expect(t.evidenceReads).toEqual([[messageUuid]]);
+    for (let start = 0; start < 2; start++) {
+      await t.restart(); // the app starts again: the record, whole, says nothing new of the answer
+      await t.service.hostStreaming();
+      await t.service.settled();
+      expect(t.question(q).state).toBe('unconfirmed');
+    }
+    expect(t.evidenceReads).toHaveLength(1);
+    await t.restart();
+    t.sim.historyComplete = false; // the journals since it was sent were pruned: only the transcript can tell
+    t.taken(messageUuid);
+    await t.service.hostStreaming();
+    await t.service.settled();
+    expect(t.evidenceReads).toHaveLength(2);
+    expect(t.question(q).state).toBe('delivered');
+  });
+
+  it('a verdict of not taken yields to the record: a member the record moved while main was away is read from the transcript again', async () => {
+    const t = await harness();
+    const q = t.ask('Which backend?');
+    t.sim.turn = true;
+    const { messageUuid } = await t.sim.queue.steer(answerText('Which backend?', 'Postgres'), { priority: 'next' });
+    t.report(q, { disposition: 'steered', messageUuid });
+    await t.restart();
+    t.sim.listening = false;
+    let answer!: () => void;
+    t.sim.cancelGate = new Promise<void>((r) => (answer = r));
+    const holding = t.sim.queue.hold(messageUuid); // the hold row waits on the engine's answer
+    await flush();
+    loseRows(t.sim, (row) => (row.direction === 'meta' && row.frame.action === 'withdraw') || (row.direction === 'in' && row.frame.command_uuid === messageUuid));
+    t.sim.historyComplete = false;
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    expect(t.question(q).state).toBe('unconfirmed');
+    await t.restart(); // main away again: the held steer goes out under a new uuid and the engine takes it
+    t.sim.listening = false;
+    answer();
+    const held = await holding;
+    const promoted = await t.sim.queue.promote(held.queueId, { priority: 'next' });
+    t.sim.engine(promoted.messageUuid, 'started');
+    loseRows(t.sim, (row) => row.direction === 'in' && row.frame.command_uuid === promoted.messageUuid); // only the transcript has the take
+    t.taken(promoted.messageUuid);
+    t.sim.historyComplete = true;
+    t.sim.listening = true;
+    await t.service.hostStreaming();
+    await t.service.settled();
+    expect(t.question(q).state).toBe('delivered');
   });
 
   it('an answer edited in the queue while main was away reads as edited once the recovery read sees the queue', async () => {
