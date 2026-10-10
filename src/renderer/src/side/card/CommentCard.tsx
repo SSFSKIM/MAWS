@@ -42,6 +42,10 @@ function positionOf(style: CardStyle): CSSProperties {
 }
 
 // The corner touching the pin is squared (Desktop's card at its click point).
+// P2-F L148: in the browser's strip the card is in flow under the page, with 8 px of margin the strip clips at (its
+// half-column cap): it casts the in-flow card's shadow (the composer's), whose visible layer lies within that margin,
+// where the floating shadow's wide blurs were trimmed at the sides and bottom. Over a frame it floats.
+const shadowOf = (style: CardStyle) => (style.mode === 'strip' ? 'shadow-composer' : 'shadow-float');
 const cornerOf = (style: CardStyle, pinned: boolean) => (!pinned ? '' : style.mode === 'below' ? 'rounded-tl-none' : style.mode === 'above' ? 'rounded-bl-none' : '');
 
 interface Props {
@@ -80,7 +84,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
       data-placement={style.mode}
       style={{ ...positionOf(style), ...(thread && { height: style.maxHeight }) }}
       onKeyDown={onKeyDown}
-      className={`pointer-events-auto ${style.mode === 'strip' ? 'relative' : 'absolute'} flex flex-col gap-2 rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg shadow-float outline-none ${thread ? 'overflow-hidden' : 'overflow-y-auto'} ${cornerOf(style, pinned)}`}
+      className={`pointer-events-auto ${style.mode === 'strip' ? 'relative' : 'absolute'} flex flex-col gap-2 rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg ${shadowOf(style)} outline-none ${thread ? 'overflow-hidden' : 'overflow-y-auto'} ${cornerOf(style, pinned)}`}
     >
       <header className="flex min-w-0 shrink-0 items-center gap-1">
         {thread && <ThreadGlyph child={thread.child} />}
