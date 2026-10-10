@@ -4,7 +4,7 @@
 // answered inline by C7's card; until the anchored prompt arrives, the comment as typed is echoed with "Starting…". A
 // Reply field sends through the human send seam (X22, origin `comment`), whose answer is read in one place
 // (`replyOutcomeOf`): queued and delivered are the transcript's own rows (the host queue's held bubble, the user row), so
-// the card keeps no delivery state but a reply waiting on a resumed start, whose failure hands the text back here. One
+// the card keeps no delivery state of its own (since P2-A the seam starts a released thread before it sends). One
 // strip above Reply names what waits on the person, with one click to the Side pane or a tab. The card yields when the
 // Side pane or a main tab draws the thread (one place draws a session with an input), and publishes its thread while on
 // screen, so the unread rule and attention navigation count it as the Side pane's.
@@ -12,12 +12,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
-import { holdMessageReturn } from '../../sessions/message-return';
 import { failureOf, useSetup } from '../../sessions/store';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
-import { useQueueStore } from '../../stores/queue';
 import { isOpen } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { deliverables, lookupKey } from '../../tools/deliverables/store';
@@ -84,21 +82,19 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   const setupFailed = useSetup((s) => failureOf(s, child) !== null);
   const pending = useAttention((s) => selectPendingOf(s, child));
   const holder = record?.holder ?? null;
-  const needs = needsYouOf({ card: setupCard, failed: setupFailed || reply.startFailed, holder, pending });
+  const needs = needsYouOf({ card: setupCard, failed: setupFailed, holder, pending });
   const held = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job');
   const exitedUnreleased = useSessions((s) => s.engine.get(child)?.process === 'exited' && s.digests.get(child)?.released === undefined);
 
-  // The field waits while the thread starts, while a terminal holds it, and while a started reply is pending (a failed
-  // start hands that reply back into it, so nothing may compete with it); delivery, the hand-back or Close release it.
-  const waiting = record === null || reply.pending !== null;
+  // The field waits while the thread starts and while a terminal holds it.
+  const waiting = record === null;
   const blocked = waiting || held;
   const placeholder = waiting ? COPY.starting : held && needs !== null ? needs.text : COPY.replyPlaceholder;
   return (
     <>
       <div className="-mx-2.5 flex min-h-0 flex-1 flex-col" data-card-thread={child}>
-        {!started && echo !== null && <Bubble data="echo" text={echo} />}
+        {!started && echo !== null && <Echo text={echo} />}
         {record !== null && <TranscriptSlot appSessionId={child} startAt={startAt} presentation="local" actions={actions} className="min-h-0 flex-1" />}
-        {reply.pending && <Bubble data="pending" text={reply.pending.text} />}
       </div>
       {needs !== null && (
         <div role="status" data-needs-you={needs.kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-warning px-2 py-1 text-ui-sm text-fg">
@@ -152,11 +148,10 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   );
 }
 
-// A user bubble the card draws itself: the comment as typed while the thread starts, or a reply waiting on a resumed
-// start; "Starting…" under it.
-function Bubble({ data, text }: { data: 'echo' | 'pending'; text: string }) {
+// The comment as typed, drawn by the card while the thread starts; "Starting…" under it.
+function Echo({ text }: { text: string }) {
   return (
-    <div {...{ [`data-card-${data}`]: '' }} className={`flex shrink-0 flex-col items-end gap-0.5 px-2.5 py-1 ${data === 'pending' ? 'opacity-60' : ''}`}>
+    <div data-card-echo="" className="flex shrink-0 flex-col items-end gap-0.5 px-2.5 py-1">
       <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-md bg-bg-active px-2.5 py-1.5 text-ui text-fg">{text}</div>
       <span className="text-ui-sm text-fg-muted">{COPY.starting}</span>
     </div>
@@ -189,51 +184,18 @@ function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptAct
 }
 
 // The Reply field: Enter sends (Shift+Enter breaks a line, a composition keeps its Enter), through the seam; a host
-// error thrown by the send reads as a refusal with its message. A started reply waits as a pending bubble until the
-// thread's transcript draws it: a user row of the thread newer than it, or (a resume whose host queue is paused) a queue
-// entry newer than it, drawn as the held bubble. The card claims the thread's returned message from the press on, so a
-// start that fails, even before its answer is applied, puts the text back here (with the failure in the strip), never
-// into the thread's unseen composer draft; any answer but `started` drops the claim, and so does the reply drawn or the
-// card gone. No other send is taken meanwhile.
+// error thrown by the send reads as a refusal with its message. No other send is taken while one is in flight.
 function useReply(child: AppSessionId) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState<{ text: string; at: number } | null>(null);
-  const [startFailed, setStartFailed] = useState(false);
-  const delivered = useTranscriptStore((s) => waiting !== null && (s.entries[child]?.rows ?? []).some((row) => row.kind === 'user' && row.pending === undefined && Date.parse(row.at) >= waiting.at));
-  const held = useQueueStore((s) => waiting !== null && (s.bySession.get(child)?.entries ?? []).some((entry) => Date.parse(entry.createdAt) >= waiting.at));
-  const pending = delivered || held ? null : waiting;
 
-  // the claim on the thread's returned message: taken at the press, dropped once nothing can hand the reply back
-  const claim = useRef<(() => void) | null>(null);
-  const drop = () => {
-    claim.current?.();
-    claim.current = null;
-  };
-  useEffect(() => {
-    if (pending === null && !sending) drop();
-  }, [pending, sending]);
-  useEffect(() => drop, []);
-
-  const canSend = text.trim() !== '' && !sending && pending === null;
+  const canSend = text.trim() !== '' && !sending;
   const send = async () => {
     if (!canSend) return;
     const content = text.trim();
-    const at = Date.now();
     setSending(true);
     setRefusal(null);
-    setStartFailed(false);
-    let returned = false;
-    drop();
-    const release = holdMessageReturn(child, (_appSessionId, message) => {
-      returned = true;
-      drop();
-      setWaiting(null);
-      setText(message.display);
-      setStartFailed(true);
-    });
-    claim.current = release;
     let result: HumanPromptResult;
     try {
       result = await sendHumanPrompt(child, content, { origin: 'comment' });
@@ -242,19 +204,16 @@ function useReply(child: AppSessionId) {
     }
     const outcome = replyOutcomeOf(result);
     setSending(false);
-    if (outcome.kind !== 'starting' && claim.current === release) drop();
-    if (returned) return; // the start already failed and handed the text back
     if (outcome.kind === 'refused') {
       setRefusal(outcome.reason);
       return;
     }
     setText('');
-    if (outcome.kind === 'starting') setWaiting({ text: content, at });
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void send();
   };
-  return { text, setText, sending, refusal, pending, startFailed, canSend, send, onKeyDown };
+  return { text, setText, sending, refusal, canSend, send, onKeyDown };
 }

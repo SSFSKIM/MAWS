@@ -58,12 +58,10 @@ export function needsYouOf({ card, failed, holder, pending }: { card: WaitingCar
 }
 
 // What a Reply became, as the card shows it (D6's disposition table): delivered (the field clears; the transcript draws
-// the user row, the pending steer or the held bubble), starting (the field clears; a pending bubble until the resumed
-// thread delivers it), or refused (the field keeps the text, the reason under it). The one place that reads the seam's
-// answer: P2-A's shape (`started: boolean` beside a `held` disposition) changes this function only, a started send or
-// queue read by its disposition and `held` like a refusal. Since P2-A (2026-10-09) the seam starts a thread before it
-// sends, so it answers no reply that waits on a start: `starting` is no longer produced.
-export type ReplyOutcome = { kind: 'delivered' } | { kind: 'starting' } | { kind: 'refused'; reason: string };
+// the user row, the pending steer or the held bubble) or refused (the field keeps the text, the reason under it). The one
+// place that reads the seam's answer: a started send or queue reads by its disposition (since P2-A the seam starts a
+// released thread before it sends, so no reply waits on a start), and `held` like a refusal.
+export type ReplyOutcome = { kind: 'delivered' } | { kind: 'refused'; reason: string };
 export function replyOutcomeOf(result: HumanPromptResult): ReplyOutcome {
   switch (result.disposition) {
     case 'sent':

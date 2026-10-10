@@ -1,8 +1,7 @@
 // P2-E1 (M2): the comment card's thread phase (P2-E1 document, D5 and D6; acceptance 3, 4 and 5). A card's Side thread
 // turns the card into the thread (no Side tool, no toast; the comment echoed until the thread's anchored prompt
 // arrives, then the thread's own rows through the shell's transcript); Reply goes through the human send seam with its
-// dispositions read in one place; a started reply waits as a pending bubble and a failed start hands its text back to
-// the card; the needs-you strip names what waits; the card yields to the Side pane or a main tab and publishes its
+// dispositions read in one place (a reply that started its thread is already the host's); the needs-you strip names what waits; the card yields to the Side pane or a main tab and publishes its
 // thread while on screen; a thread whose card went before the fork answered is revealed as the sheet does.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,7 +16,6 @@ import { deliverableUrl } from '@shared/maws/deliverable';
 import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
-import { registerMessageReturn, returnMessage } from '../../sessions/message-return';
 import { useSetup } from '../../sessions/store';
 import { useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
@@ -270,25 +268,13 @@ describe('Reply through the human send seam', () => {
   });
 
   // P2-A's final shape: the seam starts a released thread first and then sends, so a started reply is already the host's
-  it('a reply that started its thread is sent: the field clears and no pending bubble waits', async () => {
+  it('a reply that started its thread is sent: the field clears and Reply stays enabled', async () => {
     await ready();
     seam.mockResolvedValueOnce({ disposition: 'sent', started: true, messageUuid: 'm' as never });
     await userEvent.type(replyField(), 'Wake up and do it{Enter}');
     await waitFor(() => expect(replyField().value).toBe(''));
-    expect(card()!.querySelector('[data-card-pending]')).toBeNull();
     expect(replyField().disabled).toBe(false);
     expect(card()!.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('a send leaves no claim: a later returned message takes the registered way', async () => {
-    const registered = vi.fn();
-    offs.push(registerMessageReturn(registered));
-    await ready();
-    seam.mockResolvedValueOnce({ disposition: 'sent', started: false });
-    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
-    await waitFor(() => expect(replyField().value).toBe(''));
-    act(() => returnMessage(child, { content: 'other', display: 'other' }));
-    expect(registered).toHaveBeenCalledTimes(1);
   });
 
   // Whole-branch review (fix wave): a released thread whose host queue is paused resumes with the reply queued; the held
@@ -301,7 +287,6 @@ describe('Reply through the human send seam', () => {
     const held = { queueId: 'q2', appSessionId: child, content: 'Wake up and do it', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
     act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, paused: true, pauseReason: 'user', entries: [held] }));
     await waitFor(() => expect(card()!.querySelector('[data-pending="held"]')?.textContent).toContain('Wake up and do it'));
-    expect(card()!.querySelector('[data-card-pending]')).toBeNull();
     expect(replyField().disabled).toBe(false);
   });
 });
