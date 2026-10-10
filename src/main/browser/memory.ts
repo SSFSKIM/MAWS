@@ -5,9 +5,9 @@
 // Session info reports the tabs' weight beside the budget.
 //
 // The same sample enforces the soft cap: while the loaded tabs' renderers together exceed BROWSER_TABS_MEMORY_MAX_MIB,
-// the least recently shown eligible tab (the count cap's own rule, `TabStore.capVictim`: unplaced, idle, not loading, not
-// downloading) is suspended (cua #90: an internal tab closed, `TabStore.evict`) and its session told, one notice per
-// suspension. A notice from this cap carries no `count`,
+// the least recently shown eligible tab (the count cap's own rule, `TabStore.capVictim`: unplaced, not loading, not
+// downloading, lease-free, idle or human-owned past takeover grace) is suspended without changing ownership (cua #90:
+// an internal tab closed, `TabStore.evict`) and its session told, one notice per suspension. A notice carries no `count`,
 // which is how the chrome tells it from the count cap's. With nothing eligible, nothing is suspended; nothing is ever
 // force-closed. Two tabs that share a renderer are one process: counted once.
 import type { ProcessMetric } from 'electron';

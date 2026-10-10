@@ -737,8 +737,19 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
       await expect(slot).toHaveCount(0); // the agent resumed
       await s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as ControlSeam).__maws_browser.agent.sendInput(tab, { type: 'mouseDown', x: 10, y: 10, button: 'left', clickCount: 1 }), tab);
       await expect(slot).toBeVisible();
-      await slot.getByRole('button', { name: 'Hand back' }).click();
-      await expect(slot).toHaveCount(0);
+      await overflow(s, panel, 'Open in tab');
+      const main = browserIn(s, 'main');
+      const wide = main.locator('[data-browser-control="human"]');
+      for (const theme of ['light', 'dark'] as const) {
+        value(await invoke(s.page, 'settings.set', { theme }));
+        await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(wide).toContainText('You have the page');
+        expect((await wide.boundingBox())!.width).toBeGreaterThan(480);
+        await test.info().attach(`human-control-wide-${theme}`, { body: await main.locator('[data-browser-chrome]').screenshot(), contentType: 'image/png' });
+      }
+      await wide.getByRole('button', { name: 'Hand back' }).click();
+      await expect(wide).toHaveCount(0);
+      await expect(slot).toHaveCount(0); // both surfaces follow the same ownership transition
     } finally {
       await host.close();
     }

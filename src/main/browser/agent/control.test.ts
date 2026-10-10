@@ -1,7 +1,7 @@
 import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, DEFAULT_PARTITION, type BrowserControl } from '@shared/browser/tab';
+import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MAX, DEFAULT_PARTITION, type BrowserControl } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabInputSeam } from '../input';
 import { TabStore, type TabEntry } from '../tabs';
@@ -90,6 +90,30 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     vi.advanceTimersByTime(1);
     expect(entry.tab.control).toBe('human');
     expect(h.changed()).toEqual(['agent', 'human']);
+  });
+
+  it('cua #103: the count cap reclaims a previously taken-over tab after grace without clearing ownership', () => {
+    const h = harness();
+    const entries = Array.from({ length: BROWSER_LOADED_TABS_MAX }, () => {
+      const entry = h.open();
+      h.store.update(entry.tab.tabId, { loading: false });
+      h.controls.markActing(entry);
+      h.human(entry);
+      vi.advanceTimersByTime(1);
+      return entry;
+    });
+    const victim = entries[0]!;
+    const controlSince = victim.tab.controlSince;
+    vi.advanceTimersByTime(BROWSER_HANDBACK_IDLE_MS);
+    const added = h.open();
+    expect(added.view).not.toBeNull();
+    expect(added.tab.suspended).toBe(false);
+    expect(h.store.loadedCount()).toBe(BROWSER_LOADED_TABS_MAX);
+    expect(victim.view).toBeNull();
+    expect(victim.tab).toMatchObject({ suspended: true, control: 'human', controlSince, url: 'https://a.test/' });
+    expect(entries.slice(1).every((entry) => entry.view !== null && entry.tab.control === 'human')).toBe(true);
+    expect(h.changed()).not.toContain('idle');
+    h.controls.dispose();
   });
 
   it('every further human input re-arms the hand-back timer, wheels and keys included', () => {

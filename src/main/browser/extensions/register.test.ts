@@ -2,6 +2,7 @@ import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
+import type { LoadedAction } from './actions';
 
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, WebContentsView: class {}, Menu: {} }));
 
@@ -29,7 +30,7 @@ function setup() {
   const inert = { ...probe, extensionId: INERT, name: 'Inert', title: 'Inert', hasPopup: false, hasOptions: false, popupUrl: null, optionsUrl: null };
   const actions = {
     list: vi.fn(async () => [{ extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true }]),
-    find: vi.fn((partition: string, id: string) => (partition === PART ? ([probe, inert].find((a) => a.extensionId === id) ?? null) : null)),
+    find: vi.fn((partition: string, id: string): LoadedAction | null => (partition === PART ? ([probe, inert].find((a) => a.extensionId === id) ?? null) : null)),
     entries: vi.fn(() => [probe, inert]),
   };
   const popups = { open: vi.fn() };

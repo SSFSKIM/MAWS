@@ -153,7 +153,8 @@ describe('ExtensionActions', () => {
     const failed = (await actions.list(PART))[0]!;
     expect(failed).toMatchObject({ hasPopup: true, inert: 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS' });
     expect(ExtensionActionSchema.parse(failed)).toEqual(failed);
-    const { inert: _inert, ...legacy } = failed;
+    const legacy = { ...failed };
+    delete legacy.inert;
     expect(ExtensionActionSchema.parse(legacy)).toEqual(legacy); // additive and optional
     entry.background = 'running';
     entry.backgroundError = null;

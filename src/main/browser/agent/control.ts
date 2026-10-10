@@ -38,7 +38,7 @@ interface TabControlState {
 }
 
 // cua #103: recent input holds off an acting command; visible human ownership outlasts that takeover grace.
-// The one statement of the rule: the takeover gate, the dialog route and the activity's navigations.
+// The one statement of the rule: the takeover gate, dialog route, activity navigations and resource caps.
 export function personHolds(entry: TabEntry, now: number): boolean {
   const { lastHumanAt } = entry.input;
   const last = lastHumanAt ?? (entry.tab.control === 'human' ? Date.parse(entry.tab.controlSince) : null);
