@@ -1,0 +1,143 @@
+P2-F gates, stage final, head 9b111d5c (9b111d5cc5cc055ac6ab93ff491c49a660d76230)
+started 2026-10-10T14:08:53Z; load { 4.34 5.87 7.33 }; front: ASN:0x0-0x3003:
+steps: typecheck lint test --maxWorkers=4 test:probes build e2e e2e:transcript e2e:terminal e2e:panel e2e:c7 e2e:voice e2e:code e2e:agents e2e:widgets e2e:settings e2e:c12 e2e:tools e2e:scm e2e:side e2e:deliverables e2e:supervisor e2e:browser e2e:browser-comment e2e:browser-import e2e:browser-cua e2e:browser-chrome e2e:requests e2e:composer e2e:to-human e2e:available
+
+== typecheck: exit 0, 55 s, eligible: load 4.34 after 0s
+== lint: exit 0, 31 s, eligible: load 7.33 after 0s
+== test --maxWorkers=4: exit 0, 210 s, eligible: load 6.60 after 0s
+    Test Files  812 passed | 1 skipped (813)
+         Tests  11576 passed | 1 skipped (11577)
+== test:probes: exit 0, 31 s, eligible: load 17.17 after 30s
+   # tests 217
+   # pass 217
+   # fail 0
+== build: exit 0, 29 s, eligible: load 17.17 after 0s
+   ✓ built in 1.69s
+   ✓ built in 37ms
+   ✓ built in 26.57s
+== e2e: exit 0, 248 s, eligible: load 15.61 after 0s
+     142 skipped
+     64 passed (4.1m)
+== e2e:transcript: exit 0, 253 s, eligible: load 6.62 after 0s
+   ✓ built in 1.75s
+   ✓ built in 36ms
+   ✓ built in 28.24s
+     35 passed (3.7m)
+== e2e:terminal: exit 0, 163 s, eligible: load 14.27 after 0s
+   ✓ built in 1.81s
+   ✓ built in 42ms
+   ✓ built in 31.73s
+     15 passed (2.1m)
+== e2e:panel: exit 0, 132 s, eligible: load 14.61 after 60s
+   ✓ built in 1.74s
+   ✓ built in 68ms
+   ✓ built in 29.47s
+     23 passed (39.8s)
+== e2e:c7: exit 0, 131 s, eligible: load 10.32 after 0s
+   ✓ built in 1.76s
+   ✓ built in 35ms
+   ✓ built in 35.34s
+     29 passed (1.5m)
+== e2e:voice: exit 0, 187 s, eligible: load 16.80 after 120s
+   ✓ built in 1.76s
+   ✓ built in 41ms
+   ✓ built in 34.25s
+     1 skipped
+     14 passed (29.7s)
+== e2e:code: exit 0, 120 s, eligible: load 15.19 after 0s
+   ✓ built in 1.70s
+   ✓ built in 36ms
+   ✓ built in 30.33s
+     37 passed (1.4m)
+== e2e:agents: exit 0, 79 s, eligible: load 10.77 after 0s
+   ✓ built in 1.70s
+   ✓ built in 37ms
+   ✓ built in 29.07s
+     23 passed (46.8s)
+== e2e:widgets: exit 0, 92 s, eligible: load 9.32 after 0s
+   ✓ built in 1.96s
+   ✓ built in 38ms
+   ✓ built in 39.36s
+     28 passed (50.1s)
+== e2e:settings: exit 0, 62 s, eligible: load 15.91 after 1s
+   ✓ built in 1.78s
+   ✓ built in 72ms
+   ✓ built in 31.21s
+     10 passed (27.1s)
+== e2e:c12: exit 0, 72 s, eligible: load 18.19 after 30s
+   ✓ built in 1.71s
+   ✓ built in 34ms
+   ✓ built in 27.48s
+     4 passed (11.3s)
+== e2e:tools: exit 0, 53 s, eligible: load 13.73 after 0s
+   ✓ built in 1.85s
+   ✓ built in 40ms
+   ✓ built in 31.67s
+     8 passed (18.2s)
+== e2e:scm: exit 0, 95 s, eligible: load 15.32 after 30s
+   ✓ built in 1.74s
+   ✓ built in 40ms
+   ✓ built in 28.73s
+     8 passed (32.7s)
+== e2e:side: exit 0, 75 s, eligible: load 14.29 after 0s
+   ✓ built in 1.68s
+   ✓ built in 39ms
+   ✓ built in 29.13s
+     12 passed (43.4s)
+== e2e:deliverables: exit 0, 95 s, eligible: load 15.03 after 0s
+   ✓ built in 2.40s
+   ✓ built in 34ms
+   ✓ built in 32.20s
+     11 passed (59.2s)
+== e2e:supervisor: exit 0, 165 s, eligible: load 18.02 after 0s
+   ✓ built in 1.93s
+   ✓ built in 50ms
+   ✓ built in 27.43s
+     8 passed (2.2m)
+== e2e:browser: exit 0, 99 s, eligible: load 8.80 after 0s
+   ✓ built in 1.67s
+   ✓ built in 51ms
+   ✓ built in 30.18s
+     9 passed (1.1m)
+== e2e:browser-comment: exit 0, 194 s, eligible: load 18.31 after 120s
+   ✓ built in 2.38s
+   ✓ built in 49ms
+   ✓ built in 38.26s
+     14 passed (31.7s)
+== e2e:browser-import: exit 0, 63 s, eligible: load 17.68 after 0s
+   ✓ built in 1.81s
+   ✓ built in 34ms
+   ✓ built in 30.16s
+     6 passed (29.4s)
+== e2e:browser-cua: exit 0, 60 s, eligible: load 15.52 after 0s
+   ✓ built in 2.25s
+   ✓ built in 38ms
+   ✓ built in 30.96s
+     7 passed (25.5s)
+== e2e:browser-chrome: exit 0, 65 s, eligible: load 17.14 after 0s
+   ✓ built in 1.95s
+   ✓ built in 41ms
+   ✓ built in 29.51s
+     7 passed (31.9s)
+== e2e:requests: exit 0, 110 s, eligible: load 17.47 after 60s
+   ✓ built in 1.71s
+   ✓ built in 37ms
+   ✓ built in 29.43s
+     11 passed (16.9s)
+== e2e:composer: exit 0, 94 s, eligible: load 14.91 after 0s
+   ✓ built in 1.68s
+   ✓ built in 36ms
+   ✓ built in 29.56s
+     18 passed (1.0m)
+== e2e:to-human: exit 0, 129 s, eligible: load 16.02 after 90s
+   ✓ built in 1.80s
+   ✓ built in 42ms
+   ✓ built in 32.45s
+     1 passed (3.2s)
+== e2e:available: exit 0, 53 s, eligible: load 12.58 after 0s
+   ✓ built in 2.44s
+   ✓ built in 106ms
+   ✓ built in 43.29s
+     2 passed (5.8s)
+
+finished 2026-10-10T15:02:59Z; failed steps: 0
