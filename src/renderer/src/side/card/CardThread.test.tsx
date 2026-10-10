@@ -287,19 +287,16 @@ describe('Reply through the human send seam', () => {
     expect(rows[0]!.textContent, 'the comment the card did not send this time carries no mark').not.toContain('Sent to Claude');
   });
 
-  it('a queued reply is marked once the host submits it under its minted uuid and the engine starts it', async () => {
+  it('a queued reply is marked once the host releases it under its minted uuid and the engine starts it', async () => {
     await ready();
     seam.mockResolvedValueOnce({ disposition: 'queued', started: false, queueId: 'q3' });
     await userEvent.type(replyField(), 'Later then{Enter}');
     await waitFor(() => expect(replyField().value).toBe(''));
-    const entry = { queueId: 'q3', appSessionId: child, content: 'Later then', createdAt: new Date().toISOString(), messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, entries: [{ ...entry, state: 'queued' }] }));
-    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, entries: [{ ...entry, state: 'submitting', messageUuid: uuid('t3'), submittedAt: new Date().toISOString() }] }));
-    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE }));
     const b = threadTurn();
+    b.emit('queue.transition', { action: 'release', queueId: 'q3', messageUuid: uuid('t3'), reason: null }); // the host's release, journalled
     b.turn('t3', 'Later then');
     b.emit('command.lifecycle', { commandUuid: uuid('t3'), state: 'started' });
-    push(b.events.slice(-3));
+    push(b.events.slice(-4));
     await waitFor(() => expect(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!.textContent).toContain('Sent to Claude'));
   });
 
