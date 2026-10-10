@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { assertSafeAppSessionId } from '../engine/app-session-id';
 import { HostCommandError } from '../host/runtime';
 import type { AppSessionId } from '../graph/ids';
-import { DeliverableRecordSchema, type DeliverableRecord } from './deliverable';
+import { DeliverableRecordSchema, StoredDeliverableRecordSchema, type DeliverableRecord } from './deliverable';
 
 export function deliverablesDir(userData: string, appSessionId: AppSessionId): string {
   assertSafeAppSessionId(appSessionId);
@@ -80,7 +80,7 @@ export async function readRecords(dir: string, read: (path: string) => Promise<s
     } catch {
       continue;
     }
-    const parsed = DeliverableRecordSchema.safeParse(json);
+    const parsed = StoredDeliverableRecordSchema.safeParse(json); // P2-F L117: a later build's keys stripped
     if (parsed.success) records.push(parsed.data);
   }
   return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt));

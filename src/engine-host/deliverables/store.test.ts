@@ -117,6 +117,26 @@ describe('the deliverable store as E2 extends it', () => {
     expect((await readdir(join(userData, 'deliverables', A))).sort()).toEqual([ID1, `${ID1}.json`].sort());
   });
 
+  // P2-F L117 (G3's pattern): a later build's key in a record or a version is stripped on read, the file left as it was;
+  // the next version written carries only this build's shape, and a write naming an unknown key is still refused
+  it("reads a record carrying a later build's keys, leaves its bytes on read and writes back only the current shape", async () => {
+    const store = new FileDeliverableStore(userData);
+    const v1 = await store.copyVersion(A, ID1, 1, source);
+    const plain = artifact(ID1, v1.path);
+    const path = join(userData, 'deliverables', A, `${ID1}.json`);
+    const text = JSON.stringify({ ...plain, futureKey: 1, versions: plain.versions.map((version) => ({ ...version, futureKey: 2 })) });
+    await writeFile(path, text);
+    expect(await store.get(A, ID1)).toEqual(plain);
+    expect(await store.list(A)).toEqual([plain]);
+    expect(await store.findArtifact(A, 'dash')).toEqual(plain);
+    expect(await readFile(path, 'utf8')).toBe(text);
+    const v2 = await store.copyVersion(A, ID1, 2, source);
+    const next = { ...plain, path: v2.path, versions: [...plain.versions, { path: v2.path, at: 't2' }], updatedAt: 't2' };
+    await store.update(next);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(next);
+    await expect(store.update({ ...next, futureKey: 1 } as typeof next)).rejects.toThrow();
+  });
+
   it('rewrites a record whole through a temp file, leaving none', async () => {
     const store = new FileDeliverableStore(userData);
     const v1 = await store.copyVersion(A, ID1, 1, source);

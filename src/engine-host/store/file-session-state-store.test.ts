@@ -74,6 +74,39 @@ describe('FileSessionStateStore', () => {
     await expect(store.saveLaunchSpec(ID, { ...spec, futureLaunchKey: true } as typeof spec)).rejects.toThrow(); // writes remain strict
   });
 
+  // P2-F L117: the same separation one level down, for the queue's and grants' objects and the stored spec's nested ones
+  it('loads a newer build’s unknown keys inside queue entries, steers, the queue, grants and the spec’s resume, trust and retry, and writes only the current shape', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    const path = join(dir, `${ID}.json`);
+    await mkdir(dir, { recursive: true });
+    const steer = { messageUuid: '22222222-2222-4222-8222-222222222222', content: 'now', createdAt: '2026-09-28T10:00:02.000Z' };
+    const queue = { entries: [entry()], paused: false, steers: [steer] };
+    const grants = { allow: ['Bash(touch granted.txt)'] };
+    const nested = { ...spec, resume: { sessionId: '33333333-3333-4333-8333-333333333333', fork: false }, trust: { accepted: true as const, directory: '/tmp/x' }, retry: { attempt: 1, maxAttempts: 2, reason: 'no_output' } };
+    const later = (value: object) => ({ ...value, futureKey: 1 });
+    const text = JSON.stringify({
+      version: 1,
+      queue: later({ ...queue, entries: [later(entry())], steers: [later(steer)] }),
+      grants: later(grants),
+      launchSpec: { ...nested, resume: later(nested.resume), trust: later(nested.trust), retry: later(nested.retry) },
+    });
+    await writeFile(path, text);
+    const warnings: string[] = [];
+    const store = new FileSessionStateStore(userData, { warn: (m) => warnings.push(m) });
+
+    expect(await store.loadGrants(ID)).toEqual(grants);
+    expect(await store.loadQueue(ID)).toEqual({ ...queue, corrupt: null });
+    expect(await store.loadLaunchSpec(ID)).toEqual(nested);
+    expect(warnings).toEqual([]);
+    expect(await readdir(dir)).toEqual([`${ID}.json`]);
+    expect(await readFile(path, 'utf8')).toBe(text); // reads neither rewrite nor move the file
+
+    await store.saveGrants(ID, grants);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 1, queue, grants, launchSpec: nested });
+    await expect(store.saveQueue(ID, later(queue) as typeof queue)).rejects.toThrow(); // writes remain strict
+    await expect(store.saveGrants(ID, later(grants) as typeof grants)).rejects.toThrow();
+  });
+
   it('exists answers whether a state file exists; loadQueue on it shows the persisted queue untouched (no recovery transition)', async () => {
     const store = new FileSessionStateStore(userData);
     expect(await store.exists(ID)).toBe(false);

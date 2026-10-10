@@ -37,6 +37,13 @@ export const DeliverableRecordSchema = z.strictObject({
 });
 export type DeliverableRecord = z.infer<typeof DeliverableRecordSchema>;
 
+// P2-F L117 (P2-0 G3's pattern): what a reader of the files parses. A later build's key in a record or a version is
+// stripped, so this build reads the record rather than passing it over; `DeliverableRecordSchema` stays the strict write
+// and IPC schema, so a record this build writes back carries only its own shape and nothing writes a new key.
+export const StoredDeliverableRecordSchema = DeliverableRecordSchema.extend({
+  versions: z.array(DeliverableRecordSchema.shape.versions.element.strip()),
+}).strip();
+
 // E2 (Design §3, Decision Log 6): the privileged scheme main serves the store's files through, one file per URL:
 // `maws-deliverable://<recordId>/<appSessionId>/<n>`. The record's uuid is the host (lowercase, so a standard scheme's
 // host case-folding changes nothing, and each record is its own origin); the app session id, which may carry uppercase,

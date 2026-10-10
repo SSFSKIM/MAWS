@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -74,6 +74,17 @@ describe('DeliverableReader (E2 Design §2): main’s read-only view of the stor
     await mkdir(join(userData, 'deliverables', A), { recursive: true });
     await writeFile(recordPath(userData, A, ID[0]), '{ not json');
     expect(await reader.get(A, ID[0])).toEqual({ record: null, present: [] });
+  });
+
+  // P2-F L117 (G3's pattern): a later build's key is stripped on read; the file is left as it was
+  it("gets a record carrying a later build's keys in itself and its versions, leaving the file's bytes untouched", async () => {
+    const record = artifactRecord(A, ID[1], 1, '2026-10-06T00:00:00.000Z', '2026-10-06T00:00:00.000Z');
+    await mkdir(join(userData, 'deliverables', A), { recursive: true });
+    const text = JSON.stringify({ ...record, futureKey: 1, versions: record.versions.map((version) => ({ ...version, futureKey: 2 })) });
+    await writeFile(recordPath(userData, A, ID[1]), text);
+    expect(await reader.get(A, ID[1])).toEqual({ record, present: [false] });
+    expect(await reader.list(A)).toEqual([record]);
+    expect(await readFile(recordPath(userData, A, ID[1]), 'utf8')).toBe(text);
   });
 
   it('refuses an id that is not a record uuid and an app session id that is not one path component', async () => {

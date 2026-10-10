@@ -17,9 +17,12 @@ import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '
 export { BUILTIN_MODELS };
 
 const EntrySchema = z.strictObject({ at: z.string(), models: z.array(ModelCatalogueEntrySchema) });
-const CacheFileSchema = z.strictObject({ entries: z.record(z.string(), EntrySchema) });
+// P2-F L117 (P2-0 G3's pattern): what `load` parses. A later build's key in the file or an entry is stripped rather than
+// costing the cached catalogues; the file is left as it was, and the next update writes only this build's shape (`update`
+// builds the file from `CacheFile`'s fields alone).
+const StoredCacheFileSchema = z.object({ entries: z.record(z.string(), EntrySchema.strip()) });
 type Entry = z.infer<typeof EntrySchema>;
-type CacheFile = z.infer<typeof CacheFileSchema>;
+type CacheFile = z.infer<typeof StoredCacheFileSchema>;
 
 // What a launch's catalogue depends on that the launch plan carries: the binary and the route (the relay and a Direct
 // launch resolve the aliases differently). A launch whose settings change its model environment keys apart
@@ -103,7 +106,7 @@ export class ModelsCache {
       return;
     }
     try {
-      const loaded = CacheFileSchema.parse(JSON.parse(text));
+      const loaded = StoredCacheFileSchema.parse(JSON.parse(text));
       if (Object.keys(this.cached.entries).length === 0) this.cached = loaded; // an update that landed first wins
     } catch (error) {
       this.warn(`${this.file} is not a catalogue (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); answering the built-in list`);

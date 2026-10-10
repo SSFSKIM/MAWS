@@ -90,6 +90,23 @@ describe('models catalogue cache', () => {
       expect(warnings).toHaveLength(1);
     }
   });
+
+  // P2-F L117 (G3's pattern): a later build's key in the file or an entry is stripped on read, the file left as it was
+  // until the next update writes this build's shape
+  it("reads a cache carrying a later build's keys, leaves its bytes on read and writes back only the current shape", async () => {
+    await mkdir(join(userData, 'engine-host'), { recursive: true });
+    const models = [{ value: 'sonnet', displayName: 'Sonnet' }];
+    const text = JSON.stringify({ entries: { [RELAY]: { at: '2026-09-29T10:00:00.000Z', models, futureKey: 1 } }, futureKey: 2 });
+    await writeFile(file(), text);
+    const warnings: string[] = [];
+    const cache = new ModelsCache(userData, { now: () => '2026-09-29T11:00:00.000Z', warn: (m) => warnings.push(m) });
+    await cache.load();
+    expect(cache.answer(RELAY)).toEqual({ models, source: 'cached', at: '2026-09-29T10:00:00.000Z' });
+    expect(warnings).toEqual([]);
+    expect(await readFile(file(), 'utf8')).toBe(text);
+    await cache.update(DIRECT, models);
+    expect(JSON.parse(await readFile(file(), 'utf8'))).toEqual({ entries: { [RELAY]: { at: '2026-09-29T10:00:00.000Z', models }, [DIRECT]: { at: '2026-09-29T11:00:00.000Z', models } } });
+  });
 });
 
 // Debt wave 5: what a launch's catalogue depends on beyond its route, the model environment the engine will run with

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { isSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DELIVERABLES_LIST_ALL_DEFAULT } from '@shared/ipc/schema/deliverables';
-import { DeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
+import { StoredDeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
 import { deliverablesDir, readRecords, recordPath } from '@shared/maws/deliverable-files';
 
 export interface DeliverableLookup {
@@ -54,7 +54,7 @@ export class DeliverableReader {
     } catch {
       return { record: null, present: [] };
     }
-    const parsed = DeliverableRecordSchema.safeParse(json);
+    const parsed = StoredDeliverableRecordSchema.safeParse(json); // P2-F L117: a later build's keys stripped
     if (!parsed.success) return { record: null, present: [] };
     const present = await Promise.all(parsed.data.versions.map((version) => stat(version.path).then((s) => s.isFile(), () => false)));
     return { record: parsed.data, present };

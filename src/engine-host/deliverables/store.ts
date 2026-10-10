@@ -7,7 +7,7 @@
 // about main or a window (X13).
 import { open, readFile, type FileHandle } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
-import { DeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
+import { DeliverableRecordSchema, StoredDeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
 import { deliverablesDir, readRecords, recordPath, versionPath, writeAtomic, writeRecord } from '@shared/maws/deliverable-files';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 
@@ -119,7 +119,7 @@ export class FileDeliverableStore implements DeliverableWriter {
       throw error;
     }
     try {
-      const parsed = DeliverableRecordSchema.safeParse(JSON.parse(text));
+      const parsed = StoredDeliverableRecordSchema.safeParse(JSON.parse(text)); // P2-F L117: a later build's keys stripped
       return parsed.success ? parsed.data : null;
     } catch {
       return null;

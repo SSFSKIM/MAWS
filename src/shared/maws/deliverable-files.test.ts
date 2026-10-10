@@ -82,6 +82,17 @@ describe('the store layout both processes share (E2 Design §2)', () => {
     const denied = (path: string) => (path.endsWith(`${ID2}.json`) ? Promise.reject(Object.assign(new Error('EACCES: denied'), { code: 'EACCES' })) : readFile(path, 'utf8'));
     await expect(readRecords(dir, denied)).rejects.toMatchObject({ code: 'EACCES' });
   });
+
+  // P2-F L117 (G3's pattern): a later build's key in a record or a version is stripped on read, never written back
+  it("reads a record carrying a later build's keys in itself and its versions, leaving the file's bytes untouched", async () => {
+    const dir = deliverablesDir(userData, A);
+    await mkdir(dir, { recursive: true });
+    const plain = record(ID1, '2026-10-06T00:00:01.000Z');
+    const text = JSON.stringify({ ...plain, futureKey: 1, versions: plain.versions.map((version) => ({ ...version, futureKey: 2 })) });
+    await writeFile(recordPath(userData, A, ID1), text);
+    expect(await readRecords(dir)).toEqual([plain]);
+    expect(await readFile(recordPath(userData, A, ID1), 'utf8')).toBe(text);
+  });
 });
 // E4c start (E4c execution document, Design §7): a browser screenshot's file, named by the host, written by main
 describe('the screenshots directory', () => {
