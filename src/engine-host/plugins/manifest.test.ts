@@ -313,6 +313,58 @@ describe('confinement and regular files', () => {
     });
   });
 
+  // F-AB (scale review A scalpel-4#1): a folder is listed by path, so it is opened first and once listed its path must
+  // still name the opened folder under the anchor; else none of its names is used and no outside name reaches a problem.
+  describe('an ancestor directory swapped for a link while a folder is listed', () => {
+    // At the first touch of `commands/nested` for its listing (its open, or the listing itself), its ancestor `commands`
+    // is moved aside and replaced by a link to a folder outside the plugin; `restore` moves the plugin's own folder back
+    // once `commands/nested` is listed.
+    async function swapping(restore: boolean) {
+      const outside = await tree(join(root, 'outside'), { 'nested/sk-secret-name.md': md({ description: 'x' }) });
+      const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p' }, 'commands/nested/review.md': md({ description: 'Inside' }) });
+      const commands = join(plugin, 'commands');
+      const listed = await fsp.realpath(join(commands, 'nested'));
+      let swapped = false;
+      const swapIn = async (path: unknown) => {
+        if (swapped || String(path) !== listed) return;
+        swapped = true;
+        await fsp.rename(commands, `${commands}.moved`);
+        await symlink(outside, commands);
+      };
+      const fs: ManifestReaderDeps['fs'] = {
+        ...fsp,
+        open: (async (path: Parameters<typeof fsp.open>[0], ...rest: unknown[]) => {
+          await swapIn(path);
+          return (fsp.open as (...a: unknown[]) => Promise<FileHandle>)(path, ...rest);
+        }) as typeof fsp.open,
+        readdir: (async (path: Parameters<typeof fsp.readdir>[0], ...rest: unknown[]) => {
+          await swapIn(path);
+          const names = await (fsp.readdir as (...a: unknown[]) => Promise<string[]>)(path, ...rest);
+          if (restore && String(path) === listed) {
+            await rm(commands);
+            await fsp.rename(`${commands}.moved`, commands);
+          }
+          return names;
+        }) as typeof fsp.readdir,
+      };
+      return view({ root: plugin }, INSTALLATION, { fs });
+    }
+
+    it('left in place: the folder re-resolves outside the plugin and none of its names is used', async () => {
+      const answer = await swapping(false);
+      expect(answer.components.commands).toEqual([]);
+      expect(answer.problems).toEqual(['commands/nested: outside the plugin']);
+      expect(JSON.stringify(answer)).not.toContain('sk-secret');
+    });
+
+    it('swapped back after the listing: the listed folder is not the confined path’s, so its names are dropped', async () => {
+      const answer = await swapping(true);
+      expect(answer.components.commands).toEqual([]);
+      expect(answer.problems).toEqual(['commands/nested: could not be read']);
+      expect(JSON.stringify(answer)).not.toContain('sk-secret');
+    });
+  });
+
   it('reads only regular files: a directory where a file should be is `not a regular file`', async () => {
     const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p' }, '.mcp.json/inner': 'x' });
     expect((await view({ root: plugin })).problems).toEqual(['.mcp.json: not a regular file']);
@@ -547,7 +599,7 @@ describe('the bounds', () => {
     expect(answer).toMatchObject({ state: 'read', partial: true, description: 'Read before the stall', components: { mcpServers: [{ name: 's', transport: 'stdio' }], commands: [] } });
     expect(answer.problems).toEqual([]);
     await new Promise((r) => setTimeout(r, 20));
-    expect(closed).toBe(3); // plugin.json, .mcp.json and the stalled file's handle
+    expect(closed).toBe(4); // plugin.json, .mcp.json, the commands folder listed (F-AB) and the stalled file's handle
   });
 
   it('past the call’s deadline the view is partial with what it read; one begun past it reads nothing', async () => {

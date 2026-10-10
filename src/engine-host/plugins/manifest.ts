@@ -208,10 +208,20 @@ class Reading {
     }
   }
 
-  // A directory's entry names, sorted; none when it cannot be listed.
+  // A directory's entry names, sorted; none when it cannot be listed. Node lists only by path (and macOS's `/dev/fd/N`
+  // cannot be listed), so a listing is checked as a file read is (F-AB): the directory is opened first, and once listed
+  // its path must still name the opened directory under the anchor (`sameFile`), else none of its names is used and no
+  // outside name reaches a problem's label. Left open: a swap made after the open and undone before the check lists
+  // outside names; each is then resolved under the restored folder by `find`, absent there unless swapped in again.
   async list(found: Found): Promise<string[]> {
     try {
-      return (await this.bounded(this.fs.readdir(found.real))).map(String).sort();
+      const handle = await this.bounded(this.fs.open(found.real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY), (late) => late.close().catch(ignore));
+      try {
+        const names = (await this.bounded(this.fs.readdir(found.real))).map(String).sort();
+        return (await this.sameFile(found, handle)) ? names : [];
+      } finally {
+        handle.close().catch(ignore); // not awaited: a close that stalls never holds the answer
+      }
     } catch (error) {
       passStop(error);
       this.problem(found.label, 'could not be read');
