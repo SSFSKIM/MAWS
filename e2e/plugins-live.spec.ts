@@ -13,7 +13,9 @@
 // step leaves `<scratch>/live-<step>.png`; what was seen goes to `<scratch>/observations.json`. The owner's
 // ~/.claude.json check runs around the whole run, outside this file (Concrete Steps). Run on purpose only; it spends
 // usage (two haiku turns):
-//   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 pnpm exec playwright test e2e/plugins-live.spec.ts --reporter=line
+//   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 [MAWS_LIVE_MAX_USD=0.15] pnpm exec playwright test e2e/plugins-live.spec.ts --reporter=line
+// With MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script,
+// which adds `--max-budget-usd <that cap>` to every session process (P2-F's re-run cap); unset, the engine itself.
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,6 +23,7 @@ import type { PluginsAction, PluginsInstallation, PluginsScope } from '@shared/p
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
+import { cappedEngine, capWords } from './support/live-budget';
 import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
@@ -217,7 +220,10 @@ async function browseCard(w: Locator, id: string): Promise<Locator> {
 // ---- the run ---------------------------------------------------------------------------------------------------
 
 test('E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session', async () => {
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  // One launch over a fresh profile: the forwarding script's budget is the whole cap (support/live-budget.ts).
+  const engine = await cappedEngine({ root: scratch.root, real: ENGINE_BIN });
+  scratch.log(`engine cap: ${capWords(engine)}`);
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page } = maws;
   reads = await trackPluginReads(maws.app); // before the page issues any CLI read
   const failures: string[] = [];

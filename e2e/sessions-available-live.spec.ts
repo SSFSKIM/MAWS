@@ -9,10 +9,12 @@
 // `/skills` reads "Not read yet." with Load now, which says Starting… and then shows the scratch home's skill. MAWS then
 // quits and relaunches over the same profile: the first session's ring and Session info read "Last reading, …" and
 // "Last observed …" with no engine started. The product launches with no `--max-budget-usd` (C11's rule; the
-// architect's accepted form): the spend is one Haiku reply, read from the session's own receipts. The owner's
+// architect's accepted form): the spend is one Haiku reply, read from the session's own receipts. With
+// MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script, which
+// adds `--max-budget-usd <what that cap leaves>` to every session process (P2-F's re-run cap). The owner's
 // ~/.claude.json (A-15, its /tmp project keys and their digest) and ~/.claude/settings.json are read before and after,
 // never written. Run on purpose only; it spends usage (one Haiku turn):
-//   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_P2A_LIVE=1 pnpm exec playwright test e2e/sessions-available-live.spec.ts --reporter=line
+//   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_P2A_LIVE=1 [MAWS_LIVE_MAX_USD=0.20] pnpm exec playwright test e2e/sessions-available-live.spec.ts --reporter=line
 // Its log, observations and screenshots stay in the scratch root, which the run leaves in place and names.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -28,6 +30,7 @@ import { relaySkipReason } from '../test/support/relay-health';
 import { journalCost } from '../test/live/support/live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { cappedEngine, capWords, spentUnder, type CappedEngine } from './support/live-budget';
 import { a15Line, a15Reading } from './support/p1-live';
 import { seedTranscript, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
@@ -100,7 +103,11 @@ function prepare(): void {
 
 // ---- the page --------------------------------------------------------------------------------------------------------
 
-const launch = () => launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+let engine: CappedEngine; // the installed engine, or its capped forwarding script under MAWS_LIVE_MAX_USD (set at the run's start)
+const launch = () => {
+  engine.budget(spentUnder(userData));
+  return launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+};
 const main = (page: Page) => page.locator('[data-region="main"]');
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 const engineSessions = async (page: Page) => value(await invoke(page, 'engine.sessions', undefined));
@@ -143,7 +150,8 @@ async function stop(page: Page, id: string): Promise<void> {
 
 test('P2-A live: discovered sessions open with nothing started; Send, Load now and Refresh start them; a relaunch keeps the observed facts', async () => {
   prepare();
-  log(`P2-A live acceptance · ${new Date().toISOString()} · engine ${ENGINE_VERSION} (${ENGINE_BIN.replace(homedir(), '~')}) · relay ${RELAY} · scratch ${root}`);
+  engine = await cappedEngine({ root, real: ENGINE_BIN });
+  log(`P2-A live acceptance · ${new Date().toISOString()} · engine ${ENGINE_VERSION} (${ENGINE_BIN.replace(homedir(), '~')}) · cap ${capWords(engine)} · relay ${RELAY} · scratch ${root}`);
   const a15First = a15Reading();
   const ownerBefore = ownerFiles();
   log(a15Line('before', a15First, a15First, [root]));

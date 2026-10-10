@@ -35,7 +35,9 @@
     "e2e/support/processes.ts",
     "e2e/support/scratch-env.ts",
     "e2e/support/p1-live.ts",
-    "e2e/support/oopif-page.ts"
+    "e2e/support/oopif-page.ts",
     // E11 end
+    // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
+    "e2e/support/live-budget.ts"
   ]
 }
