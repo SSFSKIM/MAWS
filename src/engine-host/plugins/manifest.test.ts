@@ -270,6 +270,49 @@ describe('confinement and regular files', () => {
     expect((await view({ root: join(root, 'alias') })).components.commands).toEqual([{ name: 'review', description: 'Shared' }]);
   });
 
+  // P2-F L136: confinement is checked by realpath before the open, and Node offers no descriptor-relative open, so the
+  // reader re-resolves the path after the open and compares the descriptor's identity with the path's file.
+  describe('an ancestor directory swapped for a link between the check and the open', () => {
+    // At the open of `commands/review.md`, `commands` is moved aside and replaced by a link to a folder outside the
+    // plugin holding a file of the same name; `restore` moves the plugin's own folder back once the open has happened.
+    async function swapping(restore: boolean) {
+      const outside = await tree(join(root, 'outside'), { 'review.md': md({ description: 'sk-secret-swapped' }) });
+      const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p' }, 'commands/review.md': md({ description: 'Inside' }) });
+      const commands = join(plugin, 'commands');
+      const fs: ManifestReaderDeps['fs'] = {
+        ...fsp,
+        open: (async (path: Parameters<typeof fsp.open>[0], ...rest: unknown[]) => {
+          const swap = String(path).endsWith(join('commands', 'review.md'));
+          if (swap) {
+            await fsp.rename(commands, `${commands}.moved`);
+            await symlink(outside, commands);
+          }
+          const handle = await (fsp.open as (...a: unknown[]) => Promise<FileHandle>)(path, ...rest);
+          if (swap && restore) {
+            await rm(commands);
+            await fsp.rename(`${commands}.moved`, commands);
+          }
+          return handle;
+        }) as typeof fsp.open,
+      };
+      return view({ root: plugin }, INSTALLATION, { fs });
+    }
+
+    it('left in place: the file re-resolves outside the plugin and is refused', async () => {
+      const answer = await swapping(false);
+      expect(answer.components.commands).toEqual([{ name: 'review', description: null }]); // named by its own entry, nothing of the file read
+      expect(answer.problems).toEqual(['commands/review.md: outside the plugin']);
+      expect(JSON.stringify(answer)).not.toContain('sk-secret');
+    });
+
+    it('swapped back after the open: the descriptor is not the confined path’s file, so it is not read', async () => {
+      const answer = await swapping(true);
+      expect(answer.components.commands).toEqual([{ name: 'review', description: null }]);
+      expect(answer.problems).toEqual(['commands/review.md: could not be read']);
+      expect(JSON.stringify(answer)).not.toContain('sk-secret');
+    });
+  });
+
   it('reads only regular files: a directory where a file should be is `not a regular file`', async () => {
     const plugin = await tree(join(root, 'p'), { '.claude-plugin/plugin.json': { name: 'p' }, '.mcp.json/inner': 'x' });
     expect((await view({ root: plugin })).problems).toEqual(['.mcp.json: not a regular file']);
@@ -495,7 +538,7 @@ describe('the bounds', () => {
       open: (async (path: Parameters<typeof fsp.open>[0], ...rest: unknown[]) => {
         const handle = (await (fsp.open as (...a: unknown[]) => Promise<FileHandle>)(path, ...rest)) as FileHandle;
         const stall = String(path).endsWith('slow.md');
-        return { read: stall ? () => new Promise(() => undefined) : handle.read.bind(handle), close: async () => ((closed += 1), handle.close()) } as unknown as FileHandle;
+        return { read: stall ? () => new Promise(() => undefined) : handle.read.bind(handle), stat: () => handle.stat(), close: async () => ((closed += 1), handle.close()) } as unknown as FileHandle;
       }) as typeof fsp.open,
     };
     const started = Date.now();
@@ -521,11 +564,11 @@ describe('the bounds', () => {
 function recording() {
   const touched: string[] = [];
   const bytes = new Map<string, number>();
-  let resolved = 0;
+  const resolved = new Set<string>(); // the distinct paths resolved (P2-F L136: a file read is resolved again after its open)
   const fs: ManifestReaderDeps['fs'] = {
     ...fsp,
     realpath: (async (path: Parameters<typeof fsp.realpath>[0], ...rest: unknown[]) => {
-      resolved += 1;
+      resolved.add(String(path));
       touched.push(String(path));
       return (fsp.realpath as (...a: unknown[]) => unknown)(path, ...rest);
     }) as typeof fsp.realpath,
@@ -542,11 +585,12 @@ function recording() {
           bytes.set(String(path), (bytes.get(String(path)) ?? 0) + result.bytesRead);
           return result;
         },
+        stat: () => handle.stat(),
         close: () => handle.close(),
       } as unknown as FileHandle;
     }) as typeof fsp.open,
   };
-  return { fs, touched: () => touched, resolved: () => resolved, bytesOf: (suffix: string) => [...bytes].filter(([path]) => path.endsWith(suffix)).reduce((n, [, b]) => n + b, 0) };
+  return { fs, touched: () => touched, resolved: () => resolved.size, bytesOf: (suffix: string) => [...bytes].filter(([path]) => path.endsWith(suffix)).reduce((n, [, b]) => n + b, 0) };
 }
 
 // The real fs, refusing any path that contains one of `forbidden` (proves a bundle, module or URL is never opened).

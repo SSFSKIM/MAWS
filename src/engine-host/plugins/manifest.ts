@@ -6,9 +6,10 @@
 //   `installPath` or `readFromFolder`, and the marketplace row's `installLocation`); every path is confined to its
 //   anchor's realpath at a segment boundary, so neither `../` nor a link may leave it (`outside the plugin`).
 // - Files. A file is read only when `lstat` of its realpath says it is a regular file, opened without following a link,
-//   and bounded: a JSON file past 256 KiB (8 MiB for `marketplace.json`) is `too large`; a Markdown file is read only to
-//   its first 8 KiB, its front matter. Per plugin at most 1,000 filesystem entries and 200 items of a kind; per call a
-//   deadline; past a bound the view is `partial` with what it read.
+//   still confined and the same file (device and inode) when its path is resolved again after the open, and bounded: a
+//   JSON file past 256 KiB (8 MiB for `marketplace.json`) is `too large`; a Markdown file is read only to its first
+//   8 KiB, its front matter. Per plugin at most 1,000 filesystem entries and 200 items of a kind; per call a deadline;
+//   past a bound the view is `partial` with what it read.
 // - Redaction. The view carries names, descriptions, kinds and counts. Never a hook's, monitor's or server's command, an
 //   argument, environment or header value, a URL, a `userConfig` value. A problem is `<relative path>: <one of six
 //   words>`; never an exception's message (Node's JSON.parse message quotes the input it failed on) or a file's value.
@@ -23,6 +24,7 @@
 // `FLr` :805026). A field of a shape the reader does not know reads as no items and `unknown shape`.
 import { constants } from 'node:fs';
 import * as nodeFs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { under } from './cli-result';
@@ -69,10 +71,11 @@ const ignore = () => undefined;
 interface Anchor {
   real: string;
 }
-// A path inside an anchor: its realpath and its label (relative to the anchor, as declared).
+// A path inside an anchor: its realpath, its label (relative to the anchor, as declared) and the anchor's realpath.
 interface Found {
   real: string;
   label: string;
+  anchor: string;
 }
 
 class Reading {
@@ -174,7 +177,24 @@ class Reading {
       this.problem(label, 'outside the plugin');
       return null;
     }
-    return { real, label };
+    return { real, label, anchor: anchor.real };
+  }
+
+  // P2-F L136: whether the opened descriptor is still the file the confined path names. Confinement is checked by
+  // realpath before the open and Node offers no descriptor-relative open, so an ancestor directory swapped for a link in
+  // between would be followed: after the open the path is resolved again and must still lie under the anchor, and its
+  // file must be the descriptor's (device and inode). A failed check is the file's problem and nothing of it is read.
+  private async sameFile(found: Found, handle: FileHandle): Promise<boolean> {
+    const real = await this.bounded(this.fs.realpath(found.real));
+    if (!under(found.anchor, real)) {
+      this.problem(found.label, 'outside the plugin');
+      return false;
+    }
+    const opened = await this.bounded(handle.stat());
+    const named = await this.bounded(this.fs.lstat(real));
+    if (opened.dev === named.dev && opened.ino === named.ino) return true;
+    this.problem(found.label, 'could not be read');
+    return false;
   }
 
   async kind(found: Found): Promise<'file' | 'directory' | 'other' | null> {
@@ -211,6 +231,7 @@ class Reading {
     try {
       const handle = await this.bounded(this.fs.open(found.real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK), (late) => late.close().catch(ignore));
       try {
+        if (!(await this.sameFile(found, handle))) return null;
         const buffer = Buffer.alloc(whole ? limit + 1 : limit);
         let filled = 0;
         while (filled < buffer.length) {
