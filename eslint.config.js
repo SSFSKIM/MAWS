@@ -29,7 +29,7 @@ module.exports = defineConfig(
         'error',
         {
           selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
-          message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): increment as its own statement, then read the variable.',
+          message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
         },
       ],
     },
