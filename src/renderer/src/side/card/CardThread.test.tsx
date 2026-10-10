@@ -15,11 +15,13 @@ import { tabId } from '@shared/ipc/schema/layout';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { editAndResubmitRow, editPromptRow } from '../../composer/resubmit-seam';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
 import { useSetup } from '../../sessions/store';
 import { useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { isOpen } from '../../stores/layout-model';
+import { inlineEditOf, useComposerStore } from '../../stores/composer';
 import { useNotices } from '../../stores/notices';
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
@@ -455,6 +457,23 @@ describe('where the thread is drawn', () => {
     expect(useCommentCard.getState().shownThread).toEqual({ parent: PARENT, child });
     await userEvent.click(within(card()!.querySelector('header')!).getByRole('button', { name: 'Close' }));
     expect(useCommentCard.getState().shownThread).toBeNull();
+  });
+});
+
+// P2-F F-C1 (C scalpel-3#3): the card's transcript is its thread's, whatever the main pane shows, so its Edit edits the
+// thread's message (the registered default reads the main pane's active tab)
+describe('the thread’s Edit', () => {
+  it('edits the thread’s own message in place while the main pane shows the parent', async () => {
+    offs.push(registerTranscriptActions({ editAndResubmit: editAndResubmitRow, editPrompt: editPromptRow })); // as App.tsx's C7 block
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: PARENT }));
+    snapshot = threadTurn().events;
+    await intoThread();
+    withRecord();
+    await waitFor(() => expect(within(card()!).getByText(REPLY)).toBeTruthy());
+    const row = within(card()!).getAllByRole('region', { name: 'Your message' })[0]!;
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    expect(inlineEditOf(useComposerStore.getState(), child)?.messageUuid).toBe(uuid('t1'));
+    expect(inlineEditOf(useComposerStore.getState(), PARENT)).toBeNull();
   });
 });
 

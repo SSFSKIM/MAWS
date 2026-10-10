@@ -86,24 +86,18 @@ export function startInlineEdit(appSessionId: AppSessionId, row: UserRow & { mes
   return true;
 }
 
-// The action receives only the row, so the session is the focused pane's active tab (a click on the bubble's Edit has
-// just moved focus into that pane), and the adapter acts only when that session's transcript holds the row's message.
-function sessionHolding(row: UserRow): AppSessionId | null {
-  const appSessionId = focusedSession();
-  if (appSessionId === null || row.messageUuid === null) return null;
-  return useTranscriptStore.getState().rows(appSessionId).some((r) => r.kind === 'user' && r.messageUuid === row.messageUuid) ? appSessionId : null;
+// The action receives only the row, so the registered default's session is the focused pane's active tab (a click on the
+// bubble's Edit has just moved focus into that pane); a surface drawing another session's transcript (the comment card's
+// thread, P2-F F-C1) binds `editRowOf` to its own. Either acts only when that session's transcript holds the row's message.
+export function editRowOf(appSessionId: AppSessionId | null, row: UserRow, kind: InlineEdit['kind']): void {
+  if (appSessionId === null || row.messageUuid === null) return;
+  if (!useTranscriptStore.getState().rows(appSessionId).some((r) => r.kind === 'user' && r.messageUuid === row.messageUuid)) return;
+  startInlineEdit(appSessionId, { ...row, messageUuid: row.messageUuid }, kind);
 }
 
-export function editAndResubmitRow(row: UserRow): void {
-  const appSessionId = sessionHolding(row);
-  if (appSessionId !== null) startInlineEdit(appSessionId, { ...row, messageUuid: row.messageUuid! }, 'edit');
-}
-
+export const editAndResubmitRow = (row: UserRow): void => editRowOf(focusedSession(), row, 'edit');
 // C6's editPrompt (W1): a prompt a hook blocked, edited in the same place, sent as a new message.
-export function editPromptRow(row: UserRow): void {
-  const appSessionId = sessionHolding(row);
-  if (appSessionId !== null) startInlineEdit(appSessionId, { ...row, messageUuid: row.messageUuid! }, 'blocked');
-}
+export const editPromptRow = (row: UserRow): void => editRowOf(focusedSession(), row, 'blocked');
 
 // ---- the explicit-rewind state machine ---------------------------------------------------------------------------------
 

@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
+import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
 import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { failureOf, useSetup } from '../../sessions/store';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
@@ -78,7 +79,7 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   }, [visible, parent, child]);
 
   const replies = useDeliveredReplies(child); // P2-F L121
-  const actions = useCardActions(card, frame, replies.delivered);
+  const actions = useCardActions(card, child, frame, replies.delivered);
   const reply = useReply(serial, child, replies.track);
 
   const setupCard = useSetup((s) => s.cards.get(child));
@@ -163,8 +164,9 @@ function Echo({ text }: { text: string }) {
 
 // The thread's artifact row opening the card's own record shows that version in the card's viewer (null for the latest,
 // so the viewer keeps following new ones); any other record goes the registered way (the panel's tool). P2-F L121: a
-// reply of this card's the engine took is marked "Sent to Claude" on its row.
-function useCardActions(card: OpenCard, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
+// reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a bubble's Edit edits the
+// thread's message (the registered default reads the main pane's active tab, which is never this thread).
+function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
     showVersion.current = frame.showVersion;
@@ -183,8 +185,10 @@ function useCardActions(card: OpenCard, frame: CardFrame, delivered: ReadonlySet
         show(version === undefined || version === latest ? null : version);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
+      editAndResubmit: (row) => editRowOf(child, row, 'edit'),
+      editPrompt: (row) => editRowOf(child, row, 'blocked'),
     }),
-    [target, delivered],
+    [target, child, delivered],
   );
 }
 
