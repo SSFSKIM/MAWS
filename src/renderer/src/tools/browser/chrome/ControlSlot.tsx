@@ -1,6 +1,6 @@
 // E4a (Task 3.3): who has the page (Design §4 "Control slot", §11; A-31): nothing while idle, "Agent is browsing" with a
 // pulse while the agent drives it, "You have the page" with Hand back while the human holds it after taking it over.
-// cua #103: human ownership is a separate accent strip below navigation; the takeover grace releases commands without
+// cua board 103: human ownership is a separate accent strip below navigation; the takeover grace releases commands without
 // hiding it. Below 480 px the label collapses to the person icon; Hand back is always present.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
