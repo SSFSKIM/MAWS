@@ -2,14 +2,15 @@
 // its own. A-39's tab-sharing rule applied to artifacts: a side thread reaches its parent's, and a thread of a thread
 // reaches every side-thread ancestor up to the family root, nearest first, so the root's artifact is found through the
 // chain. Main resolves it at every launch over the index (`session.launch {spec, artifactScope}`, never stored by the
-// host); P2-F L122: the window resolves the same chain over its session records for `show_pane`'s deliverable target.
+// host); P2-F L122: the window resolves the same chain for `show_pane`'s deliverable target, over its session records
+// and, for an ancestor they lack (archived), main's index.
 import type { AppSessionId } from '../graph/ids';
 import type { Lineage } from '../graph/session';
 
 // As many links as `session.launch` admits (its `artifactScope` is capped at the same count).
 export const ARTIFACT_SCOPE_MAX_LINKS = 16;
 
-// Where a session's lineage is read: main's index, or the window's session records.
+// Where a session's lineage is read: main's index, or the window's records (`session.get` for an archived one).
 export interface LineageSource {
   get(appSessionId: AppSessionId): { lineage: Lineage | null } | null | undefined;
 }

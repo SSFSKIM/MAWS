@@ -165,15 +165,17 @@ describe('the pane bridge, window side (E1)', () => {
     describe('from a side thread (P2-F L122)', () => {
       const THREAD_OWN = '00000000-0000-4000-8000-000000000002';
       const threadOf = (parent: AppSessionId): Lineage => ({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: null, openedBy: 'comment' });
-      // C is a thread of B, a thread of root A; each session holds the records given
-      const holding = (held: Partial<Record<AppSessionId, (typeof record)[]>>) => {
-        const records = new Map(useSessions.getState().records);
-        records.set(B, { ...records.get(B)!, lineage: threadOf(A) });
-        records.set(C, { ...records.get(C)!, lineage: threadOf(B) });
-        useSessions.setState({ records });
+      // C is a thread of B, a thread of root A; each session holds the records given. `archived` sessions are in main's
+      // index (`session.get` answers them) but not in the window's records: the window's feed lists unarchived sessions.
+      const holding = (held: Partial<Record<AppSessionId, (typeof record)[]>>, archived: AppSessionId[] = []) => {
+        const index = new Map(useSessions.getState().records);
+        index.set(B, { ...index.get(B)!, lineage: threadOf(A) });
+        index.set(C, { ...index.get(C)!, lineage: threadOf(B) });
+        useSessions.setState({ records: new Map([...index].filter(([id]) => !archived.includes(id))) });
         disconnect();
         fake = fakeClient({
           'maws.pane.answer': { outcome: 'delivered' },
+          'session.get': (input: { appSessionId: AppSessionId }) => index.get(input.appSessionId) ?? null,
           'deliverables.get': (input: { appSessionId: AppSessionId; id: string }) => {
             const found = held[input.appSessionId]?.find((one) => one.id === input.id);
             return found ? { record: found, present: [true] } : { record: null, present: [] };
@@ -217,6 +219,33 @@ describe('the pane bridge, window side (E1)', () => {
         await settle();
         expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: B }]);
         expect(probe.created.map((init) => init.params)).toEqual([{ target: THREAD_OWN, appSessionId: B }]);
+      });
+
+      // review fix: an archived intermediate thread is read from main's index, so the chain still reaches the family root
+      // as the host's artifact tools see it (archiving B leaves its thread C active)
+      it("an archived intermediate thread missing from the window's records is read through session.get; the root's record is found", async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({ [A]: [record] }, [B]);
+        show(fake, { appSessionId: C, pane: 'deliverable', target: 'dash' });
+        await settle();
+        expect(fake.invoked('session.get')).toEqual([{ appSessionId: B }]);
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: C }, { appSessionId: B }, { appSessionId: A }]);
+        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]);
+      });
+
+      it("an ancestor main's index does not hold ends the chain there, as main's own walk does", async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({ [A]: [record] }, [B]);
+        disconnect();
+        fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' }, 'session.get': null, 'deliverables.list': { records: [] } });
+        disconnect = connectPaneShows(fake.client);
+        show(fake, { appSessionId: C, pane: 'deliverable', target: 'dash' });
+        await settle();
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: C }, { appSessionId: B }]);
+        expect(probe.created).toEqual([]);
+        expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: C, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.deliverableNotFound('dash') } }]);
       });
 
       it('a target no session of the chain holds is deliverableNotFound; a root session reads only its own', async () => {

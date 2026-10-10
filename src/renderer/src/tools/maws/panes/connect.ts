@@ -24,7 +24,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import type { MawsPaneAnswerResult, MawsPaneShow } from '@shared/ipc/schema/maws';
-import { artifactScopeOf } from '@shared/maws/artifact-scope'; // P2-F L122
+import { artifactScopeOf, type LineageSource } from '@shared/maws/artifact-scope'; // P2-F L122
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
@@ -83,7 +83,7 @@ export function connectPaneShows(client: MawsBridge = ipc): () => void {
 // deliverable id); an artifact's own short id (`dash`) is also found, through the session's list, since the model holds
 // both and either names one record (an artifact id may itself be shaped like a uuid, so a record id read as absent
 // falls through to the search). P2-F L122: a side thread's target resolves over its ancestor chain as its artifact tools
-// do (`artifactScopeOf` over this window's session records), the nearest session holding it owning the record.
+// do (`ancestorsOf`), the nearest session holding it owning the record.
 async function deliverableIn(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
   if (z.uuid().safeParse(target).success) {
     const found = await client.invoke('deliverables.get', { appSessionId, id: target });
@@ -95,10 +95,26 @@ async function deliverableIn(client: MawsBridge, appSessionId: AppSessionId, tar
   return { id: listed.value.records.find((record) => record.kind === 'artifact' && record.artifactId === target)?.id ?? null };
 }
 
+// The session's ancestors as main's index walks them for the artifact tools: this window's records first, and an
+// ancestor they lack (an archived thread: the window's feed lists unarchived sessions only) read through `session.get`,
+// which reads the whole index. An ancestor neither holds (or a read that fails) ends the chain there, as in main.
+async function ancestorsOf(client: MawsBridge, appSessionId: AppSessionId): Promise<AppSessionId[]> {
+  const records = useSessions.getState().records;
+  const read = new Map<AppSessionId, ReturnType<LineageSource['get']>>();
+  const source: LineageSource = { get: (id) => records.get(id) ?? read.get(id) };
+  const lineage = records.get(appSessionId)?.lineage ?? null;
+  for (;;) {
+    const chain = artifactScopeOf(source, lineage);
+    const unread = chain.find((id) => !records.has(id) && !read.has(id));
+    if (unread === undefined) return chain;
+    const found = await client.invoke('session.get', { appSessionId: unread });
+    read.set(unread, found.ok ? found.value : null);
+  }
+}
+
 // The record the target names and the session holding it, the session itself first; null when none of them holds it.
 async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string; owner: AppSessionId } | null | { error: string }> {
-  const records = useSessions.getState().records;
-  for (const owner of [appSessionId, ...artifactScopeOf(records, records.get(appSessionId)?.lineage ?? null)]) {
+  for (const owner of [appSessionId, ...(await ancestorsOf(client, appSessionId))]) {
     const found = await deliverableIn(client, owner, target);
     if ('error' in found) return found;
     if (found.id !== null) return { id: found.id, owner };
