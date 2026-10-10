@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
@@ -280,6 +280,36 @@ test('a Read request flagged requires_user_interaction offers no quick approval 
   expect(cards.consoleErrors()).toEqual([]);
 });
 
+// L114: each answer waits on the harness's event stream, never on what a card shows. The n-th `dialog.requested` of
+// the session names the request; main's attention item for it names its card (`data-request-card`); the key goes to
+// that card's frame while its control is enabled, again until the card takes it: the card binds its keys in an effect
+// after the render that shows it, so a key can land before them, and a key it takes turns the card busy before the
+// press returns (`submit` sets `answering` in the key's handler), so only a key it did not take is pressed again, and
+// never on the next request's card (which docks only after this one's answer). A failure of the case prints the
+// sessions' dialog events and attention items, so the gate's log keeps what the next group's run would sweep.
+async function answerDialog(page: Page, pane: Locator, appSessionId: string, n: number, control: string, key: 'Enter' | 'Escape'): Promise<void> {
+  const requested = () => resolved(page, appSessionId, 'dialog.requested');
+  await expect.poll(async () => (await requested()).length, { message: `${appSessionId}: dialog request ${n} on the event stream` }).toBeGreaterThanOrEqual(n);
+  const { requestId } = (await requested())[n - 1];
+  let itemId: string | undefined;
+  await expect
+    .poll(async () => (itemId = value(await invoke(page, 'attention.list', undefined)).find((i) => i.request.requestId === requestId)?.id), {
+      message: `${appSessionId}: main's attention item for request ${requestId}`,
+    })
+    .toBeDefined();
+  const cardSelector = `[data-request-card="${itemId}"]`;
+  const frame = pane.locator('[data-docked-frame]').filter({ has: page.locator(cardSelector) }); // `has` is relative to the frame
+  const button = frame.locator(cardSelector).getByRole('button', { name: control, exact: true });
+  await expect(button, `${appSessionId}: request ${n}'s card docked with ${control}`).toBeEnabled();
+  await expect(async () => {
+    if ((await button.count()) > 0 && (await button.isEnabled())) {
+      await frame.focus();
+      await page.keyboard.press(key);
+    }
+    expect((await button.count()) === 0 || !(await button.isEnabled()), `${appSessionId}: request ${n}'s card took ${key}`).toBe(true);
+  }).toPass({ timeout: 10_000 });
+}
+
 test('the two declared dialogs answer with the pinned result strings', async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
@@ -291,33 +321,39 @@ test('the two declared dialogs answer with the pinned result strings', async ({ 
     { appSessionId: 'c7-auto', placement: 'docked' },
   ]);
   const results = async (id: string) => (await resolved(page, id, 'dialog.resolved')).map((e) => [e.behavior, e.result]);
+  const context = async () => {
+    const dialogs = async (id: string) => (await eventsOf(page, id)).filter((e) => e.kind.startsWith('dialog.')).map((e) => JSON.stringify(e));
+    const items = value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId.startsWith('c7-'));
+    return { refusal: await dialogs('c7-refusal'), auto: await dialogs('c7-auto'), attention: items.map((i) => [i.id, i.appSessionId, i.kind, i.state, i.request.requestId]) };
+  };
 
-  const refusal = page.getByRole('region', { name: 'pane 0' }).getByRole('group', { name: 'Dialog' });
-  await expect(refusal.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeVisible();
-  await refusal.focus();
-  await page.keyboard.press('Enter');
-  await expect.poll(() => results('c7-refusal')).toEqual([['completed', 'retry_fallback']]);
-  await expect(refusal.getByRole('button', { name: 'Cancel' })).toBeVisible(); // the second request (the answered one has no controls)
-  await refusal.focus();
-  await page.keyboard.press('Escape');
-  await expect.poll(() => results('c7-refusal')).toEqual([
-    ['completed', 'retry_fallback'],
-    ['completed', 'cancelled'],
-  ]);
+  try {
+    const refusal = page.getByRole('region', { name: 'pane 0' });
+    await answerDialog(page, refusal, 'c7-refusal', 1, 'Retry with claude-sonnet-5', 'Enter');
+    await expect.poll(() => results('c7-refusal'), { message: 'c7-refusal: Enter retries' }).toEqual([['completed', 'retry_fallback']]);
+    await answerDialog(page, refusal, 'c7-refusal', 2, 'Cancel', 'Escape');
+    await expect
+      .poll(() => results('c7-refusal'), { message: 'c7-refusal: Escape cancels the second request' })
+      .toEqual([
+        ['completed', 'retry_fallback'],
+        ['completed', 'cancelled'],
+      ]);
 
-  const auto = page.getByRole('region', { name: 'pane 1' }).getByRole('group', { name: 'Dialog' });
-  await expect(auto.getByRole('button', { name: 'Continue' })).toBeVisible();
-  await auto.focus();
-  await page.keyboard.press('Enter');
-  await expect.poll(() => results('c7-auto')).toEqual([['completed', 'continue']]);
-  await expect(auto.getByRole('button', { name: 'Stop' })).toBeEnabled(); // the second request
-  await auto.focus();
-  await page.keyboard.press('Escape');
-  await expect.poll(() => results('c7-auto')).toEqual([
-    ['completed', 'continue'],
-    ['completed', 'interrupt'],
-  ]);
-  expect(cards.consoleErrors()).toEqual([]);
+    const auto = page.getByRole('region', { name: 'pane 1' });
+    await answerDialog(page, auto, 'c7-auto', 1, 'Continue', 'Enter');
+    await expect.poll(() => results('c7-auto'), { message: 'c7-auto: Enter continues' }).toEqual([['completed', 'continue']]);
+    await answerDialog(page, auto, 'c7-auto', 2, 'Stop', 'Escape');
+    await expect
+      .poll(() => results('c7-auto'), { message: 'c7-auto: Escape stops the second request' })
+      .toEqual([
+        ['completed', 'continue'],
+        ['completed', 'interrupt'],
+      ]);
+    expect(cards.consoleErrors(), 'no console error in the card page').toEqual([]);
+  } catch (error) {
+    console.log(`[L114 context] ${JSON.stringify(await context().catch((e: unknown) => String(e)))}`);
+    throw error;
+  }
 });
 
 test('an undeclared dialog kind stays pending and unanswered', async ({ cards }) => {
