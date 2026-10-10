@@ -147,6 +147,9 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
   it('answers why when the record, the version or its file is gone, and opens no window', async () => {
     const gone = { get: vi.fn(async () => ({ record: null, present: [] })) };
     expect(await captureArtifact(request(), { reader: gone, env: {} })).toEqual({ ok: false, error: `no deliverable ${ID} in this session` });
+    // P2-F L123: an ancestor's missing record names that ancestor, not "this session"
+    const OWNER = 'App-Parent' as AppSessionId;
+    expect(await captureArtifact(request({ ownerAppSessionId: OWNER }), { reader: gone, env: {} })).toEqual({ ok: false, error: `no deliverable ${ID} in ancestor session ${OWNER}` });
     expect(await captureArtifact(request({ version: 3 }), { reader: reader(), env: {} })).toEqual({ ok: false, error: 'version 3 does not exist' });
     expect(await captureArtifact(request(), { reader: reader(2, [true, false]), env: {} })).toEqual({ ok: false, error: 'version 2 is not on disk any more' });
     expect(electron.state.windows).toHaveLength(0);

@@ -47,7 +47,7 @@ class CaptureFailure extends Error {}
 export async function captureArtifact(request: MawsArtifactCapture, { reader, env }: CaptureDeps): Promise<MawsArtifactCapturedResult> {
   const owner = request.ownerAppSessionId ?? request.appSessionId;
   const { record, present } = await reader.get(owner, request.deliverableId).catch(() => ({ record: null, present: [] as boolean[] }));
-  if (!record) return { ok: false, error: `no deliverable ${request.deliverableId} in this session` };
+  if (!record) return { ok: false, error: `no deliverable ${request.deliverableId} in ${request.ownerAppSessionId ? `ancestor session ${owner}` : 'this session'}` }; // P2-F L123
   if (request.version > record.versions.length) return { ok: false, error: `version ${request.version} does not exist` };
   if (!present[request.version - 1]) return { ok: false, error: `version ${request.version} is not on disk any more` };
 
