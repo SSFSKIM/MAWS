@@ -40,6 +40,8 @@ import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
 import type { DeliverablesParams } from '../tools/deliverables/DeliverablesTool';
 import { useCommentCard } from './card/store';
 // P2-E1 end
+import { browser, resetBrowser } from '../tools/browser/store'; // P2-F L146
+import { registerDock } from '../tools/browser/comment/dock'; // P2-F L146
 
 const ONE = 'side-one' as AppSessionId;
 const TWO = 'side-two' as AppSessionId;
@@ -238,6 +240,65 @@ describe('the Side pane', () => {
     });
   });
   // P2-E1 end
+
+  // P2-F L146: "Show in browser" re-docks a page thread into the card under the pane that shows its page
+  describe('Show in browser', () => {
+    const PAGE = 'http://127.0.0.1:4000/comment.html';
+    const ELEMENT: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: PAGE, css: '#increment' };
+    const SHOW = 'Show in browser';
+    const offs: (() => void)[] = [];
+    const withTab = (url: string) => act(() => browser.setState({ sessions: new Map([[A, { tabs: [browserTab(T1, A, { url })], selected: T1 }]]) }));
+    beforeEach(() => useCommentCard.setState({ open: null }));
+    afterEach(() => {
+      offs.splice(0).forEach((off) => off());
+      useCommentCard.setState({ open: null });
+      resetBrowser();
+    });
+
+    it('is offered only while a pane of this window holds a tab on the thread’s page', () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      render(<ThreadView parent={A} child={ONE} visible />);
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull(); // no tab
+      withTab(PAGE);
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull(); // a tab, but no pane holds its view
+      act(() => void offs.push(registerDock(T1, 'pane-1')));
+      expect(screen.getByRole('button', { name: SHOW })).toBeTruthy();
+      withTab('http://127.0.0.1:4000/other.html');
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull(); // the pane moved to another page
+      withTab(PAGE);
+      act(() => offs.splice(0).forEach((off) => off()));
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull(); // the pane let the view go
+    });
+
+    it('opens the thread’s card for the page’s pane to claim; the Side pane yields it until Show here', async () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      withTab(PAGE);
+      offs.push(registerDock(T1, 'pane-1'));
+      act(() => openSideThread(A, ONE));
+      mount();
+      expect(sideChildrenShown().get(A)).toBe(ONE);
+      await userEvent.click(screen.getByRole('button', { name: SHOW }));
+      expect(useCommentCard.getState().open).toMatchObject({
+        parent: A, anchor: ELEMENT, host: 'browser', hostId: null, claimMode: null, rect: null,
+        target: { kind: 'browser', pageUrl: PAGE }, phase: { kind: 'thread', child: ONE, echo: null },
+      });
+      expect(sideChildrenShown().get(A), 'the pane stopped drawing the thread, so the page’s pane may claim its card').toBeUndefined();
+      expect(screen.getByText('Shown in the card under the page')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Show here' }));
+      expect(useCommentCard.getState().open).toBeNull();
+      expect(sideChildrenShown().get(A)).toBe(ONE);
+    });
+
+    it('is hidden while a main tab shows the thread', () => {
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      withTab(PAGE);
+      offs.push(registerDock(T1, 'pane-1'));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: ONE }));
+      render(<ThreadView parent={A} child={ONE} visible />);
+      expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
+    });
+  });
 });
 
 // E3 (M4): the question view (Design §7) and a promoted thread's header (M3's review)

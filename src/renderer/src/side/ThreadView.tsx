@@ -16,6 +16,13 @@
 // claim and pin at the element, found again by its selector. Opening the tool takes the panel from this pane, so the
 // pane stops drawing the thread and the card's host may claim it (CardHost.tsx). Hidden while a main tab shows the
 // thread, where the card's own close rule would shut it at once.
+//
+// P2-F L146: a thread a comment on a page element opened has "Show in browser" while a pane of this window holds a tab
+// on its page (the browser's dock, `comment/dock.ts`): a card on the thread opens for that pane's strip to claim by the
+// page's URL (the host's `accepts`), with no caret (no pick position is stored). The Side pane cannot hand its panel to
+// that pane as the deliverable's re-dock does (the page shows in the main area), so while a browser card draws the
+// thread the pane says so with Show here, which closes the card and draws the thread here again, as Go to tab does for a
+// main tab.
 import { useEffect } from 'react';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -36,8 +43,9 @@ import { COMMENT_COPY } from '../tools/browser/comment/copy';
 // E4d end
 // P2-E1 start (2026-10-09)
 import { openDeliverable } from '../tools/maws/actions';
-import { openCard, targetOf } from './card/store';
+import { closeCard, openCard, targetOf, useCommentCard } from './card/store';
 // P2-E1 end
+import { usePageDock } from '../tools/browser/comment/dock'; // P2-F L146
 
 const COPY = SIDE_COPY.pane;
 
@@ -49,6 +57,10 @@ function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: An
   openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
 }
 // P2-E1 end
+
+// P2-F L146: the card opens unclaimed, for the browser pane on its page to claim
+const showInBrowser = (parent: AppSessionId, child: AppSessionId, anchor: Anchor): void =>
+  openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null } });
 
 // The first question of a promoted thread: the first `Q:` line of its promotion prompt (the user row whose anchor is
 // the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history). The
@@ -66,7 +78,9 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   const question = useTranscriptStore((s) => (promoted ? promotionQuestionOf(s.entries[child]?.rows ?? []) : null));
   const childTab = tabId({ kind: 'session', appSessionId: child });
   const inMain = useLayout((s) => isOpen(s.main, childTab));
-  const drawn = visible && !inMain;
+  // P2-F L146: a browser card draws the thread (the re-dock's, or a pick's card left open)
+  const inCard = useCommentCard((s) => s.open !== null && s.open.host === 'browser' && s.open.phase.kind === 'thread' && s.open.phase.child === child);
+  const drawn = visible && !inMain && !inCard;
   const questionsOpen = useSidePane((s) => sidePaneOf(s, child).inlineQuestions);
   const asked = useSidePane((s) => (sidePaneOf(s, child).exchanges?.length ?? 0) > 0);
 
@@ -82,7 +96,8 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d start
   const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
   // E4d end
-  const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable (P2-E2: a page's thread has no re-dock)
+  const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable
+  const pageDock = usePageDock(pageUrl ?? null); // P2-F L146: a pane of this window on the thread's page
 
   return (
     <div data-side-thread-view={child} className="flex h-full min-h-0 flex-col">
@@ -123,7 +138,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             </p>
           )}
         </div>
-        {!inMain && (questionsOpen || asked) && (
+        {!inMain && !inCard && (questionsOpen || asked) && (
           <button
             type="button"
             aria-pressed={questionsOpen}
@@ -142,6 +157,11 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           </button>
         )}
         {/* P2-E1 end */}
+        {!inMain && !inCard && pageDock !== null && anchor !== null && (
+          <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => showInBrowser(parent, child, anchor)}>
+            {COPY.showInBrowser}
+          </button>
+        )}
         {!inMain && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => useLayout.getState().openTab({ kind: 'session', appSessionId: child })}>
             {COPY.openAsTab}
@@ -153,6 +173,13 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           <p className="m-0 text-ui text-fg-muted">{COPY.shownInMain}</p>
           <button type="button" className={SECONDARY} onClick={() => useLayout.getState().activateTab(childTab)}>
             {COPY.goToTab}
+          </button>
+        </div>
+      ) : inCard ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+          <p className="m-0 text-ui text-fg-muted">{COPY.shownInCard}</p>
+          <button type="button" className={SECONDARY} onClick={() => closeCard()}>
+            {COPY.showHere}
           </button>
         </div>
       ) : (

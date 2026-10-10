@@ -236,6 +236,31 @@ describe('the re-dock and the card’s close rule', () => {
   });
 });
 
+// P2-F L146: "Show in browser" re-docks a page thread with no pick: the browser pane's strip claims it by its page's URL
+// (the dock's `accepts`), and with no pick position the card draws no caret
+describe('the browser re-dock', () => {
+  const PAGE = 'http://127.0.0.1:4000/comment.html';
+  const ELEMENT: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: PAGE, css: '#increment' };
+  const Strip = ({ url }: { url: string }) => (
+    <div data-column="">
+      <CommentCardHost hostId="pane-1" host="browser" mode="tab" layout="docked" accepts={(c) => c.target?.kind === 'browser' && c.target.pageUrl === url} frame={frameOf('k1')} visible />
+    </div>
+  );
+  beforeEach(() => useSessions.setState({ records: new Map() }));
+
+  it('the pane on the page claims the thread card, with no caret; a pane on another page does not', async () => {
+    const view = render(<Strip url="http://127.0.0.1:4000/other.html" />);
+    act(() => openCard(ELEMENT, { appSessionId: PARENT, phase: { kind: 'thread', child: CHILD, echo: null } }));
+    await settle();
+    expect(useCommentCard.getState().open).toMatchObject({ hostId: null });
+    view.rerender(<Strip url={PAGE} />);
+    await settle();
+    expect(useCommentCard.getState().open).toMatchObject({ hostId: 'pane-1', target: { kind: 'browser', pageUrl: PAGE } });
+    expect(card()!.dataset.cardPhase).toBe('thread');
+    expect(document.querySelector('[data-card-caret]')).toBeNull();
+  });
+});
+
 // P2-E2: the docked strip under a native view never takes more than half its column, even where the card's own floor
 // (its padding, border and margin) is taller than that half, so the page keeps at least the other half.
 describe('the docked strip', () => {
