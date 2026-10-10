@@ -152,4 +152,33 @@ describe('the resume chooser', () => {
     expect(badge('alpha')).toBe('maws');
     expect(badge('elsewhere')).toBe('usage');
   });
+
+  // P2-F W-V (L131): Claude Desktop's picker (cc43287c9-ua-2O55p.js:34271-34273, 34393-34399, 34519-34525, 34487-34495)
+  it('draws the 100 newest, loads 100 more when the list scrolls near its end or ArrowDown passes the last row, and a new search starts over', async () => {
+    const user = userEvent.setup();
+    const t0 = Date.UTC(2026, 9, 1, 12);
+    fill(Array.from({ length: 250 }, (_, k) => record(`s${String(k).padStart(3, '0')}`, { projectId: P.id, updatedAt: new Date(t0 - k * 60_000).toISOString() })));
+    mount();
+    const list = screen.getByRole('listbox');
+    expect(titles()).toHaveLength(100);
+    expect(list.textContent).toContain('Showing 100 of 250. Scroll for more, or type to narrow the list.');
+    const scrollTo = (top: number) => {
+      Object.defineProperties(list, { scrollHeight: { value: 3600, configurable: true }, clientHeight: { value: 400, configurable: true } });
+      list.scrollTop = top;
+      act(() => void list.dispatchEvent(new Event('scroll')));
+    };
+    scrollTo(2800); // 400 px from the end: not yet
+    expect(titles()).toHaveLength(100);
+    scrollTo(2900); // 300 px from the end
+    expect(titles()).toHaveLength(200);
+    expect(list.textContent).toContain('Showing 200 of 250.');
+    await user.click(screen.getAllByRole('option')[199]);
+    await user.keyboard('{ArrowDown}');
+    expect(titles()).toHaveLength(250);
+    expect(selected()).toBe('s200');
+    expect(list.textContent).not.toContain('Scroll for more');
+    await user.keyboard('s'); // every session matches: the first page again
+    expect(titles()).toHaveLength(100);
+    expect(selected()).toBe('s000');
+  });
 });

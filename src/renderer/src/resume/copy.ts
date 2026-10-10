@@ -11,7 +11,7 @@ export const RESUME_COPY = {
   list: 'Sessions',
   none: 'No sessions',
   noMatch: 'No sessions match',
-  more: (shown: number, all: number) => `The ${shown} newest of ${all}; type to narrow`,
+  more: (shown: number, all: number) => `Showing ${shown.toLocaleString('en-US')} of ${all.toLocaleString('en-US')}. Scroll for more, or type to narrow the list.`,
   archived: 'Archived',
   legend: { move: 'navigate', open: 'open', newTab: 'new tab', close: 'close' },
   facts: { folder: 'Folder', branch: 'Branch', project: 'Project', lastActive: 'Last active', lastAnswer: 'Last answer' },

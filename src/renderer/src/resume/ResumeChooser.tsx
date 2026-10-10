@@ -40,8 +40,12 @@ import {
 } from './model';
 import { useRecentTurns } from './preview';
 
-// Rows drawn at once; the search narrows the rest (the CLI picker's and Desktop's first page).
+// Rows drawn at first, and how many more a scroll near the list's end (within NEAR_END px) or an ArrowDown past the last
+// row adds; a new search or scope starts at the first page again (Desktop's picker, cc43287c9-ua-2O55p.js:34271-34273,
+// 34393-34399, 34487-34495, 34519-34525, 34655, 34672; P2-F L131).
 export const SHOWN = 100;
+const MORE = 100;
+const NEAR_END = 320;
 const PROMPT_SHOWN = 400; // Desktop's caps on a preview's user and assistant text
 const ANSWER_SHOWN = 700;
 
@@ -89,12 +93,13 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const [toggles, setToggles] = useState<ChooserToggles>(() => initialToggles(context));
   const [picked, setPicked] = useState<AppSessionId | null>(null);
   const [settled, setSettled] = useState(false); // false until the selection first moves (a fallback too): the opening one previews at once
+  const [limit, setLimit] = useState(SHOWN);
   const now = useNow();
   const search = useRef<HTMLInputElement>(null);
   const ids = useId();
 
   const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query }), [records, digests, projects, context, toggles, branch, query]);
-  const shown = rows.slice(0, SHOWN);
+  const shown = rows.slice(0, limit);
   const groups = chooserGroups(shown, now);
   // The selection stays on its session while the stores change; one that left the list falls back to the first row. The
   // row shown selected is the one kept: the opening one, a search's first row and a fallback are committed as they show,
@@ -125,12 +130,19 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   };
   const flip = (key: keyof ChooserToggles) => {
     setToggles((t) => ({ ...t, [key]: !t[key] }));
+    setLimit(SHOWN);
     setSettled(true);
+  };
+  // the next page, if any rows are left undrawn; the first of them
+  const loadMore = (): ChooserRow | null => {
+    const next = rows[shown.length] ?? null;
+    if (next !== null) setLimit(shown.length + MORE);
+    return next;
   };
   const move = (by: number) => {
     if (shown.length === 0) return;
     const at = selected === null ? -1 : shown.indexOf(selected);
-    const next = shown[Math.min(shown.length - 1, Math.max(0, at + by))];
+    const next = at + by >= shown.length ? (loadMore() ?? shown[shown.length - 1]) : shown[Math.max(0, at + by)];
     select(next.record.appId);
   };
 
@@ -190,6 +202,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
+              setLimit(SHOWN);
               setPicked(null); // a new search selects its first row
               setSettled(true);
             }}
@@ -198,6 +211,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
                 event.preventDefault();
                 event.stopPropagation();
                 setQuery('');
+                setLimit(SHOWN);
               }
             }}
             className="h-9 w-full shrink-0 rounded-sm border border-border bg-transparent px-2.5 text-ui text-fg outline-none placeholder:text-fg-faint focus:border-accent"
@@ -217,7 +231,17 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
             ))}
           </div>
           {/* the list keeps the keyboard in the search field: a press selects without taking focus */}
-          <div id={listId} role="listbox" aria-label={COPY.list} className="mt-2 min-h-0 flex-1 overflow-y-auto" onMouseDown={(event) => event.preventDefault()}>
+          <div
+            id={listId}
+            role="listbox"
+            aria-label={COPY.list}
+            className="mt-2 min-h-0 flex-1 overflow-y-auto"
+            onMouseDown={(event) => event.preventDefault()}
+            onScroll={(event) => {
+              const list = event.currentTarget;
+              if (list.scrollHeight - list.scrollTop - list.clientHeight < NEAR_END) loadMore();
+            }}
+          >
             {shown.length === 0 && <p className="m-0 p-3 text-ui-sm text-fg-muted">{query.trim() === '' ? COPY.none : COPY.noMatch}</p>}
             {groups.map((group) => (
               <div key={group.key} role="group" aria-label={group.label}>
@@ -239,7 +263,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
                 ))}
               </div>
             ))}
-            {rows.length > shown.length && <p className="m-0 mt-1 px-2 text-ui-sm text-fg-faint">{COPY.more(SHOWN, rows.length)}</p>}
+            {rows.length > shown.length && <p className="m-0 mt-1 px-2 text-ui-sm text-fg-faint">{COPY.more(shown.length, rows.length)}</p>}
           </div>
         </div>
         <Preview row={selected} projects={projects} now={now} immediate={!settled} />
