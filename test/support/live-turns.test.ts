@@ -27,6 +27,17 @@ describe('promptsEnded', () => {
     expect(promptsEnded(writtenPrompts(rows), 1), 'the earlier prompt’s end is not the next one’s').toBe(false);
   });
 
+  it('reads a recorded cancellation as an end: a steer cancelled while the first prompt still runs', () => {
+    // steer-next-cancelled: the prompt at seq 11 completes at seq 149; the steer written at seq 30 is cancelled at 35
+    const steer = readFileSync(join(__dirname, '../../spikes/protocol-probe/fixtures/pass3/steer-next-cancelled.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
+    const at = (seq: number) => writtenPrompts(steer.filter((r) => r.seq <= seq));
+    expect(at(34).map((p) => p.ended)).toEqual([null, null]);
+    expect(at(35).map((p) => p.ended)).toEqual([null, 'cancelled']);
+    expect(promptsEnded(at(35), 1), 'the steer, written after the count, ended by its cancellation').toBe(true);
+    expect(promptsEnded(at(35), 0), 'the first prompt still runs').toBe(false);
+    expect(writtenPrompts(steer).map((p) => p.ended)).toEqual(['completed', 'cancelled']);
+  });
+
   it('reads a cancelled prompt as ended and waits on any prompt since the count still open', () => {
     const prompt = (uuid: string, ended: 'completed' | 'cancelled' | null) => ({ uuid, at: '', ended });
     expect(promptsEnded([prompt('a', 'completed'), prompt('b', 'cancelled')], 1)).toBe(true);
