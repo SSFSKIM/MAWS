@@ -4,28 +4,36 @@ Each step row: step | surface or check | pass | fail | note | owner: not run | w
   Mark one of the four middle cells with an x. Leave the rest empty. Write "n/a (<why>)" for a surface not reachable.
   Every fail and note is routed afterwards (see the route column note at the end).
 
+== Joint-sitting provenance ==
+The owner requested a joint sitting on 2026-10-10: the assistant operates cua_repl, records observations,
+and asks the owner only for input it cannot supply. This supersedes the script's owner-only execution
+wording for this run, not its acceptance criteria. Assistant observations are labelled "assistant";
+owner taste, IME and product rulings remain unrun until supplied. No automated observation is owner sign-off.
+The script's pre.2 pin is stale: the rebuilt master should name 5cfb59ea, which contains 9b111d5c.
+Evidence branch: p2-f-joint-sitting; the main checkout stays on master for the signed build.
+
 == Header ==
-Date of the sitting:
-Sessions (one or two, with times):
+Date of the sitting: 2026-10-10
+Sessions (one or two, with times): began around 10:35 PDT; in progress
 The build's commit (master): (the owner: the merge commit Diagnostics names)
 The final head the re-runs ran on: 9b111d5c
 The codesign Authority line:
 The codesign TeamIdentifier:
-claude --version (the re-runs ran on 2.1.296):
-The system locale:
-The display width:
+claude --version (the re-runs ran on 2.1.296): 2.1.296 (Claude Code), assistant shell observation
+The system locale: ko_KR (defaults read -g AppleLocale)
+The display width: main display 3024 x 1964 Retina (system_profiler); MAWS window screenshot 2962 x 1704 physical pixels before rebuild
 The theme order (light then dark, or the reverse):
 
 == Steps ==
 step | surface or check | pass | fail | note | owner: not run | what was seen | screenshot path
 
 -- Before --
-pre.1 | build, stale-build notice (N2.7b), then open the new app | [ ] | [ ] | [ ] | [ ] | |
+pre.1 | build, stale-build notice (N2.7b), then open the new app | [ ] | [ ] | [x] | [ ] | assistant: existing main-checkout app running; no build identity line in its Diagnostics header. Disk signature ad-hoc (Identifier=Electron, TeamIdentifier not set). Signed master build started; not yet completed. |
 pre.2 | codesign Authority and TeamIdentifier (header); Diagnostics' build identity names the final head | [ ] | [ ] | [ ] | [ ] | |
-pre.3 | relay answers 200; Claude Desktop open and signed in; locale and display width recorded | [ ] | [ ] | [ ] | [ ] | |
-pre.4 | claude --version recorded | [ ] | [ ] | [ ] | [ ] | |
-pre.5 | the two terminal sessions prepared (one exited and never opened by MAWS, one left running) | [ ] | [ ] | [ ] | [ ] | |
-pre.6 | scratch keys to clean in ~/.claude.json (none expected) | [ ] | [ ] | [ ] | [ ] | |
+pre.3 | relay answers 200; Claude Desktop open and signed in; locale and display width recorded | [ ] | [ ] | [x] | [ ] | assistant: relay HTTP 200; Claude Desktop opened and signed in; locale and display recorded. Comparison surface preparation in progress. |
+pre.4 | claude --version recorded | [x] | [ ] | [ ] | [ ] | assistant: claude --version reports 2.1.296 (Claude Code). |
+pre.5 | the two terminal sessions prepared (one exited and never opened by MAWS, one left running) | [ ] | [ ] | [x] | [ ] | assistant: Terminal.app denied by computer-use safety policy; owner asked to prepare EXITED and HELD marker sessions. Not yet verified. |
+pre.6 | scratch keys to clean in ~/.claude.json (none expected) | [ ] | [ ] | [x] | [ ] | assistant: read-only scratch-project-key baseline is 25 keys, sha1 67ef531ae7156551225960b4c8b20b8aa127835e. Differs from earlier live-run baseline (26 keys); no keys changed or removed by this sitting, no cleanup inferred. |
 
 -- A. Section 2 items 1 to 6 --
 A1.1 | item 1: a session MAWS never ran shows at once, nothing starts | [ ] | [ ] | [ ] | [ ] | |
