@@ -5,7 +5,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
@@ -25,6 +25,16 @@ beforeAll(() => {
   });
 });
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
+
+// No case waits on a clock (L79). The slot renders through its lazy chunk (`lazy.tsx`), whose first import is real
+// module loading that the machine's load can stretch past any poll's deadline, so the chunk is loaded before the cases.
+// After that, everything a render or an event sets off is promise-chained (the fake IPC's answers, the store's batches,
+// React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
+// read once, so load can slow a case but not fail it.
+beforeAll(async () => {
+  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown')]);
+});
+const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 const disposers: (() => void)[] = [];
 const register = (partial: Parameters<typeof registerTranscriptActions>[0]) => {
@@ -86,7 +96,8 @@ describe('TranscriptSlot', () => {
     );
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={APP} className="slot" />);
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy());
+    await settle();
+    expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy();
     expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: APP, afterSeq: null, limit: null });
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
 
@@ -126,9 +137,11 @@ describe('TranscriptSlot', () => {
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={id} />);
-    await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
+    await settle();
+    expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
     act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
-    await waitFor(() => expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt'));
+    await settle();
+    expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt');
   });
 
   // A child agent's shell may have run in its own worktree, so its transcript names no directory it cannot vouch for.
@@ -152,9 +165,11 @@ describe('TranscriptSlot', () => {
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={id} agentId={agent} />);
     const key = `${id}:${agent}`;
-    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    await settle();
+    expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live');
     act(() => useTranscriptStore.getState().expandAll(key, { cells: true }));
-    await waitFor(() => expect(document.querySelector('.transcript-shell')).not.toBeNull());
+    await settle();
+    expect(document.querySelector('.transcript-shell')).not.toBeNull();
     expect(document.querySelector('.transcript-shell-meta')).toBeNull();
     expect(invoke.mock.calls.map(([name]) => name)).not.toContain('session.queue.list'); // a child's transcript has no queue
   });
@@ -182,13 +197,16 @@ describe('TranscriptSlot', () => {
     (window as { maws?: MawsBridge }).maws = { invoke, on } as unknown as MawsBridge;
     const { unmount } = render(<TranscriptSlot appSessionId={id} />);
     const heldTexts = () => [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent);
-    await waitFor(() => expect(heldTexts()).toEqual(['Then run the tests']));
+    await settle();
+    expect(heldTexts()).toEqual(['Then run the tests']);
     expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: id });
 
     act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
-    await waitFor(() => expect(heldTexts()).toEqual(['Then run the tests', 'And commit']));
+    await settle();
+    expect(heldTexts()).toEqual(['Then run the tests', 'And commit']);
     act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-2', 'And commit')] })));
-    await waitFor(() => expect(heldTexts()).toEqual(['And commit']));
+    await settle();
+    expect(heldTexts()).toEqual(['And commit']);
 
     unmount();
     expect(listeners.size).toBe(0); // the last attachment let the queue go
@@ -203,7 +221,8 @@ describe('TranscriptSlot', () => {
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
     const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');
-    await waitFor(() => expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer'));
+    await settle();
+    expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
 
     let disposeFirst = () => {};
     let disposeSecond = () => {};
@@ -248,13 +267,15 @@ describe('TranscriptSlot', () => {
     };
     const overrides = { openFile: override };
     const view = render(<TranscriptSlot appSessionId={id} startAt={startAt} actions={overrides} presentation="local" />);
-    await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
+    await settle();
+    expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
     expect(seen.at(-1)).toBe(true);
     expect(screen.queryAllByRole('region', { name: 'Your message' })).toEqual([]); // null: nothing yet
 
     index = 0;
     view.rerender(<TranscriptSlot appSessionId={id} startAt={(rows, loaded) => startAt(rows, loaded)} actions={overrides} presentation="local" />);
-    await waitFor(() => expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(1));
+    await settle();
+    expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(1);
     expect(document.body.textContent).toContain('The thread’s own prompt');
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('[data-owner-report]')).not.toBeNull(); // the local presenter
@@ -263,7 +284,8 @@ describe('TranscriptSlot', () => {
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action
-    await waitFor(() => expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(2));
+    await settle();
+    expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(2);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(registered).toHaveBeenCalledTimes(1);
   });
