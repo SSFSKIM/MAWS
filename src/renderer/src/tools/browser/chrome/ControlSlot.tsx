@@ -2,23 +2,40 @@
 // pulse while the agent drives it, "You have the page" with Hand back while the human holds it after taking it over.
 // E4c moves `control`; E4a only hands it back (`browser.control.handBack`), so outside tests the slot stays empty until
 // E4c lands.
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import { handBack } from '../actions';
 import { BROWSER_COPY } from '../copy';
+import { PersonIcon } from '../icons';
 
 export function ControlSlot({ tab }: { tab: BrowserTab }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    const chrome = root.current?.closest('[data-browser-chrome]');
+    if (!chrome) return;
+    const measure = () => {
+      const width = chrome.getBoundingClientRect().width;
+      setCompact(width > 0 && width < 480);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(chrome);
+    return () => observer?.disconnect();
+  }, [tab.control]);
   if (tab.control === 'idle') return null;
   if (tab.control === 'agent') {
     return (
-      <span data-browser-control="agent" role="status" className="flex shrink-0 items-center gap-1.5 px-1.5 text-ui-sm text-fg-muted">
+      <span ref={root} data-browser-control="agent" role="status" className="flex shrink-0 items-center gap-1.5 px-1.5 text-ui-sm text-fg-muted">
         <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />
         {BROWSER_COPY.control.agentBrowsing}
       </span>
     );
   }
   return (
-    <span data-browser-control="human" className="flex shrink-0 items-center gap-1.5 pl-1.5 text-ui-sm text-fg-muted">
-      {BROWSER_COPY.control.humanHasPage}
+    <span ref={root} data-browser-control="human" aria-label={BROWSER_COPY.control.humanHasPage} className="flex shrink-0 items-center gap-1.5 pl-1.5 text-ui-sm text-fg-muted">
+      <PersonIcon className="size-4 shrink-0" />
+      {!compact && BROWSER_COPY.control.humanHasPage}
       <button
         type="button"
         onClick={() => handBack(tab.tabId)}

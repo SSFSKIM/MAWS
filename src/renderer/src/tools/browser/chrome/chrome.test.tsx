@@ -70,6 +70,16 @@ const show = (props: Partial<ChromeProps> & { tab: BrowserTab | null }) =>
   render(<Chrome appSessionId={A} surface="panel" tabs={props.tab ? [props.tab] : []} {...props} />);
 
 describe('the control slot', () => {
+  it('at 379 px keeps the ownership icon and usable Hand back, without the long label', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 379, height: 36 }));
+    show({ tab: tab({ control: 'human' }) });
+    expect(screen.queryByText(BROWSER_COPY.control.humanHasPage)).toBeNull();
+    expect(document.querySelector('[data-browser-control="human"] svg')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.control.handBack }));
+    await wait(0);
+    expect(calls('browser.control.handBack')).toEqual([{ tabId: T1 }]);
+  });
+
   it('is empty while idle, says the agent is browsing, and offers Hand back while the human has the page', async () => {
     const { rerender } = show({ tab: tab() });
     expect(document.querySelector('[data-browser-control]')).toBeNull();
