@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { useNotices } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
+import { VOICE } from '../../settings-tab/copy';
 import { provideDictation, type DictationController } from './controller';
 import { errorNotice, type NoticeCopy } from './copy';
 import { MicControl } from './MicControl';
@@ -73,6 +75,16 @@ describe('the microphone control', () => {
     expect(invoke).toHaveBeenLastCalledWith('voice.openPrivacySettings', { pane: 'speech' });
     fireEvent.click(a.getByRole('button', { name: 'Dismiss' }));
     expect(a.queryByRole('note')).toBeNull();
+  });
+
+  // P2-F (L89): a failed open says so as Settings › Voice does, with the pane to open by hand
+  it('a failed open of the pane raises the same warning toast as Settings › Voice', async () => {
+    useNotices.setState({ notices: [] });
+    const { a } = renderBoth();
+    act(() => notice(A, errorNotice('speech_denied', 'denied', null)));
+    invoke.mockResolvedValueOnce({ ok: false, error: { code: 'failed', message: 'no settings app' } } as never);
+    fireEvent.click(a.getByRole('button', { name: 'Open System Settings' }));
+    await vi.waitFor(() => expect(useNotices.getState().notices.map((n) => [n.level, n.text])).toEqual([['warning', VOICE.openFailed('no settings app', VOICE.paneByHand.speech)]]));
   });
 
   it('points a language with no on-device model at the Dictation settings, with no pane button', () => {

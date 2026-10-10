@@ -11,6 +11,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { VoicePrivacyPane } from '@shared/ipc/schema/voice';
 import { Icon, useChordHint } from '../../app/IconButton';
 import { ipc } from '../../ipc/client';
+import { VOICE } from '../../settings-tab/copy'; // P2-F (L89): Settings › Voice's words for a failed open
+import { toast } from '../../stores/notices';
 import { mountedDictation } from './controller';
 import { micTitle } from './copy';
 import { dismissDictationNotice, useDictationStore, type DictationNoticeKind, type DictationPhase } from './store';
@@ -79,7 +81,7 @@ export function DictationNotice({ appSessionId, client = ipc }: { appSessionId: 
           className="shrink-0 rounded-sm px-1 text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2"
           onClick={() =>
             void client.invoke('voice.openPrivacySettings', { pane }).then((result) => {
-              if (!result.ok) console.warn('[dictation] voice.openPrivacySettings failed', result.error);
+              if (!result.ok) toast({ level: 'warning', text: VOICE.openFailed(result.error.message, VOICE.paneByHand[pane]), actions: [], dismissible: true });
             })
           }
         >
