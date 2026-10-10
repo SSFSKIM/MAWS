@@ -1,33 +1,11 @@
-// P2-E1 G4 (P2-E1 execution document, D10; P2 Decision Log 9): the sessions whose artifacts a side thread sees besides
-// its own. A-39's tab-sharing rule applied to artifacts: a side thread reaches its parent's, and a thread of a thread
-// reaches every side-thread ancestor up to the family root, nearest first, so the root's artifact is found through the
-// chain. The chain is resolved at every launch (the intent's lineage, a resume's record) and travels beside the launch
-// spec (`session.launch {spec, artifactScope}`), never stored by the host.
+// P2-E1 G4 (P2-E1 execution document, D10; P2 Decision Log 9): a side thread's artifact scope as `session.launch` carries
+// it, resolved over the index at every launch (the intent's lineage, a resume's record). The chain itself is shared since
+// P2-F L122 (`@shared/maws/artifact-scope`), so the window's `show_pane` resolves a deliverable target over the same
+// ancestors.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage } from '@shared/graph/session';
+import { artifactScopeOf } from '@shared/maws/artifact-scope';
 import type { SessionStore } from '../index/sessions';
-
-// As many links as `session.launch` admits (its `artifactScope` is capped at the same count).
-export const ARTIFACT_SCOPE_MAX_LINKS = 16;
-
-// The ancestors of a session with this lineage, nearest first: each side thread's parent, continuing while that parent is
-// itself a side thread, so the first parent that is not (the family root) ends the chain, included. A root or a fork
-// answers []; a parent missing from the index, or an index that cannot be read, ends the chain with the last one found;
-// a repeated id and the link cap end it too.
-export function artifactScopeOf(sessions: Pick<SessionStore, 'get'>, lineage: Lineage | null): AppSessionId[] {
-  const chain: AppSessionId[] = [];
-  let link = lineage;
-  while (link?.kind === 'side-thread' && chain.length < ARTIFACT_SCOPE_MAX_LINKS && !chain.includes(link.parentAppSessionId)) {
-    const parent = link.parentAppSessionId;
-    chain.push(parent);
-    try {
-      link = sessions.get(parent)?.lineage ?? null;
-    } catch {
-      break; // the index is unavailable: the chain so far
-    }
-  }
-  return chain;
-}
 
 // The `session.launch` input's scope field for a launch with this lineage: absent when the chain is empty, so every launch
 // other than a side thread's sends the input it sent before.

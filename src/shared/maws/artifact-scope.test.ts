@@ -1,5 +1,6 @@
-// P2-E1 G4 (D10): the artifact scope main resolves at launch. A side thread's ancestors, nearest first, up to the family
-// root (the first ancestor that is not itself a side thread, included); empty for a root or a fork.
+// P2-E1 G4 (D10): the artifact scope main resolves at launch and, since P2-F L122, the window resolves for `show_pane`.
+// A side thread's ancestors, nearest first, up to the family root (the first ancestor that is not itself a side thread,
+// included); empty for a root or a fork.
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';

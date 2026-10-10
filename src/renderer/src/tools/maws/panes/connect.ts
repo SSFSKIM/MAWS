@@ -24,6 +24,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import type { MawsPaneAnswerResult, MawsPaneShow } from '@shared/ipc/schema/maws';
+import { artifactScopeOf } from '@shared/maws/artifact-scope'; // P2-F L122
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
@@ -81,8 +82,9 @@ export function connectPaneShows(client: MawsBridge = ipc): () => void {
 // E2 start: the `deliverable` pane. The target is the record's id (what `send_file` and `artifact_create` answer as the
 // deliverable id); an artifact's own short id (`dash`) is also found, through the session's list, since the model holds
 // both and either names one record (an artifact id may itself be shaped like a uuid, so a record id read as absent
-// falls through to the search).
-async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
+// falls through to the search). P2-F L122: a side thread's target resolves over its ancestor chain as its artifact tools
+// do (`artifactScopeOf` over this window's session records), the nearest session holding it owning the record.
+async function deliverableIn(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
   if (z.uuid().safeParse(target).success) {
     const found = await client.invoke('deliverables.get', { appSessionId, id: target });
     if (!found.ok) return { error: found.error.message };
@@ -93,6 +95,17 @@ async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, tar
   return { id: listed.value.records.find((record) => record.kind === 'artifact' && record.artifactId === target)?.id ?? null };
 }
 
+// The record the target names and the session holding it, the session itself first; null when none of them holds it.
+async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string; owner: AppSessionId } | null | { error: string }> {
+  const records = useSessions.getState().records;
+  for (const owner of [appSessionId, ...artifactScopeOf(records, records.get(appSessionId)?.lineage ?? null)]) {
+    const found = await deliverableIn(client, owner, target);
+    if ('error' in found) return found;
+    if (found.id !== null) return { id: found.id, owner };
+  }
+  return null;
+}
+
 async function showDeliverable(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, client: MawsBridge): Promise<MawsPaneAnswerResult> {
   const open = (params: Record<string, string>): MawsPaneAnswerResult => {
     const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
@@ -100,9 +113,9 @@ async function showDeliverable(tool: PanelTool<unknown, unknown>, appSessionId: 
   };
   if (target === null) return open({});
   const found = await deliverableOf(client, appSessionId, target);
+  if (found === null) return { ok: false, error: TOOL_ERRORS.deliverableNotFound(target) };
   if ('error' in found) return { ok: false, error: TOOL_ERRORS.deliverableUnreadable(target, found.error) };
-  if (found.id === null) return { ok: false, error: TOOL_ERRORS.deliverableNotFound(target) };
-  return open({ target: found.id, appSessionId }); // the session named, so a pinned tab showing another one follows it
+  return open({ target: found.id, appSessionId: found.owner }); // the record's session named, so a pinned tab showing another one follows it
 }
 // E2 end
 

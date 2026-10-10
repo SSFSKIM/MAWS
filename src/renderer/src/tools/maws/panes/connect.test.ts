@@ -4,13 +4,15 @@
 // know is left to the window that does.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { Lineage } from '@shared/graph/session';
 import { tabId } from '@shared/ipc/schema/layout';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { activeTab } from '../../../stores/layout-model';
-import { A, B, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { useSessions } from '../../../stores/sessions';
+import { A, B, C, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
 import { connectPaneShows } from './connect';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -156,6 +158,83 @@ describe('the pane bridge, window side (E1)', () => {
       await settle();
       expect(probe.created.map((init) => init.params)).toEqual([{}]);
       expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { ok: true, opened: { kind: 'panel-tool', toolId: 'deliverables' } } });
+    });
+
+    // P2-F L122: a side thread's target resolves over its ancestor chain, nearest first, as its artifact tools do
+    // (`artifactScopeOf`); the record found opens under the session that holds it, in the thread's own panel.
+    describe('from a side thread (P2-F L122)', () => {
+      const THREAD_OWN = '00000000-0000-4000-8000-000000000002';
+      const threadOf = (parent: AppSessionId): Lineage => ({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: null, openedBy: 'comment' });
+      // C is a thread of B, a thread of root A; each session holds the records given
+      const holding = (held: Partial<Record<AppSessionId, (typeof record)[]>>) => {
+        const records = new Map(useSessions.getState().records);
+        records.set(B, { ...records.get(B)!, lineage: threadOf(A) });
+        records.set(C, { ...records.get(C)!, lineage: threadOf(B) });
+        useSessions.setState({ records });
+        disconnect();
+        fake = fakeClient({
+          'maws.pane.answer': { outcome: 'delivered' },
+          'deliverables.get': (input: { appSessionId: AppSessionId; id: string }) => {
+            const found = held[input.appSessionId]?.find((one) => one.id === input.id);
+            return found ? { record: found, present: [true] } : { record: null, present: [] };
+          },
+          'deliverables.list': (input: { appSessionId: AppSessionId }) => ({ records: held[input.appSessionId] ?? [] }),
+        });
+        disconnect = connectPaneShows(fake.client);
+      };
+
+      it("a thread's target held by its parent opens the parent's record in the thread's panel", async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({ [A]: [record] });
+        show(fake, { appSessionId: B, pane: 'deliverable', target: DASH });
+        await settle();
+        show(fake, { appSessionId: B, pane: 'deliverable', target: 'dash', requestId: 'r2' });
+        await settle();
+        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]); // the second call reuses the one tab
+        expect(fake.invoked('deliverables.get')).toEqual([{ appSessionId: B, id: DASH }, { appSessionId: A, id: DASH }]);
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: B }, { appSessionId: B }, { appSessionId: A }]);
+        const [opened] = panelOf(B)!.tabs;
+        const answer = { ok: true, opened: { kind: 'panel-tool', toolId: 'deliverables', tabId: opened!.id, title: 'Deliverables' } };
+        expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: B, requestId: 'r1', result: answer }, { appSessionId: B, requestId: 'r2', result: answer }]);
+      });
+
+      it("a thread of a thread reaches the family root's record", async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({ [A]: [record] });
+        show(fake, { appSessionId: C, pane: 'deliverable', target: 'dash' });
+        await settle();
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: C }, { appSessionId: B }, { appSessionId: A }]);
+        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]);
+      });
+
+      it("the nearest session holding the artifact id owns it: the thread's own before its parent's", async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({ [A]: [record], [B]: [{ ...record, id: THREAD_OWN, appSessionId: B }] });
+        show(fake, { appSessionId: B, pane: 'deliverable', target: 'dash' });
+        await settle();
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: B }]);
+        expect(probe.created.map((init) => init.params)).toEqual([{ target: THREAD_OWN, appSessionId: B }]);
+      });
+
+      it('a target no session of the chain holds is deliverableNotFound; a root session reads only its own', async () => {
+        const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+        registerPanelTool(tool);
+        holding({});
+        show(fake, { appSessionId: C, pane: 'deliverable', target: 'none' });
+        await settle();
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: C }, { appSessionId: B }, { appSessionId: A }]);
+        show(fake, { appSessionId: A, pane: 'deliverable', target: 'none', requestId: 'r2' });
+        await settle();
+        expect(fake.invoked('deliverables.list')).toEqual([{ appSessionId: C }, { appSessionId: B }, { appSessionId: A }, { appSessionId: A }]);
+        expect(probe.created).toEqual([]);
+        expect(fake.invoked('maws.pane.answer')).toEqual([
+          { appSessionId: C, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.deliverableNotFound('none') } },
+          { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.deliverableNotFound('none') } },
+        ]);
+      });
     });
   });
 
