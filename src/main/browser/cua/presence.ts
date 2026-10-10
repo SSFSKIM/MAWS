@@ -5,8 +5,8 @@
 // lapses or the lease is released. Reading commands never change control, so a permitted read during `human` cannot
 // revoke the person's hold.
 //
-// Takeover: before an acting command is marked and dispatched, control's `personHolds` is asked (the tab is `human`, or
-// the person touched it within the 3 s hand-back window while `idle`); a recent touch of an idle tab promotes it to
+// Takeover: before an acting command is marked and dispatched, control's `personHolds` is asked (the person touched it
+// within the 3 s grace, independent of the visible ownership; cua #103); a recent touch of an idle tab promotes it to
 // `human` first, as E4c's tools' pause point did. While `human`, the command waits for the hand-back for at most
 // min(BROWSER_TAKEOVER_HOLD_MS, deadline - TAKEOVER_MARGIN_MS), then is refused with PERSON_USING_TAB; a command whose
 // deadline is already under TAKEOVER_MIN_DEADLINE_MS is refused at once. The vendor caps locator actions at 3 s and the

@@ -202,7 +202,7 @@ describe('the detached transport: connecting', () => {
     expect(spawn).toHaveBeenCalledOnce();
     const [command, args, options] = spawn.mock.calls[0];
     expect(command).toBe(process.execPath);
-    expect(args).toEqual([profile.modulePath, '--detached', profile.dir]);
+    expect(args).toEqual(['--disable-sigusr1', profile.modulePath, '--detached', profile.dir]); // no inspector on SIGUSR1, from exec on
     expect(options).toMatchObject({ detached: true, cwd: process.cwd(), argv0: 'maws-supervisor' });
     const stdio = options.stdio as unknown[];
     expect(stdio[0]).toBe('ignore');

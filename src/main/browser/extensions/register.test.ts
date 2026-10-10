@@ -2,6 +2,7 @@ import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
+import type { LoadedAction } from './actions';
 
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, WebContentsView: class {}, Menu: {} }));
 
@@ -29,7 +30,7 @@ function setup() {
   const inert = { ...probe, extensionId: INERT, name: 'Inert', title: 'Inert', hasPopup: false, hasOptions: false, popupUrl: null, optionsUrl: null };
   const actions = {
     list: vi.fn(async () => [{ extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true }]),
-    find: vi.fn((partition: string, id: string) => (partition === PART ? ([probe, inert].find((a) => a.extensionId === id) ?? null) : null)),
+    find: vi.fn((partition: string, id: string): LoadedAction | null => (partition === PART ? ([probe, inert].find((a) => a.extensionId === id) ?? null) : null)),
     entries: vi.fn(() => [probe, inert]),
   };
   const popups = { open: vi.fn() };
@@ -66,6 +67,14 @@ const refusal = (run: () => unknown) => {
 };
 
 describe('browser.extensions.* (cua #90)', () => {
+  it('cua #103: a failed-background action cannot open its declared popup through IPC', () => {
+    const s = setup();
+    const loaded = s.actions.find(PART, PROBE)!;
+    s.actions.find.mockReturnValueOnce({ ...loaded, inert: 'Loaded · background failed' });
+    s.call('browser.extensions.action.click', { tabId: s.tabId, extensionId: PROBE, anchor: RECT });
+    expect(s.popups.open).not.toHaveBeenCalled();
+  });
+
   it('lists the partition\'s actions', async () => {
     const s = setup();
     expect(await s.call('browser.extensions.actions', { partition: PART })).toEqual({ actions: [expect.objectContaining({ extensionId: PROBE })] });

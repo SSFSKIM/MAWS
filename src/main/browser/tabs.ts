@@ -6,8 +6,8 @@
 // A tab is *loaded* when it has a view; the view is created when a URL is first loaded into the tab (opened with one,
 // navigated, or resumed), never for an empty or suspended tab alone. At most BROWSER_LOADED_TABS_MAX tabs are loaded
 // across the app: loading one more suspends the least recently shown eligible tab (unplaced, not loading, not
-// downloading, idle), and with none eligible the tab being loaded is itself left suspended with its URL kept as the
-// suggestion; nothing is ever force-closed (Decision Log 6).
+// downloading, lease-free, idle or human-owned past takeover grace), and with none eligible the tab being loaded is
+// itself left suspended with its URL kept as the suggestion; nothing is ever force-closed (Decision Log 6).
 //
 // Later pieces attach through the entry hooks rather than through this file: `onViewCreated` is where a view's listeners
 // are wired (navigation, keys, permissions, the debugger, the input seams), `onViewDestroying` where they are torn down
@@ -21,6 +21,7 @@ import { classifyLoadError } from '@shared/browser/errors';
 import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { personHolds } from './agent/control';
 import { TabDebugger } from './debugger';
 import { TabInputSeam } from './input';
 import type { PersistedTab, TabsFile } from './persist';
@@ -194,10 +195,11 @@ export class TabStore {
     return undefined;
   }
 
-  // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
-  // not the agent's or the human's (Design §2), nor driven through cua (E13), nor one of `spared` (the tab being loaded; a page opening a tab, which
-  // never suspends its own opener). The count cap here and the memory cap (memory.ts) share it.
+  // The least recently shown loaded tab that may be unloaded: unplaced, not loading, not downloading, lease-free
+  // (E13), and idle or human-owned past takeover grace (cua #103). Suspension preserves visible human ownership.
+  // Never one of `spared` (the tab being loaded or its opener). The count and memory caps share this rule.
   capVictim(...spared: TabEntry[]): TabEntry | undefined {
+    const now = this.now();
     const eligible = this.all().filter(
       (entry) =>
         !spared.includes(entry) &&
@@ -205,7 +207,7 @@ export class TabStore {
         entry.tab.placedIn === null &&
         !entry.tab.loading &&
         entry.tab.download?.state !== 'progressing' &&
-        entry.tab.control === 'idle' &&
+        (entry.tab.control === 'idle' || (entry.tab.control === 'human' && !personHolds(entry, now))) &&
         this.deps.driven?.(entry.tab.tabId) !== true,
     );
     eligible.sort((a, b) => a.tab.lastShownAt.localeCompare(b.tab.lastShownAt) || a.tab.createdAt.localeCompare(b.tab.createdAt));

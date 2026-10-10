@@ -18,6 +18,7 @@ import { toggleBookmarksBar } from '../settings';
 import { onChromeCommand, onExtensionReveal, tabOpened } from '../store';
 import { BookmarksBar } from './BookmarksBar';
 import { canShowBar } from './bookmarks-bar';
+import { ControlSlot } from './ControlSlot';
 import { FindBar } from './FindBar';
 import { NavRow } from './NavRow';
 import { Notices } from './Notices';
@@ -86,6 +87,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
     <div data-browser-chrome="" onKeyDown={onKeyDown} className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
       <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={tabId} />
       <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} onFind={openFind} />
+      {tab?.control === 'human' && <ControlSlot tab={tab} />}
       {tab && tab.partition !== DEFAULT_PARTITION && <BookmarksBar tab={tab} /> /* cua #90 */}
       {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} owns={owns} />}
       {tab && finding !== null && <FindBar tab={tab} focusRequest={finding.focus} onClose={() => setFinding(null)} />}

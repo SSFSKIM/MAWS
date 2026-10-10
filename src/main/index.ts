@@ -118,6 +118,10 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
+// Socket peer authentication (cua spec 2026-10-09-maws-socket-peer-auth-design.md, Decision Log 2026-10-10): without a
+// listener, a same-user SIGUSR1 opens a Node inspector on 127.0.0.1:9229 whose code runs inside main, a route around the
+// cua socket's peer check. A listener of its own keeps Node from starting one; `--inspect` still works (the e2e harness).
+process.on('SIGUSR1', () => {});
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);

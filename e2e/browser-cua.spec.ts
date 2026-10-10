@@ -23,17 +23,27 @@
 // (`browser.bookmarks.open` from the window) is theirs too: no agent row, and the agent's next acting command within the
 // hand-back window is refused as the person's; the agent's own navigation through CDP still makes its row. The profile is
 // imported over IPC from the synthetic Chrome fixture (bookmarks only), never the owner's Chrome.
-import { mkdtempSync, rmSync } from 'node:fs';
+// Socket peer authentication (cua docs/doperpowers/specs/2026-10-09-maws-socket-peer-auth-design.md, M2; Acceptance 5):
+// every socket checks its peer, so each scene whose fake host runs in this test process makes the process a trusted root
+// after every launch (the seam's `trustRoot`). The sixth scene connects a same-user process reparented to launchd and
+// sees it cut off before any hello; the seventh trusts nothing and runs a live session whose engine is a stub
+// (test/support/cua-engine-stub.mjs) that starts a connector as its child, which MAWS lets in on the engine's pid from
+// the session's status.
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
 import { invoke, value } from './support/c7-replay';
 import { browserIn, tabsOf } from './support/browser-scene';
-import { launchMaws, type MawsLaunch } from './support/launch';
-import { closeScene, launchScene, scratchProject, show } from './support/maws-tools';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { closeScene, launchScene, scratchProject, seedTranscripts, show } from './support/maws-tools';
+import { launchDefaults } from '../src/shared/composer/launch-defaults';
+import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 // cua #90 start
 import { profilePartition } from '@shared/browser/tab';
 import { buildChromeUserData } from '../test/support/chrome-profile';
@@ -70,7 +80,11 @@ function startPages(): Promise<{ origin: string; url(path: string): string; clos
 // presence (the person's stand-in, control and the cursor).
 interface Seam {
   __maws_browser: {
-    cua: { socketPathFor(appSessionId: string): string | null; inspect(): Record<string, { connections: number; held: number; leased: string[] }> };
+    cua: {
+      socketPathFor(appSessionId: string): string | null;
+      inspect(): { peerModule: string; sessions: Record<string, { connections: number; held: number; leased: string[]; refused: number }> };
+      trustRoot(pid: number): boolean;
+    };
     agent: {
       control(tabId: string): { control: string } | null;
       lastInputs(tabId: string): { kind: string; source: string }[];
@@ -81,7 +95,9 @@ interface Seam {
 }
 const seam = (maws: MawsLaunch) => ({
   socketPathFor: (appSessionId: string) => maws.app.evaluate((_electron, id) => (globalThis as unknown as Seam).__maws_browser.cua.socketPathFor(id), appSessionId),
-  inspect: () => maws.app.evaluate(() => (globalThis as unknown as Seam).__maws_browser.cua.inspect()),
+  inspect: () => maws.app.evaluate(() => (globalThis as unknown as Seam).__maws_browser.cua.inspect().sessions),
+  // this test process (where the fake hosts run) made a root every session's socket lets in, after each launch
+  trustThisProcess: async () => expect(await maws.app.evaluate((_electron, pid) => (globalThis as unknown as Seam).__maws_browser.cua.trustRoot(pid), process.pid)).toBe(true),
   // a tab the person opens in the session's Browser tool (`browser.tabs.open` from the window, as the address field does)
   open: (appSessionId: string, url: string) =>
     maws.page.evaluate(([id, address]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean }> } }).maws.invoke('browser.tabs.open', { appSessionId: id, url: address, select: true }), [appSessionId, url] as const),
@@ -111,6 +127,7 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
   const hosts: FakeHost[] = [];
   try {
     const app = seam(maws);
+    await app.trustThisProcess();
     const path = await app.socketPathFor(A);
     expect(path).toBe(`${userData}/browser/cua/${A}.sock`);
     const host = await connectFakeHost(path!);
@@ -198,6 +215,7 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
+    await app.trustThisProcess();
     // what the window hears of the agent's activity, as the transcript's store does
     await maws.page.evaluate(() => {
       const w = window as unknown as { __acts: unknown[]; maws: { on(name: string, listener: (payload: unknown) => void): () => void } };
@@ -245,8 +263,9 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
     expect(await send('Page.captureScreenshot', { format: 'jpeg' })).toHaveProperty('data');
     expect(await app.control(tab)).toBe('human');
 
-    // 3 s after the person's last input the page is handed back, and the same command goes through
-    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    // cua #103: after 3 s the takeover grace ends, but human ownership stays until the same command resumes
+    await maws.page.waitForTimeout(3_100); // exercise expiry without an acting command
+    expect(await app.control(tab)).toBe('human');
     expect(Date.now() - clickedAt).toBeGreaterThanOrEqual(2_900);
     expect(await evaluate(send, `document.querySelector('#state').textContent`)).toBe('clicked'); // the person's click; the refused command never ran
     expect(await send('Runtime.evaluate', click, { timeoutMs: 3_000 })).toMatchObject({ result: { value: 1 } });
@@ -294,6 +313,7 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
       const [id] = s.ids as [AppSessionId];
       await show(s, id);
       const app = seam(s.maws);
+      await app.trustThisProcess();
       const panelBrowser = browserIn(s, 'panel');
       await expect(panelBrowser).toHaveCount(0);
 
@@ -326,6 +346,7 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
     // cua board #93: what the agent did outlives the app; a restart lists the session's activity as the quit left it
     const again = await launchScene(scratch, s.ids);
     try {
+      await seam(again.maws).trustThisProcess();
       const [id] = again.ids as [AppSessionId];
       expect(before).toBeDefined();
       expect(await listed(again.page, id)).toEqual(before);
@@ -346,6 +367,7 @@ test('the person\'s own navigations of a leased idle tab are theirs: ⌘R in the
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
+    await app.trustThisProcess();
     await maws.page.evaluate(() => {
       const w = window as unknown as { __acts: unknown[]; maws: { on(name: string, listener: (payload: unknown) => void): () => void } };
       w.__acts = [];
@@ -400,6 +422,7 @@ test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, a
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
+    await app.trustThisProcess();
     // Default imported with its bookmarks alone, and made the profile new tabs open in
     const { inspectionId } = value(await invoke(maws.page, 'browser.import.inspect', { userDataDir: chrome.dir, profileDir: 'Default' }));
     value(await invoke(maws.page, 'browser.import.start', { inspectionId, categories: { history: false, cookies: false, extensions: false, bookmarks: true }, extensionIds: [], allowUnverifiedExtensions: false }));
@@ -436,7 +459,8 @@ test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, a
     expect(await kinds()).toEqual(['tabOpened']); // no agent row for the person's bookmark
 
     // handed back, the agent's own navigation makes its row
-    await expect.poll(() => app.control(tab), { timeout: 6_000 }).toBe('idle');
+    await maws.page.waitForTimeout(3_100); // exercise expiry without an acting command
+    expect(await app.control(tab)).toBe('human');
     await send('Page.navigate', { url: pages.url('/frames.html') });
     await expect.poll(kinds, { timeout: 5_000 }).toEqual(['tabOpened', 'navigated']);
   } finally {
@@ -449,3 +473,73 @@ test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, a
 });
 // cua #90 end
 
+
+// Socket peer authentication start (cua docs/doperpowers/specs/2026-10-09-maws-socket-peer-auth-design.md, M2)
+const CONNECTOR = join(REPO_ROOT, 'test/support/cua-connector.mjs');
+const ENGINE_STUB = join(REPO_ROOT, 'test/support/cua-engine-stub.mjs');
+type ConnectorReport = { pid: number; hello: Record<string, unknown> | null; closed: boolean };
+const reportOf = (path: string): ConnectorReport | null => (existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as ConnectorReport) : null);
+
+test('a same-user process outside every session\'s tree is cut off before the hello: an orphaned connector is refused, the trusted host keeps its connection', async () => {
+  const userData = mkdtempSync('/tmp/mcua-e2e-');
+  const work = mkdtempSync('/tmp/mcua-orphan-');
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  let host: FakeHost | null = null;
+  try {
+    const app = seam(maws);
+    await app.trustThisProcess();
+    const path = (await app.socketPathFor(A))!;
+    host = await connectFakeHost(path);
+    expect((await app.inspect())[A]).toMatchObject({ connections: 1, refused: 0 });
+
+    // a connector started in a subshell that exits at once, so it runs under launchd when it connects (the Terminal's `nc`)
+    const report = join(work, 'orphan.json');
+    execFileSync('/bin/sh', ['-c', '(sleep 0.2; exec "$0" "$@") &', process.execPath, CONNECTOR, path, report], { stdio: 'ignore' }); // paths as arguments, never pasted
+    await expect.poll(() => reportOf(report), { timeout: 10_000 }).toMatchObject({ closed: true });
+    expect(reportOf(report)).toMatchObject({ hello: null, closed: true });
+    expect((await app.inspect())[A]).toMatchObject({ connections: 1, refused: 1 });
+    expect(await host.request('tabs.query')).toEqual([]); // the trusted host is untouched
+  } finally {
+    await host?.close();
+    await maws.cleanup();
+    rmSync(userData, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('with no trusted root, a live session\'s own engine tree is let in: the connector its engine starts hears the hello, on the engine\'s pid from the session\'s status', async () => {
+  const root = realpathSync(mkdtempSync('/tmp/mcua-live-'));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  const userData = join(root, 'user-data');
+  mkdirSync(repo);
+  mkdirSync(userData);
+  const [engineSessionId] = seedTranscripts(config, repo, ['the cua engine stub']);
+  // the engine binary: a wrapper naming this Node, which the engine host probes with --version and spawns per launch
+  const bin = join(root, 'cua-engine');
+  const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`; // as test/support/plugin-cli-stub.ts quotes its wrapper
+  writeFileSync(bin, `#!/bin/sh\nMAWS_CUA_STUB_VERSION=${quote(FIXTURE_ENGINE_VERSION)} exec ${quote(process.execPath)} ${quote(ENGINE_STUB)} "$@"\n`, { mode: 0o755 });
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_ENGINE_BIN: bin } });
+  try {
+    const app = seam(maws); // nothing trusted: only the session's engine is a root
+    let id = '';
+    await expect
+      .poll(async () => (id = value(await invoke(maws.page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineSessionId)?.appId ?? ''), { timeout: 15_000 })
+      .not.toBe('');
+    const path = (await app.socketPathFor(id))!;
+    const launch = { ...launchDefaults(id as AppSessionId, repo), gateway: 'direct' as const, extraSettings: { env: { CUA_BROWSER_BACKENDS: path } } };
+    expect(value(await invoke(maws.page, 'session.launch', { spec: launch }))).toMatchObject({ status: 'launching' });
+
+    const report = join(repo, 'cua-connector.json');
+    await expect.poll(() => reportOf(report), { timeout: 15_000 }).toMatchObject({ hello: { extensionInstanceId: `maws:${id}` }, closed: false });
+    expect((await app.inspect())[id]).toMatchObject({ connections: 1, refused: 0 });
+    // the connector is the engine's child, and the engine is the pid the session's status names
+    const enginePid = value(await invoke(maws.page, 'session.status', { appSessionId: id as AppSessionId })).pid;
+    expect(enginePid).not.toBeNull();
+    expect(Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(reportOf(report)!.pid)], { encoding: 'utf8' }).trim())).toBe(enginePid);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+// Socket peer authentication end

@@ -237,12 +237,16 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
       manifest_version: 3,
       name: 'Probe fails',
       version,
+      action: { default_title: 'Probe fails', default_popup: 'popup.html' }, // cua #103: failure, not a missing popup, mutes this action
       description: 'Its worker reads chrome.contextMenus, which MAWS does not provide',
       permissions: ['contextMenus'],
       background: { service_worker: 'sw.js' },
       key: manifestKey,
     }),
-    (versionDir) => writeFileSync(join(versionDir, 'sw.js'), 'chrome.contextMenus.onClicked.addListener(() => {});\n'),
+    (versionDir) => {
+      writeFileSync(join(versionDir, 'sw.js'), 'chrome.contextMenus.onClicked.addListener(() => {});\n');
+      writeFileSync(join(versionDir, 'popup.html'), '<!doctype html><title>Failed background probe</title><p>Its background failed.</p>');
+    },
     ['1.9', '1.10'], // an older version directory left beside the newest, as Chrome leaves one mid-update
   );
   const wallet = installExtension(

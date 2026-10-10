@@ -75,6 +75,10 @@ const EXIT_SHUTDOWN_BOUND_MS = 10_000; // past this the exit order goes on witho
 // START_EXIT_ABORTED (143) when a SIGTERM arrived during the start (main reads 1 and 143 as an unexpected exit).
 export function runDetached(hostVersion: string, register: HostRegister, opts: DetachedOptions): void {
   routeConsole(opts.log);
+  // Socket peer authentication (cua spec 2026-10-09-maws-socket-peer-auth-design.md, Decision Log 2026-10-10): the
+  // supervisor is the app binary run as Node, so without a listener a same-user SIGUSR1 opens a Node inspector whose code
+  // drives every session's engine, a route around the cua socket's peer check. A listener of its own keeps Node from it.
+  process.on('SIGUSR1', () => {});
   const proc: SupervisorProcess = { exit: (code) => process.exit(code) };
   let supervisor: RunningSupervisor | null = null;
   const fatal = (error: unknown) => {

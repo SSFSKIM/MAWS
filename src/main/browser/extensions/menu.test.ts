@@ -48,6 +48,16 @@ describe('the puzzle menu', () => {
 });
 
 describe('an action\'s context menu', () => {
+  it('puts the background failure first and disabled, including an extension that declares a popup', () => {
+    const failed = { ...probe, inert: 'Loaded · background failed: unsupported API' };
+    expect(toNodes(actionMenu(failed, handlers()))[0]).toEqual({ id: 'inert', label: failed.inert, enabled: false });
+    const menus = new NativeMenus({ e2e: true });
+    const on = handlers();
+    menus.present(puzzleMenu([failed], on), { window: {} as never, x: 0, y: 0 });
+    expect(menus.seam.pick([`action:${PROBE}`])).toBe(false);
+    expect(on.open).not.toHaveBeenCalled();
+  });
+
   it('names the extension, then Options when it has one, then Manage extensions…', () => {
     const on = handlers();
     expect(toNodes(actionMenu(probe, on))).toEqual([
