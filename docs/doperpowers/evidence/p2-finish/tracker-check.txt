@@ -1,0 +1,12 @@
+P2-F tracker-check (Design §2, Task 1.6), 2026-10-10, on the branch after the 1.6 edit (base head 94edc3c2)
+Command: python3 .doperpowers/sde/2026-10-09-p2-f-finish/tracker_check.py <docs/tech-debt-tracker.md at 9548a40a>
+Checks: every row present at M0 has a bin in triage.txt; no fix row left present unless narrowed by its own clause or re-deferred; every kept row's "Closes when" names an owner.
+
+M0 rows (tracker at 9548a40a): 134; rows with a bin in triage.txt: 134
+  bins: defer 82, fix 39, sitting 13
+  fix L95: kept, narrowed by its own clause (ok)
+  fix L114: kept, narrowed by its own clause (ok)
+  fix L158: kept, narrowed by its own clause (ok)
+  fix rows removed: 36
+Rows now: 100; kept rows whose "Closes when" names no owner: 0
+RESULT: pass
