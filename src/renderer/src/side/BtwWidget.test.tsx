@@ -45,6 +45,16 @@ describe('the /btw widget on a session with no ready process', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('dismissed while its start runs, it still asks but never closes the widget that replaced it', async () => {
+    const close = vi.fn(); // the host's close puts away whichever widget is open by then
+    const view = render(<BtwWidget appSessionId={A} args="why?" close={close} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    view.unmount(); // Esc, then another widget opened in its place
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'why?' }]);
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it('a refused start says why and keeps the question; nothing is asked', async () => {
     const close = vi.fn();
     render(<BtwWidget appSessionId={A} args="why?" close={close} />);

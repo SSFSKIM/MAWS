@@ -3,8 +3,9 @@
 // does (the Side pane's question view shows the answer) and closes. P2-A (2026-10-09; the execution document §5.6):
 // on a session with no ready process Ask starts it first (`acquireSession(id, 'side')`), reading Starting…, then
 // asks; a refused start says why and keeps the question; a terminal or job holding it, or an archive, disables Ask
-// with the reason. Opening the widget starts nothing.
-import { useState, type KeyboardEvent } from 'react';
+// with the reason. Opening the widget starts nothing. A widget put away while its start runs still asks (Ask was
+// pressed), but closes nothing: the host's close puts away whichever widget is open by then.
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { STARTS } from '../composer/submit/submit-state';
 import { useAvailability } from '../sessions/availability';
@@ -26,6 +27,11 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
   const [start, setStart] = useState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>({ kind: 'idle' });
   const blocked = ready ? null : sideBlock(availability, holder);
   const starting = start.kind === 'starting';
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => void (mounted.current = false);
+  }, []);
   const canAsk = blocked === null && !starting && question.trim() !== '';
   const ask = async () => {
     if (!canAsk) return;
@@ -36,7 +42,7 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
       if (refusal !== null) return setStart({ kind: 'refused', words: refusal });
     }
     askSideQuestion(appSessionId, asked);
-    close();
+    if (mounted.current) close();
   };
   const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
