@@ -1367,8 +1367,11 @@ test('M5 the report view folds a marked turn into its working record and draws t
   }
 });
 
-// Light and dark shots of the report for M5's review, outside the repository.
+// Light and dark shots of the report for M5's review, outside the repository, only under MAWS_P2C_M5_SHOTS=1 (as the
+// other `MAWS_*_SHOTS` evidence is), so an ordinary run neither overwrites a review's shots nor shares a fixed path
+// with another worktree's run.
 async function captureReportShot(page: Page, name: string) {
+  if (process.env.MAWS_P2C_M5_SHOTS !== '1') return;
   const dir = '/tmp/maws-p2c-m5-evidence';
   mkdirSync(dir, { recursive: true });
   try {
