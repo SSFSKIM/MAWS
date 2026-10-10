@@ -28,9 +28,17 @@ export async function showProjectList(page: Page): Promise<void> {
   if ((await more.count()) > 0) await more.click();
 }
 
+// A click opens or closes the row as the sidebar sees it at that moment (`Sidebar.tsx`, `toggleProject`). Right after a
+// launch the sidebar draws every project collapsed until the layout's saved expansions arrive (`layout.ts`, `hydrate`),
+// and those may open this very row between the read and the click, which then closes it again. So a click follows only
+// a read that says collapsed, and the row is read back until it holds expanded; a click the restored state overtook is
+// made again from a fresh read (a click is a discrete event, whose toggle React renders before the event's dispatch
+// returns to Playwright, so the read-back does not race the click it follows).
 async function expandRow(page: Page, row: Locator): Promise<void> {
-  if ((await row.getAttribute('aria-expanded')) !== 'true') await projectLine(row).click();
-  await expect(row).toHaveAttribute('aria-expanded', 'true');
+  await expect(async () => {
+    if ((await row.getAttribute('aria-expanded')) !== 'true') await projectLine(row).click();
+    await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   await settled(page);
 }
 
