@@ -105,6 +105,7 @@ const market = join(root, 'doperpowers-market');
 const engineScript = join(root, 'engine', 'claude');
 const budgetFile = join(root, 'budget-usd');
 const probeLog = join(root, 'probe.log');
+const notifyHook = join(root, 'notify-hook.cjs');
 const db = join(userData, 'index.sqlite');
 
 const line = (text: string) => {
@@ -162,6 +163,7 @@ async function prepare(real: string, cap: number): Promise<{ declares: boolean }
   const probe = join(root, 'probe.sh');
   writeFileSync(probe, `#!/bin/sh\nmeta=$(/usr/bin/python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""), d.get("source",""))' 2>/dev/null)\nprintf '%s %s ${NATIVE_TO_HUMAN_ENV}=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$meta" "\${${NATIVE_TO_HUMAN_ENV}:-<unset>}" >> '${probeLog}'\nexit 0\n`, { mode: 0o755 });
   writeSettings({});
+  writeFileSync(notifyHook, NOTIFY_HOOK);
   // The engine as the app finds it: every argument forwarded to the installed binary; a session process (stream-json
   // input) also gets the run's remaining budget (the script's source is e2e/support/live-budget.ts's, quoting the paths).
   const declares = await binaryDeclares(real, SYSTEM_PROMPT_SNAPSHOT_FLAG);
@@ -306,7 +308,7 @@ const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length
 
 // ---- the page ----------------------------------------------------------------------------------------------------------
 
-const launch = () => launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+const launch = () => launchMaws({ userData, requireFirst: notifyHook, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
 const pane = (page: Page) => page.locator('[data-region="main"] [data-pane="0"]');
 const composer = (page: Page) => pane(page).getByRole('textbox', { name: 'Message' });
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
@@ -381,13 +383,29 @@ async function setOverride(page: Page, to: 'On' | 'Off'): Promise<Locator> {
   await expect(radio).toBeChecked({ timeout: 10_000 });
   return row;
 }
-// Every attention.notified the page hears, from its load; the OS notification refused in main (as an unsigned build's
-// is), so the notifier's own fallback runs and nothing reaches the desktop's notification centre.
+// Loaded in main before its entry at every launch (launchMaws's requireFirst), so it sees what main does before any
+// page listens (the owner service and the notifier start with the app): every notification main attempts, the OS one
+// refused (as an unsigned build's is) so the notifier's own fallback runs and nothing reaches the desktop's notification
+// centre, and every fallback's dock bounce, which each notification ends in.
+const NOTIFY_HOOK = `const { app, Notification } = require('electron');
+const attempts = (globalThis.__p2cNotifyAttempts = []);
+Notification.prototype.show = function () {
+  attempts.push({ via: 'os', title: this.title, at: new Date().toISOString() });
+  this.emit('failed', {}, 'refused by the P2-C live run');
+};
+if (app.dock) {
+  const bounce = app.dock.bounce.bind(app.dock);
+  app.dock.bounce = (type) => {
+    attempts.push({ via: 'bounce', at: new Date().toISOString() });
+    return bounce(type);
+  };
+}
+`;
+// What the hook recorded since this launch's main process began.
+const mainNotifications = (app: ElectronApplication) => app.evaluate(() => (globalThis as unknown as { __p2cNotifyAttempts?: { via: string; title?: string; at: string }[] }).__p2cNotifyAttempts ?? null);
+// Every attention.notified the page hears, from its load, with the window unfocused.
 async function instrument(app: ElectronApplication, page: Page): Promise<void> {
-  await app.evaluate(({ Notification, BrowserWindow }) => {
-    Notification.prototype.show = function (this: InstanceType<typeof Notification>) {
-      this.emit('failed', {}, 'refused by the P2-C live run');
-    };
+  await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().forEach((w) => w.blur());
   });
   await page.evaluate(() => {
@@ -627,15 +645,18 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await page.waitForTimeout(3_000);
       const after = (await items(page, s1)).map((i) => i.id).sort();
       const notes = await notified(page, s1);
+      const attempts = await mainNotifications(maws.app);
       await shot('07-restart');
-      log(`items before ${JSON.stringify(restoredBefore)}; after ${JSON.stringify(after)}; attention.notified since the page loaded: ${notes.length}; unread must-reads ${await unread.count()}`);
+      log(`items before ${JSON.stringify(restoredBefore)}; after ${JSON.stringify(after)}; attention.notified since the page loaded: ${notes.length}; notifications main attempted since it started: ${JSON.stringify(attempts)}; unread must-reads ${await unread.count()}`);
       expect(after).toEqual(restoredBefore);
+      expect(attempts, 'the hook loaded first in main').not.toBeNull();
+      expect(attempts, 'main attempted no notification from its start').toEqual([]);
       expect(notes).toEqual([]);
       const before = await unread.count();
       while ((await unread.count()) > 0) await unread.first().getByRole('button', { name: 'Mark read' }).click();
       await expect(pane(page).locator('[data-owner-card="essential"][data-state="read"]').first()).toContainText('Read');
       await expect.poll(async () => (await items(page, s1)).filter((i) => i.kind === 'essential_unread').length).toBe(0);
-      line(`restart: ${after.length} item(s) restored, ${notes.length} notified; the question reads "Answered: ${REPLY}"; ${before} must-read(s) unread until Mark read, then Read`);
+      line(`restart: ${after.length} item(s) restored, ${notes.length} notified (main attempted ${attempts!.length} from its start); the question reads "Answered: ${REPLY}"; ${before} must-read(s) unread until Mark read, then Read`);
     });
 
     await step('resume', 'resume: the contract passed again and the recorded snapshot reused; the agent names the marks', async () => {

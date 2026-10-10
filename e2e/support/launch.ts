@@ -46,6 +46,10 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // Interfaces "Files and environment").
   keepConfigHome?: boolean;
   // E10 end
+  // P2-F F-E: a CommonJS module main loads before its own entry and before `ready` (`-r`, as Playwright loads its own
+  // loader), so a spec can observe what main does from its first moment (P2-C's restart check records notifications
+  // from there). The built app only: the packaged one's fuses refuse Node switches.
+  requireFirst?: string;
 }
 // C5 end
 
@@ -68,6 +72,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
   if (!executable && !existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
+  if (executable && opts.requireFirst) throw new Error('requireFirst needs the built app, not MAWS_E2E_EXECUTABLE');
 
   const ownsUserData = opts.userData === undefined; // C5
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
@@ -109,7 +114,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     const launchedAt = Date.now();
     app = executable
       ? await _electron.launch({ executablePath: executable, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [main], env, cwd: REPO_ROOT });
+      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), main], env, cwd: REPO_ROOT });
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
