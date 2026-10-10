@@ -213,6 +213,22 @@ describe('session.acquire: the lifecycle table', () => {
     expect(h.setupEvents(started.appId).map((e) => [e.phase, e.acquisition])).toEqual([['launching', undefined], ['failed', undefined]]);
   });
 
+  // F-AB (scale review B scalpel-1#1): a record's start that reaches ready is MAWS's last start of it, so the failure
+  // an earlier acquisition remembered no longer describes the session once that process exits.
+  it('a failed acquisition’s memory is cleared by a record start that reaches ready', async () => {
+    const record = recordAt();
+    h.host.script = () => ({ exit: { error: 'the model is not available' } });
+    expect(await h.service.acquire(record.appId, 'send')).toMatchObject({ status: 'failed' });
+    expect(availability(record.appId)).toBe('failed');
+    h.host.script = () => ({});
+    expect(await h.service.startSession(record.appId, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+    await h.settled(record.appId, 2); // the acquisition's failure was the first end
+    await vi.waitFor(() => expect(availability(record.appId)).toBe('usable')); // the run's end follows its ready phase
+    exitedAs(record.appId, 'stop');
+    expect(availability(record.appId)).toBe('resumable');
+    expect(h.memory.get(record.appId)).toMatchObject({ inFlight: false, last: null });
+  });
+
   it('a launch that fails answers failed with the engine’s words, and is remembered as failed', async () => {
     const record = recordAt();
     h.host.script = () => ({ exit: { error: 'the model is not available' } });

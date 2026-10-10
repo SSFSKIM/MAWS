@@ -573,6 +573,7 @@ export class SessionService {
               await run();
               const answer = outcome as SetupEvent['outcome'];
               if (answer?.kind !== 'ready') throw new Error(answer?.kind === 'error' ? answer.message : `MAWS could not become ready: ${answer?.kind ?? 'no answer'}.`);
+              this.lastAttempt.delete(appSessionId); // F-AB: this launch is MAWS's last start of it (published at the run's end)
             },
             authority: (paused) => holderAuthority({ dispatch: this.s.dispatch, sessions: this.s.sessions }, { appSessionId, engineSessionId: record.engineSessionId! }, paused),
             cancel: async () => {
@@ -668,7 +669,11 @@ export class SessionService {
       void run().finally(() => {
         this.endStart(appSessionId, claim);
         held();
-        registration.end({ outcome: acquireOutcomeOf(appSessionId, captured.outcome()) }); // P2-A
+        const ended = acquireOutcomeOf(appSessionId, captured.outcome());
+        // F-AB: a start that reached ready is MAWS's last start of the session, so an earlier acquisition's answer no
+        // longer describes it once this process exits (published by the end below)
+        if (ended.status === 'ready') this.lastAttempt.delete(appSessionId);
+        registration.end({ outcome: ended }); // P2-A
       });
       return outcome;
     } catch (error) {
