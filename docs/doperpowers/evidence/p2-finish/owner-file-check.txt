@@ -8,3 +8,8 @@ L99 diagnosis (W-C2, 2026-10-10, test/live/model-change-from-auto.live.test.ts u
   A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b; after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
   spend from the journal: US$0.0026 (Haiku); survivor check: none by argument or working directory; scratch roots removed
 Spend so far: US$0.0026
+
+L99 probe re-run with assertions (W-C2 fix round, 2026-10-10T07:17Z, same harness and cap):
+  A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b; after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+  spend from the journal: US$0.0025 (Haiku); survivor check: none; scratch roots removed
+Spend so far: US$0.0051
