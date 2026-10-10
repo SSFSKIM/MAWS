@@ -1,0 +1,76 @@
+P2-F live re-run R2a: e2e/plugins-library-live.spec.ts 
+head 987baa556781eb690445ed0b9dc5e95ca8ef0d55; 2026-10-10T15:06:37Z; load { 14.04 19.59 19.37 }
+variables: MAWS_E8_LIVE=1 MAWS_LIVE_MAX_USD=0.15
+relay GET /api/hello: 200
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+eligible: load 14.04 after 0s
+harness build: exit 0
+eligible: load 11.82 after 0s
+run: exit 0
+-- the run's lines (results, spend, A-15, survivors, cases):
+[1/1] e2e/plugins-library-live.spec.ts:173:5 › P2-B acceptance: the plugin and skills libraries on the installed engine, in a scratch home
+  1 passed (34.1s)
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+survivor check (processes naming a scratch root or a MAWS e2e build, after the run):
+11717 /bin/zsh -c source /Users/new/.claude/shell-snapshots/snapshot-zsh-1791607379566-4uniou.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unal
+11728 /bin/zsh /tmp/maws-review/p2f-live-run.sh 2a e2e/plugins-library-live.spec.ts -- MAWS_E8_LIVE=1 MAWS_LIVE_MAX_USD=0.15
+(end of survivor list)
+full log: /tmp/maws-review/p2f-live-r2a.log
+
+-- spend: the spec logs none and MAWS's scratch user data (with its journals) is removed at teardown; from the scratch home's own transcript usage (/tmp/maws-review/p2f-usage.py): 1 Haiku call, 7,156 cache-write + 11,831 cache-read + 2 input + 4 output tokens, about US$0.0025 at R1's measured rate for a like call (US$0.00236 for an 18,887-token context); capped at the engine at US$0.15.
+-- the spec's own log (/private/tmp/maws-e8-live-EwS1YC/live-run.txt, copied; the root then removed):
+P2-B acceptance run · 2026-10-10T15:07:12.539Z · engine 2.1.296 · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-EwS1YC/claude-config · proj /private/tmp/maws-e8-live-EwS1YC/e8-repo · other /private/tmp/maws-e8-live-EwS1YC/other
+setup · plugin marketplace add anthropics/claude-plugins-official: ok · Cleaning up old marketplace cache… ⏎ ✔ Successfully added marketplace: claude-plugins-official (declared in user settings)
+setup · install code-review --scope user: ok · Installing plugin "code-review@claude-plugins-official"...✔ Successfully installed plugin: code-review@claude-plugins-official (scope: user)
+setup · install frontend-design --scope project (proj): ok · Installing plugin "frontend-design@claude-plugins-official"...✔ Successfully installed plugin: frontend-design@claude-plugins-official (scope: project)
+setup · install supabase --scope project (other): ok · Installing plugin "supabase@claude-plugins-official"...✔ Successfully installed plugin: supabase@claude-plugins-official (scope: project)
+setup · the catalogue: 313 official entries, 3244 directory entries; most popular not installed: superpowers (1153057; its directory entry uncounted or absent); a directory-only entry: productivity
+engine cap: US$0.15 at the engine through /private/tmp/maws-e8-live-EwS1YC/claude-capped
+
+=== 01-start · a session in proj on Haiku, one turn ("Reply with OK"), then stopped
+session 9dc5990e-341a-459e-880c-62dc9cf6e799: ready · model claude-haiku-5-5[1m] · gateway routed · plugins loaded: code-review@claude-plugins-official, frontend-design@claude-plugins-official, cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin
+stopped: exited
+
+=== 02-size · /plugins: the library box at a 1440 by 960 window; Esc closes it and the composer has the keyboard
+window 1440×900; the dialog 960×765
+
+=== 03-my-items · My items: code-review under From Anthropic & Partners, frontend-design under In this project, supabase only under Other projects
+My items: In this project · 1 · Frontend design · New · by Anthropic · Create distinctive, production-grade frontend interfaces with high design quality. Generates creative, polished code that avoids generic AI aesthetics. · b8e53f1c05df · just now · From Anthropic & Partners · 1 · Code review · New · by Anthropic · Automated code review for pull requests using multiple specialized agents with confidence-based scoring to filter false positives · b8e53f1c05df · just now · MAWS mods · Built in · 1 · To-human · Built in · Agents mark what is for you: messages, must-reads, insights and questions you answer in place. · MAWS gives the agent its instructions · This session · Default (On) · On · Off · Version 1
+loaded line: 5 plugins loaded in this session
+·
+Loaded last time, just now
+Refresh
+
+=== 04-detail · frontend-design’s detail: Enabled for this project, the loaded fact, What’s inside with its skill
+loaded fact: Loaded in this session · Loaded last time, just now
+what's inside: What’s inside · Skills · 1 · · frontend-design · Things Claude can do when you ask.
+
+=== 05-loaded-line · the loaded line on the stopped session: N plugins loaded · Loaded last time, with Refresh; no engine started by /plugins
+loaded line: 5 plugins loaded in this session·Loaded last time, just nowRefresh
+
+=== 06-skills-dormant · /skills on the stopped session: Not read yet. with Load now, nothing started until it is clicked; Load now reads the skills with no turn; stopped again
+after Load now: ready; skills rows 3
+ready with no turn: pluginsObservedAt null, 0 plugins in the status; loaded line: 5 plugins loaded in this session·Loaded last time, just nowReload pluginsReload skills
+
+=== 07-refresh · the loaded line’s Refresh on the stopped session: Starting…, then Loaded now (acquire, then reload_plugins; no turn)
+after the click: 5 plugins loaded in this session·Loaded last time, just nowStarting…
+loaded line: 5 plugins loaded in this session·Loaded nowReload pluginsReload skillsReloaded · 52 commands · 5 agents · 5 plugins · 0 errors
+
+=== 08-browse · Browse after its click: counts on official cards, none on a directory-only card; supabase Installed in other projects, installed here
+superpowers: superpowers@anthropic-plugin-directory · 1.2M installs (the CLI's 1153057, its directory entry's none)
+productivity@anthropic-plugin-directory: no count
+sheet: claude-capped plugin install supabase@claude-plugins-official --scope project --json
+result: Successfully installed plugin: supabase@claude-plugins-official (scope: project) · Reloaded in 1 session · reflected
+
+=== 09-manage · Add › Manage marketplaces lists claude-plugins-official
+Manage marketplaces: Manage marketplaces ·  · Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins. ·  · claude-plugins-official · anthropics/claude-plugins-official · 3 plugins installed · Done
+
+=== 10-skills · /skills: p2b-project and frontend-design’s skill under In this project, p2b-user under Created by you; Use in chat inserts and sends nothing
+skills: here: frontend-design:frontend-design, p2b-project, supabase:supabase, supabase:supabase-postgres-best-practices · yours: p2b-user
+frontend-design's skill: / · frontend-design · Frontend design · Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults. · Use in chat
+
+=== 11-sandbox · /sandbox reads Sandbox off and offers no control that writes settings
+sandbox: Sandbox · /sandbox · × ·  · Sandbox off ·  · Not turned on in your settings ·  · Details
+
+console errors: []
+result: every step passed

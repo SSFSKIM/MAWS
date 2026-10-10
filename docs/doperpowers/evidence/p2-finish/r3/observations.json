@@ -1,0 +1,389 @@
+{
+  "before": {
+    "engine": {
+      "bin": "/Users/new/.local/share/claude/versions/2.1.296",
+      "version": "2.1.296"
+    },
+    "declares": true,
+    "plugin": {
+      "version": "7.145.0",
+      "scope": "user",
+      "installPath": "/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.145.0",
+      "lastUpdated": "2026-10-10T04:42:40.802Z",
+      "contractKey": "1",
+      "reads": [
+        "hooks/mods/to-human.tsx",
+        "hooks/to-human-stream.sh"
+      ]
+    },
+    "owner": {
+      "a15": {
+        "keys": [
+          "/private/tmp",
+          "/private/tmp/agtest",
+          "/private/tmp/b2-ws",
+          "/private/tmp/bench-browser",
+          "/private/tmp/bgt2",
+          "/private/tmp/bgtest",
+          "/private/tmp/cc-capture",
+          "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+          "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+          "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+          "/private/tmp/claude-plugin-smoke-15",
+          "/private/tmp/cua-accept",
+          "/private/tmp/fold-live",
+          "/private/tmp/fold-smoke",
+          "/private/tmp/hooktest",
+          "/private/tmp/maws-accept",
+          "/private/tmp/maws-harness/a",
+          "/private/tmp/md-test",
+          "/private/tmp/oc-ws-b",
+          "/private/tmp/sminos-probe",
+          "/private/tmp/th-pad.Nnz1",
+          "/private/tmp/th-pad.WI9D",
+          "/private/tmp/th-test",
+          "/private/tmp/th-tools.Ozkz",
+          "/private/tmp/th-tools.VY2Y",
+          "/private/tmp/wr-test"
+        ],
+        "digest": "ae14a6db5b459b9c44163d3af24237aa8ad1372b"
+      },
+      "settings": "ed565ff983d7cb00ec0ad050d5eb2cd995397268c62f5385498fa3a3760a3b65",
+      "cache": {
+        "files": 895,
+        "digest": "e8a90755986a47da849b1bf82bf987ceea16617ba3cbac72f68432151a4e2ec5"
+      }
+    }
+  },
+  "g1New": {
+    "s1": "a7c1b943-b3ea-4c98-9fc0-3f657030d6ad",
+    "s1Engine": "2952516f-29b3-44ba-aaf2-23ad5c689fd6",
+    "spawn": {
+      "at": "2026-10-10T15:13:29.048Z",
+      "launchId": "inw7ihb5",
+      "append": "# Messages to the human (MAWS to-human contract 1)\n\nThe human who runs this sess",
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-9a3p1V/user-data/browser/cua/a7c1b943-b3ea-4c98-9fc0-3f657030d6ad.sock",
+        "MAWS_NATIVE_TO_HUMAN": "1"
+      },
+      "resume": null
+    },
+    "row": {
+      "launch_id": "inw7ihb5",
+      "desired": "maws-contract",
+      "recorded": "unrecorded",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "maws-contract",
+      "style": "default",
+      "observed_style": null,
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-10T15:13:29.048Z"
+    },
+    "probe": "1",
+    "model": {
+      "requested": "haiku",
+      "resolved": "claude-haiku-5-5[1m]"
+    },
+    "gateway": {
+      "mode": "gateway",
+      "baseUrl": "http://127.0.0.1:8641",
+      "verified": "routed",
+      "autoModeServer": "unknown",
+      "localLane": null
+    }
+  },
+  "g6Notify": {
+    "focused": null,
+    "items": [
+      {
+        "kind": "essential_unread",
+        "summary": "Must read — Warning: the CHANGELOG.md does not exist yet, so any format I pick becomes the baseline that later entries follow. Chan…",
+        "anchor": {
+          "messageUuid": "00063d92-b511-425f-8a0e-aa8ea11d8ab2",
+          "blockIndex": 1,
+          "span": 0
+        }
+      },
+      {
+        "kind": "async_input",
+        "summary": "Question — Should the changelog follow the Keep a Changelog format?",
+        "anchor": {
+          "messageUuid": "00063d92-b511-425f-8a0e-aa8ea11d8ab2",
+          "blockIndex": 1,
+          "span": 0
+        }
+      }
+    ],
+    "notified": [
+      {
+        "appSessionId": "a7c1b943-b3ea-4c98-9fc0-3f657030d6ad",
+        "attentionId": "a7c1b943-b3ea-4c98-9fc0-3f657030d6ad:essential_unread:a7c1b943-b3ea-4c98-9fc0-3f657030d6ad:00063d92-b511-425f-8a0e-aa8ea11d8ab2:1:e0",
+        "delivery": "fallback",
+        "at": "2026-10-10T15:13:34.320Z"
+      },
+      {
+        "appSessionId": "a7c1b943-b3ea-4c98-9fc0-3f657030d6ad",
+        "attentionId": "a7c1b943-b3ea-4c98-9fc0-3f657030d6ad:async_input:a7c1b943-b3ea-4c98-9fc0-3f657030d6ad:00063d92-b511-425f-8a0e-aa8ea11d8ab2:1:q0",
+        "delivery": "fallback",
+        "at": "2026-10-10T15:13:34.320Z"
+      }
+    ]
+  },
+  "g4Choice": {
+    "running": true,
+    "clickedAt": "2026-10-10T15:13:36.861Z",
+    "queuedSeenAt": "2026-10-10T15:13:36.885Z",
+    "writtenWhileQueued": 1,
+    "write": {
+      "uuid": "3d27ef8f-5bd5-4d77-b0b2-fa330d87424f",
+      "text": "Answering \"Should the changelog follow the Keep a Changelog format?\": Keep a Changelog: fixed sections (Added, Changed, Fixed, and so on) and an Unreleased heading at the top",
+      "at": "2026-10-10T15:13:36.853Z"
+    },
+    "started": "2026-10-10T15:14:15.931Z",
+    "answeredSeenAt": "2026-10-10T15:14:15.976Z",
+    "choiceText": "Keep a Changelog: fixed sections (Added, Changed, Fixed, and so on) and an Unreleased heading at the top"
+  },
+  "g3Report": {
+    "counts": {
+      "message": 2,
+      "mustRead": 1,
+      "insight": 1,
+      "question": 1,
+      "records": 1
+    },
+    "placement": "inline",
+    "closed": "Working record · 1 tool call",
+    "dividerText": "Worked for 47s · 1 tool call",
+    "toolText": "Ran sleep 40 in 41s"
+  },
+  "resume": {
+    "spawn": {
+      "at": "2026-10-10T15:14:24.987Z",
+      "launchId": "nzilwtam",
+      "append": "# Messages to the human (MAWS to-human contract 1)\n\nThe human who runs this sess",
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-9a3p1V/user-data/browser/cua/a7c1b943-b3ea-4c98-9fc0-3f657030d6ad.sock",
+        "MAWS_NATIVE_TO_HUMAN": "1"
+      },
+      "resume": "2952516f-29b3-44ba-aaf2-23ad5c689fd6"
+    },
+    "row": {
+      "launch_id": "nzilwtam",
+      "desired": "maws-contract",
+      "recorded": "contract:1",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "maws-contract",
+      "style": "default",
+      "observed_style": "default",
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-10T15:13:29.048Z"
+    },
+    "probe": "1",
+    "before": {
+      "snapshots": [
+        1,
+        1
+      ],
+      "boundaries": 0
+    },
+    "snap": {
+      "snapshots": [
+        1,
+        1
+      ],
+      "boundaries": 0
+    },
+    "reply": "Yes. The system prompt has a section titled \"Messages to the human (MAWS to-human contract 1)\". It defines these tag names: to-human, essential, need-input, insight, choice."
+  },
+  "off": {
+    "spawn": {
+      "at": "2026-10-10T15:14:30.285Z",
+      "launchId": "y5tjn7h7",
+      "snapshotOff": true,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-9a3p1V/user-data/browser/cua/a7c1b943-b3ea-4c98-9fc0-3f657030d6ad.sock"
+      },
+      "resume": "2952516f-29b3-44ba-aaf2-23ad5c689fd6"
+    },
+    "decided": {
+      "launch_id": "y5tjn7h7",
+      "desired": "off",
+      "recorded": "contract:1",
+      "appended": 0,
+      "snapshot_off": 1,
+      "off_unavailable": 0,
+      "applied": "off",
+      "style": "default",
+      "observed_style": "default",
+      "style_mismatch": 0,
+      "override": "off",
+      "enabled_at": null
+    },
+    "probe": "<unset>",
+    "reply": "NO\n\nMy previous answer was wrong. My system prompt has no section titled \"Messages to the human,\" and I made up those tag names.",
+    "pendingWords": "Applies the next time this session starts",
+    "sourceWords": "Off: the agent is not asked to mark anything"
+  },
+  "style": {
+    "s2": "0134fba0-0394-4acc-9311-ae8b1b1dc99c",
+    "s2Engine": "c1875db8-c37f-4226-806c-4469703611c6",
+    "spawn": {
+      "at": "2026-10-10T15:14:37.242Z",
+      "launchId": "b7nmwolj",
+      "append": null,
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-9a3p1V/user-data/browser/cua/0134fba0-0394-4acc-9311-ae8b1b1dc99c.sock",
+        "MAWS_NATIVE_TO_HUMAN": "1"
+      },
+      "resume": null
+    },
+    "row": {
+      "launch_id": "b7nmwolj",
+      "desired": "external-compatible-style",
+      "recorded": "unrecorded",
+      "appended": 0,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "external-compatible-style",
+      "style": "doperpowers:to-human",
+      "observed_style": null,
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-10T15:14:37.242Z"
+    },
+    "observed": {
+      "launch_id": "b7nmwolj",
+      "desired": "external-compatible-style",
+      "recorded": "unrecorded",
+      "appended": 0,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "external-compatible-style",
+      "style": "doperpowers:to-human",
+      "observed_style": "doperpowers:to-human",
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-10T15:14:37.242Z"
+    },
+    "probe": "1",
+    "cards": 3,
+    "bandText": "(no band)",
+    "reply": "<to-human>\nThis is a git repository at `p2c-repo` on branch `master`. The working tree is clean, and its only commit is \"seed.\" I haven't opened any files, so I don't yet know what the project does.\n\n<essential>I haven't read any file in this repo, so nothing here describes its code or purpose. The only facts I have come from the git status snapshot.</essential>\n\n<need-input>Should the README get a usage section?\n<choice recommended>Yes, add a usage section: it tells new readers how to run the project and costs little to write.</choice>\n<choice>No, leave the README as it is: the project stays as documented, and I make no README changes.</choice>\n</need-input>\n</to-human>",
+    "plugins": [
+      {
+        "name": "doperpowers",
+        "path": "/private/tmp/maws-p2c-live-9a3p1V/doperpowers-market",
+        "source": "doperpowers@doperpowers",
+        "version": "7.145.0"
+      },
+      {
+        "name": "cc-plugin-agents-md",
+        "path": "builtin",
+        "source": "cc-plugin-agents-md@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-telemetry",
+        "path": "builtin",
+        "source": "cc-plugin-telemetry@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-plugin-authoring",
+        "path": "builtin",
+        "source": "cc-plugin-plugin-authoring@builtin",
+        "version": null
+      }
+    ]
+  },
+  "styleAnswer": {
+    "write": {
+      "uuid": "1ce018e3-693d-4514-bc46-4db4c2829a78",
+      "text": "Answering \"Should the README get a usage section?\": Yes, add a usage section: it tells new readers how to run the project and costs little to write.",
+      "at": "2026-10-10T15:14:42.738Z"
+    },
+    "started": "2026-10-10T15:14:42.739Z",
+    "answeredSeenAt": "2026-10-10T15:14:42.761Z",
+    "choiceText": "Yes, add a usage section: it tells new readers how to run the project and costs little to write.",
+    "mustReads": 1
+  },
+  "styleOff": {
+    "spawn": {
+      "at": "2026-10-10T15:14:44.360Z",
+      "launchId": "buezbluc",
+      "append": null,
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-9a3p1V/user-data/browser/cua/0134fba0-0394-4acc-9311-ae8b1b1dc99c.sock"
+      },
+      "resume": "c1875db8-c37f-4226-806c-4469703611c6"
+    },
+    "row": {
+      "launch_id": "buezbluc",
+      "desired": "off",
+      "recorded": "none",
+      "appended": 0,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "off",
+      "style": "doperpowers:to-human",
+      "observed_style": "doperpowers:to-human",
+      "style_mismatch": 0,
+      "override": "off",
+      "enabled_at": null
+    },
+    "probe": "<unset>",
+    "bandText": "to-human view ·  full transcript"
+  },
+  "after": {
+    "a15": {
+      "keys": [
+        "/private/tmp",
+        "/private/tmp/agtest",
+        "/private/tmp/b2-ws",
+        "/private/tmp/bench-browser",
+        "/private/tmp/bgt2",
+        "/private/tmp/bgtest",
+        "/private/tmp/cc-capture",
+        "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+        "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+        "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+        "/private/tmp/claude-plugin-smoke-15",
+        "/private/tmp/cua-accept",
+        "/private/tmp/fold-live",
+        "/private/tmp/fold-smoke",
+        "/private/tmp/hooktest",
+        "/private/tmp/maws-accept",
+        "/private/tmp/maws-harness/a",
+        "/private/tmp/md-test",
+        "/private/tmp/oc-ws-b",
+        "/private/tmp/sminos-probe",
+        "/private/tmp/th-pad.Nnz1",
+        "/private/tmp/th-pad.WI9D",
+        "/private/tmp/th-test",
+        "/private/tmp/th-tools.Ozkz",
+        "/private/tmp/th-tools.VY2Y",
+        "/private/tmp/wr-test"
+      ],
+      "digest": "ae14a6db5b459b9c44163d3af24237aa8ad1372b"
+    },
+    "settings": "ed565ff983d7cb00ec0ad050d5eb2cd995397268c62f5385498fa3a3760a3b65",
+    "cache": {
+      "files": 895,
+      "digest": "e8a90755986a47da849b1bf82bf987ceea16617ba3cbac72f68432151a4e2ec5"
+    },
+    "failures": [],
+    "consoleErrors": [],
+    "spentUsd": 0.015077985000000002,
+    "teardown": null
+  }
+}

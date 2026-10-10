@@ -7,11 +7,11 @@ Each step row: step | surface or check | pass | fail | note | owner: not run | w
 == Header ==
 Date of the sitting:
 Sessions (one or two, with times):
-The build's commit (master): [M4.2: the master commit the owner builds from]
-The final head the re-runs ran on: [M4.2: the final head]
+The build's commit (master): (the owner: the merge commit Diagnostics names)
+The final head the re-runs ran on: 9b111d5c
 The codesign Authority line:
 The codesign TeamIdentifier:
-claude --version (the re-runs ran on [M4.2: the re-runs' engine version]):
+claude --version (the re-runs ran on 2.1.296):
 The system locale:
 The display width:
 The theme order (light then dark, or the reverse):
@@ -121,7 +121,7 @@ D8 A-35 the in-app browser | as built (clipboard carve-out, Google default, 12-t
 D9 A-36 the wallet extension list | as built (14 ids and the name heuristic) |
 D10 P-23 import activates the profile | as built (the consent says agents' tabs will be signed in as it) |
 D11 A-37 sharing a browser page | as built (reads proceed while you hold the page, Browser tool opens once, 10 s decay, fixed cursor colours) |
-D12 TESTED_ENGINE_VERSION | move to the newest version where R1 to R4 pass ([M4.2: the version]), fixtures' pin unchanged (wave S) |
+D12 TESTED_ENGINE_VERSION | move to the newest version where R1 to R4 pass (2.1.296), fixtures' pin unchanged (wave S) |
 D13 the taste calls of step B | per call, see the taste-calls line |
 D14 "Quit and Keep Windows" (종료 및 윈도우 유지) | maps to MAWS's keep option (wave S, after verifying the hook) |
 

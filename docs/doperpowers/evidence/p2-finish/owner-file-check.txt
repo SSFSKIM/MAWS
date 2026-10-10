@@ -13,3 +13,13 @@ L99 probe re-run with assertions (W-C2 fix round, 2026-10-10T07:17Z, same harnes
   A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b; after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
   spend from the journal: US$0.0025 (Haiku); survivor check: none; scratch roots removed
 Spend so far: US$0.0051
+
+M4.1, the live re-runs on the final head 9b111d5c (engine 2.1.296 under scratch config homes, through the relay, Haiku), each through /tmp/maws-review/p2f-live.sh with its A-15 reading before and after; every pair identical (26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b); no survivor; every scratch root removed:
+  R1  e2e/sessions-available-live.spec.ts (MAWS_P2A_LIVE=1, MAWS_LIVE_MAX_USD=0.20): passed; spend US$0.00236 (receipts)        live-r1.txt
+  R2a e2e/plugins-library-live.spec.ts (MAWS_E8_LIVE=1, MAWS_LIVE_MAX_USD=0.15): passed; about US$0.0025 (1 Haiku call; tokens)  live-r2a.txt
+  R2b e2e/plugins-live.spec.ts (MAWS_E8_LIVE=1, MAWS_LIVE_MAX_USD=0.15): passed; about US$0.005 (2 Haiku calls; tokens)          live-r2b.txt
+  R3  e2e/to-human-live.spec.ts (MAWS_C_LIVE=1, MAWS_C_LIVE_MAX_USD=0.40, OUT p2-finish/r3): passed; spend US$0.0151 (journals)    live-r3.txt, r3/
+  R4  e2e/p1-live.spec.ts -g "S3:" (MAWS_P1_LIVE=1, MAWS_P1_LIVE_MAX_USD=0.60, OUT p2-finish/r4): 4 passed; receipts US$0.0063;   live-r4.txt, r4/
+      the spec's conservative charge US$0.4221 (an unreceipted prompt's launch budget kept whole, the /btw reserved)
+Spend so far: receipts about US$0.0367 (L99 US$0.0051 + R1 to R4 about US$0.0316); counted conservatively (R4 at its charge) about US$0.452; both under the child's US$2.00 (Constraint 11).
+A-15 after the last run (2026-10-10): 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b, the M0 baseline unchanged.

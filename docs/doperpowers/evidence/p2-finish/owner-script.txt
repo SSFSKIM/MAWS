@@ -15,10 +15,10 @@ Order, and why: the build first, while the old MAWS is still running; the scenes
   decisions, the optional items, and the measure.
 
 The facts of this build (filled in when the script is finalised, M4.2):
-  Final head: [M4.2: the final head's commit id after the last gates and any wave S already merged]
-  Build commit to record (master after the architect's merge): [M4.2: the master commit the owner builds from]
-  Engine of the re-runs R1 to R4: [M4.2: claude --version on which R1 to R4 all passed, 2.1.296 at authoring]
-  Re-runs' result and spend: [M4.2: R1 to R4 verdicts and the summed spend, from owner-file-check.txt]
+  Final head: 9b111d5c (branch worktree-agent-a9c0dca8fc3b39165; no wave S yet)
+  Build commit to record (master after the architect's merge): master after the architect merges 9b111d5c's branch (the merge commit; Diagnostics' build identity names it)
+  Engine of the re-runs R1 to R4: 2.1.296
+  Re-runs' result and spend: R1, R2 (two specs), R3 and R4 (S3's four cases) all passed on 2026-10-10; receipts about US$0.037 with L99's diagnosis; A-15 identical around every run
 
 == Before (about 15 minutes) ==
 
@@ -35,15 +35,15 @@ pre.1 Build the new MAWS while the current one is still running. In the MAWS che
 pre.2 Check the signing:
         codesign -dv --verbose=2 dist/mac-arm64/MAWS.app 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier)'
       Put the Authority and TeamIdentifier lines in the results header. Open Diagnostics: its build identity must name the
-      final head [M4.2: the final head]. Every step below runs in this signed app, never under pnpm dev.
+      final head 9b111d5c. Every step below runs in this signed app, never under pnpm dev.
 pre.3 The relay answers 200:  curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8641/api/hello
       Claude Desktop is open and signed in, on a screen comparable to MAWS's. Record the system locale (Korean, as you use
       it) and the display width in the header.
-pre.4 Record `claude --version` in the header. The re-runs ran on [M4.2: the re-runs' engine version]; say if yours differs.
+pre.4 Record `claude --version` in the header. The re-runs ran on 2.1.296; say if yours differs.
 pre.5 Prepare two terminal sessions for A1. First, in a project, run `claude`, say one thing, and exit; MAWS must never have
       opened this session. Second, in another terminal, start `claude` in a project and leave it running (A1.7 needs it).
 pre.6 Scratch keys to clean in ~/.claude.json: none expected. The re-runs' A-15 readings are in owner-file-check.txt
-      [M4.2: baseline after R1 to R4, key count and shasum]. Write "none" if nothing is there.
+      26 keys, shasum ae14a6db5b459b9c44163d3af24237aa8ad1372b (the same as before any P2-F run). Write "none" if nothing is there.
 
 == A. Section 2 items 1 to 6 as scenes (about 40 minutes) ==
 Each sub-step names the clause of section 2 it observes. Mark pass or note; if a clause fails, write what happened.
@@ -79,8 +79,13 @@ A2 Item 2, the library.
        sandbox: it begins "Runs outside it: ...".
   A2.6 [item 2: built-in mods] "MAWS mods - Built in" lists To-human with its switch.
 A3 Item 3, to-human, with your own doperpowers active. In a real project.
-  A3.1 [item 3: the four marks and a question] Send this prompt: [M4.2: the prompt that asks the agent to report once with
-       each of the four marks and to ask one question with three choices, one recommended].
+  A3.1 [item 3: the four marks and a question] Send this prompt: (R3's own prompt, `e2e/to-human-live.spec.ts`
+       PROMPTS.marks, with three options)
+       "For a CHANGELOG.md this repository will get later, send me, the way your instructions describe: a short plan as a
+       message to me, one warning I must not miss, one insight, and one question I can answer later while you go on working
+       (never AskUserQuestion), with three options and the one you recommend, asking which changelog format to follow. Write
+       all of that first. Then run the Bash command `sleep 40` yourself, in the foreground. Do not create, edit or read any
+       file."
   A3.2 [item 3: the report view] The report view shows message cards. The working record folds to "Worked for ... - N tool
        calls", and opens to the tool rows.
   A3.3 [item 3: the essential stays unread] The essential card stays unread until you press Mark read.
@@ -89,8 +94,10 @@ A3 Item 3, to-human, with your own doperpowers active. In a real project.
   A3.5 [item 3: Reply] Type free text in Reply on the card and send. The composer's own draft is untouched. Your reply's
        row shows a delivered mark once the engine has it (only replies sent from the open card carry it).
   A3.6 [item 3: where it shows] The sidebar and Needs you show the open question and the unread essential.
-  A3.7 [item 3: notifications] Unfocus the window and trigger both again [M4.2: the prompt that repeats the question and an
-       essential mark]. An OS notification arrives for those two only, nothing else.
+  A3.7 [item 3: notifications] Unfocus the window and trigger both again with this prompt (R3's PROMPTS.style form): "Send me, the way
+       your instructions describe: one note I must not miss, and one question I can answer later while you go on working
+       (never AskUserQuestion), with two options and the one you recommend, asking whether the README should get a usage
+       section. Use no tool.". An OS notification arrives for those two only, nothing else.
   A3.8 [item 3: persistence] Quit, relaunch and resume the session. Every state is kept (question open or answered, essential
        unread or read).
   A3.9 [item 3: a choice on an exited engine] On a session whose engine has exited, click a choice. It starts the engine and
@@ -107,8 +114,11 @@ A4 Item 4, the chooser.
        to the end: more rows load, under a line "Showing N of M. Scroll for more...". A new search or scope starts the list
        over.
 A5 Item 5, comments on a deliverable.
-  A5.1 [item 5: the card in the viewer] Send this prompt, which delivers an HTML artifact: [M4.2: the prompt that makes a
-       small HTML artifact with an element worth commenting on]. Comment on an element. The card opens beside the element in
+  A5.1 [item 5: the card in the viewer] Send this prompt, which delivers an HTML artifact: (R4's `mcp__maws__artifact_create` route, `e2e/p1-live.spec.ts`)
+       "Do these steps yourself, never through an agent, and do not read any file first. Write a small HTML page to
+       demo-page.html with a heading, a paragraph and three buttons labelled One, Two and Three. Then call
+       mcp__maws__artifact_create with id "demo-page", title "Demo page" and html_path "demo-page.html". Then reply with one
+       line: DONE.". Comment on an element. The card opens beside the element in
        the viewer.
   A5.2 [item 5: the thread] Send the comment. It goes to a side thread. The agent's reply appears in the card; press Reply
        on the card and answer.
@@ -123,7 +133,12 @@ A5 Item 5, comments on a deliverable.
        "Shown in the card under the page - Show here"; press Show here and the Side pane takes it back. Also try the card's
        needs-you strip and "Open in Side pane": they still move the thread to the pane and close the card.
 A6 Item 6, the viewer (L95's acceptance).
-  A6.1 [item 6: a PNG and a short video] Send this prompt: [M4.2: the prompt that delivers a small PNG and a short video].
+  A6.1 [item 6: a PNG and a short video] Send this prompt: (E1's `mcp__maws__send_file` route,
+       `e2e/maws-tools-live.spec.ts`; both commands checked on this Mac 2026-10-10: a 64x64 PNG and a 2-second MP4)
+       "Do these steps yourself, never through an agent. Run, in the foreground:
+       `ffmpeg -loglevel error -y -f lavfi -i color=c=0x2e7d32:s=64x64 -frames:v 1 dot.png` and
+       `ffmpeg -loglevel error -y -f lavfi -i testsrc=size=160x120:rate=10 -t 2 -pix_fmt yuv420p clip.mp4`.
+       Then deliver both files to me with the mcp__maws__send_file tool. Then reply with one line: SENT.".
        Each fills the pane (grown or shrunk, aspect kept).
   A6.2 [item 6: zoom] On the image, use the zoom bar: zoom in, actual size, fit again. A click on the image toggles actual
        size and fit. On the video, use the bar under the header; a click on the video stays the player's.

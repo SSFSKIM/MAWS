@@ -1,0 +1,21 @@
+P2-F live re-run R3: e2e/to-human-live.spec.ts 
+head 987baa556781eb690445ed0b9dc5e95ca8ef0d55; 2026-10-10T15:12:07Z; load { 21.06 18.11 18.72 }
+variables: MAWS_C_LIVE=1 MAWS_C_LIVE_MAX_USD=0.40 MAWS_C_LIVE_OUT=docs/doperpowers/evidence/p2-finish/r3
+relay GET /api/hello: 200
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+eligible: load 16.44 after 30s
+harness build: exit 0
+eligible: load 19.95 after 0s
+run: exit 0
+-- the run's lines (results, spend, A-15, survivors, cases):
+[1/1] e2e/to-human-live.spec.ts:420:5 › P2-C live: to-human end to end on the installed engine, in a scratch home
+e2e/to-human-live.spec.ts:420:5 › P2-C live: to-human end to end on the installed engine, in a scratch home
+  1 passed (1.4m)
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+survivor check (processes naming a scratch root or a MAWS e2e build, after the run):
+13521 /bin/zsh -c source /Users/new/.claude/shell-snapshots/snapshot-zsh-1791607379566-4uniou.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unal
+13523 /bin/zsh /tmp/maws-review/p2f-live-run.sh 3 e2e/to-human-live.spec.ts -- MAWS_C_LIVE=1 MAWS_C_LIVE_MAX_USD=0.40 MAWS_C_LIVE_OUT=docs/doperpowers/evidence/p2-finish/r3
+(end of survivor list)
+full log: /tmp/maws-review/p2f-live-r3.log
+
+-- spend: US$0.0151 across the run's journals (cap US$0.40), from the spec's own log in r3/live-run.txt; scratch roots /private/tmp/maws-p2c-live-9a3p1V (removed after the run) and /private/tmp/maws-p2c-live-YsKfvs (empty, the module-level root a second load of the spec makes; removed).
