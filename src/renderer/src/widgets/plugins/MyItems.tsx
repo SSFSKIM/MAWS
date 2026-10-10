@@ -6,7 +6,8 @@
 // list with one line saying so (E8's rule). Show › "Loaded in this session" adds the init's problems and the loaded
 // plugins that are no row of the list, both through the same search and sort (under Name sort, one list with the rows:
 // P2-F L133). "Nothing matches" is only a searched or
-// filtered view's; the default view keeps "In this project" saying it has none. A failed read of what the plugins say
+// filtered view's; the default view keeps "In this project" saying it has none, and "Loaded in this session" with
+// nothing observed says it is unknown (unknown is never empty). A failed read of what the plugins say
 // about themselves keeps the rows (their names come from the listing) and says so with Retry. A change's result whose
 // installation left the list stays beneath it.
 import type { ReactNode } from 'react';
@@ -77,6 +78,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
   const extras = loadedView ? loadedOnlyShown(loadedOnly(loaded.plugins, identities), view.search) : [];
   const problems = loadedView ? problemsShown(present(loaded).problems, view.search, groups.flatMap((g) => g.rows), extras) : [];
   const resetFilters = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, search: '', filter: 'all' } }));
+  const showAll = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'all' } }));
 
   let body: ReactNode;
   if (plugins.length === 0 && view.filter === 'all' && view.search.trim() === '') {
@@ -84,6 +86,15 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
       <Centered>
         <p className="m-0 text-ui font-medium text-fg">{L.firstTitle}</p>
         <p className="m-0 max-w-sm text-ui-sm text-fg-muted">{L.firstBody}</p>
+      </Centered>
+    );
+  } else if (loadedView && loadedIds === null) {
+    body = (
+      <Centered role="status">
+        <p className="m-0 text-ui text-fg-muted">{L.loadedUnknown}</p>
+        <button type="button" className={SECONDARY} onClick={showAll}>
+          {L.showAll}
+        </button>
       </Centered>
     );
   } else if (isNarrowed(view) && groups.every((g) => g.rows.length === 0) && extras.length === 0 && problems.length === 0) {

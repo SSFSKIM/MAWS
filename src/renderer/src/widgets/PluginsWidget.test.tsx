@@ -337,6 +337,19 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not observed yet');
   });
 
+  it('Show › Loaded in this session with nothing observed says it is unknown, never that nothing matches (scale review D scalpel-2#1)', async () => {
+    backend.script('session.observedFacts', () => null);
+    useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }));
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
+    mount();
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
+    const unknown = await waitFor(() => within(section('my-items')).getByText('What this session loaded is not observed yet.'));
+    expect(within(section('my-items')).queryByText('Nothing matches these filters.')).toBeNull();
+    fireEvent.click(within(unknown.closest<HTMLElement>('[role="status"]')!).getByRole('button', { name: 'Show all plugins' }));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(useLibraryStore.getState().plugins.filter).toBe('all');
+  });
+
   it('a ready process whose report lists only a problem still counts it, loaded now', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [] }]]) });
     mount();

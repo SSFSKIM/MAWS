@@ -476,6 +476,8 @@ export const LIBRARY = {
   firstBody: 'Give Claude role-level expertise with plugins. Add them from Browse.',
   noMatch: 'Nothing matches these filters.',
   resetFilters: 'Reset filters',
+  loadedUnknown: 'What this session loaded is not observed yet.', // Show › Loaded in this session with nothing observed
+  showAll: 'Show all plugins',
   failed: "Couldn't load your plugins.",
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
