@@ -46,6 +46,12 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     await expect(chipOf(panel, a).locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
     expect(s.server.hits('/favicon.ico')).toBeGreaterThan(0);
 
+    // The chrome's layout.openExternal hand-off stays in the scratch seam log, never the real system browser.
+    await overflow(s, panel, 'Open in external browser');
+    await expect.poll(() => seamLines(s)).toContain(`openExternal ${A}`);
+    await expectOnPane(s, a, paneIn(panel), 'panel');
+    expect((await tabState(s, a)).tab?.url).toBe(A);
+
     // ten window.open calls on a timer with no input to the page: none honoured, each counted, the line shown
     await pageA.evaluate(() => (window as unknown as { popupLoop(): void }).popupLoop());
     await expect.poll(async () => (await tabState(s, a)).tab?.blockedPopups).toBe(10);

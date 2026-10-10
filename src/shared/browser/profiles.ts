@@ -82,6 +82,31 @@ export const ImportedProfileV1Schema = ownRecord(z.strictObject({ ...RECORD_FIEL
 export type ImportedProfileV1 = z.infer<typeof ImportedProfileV1Schema>;
 export const ImportedProfilesFileV1Schema = z.strictObject({ version: z.literal(1), profiles: z.array(ImportedProfileV1Schema) }).refine(unique, uniqueProfiles);
 
+// Disk reads accept additive object fields; writes and IPC keep the strict schemas
+// above. safeExtend keeps the partition/report and count refinements, while strip drops only unknown fields in memory.
+const ReadExtensionsSchema = z.array(ImportedExtensionSchema.strip());
+const ReadReportFields = {
+  history: ImportReportV1Schema.shape.history.unwrap().strip().nullable(),
+  cookies: ImportReportV1Schema.shape.cookies.unwrap().safeExtend({
+    partitioned: ImportReportV1Schema.shape.cookies.unwrap().shape.partitioned.strip(),
+  }).strip().nullable(),
+  extensions: ReadExtensionsSchema.nullable(),
+};
+const ReadReportV1Schema = ImportReportV1Schema.safeExtend(ReadReportFields).strip();
+const ReadReportSchema = ImportReportSchema.safeExtend({
+  ...ReadReportFields,
+  bookmarks: ImportReportSchema.shape.bookmarks.unwrap().strip().nullable(),
+}).strip();
+const ReadProfileSchema = ImportedProfileSchema.safeExtend({
+  extensions: ReadExtensionsSchema,
+  report: ReadReportSchema,
+  bookmarks: ImportedBookmarksSchema.strip().nullable(),
+  avatar: z.discriminatedUnion('kind', [ProfileAvatarSchema.options[0].strip(), ProfileAvatarSchema.options[1].strip()]),
+}).strip();
+const ReadProfileV1Schema = ImportedProfileV1Schema.safeExtend({ extensions: ReadExtensionsSchema, report: ReadReportV1Schema }).strip();
+export const ReadImportedProfilesFileSchema = ImportedProfilesFileSchema.safeExtend({ profiles: z.array(ReadProfileSchema) }).strip();
+export const ReadImportedProfilesFileV1Schema = ImportedProfilesFileV1Schema.safeExtend({ profiles: z.array(ReadProfileV1Schema) }).strip();
+
 // An imported profile as the chrome's pill, its popover and Switch profile draw it (`browser.profiles.list`; the spec's
 // "Profiles list item"): the Chrome account's names, shown in the popover and the picker only, and the avatar, the 64 px
 // PNG as a data URL or the profile's initial. The Default partition is never listed; the renderer draws its own glyph.

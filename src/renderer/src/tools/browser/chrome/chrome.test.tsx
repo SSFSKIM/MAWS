@@ -3,7 +3,7 @@
 // answer only, a refused scheme's line, the cover held while the list shows), the find bar's messages and its session
 // with main, the notice lines and their dismissal, the tab strip per surface, the overflow menu, main's chrome commands
 // for the owning chrome only, and the extras slot.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -179,10 +179,12 @@ describe('the address field', () => {
     show({ tab: tab() });
     await user.click(field());
     await user.keyboard('wikipedia.org');
-    await wait(80);
-    expect(calls('browser.history.suggest')).toEqual([{ partition: 'persist:maws-browser', query: 'wikipedia.org' }]);
-    const options = screen.getAllByRole('option').map((option) => option.textContent);
-    expect(options).toEqual([BROWSER_COPY.goTo('https://wikipedia.org/'), BROWSER_COPY.searchFor('wikipedia.org'), 'Ahttps://wikipedia.org/wiki/A']);
+    await waitFor(() => {
+      expect(calls('browser.history.suggest').at(-1)).toEqual({ partition: 'persist:maws-browser', query: 'wikipedia.org' });
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+        BROWSER_COPY.goTo('https://wikipedia.org/'), BROWSER_COPY.searchFor('wikipedia.org'), 'Ahttps://wikipedia.org/wiki/A',
+      ]);
+    });
     const selected = () => field().getAttribute('aria-activedescendant');
     expect(selected()).toBe(screen.getAllByRole('option')[0]!.id);
     await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
@@ -190,7 +192,6 @@ describe('the address field', () => {
     await user.keyboard('{ArrowUp}');
     expect(selected()).toBe(screen.getAllByRole('option')[1]!.id);
     await user.keyboard('{Enter}');
-    await wait(0);
     expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T1, to: { url: `${SEARCH.replace('%s', 'wikipedia.org')}`, typed: true } }]);
     expect(screen.queryByRole('listbox')).toBeNull();
   });

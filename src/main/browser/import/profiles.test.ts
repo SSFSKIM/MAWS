@@ -67,6 +67,48 @@ describe('ImportedProfiles', () => {
     expect(store.get('Default')).toEqual(RECORD);
   });
 
+  it('strips unknown same-version fields on read without rewriting the file or sweeping its partition', async () => {
+    const bookmarks = { consentedAt: '2026-10-08T09:00:00.000Z', syncedAt: null, count: 0, error: null, errorAt: null };
+    const expected: ImportedProfile = { ...RECORD, report: BOOKMARKS_REPORT, bookmarks };
+    const future = {
+      ...expected,
+      futureField: true,
+      extensions: expected.extensions.map((extension) => ({ ...extension, futureField: true })),
+      report: {
+        ...BOOKMARKS_REPORT, futureField: true,
+        history: { ...BOOKMARKS_REPORT.history, futureField: true },
+        cookies: { ...BOOKMARKS_REPORT.cookies, futureField: true, partitioned: { ...BOOKMARKS_REPORT.cookies.partitioned, futureField: true } },
+        extensions: BOOKMARKS_REPORT.extensions.map((extension) => ({ ...extension, futureField: true })),
+        bookmarks: { ...BOOKMARKS_REPORT.bookmarks, futureField: true },
+      },
+      bookmarks: { ...bookmarks, futureField: true },
+      avatar: { kind: 'initials', futureField: true },
+    };
+    const text = JSON.stringify({ version: 2, profiles: [future], futureField: true });
+    writeRaw(text);
+    const folder = join(dir.path, 'browser', 'maws-chrome-Default');
+    const storage = join(dir.path, 'Partitions', RECORD.storageDirName);
+    for (const path of [folder, storage]) {
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'kept'), 'profile data');
+    }
+    const store = ImportedProfiles.open(dir.path);
+    expect(store).toMatchObject({ fileBroken: false, readOnly: false });
+    expect(store.list()).toEqual([expected]);
+    expect(readFileSync(file(), 'utf8')).toBe(text);
+    const removeImportedExcept = vi.fn(() => 0);
+    const removeExcept = vi.fn(() => 0);
+    expect(sweepBrowserImports({ userData: dir.path, profiles: store, history: { removeImportedExcept }, bookmarks: { removeExcept } })).toEqual({
+      staging: 0, partitionFolders: 0, storageDirs: 0, historyRows: 0, bookmarkRows: 0,
+    });
+    for (const path of [folder, storage]) expect(readFileSync(join(path, 'kept'), 'utf8')).toBe('profile data');
+    expect(removeImportedExcept).toHaveBeenCalledWith('persist:maws-chrome-', ['persist:maws-chrome-Default']);
+    expect(removeExcept).toHaveBeenCalledWith(['persist:maws-chrome-Default']);
+    await expect(store.put(future as ImportedProfile)).rejects.toThrow(); // writes still require the current shape
+    await store.put(store.get('Default')!);
+    expect(onDisk()).toEqual({ version: 2, profiles: [expected] });
+  });
+
   it('puts a record, writing the whole file atomically with the record visible at once', async () => {
     const store = ImportedProfiles.open(dir.path);
     await store.put(RECORD);
@@ -137,7 +179,7 @@ describe('a broken profiles.json (Design §13; Decision Log 35)', () => {
     ['not JSON', '{"version": 1, "profiles": [ e4b-sentinel-profiles'],
     ['a version no build wrote', JSON.stringify({ version: 0, profiles: [] })], // E11: a newer one is read-only, below
     ['a record its schema refuses', JSON.stringify({ version: 2, profiles: [{ ...RECORD, partition: 'persist:maws-browser', note: 'e4b-sentinel-profiles' }] })],
-    ['a version-1 file holding a version-2 record', JSON.stringify({ version: 1, profiles: [{ ...RECORD, note: 'e4b-sentinel-profiles' }] })], // cua #90
+    ['a version-1 record with an invalid known field', JSON.stringify({ version: 1, profiles: [{ ...RECORD, name: 42, note: 'e4b-sentinel-profiles' }] })],
   ] as const) {
     it(`moves ${label} aside, starts empty, says so once without the content, and reports fileBroken`, () => {
       writeRaw(text);
@@ -196,6 +238,15 @@ describe('profiles.json version 2 (cua board #90)', () => {
     expect(store.fileBroken).toBe(false);
     expect(store.get('Default')).toEqual({ ...RECORD, report: { ...V1_REPORT, bookmarks: null } });
     expect((onDisk() as { version: number }).version).toBe(1); // nothing written until something changes
+  });
+
+  it('also strips unknown fields while upgrading version 1, without changing its bytes on read', () => {
+    const text = JSON.stringify({ version: 1, profiles: [{ ...V1_RECORD, futureField: true, report: { ...V1_REPORT, futureField: true } }], futureField: true });
+    writeRaw(text);
+    const store = ImportedProfiles.open(dir.path);
+    expect(store.fileBroken).toBe(false);
+    expect(store.get('Default')).toEqual(RECORD);
+    expect(readFileSync(file(), 'utf8')).toBe(text);
   });
 
   it('writes the upgraded file as version 2 on the next write, which reopens as it was and keeps the sweep off the partition', async () => {
