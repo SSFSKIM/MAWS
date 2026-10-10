@@ -7,7 +7,7 @@
 // reader where it was), `followOnAppend` (a reader at the end stays pinned as rows arrive), measured rows in normal
 // DOM order, and browser scroll anchoring off because the virtualiser owns it. Follow mode is a mode: entered at the
 // end, left only by a scroll upward, and while following every structural change keeps the end pinned.
-import { measureElement, useVirtualizer } from '@tanstack/react-virtual';
+import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
@@ -69,6 +69,13 @@ export interface TranscriptListProps {
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
+  // P2-C start (2026-10-09): the scroller's offset and viewport height as the follow rule last knew them (below)
+  const known = useRef({ offset: 0, height: 0 });
+  const remember = useCallback(() => {
+    const element = scrollRef.current;
+    if (element) known.current = { offset: element.scrollTop, height: element.clientHeight };
+  }, []);
+  // P2-C end
   // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
   // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
   // 280 px the moment it opens, and the rows below would jump there and back while the disclosure motion starts it
@@ -96,6 +103,11 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     anchorTo: 'end',
     followOnAppend: true,
     scrollEndThreshold: SCROLL_END_THRESHOLD,
+    // P2-C: every scroll the list makes (to the end, anchoring, a jump) is known at once, as the browser clamped it
+    scrollToFn: (offset, options, instance) => {
+      elementScroll(offset, options, instance);
+      remember();
+    },
     // Reaching the end (within the threshold) enters follow mode; only a scroll upward leaves it (the scroller's own
     // scroll events, P2-C below). Content changing size under a follower is not a reason to stop following.
     onChange: (instance) => {
@@ -109,9 +121,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   // notifications come only when its range or scrolling state changes and whose direction outlives the scroll that set
   // it (a viewport resize then read as a scroll upward or, unreported, hid the next real one). Two things leave it, each
   // only away from the end: a jump the handle is asked for (the offset is read as soon as it is written, before a row
-  // change in the same frame could pin the end again), and a scroll event whose offset is lower than at the last scroll
-  // event or viewport resize with the viewport the same height. The browser's clamp as the viewport grows is not one,
-  // and the follow logic only ever scrolls toward the end.
+  // change in the same frame could pin the end again), and a scroll event whose offset is lower than the last known one
+  // with the viewport the same height. The known offset and height are those at the last scroll event, viewport resize
+  // or scroll the list made itself: a scroll of its own lands a frame before its scroll event, and a scroll upward in
+  // between would otherwise be measured from before it and missed. The browser's clamp as the viewport grows is not one.
   const leaveIfAway = useCallback(() => {
     const element = scrollRef.current;
     if (!element || !followingRef.current || element.scrollHeight - element.clientHeight - element.scrollTop <= SCROLL_END_THRESHOLD) return;
@@ -121,25 +134,20 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    let offset = element.scrollTop;
-    let height = element.clientHeight;
-    const baseline = () => {
-      offset = element.scrollTop;
-      height = element.clientHeight;
-    };
+    remember();
     const scrolled = () => {
-      const movedUp = element.scrollTop < offset && element.clientHeight === height;
-      baseline();
+      const movedUp = element.scrollTop < known.current.offset && element.clientHeight === known.current.height;
+      remember();
       if (movedUp) leaveIfAway();
     };
-    const observer = new ResizeObserver(baseline);
+    const observer = new ResizeObserver(remember);
     observer.observe(element);
     element.addEventListener('scroll', scrolled, { passive: true });
     return () => {
       observer.disconnect();
       element.removeEventListener('scroll', scrolled);
     };
-  }, [leaveIfAway]);
+  }, [leaveIfAway, remember]);
   // P2-C end
 
   // A transcript opens at its end, and a following reader stays there through every structural change. The

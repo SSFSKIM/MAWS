@@ -298,6 +298,56 @@ test('a scroll upward after a viewport shrinks mid-scroll leaves follow mode', a
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// P2-C (2026-10-09): the list's own scroll to the end (a row growing under a follower) moves the offset a frame before
+// its scroll event arrives; a scroll upward in that interval is measured from where the list put the reader, not from
+// before, so it leaves follow mode and the stream leaves the reader where they are.
+test('a scroll upward right after the list follows a row growth leaves follow mode', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'following at the end').toBe(true);
+  const offsets = await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    // A fixed viewport, so no resize is involved; the follower's scroll to the end for this one settles first.
+    scroller.style.height = `${scroller.clientHeight}px`;
+    for (let k = 0; k < 5; k++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    // The first row mounted, above the viewport and outside the turn the stream replays; a style rule keeps it grown
+    // across a remount.
+    const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]'));
+    const first = rows.reduce((a, b) => (Number(b.dataset.index) < Number(a.dataset.index) ? b : a));
+    const before = scroller.scrollTop;
+    return new Promise<{ before: number; followed: number; scrolled: number }>((resolve) => {
+      // Observed after the list's own observer, so this runs in the same frame, after the list has followed the growth
+      // to the end and before that scroll's event.
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        const followed = scroller.scrollTop;
+        scroller.scrollBy(0, -200); // the owner scrolls up
+        resolve({ before, followed, scrolled: scroller.scrollTop });
+      });
+      const grow = document.createElement('style');
+      grow.textContent = `[data-row-id="${first.dataset.rowId}"] { padding-bottom: 400px; }`; // the row grows by 400 px
+      document.head.append(grow);
+      observer.observe(first);
+    });
+  });
+  expect(offsets.followed, 'the list followed the growth to the end').toBeGreaterThan(offsets.before + 200);
+  expect(offsets.scrolled, 'the scroll up still lands below where the list was before').toBeGreaterThan(offsets.before);
+  const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  await expect.poll(async () => (await metrics(page)).following, { message: 'the scroll up leaves follow mode' }).toBe(false);
+  await expect(jump).toBeVisible();
+  const readingAt = await scrollerTop(page);
+  const batches = (await metrics(page)).batches;
+  await play(page, 1);
+  await expect.poll(async () => (await metrics(page)).batches).toBeGreaterThan(batches + 30);
+  expect(await scrollerTop(page), 'the stream does not move the reader').toBe(readingAt);
+  expect((await metrics(page)).following, 'still not following').toBe(false);
+  await expect(jump).toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('collapsing a divider keeps its position', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
