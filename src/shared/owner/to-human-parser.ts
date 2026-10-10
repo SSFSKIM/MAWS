@@ -16,8 +16,11 @@ export type Part = { kind: 'plain'; text: string } | { kind: Kind; text: string;
 // Code regions (grammar 2): half-open [start, end) offsets into the text, in order.
 export type CodeRegion = readonly [start: number, end: number];
 
-const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})(.*)$/;
-const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+// Mark tags are transparent at a fence line's edges (F-AB): a model that glues `<to-human>` before an opening fence or
+// `</to-human>` after a closing one still means the fence, and the tags stay outside the code region.
+const MARK_TAGS = String.raw`(?:<\/?(?:to-human|essential|need-input|insight)>[ \t]*)*`;
+const FENCE_OPEN = new RegExp(String.raw`^[ \t]*${MARK_TAGS}(\x60{3,}|~{3,})(.*)$`);
+const FENCE_CLOSE = new RegExp(String.raw`^[ \t]*(\x60{3,}|~{3,})[ \t]*(${MARK_TAGS})$`);
 
 export function codeRegions(text: string): CodeRegion[] {
   const regions: CodeRegion[] = [];
@@ -34,7 +37,7 @@ export function codeRegions(text: string): CodeRegion[] {
     if (fence !== null) {
       const close = FENCE_CLOSE.exec(line);
       if (close !== null && close[1][0] === fence.char && close[1].length >= fence.length) {
-        regions.push([fence.start, end]);
+        regions.push([fence.start, end - close[2].length]);
         fence = null;
       }
     } else {
@@ -42,7 +45,7 @@ export function codeRegions(text: string): CodeRegion[] {
       // A backtick fence's info string holds no backtick; such a line is an inline span instead.
       if (open !== null && !(open[1][0] === '`' && open[2].includes('`'))) {
         closeParagraph();
-        fence = { char: open[1][0], length: open[1].length, start: at };
+        fence = { char: open[1][0], length: open[1].length, start: end - open[1].length - open[2].length };
       } else if (line.trim() === '') closeParagraph();
       else paragraph = paragraph === null ? [at, end] : [paragraph[0], end];
     }

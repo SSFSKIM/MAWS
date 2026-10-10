@@ -88,6 +88,31 @@ describe('grammar 2: code regions', () => {
       { kind: 'to-human', text: 'Example:\n```\n</to-human>\n```\nEnd.' },
     ]);
   });
+  it('a closing fence glued to a closing tag still closes, leaving the tag and the marks after it outside code', () => {
+    for (const fence of ['```', '~~~']) {
+      expect(parse(`<to-human>Run this:\n${fence}bash\nnpm test\n${fence}</to-human>\n<need-input>Go?</need-input>`)).toEqual([
+        { kind: 'to-human', text: `Run this:\n${fence}bash\nnpm test\n${fence}` }, { kind: 'plain', text: '\n' }, { kind: 'need-input', text: 'Go?' },
+      ]);
+    }
+    expect(parse('<to-human>A:\n```\nx\n``` </to-human> <essential>\nB</essential>')).toEqual([
+      { kind: 'to-human', text: 'A:\n```\nx\n```' }, { kind: 'plain', text: ' ' }, { kind: 'essential', text: 'B' },
+    ]);
+  });
+  it('an opening fence glued to an opening tag still opens, after the tag', () => {
+    expect(parse('<to-human>```bash\nnpm test\n```\n</to-human>\n<need-input>Go?</need-input>')).toEqual([
+      { kind: 'to-human', text: '```bash\nnpm test\n```' }, { kind: 'plain', text: '\n' }, { kind: 'need-input', text: 'Go?' },
+    ]);
+    expect(parse('<to-human><essential>```\n</essential>\n```</essential></to-human>')).toEqual([
+      { kind: 'essential', text: '```\n</essential>\n```' },
+    ]);
+  });
+  it('text other than tags beside a fence keeps the line from being a fence', () => {
+    expect(parse('x <essential>```\n<to-human>Shown.</to-human>')).toEqual([
+      { kind: 'plain', text: 'x <essential>```\n' }, { kind: 'to-human', text: 'Shown.' },
+    ]);
+    const closing = '```\n``` and </to-human>\n<to-human>z</to-human>';
+    expect(parse(closing)).toEqual([{ kind: 'plain', text: closing }]);
+  });
   it('a fence closes only on the same character, at least as long', () => {
     expect(parse('````\n```\n~~~~\n<to-human>quoted</to-human>\n````\n<to-human>Shown.</to-human>')).toEqual([
       { kind: 'plain', text: '````\n```\n~~~~\n<to-human>quoted</to-human>\n````\n' }, { kind: 'to-human', text: 'Shown.' },
