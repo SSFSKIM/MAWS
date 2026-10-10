@@ -133,12 +133,12 @@ describe('every widget renders its fixture response', () => {
     expect(Sandbox.present({ ...on, unsandboxed_fallback: false })).toMatchObject({ reason: 'Commands run only inside the sandbox', outside: null });
     expect(Sandbox.present({ ...on, unsandboxed_fallback: false, excluded_commands: ['docker', 'npm'] })).toMatchObject({
       reason: 'Other commands run only inside the sandbox',
-      outside: 'Run outside it: docker, npm',
+      outside: 'Runs outside it: docker, npm',
       excluded: ['docker', 'npm'],
     });
     expect(Sandbox.present({ ...on, unsandboxed_fallback: true, excluded_commands: ['docker', 'npm', 'git', 'make', 'kubectl'] })).toMatchObject({
       reason: 'A command that fails in the sandbox may run outside it, with your permission',
-      outside: 'Run outside it: docker, npm, git and 2 more',
+      outside: 'Runs outside it: docker, npm, git and 2 more',
     });
     expect(Sandbox.present({ ...base, excluded_commands: ['docker'] }).outside, 'off: every command already runs outside it').toBeNull();
   });
