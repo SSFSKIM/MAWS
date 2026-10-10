@@ -150,6 +150,18 @@ describe('connectBrowserComment', () => {
     }
   });
 
+  it('the pick’s position is the docked card’s pin, a rect of no size at the element’s point; none, no pin', () => {
+    const undock = registerDock(T1, 'pane-1');
+    try {
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none', position: { x: 296, y: 342 } });
+      expect(opened).toHaveBeenLastCalledWith(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1', rect: { x: 296, y: 342, width: 0, height: 0 } } });
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none' });
+      expect(opened.mock.lastCall![1].placement).not.toHaveProperty('rect');
+    } finally {
+      undock();
+    }
+  });
+
   it('a dock is the latest registration, and a disposer removes only its own', () => {
     const first = registerDock(T1, 'pane-1');
     const second = registerDock(T1, 'pane-2');

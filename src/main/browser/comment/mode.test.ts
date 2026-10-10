@@ -402,11 +402,21 @@ describe('the report gate (Design §8, §9)', () => {
           a11y: 'main > region “A form” > button “Increment”',
           box: { x: 248, y: 412, width: 96, height: 30 },
         },
+        position: { x: 296, y: 342 }, // P2-E2: the element's centre across and its bottom, in the pane's pixels
       },
     ]);
     expect(changes().at(-1)).toEqual({ tabId: A, on: false, reason: 'picked' });
     expect(wc.sent().at(-1)).toEqual({ type: 'disarm' });
     expect(discard).not.toHaveBeenCalled();
+  });
+
+  // P2-E2: the pin is in the pane's pixels, so the page's zoom scales it
+  it('sends the element\'s position in the pane\'s pixels at the page\'s zoom', async () => {
+    const { wc, send } = store.add(A);
+    wc.zoom = 1.5;
+    arm(A);
+    await mode.receive(wc as never, report());
+    expect(picked(send)).toMatchObject([{ tabId: A, position: { x: 444, y: 513 } }]);
   });
 
   it('drops, counts and disarms nothing for a report that is not the person\'s pick', async () => {

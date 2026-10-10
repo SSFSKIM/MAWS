@@ -4,9 +4,11 @@
 // browser preload with a body: its shield, outline and pick, main's gate and crop, the comment opened through E5's seam
 // (since P2-E2 the comment card docked in the pane's strip under the page, E3's sheet before).
 //
-// (1) G1: the toggle, the hover outline, a click pick, the card with the crop, no click reaching the page; (2) G1: Send
-// to main and a Side thread from a pick on a live parent (E3's replay journals): the written prompts, the transcript's
-// chip and image, the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
+// (1) G1: the toggle, the hover outline, a click pick, the card with the crop, no click reaching the page (P2-E2: the
+// card docked in the pane's strip, the view's bounds shrunk to the page's element, no cover, the pick's position and the
+// caret under it); (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
+// written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
+// pane at the thread's permission), the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -118,7 +120,7 @@ const reportFor = (epoch: number) => ({
 
 // ---- the app window's record of comment mode's events ------------------------------------------------------------------
 
-type Picked = { tabId: string; appSessionId: string; anchor: Anchor; crop: 'attached' | 'none' | 'tooLarge' | 'failed' };
+type Picked = { tabId: string; appSessionId: string; anchor: Anchor; crop: 'attached' | 'none' | 'tooLarge' | 'failed'; position?: { x: number; y: number } };
 type Changed = { at: number; payload: { tabId: string; on: boolean; reason: string } };
 type Recorded = { picked: Picked[]; changed: Changed[] };
 
@@ -306,6 +308,14 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     expect(near(Number(w), button.width * dpr, 2 * dpr + 1) && near(Number(h), button.height * dpr, 2 * dpr + 1), `the crop is the button: ${w}×${h} at DPR ${dpr} for ${JSON.stringify(button)}`).toBe(true);
     const picked = await lastPicked(s, 1);
     expect(picked).toMatchObject({ tabId: t.tabId, appSessionId: id, crop: 'attached' });
+    // G2 (P2-E2): the pick's position is the button's centre across and its bottom, in the pane's pixels (zoom 1), and the
+    // docked card points at it: a caret on the strip's top edge right under the button
+    const position = picked.position!;
+    expect(near(position.x, button.x + button.width / 2, 1) && near(position.y, button.y + button.height, 1), `position ${JSON.stringify(position)} for ${JSON.stringify(button)}`).toBe(true);
+    const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
+    await expect(caret).toHaveAttribute('data-card-caret', String(position.x));
+    const caretBox = (await caret.boundingBox())!;
+    expect(near(caretBox.x + caretBox.width / 2, fullPane.x + position.x, 1.5), `the caret under the button: ${JSON.stringify({ caretBox, fullPane, position })}`).toBe(true);
 
     // one pick per arm: the toggle is off, the page holds none of MAWS's nodes, and the page heard nothing of the pick
     await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'false');
@@ -995,7 +1005,7 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
     const card = cardOf(s, INCREMENT_LABEL);
     await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
     await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
-    await shoot(s, 'card');
+    await shoot(s, 'card', { pane: paneIn(t.panel), page: t.page }); // P2-E2: the page over the docked card
     await dismiss(s, t, card);
 
     await show(s, disk);

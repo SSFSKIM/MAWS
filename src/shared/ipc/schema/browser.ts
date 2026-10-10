@@ -110,6 +110,7 @@ export const BrowserCommentPickedSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   anchor: AnchorSchema,
   crop: z.enum(['attached', 'none', 'tooLarge', 'failed']),
+  position: z.strictObject({ x: z.number().nonnegative(), y: z.number().nonnegative() }).optional(), // P2-E2 (2026-10-09): the card's pin, `PickPosition` below
 });
 export type BrowserCommentPicked = z.infer<typeof BrowserCommentPickedSchema>;
 // E4d end
@@ -368,3 +369,11 @@ export const events = {
   }),
   // cua #90 end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
+
+// P2-E2 start (2026-10-09): the comment card's pin on `browser.comment.picked` (P2 spec §4.7, X21; P2 interface ledger §1),
+// its one marked line in E4d's strict object above: the picked element's point in the pane's viewport pixels (the page
+// view's own box, whose top-left is the pane's page element's), main's from the preload's rect and the page's zoom (the
+// centre of the element's visible span across, its bottom edge down, each clamped to the viewport). A pick without it
+// docks a card with no pin.
+export type PickPosition = NonNullable<BrowserCommentPicked['position']>;
+// P2-E2 end
