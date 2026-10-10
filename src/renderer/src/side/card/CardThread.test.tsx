@@ -354,6 +354,22 @@ describe('Reply through the human send seam', () => {
     await act(async () => answer({ disposition: 'sent', started: false }));
     expect(useNotices.getState().notices).toEqual([]);
   });
+
+  // P2-F F-C1 (C scalpel-3#4): a disabled field drops the browser's focus, so Reply is read-only while its send is out
+  it('keeps the field focused through an asynchronous send: read-only while it is out, never disabled', async () => {
+    await ready();
+    let answer!: (result: Awaited<ReturnType<typeof sendHumanPrompt>>) => void;
+    seam.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    expect(replyField().disabled).toBe(false);
+    expect(replyField().readOnly).toBe(true);
+    expect(document.activeElement).toBe(replyField());
+    await act(async () => answer({ disposition: 'sent', started: false }));
+    expect(replyField().readOnly).toBe(false);
+    expect(document.activeElement).toBe(replyField());
+    await userEvent.keyboard('Next');
+    expect(replyField().value).toBe('Next');
+  });
 });
 
 describe('needs you', () => {
