@@ -634,6 +634,8 @@ export class OwnerChannelService {
       // it, nothing happened to the answer while main was away, and what happened while main listened it heard; the
       // verdict stands without reading the transcript again. A record that is not whole may have lost what did happen.
       if (history.complete && verdicts.get(answer) === livesOf(answer)) continue;
+      // read afresh, the old verdict no longer holds: a read that fails must not leave it covering what this fold moved
+      answer.unconfirmed = false;
       const uuids = unsettled.filter((m) => m.kind === 'uuid').map((m) => m.id as MessageUuid);
       reads.push(
         (uuids.length === 0 ? Promise.resolve(null) : this.deps.transcriptEvidence(appSessionId, uuids)).then((taken) => () => {

@@ -730,7 +730,7 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     expect(t.question(q).state).toBe('delivered');
   });
 
-  it('a verdict of not taken yields to the record: a member the record moved while main was away is read from the transcript again', async () => {
+  it.each(['readable', 'unreadable at first'] as const)('a verdict of not taken yields to the record: a member the record moved while main was away is read from the transcript again (transcript %s)', async (transcriptAt) => {
     const t = await harness();
     const q = t.ask('Which backend?');
     t.sim.turn = true;
@@ -757,9 +757,18 @@ describe('the recovery read (Design §6, "Restarts and reconnects")', () => {
     t.taken(promoted.messageUuid);
     t.sim.historyComplete = true;
     t.sim.listening = true;
+    if (transcriptAt === 'unreadable at first') {
+      // the read the moved member needs fails: the fold's changes stay in memory, and the old verdict must not cover them
+      const file = transcript;
+      transcript = dir.path;
+      await t.service.hostStreaming();
+      await t.service.settled();
+      expect(t.question(q).state).not.toBe('delivered');
+      transcript = file;
+    }
     await t.service.hostStreaming();
     await t.service.settled();
-    expect(t.question(q).state).toBe('delivered');
+    await vi.waitFor(() => expect(t.question(q).state).toBe('delivered'));
   });
 
   it('an answer edited in the queue while main was away reads as edited once the recovery read sees the queue', async () => {
