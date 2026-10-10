@@ -378,7 +378,7 @@ describe("startBrowser: cua's primitive server (E13)", () => {
     const browser = start(index, { hosts: hosts as never });
     const dir = join(userData, 'browser', 'cua');
     expect(statSync(dir).mode & 0o777).toBe(0o700);
-    const status = (appSessionId: string, process: string) => listeners.forEach((l) => l({ appSessionId: appSessionId as AppSessionId, status: { process } }));
+    const status = (appSessionId: string, process: string) => listeners.forEach((l) => l({ appSessionId: appSessionId as AppSessionId, status: { process, pid: null } as never }));
     status('a-bootstrap-id', 'ready');
     status(A, 'exited');
     expect(readdirSync(dir)).toEqual([]);
@@ -390,6 +390,38 @@ describe("startBrowser: cua's primitive server (E13)", () => {
     browser.cua.socketPathFor(A);
     browser.stop();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  // the socket peer authentication spec of 2026-10-09 (M2, Acceptance 4): every status of a known session names its engine
+  // to the socket's peer check; the committed addon loads from the repository root (vitest's working directory)
+  it('names each known session\'s engine from its statuses: the pid while it runs, none once it exited, nothing for an unknown id', async () => {
+    userData = mkdtempSync('/tmp/mbs-');
+    const listeners = new Set<(payload: { appSessionId: AppSessionId; status: { process: string; pid: number | null } }) => void>();
+    const hosts = {
+      onEvent: vi.fn((name: string, listener: never) => {
+        if (name !== 'session.status') return () => {};
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }),
+      dispatch: vi.fn(async () => ({ ok: true })),
+      onState: vi.fn(() => () => {}),
+    };
+    const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
+    const named = vi.spyOn(browser.cua, 'engineProcess');
+    const status = (appSessionId: string, process: string, pid: number | null) => listeners.forEach((l) => l({ appSessionId: appSessionId as AppSessionId, status: { process, pid } }));
+    expect(browser.cua.inspect().peerModule).toBe('loaded');
+    status('a-bootstrap-id', 'initializing', 4242);
+    expect(named).not.toHaveBeenCalled();
+    status(A, 'initializing', process.pid); // this test process stands for the engine
+    expect(named).toHaveBeenLastCalledWith(A, process.pid);
+    const { connectFakeHost } = await import('../../../test/support/cua-fake-host');
+    const host = await connectFakeHost(browser.cua.socketPathFor(A)!); // the engine itself connects: accepted
+    expect(host.hello).toMatchObject({ extensionInstanceId: `maws:${A}` });
+    expect(browser.cua.inspect().sessions[A]).toMatchObject({ connections: 1, refused: 0 });
+    status(A, 'exited', process.pid);
+    expect(named).toHaveBeenLastCalledWith(A, null);
+    await host.close();
+    browser.stop();
   });
 });
 // E13 end

@@ -23,6 +23,10 @@ test('preload bundle has no external runtime imports', () => {
 test('MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean', async ({ maws }) => {
   const { app, page, launchedAt } = maws;
   expect(await app.evaluate(({ app }) => app.isPackaged), 'the app under test is the one MAWS_E2E_EXECUTABLE names').toBe(maws.packaged);
+  // The cua socket's peer check loaded its addon (cua docs/doperpowers/specs/2026-10-09-maws-socket-peer-auth-design.md,
+  // Acceptance 6): Resources/peer-auth/peer-auth.node when packaged, the committed prebuild otherwise.
+  const peerModule = await app.evaluate(() => (globalThis as { __maws_browser?: { cua?: { inspect(): { peerModule: string } } } }).__maws_browser?.cua?.inspect().peerModule);
+  expect(peerModule, 'without the addon every cua connection is refused (run scripts/build-peer-auth.sh)').toBe('loaded');
 
   // Item 1: one window titled MAWS, three regions side by side, light theme, clean console.
   const regions = ['sidebar', 'main', 'panel'].map((name) => page.locator(`[data-region="${name}"]`));
