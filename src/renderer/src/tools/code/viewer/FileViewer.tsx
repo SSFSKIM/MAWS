@@ -10,6 +10,8 @@
 // E2 (E2 execution document, Design §3): the body is `FileBody` (the mount, the notices, the Wrap and Source controls and
 // the content), which the deliverables viewer mounts read-only under its own header; the file tab adds the path at the
 // bar's start and E5's editor controls beside the notices.
+//
+// P2-F W-V (L95, §2 item 6): an image's zoom lives here, beside the bar that draws its controls and the view it sizes.
 import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
@@ -21,6 +23,7 @@ import { ExternalRow, OpenExternally } from './ExternalRow';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
+import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
 import { useViewer, type ViewerEntry } from './viewer-store';
 
 const CodeView = lazy(() => import('./CodeView'));
@@ -89,6 +92,7 @@ interface FileBodyProps {
 export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, lead, controls }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
+  const zoom = useMediaZoom(`${tabId}\n${path}`);
   useEffect(() => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly }), [tabId, appSessionId, path, line, readOnly]);
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
@@ -109,9 +113,9 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {lead ?? <span className="flex-1" />}
         {entry ? <Notices entry={entry} /> : null}
         {entry ? controls?.(entry) : null}
-        {entry ? <Controls entry={entry} wrap={wrap} /> : null}
+        {entry ? <Controls entry={entry} wrap={wrap} zoom={zoom} /> : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} /> : <Loading />}</div>
     </div>
   );
 }
@@ -119,7 +123,9 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
 const showsCode = (entry: ViewerEntry) => entry.kind === 'code' || entry.kind === 'head' || (entry.sourceView && (entry.kind === 'markdown' || entry.kind === 'image'));
 const hasSource = (entry: ViewerEntry) => entry.kind === 'markdown' || (entry.kind === 'image' && entry.encoding === 'utf8');
 
-function Body({ entry, wrap }: { entry: ViewerEntry; wrap: boolean }) {
+const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
+
+function Body({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
   if (showsCode(entry)) {
@@ -130,7 +136,7 @@ function Body({ entry, wrap }: { entry: ViewerEntry; wrap: boolean }) {
     );
   }
   if (entry.kind === 'markdown') return <MarkdownView entry={entry} />;
-  if (entry.kind === 'image') return <ImageView entry={entry} />;
+  if (showsImage(entry)) return <ImageView entry={entry} zoom={zoom} />;
   return <ExternalRow entry={entry} />;
 }
 
@@ -157,12 +163,13 @@ function Notices({ entry }: { entry: ViewerEntry }) {
   );
 }
 
-function Controls({ entry, wrap }: { entry: ViewerEntry; wrap: boolean }) {
+function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom }) {
   if (entry.status !== 'ready') return null;
   const { tabId } = entry;
   const more = entry.kind === 'head' && entry.loaded < Math.min(CODE_CAP, entry.bytes);
   return (
     <span className="flex shrink-0 items-center gap-1">
+      {showsImage(entry) ? <ZoomControls zoom={zoom} /> : null}
       {more ? (
         <button type="button" className={toggle} disabled={entry.loadingMore} onClick={() => useViewer.getState().loadMore(tabId)}>
           {VIEWER_COPY.loadMore}

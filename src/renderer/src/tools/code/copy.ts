@@ -45,6 +45,13 @@ export const VIEWER_COPY = {
   updated: 'Updated',
   refused: (message: string) => `Refused: ${message}`,
   notOpened: (message: string) => `Not opened: ${message}`,
+  // P2-F W-V (L95): an image's or a video's sizing controls
+  zoom: 'Zoom',
+  zoomIn: 'Zoom in',
+  zoomOut: 'Zoom out',
+  actualSize: 'Actual size',
+  fit: 'Fit',
+  zoomPercent: (scale: number) => `${Math.round(scale * 100)}%`,
 } as const;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

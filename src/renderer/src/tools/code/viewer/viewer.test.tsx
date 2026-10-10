@@ -3,7 +3,7 @@
 // the follow-the-file refresh, the no-session tab).
 import { EditorView } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
@@ -20,6 +20,7 @@ import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } fr
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
 import { installDisk } from '../../../test-support/code-disk';
+import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
 import { currentSet } from '../../../stores/layout-model';
@@ -148,6 +149,7 @@ describe('viewer', () => {
   afterEach(() => {
     cleanup();
     offs.splice(0).forEach((off) => off());
+    vi.unstubAllGlobals();
   });
 
   it('renders a refusal in words with the path, and reads no more than once', async () => {
@@ -263,6 +265,57 @@ describe('viewer', () => {
     expect(src).toBe(dataUrl('image/svg+xml', 'utf8', svg));
     fireEvent.click(screen.getByRole('button', { name: 'Source' }));
     await waitFor(() => expect(codeText()).toContain('Ünïcødé — 日本語'));
+  });
+
+  // P2-F W-V (L95, §2 item 6): fit to the pane is the default; the zoom steps, actual size and fit are the bar's controls
+  it('fits an image to the pane with its aspect, small grown and the fit following the pane, and zooms in, out, to actual size and back', async () => {
+    const { resize } = installResizeObserver();
+    serve({ '/r/dot.png': { base64: 'iVBORw0KGgo=', bytes: 8 } });
+    render(<FileViewer tab={fileTab('/r/dot.png')} />);
+    const img = (await screen.findByRole('img')) as HTMLImageElement;
+    Object.defineProperties(img, { naturalWidth: { value: 64 }, naturalHeight: { value: 48 } });
+    fireEvent.load(img);
+    const stage = document.querySelector('[data-zoom-stage]')!;
+    resize(stage, { width: 600, height: 400 });
+    const drawn = () => [img.style.width, img.style.height];
+    const percent = () => document.querySelector('[data-zoom-percent]')?.textContent;
+    const button = (name: string) => screen.getByRole('button', { name });
+    const pressed = (name: string) => button(name).getAttribute('aria-pressed');
+    expect(drawn()).toEqual(['533px', '400px']); // 400 / 48 of 64 × 48: grown by the tighter side
+    expect(percent()).toBe('833%');
+    expect([pressed('Fit'), pressed('Actual size')]).toEqual(['true', 'false']);
+    resize(stage, { width: 300, height: 400 }); // the pane narrows: the fit follows it
+    expect(drawn()).toEqual(['300px', '225px']);
+    fireEvent.click(button('Zoom in'));
+    expect(drawn()).toEqual(['384px', '288px']); // 4.6875 → the next rung, 6
+    expect(stage.getAttribute('data-zoom')).toBe('6');
+    expect(pressed('Fit')).toBe('false');
+    fireEvent.click(button('Zoom out'));
+    fireEvent.click(button('Zoom out'));
+    expect(drawn()).toEqual(['192px', '144px']);
+    expect(percent()).toBe('300%');
+    fireEvent.click(button('Actual size'));
+    expect(drawn()).toEqual(['64px', '48px']);
+    expect([pressed('Fit'), pressed('Actual size')]).toEqual(['false', 'true']);
+    fireEvent.click(button('Fit'));
+    expect(drawn()).toEqual(['300px', '225px']);
+    fireEvent.click(img); // a click on the image toggles actual size and fit
+    expect(drawn()).toEqual(['64px', '48px']);
+    fireEvent.click(img);
+    expect(drawn()).toEqual(['300px', '225px']);
+    for (let k = 0; k < 4; k++) fireEvent.click(button('Zoom in'));
+    expect(drawn()).toEqual(['1024px', '768px']); // the ladder's top, 16
+    expect(button('Zoom in')).toHaveProperty('disabled', true);
+  });
+
+  it('offers no zoom on an svg shown as its source', async () => {
+    installResizeObserver();
+    serve({ '/r/label.svg': { text: '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>' } });
+    render(<FileViewer tab={fileTab('/r/label.svg')} />);
+    await screen.findByRole('img');
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull());
   });
 
   it('offers Open externally for a PDF and only the size for a binary MAWS will not hand out', async () => {

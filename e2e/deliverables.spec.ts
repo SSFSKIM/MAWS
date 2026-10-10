@@ -11,7 +11,7 @@
 // maws-tools.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
 // the console chip; (2) the Deliverables tool's list, viewer, versions and main tab; (3) a delivered file of every kind
 // and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into the
-// comment card beside the element (P2-E1; E3's composer before it); (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay. Records
+// comment card beside the element (P2-E1; E3's composer before it); (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay; P2-F added (8) the media viewers' fit, zoom and actual size (L95). Records
 // are written straight into the store's layout (`<userData>/deliverables/<appSessionId>/<id>.json`, the reader's format)
 // where no replay writes them; main's reader has no cache. MAWS_E2_SHOTS=1 also writes the evidence shots in both themes
 // under docs/doperpowers/evidence/p1-e2/ (`e2-<surface>-<theme>.png`).
@@ -836,6 +836,69 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     // the seam saw exactly the opens and reveals asked for, the outside files' included
     expect(opened()).toEqual(expected);
     for (const record of [webm, png, code]) expect(expected).toContain(`reveal ${record.path}`);
+  });
+});
+
+// ---- P2-F W-V (L95, §2 item 6): the media viewers' sizing ------------------------------------------------------------
+
+test('a 64 px image and a short video fill the pane, in the panel and in a main tab; zoom in, actual size, and fit again', async () => {
+  test.setTimeout(180_000);
+  await scene({ titles: ['P2-F: media sizing'] }, async (s) => {
+    const [id] = s.ids;
+    const at = (k: number) => new Date(Date.parse('2026-10-09T09:00:00.000Z') + k * 60_000).toISOString();
+    const put = (name: string, bytes: Buffer) => {
+      writeFileSync(join(s.repo, name), bytes);
+      return join(s.repo, name);
+    };
+    const png = seedFile(s.maws.userData, id, put('dot.png', solidPng(64, 64, [21, 101, 192])), at(0));
+    const webm = seedFile(s.maws.userData, id, put('clip.webm', await recordedWebm(s.page)), at(1)); // 160 × 120
+
+    await show(s, id);
+    await openDeliverables(s);
+    const list = listOf(s);
+    const panelViewer = viewerOf(s.panel);
+    const tabViewer = (record: DeliverableRecord) => s.page.locator(`[data-region="main"] [data-deliverable-tab] [data-deliverable-viewer][data-deliverable-id="${record.id}"]`);
+
+    // the media's drawn box against the stage's content box: at fit one side meets the pane, neither passes it, the
+    // aspect is kept and a small medium is grown well past its natural size
+    const measure = (viewer: Locator, media: string) =>
+      viewer.locator('[data-zoom-stage]').evaluate((stage, selector) => {
+        const style = getComputedStyle(stage);
+        const box = { width: stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), height: stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) };
+        const drawn = stage.querySelector(selector)!.getBoundingClientRect();
+        return { box, drawn: { width: drawn.width, height: drawn.height }, zoom: stage.getAttribute('data-zoom') };
+      }, media);
+    const sizes = async (viewer: Locator, media: string, natural: { width: number; height: number }) => {
+      const fits = async () => {
+        const { box, drawn, zoom } = await measure(viewer, media);
+        const scale = Math.min(box.width / natural.width, box.height / natural.height);
+        return zoom === 'fit' && Math.abs(drawn.width - natural.width * scale) <= 1 && Math.abs(drawn.height - natural.height * scale) <= 1 && drawn.width >= natural.width * 2;
+      };
+      await expect.poll(fits, { message: 'fills the pane at fit' }).toBe(true);
+      const fitted = (await measure(viewer, media)).drawn;
+      await expect(viewer.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true');
+      await viewer.getByRole('button', { name: 'Zoom in' }).click();
+      await expect.poll(async () => (await measure(viewer, media)).drawn.width).toBeGreaterThan(fitted.width + 1);
+      expect((await measure(viewer, media)).zoom).not.toBe('fit');
+      await viewer.getByRole('button', { name: 'Actual size' }).click();
+      await expect.poll(async () => (await measure(viewer, media)).drawn).toEqual(natural);
+      await expect(viewer.locator('[data-zoom-percent]')).toHaveText('100%');
+      await viewer.getByRole('button', { name: 'Fit' }).click();
+      await expect.poll(fits, { message: 'fits again' }).toBe(true);
+    };
+
+    for (const [record, body, media, natural] of [
+      [png, 'file', '[data-image-view] img', { width: 64, height: 64 }],
+      [webm, 'video', 'video[data-deliverable-media="video"]', { width: 160, height: 120 }],
+    ] as const) {
+      if (await panelViewer.isVisible()) await panelViewer.getByRole('button', { name: 'Back' }).click();
+      await rowOf(list, record).click();
+      await expect(panelViewer).toHaveAttribute('data-body', body);
+      await sizes(panelViewer, media, natural);
+      await panelViewer.getByRole('button', { name: 'Open in tab' }).click();
+      await expect(tabViewer(record)).toBeVisible();
+      await sizes(tabViewer(record), media, natural);
+    }
   });
 });
 
