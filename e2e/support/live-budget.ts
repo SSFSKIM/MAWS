@@ -1,7 +1,7 @@
 // The live specs' engine cap (P2-F W-T, Design §6's R1 and R2; the tracker's P2-A live-harness row). The product passes
 // no `--max-budget-usd` (`launch-mapping.ts`, untouched), so a live spec that must meet P1's "at most US$1" rule at the
 // engine reaches it through a forwarding script in its scratch root, P2-C's form (`e2e/to-human-live.spec.ts`, which
-// keeps its own copy): every argument goes to the installed engine unchanged (D-1), and a session process (stream-json
+// writes the same script with its own budget bookkeeping): every argument goes to the installed engine unchanged (D-1), and a session process (stream-json
 // input) also gets `--max-budget-usd` with what the run's cap leaves, written before each launch from the receipts
 // spent so far. A launch's session processes each start with what was left at that launch. The script carries the
 // system-prompt snapshot flag's literal only when the engine's own bytes do, so the app's declaration scan reads it as
@@ -42,25 +42,30 @@ export interface CappedEngine {
   budget(spentUsd: number): number | null;
 }
 
+// A value as one shell word: single-quoted, each quote inside it closed, escaped and reopened, so no character of it (a
+// quote, a newline, `$`, a backtick) is shell syntax.
+export const shellWord = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+// The forwarding script's source (this module's and P2-C's). A path reaches it as a quoted word where the script runs it
+// and JSON-encoded where a comment names it, since a raw newline would end the comment and run the rest as a command.
+export function forwardingScript({ label, real, budgetFile, declares, cap }: { label: string; real: string; budgetFile: string; declares: boolean; cap: number }): string {
+  return [
+    '#!/bin/sh',
+    `# ${label}: forwards every argument to the installed Claude Code at ${JSON.stringify(real)}, unmodified.`,
+    declares ? `# That binary declares ${SYSTEM_PROMPT_SNAPSHOT_FLAG}, which this script passes through.` : '# That binary does not declare the system-prompt snapshot flag.',
+    `# A session process (stream-json input) also gets --max-budget-usd with what the run's cap (US$${cap}) leaves.`,
+    `case " $* " in *" --input-format "*) exec ${shellWord(real)} --max-budget-usd "$(cat ${shellWord(budgetFile)})" "$@" ;; esac`,
+    `exec ${shellWord(real)} "$@"`,
+    '',
+  ].join('\n');
+}
+
 export async function cappedEngine({ root, real, cap = liveMaxUsd() }: { root: string; real: string; cap?: number | null }): Promise<CappedEngine> {
   if (cap === null) return { bin: real, cap, budget: () => null };
-  if (real.includes("'")) throw new Error(`cannot forward to an engine path with a quote: ${real}`);
   const bin = join(root, 'claude-capped');
   const budgetFile = join(root, 'claude-capped.budget');
   const declares = await binaryDeclares(real, SYSTEM_PROMPT_SNAPSHOT_FLAG);
-  writeFileSync(
-    bin,
-    [
-      '#!/bin/sh',
-      `# MAWS live run: forwards every argument to the installed Claude Code at ${real}, unmodified.`,
-      declares ? `# That binary declares ${SYSTEM_PROMPT_SNAPSHOT_FLAG}, which this script passes through.` : '# That binary does not declare the system-prompt snapshot flag.',
-      `# A session process (stream-json input) also gets --max-budget-usd with what the run's cap (US$${cap}) leaves.`,
-      `case " $* " in *" --input-format "*) exec '${real}' --max-budget-usd "$(cat '${budgetFile}')" "$@" ;; esac`,
-      `exec '${real}' "$@"`,
-      '',
-    ].join('\n'),
-    { mode: 0o755 },
-  );
+  writeFileSync(bin, forwardingScript({ label: 'MAWS live run', real, budgetFile, declares, cap }), { mode: 0o755 });
   const budget = (spentUsd: number): number => {
     const left = cap - spentUsd;
     if (left < 0.05) throw new Error(`not run (budget): US$${left.toFixed(4)} left of US$${cap}`);

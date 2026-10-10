@@ -48,6 +48,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { forwardingScript } from './support/live-budget';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -147,7 +148,7 @@ function ownerPlugin(): { version: string; scope: string; installPath: string; l
   return { version: entry.version, scope: entry.scope, installPath: entry.installPath, lastUpdated: entry.lastUpdated, contractKey, reads };
 }
 
-async function prepare(real: string): Promise<{ declares: boolean }> {
+async function prepare(real: string, cap: number): Promise<{ declares: boolean }> {
   for (const dir of [config, userData, repo, join(root, 'engine'), join(root, 'kairos')]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(repo, 'README.md'), '# P2-C live run\n');
   const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: repo, stdio: 'ignore' });
@@ -161,21 +162,9 @@ async function prepare(real: string): Promise<{ declares: boolean }> {
   writeFileSync(probe, `#!/bin/sh\nmeta=$(/usr/bin/python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""), d.get("source",""))' 2>/dev/null)\nprintf '%s %s ${NATIVE_TO_HUMAN_ENV}=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$meta" "\${${NATIVE_TO_HUMAN_ENV}:-<unset>}" >> '${probeLog}'\nexit 0\n`, { mode: 0o755 });
   writeSettings({});
   // The engine as the app finds it: every argument forwarded to the installed binary; a session process (stream-json
-  // input) also gets the run's remaining budget.
+  // input) also gets the run's remaining budget (the script's source is e2e/support/live-budget.ts's, quoting the paths).
   const declares = await binaryDeclares(real, SYSTEM_PROMPT_SNAPSHOT_FLAG);
-  writeFileSync(
-    engineScript,
-    [
-      '#!/bin/sh',
-      `# P2-C live run: forwards every argument to the installed Claude Code at ${real}, unmodified.`,
-      declares ? `# That binary declares ${SYSTEM_PROMPT_SNAPSHOT_FLAG}, which this script passes through.` : '# That binary does not declare the system-prompt snapshot flag.',
-      '# A session process (stream-json input) also gets --max-budget-usd with what the run’s cap leaves.',
-      `case " $* " in *" --input-format "*) exec '${real}' --max-budget-usd "$(cat '${budgetFile}')" "$@" ;; esac`,
-      `exec '${real}' "$@"`,
-      '',
-    ].join('\n'),
-    { mode: 0o755 },
-  );
+  writeFileSync(engineScript, forwardingScript({ label: 'P2-C live run', real, budgetFile, declares, cap }), { mode: 0o755 });
   return { declares };
 }
 
@@ -416,7 +405,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
   mkdirSync(OUT, { recursive: true });
   for (const file of ['live-run.txt', 'live-log.txt', 'observations.json']) writeFileSync(join(OUT, file), file.endsWith('.json') ? '{}\n' : '');
   const engine = installedEngine();
-  const { declares } = await prepare(engine.bin);
+  const { declares } = await prepare(engine.bin, cap);
   const plugin = ownerPlugin();
   const owner = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')), cache: treeDigest(plugin.installPath) };
   line(`setup: engine ${engine.version} (${engine.bin.replace(homedir(), '~')}, declares ${SYSTEM_PROMPT_SNAPSHOT_FLAG}: ${declares ? 'yes' : 'no'}) through ${engineScript} (adds --max-budget-usd, cap US$${cap}); relay ${RELAY_URL}; scratch ${root}`);

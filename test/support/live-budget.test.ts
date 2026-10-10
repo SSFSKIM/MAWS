@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../../src/engine-host/binary-info';
-import { cappedEngine, liveMaxUsd, spentUnder } from '../../e2e/support/live-budget';
+import { cappedEngine, forwardingScript, liveMaxUsd, spentUnder } from '../../e2e/support/live-budget';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -22,7 +22,7 @@ function fakeEngine(root: string, { declares }: { declares: boolean }): string {
   writeFileSync(path, `#!/bin/sh\n# ${declares ? SYSTEM_PROMPT_SNAPSHOT_FLAG : 'no flag table here'}\nfor a in "$@"; do echo "$a"; done\n`, { mode: 0o755 });
   return path;
 }
-const argsOf = (bin: string, args: string[]) => execFileSync(bin, args, { encoding: 'utf8' }).trim().split('\n');
+const argsOf = (bin: string, args: string[], cwd?: string) => execFileSync(bin, args, { encoding: 'utf8', cwd }).trim().split('\n');
 
 describe('liveMaxUsd', () => {
   it('reads no cap when the variable is unset, and a cap above 0 and at most US$1 when set', () => {
@@ -73,6 +73,36 @@ describe('cappedEngine', () => {
       const engine = await cappedEngine({ root, real, cap: 0.2 });
       expect(await binaryDeclares(engine.bin, SYSTEM_PROMPT_SNAPSHOT_FLAG)).toBe(declares);
     }
+  });
+});
+
+// Directory names an installed engine's real path may carry, each of which broke the script's unquoted source.
+const HOSTILE = ["owner's-tools", 'two\ntouch pwned #lines','a $(touch pwned) `touch pwned` b', 'semi;colon & "dq"', "end'\n# x\ntouch pwned; exec false '"];
+
+describe('forwardingScript', () => {
+  it('stays valid shell, forwarding to the path itself, whatever the engine path and budget file hold', () => {
+    for (const name of HOSTILE) {
+      const root = scratch();
+      const dir = join(root, name);
+      mkdirSync(dir);
+      const real = fakeEngine(dir, { declares: false });
+      const budgetFile = join(dir, 'budget');
+      writeFileSync(budgetFile, '0.1000');
+      const script = join(root, 'claude-forward');
+      writeFileSync(script, forwardingScript({ label: 'test', real, budgetFile, declares: false, cap: 0.2 }), { mode: 0o755 });
+      expect(() => execFileSync('/bin/sh', ['-n', script], { stdio: 'pipe' }), JSON.stringify(name)).not.toThrow();
+      expect(argsOf(script, ['--input-format', 'stream-json'], root), JSON.stringify(name)).toEqual(['--max-budget-usd', '0.1000', '--input-format', 'stream-json']);
+      expect(argsOf(script, ['--version'], root), JSON.stringify(name)).toEqual(['--version']);
+      expect(readdirSync(root).sort(), JSON.stringify(name)).toEqual(['claude-forward', name].sort()); // nothing the path spelled ran
+    }
+  });
+
+  it('lets cappedEngine forward to an engine under a quoted path rather than refusing it', async () => {
+    const root = scratch();
+    const dir = join(root, HOSTILE[0]!);
+    mkdirSync(dir);
+    const engine = await cappedEngine({ root, real: fakeEngine(dir, { declares: false }), cap: 0.2 });
+    expect(argsOf(engine.bin, ['--input-format', 'stream-json'])).toEqual(['--max-budget-usd', '0.2000', '--input-format', 'stream-json']);
   });
 });
 
