@@ -19,11 +19,13 @@ function linesOf(hunk: Hunk): DiffLine[] {
   return hunk.lines.map((line) => {
     const sign = line[0] ?? ' ';
     const text = line.slice(1);
-    if (sign === '+') return { kind: 'add', number: next++, sign: '+', text };
-    if (sign === '-') return { kind: 'del', number: old++, sign: '−', text };
     if (sign === '\\') return { kind: 'meta', number: null, sign: '', text: line };
-    old += 1;
-    return { kind: 'context', number: next++, sign: ' ', text: sign === ' ' ? text : line }; // an unprefixed line is context, whole
+    const numbers = { old, next };
+    if (sign !== '+') old += 1;
+    if (sign !== '-') next += 1;
+    if (sign === '+') return { kind: 'add', number: numbers.next, sign: '+', text };
+    if (sign === '-') return { kind: 'del', number: numbers.old, sign: '−', text };
+    return { kind: 'context', number: numbers.next, sign: ' ', text: sign === ' ' ? text : line }; // an unprefixed line is context, whole
   });
 }
 

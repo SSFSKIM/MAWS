@@ -203,7 +203,7 @@ export function withBrowserActivityRows(list: Row[], attachment: BrowserActivity
   const out: Row[] = [];
   let p = 0;
   for (let i = 0; i <= list.length; i++) {
-    while (p < placed.length && placed[p].at === i) out.push(...placed[p++].rows);
+    for (; p < placed.length && placed[p].at === i; p++) out.push(...placed[p].rows);
     if (i < list.length) out.push(list[i]);
   }
   return out;

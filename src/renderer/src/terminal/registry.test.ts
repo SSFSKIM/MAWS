@@ -114,7 +114,11 @@ function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean; 
   return new TerminalRegistry({
     ipc: ipc.bridge,
     createRenderer: async (opts) => {
-      if (options.rendererFails || failures-- > 0) throw new Error('no WebGL, no DOM: the renderer could not start');
+      if (options.rendererFails) throw new Error('no WebGL, no DOM: the renderer could not start');
+      if (failures > 0) {
+        failures--;
+        throw new Error('no WebGL, no DOM: the renderer could not start');
+      }
       const r = new FakeRenderer(opts);
       renderers.push(r);
       return r;

@@ -58,7 +58,8 @@ function harness(options: { refuse?: boolean } = {}) {
     locale: () => 'en-US',
     now: () => now,
     setTimeout: (run, ms) => {
-      const id = nextTimer++;
+      const id = nextTimer;
+      nextTimer++;
       timers.set(id, { at: now + ms, run });
       return id;
     },

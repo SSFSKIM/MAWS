@@ -551,7 +551,11 @@ describe('a record’s trust card and its continuation', () => {
   // `session.acquire` answers in turn: each call takes the next outcome (the last repeats)
   const acquiring = (...outcomes: unknown[]) => {
     let n = 0;
-    return () => outcomes[Math.min(n++, outcomes.length - 1)];
+    return () => {
+      const outcome = outcomes[Math.min(n, outcomes.length - 1)];
+      n++;
+      return outcome;
+    };
   };
   const known = () => useSessions.setState({ records: new Map([[ID, record(ID)]]), engine: new Map(), digests: new Map() });
   const composerSend = () => sendHumanPrompt(ID, MESSAGE.content, { origin: 'composer', display: MESSAGE.display });

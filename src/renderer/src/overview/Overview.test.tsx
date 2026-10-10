@@ -139,7 +139,12 @@ describe('overview board', () => {
     const button = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     let asked = 0;
-    offs.push(registerSessionCreator(async () => (asked++, null)));
+    offs.push(
+      registerSessionCreator(async () => {
+        asked++;
+        return null;
+      }),
+    );
     await act(async () => {});
     expect(button.disabled).toBe(false);
     await user.click(button);

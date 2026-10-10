@@ -496,7 +496,8 @@ describe('viewer', () => {
     const answers = ['old\n', 'new\n'];
     installFakeMain(async (name) => {
       if (name !== 'files.read') return ok();
-      const n = reads++;
+      const n = reads;
+      reads++;
       await gates[n].promise;
       return ok({ encoding: 'utf8', content: answers[n], bytes: 4, offset: 0, length: 4, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     });

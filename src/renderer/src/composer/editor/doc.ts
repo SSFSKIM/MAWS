@@ -53,4 +53,8 @@ export const isMultiline = (doc: ComposerDoc): boolean => (doc.content?.length ?
 
 let counter = 0;
 // An id for an atom or attachment, unique within this renderer.
-export const atomId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(counter++).toString(36)}`;
+export const atomId = (prefix: string): string => {
+  const n = counter;
+  counter++;
+  return `${prefix}-${Date.now().toString(36)}-${n.toString(36)}`;
+};

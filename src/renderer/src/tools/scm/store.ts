@@ -170,7 +170,8 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
     // E11: a stage or discard of these paths: an untracked read of one already asked is dropped, and each held one is
     // read again (trailing) once the mutation answered, whether or not it ran anything
     const moving = async (paths: readonly string[], call: () => Promise<ScmMutationResult>) => {
-      const seq = mutations++;
+      const seq = mutations;
+      mutations++;
       for (const path of paths) moved.set(path, seq);
       try {
         return await call();

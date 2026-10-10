@@ -59,7 +59,12 @@ type Group = { origin: SlashOrigin; rows: { row: Row; index: number }[] };
 function grouped(ranked: Row[]): { rows: Row[]; groups: Group[] } {
   const members = ORIGIN_ORDER.map((origin) => ({ origin, rows: ranked.filter((row) => row.item.origin === origin) })).filter((g) => g.rows.length > 0);
   let index = 0;
-  return { rows: members.flatMap((g) => g.rows), groups: members.map((g) => ({ origin: g.origin, rows: g.rows.map((row) => ({ row, index: index++ })) })) };
+  const groups = members.map((g) => {
+    const start = index;
+    index += g.rows.length;
+    return { origin: g.origin, rows: g.rows.map((row, i) => ({ row, index: start + i })) };
+  });
+  return { rows: members.flatMap((g) => g.rows), groups };
 }
 
 export function SlashPalette(props: PopupProps) {

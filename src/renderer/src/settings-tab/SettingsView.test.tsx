@@ -212,7 +212,11 @@ describe('settings tab writes one field per row', () => {
     const invoke = b.bridge.invoke as unknown as ReturnType<typeof vi.fn<(name: string, input: unknown) => Promise<unknown>>>;
     const real = invoke.getMockImplementation()!;
     let refusals = 0;
-    invoke.mockImplementation(async (name: string, input: unknown) => (name === 'settings.set' ? (refusals++, { ok: false, error: { code: 'internal', message: 'disk full' } }) : real(name, input)));
+    invoke.mockImplementation(async (name: string, input: unknown) => {
+      if (name !== 'settings.set') return real(name, input);
+      refusals++;
+      return { ok: false, error: { code: 'internal', message: 'disk full' } };
+    });
     const font = within(row('Monospace font')).getByRole('textbox') as HTMLInputElement;
     fireEvent.change(font, { target: { value: 'MesloLGM Nerd Font Mono' } });
     fireEvent.keyDown(font, { key: 'Enter' });

@@ -42,7 +42,8 @@ export function tap(): void {
     void ipc.invoke('pty.list', undefined).then((result) => {
       if (result.ok) {
         for (const pty of result.value.ptys) if (pty.paused) pausedSeen.add(pty.ptyId);
-        if (samples++ % 50 === 0) useSamples.setState({ rows: result.value.ptys });
+        if (samples % 50 === 0) useSamples.setState({ rows: result.value.ptys });
+        samples++;
       }
       setTimeout(sample, 10); // one request in flight at a time
     });

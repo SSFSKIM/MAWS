@@ -78,7 +78,8 @@ export function bodiesByPlaceholder(prefill: Prefill): Record<string, string> {
   let k = 0;
   for (const placeholder of parsePlaceholders(prefill.text)) {
     if (placeholder.kind !== 'pasted') continue;
-    const body = prefill.pasted?.[k++];
+    const body = prefill.pasted?.[k];
+    k++;
     const key = pastedPlaceholder(placeholder.n, placeholder.lines);
     if (body && !(key in bodies)) bodies[key] = body.text;
   }
@@ -103,7 +104,8 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     prefill.text,
     (placeholder) => {
       if (placeholder.kind !== 'pasted') return unavailable(placeholder);
-      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : prefill.pasted?.[k++]?.text;
+      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : prefill.pasted?.[k]?.text;
+      if (!bodies) k++;
       return body !== undefined ? available(placeholder, body) : unavailable(placeholder);
     },
     images,
