@@ -5,8 +5,12 @@
 // Haiku turn asking for a Bash command, so the turn's `system/init` and whether the Bash call asks for permission say
 // the mode the engine runs in. Through MAWS's own engine host (LiveHost), under a scratch config home under /tmp,
 // through ClaudeUsage's relay, capped at the engine (`--max-budget-usd 0.05`). The owner's ~/.claude.json is read only.
+// It asserts (P2-F W-C review fix): the switch is accepted; MAWS's resolved model is the engine catalogue's `haiku` row;
+// the next turn's `system/init` runs that model and carries a mode, `auto` exactly when that row holds auto; and MAWS's
+// effective mode (`status.permissionMode.effective`, the value the composer's mode chip draws through
+// `statusline/mode-menu.ts` `liveModeBinding`) is that init's mode after the turn.
 // `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/model-change-from-auto.live.test.ts`
-import { afterAll, beforeAll, describe, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import { liveSpec } from './support/live';
 import { LiveHost } from './support/live-host';
@@ -36,7 +40,7 @@ afterAll(() => {
 });
 
 describe('a model change from auto to Haiku, live (P2-F L99)', () => {
-  it('records the mode the engine runs in after the change', async (ctx) => {
+  it('runs the mode the engine reports after the change, and the chip reads it', async (ctx) => {
     const g = liveCase(gate, ctx);
     const host = new LiveHost({ userData: g.userData, configHome: g.home, binary: null });
     const repo = scratchRepo(g, 'p2f-l99');
@@ -53,6 +57,7 @@ describe('a model change from auto to Haiku, live (P2-F L99)', () => {
       const set = await host.call('session.setModel', { appSessionId: id, model: 'haiku' });
       await delay(3_000);
       report.push(`session.setModel haiku: ${JSON.stringify(set)}; mode after ${mode()}`);
+      expect(set).toEqual({ ok: true, error: null, code: null });
       const after = readJournal(journalPath).slice(before);
       report.push(`frames after set_model: ${JSON.stringify(after.map((r) => ({ seq: r.seq, direction: r.direction, frame: r.frame })))}`.slice(0, 4_000));
 
@@ -76,6 +81,26 @@ describe('a model change from auto to Haiku, live (P2-F L99)', () => {
         `permission requests during the turn: ${asked.length} (${JSON.stringify(ofKind(host.events(id), 'permission.requested').map((e) => e.toolName))})`,
         `mode after the turn: ${mode()}`,
       );
+
+      // The engine's own catalogue (the initialize response) says what `haiku` resolves to here and whether it holds auto.
+      type CatalogueRow = { value?: unknown; resolvedModel?: unknown; supportsAutoMode?: unknown };
+      const catalogue = rows
+        .map((r) => (r.direction === 'in' ? (r.frame as { response?: { response?: { models?: CatalogueRow[] } } }).response?.response?.models : undefined))
+        .find((models) => Array.isArray(models));
+      const haiku = catalogue?.find((m) => m.value === 'haiku');
+      report.push(`catalogue haiku row: ${JSON.stringify(haiku ?? null)}`);
+      expect(haiku, 'the engine answered a catalogue with a haiku row').toBeDefined();
+      const expected = haiku?.resolvedModel;
+      expect(typeof expected).toBe('string');
+      const turnInit = inits.find((r) => rows.indexOf(r) >= before); // the first init after set_model
+      expect(turnInit, "the Haiku turn's system/init").toBeDefined();
+      const engineMode = (turnInit?.frame as { permissionMode?: unknown }).permissionMode;
+      expect(typeof engineMode, 'the init carries the mode the engine runs in').toBe('string');
+      expect((turnInit?.frame as { model?: unknown }).model).toBe(expected);
+      expect(engineMode === 'auto').toBe(haiku?.supportsAutoMode === true);
+      const settled = host.status(id);
+      expect(settled?.model.resolved).toBe(expected);
+      expect(settled?.permissionMode.effective, "MAWS's effective mode (the chip's value) is the engine's").toBe(engineMode);
       report.push(`session.stop: ${JSON.stringify(await host.call('session.stop', { appSessionId: id, reason: 'stop' }))}`);
     } finally {
       stopAnswering();
