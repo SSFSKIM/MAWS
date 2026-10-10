@@ -32,7 +32,7 @@ pre.1 | build, stale-build notice (N2.7b), then open the new app | [ ] | [ ] | [
 pre.2 | codesign Authority and TeamIdentifier (header); Diagnostics' build identity names the final head | [ ] | [ ] | [ ] | [ ] | |
 pre.3 | relay answers 200; Claude Desktop open and signed in; locale and display width recorded | [ ] | [ ] | [x] | [ ] | assistant: relay HTTP 200; Claude Desktop opened and signed in; locale and display recorded. Comparison surface preparation in progress. |
 pre.4 | claude --version recorded | [x] | [ ] | [ ] | [ ] | assistant: claude --version reports 2.1.296 (Claude Code). |
-pre.5 | the two terminal sessions prepared (one exited and never opened by MAWS, one left running) | [ ] | [ ] | [x] | [ ] | assistant: Terminal.app denied by computer-use safety policy; owner asked to prepare EXITED and HELD marker sessions. Not yet verified. |
+pre.5 | the two terminal sessions prepared (one exited and never opened by MAWS, one left running) | [x] | [ ] | [ ] | [ ] | owner: "done A1" in reply to terminal preparation request. Assistant then observed Diagnostics list both under /Users/new/Developer/GitHub/MAWS: "P2_SITTING_EXITED reply test" without a terminal-held badge and "Reply exactly P2_SITTING_HELD. Do not use tools." with terminal pid 82015. Neither session opened by this controller; A1 behavior checks still unrun pending signed build. |
 pre.6 | scratch keys to clean in ~/.claude.json (none expected) | [ ] | [ ] | [x] | [ ] | assistant: read-only scratch-project-key baseline is 25 keys, sha1 67ef531ae7156551225960b4c8b20b8aa127835e. Differs from earlier live-run baseline (26 keys); no keys changed or removed by this sitting, no cleanup inferred. |
 
 -- A. Section 2 items 1 to 6 --
