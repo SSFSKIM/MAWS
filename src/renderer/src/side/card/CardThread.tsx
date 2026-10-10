@@ -175,7 +175,7 @@ function useCardActions(card: OpenCard, frame: CardFrame): Partial<TranscriptAct
     () => ({
       openDeliverable(appSessionId, id, version) {
         const show = showVersion.current;
-        if (target === null || show === undefined || appSessionId !== target.appSessionId || id !== target.deliverableId) {
+        if (target?.kind !== 'deliverable' || show === undefined || appSessionId !== target.appSessionId || id !== target.deliverableId) {
           registeredActions().openDeliverable(appSessionId, id, version);
           return;
         }

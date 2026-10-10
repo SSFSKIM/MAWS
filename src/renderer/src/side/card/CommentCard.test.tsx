@@ -122,11 +122,22 @@ describe('the card’s placement', () => {
     expect(card()!.style).toMatchObject({ left: '24px', bottom: '204px' });
   });
 
-  it('a docked host draws it at its bottom edge, its full width less 16 px', () => {
+  // P2-E2: docked, the host is a strip in flow under a native view, the card in it and the pin a caret on its top edge
+  it('a docked host draws it in flow in its strip, the column’s full width less 16 px, with a caret under the element', () => {
     mount('docked');
     pick();
-    expect(card()!.dataset.placement).toBe('docked');
-    expect(card()!.style).toMatchObject({ width: '584px', bottom: '8px' });
+    expect(card()!.dataset.placement).toBe('strip');
+    expect(card()!.style).toMatchObject({ width: '584px', maxHeight: '320px', margin: '8px' });
+    expect(card()!.className).toContain('relative');
+    expect(document.querySelector('[data-card-host]')!.hasAttribute('data-card-dock')).toBe(true);
+    expect(document.querySelector<HTMLElement>('[data-card-caret]')!.dataset.cardCaret).toBe('24'); // the pick's x
+  });
+
+  it('a docked card with no rect has no caret', () => {
+    mount('docked');
+    pick(ANCHOR, cardPlacement({ rect: undefined }));
+    expect(card()!.dataset.placement).toBe('strip');
+    expect(document.querySelector('[data-card-caret]')).toBeNull();
   });
 });
 

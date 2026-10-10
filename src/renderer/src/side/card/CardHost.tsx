@@ -14,11 +14,16 @@
 // counts. A re-docked thread card is claimed only once the Side pane has stopped drawing its thread: "Show in
 // deliverable" starts from that pane, and the card's own close rule (one place draws a session with an input) would
 // otherwise shut it the moment it showed beside a pane still drawing the thread.
+//
+// P2-E2 (the docked layout): a host beside a native view (the browser pane's page) cannot overlay it, since the view lies
+// above the whole renderer. Docked, the host is no overlay but a strip in flow, the last child of the column it shares
+// with the view's box: it measures that column, draws the card in flow (`stripCard`), so the strip grows with the card
+// and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import { CommentCard } from './CommentCard';
-import { dockCard, pinOf, placeCard } from './placement';
+import { caretOf, pinOf, placeCard, stripCard } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
 
 export interface CardFrame {
@@ -48,14 +53,15 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   const [box, setBox] = useState({ width: 0, height: 0 });
 
   useLayoutEffect(() => {
-    const el = ref.current;
+    // docked, the strip's own height is the card's: the room it may take is the column's (P2-E2)
+    const el = layout === 'docked' ? (ref.current?.parentElement ?? null) : ref.current;
     if (!el) return;
     const measure = () => setBox((was) => (was.width === el.clientWidth && was.height === el.clientHeight ? was : { width: el.clientWidth, height: el.clientHeight }));
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(el);
     return () => observer?.disconnect();
-  }, []);
+  }, [layout]);
 
   const drawnInSidePane = useSidePane((s) => open !== null && open.phase.kind === 'thread' && hostedInSidePane(open.phase.child, s));
   const claimable =
@@ -79,15 +85,37 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   const card = open?.hostId === hostId ? open : null;
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
-  const style = layout === 'docked' ? dockCard(box) : placeCard(box, pin);
+  const style = layout === 'docked' ? stripCard(box) : placeCard(box, pin);
   const dismiss = (serial: number) => {
     closeCard(serial);
     restoreFocus?.();
   };
+  if (layout === 'docked') {
+    const caret = card ? caretOf(pin, box) : null;
+    return (
+      <div ref={ref} data-card-host={host} data-card-dock="" className="relative shrink-0 bg-bg">
+        {caret !== null && <Caret x={caret} />}
+        {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
+      </div>
+    );
+  }
   return (
     <div ref={ref} data-card-host={host} className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
     </div>
+  );
+}
+
+// P2-E2: the strip's pin, a caret on its top edge pointing up at the element in the view above, drawn over the card's
+// top border so the two read as one outline.
+function Caret({ x }: { x: number }) {
+  return (
+    <span
+      aria-hidden
+      data-card-caret={Math.round(x)}
+      style={{ left: x - 6 }}
+      className="pointer-events-none absolute top-[2px] z-10 size-3 rotate-45 border-t border-l border-border-strong bg-bg-raised"
+    />
   );
 }
 

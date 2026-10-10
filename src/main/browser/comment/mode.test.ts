@@ -16,6 +16,8 @@ class FakeContents extends EventEmitter {
   destroyed = false;
   url = URL_;
   readonly send = vi.fn();
+  zoom = 1; // P2-E2: the pick's position is in CSS px times the page's zoom
+  getZoomFactor = () => this.zoom;
   readonly insertCSS = vi.fn(async () => `css-${this.id}`);
   readonly removeInsertedCSS = vi.fn(async () => {});
   isDestroyed = () => this.destroyed;
@@ -25,7 +27,7 @@ class FakeContents extends EventEmitter {
 
 function fakeWindow() {
   const send = vi.fn();
-  const win = { id: 7, destroyed: false, isDestroyed: () => win.destroyed, webContents: { isDestroyed: () => false, send } };
+  const win = { id: 7, destroyed: false, isDestroyed: () => win.destroyed, webContents: { isDestroyed: () => false, send, focus: vi.fn() } };
   return { win, send };
 }
 

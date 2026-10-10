@@ -12,11 +12,19 @@
 //   crashed, the load failed, the tab never navigated, the tab is suspended.
 //
 // A pane shows one tab: another tab is another mount with its own token (the caller keys it by tab).
-import { useEffect, useRef, useState } from 'react';
+//
+// P2-E2: the comment card's dock. A placed pane is a column: the page's element (what the placement measures, so the
+// view's bounds are its box) and under it the card's strip (`CommentCardHost`, layout `docked`), mounted while the pane
+// holds or claims the view and registered as the tab's dock while it holds it (`comment/dock.ts`). An open card grows
+// the strip and the page's element shrinks by as much: the view is never under the card and no cover is raised.
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
+import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
+import type { OpenCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
 import { place } from './actions';
 import { BROWSER_COPY } from './copy';
+import { registerDock } from './comment/dock';
 import { coverPane } from './covering';
 import { CrashPage, ViewFailedPage } from './pages/CrashPage';
 import { EmptyState, SuspendedPage } from './pages/EmptyState';
@@ -26,6 +34,7 @@ import { paneRect, Placement, type PlacementMode } from './placement';
 import { onShowRequest, useBrowser } from './store';
 
 const PANE = 'relative h-full w-full overflow-hidden bg-bg';
+const PAGE = 'relative min-h-0 w-full flex-1 overflow-hidden bg-bg'; // P2-E2: a placed pane's page, over the card's strip
 
 export interface BrowserPaneProps {
   tab: BrowserTab | null; // null: the session has no tab to show
@@ -108,9 +117,18 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   useEffect(() => onOwns?.(mode === 'owner'), [mode, onOwns]);
   useEffect(() => () => onOwns?.(false), [onOwns]);
 
+  // P2-E2: the card's dock, registered for the tab while this pane holds its view (where main sends its picks)
+  const hostId = useId();
+  useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
+  const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId }), [tabId]);
+  const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
+
   return (
-    <div ref={element} data-browser-pane="" className={PANE}>
-      {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+    <div data-browser-column="" className="flex h-full w-full flex-col">
+      <div ref={element} data-browser-pane="" className={PAGE}>
+        {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+      </div>
+      {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} />}
     </div>
   );
 }

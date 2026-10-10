@@ -36,6 +36,8 @@ function positionOf(style: CardStyle): CSSProperties {
       return { left: style.left, bottom: style.bottom, width: style.width, maxHeight: style.maxHeight };
     case 'docked':
       return { left: DOCK_INSET, bottom: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
+    case 'strip': // P2-E2: in flow in its host's strip, the margin its inset
+      return { margin: DOCK_INSET, width: style.width, maxHeight: style.maxHeight };
   }
 }
 
@@ -78,7 +80,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
       data-placement={style.mode}
       style={{ ...positionOf(style), ...(thread && { height: style.maxHeight }) }}
       onKeyDown={onKeyDown}
-      className={`pointer-events-auto absolute flex flex-col gap-2 rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg shadow-float outline-none ${thread ? 'overflow-hidden' : 'overflow-y-auto'} ${cornerOf(style, pinned)}`}
+      className={`pointer-events-auto ${style.mode === 'strip' ? 'relative' : 'absolute'} flex flex-col gap-2 rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg shadow-float outline-none ${thread ? 'overflow-hidden' : 'overflow-y-auto'} ${cornerOf(style, pinned)}`}
     >
       <header className="flex min-w-0 shrink-0 items-center gap-1">
         {thread && <ThreadGlyph child={thread.child} />}
