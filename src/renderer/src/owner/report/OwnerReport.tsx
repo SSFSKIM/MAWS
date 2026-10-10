@@ -31,7 +31,9 @@ export interface OwnerReportProps {
   anchor: { messageUuid: MessageUuid; blockIndex: number } | null; // null: no message uuid yet, so no state to match
 }
 
-type Item = { main: ReactNode; insights: Part[] };
+// `key`: the source index of the part that opened the item, so a card keeps its identity (an open Reply, its draft)
+// when the working record's words come and go around it
+type Item = { key: number; main: ReactNode; insights: Part[] };
 
 export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, anchor }: OwnerReportProps) {
   const { parts } = marksOfText(text, live);
@@ -50,15 +52,15 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
     if (part.kind === 'insight') {
       const last = items.at(-1);
       if (last) last.insights.push(part);
-      else items.push({ main: null, insights: [part] });
+      else items.push({ key: index, main: null, insights: [part] });
       return;
     }
     if (part.kind === 'plain') {
-      if (showRecord && part.text.trim()) items.push({ main: <div key={index} className="transcript-commentary"><Markdown markdown={part.text} live={live} /></div>, insights: [] });
+      if (showRecord && part.text.trim()) items.push({ key: index, main: <div className="transcript-commentary"><Markdown markdown={part.text} live={live} /></div>, insights: [] });
       return;
     }
     if (part.kind === 'to-human') {
-      items.push({ main: <MessageCard key={index} text={part.text} live={live} />, insights: [] });
+      items.push({ key: index, main: <MessageCard text={part.text} live={live} />, insights: [] });
       return;
     }
     // M6: never `spans[kind]++` here: the React Compiler (this build) emits a member postfix increment as a prefix one,
@@ -67,17 +69,18 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
     spans[part.kind] = span + 1;
     const mark = markOf(part.kind, span);
     items.push({
+      key: index,
       main: part.kind === 'need-input'
-        ? <AnsweredQuestion key={index} appSessionId={appSessionId} text={part.text} choices={part.choices ?? []} mark={mark} live={live} held={held} />
-        : <EssentialCard key={index} text={part.text} live={live} mark={mark} markRead={mark?.item && mark.essential?.state === 'unread' ? () => markRead(appSessionId, [mark.id as MarkId]) : undefined} />,
+        ? <AnsweredQuestion appSessionId={appSessionId} text={part.text} choices={part.choices ?? []} mark={mark} live={live} held={held} />
+        : <EssentialCard text={part.text} live={live} mark={mark} markRead={mark?.item && mark.essential?.state === 'unread' ? () => markRead(appSessionId, [mark.id as MarkId]) : undefined} />,
       insights: [],
     });
   });
 
   return (
     <div className="owner-report" data-owner-report={recordKey}>
-      {items.map((item, n) => (
-        <div key={n} className="owner-report-item">
+      {items.map((item) => (
+        <div key={item.key} className="owner-report-item">
           {item.main}
           {item.insights.length > 0 && (
             <InsightGroup>

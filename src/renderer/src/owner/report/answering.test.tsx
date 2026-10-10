@@ -205,6 +205,19 @@ describe('Reply', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reply' }));
   });
 
+  it('an open field and its unsent text survive opening and closing the working record around the question', () => {
+    withMarks([question({ state: 'unanswered' })]);
+    const text = `Working notes.\n${QUESTION}`;
+    const view = render(<OwnerReport appSessionId={APP} text={text} live={false} showRecord={false} recordKey="k" anchor={anchor} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'Half a thought' } });
+    view.rerender(<OwnerReport appSessionId={APP} text={text} live={false} showRecord recordKey="k" anchor={anchor} />);
+    expect(view.container.textContent).toContain('Working notes.');
+    expect((screen.getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('Half a thought');
+    view.rerender(<OwnerReport appSessionId={APP} text={text} live={false} showRecord={false} recordKey="k" anchor={anchor} />);
+    expect((screen.getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('Half a thought');
+  });
+
   it('a refused reply keeps the field and its text, and says why; Escape closes the field', async () => {
     withMarks([question({ state: 'delivered', answer: { text: 'Answering "Which backend?": Postgres', origin: 'answer', at: '2026-10-09T10:02:00.000Z' } })]);
     seam({ disposition: 'refused', started: false, reason: 'Trust this folder in the session to continue' });
