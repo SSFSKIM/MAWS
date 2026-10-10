@@ -12,7 +12,7 @@
 // (`browser.agent.activity`, acceptance 10's main half): the tab opened, the navigation, a click labelled from the real
 // page's node, typing as a count only.
 // Runs under `pnpm e2e:browser-cua` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); the launch passes
-// MAWS_HARNESS=0 (the product app) and MAWS_E2E_QUIET=1, over a profile under /tmp (a Unix socket path is short).
+// MAWS_HARNESS=0 (the product app), quiet as every e2e window is, over a profile under /tmp (a Unix socket path is short).
 // The final fix wave's case (the owner's decision; P1 A-54, amended): the Browser panel follows the agent again. In a
 // window that shows a seeded session, a lease's reading commands open nothing, its first acting command opens the
 // session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection. Then the
@@ -107,7 +107,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms 
 test('a fake cua host drives a session\'s tabs through its socket: create, navigate, read, click, frames, filter, isolation, ownership, reset, close, disconnect', async () => {
   const userData = mkdtempSync('/tmp/mcua-e2e-');
   const pages = await startPages();
-  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0' } });
   const hosts: FakeHost[] = [];
   try {
     const app = seam(maws);
@@ -194,7 +194,7 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
 test('takeover and the cursor through a lease: cursor.move draws, a screenshot hides it first, the person\'s click takes the page, an acting command is refused within 2 s and a reading one passes, 3 s later the same command goes through, letting go hides the cursor', async () => {
   const userData = mkdtempSync('/tmp/mcua-e2e-');
   const pages = await startPages();
-  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0' } });
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
@@ -342,7 +342,7 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
 test('the person\'s own navigations of a leased idle tab are theirs: ⌘R in the page and Reload from the window make no agent row', async () => {
   const userData = mkdtempSync('/tmp/mcua-e2e-');
   const pages = await startPages();
-  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0' } });
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
@@ -395,7 +395,7 @@ test('a person\'s bookmark click on a leased idle tab is theirs: no agent row, a
   const chrome = buildChromeUserData(chromeDir, { bookmarksOrigin: pages.origin });
   const maws = await launchMaws({
     userData,
-    env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_CHROME_USER_DATA: chrome.dir, MAWS_E2E_KEYCHAIN: `file:${chrome.passwordFile}` },
+    env: { MAWS_HARNESS: '0', MAWS_E2E_CHROME_USER_DATA: chrome.dir, MAWS_E2E_KEYCHAIN: `file:${chrome.passwordFile}` },
   });
   let host: FakeHost | null = null;
   try {

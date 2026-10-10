@@ -5,6 +5,7 @@ import { BrowserWindow, session } from 'electron';
 import type { WindowState } from '@shared/ipc/schema/layout';
 import { buildCsp } from './csp';
 import { appWindows, registerAppWindow } from './windows'; // E2
+import { showAppWindow } from './window-show';
 // E2 start
 import { attributeConsole, guardFrames, isCspExempt } from './deliverables/policies';
 import { emit } from './ipc/events';
@@ -89,20 +90,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.once('ready-to-show', () => {
     if (placement?.maximized) win.maximize(); // C5
-    // Debt wave 5: an end-to-end launch shows its window without making it key. A run opens one window per test, and
-    // a window that activated took the keystrokes and clicks of whoever was using the desktop meanwhile, which landed in
-    // the c7 group's editors as characters no test typed. Playwright drives the page over CDP with its focus emulated,
-    // so no test needs the window key; one that needs native focus asks for it (`win.focus()`).
-    if (process.env.MAWS_E2E === '1') {
-      // Quiet e2e (owner's ruling 2026-10-06): the window must exist for Chromium to paint, but it need not be seen.
-      // MAWS_E2E_QUIET=1 shows it fully transparent and lets clicks pass through, so a run of many launches no longer
-      // covers the desktop; Playwright's input and screenshots go over CDP and never touch the window's alpha.
-      if (process.env.MAWS_E2E_QUIET === '1') {
-        win.setOpacity(0);
-        win.setIgnoreMouseEvents(true);
-      }
-      win.showInactive();
-    } else win.show();
+    showAppWindow(win, process.env); // quiet under MAWS_E2E unless MAWS_E2E_QUIET=0 (owner's rulings 2026-10-06, 2026-10-10)
   });
 
   if (pageUrl) void win.loadURL(pageUrl);
