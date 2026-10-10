@@ -319,15 +319,17 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       expect(await invokes(['session.send', 'session.steer'])).toBe(sent); // no prompt to read them
       scratch.log(`after Load now: ${(await status(page, id)).process}; skills rows ${await w.locator('[data-skill-row]').count()}`);
       // a start with no turn reports no plugins: the ready session's line keeps the last observed list, never "Loaded now"
-      // over an empty one (the architect's ruling of 2026-10-10, now A's precedence)
+      // over an empty one (the architect's ruling of 2026-10-10, now A's precedence). Asserted whatever the status says:
+      // the start sent no prompt (above) and Load now reloads no plugins, and the engine emits no system/init before a
+      // user frame (U1, `spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-1.jsonl`), so a "now" here would be
+      // the no-prompt handshake taken for an observation.
       const s = await status(page, id);
       const plugins = await openWidget(page, 'plugins');
       const line = plugins.locator('[data-plugins-loaded]');
       scratch.log(`ready with no turn: pluginsObservedAt ${s.pluginsObservedAt ?? 'null'}, ${s.plugins.length} plugins in the status; loaded line: ${(await line.textContent()) ?? ''}`);
-      if (s.pluginsObservedAt === null) {
-        await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
-        await expect(line).not.toContainText('Loaded now');
-      }
+      await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
+      await expect(line).not.toContainText('Loaded now');
+      expect((await line.textContent()) ?? '').toMatch(/^[1-9]\d* plugins? loaded in this session·Loaded last time, \S/);
       await closeWidgets(page);
       value(await invoke(page, 'session.stop', { appSessionId: id as AppSessionId, reason: 'stop' }));
       await expect.poll(async () => (await status(page, id)).process, { timeout: 60_000 }).not.toBe('ready');
