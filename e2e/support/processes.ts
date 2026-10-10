@@ -55,3 +55,14 @@ export async function killScratchProcesses(root: string, recorded: Iterable<numb
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
+
+// The TCP addresses the process listens on (`lsof`, which needs no privilege for one's own process), sorted; [] for none.
+// The SIGUSR1 checks compare it before and after the signal: an inspector would add 127.0.0.1:9229.
+export function tcpListeners(pid: number): string[] {
+  try {
+    const out = execFileSync('lsof', ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN', '-Fn'], { encoding: 'utf8' });
+    return out.split('\n').filter((line) => line.startsWith('n')).map((line) => line.slice(1)).sort();
+  } catch {
+    return []; // lsof exits 1 when nothing matches
+  }
+}

@@ -15,7 +15,7 @@ import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { isAlive, killScratchProcesses, ps } from './support/processes';
+import { isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
@@ -92,6 +92,14 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     expect(binary, 'the supervisor runs the app binary itself').toBe(exe);
     expect(Number(pgid), 'the supervisor leads its own process group').toBe(lock.pid);
     expect(maws.consoleErrors()).toEqual([]);
+
+    // a same-user SIGUSR1 opens no Node inspector in the supervisor (closed 2026-10-10: the socket peer authentication
+    // spec's SIGUSR1 route; src/engine-host/detached.ts): it stays alive and listens on no new TCP address
+    const listenersBefore = tcpListeners(lock.pid);
+    process.kill(lock.pid, 'SIGUSR1');
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(isAlive(lock.pid), 'the supervisor survives SIGUSR1').toBe(true);
+    expect(tcpListeners(lock.pid), 'no inspector opened in the supervisor').toEqual(listenersBefore);
 
     // an unbusy quit stops the supervisor with the app (residue 23)
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
