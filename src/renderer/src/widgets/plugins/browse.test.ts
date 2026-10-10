@@ -95,6 +95,16 @@ describe('Browse: the installed join', () => {
     expect(installedDirectory).toEqual([expect.objectContaining({ pluginId: `x@${DIRECTORY}`, section: ANTHROPIC, installed: expect.objectContaining({ where: 'here' }) })]);
   });
 
+  it('a catalogue read before the official twin was installed still yields one card, the installed one (scale review D scalpel-3#2)', () => {
+    // plugins.available retained its earlier answer (both entries offered) while plugins.list already lists the install
+    const offers = [listed('frontend-design'), offer('frontend-design@claude-plugins-official', { installCount: 1_290_640 })];
+    const cards = browseCards(offers, identities([inst('frontend-design@claude-plugins-official')], [OFFICIAL]), [OFFICIAL]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ pluginId: 'frontend-design@claude-plugins-official', installed: expect.objectContaining({ where: 'here' }), installCount: 1_290_640 });
+    // either order of the two entries
+    expect(browseCards([...offers].reverse(), identities([inst('frontend-design@claude-plugins-official')], [OFFICIAL]), [OFFICIAL]).map((c) => c.pluginId)).toEqual(['frontend-design@claude-plugins-official']);
+  });
+
   it('an offered id that is also installed is one card, marked by its installations (never by a name alone)', () => {
     const cards = browseCards([offer('a@acme', { installCount: null }), offer('a@other-acme')], identities([inst('a@acme', { scope: 'project', projectPath: '/work/other' })], [ACME]), [ACME, market('other-acme', 'git', 'https://example.com/other.git')]);
     expect(cards.filter((c) => c.pluginId === 'a@acme')).toHaveLength(1);

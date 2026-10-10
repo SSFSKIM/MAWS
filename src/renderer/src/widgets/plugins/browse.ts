@@ -62,6 +62,12 @@ export function browseCards(available: readonly AvailablePlugin[], identities: r
     if (offer.marketplaceName !== BUILT_IN_DIRECTORY) continue;
     const key = sourceKey(offer.source, null);
     const twin = key === null ? undefined : official.get(key);
+    // an official twin already installed (a catalogue answer read before its install, retained or not yet reread): the
+    // engine hides the directory entry of an installed plugin, so the official entry is the one card, installed
+    if (twin && installedById.has(twin.pluginId) && !installedById.has(offer.pluginId)) {
+      consumed.add(offer.pluginId);
+      continue;
+    }
     if (twin && !consumed.has(twin.pluginId)) {
       folded.set(offer.pluginId, twin);
       consumed.add(twin.pluginId);
