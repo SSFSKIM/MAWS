@@ -492,7 +492,7 @@ test('a same-user process outside every session\'s tree is cut off before the he
 
     // a connector started in a subshell that exits at once, so it runs under launchd when it connects (the Terminal's `nc`)
     const report = join(work, 'orphan.json');
-    execFileSync('/bin/sh', ['-c', `(sleep 0.2; exec '${process.execPath}' '${CONNECTOR}' '${path}' '${report}') &`], { stdio: 'ignore' });
+    execFileSync('/bin/sh', ['-c', '(sleep 0.2; exec "$0" "$@") &', process.execPath, CONNECTOR, path, report], { stdio: 'ignore' }); // paths as arguments, never pasted
     await expect.poll(() => reportOf(report), { timeout: 10_000 }).toMatchObject({ closed: true });
     expect(reportOf(report)).toMatchObject({ hello: null, closed: true });
     expect((await app.inspect())[A]).toMatchObject({ connections: 1, refused: 1 });
@@ -515,7 +515,8 @@ test('with no trusted root, a live session\'s own engine tree is let in: the con
   const [engineSessionId] = seedTranscripts(config, repo, ['the cua engine stub']);
   // the engine binary: a wrapper naming this Node, which the engine host probes with --version and spawns per launch
   const bin = join(root, 'cua-engine');
-  writeFileSync(bin, `#!/bin/sh\nMAWS_CUA_STUB_VERSION='${FIXTURE_ENGINE_VERSION}' exec '${process.execPath}' '${ENGINE_STUB}' "$@"\n`, { mode: 0o755 });
+  const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`; // as test/support/plugin-cli-stub.ts quotes its wrapper
+  writeFileSync(bin, `#!/bin/sh\nMAWS_CUA_STUB_VERSION=${quote(FIXTURE_ENGINE_VERSION)} exec ${quote(process.execPath)} ${quote(ENGINE_STUB)} "$@"\n`, { mode: 0o755 });
   const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_ENGINE_BIN: bin } });
   try {
     const app = seam(maws); // nothing trusted: only the session's engine is a root
