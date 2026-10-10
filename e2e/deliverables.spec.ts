@@ -252,8 +252,15 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       element.contentWindow!.postMessage({ type: 'maws:pick', on: true }, '*');
     });
     const posted = () => maws.page.evaluate(() => (window as unknown as { __e2Posted: unknown[] }).__e2Posted);
-    await maws.page.mouse.move(100, 100);
-    await expect.poll(() => frame.locator('[data-maws-pick-overlay]').count()).toBe(1);
+    // The move that shows the overlay is dispatched in the frame, again until the overlay is up (L64): the pick-on
+    // message is a task in the frame that a move sent as input can overtake, leaving no later move to place the overlay,
+    // and the desktop's own pointer still reaches an e2e window. The bridge hears mousemove at the window's capture phase.
+    await expect
+      .poll(async () => {
+        await frame.evaluate(() => document.getElementById('hero')!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 })));
+        return frame.locator('[data-maws-pick-overlay]').count();
+      })
+      .toBe(1);
     await maws.page.mouse.click(100, 100);
     await expect.poll(posted).toEqual([
       { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
