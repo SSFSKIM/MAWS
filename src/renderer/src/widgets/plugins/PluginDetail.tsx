@@ -40,6 +40,7 @@ export interface PluginDetailProps {
   loadedIds: ReadonlySet<string> | null; // the loaded list's ids; null when none was observed
   reloads: Reloads | null; // on a ready process
   listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
+  listError?: string | null; // the installed list's later failed read: what the detail shows is the last list read (E8's rule)
   backTo?: string; // the view Back returns to: My items, or Browse for an installed card opened there
   onBack(): void;
 }
@@ -51,7 +52,7 @@ const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none 
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, listManifests, backTo = L.myItems, onBack }: PluginDetailProps) {
+export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, listManifests, listError = null, backTo = L.myItems, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -104,6 +105,11 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-border px-3 pb-3">
         <BackButton to={backTo} onBack={onBack} />
+        {listError !== null && (
+          <p role="status" className="m-0 text-ui-sm text-warning [overflow-wrap:anywhere]">
+            {listError}
+          </p>
+        )}
         <div className="flex min-w-0 items-start gap-3">
           <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-active text-fg-muted">
             <PluginGlyph className="size-5" />

@@ -1232,6 +1232,23 @@ describe('plugins widget: the detail', () => {
     expect(within(section('my-items').querySelector<HTMLElement>('[data-plugin-result="e8-probe@e8-scratch"]')!).getByRole('status').textContent).toBe('Successfully uninstalled plugin: e8-probe (scope: user) · No running session to reload');
   });
 
+  it('a change whose installed list then fails to read again says so in the detail, which shows the last list read (scale review D scalpel-1#1)', async () => {
+    await ready();
+    fireEvent.click(view('e8-probe@e8-scratch'));
+    fireEvent.click(switchOf());
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
+    await waitFor(() => expect(invoked('plugins.disable')).toHaveLength(1));
+    backend.script('plugins.list', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
+    });
+    act(() => emit('plugins.changed', {}));
+    const warning = await waitFor(() => within(detail()!).getByText(/Path does not exist: \/nope/));
+    expect(warning.textContent).toBe('Path does not exist: /nope · showing the last value it reported');
+    expect(warning.getAttribute('role')).toBe('status');
+    expect(switchOf().getAttribute('aria-checked')).toBe('true'); // the last read's position, now disclosed as such
+  });
+
   it('the row’s overflow keeps its own click: its menu opens and no detail does', async () => {
     await ready();
     expect(menuItems('e8-probe@e8-scratch')).toEqual(['Turn off', 'Update', 'Uninstall…']);

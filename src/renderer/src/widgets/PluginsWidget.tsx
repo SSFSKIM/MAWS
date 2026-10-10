@@ -148,7 +148,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const add = <AddMenu onOpen={setDialog} />;
   const toolbar = inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
   const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
-    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} listManifests={manifests} backTo={backTo} onBack={onBack} />
+    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} listManifests={manifests} listError={installed.error} backTo={backTo} onBack={onBack} />
   );
 
   return (
