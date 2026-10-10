@@ -1,0 +1,5 @@
+P2-F — the owner file (A-15) and the child's engine spend
+Rule: the sorted list of `/tmp` and `/private/tmp` project keys in ~/.claude.json, printed by Python and piped to `shasum`, read only, before and after every live run; the two readings identical. Spend is summed here before each run (Constraint 11: US$2.00 for the child).
+
+Baseline (M0.3, 2026-10-10T05:08Z, before any live run of this child): 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+Spend so far: US$0.00

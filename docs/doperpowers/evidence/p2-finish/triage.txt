@@ -161,3 +161,6 @@ Wave contents, in order:
 Sitting rows and where M4 settles them: L31 (M4 step C4 (keep-quit and relaunch on the owner profile)), L32 (M2 Q1 (final)), L36 (M2 Q3 (out of scope)), L37 (M2 Q3 (out of scope)), L53 (M2 Q2 (the app display locale beside the engine English)), L57 (M2 A-35 (the caps as built)), L82 (M2 Q12, then wave S), L96 (M4 step B (the report view)), L98 (M4 step C1 (the cat comparison in Terminal.app)), L102 (M4 step B (the error dwell)), L147 (M4 step B (the P2-E2 strip)), L155 (M4 step B (the report view default)), L156 (M4 step B (the report bar))
 
 Rows added after authoring are binned at M0.2 by the same criteria and appended below with their line numbers.
+
+M0.2 (2026-10-09, executor, master 9548a40a): the tracker is byte-identical to 9cabdf69's (`git diff 9cabdf69 9548a40a -- docs/tech-debt-tracker.md` empty); 134 dated rows on file lines 25 to 158, every line number above unchanged; no row added since authoring. `grep -c '^| 20' docs/tech-debt-tracker.md` → 134; triage row lines → 134.
+M0.3 L29 re-check (2026-10-10T05:10Z): package.json and pnpm-workspace.yaml with the C8c block removed, `pnpm install --lockfile-only` with no lockfile (pnpm 11.23.0) → highlight.js@11.11.2 and highlight.js@11.12.0 (two copies); L29 stays deferred, no W-T row added.
