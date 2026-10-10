@@ -33,7 +33,7 @@ afterEach(() => cleanup());
 const draftOf = (doc: ComposerDoc): Draft => ({ doc, attachments: [], updatedAt: '2026-10-05T00:00:00.000Z' });
 
 // An editor over `doc`, focused with the caret at `caret` (a selection when `to` is given).
-async function mount(doc: ComposerDoc, caret: number, options: { to?: number; onSubmit?(s: Serialized): Promise<boolean>; disabled?: string | null } = {}) {
+async function mount(doc: ComposerDoc, caret: number, options: { to?: number; onSubmit?(s: Serialized): Promise<boolean>; disabled?: string | null; focus?: boolean } = {}) {
   const saved: (Draft | null)[] = [];
   const port: DraftPort = { load: async () => draftOf(doc), save: (d) => void saved.push(d) };
   const handle = createRef<EditorHandle>();
@@ -44,7 +44,7 @@ async function mount(doc: ComposerDoc, caret: number, options: { to?: number; on
   const editor = content.editor;
   act(() => {
     editor.commands.setTextSelection({ from: caret, to: options.to ?? caret });
-    editor.view.focus();
+    if (options.focus !== false) editor.view.focus();
   });
   const rerender = (disabled: string | null) => view.rerender(<Editor {...props} disabled={disabled} />);
   return { handle, editor, content, saved, rerender, unmount: view.unmount };
@@ -397,9 +397,18 @@ describe('editor dictation replaces interim text and settles the final', () => {
     });
   });
 
-  it('focuses an unfocused editor at the end before opening the range', async () => {
+  // P2-F (L135): the insertion seam's caret rule (P2-B M6), as Use in chat and Mention follow it
+  it('an unfocused editor the human left a caret in opens the range at that caret', async () => {
     const { handle, editor } = await mount(ALPHA_BETA, AFTER_ALPHA);
     act(() => editor.view.dom.blur());
+    expect(editor.isFocused).toBe(false);
+    const sink = handle.current!.beginDictation(() => {})!;
+    act(() => sink.final('done'));
+    expect(text(editor)).toBe('alpha done beta');
+  });
+
+  it('an unfocused editor the human never left a caret in is focused at the end before opening the range', async () => {
+    const { handle, editor } = await mount(ALPHA_BETA, AFTER_ALPHA, { focus: false });
     expect(editor.isFocused).toBe(false);
     const sink = handle.current!.beginDictation(() => {})!;
     act(() => sink.final('done'));

@@ -527,7 +527,7 @@ export class EditorController {
   // ---- E9: dictation (E9 execution document, Design §7) -----------------------------------------------------------
 
   // Opens the interim range at the caret (the editor takes focus first: at its selection, read from the DOM, when
-  // focused, else at the end), deleting nothing: a selection stays and the words go after it, inside its last text
+  // focused, else at the caret the human left, else at the end, as `insertText` does; P2-F, L135), deleting nothing: a selection stays and the words go after it, inside its last text
   // block, so a refused or cancelled capture leaves the document exactly as it was. Whether the words get a leading
   // space is decided once, here.
   private beginDictation(onEnded: () => void): DictationSink | null {
@@ -535,7 +535,7 @@ export class EditorController {
     if (!editor || editor.isDestroyed || this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return null;
     this.endDictation('remove'); // one sink at a time
     if (editor.isFocused) syncSelectionFromDOM(editor.view); // the selection the arrow keys moved, which ProseMirror may not have read
-    else editor.commands.focus('end');
+    else editor.commands.focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
     editor.view.focus();
     const at = dictationStart(editor.state);
     const space = needsLeadingSpace(editor.state, at);
