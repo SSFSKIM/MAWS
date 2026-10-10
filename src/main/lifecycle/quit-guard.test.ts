@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'; // E5: a window's webContents, as th
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults'; // P2-F L113
 import { humanTurn, record, status } from '../../../test/support/builders';
 
 // Electron's `app` as the guard sees it: `before-quit` listeners, and `quit()` firing `before-quit` again, as it does.
@@ -35,6 +36,8 @@ const { SessionReadModel } = await import('../sessions/read-model');
 const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
 const { hostEventSource } = await import('../sessions'); // C12
 const { SAVE_ALL_BOUND_MS, trackUnsavedFiles } = await import('./quit-guard'); // E5
+const { engineQuitDeps } = await import('./engine-quit'); // P2-F L113
+const { hostModeFromEnv } = await import('../hosts/mode'); // P2-F L113
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] };
@@ -1200,6 +1203,28 @@ describe('keeping sessions running at quit', () => {
     const offers = ask.mock.calls.map((call) => (call as unknown[])[2] as { isDefault: boolean; kept(): number });
     expect(offers.map((o) => o.isDefault)).toEqual([true, false]);
     expect(offers[0]!.kept()).toBe(3); // the idle live session is kept too; the exited one is not a session kept
+  });
+
+  // P2-F L113: the question's buttons by host mode, through the composition main wires (the mode the environment picks,
+  // the engine host's quit deps keyed on its transport, the guard, the question). The development build (`pnpm dev`,
+  // no harness flag) runs detached like the packaged one, so it honestly offers keep; under a harness (`dev:harness`,
+  // the e2e) the host is a utility process and keep is not among the buttons.
+  it('offers keep by host mode: the development build runs detached and offers it; a utility host offers none', async () => {
+    const cases = [
+      { env: {}, mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev`, the packaged app
+      { env: { MAWS_HARNESS: '1' }, mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
+      { env: { MAWS_E2E: '1' }, mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] },
+    ] as const;
+    for (const { env, mode, buttons } of cases) {
+      electron.app.reset();
+      expect(hostModeFromEnv(env)).toBe(mode);
+      const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode }) };
+      const { deps } = guard(modelWith(midTurn(1)), engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V13));
+      electron.app.attempt();
+      await settle();
+      const keep = deps.ask.mock.calls[0]![2] as Parameters<typeof quitQuestion>[3];
+      expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), keep).buttons, mode).toEqual(buttons);
+    }
   });
 
   it('is not offered in utility mode', async () => {
