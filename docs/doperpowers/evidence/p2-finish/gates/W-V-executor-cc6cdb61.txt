@@ -1,0 +1,8 @@
+P2-F gates, wave W-V, step executor, head cc6cdb61 (rows L95 a7b5e56e, L154 65001f48, L104 8174b561, L133 c76da515, L134 61475816, L131 cc6cdb61); run by the W-V executor through the slot, 2026-10-10
+pnpm typecheck: exit 0
+pnpm lint: exit 0
+vitest run src/renderer/src/tools src/renderer/src/widgets src/renderer/src/resume: Test Files 143 passed (143), Tests 2126 passed (2126)
+pnpm e2e:deliverables: 11 passed (51.0s) (the new media sizing case included)
+pnpm e2e:widgets: 28 passed (1.1m)
+pnpm e2e:code: 36 passed (1.4m)
+No retries; evidence directory clean after each e2e run.
