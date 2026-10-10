@@ -1389,6 +1389,30 @@ describe('plugins widget: Browse', () => {
     expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
   });
 
+  it('an uninstall from an installed card’s detail keeps its result and Reload again above the grid it returns to (scale review D scalpel-1#2)', async () => {
+    await ready();
+    await toBrowse();
+    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
+    const detail = document.querySelector<HTMLElement>('[data-plugin-detail]')!;
+    fireEvent.keyDown(within(detail).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Uninstall' }));
+    await waitFor(() => expect(invoked('plugins.uninstall')).toHaveLength(1));
+    installed = installed.filter((p) => p.id !== 'code-review@claude-plugins-official');
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
+    act(() =>
+      emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', target: 'code-review@claude-plugins-official', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: code-review (scope: user)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'not_reflected', error: null }] } })),
+    );
+    const gone = section('browse').querySelector<HTMLElement>('[data-plugin-result="code-review@claude-plugins-official"]')!;
+    expect(gone).toBeTruthy();
+    expect(within(gone).getByRole('status').textContent).toContain('Successfully uninstalled plugin: code-review (scope: user)');
+    fireEvent.click(within(gone).getByRole('button', { name: 'Reload again' }));
+    await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
+  });
+
   it('a zero install count is never shown, and Most popular is not offered when 0 is the only count', async () => {
     backend.script('plugins.available', () => ({ plugins: [offered('zero', 0), directory('alpha')] }));
     await ready();

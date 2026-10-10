@@ -6,18 +6,19 @@
 // heading is a row; a row holds two cards, or one where the pane is narrow). Desktop's states: pulsing placeholder cards
 // while the first read runs; "Couldn't load the plugins to browse." with the read's words and Retry; a later failed read
 // keeps the last cards with one line saying so (E8's rule); "Nothing matches these filters." with Reset filters. An
-// install whose card the next read no longer offers keeps its result above the grid. The pane stays mounted beneath an
+// install whose card the next read no longer offers keeps its result above the grid, as does an uninstall from an
+// installed card's detail, which returns here once the installation leaves the list. The pane stays mounted beneath an
 // open detail and returns with its scroll and focus.
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { AvailablePlugin } from '@shared/ipc/schema/plugins';
+import type { AvailablePlugin, InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { LIBRARY as L } from '../copy';
 import { sectionKey, type BrowseCard as Card, type BrowseSection, type BrowseViewResult } from './browse';
 import { AVAILABLE_PREFIX, BrowseCard } from './BrowseCard';
 import { sourceWords } from './LibraryHeader';
 import { useLibraryStore } from './library-store';
 import { Gone, useManage } from './manage';
-import { GroupHeading } from './PluginRow';
+import { GroupHeading, INSTALLED_PREFIX, installationOf, installedKey } from './PluginRow';
 import type { PluginsReadResult } from './read';
 
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
@@ -70,17 +71,21 @@ function Placeholders() {
 export interface BrowsePaneProps {
   read: PluginsReadResult<{ plugins: AvailablePlugin[] }>;
   cards: readonly Card[]; // every card, before the view's filters
+  installed: readonly InstalledPlugin[] | undefined; // the installed list as last read
   view: BrowseViewResult;
   hidden: boolean; // a detail opened from Browse stands in its place
   onOpen(card: Card): void;
   onRetry(): void;
 }
 
-export function BrowsePane({ read, cards, view, hidden, onOpen, onRetry }: BrowsePaneProps) {
+export function BrowsePane({ read, cards, installed, view, hidden, onOpen, onRetry }: BrowsePaneProps) {
   const { ops } = useManage();
   const offered = new Set(cards.map((c) => c.pluginId));
   // an install whose card left (the engine no longer offers it, and nothing installed it): its result above the grid
   const gone = read.data ? [...ops.entries.keys()].filter((key) => key.startsWith(AVAILABLE_PREFIX) && !offered.has(key.slice(AVAILABLE_PREFIX.length))) : [];
+  // a change whose installation left the installed list (an uninstall): no card hosts an installed key's result
+  const listed = installed ? new Set(installed.map(installedKey)) : null;
+  const uninstalled = listed ? [...ops.entries.keys()].filter((key) => key.startsWith(INSTALLED_PREFIX) && !listed.has(key)) : [];
   const reset = () => useLibraryStore.setState((s) => ({ browse: { ...s.browse, search: '', status: { installed: true, notInstalled: true }, source: null } }));
 
   let body: ReactNode;
@@ -126,6 +131,14 @@ export function BrowsePane({ read, cards, view, hidden, onOpen, onRetry }: Brows
           <Gone opKey={key} name={key.slice(AVAILABLE_PREFIX.length)} data={{ 'data-plugin-result': key.slice(AVAILABLE_PREFIX.length) }} />
         </div>
       ))}
+      {uninstalled.map((key) => {
+        const { id, scope } = installationOf(key);
+        return (
+          <div key={key} className="px-2">
+            <Gone opKey={key} name={id} data={{ 'data-plugin-result': id, 'data-plugin-scope': scope }} />
+          </div>
+        );
+      })}
       {body ?? <Grid sections={view.sections} hidden={hidden} onOpen={onOpen} />}
     </div>
   );
