@@ -20,7 +20,7 @@ function Video({ url }: { url: string }) {
   const { className, style } = zoomedMedia(zoom);
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
-      <div className="flex h-8 shrink-0 items-center justify-end gap-2 border-b border-border px-3 text-ui-sm">
+      <div className="flex min-h-8 shrink-0 flex-wrap items-center justify-end gap-2 border-b border-border px-3 py-1 text-ui-sm">
         <ZoomControls zoom={zoom} />
       </div>
       <ZoomStage zoom={zoom} className="flex-1">

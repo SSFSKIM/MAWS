@@ -98,11 +98,13 @@ export function zoomedMedia(zoom: MediaZoom): { className: string; style: CSSPro
 
 const control = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:bg-bg-active aria-pressed:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
+// The zoom group wraps among its own buttons in a bar narrower than it, so Fit stays reachable (scale review D
+// scalpel-4#1, review round 1); its bars grow a line rather than clipping.
 export function ZoomControls({ zoom }: { zoom: MediaZoom }) {
   const { scale } = zoom;
   const top = ZOOM_STEPS[ZOOM_STEPS.length - 1];
   return (
-    <span role="group" aria-label={VIEWER_COPY.zoom} className="flex shrink-0 items-center gap-1">
+    <span role="group" aria-label={VIEWER_COPY.zoom} className="flex min-w-0 flex-wrap items-center gap-1 whitespace-nowrap">
       <button type="button" className={control} aria-label={VIEWER_COPY.zoomOut} title={VIEWER_COPY.zoomOut} disabled={scale === null || scale <= ZOOM_STEPS[0]} onClick={zoom.zoomOut}>
         −
       </button>

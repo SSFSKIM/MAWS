@@ -468,7 +468,29 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const name = viewer.locator('[data-path-name]');
         const shown = await name.evaluate((el) => ({ width: el.getBoundingClientRect().width, needed: el.scrollWidth }));
         expect(shown.width, 'the basename drawn whole').toBeGreaterThanOrEqual(shown.needed - 0.5);
+        // narrower than the zoom group itself (review round 1): the group wraps among its own buttons
+        const group = viewer.getByRole('group', { name: 'Zoom' });
+        const intrinsic = await group.evaluate((el: HTMLElement) => {
+          const probe = el.cloneNode(true) as HTMLElement;
+          probe.style.cssText = 'position:absolute;visibility:hidden;width:max-content;flex-wrap:nowrap';
+          document.body.append(probe);
+          const width = probe.getBoundingClientRect().width;
+          probe.remove();
+          return width;
+        });
+        const narrow = Math.floor(intrinsic * 0.7);
+        await viewer.evaluate((el: HTMLElement, width) => (el.style.width = `${width}px`), narrow);
+        const tight = (await viewer.boundingBox())!;
+        expect(Math.round(tight.width)).toBe(narrow);
+        for (const name of ['Zoom out', 'Zoom in', 'Actual size', 'Fit', 'Source']) {
+          const box = (await viewer.getByRole('button', { name, exact: true }).boundingBox())!;
+          expect(box.x, `${name} starts inside the pane at ${narrow} px`).toBeGreaterThanOrEqual(tight.x - 0.5);
+          expect(box.x + box.width, `${name} inside the pane at ${narrow} px`).toBeLessThanOrEqual(tight.x + tight.width + 0.5);
+        }
+        await viewer.getByRole('button', { name: 'Zoom in', exact: true }).click();
+        await expect(viewer.locator('[data-zoom-stage]')).not.toHaveAttribute('data-zoom', 'fit');
         await viewer.getByRole('button', { name: 'Fit', exact: true }).click();
+        await expect(viewer.locator('[data-zoom-stage]')).toHaveAttribute('data-zoom', 'fit');
         await viewer.getByRole('button', { name: 'Source', exact: true }).click();
         await expect(viewer.locator('[data-code-view] .cm-content')).toContainText(SVG_TEXT);
       },
