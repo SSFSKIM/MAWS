@@ -25,7 +25,7 @@ export function puzzleMenu(actions: readonly LoadedAction[], on: ExtensionMenuAc
   const items: MenuSpec[] = actions.map((action) => ({
     id: `action:${action.extensionId}`,
     label: action.title,
-    ...(action.hasPopup ? { click: () => on.open(action.extensionId) } : { enabled: false }),
+    ...(action.hasPopup && !action.inert ? { click: () => on.open(action.extensionId) } : { enabled: false }),
   }));
   const options = actions.filter((action) => action.hasOptions);
   if (options.length > 0) {
@@ -40,6 +40,7 @@ export function puzzleMenu(actions: readonly LoadedAction[], on: ExtensionMenuAc
 
 export function actionMenu(action: LoadedAction, on: ExtensionMenuActions): MenuSpec[] {
   return [
+    ...(action.inert ? [{ id: 'inert', label: action.inert, enabled: false }] : []),
     { id: 'name', label: action.name, enabled: false },
     SEPARATOR,
     ...(action.hasOptions ? [{ id: `options:${action.extensionId}`, label: EXTENSION_MENU_COPY.options, click: () => on.options(action.extensionId) }] : []),

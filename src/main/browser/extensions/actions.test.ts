@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Extension, Session } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { EXTENSION_ICON_MAX_BYTES } from '@shared/browser/extensions';
+import { ExtensionActionSchema, EXTENSION_ICON_MAX_BYTES } from '@shared/browser/extensions';
 import type { EventName } from '@shared/ipc/schema';
 import { ExtensionActions, extensionPageUrl, pickIcon, readExtensionIcon, readManifestAction, type ActionRecord } from './actions';
 
@@ -146,6 +146,22 @@ const probe = extension(PROBE, { name: 'MAWS probe extension', action: { default
 const plain = extension(OTHER, { name: 'Plain', icons: { 16: 'p16.png' } });
 
 describe('ExtensionActions', () => {
+  it('marks a loaded extension with a failed background, preserving the report failure, and clears it after recovery', async () => {
+    const entry = { id: PROBE, name: 'MAWS probe extension', background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' as string | null };
+    const { actions } = harness([{ partition: PART, extensions: [entry] }]);
+    actions.attach(fakeSession([probe]), PART);
+    const failed = (await actions.list(PART))[0]!;
+    expect(failed).toMatchObject({ hasPopup: true, inert: 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS' });
+    expect(ExtensionActionSchema.parse(failed)).toEqual(failed);
+    const { inert: _inert, ...legacy } = failed;
+    expect(ExtensionActionSchema.parse(legacy)).toEqual(legacy); // additive and optional
+    entry.background = 'running';
+    entry.backgroundError = null;
+    expect((await actions.list(PART))[0]).toMatchObject({ inert: null });
+    entry.background = 'failed';
+    expect((await actions.list(PART))[0]).toMatchObject({ inert: 'Loaded · background failed' });
+  });
+
   const records: ActionRecord[] = [
     {
       partition: PART,
@@ -161,8 +177,8 @@ describe('ExtensionActions', () => {
     const { actions } = harness(records);
     actions.attach(fakeSession([probe, plain]), PART);
     expect(await actions.list(PART)).toEqual([
-      { extensionId: OTHER, name: 'Plain (Settings)', title: 'Plain (Settings)', icon: `data:image/png;base64,${Buffer.from('/ext/' + OTHER + '|p16.png').toString('base64')}`, hasPopup: false, hasOptions: false },
-      { extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true },
+      { extensionId: OTHER, name: 'Plain (Settings)', title: 'Plain (Settings)', icon: `data:image/png;base64,${Buffer.from('/ext/' + OTHER + '|p16.png').toString('base64')}`, hasPopup: false, hasOptions: false, inert: null },
+      { extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true, inert: null },
     ]);
     expect(actions.find(PART, PROBE)).toMatchObject({ popupUrl: `chrome-extension://${PROBE}/popup.html`, optionsUrl: `chrome-extension://${PROBE}/options.html` });
     expect(actions.find(PART, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')).toBeNull();

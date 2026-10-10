@@ -66,6 +66,14 @@ const refusal = (run: () => unknown) => {
 };
 
 describe('browser.extensions.* (cua #90)', () => {
+  it('cua #103: a failed-background action cannot open its declared popup through IPC', () => {
+    const s = setup();
+    const loaded = s.actions.find(PART, PROBE)!;
+    s.actions.find.mockReturnValueOnce({ ...loaded, inert: 'Loaded · background failed' });
+    s.call('browser.extensions.action.click', { tabId: s.tabId, extensionId: PROBE, anchor: RECT });
+    expect(s.popups.open).not.toHaveBeenCalled();
+  });
+
   it('lists the partition\'s actions', async () => {
     const s = setup();
     expect(await s.call('browser.extensions.actions', { partition: PART })).toEqual({ actions: [expect.objectContaining({ extensionId: PROBE })] });

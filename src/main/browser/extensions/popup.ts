@@ -132,7 +132,7 @@ export class ExtensionPopups {
     this.blurred.delete(window.id);
     if (!open && blurred && blurred.tabId === tabId && blurred.extensionId === extensionId && this.now() - blurred.at < POPUP_REOPEN_GUARD_MS) return;
     const action = this.deps.actions.find(partition, extensionId);
-    if (!action?.popupUrl) return;
+    if (!action?.popupUrl || action.inert) return;
     if (open) this.close(window.id, 'toggle');
 
     // shown at once at Chrome's minimum under the button, as Chrome opens one: a hidden view never lays its page out, so

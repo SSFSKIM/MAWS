@@ -3,6 +3,7 @@
 // removal sheet. The report's summary line is `summaryWords` (src/shared/browser/import-summary.ts), its one English
 // home. The Cookies row names the Keychain dialog's Allow button and no other (E0b S1e).
 import type { CookieSkipReason, ExtensionCandidate, HistorySkipReason, ImportedExtension, ImportPhase, ImportReport, KeychainOutcome } from '@shared/browser/import';
+import { extensionBackgroundFailure } from '@shared/browser/extensions';
 import { summaryWords } from '@shared/browser/import-summary';
 
 const count = (n: number): string => n.toLocaleString('en-US');
@@ -194,7 +195,7 @@ function extensionStatus(extension: ImportedExtension): string {
       if (extension.background === 'running') return 'Loaded · background running';
       if (extension.background === 'none') return 'Loaded · no background';
       if (extension.background === 'stopped') return 'Loaded · background stopped';
-      return extension.backgroundError === null ? 'Loaded · background failed' : `Loaded · background failed: ${extension.backgroundError}`;
+      return extensionBackgroundFailure(extension.backgroundError);
     case 'off':
       if (extension.enabled) return 'On · loads when a tab next opens in this profile';
       return extension.wallet ? 'Off (wallet)' : 'Off';

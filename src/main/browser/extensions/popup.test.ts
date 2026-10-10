@@ -91,7 +91,7 @@ const probeAction: LoadedAction = {
 const otherAction: LoadedAction = { ...probeAction, extensionId: OTHER, name: 'Other', popupUrl: `chrome-extension://${OTHER}/p.html` };
 const inert: LoadedAction = { ...probeAction, extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', hasPopup: false, popupUrl: null };
 
-function harness({ linkTarget = 'in-app' as LinkTarget } = {}) {
+function harness({ linkTarget = 'in-app' as LinkTarget, backgroundFailed = false } = {}) {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
   let tabViews = 0;
@@ -114,7 +114,7 @@ function harness({ linkTarget = 'in-app' as LinkTarget } = {}) {
   const popups = new ExtensionPopups({
     store,
     actions: {
-      find: (partition, id) => (partition !== PART ? null : ([probeAction, otherAction, inert].find((action) => action.extensionId === id) ?? null)),
+      find: (partition, id) => (partition !== PART ? null : ([backgroundFailed ? { ...probeAction, inert: 'Loaded · background failed' } : probeAction, otherAction, inert].find((action) => action.extensionId === id) ?? null)),
       onUnloaded: (listener) => {
         unloads.add(listener);
         return () => void unloads.delete(listener);
@@ -477,4 +477,11 @@ describe('ExtensionPopups: the popup\'s own links (window.open and its navigatio
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(elsewhere.preventDefault).toHaveBeenCalled();
   });
+});
+
+
+it('cua #103: a popup declaration does not open a view while the background is failed', () => {
+  const h = harness({ backgroundFailed: true });
+  h.popups.open(h.placedTab(), PROBE, ANCHOR);
+  expect(h.views).toHaveLength(0);
 });

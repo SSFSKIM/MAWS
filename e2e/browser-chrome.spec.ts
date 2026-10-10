@@ -767,7 +767,7 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       expect(menuIds(folded)).toEqual(expect.arrayContaining([`action:${probeId}`, `action:${chrome.extensions.fails.id}`, 'options', 'manage']));
       expect(menuIds(folded).at(-1)).toBe('manage');
       expect(menuShape(folded)).toContainEqual(['Options', ['MAWS probe extension']]);
-      expect(folded.find((node) => 'id' in node && node.id === `action:${chrome.extensions.fails.id}`)).toMatchObject({ enabled: false }); // no popup: inert
+      expect(folded.find((node) => 'id' in node && node.id === `action:${chrome.extensions.fails.id}`)).toMatchObject({ enabled: false }); // cua #103: background failed, even though it declares a popup
 
       // a main tab: the icons inline, right of the address field and before the pill
       await overflow(s, panel, 'Open in tab');
@@ -782,7 +782,14 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       await expect(probe).toHaveAttribute('title', 'MAWS probe');
       const fails = actionIn(main, chrome.extensions.fails.id);
       await expect(fails).toHaveAttribute('aria-disabled', 'true');
-      await expect(fails).toHaveAttribute('title', /This extension has no popup here$/);
+      const failure = 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS';
+      await expect(fails).toHaveAttribute('title', `Probe fails\n${failure}`);
+      await expect(fails).toHaveAttribute('aria-description', failure);
+      await expect(fails.locator('span')).toHaveCSS('opacity', '0.5');
+      const failedActions = value(await invoke(s.page, 'browser.extensions.actions', { partition: DEFAULT })).actions;
+      expect(failedActions.find((action) => action.extensionId === chrome.extensions.fails.id)).toMatchObject({ hasPopup: true, inert: failure });
+      const failedMenu = await menuAfter(s.maws.app, () => fails.click({ button: 'right', force: true }));
+      expect(failedMenu[0]).toEqual({ id: 'inert', label: failure, enabled: false });
       await fails.click({ force: true }); // aria-disabled: Playwright would wait for it to be enabled
       expect(await popupOf(s)).toBeNull();
 

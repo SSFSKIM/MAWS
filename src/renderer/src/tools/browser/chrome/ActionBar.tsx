@@ -66,7 +66,7 @@ function Bar({ tab, actions, addressBox }: ActionBarProps & { actions: Extension
   }, [addressBox, count]);
 
   const click = (action: ExtensionAction, button: Element) => {
-    if (!action.hasPopup) return;
+    if (!action.hasPopup || action.inert) return;
     void ipc.invoke('browser.extensions.action.click', { tabId, extensionId: action.extensionId, anchor: boxOf(button) }).then(warned('opening an extension popup'));
   };
   const menu = (action: ExtensionAction, event: MouseEvent) => {
@@ -98,15 +98,15 @@ function Bar({ tab, actions, addressBox }: ActionBarProps & { actions: Extension
           type="button"
           data-extension-action={action.extensionId}
           aria-label={action.title}
-          aria-description={action.hasPopup ? undefined : COPY.noPopup}
-          aria-disabled={!action.hasPopup || undefined}
-          aria-pressed={action.hasPopup ? open === action.extensionId : undefined}
-          title={COPY.actionTitle(action.title, action.hasPopup)}
+          aria-description={action.inert ?? (action.hasPopup ? undefined : COPY.noPopup)}
+          aria-disabled={!action.hasPopup || !!action.inert || undefined}
+          aria-pressed={action.hasPopup && !action.inert ? open === action.extensionId : undefined}
+          title={action.inert ? `${action.title}\n${action.inert}` : COPY.actionTitle(action.title, action.hasPopup)}
           onClick={(event) => click(action, event.currentTarget)}
           onContextMenu={(event) => menu(action, event)}
           className={BUTTON}
         >
-          <span className={`inline-flex ${action.hasPopup ? '' : 'opacity-50'}`}>
+          <span className={`inline-flex ${action.hasPopup && !action.inert ? '' : 'opacity-50'}`}>
             {action.icon ? <img alt="" src={action.icon} draggable={false} className="size-4" /> : <PuzzleIcon className="size-4" />}
           </span>
         </button>
