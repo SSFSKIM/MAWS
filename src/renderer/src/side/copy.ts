@@ -40,6 +40,8 @@ export const SIDE_COPY = {
     starting: 'Starting…',
     retry: 'Retry',
     replyRefused: 'The reply was not sent', // a refusal the seam gave no reason for
+    replyRefusedAfterClose: (reason: string) => `The reply was not sent: ${reason}`, // P2-F F-C1: the card went meanwhile
+    copyReply: 'Copy reply',
     sentToClaude: 'Sent to Claude', // P2-F L121: a reply's row once the engine took it (Desktop's mark)
     openInSidePane: 'Open in Side pane',
     openAsTab: 'Open as tab',

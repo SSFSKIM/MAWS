@@ -16,6 +16,7 @@ import { failureOf, useSetup } from '../../sessions/store';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
+import { toast } from '../../stores/notices';
 import { isOpen } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { deliverables, lookupKey } from '../../tools/deliverables/store';
@@ -27,7 +28,7 @@ import { SIDE_COPY } from '../copy';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { CardFrame } from './CardHost';
 import { useDeliveredReplies } from './delivered'; // P2-F L121
-import { closeCard, hideCardThread, showCardThread, type OpenCard } from './store';
+import { cardGone, closeCard, hideCardThread, showCardThread, type OpenCard } from './store';
 import { needsYouOf, replyOutcomeOf, threadStartOf } from './thread';
 import './card.css';
 
@@ -78,7 +79,7 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
 
   const replies = useDeliveredReplies(child); // P2-F L121
   const actions = useCardActions(card, frame, replies.delivered);
-  const reply = useReply(child, replies.track);
+  const reply = useReply(serial, child, replies.track);
 
   const setupCard = useSetup((s) => s.cards.get(child));
   const setupFailed = useSetup((s) => failureOf(s, child) !== null);
@@ -189,8 +190,10 @@ function useCardActions(card: OpenCard, frame: CardFrame, delivered: ReadonlySet
 
 // The Reply field: Enter sends (Shift+Enter breaks a line, a composition keeps its Enter), through the seam; a host
 // error thrown by the send reads as a refusal with its message. No other send is taken while one is in flight. A reply
-// the seam took is handed to `delivered` to watch (P2-F L121).
-function useReply(child: AppSessionId, delivered: (result: HumanPromptResult) => void) {
+// the seam took is handed to `delivered` to watch (P2-F L121). A refusal arriving after the card went (closed, or its
+// thread opened elsewhere) is a toast offering the reply to the clipboard, as the comment form's is, so it is never lost
+// unseen (P2-F F-C1).
+function useReply(serial: number, child: AppSessionId, delivered: (result: HumanPromptResult) => void) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -208,6 +211,10 @@ function useReply(child: AppSessionId, delivered: (result: HumanPromptResult) =>
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }
     const outcome = replyOutcomeOf(result);
+    if (outcome.kind === 'refused' && cardGone(serial)) {
+      toast({ level: 'warning', text: COPY.replyRefusedAfterClose(outcome.reason), actions: [{ label: COPY.copyReply, run: () => void navigator.clipboard.writeText(content) }], dismissible: true });
+      return;
+    }
     setSending(false);
     if (outcome.kind === 'refused') {
       setRefusal(outcome.reason);

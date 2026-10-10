@@ -322,6 +322,36 @@ describe('Reply through the human send seam', () => {
     await waitFor(() => expect(card()!.querySelector('[data-pending="held"]')?.textContent).toContain('Wake up and do it'));
     expect(replyField().disabled).toBe(false);
   });
+
+  // P2-F F-C1 (C scalpel-3#1): as the comment form's own refusal after its presentation went
+  it.each([
+    ['Close', () => userEvent.click(within(card()!).getByRole('button', { name: 'Close' }))],
+    ['Open as tab', () => userEvent.click(within(card()!).getByRole('button', { name: 'Open as tab' }))],
+  ])('a reply refused after the card went (%s) is a toast with its reason, the reply one click from the clipboard', async (_way, leave) => {
+    await ready();
+    let answer!: (result: Awaited<ReturnType<typeof sendHumanPrompt>>) => void;
+    seam.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await leave();
+    expect(card()).toBeNull();
+    await act(async () => answer({ disposition: 'refused', started: false, reason: 'The session has ended' }));
+    const notices = useNotices.getState().notices;
+    expect(notices.map((n) => n.text)).toEqual(['The reply was not sent: The session has ended']);
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    notices[0]!.actions.find((a) => a.label === 'Copy reply')!.run();
+    expect(writeText).toHaveBeenCalledWith('Also the subtitle');
+  });
+
+  it('a reply the seam took after the card went says nothing', async () => {
+    await ready();
+    let answer!: (result: Awaited<ReturnType<typeof sendHumanPrompt>>) => void;
+    seam.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await act(async () => answer({ disposition: 'sent', started: false }));
+    expect(useNotices.getState().notices).toEqual([]);
+  });
 });
 
 describe('needs you', () => {
