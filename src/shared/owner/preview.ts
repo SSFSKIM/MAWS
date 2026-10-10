@@ -7,20 +7,21 @@
 // summary stored before this read 200 raw characters); any other markup stays as written, and so do tags quoted in
 // inline code (grammar 2, P2-C). Null when nothing is left.
 import { stripAnsi } from '../wire/ansi';
-import { codeRegions, parse, type Kind, type Part } from './to-human-parser';
+import { codeRegions, insideCode, parse, type Kind, type Part } from './to-human-parser';
 
 const OWNER_MARK = /<\/?(?:to-human|essential|need-input|insight)>|<choice(?: recommended)?>|<\/choice>/g;
 
-const withoutMarks = (line: string): string => {
-  const regions = codeRegions(line);
-  return line.replace(OWNER_MARK, (tag: string, at: number) => (regions.some(([start, end]) => at >= start && at < end) ? tag : ''));
+// Code regions are read over the whole text, not per line: an inline span may cross a line break within its paragraph.
+const firstLine = (text: string): string | null => {
+  const inCode = insideCode(codeRegions(text));
+  let at = 0;
+  for (const line of text.split('\n')) {
+    const shown = line.replace(OWNER_MARK, (tag: string, offset: number) => (inCode(at + offset) ? tag : '')).trim();
+    if (shown.length > 0) return shown;
+    at += line.length + 1;
+  }
+  return null;
 };
-
-const firstLine = (text: string): string | null =>
-  text
-    .split('\n')
-    .map((line) => withoutMarks(line).trim())
-    .find((line) => line.length > 0) ?? null;
 
 export function previewLine(text: string, max: number): string | null {
   const parts = parse(stripAnsi(text));

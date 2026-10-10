@@ -47,5 +47,12 @@ describe('previewLine', () => {
     expect(previewLine('```\n<need-input>Quoted?</need-input>\n```\nPlain words', 160)).toBe('```');
     expect(previewLine('Use `<to-human>` to mark a message.', 160)).toBe('Use `<to-human>` to mark a message.');
   });
+
+  it('grammar 2: a tag quoted in inline code that spans a line break stays as written', () => {
+    expect(previewLine('Quote `<to-human>\nand </to-human>` as written.', 160)).toBe('Quote `<to-human>');
+    expect(previewLine('<to-human>Quote `<essential>\na` here.</to-human>', 160)).toBe('Quote `<essential>');
+    // A blank line ends the paragraph, so a backtick before it pairs with nothing and hides no tag.
+    expect(previewLine('A stray ` <insight>\n\nthen ` end', 160)).toBe('A stray `');
+  });
 });
 

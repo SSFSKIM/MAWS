@@ -65,7 +65,8 @@ function inlineSpans(text: string, start: number, end: number, regions: CodeRegi
   }
 }
 
-const inside = (regions: readonly CodeRegion[]) => (offset: number): boolean => {
+// Whether an offset lies in one of `codeRegions`' regions (binary search over the ordered, disjoint regions).
+export const insideCode = (regions: readonly CodeRegion[]) => (offset: number): boolean => {
   let low = 0;
   let high = regions.length - 1;
   while (low <= high) {
@@ -83,7 +84,7 @@ const STREAMING_TAGS = ['to-human', 'essential', 'need-input', 'insight', 'choic
 export function parseLive(text: string): Part[] {
   const tail = text.lastIndexOf('<');
   const suffix = tail === -1 ? '' : text.slice(tail);
-  const arriving = suffix !== '' && STREAMING_TAGS.some((tag) => tag.length > suffix.length && tag.startsWith(suffix)) && !inside(codeRegions(text))(tail);
+  const arriving = suffix !== '' && STREAMING_TAGS.some((tag) => tag.length > suffix.length && tag.startsWith(suffix)) && !insideCode(codeRegions(text))(tail);
   return partsOf(arriving ? text.slice(0, tail) : text, true);
 }
 
@@ -93,7 +94,7 @@ export function parse(text: string): Part[] {
 
 function partsOf(text: string, live: boolean): Part[] {
   // Grammar 2: tags inside code are literal.
-  const inCode = inside(codeRegions(text));
+  const inCode = insideCode(codeRegions(text));
   const tokens = [...text.matchAll(/<(\/?)(to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index));
   const stack: number[] = [];
   const paired = new Set<number>();
