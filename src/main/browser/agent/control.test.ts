@@ -77,7 +77,7 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     expect(h.changed()).toEqual([]);
   });
 
-  it('a click while the agent acts enters human, stamped and told; 3 s without input returns it to idle', () => {
+  it('a click while the agent acts enters human, stamped and told; the grace expires without clearing human ownership', () => {
     const h = harness();
     const entry = h.open();
     h.controls.markActing(entry);
@@ -88,8 +88,8 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     vi.advanceTimersByTime(BROWSER_HANDBACK_IDLE_MS - 1);
     expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(1);
-    expect(entry.tab.control).toBe('idle');
-    expect(h.changed()).toEqual(['agent', 'human', 'idle']);
+    expect(entry.tab.control).toBe('human');
+    expect(h.changed()).toEqual(['agent', 'human']);
   });
 
   it('every further human input re-arms the hand-back timer, wheels and keys included', () => {
@@ -104,8 +104,8 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     vi.advanceTimersByTime(2999);
     expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(1);
-    expect(entry.tab.control).toBe('idle');
-    expect(h.changed()).toEqual(['agent', 'human', 'idle']);
+    expect(entry.tab.control).toBe('human');
+    expect(h.changed()).toEqual(['agent', 'human']);
   });
 
   it("a click while the agent holds the tab enters human and stops the agent-idle lapse; the agent's own input changes nothing", () => {
@@ -121,12 +121,12 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     h.agent(entry);
     expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(BROWSER_HANDBACK_IDLE_MS);
-    expect(entry.tab.control).toBe('idle');
+    expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(BROWSER_AGENT_IDLE_MS); // the old lapse fires into nothing
-    expect(h.changed()).toEqual(['agent', 'human', 'idle']);
+    expect(h.changed()).toEqual(['agent', 'human']);
   });
 
-  it('an action that ends while the person holds the page leaves them holding it until the timer', () => {
+  it('an action that ends while the person holds the page leaves them holding it until Hand back or the agent resumes', () => {
     const h = harness();
     const entry = h.open();
     h.controls.markActing(entry);
@@ -134,11 +134,27 @@ describe('human input (Design §8, rows 1 and 2; Decision Log 4)', () => {
     h.controls.actionEnded(entry);
     expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(BROWSER_HANDBACK_IDLE_MS);
-    expect(entry.tab.control).toBe('idle');
+    expect(entry.tab.control).toBe('human');
   });
 });
 
 describe('a held command waits for the person (Design §6 step 3, §8 row 3)', () => {
+  it('after the grace, new commands release immediately but human ownership stays until the agent resumes', async () => {
+    const h = harness();
+    const entry = h.open();
+    h.controls.markActing(entry);
+    h.human(entry);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(entry.tab.control).toBe('human');
+    expect(h.controls.personHolds(entry)).toBe(false);
+    await expect(h.controls.whenReleased(entry, new AbortController().signal)).resolves.toBeUndefined();
+    h.controls.markActing(entry);
+    expect(entry.tab.control).toBe('agent');
+    h.human(entry);
+    h.store.setControl(entry.tab.tabId, 'idle');
+    expect(entry.tab.control).toBe('idle');
+  });
+
   it('whenReleased resolves at once off human and when control leaves human', async () => {
     const h = harness();
     const entry = h.open();
@@ -165,7 +181,7 @@ describe('a held command waits for the person (Design §6 step 3, §8 row 3)', (
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("a cancel while waiting rejects with the signal's reason; the person keeps the page until the timer", async () => {
+  it("a cancel while waiting rejects with the signal's reason; the person keeps the page until Hand back or the agent resumes", async () => {
     const h = harness();
     const entry = h.open();
     h.controls.markActing(entry);
@@ -177,7 +193,7 @@ describe('a held command waits for the person (Design §6 step 3, §8 row 3)', (
     await expect(released).rejects.toBe(reason);
     expect(entry.tab.control).toBe('human');
     vi.advanceTimersByTime(BROWSER_HANDBACK_IDLE_MS);
-    expect(entry.tab.control).toBe('idle');
+    expect(entry.tab.control).toBe('human');
   });
 
   it('an already cancelled wait rejects at once', async () => {
@@ -234,7 +250,7 @@ describe('the agent (Design §8 rows 6 to 8; Design §9 throttling)', () => {
     await vi.advanceTimersByTimeAsync(BROWSER_HANDBACK_IDLE_MS);
     await expect(released).resolves.toBeUndefined();
     h.controls.markActing(entry);
-    expect(h.changed()).toEqual(['agent', 'human', 'idle', 'agent']);
+    expect(h.changed()).toEqual(['agent', 'human', 'agent']);
   });
 
   it('onChange hears every transition with the state it left', () => {
@@ -246,13 +262,13 @@ describe('the agent (Design §8 rows 6 to 8; Design §9 throttling)', () => {
     expect(h.changes).toEqual([
       [entry.tab.tabId, 'idle', 'agent'],
       [entry.tab.tabId, 'agent', 'human'],
-      [entry.tab.tabId, 'human', 'idle'],
+
     ]);
   });
 });
 
 describe('personHolds (Design §6 step 3, §8): the one statement of the rule', () => {
-  it('holds while human, and within 3 s of the person\'s last input whatever the state', () => {
+  it('holds within 3 s of the person\'s last input, independently of the visible human ownership', () => {
     const h = harness();
     const entry = h.open();
     expect(personHolds(entry, Date.now())).toBe(false);
@@ -260,7 +276,7 @@ describe('personHolds (Design §6 step 3, §8): the one statement of the rule', 
     expect(personHolds(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1)).toBe(true);
     expect(personHolds(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS)).toBe(false);
     h.store.setControl(entry.tab.tabId, 'human');
-    expect(personHolds(entry, Date.now() + 60_000)).toBe(true);
+    expect(personHolds(entry, Date.now() + 60_000)).toBe(false);
     expect(h.controls.personHolds(entry)).toBe(true);
   });
 });

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { connectFakeHost } from '../test/support/cua-fake-host';
 import type { AppSessionId } from '@shared/graph/ids';
+import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
@@ -718,12 +719,24 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
         expect(box.x).toBeGreaterThanOrEqual(bounds.x);
         expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
         // Only compare buttons sharing the navigation row; tab-strip buttons live above it.
-        if (await button.evaluate((el) => el.closest('[data-browser-control]') !== null || el.parentElement?.querySelector('[data-address-box]') !== null)) {
+        if (await button.evaluate((el) => el.closest('[data-browser-nav]') !== null)) {
           expect(box.x).toBeGreaterThanOrEqual(right);
           right = box.x + box.width;
         }
       }
-      await test.info().attach('human-control-380-light', { body: await chrome.screenshot(), contentType: 'image/png' });
+      await s.page.waitForTimeout(4_000); // ownership is still visible after the former 3 s timeout
+      await expect(slot).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        value(await invoke(s.page, 'settings.set', { theme }));
+        await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(slot).toBeVisible();
+        await test.info().attach(`human-control-380-${theme}`, { body: await chrome.screenshot(), contentType: 'image/png' });
+      }
+      value(await invoke(s.page, 'settings.set', { theme: 'light' }));
+      await host.request('debugger.sendCommand', { debuggee: { tabId: native.id }, method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 10, y: 10 } });
+      await expect(slot).toHaveCount(0); // the agent resumed
+      await s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as ControlSeam).__maws_browser.agent.sendInput(tab, { type: 'mouseDown', x: 10, y: 10, button: 'left', clickCount: 1 }), tab);
+      await expect(slot).toBeVisible();
       await slot.getByRole('button', { name: 'Hand back' }).click();
       await expect(slot).toHaveCount(0);
     } finally {

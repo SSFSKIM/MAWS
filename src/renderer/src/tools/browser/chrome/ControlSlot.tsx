@@ -1,7 +1,7 @@
 // E4a (Task 3.3): who has the page (Design §4 "Control slot", §11; A-31): nothing while idle, "Agent is browsing" with a
 // pulse while the agent drives it, "You have the page" with Hand back while the human holds it after taking it over.
-// E4c moves `control`; E4a only hands it back (`browser.control.handBack`), so outside tests the slot stays empty until
-// E4c lands.
+// cua #103: human ownership is a separate accent strip below navigation; the takeover grace releases commands without
+// hiding it. Below 480 px the label collapses to the person icon; Hand back is always present.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import { handBack } from '../actions';
@@ -33,13 +33,13 @@ export function ControlSlot({ tab }: { tab: BrowserTab }) {
     );
   }
   return (
-    <span ref={root} data-browser-control="human" aria-label={BROWSER_COPY.control.humanHasPage} className="flex shrink-0 items-center gap-1.5 pl-1.5 text-ui-sm text-fg-muted">
+    <span ref={root} data-browser-control="human" role="status" aria-label={BROWSER_COPY.control.humanHasPage} className="flex shrink-0 items-center gap-2 border-t border-l-2 border-accent bg-accent-soft px-2 py-1 text-ui font-medium text-fg">
       <PersonIcon className="size-4 shrink-0" />
-      {!compact && BROWSER_COPY.control.humanHasPage}
+      {!compact && <span>{BROWSER_COPY.control.humanHasPage}</span>}
       <button
         type="button"
         onClick={() => handBack(tab.tabId)}
-        className="h-6 rounded-sm border border-border-strong px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+        className="ml-auto h-6 shrink-0 rounded-sm border border-accent px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
       >
         {BROWSER_COPY.control.handBack}
       </button>
