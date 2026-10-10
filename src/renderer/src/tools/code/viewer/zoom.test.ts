@@ -43,4 +43,11 @@ describe('media zoom', () => {
     const box = { width: 400.5, height: 300.75 };
     expect(drawnSize({ width: 64, height: 48 }, fitScale({ width: 64, height: 48 }, box))).toEqual({ width: 400, height: 300 });
   });
+
+  it('never draws a positive side at 0 px: thin media keeps at least a pixel across', () => {
+    const pane = { width: 600, height: 400 };
+    expect(drawnSize({ width: 2000, height: 1 }, fitScale({ width: 2000, height: 1 }, pane))).toEqual({ width: 600, height: 1 });
+    expect(drawnSize({ width: 1, height: 4000 }, fitScale({ width: 1, height: 4000 }, pane))).toEqual({ width: 1, height: 400 });
+    expect(drawnSize({ width: 3, height: 3 }, ZOOM_STEPS[0])).toEqual({ width: 1, height: 1 });
+  });
 });

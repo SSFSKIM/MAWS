@@ -21,5 +21,7 @@ export const zoomedIn = (scale: number): number => ZOOM_STEPS.find((step) => ste
 
 export const zoomedOut = (scale: number): number => ZOOM_STEPS.findLast((step) => step < scale - EPSILON) ?? ZOOM_STEPS[0];
 
-// Whole pixels, rounded down, so a fit never overflows the pane by a fraction and draws a scrollbar.
-export const drawnSize = (media: Size, scale: number): Size => ({ width: Math.floor(media.width * scale), height: Math.floor(media.height * scale) });
+// Whole pixels, rounded down, so a fit never overflows the pane by a fraction and draws a scrollbar; never under 1 px,
+// so thin media (a 2000 × 1 strip at fit) stays drawn rather than collapsing to nothing.
+const pixels = (length: number): number => Math.max(1, Math.floor(length));
+export const drawnSize = (media: Size, scale: number): Size => ({ width: pixels(media.width * scale), height: pixels(media.height * scale) });
