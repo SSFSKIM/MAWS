@@ -45,6 +45,7 @@ import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/
 import { RELAY_URL } from '../src/engine-host/launch';
 import { journalCost } from '../test/live/support/live';
 import { isolatedGitEnv } from '../test/support/git-env';
+import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -838,9 +839,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
     console.log(`P2-C live: scratch root ${root}`);
     expect(after.settings, '~/.claude/settings.json unchanged').toBe(owner.settings);
     expect(after.cache.digest, 'the owner’s doperpowers cache tree unchanged').toBe(owner.cache.digest);
-    expect(after.a15.keys.filter((k) => k.startsWith(root) || k.startsWith(root.replace(/^\/private\/tmp\//, '/tmp/'))), 'A-15: the owner file names none of the run’s scratch').toEqual([]);
-    expect(after.a15.keys, 'A-15: the same /tmp project keys after the run as before').toEqual(owner.a15.keys);
-    expect(after.a15.digest, 'A-15: the same digest after the run as before').toBe(owner.a15.digest);
+    // A-15 by the shared attribution (test/support/owner-file.ts): a key under the run's scratch appearing or vanishing
+    // is a breach; another owner session's /tmp project meanwhile is recorded in the line above, not failed.
+    expect(compareA15(owner.a15.keys, after.a15.keys, [root]).breach, 'A-15: no key under the run’s scratch appeared or vanished in the owner file').toEqual([]);
     expect(total, `the run's spend within its cap of US$${cap}`).toBeLessThanOrEqual(cap);
   }
   expect(failures, failures.join('\n')).toEqual([]);
