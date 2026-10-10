@@ -371,6 +371,8 @@ const MAIN_COMMENT = 'Make this the primary button.';
 const MAIN_REPLY = 'Noted: the Increment button becomes the primary one.';
 const THREAD_COMMENT = 'Click this once and tell me what the count says.';
 const THREAD_REPLY = 'The count reads 1 after one click.';
+const THREAD_FIRST_REPLY = 'I see the Increment button; the count reads 0.'; // P2-F W-T: the turn before the card's Reply
+const THREAD_FOLLOW_UP = 'Now click it once and read the count.';
 
 const writtenUsers = (s: BrowserScene, id: string) => s.journal(id).filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 const contentOf = (row: JournalRow) => (row.frame as { message: { content: unknown } }).message.content as ({ type: 'image'; source: { data: string } } | { type: 'text'; text: string })[];
@@ -389,7 +391,7 @@ function expectBox(box: Anchor['box'], want: Rect, slack = 2): void {
   expect(near(box!.x, want.x, slack) && near(box!.y, want.y, slack) && near(box!.width, want.width, slack) && near(box!.height, want.height, slack), `box ${JSON.stringify(box)} against ${JSON.stringify(want)}`).toBe(true);
 }
 
-test('2. a pick sent to main writes [image, anchored text] whose tag round-trips to the page’s anchor; a pick sent as a Side thread forks with it and the docked card becomes the thread, handed off to the Side pane at its request, whose header opens the page in the parent’s tab', async () => {
+test('2. a pick sent to main writes [image, anchored text] whose tag round-trips to the page’s anchor; a pick sent as a Side thread forks with it and the docked card becomes the thread, whose Reply reaches the thread alone, handed off to the Side pane at its request, whose header opens the page in the parent’s tab', async () => {
   test.setTimeout(240_000);
   let parentJournal = '';
   await commentScene(
@@ -408,9 +410,12 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
         const thread = new SideJournal(CHILD, scratch.repo);
         const first = thread.prompt();
         thread.rename(INCREMENT_LABEL); // `finishBinding` names a comment's thread by its anchor's label
-        thread.permission(first, 'Bash', { command: 'echo the-count', description: 'Read the count' }); // P2-E2: the hand-off
-        thread.reply(first, THREAD_REPLY);
+        thread.reply(first, THREAD_FIRST_REPLY);
         thread.completed(first);
+        const second = thread.prompt(); // P2-F W-T: the card's Reply
+        thread.permission(second, 'Bash', { command: 'echo the-count', description: 'Read the count' }); // P2-E2: the hand-off
+        thread.reply(second, THREAD_REPLY);
+        thread.completed(second);
         return [thread.write(dir, 'thread')]; // the parent is launched directly (below); the fork takes the seam's one journal
       },
     },
@@ -469,6 +474,29 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await card.getByRole('button', { name: 'Send' }).click();
       await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
       await expect(card.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]')).toHaveText(INCREMENT_LABEL);
+      await expect(card.getByText(THREAD_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
+
+      // Reply inside the browser card while the thread is idle (P2-F W-T; the card's shared code, as side.spec cases 9
+      // and 10 drive it under a deliverable): an ordinary prompt to the thread, drawn as its next user row in the card,
+      // nothing reaching the parent
+      let child = '';
+      await expect
+        .poll(async () => {
+          const records = value(await invoke(s.page, 'session.list', {})).sessions;
+          child = records.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? '';
+          return child;
+        }, { timeout: 20_000 })
+        .not.toBe('');
+      await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: child as AppSessionId })).turn, { timeout: 20_000 }).toBeNull();
+      await card.getByRole('textbox', { name: 'Reply' }).fill(THREAD_FOLLOW_UP);
+      await card.getByRole('textbox', { name: 'Reply' }).press('Enter');
+      await expect.poll(() => writtenUsers(s, child).length).toBe(2);
+      const followUp = writtenUsers(s, child)[1]!.frame as { priority?: unknown; message: { content: unknown } };
+      expect(followUp.priority, 'a send, not a steer').toBeUndefined();
+      expect(JSON.stringify(followUp.message.content)).toContain(THREAD_FOLLOW_UP);
+      await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+      await expect(card.getByRole('region', { name: 'Your message' }).filter({ hasText: THREAD_FOLLOW_UP })).toBeVisible();
+      expect(writtenUsers(s, parent), 'the main conversation received only its own comment').toHaveLength(1);
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, said in the card').toContainText('Waiting for your permission', { timeout: 20_000 });
       await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
       const [threadView, threadCard] = [(await viewOf(s, t.tabId))!, (await card.boundingBox())!];
@@ -479,14 +507,6 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       // the hand-off: the strip's Open in Side pane closes the card, and the Side pane draws the thread with its request
       await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
       await expect(card).toHaveCount(0);
-      let child = '';
-      await expect
-        .poll(async () => {
-          const records = value(await invoke(s.page, 'session.list', {})).sessions;
-          child = records.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? '';
-          return child;
-        }, { timeout: 20_000 })
-        .not.toBe('');
       const pane = s.panel.locator(`[data-side-thread-view="${child}"]`);
       await expect(pane, 'the Side pane opens on the thread').toBeVisible();
       const request = pane.getByRole('group', { name: 'Approval needed' });
