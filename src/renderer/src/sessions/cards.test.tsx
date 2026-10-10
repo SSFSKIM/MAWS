@@ -804,6 +804,42 @@ describe('a record’s trust card and its continuation', () => {
     expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
   });
 
+  // P2-F F-C1 (C scalpel-1#1): the continuation dies with its card through the send seam's own awaits too (X22)
+  it.each([
+    ['ready', ACCEPTED],
+    ['needs_trust', NEEDS_TRUST],
+  ])('a card cancelled during the seam’s second acquisition (the status still trailing): a late %s sends nothing and docks no card', async (_kind, second) => {
+    withMain({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await act(() => fake.reply('session.acquire', ACCEPTED)); // no ready status yet: the seam acquires again
+    await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.reply('session.acquire', second));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it('a card cancelled while the seam reads the queue sends nothing', async () => {
+    withMain({ 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
+    act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await act(() => fake.reply('session.acquire', ACCEPTED));
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => fake.reply('session.queue.list', { entries: [], paused: false }));
+    await waitFor(() => expect(isContinuing(ID)).toBe(false));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
   // M1's re-review: the continuation dies with its card; a Recheck whose read was out when the card went starts nothing
   it('a Recheck pending when the card is cancelled continues nothing once the relay answers', async () => {
     withMain({ 'session.queue.list': { entries: [], paused: false } });

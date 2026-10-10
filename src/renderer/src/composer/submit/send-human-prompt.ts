@@ -23,6 +23,10 @@ export interface HumanPromptOptions {
   // go, before an acquisition or a dispatch, never when the seam refuses by state; false refuses it with no reason
   precheck?: () => boolean;
   pastedContents?: Record<string, PastedContent>; // P2-F (L118): the composer's pasted segments, held with its message for the history row
+  // P2-F F-C1: whether the caller still wants the prompt (a setup card's continuation: its card still docked), consulted
+  // before every dispatch and handed to an acquisition so a gone caller's card is not docked again; false refuses it
+  // with no reason, nothing sent
+  current?: () => boolean;
 }
 export interface HumanPromptResult {
   disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
@@ -40,7 +44,8 @@ export const dispatchHumanPrompt = (client: MawsBridge, appSessionId: AppSession
     : client.invoke('session.send', { appSessionId, content });
 
 const notReady = (process: string | undefined): HumanPromptResult => ({ disposition: 'refused', started: false, reason: process === 'starting' || process === 'initializing' ? STARTING : ENDED });
-const declined = (options: HumanPromptOptions): HumanPromptResult | null => (options.precheck === undefined || options.precheck() ? null : { disposition: 'refused', started: false });
+const declined = (options: HumanPromptOptions): HumanPromptResult | null =>
+  (options.current?.() ?? true) && (options.precheck?.() ?? true) ? null : { disposition: 'refused', started: false };
 
 export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendContent, options: HumanPromptOptions, client: MawsBridge = ipc): Promise<HumanPromptResult> {
   let status = useSessions.getState().engine.get(appSessionId) ?? null;
@@ -73,7 +78,8 @@ async function sendAcquiring(appSessionId: AppSessionId, content: SendContent, o
   const composer = options.origin === 'composer';
   const display = options.display ?? (typeof content === 'string' ? content : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n'));
   const dockMessage = { content, display, ...(options.pastedContents !== undefined && { pastedContents: options.pastedContents }) };
-  const outcome = await acquireSession(appSessionId, 'send', composer ? { dockMessage } : {}, client);
+  const outcome = await acquireSession(appSessionId, 'send', { ...(composer && { dockMessage }), ...(options.current && { current: options.current }) }, client);
+  if (options.current?.() === false) return { disposition: 'refused', started: outcome.status === 'ready' && (outcome.launched || outcome.joined) }; // P2-F F-C1
   if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') {
     if (composer) return { disposition: 'held', started: false, reason: outcome.status === 'needs_trust' ? 'trust' : 'relay' };
     return { disposition: 'refused', started: false, reason: cardWords(outcome) };
