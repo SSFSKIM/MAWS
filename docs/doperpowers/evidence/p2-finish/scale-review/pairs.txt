@@ -1,0 +1,71 @@
+P2-F scale review (M3.1): the five synthetic pairs
+Document: docs/doperpowers/plans/2026-10-09-p2-f-finish.md, Design §5 (child P2-F of docs/doperpowers/plans/2026-10-08-p2-daily-driver.md, parent pin ebcf71cba3c9)
+Range: 5bd2cd57 (the P2 cut's grounding pin) to the post-debt head ad89b580 (ad89b580914efa9571537f1872c9cdd7329ea921), gated green 2026-10-10 (gates/postdebt-ad89b580.txt; the one red cua-owned and routed)
+Built by /tmp/maws-review/p2f-make-pairs.sh (E11's mechanics): git clone --shared of the worktree; branch base = the head with the area's paths restored to 5bd2cd57 (no-overlay restore); branch review-head = the head (read-tree -u --reset).
+Level: max. Lanes: deriverModel, finderModel, verifierModel all "opus" (the astra route limited until 2026-10-13, P1 P-26). Run two panels at a time. Findings files: docs/doperpowers/evidence/p2-finish/scale-review/<area>.findings.json in this worktree.
+Coverage: `git diff --no-renames --name-only 5bd2cd57 ad89b580` outside docs/: 823 files; A 129 + B 207 + C 188 + D 169 + E 130 = 823; files in two areas: 0; remainder: none.
+
+== Area A: engine host and wire ==
+  clone: /private/tmp/maws-p2f-review/A
+  base: 3214b6169674999bcff07d759a579e7cdb6d7e9b   review-head: 7dc1bd78f449652139a6f3585c70406509197ab9   (git status --porcelain lines after build: 0)
+  pair  --stat: 129 files changed, 9586 insertions(+), 212 deletions(-)
+  range --stat: 129 files changed, 9586 insertions(+), 212 deletions(-)   (equal: True)
+  paths (each a :(glob) pathspec): src/engine-host/** spikes/protocol-probe/** src/shared/wire/** src/shared/engine/** src/shared/host/** src/shared/maws/** src/shared/graph/** src/shared/plugins/** src/shared/owner/** src/shared/anchor/** src/shared/side/** src/shared/keymap/** src/shared/composer/**
+  lenses:
+    (1) the launch decision per U2 as built: `--append-system-prompt` and `--system-prompt-snapshot off` only where the binary declares it, never for foreign-live or probe launches, nothing stored in the state file
+    (2) the queue's transitions and `session.promptHistory`: exactly once across crash, giveback, withdraw and promote, the recovery marker
+    (3) X17's observed-facts file: per-field times, the journal recovery bounded and resumable, forget-safe, the tolerant reader (and W-H's L117 tolerant readers: deliverable records, the models cache, the queue, grant and nested launch objects)
+    (4) the manifest service as a trust boundary: confinement, bounds, redaction to names, kinds and counts, no plugin code run (W-H's L136 re-realpath and fstat identity)
+    (5) the owner grammar 2 and the preview: literal code spans, identity `(appSessionId, uuid, block, span)`, finalized text only (W-O's L151/L152 linear pairing)
+
+== Area B: main process ==
+  clone: /private/tmp/maws-p2f-review/B
+  base: 8765955d7c791dcecfeead4b22e2e1f486ba4160   review-head: a7b242246dc90397996749d28152119eeb939b8d   (git status --porcelain lines after build: 0)
+  pair  --stat: 207 files changed, 15045 insertions(+), 598 deletions(-)
+  range --stat: 207 files changed, 15045 insertions(+), 598 deletions(-)   (equal: True)
+  paths (each a :(glob) pathspec): src/main/** src/preload/** src/pty-host/** electron-builder.yml build/** src/shared/app/** src/shared/attention/** src/shared/browser/** src/shared/files/** src/shared/ipc/** src/shared/mods/** src/shared/sessions/** src/shared/settings/** src/shared/usage/**
+  lenses:
+    (1) acquisition (X16): the in-flight registry's joins and refusals, take-over, the trust and relay continuations, X4's request lifetime, nothing acquiring on mount, switch or timer
+    (2) main's owner channel: marks and answers, the two attention kinds, the watermark, notifications only from the live stream, foreign-held sessions never notified, migration 8 and settings 13 as released (W-O's L153 settled verdict and L158 in-memory `unconfirmed`)
+    (3) the side-thread artifact scope: the ancestor chain nearest first, one write chain per host process, the create refusal, `artifact_screenshot`
+    (4) `session.recentTurns`: bounded, no follow, no launch, cycle-safe
+    (5) the browser comment's `position` and the pick's focus; the cua session's code in the range (#90's bookmarks, extensions and chrome; #95's socket peer authentication `src/main/browser/cua/peer.ts` and the SIGUSR1 listener; #102/#103's profiles reader and chrome) read for its seams with P2 and routed to the cua session
+
+== Area C: renderer core ==
+  clone: /private/tmp/maws-p2f-review/C
+  base: 904f9c947a25219f2356432d0e0d3ae3e3c6e6b8   review-head: a10cdc0c699e6ab7fbff38911df1f21ede18558c   (git status --porcelain lines after build: 0)
+  pair  --stat: 188 files changed, 10700 insertions(+), 933 deletions(-)
+  range --stat: 188 files changed, 10700 insertions(+), 933 deletions(-)   (equal: True)
+  paths (each a :(glob) pathspec): src/renderer/src/accounts/** src/renderer/src/app/** src/renderer/src/attention/** src/renderer/src/budget/** src/renderer/src/composer/** src/renderer/src/gateway/** src/renderer/src/ipc/** src/renderer/src/keymap/** src/renderer/src/lifecycle/** src/renderer/src/main/** src/renderer/src/overview/** src/renderer/src/owner/** src/renderer/src/palette/** src/renderer/src/panel/** src/renderer/src/resume/** src/renderer/src/session/** src/renderer/src/sessions/** src/renderer/src/side/** src/renderer/src/sidebar/** src/renderer/src/statusline/** src/renderer/src/stores/** src/renderer/src/styles/** src/renderer/src/transcript/** src/renderer/src/ui/** src/renderer/src/usage/** src/renderer/src/App.test.tsx src/renderer/src/App.tsx src/renderer/src/env.d.ts src/renderer/src/main.tsx src/renderer/src/relay-wait.ts src/renderer/harness.html src/renderer/index.html
+  lenses:
+    (1) X22: the five dispositions passed through, delivered only at the engine's `started`, a card's continuation dying with the card (W-C's L118 history row, L121 delivered mark)
+    (2) the report view: the two-level fold, live and detached parity, the cards' states, Mark read, Reply leaving the draft untouched
+    (3) the comment card's lifecycle and geometry: anchored and docked, re-dock (W-C's L146 Show in browser / Show here), re-pin, Escape, focus
+    (4) follow mode after C's three rounds; the React Compiler hazard class (value-used post-increments, effects that run twice)
+    (5) tokens only in both themes, keyboard paths and accessible names of every new surface, IME-safe Escape in every dialog
+
+== Area D: renderer tools and widgets ==
+  clone: /private/tmp/maws-p2f-review/D
+  base: 4e07e08e85f25441cbe7efff75130c12836afa44   review-head: 14753b8c2409d8fec63f217214c14c14a5b516da   (git status --porcelain lines after build: 0)
+  pair  --stat: 169 files changed, 11000 insertions(+), 1150 deletions(-)
+  range --stat: 169 files changed, 11000 insertions(+), 1150 deletions(-)   (equal: True)
+  paths (each a :(glob) pathspec): src/renderer/src/widgets/** src/renderer/src/tools/** src/renderer/src/request-card/** src/renderer/src/settings-tab/** src/renderer/src/engine-surface/** src/renderer/src/terminal/** src/renderer/src/harness/** src/renderer/src/test-support/**
+  lenses:
+    (1) the library: identity grouping, the two facts never merged ("Enabled for this project", "Loaded in this session"), E8's sheets and the reload after a mutation, the stale-cache rule
+    (2) `DormantGesture` and `useEngineRead`: no surface acquires on open, freshness labels truthful, unknown never empty
+    (3) Browse's truthfulness (installed state, counts only where supplied)
+    (4) the deliverables viewer after W-V (fit, zoom, actual size; `MediaZoom`, `zoom.ts`) and the card host inside it
+    (5) the browser pane's dock strip and the native view's bounds (the chrome itself routed to the cua session)
+
+== Area E: e2e, tests, build, probes ==
+  clone: /private/tmp/maws-p2f-review/E
+  base: fed9dcc84c32e21d8be5ff3fbfe14193d8d67a03   review-head: ce0b4c6ab6aa5dd04129d849c2bfb6d0909ffb7a   (git status --porcelain lines after build: 0)
+  pair  --stat: 130 files changed, 10016 insertions(+), 490 deletions(-)
+  range --stat: 130 files changed, 10016 insertions(+), 490 deletions(-)   (equal: True)
+  paths (each a :(glob) pathspec): e2e/** test/** scripts/** native/** package.json pnpm-lock.yaml pnpm-workspace.yaml playwright.config.ts vitest.config.ts tsconfig*.json eslint.config.js CLAUDE.md .gitignore electron.vite.config.ts spikes/browser-probe/** spikes/code-tools/** spikes/computer-use-probe/** spikes/cua-backend/** spikes/extension-popup/** spikes/gws-onboarding/** spikes/supervisor-probe/** spikes/terminal-probe/**
+  lenses:
+    (1) the gates' truthfulness: assertions against notes, skipped cases, waits that hide timing, stand-ins that answer "now" (W-T's wait fixes, the quiet e2e default)
+    (2) fixture admission and provenance for the P2 fixtures
+    (3) the live specs' scratch isolation, A-15, budgets and survivor checks (W-T's L128 `e2e/support/live-budget.ts`)
+    (4) harness seams only under `MAWS_E2E`/`MAWS_HARNESS`/the live flags, never on a product path (the cua session's `native/peer-auth/` and the smoke `peerModule` assertion read for seams, routed to it)
+    (5) evidence writes only behind flags
