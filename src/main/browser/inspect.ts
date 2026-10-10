@@ -23,7 +23,9 @@ export interface BrowserInspector {
   tab(tabId: string): InspectedTab | null;
   showPane(request: MawsPaneShow): boolean; // `emit`'s answer: false when the request was invalid and nothing was sent
   metrics(): { loaded: number; sampled: number };
-  cua?: Pick<CuaBackend, 'socketPathFor' | 'inspect' | 'holds'>; // E13, under MAWS_E2E=1
+  // E13, under MAWS_E2E=1; `trustRoot(pid)` makes the process a root every session's socket accepts descendants of
+  // (false when it is gone or the addon is missing)
+  cua?: Pick<CuaBackend, 'socketPathFor' | 'inspect' | 'holds'> & { trustRoot(pid: number): boolean };
   menu?: NativeMenuSeam & { openAllAsked(): number[] }; // cua #90: the last native menu, chosen from by id path; "Open all"'s questions
   extensions?: ExtensionsInspector; // cua #90: the open extension popup, and its page's answers
 }

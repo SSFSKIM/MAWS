@@ -7,11 +7,12 @@ import { connectFakeHost } from '../../../../test/support/cua-fake-host';
 import { TabStore } from '../tabs';
 import { startCuaBackend } from './index';
 import type { AppSessionId } from '@shared/graph/ids';
-import { A, B, FakeContents, fakeView, harness, S, takeDown, tracked } from './server.fake';
+import { A, B, FakeContents, fakeView, harness, S, takeDown, testPeer, tracked } from './server.fake';
 
 // The primitive server (the in-app browser spec of 2026-10-08, M2): a real socket per app session, MAWS's real TabStore
 // and TabDebugger over fake views whose webContents.debugger records every command, and the fake host of
-// test/support/cua-fake-host.ts on the other end, as cua's host would be.
+// test/support/cua-fake-host.ts on the other end, as cua's host would be. The fake host runs in this process, which every
+// stand trusts as a root (the socket peer authentication spec of 2026-10-09, M2; admission.test.ts drives the check).
 
 afterEach(takeDown);
 
@@ -24,7 +25,7 @@ describe('the socket and the hello', () => {
     mkdirSync(join(root, 'browser', 'cua'), { recursive: true });
     writeFileSync(join(root, 'browser', 'cua', 'gone.sock'), '');
     const store = new TabStore({ emit: () => undefined, createView: () => fakeView() as unknown as WebContentsView, resolvePartition: () => DEFAULT_PARTITION, schedule: () => {} });
-    const backend = startCuaBackend({ store, windows: () => [], reaches: (a, b) => a === b, userData: root, version: '1.2.3', log: () => {} });
+    const backend = startCuaBackend({ store, windows: () => [], reaches: (a, b) => a === b, userData: root, version: '1.2.3', log: () => {}, peer: testPeer() });
     tracked.backends.push(backend);
     expect(existsSync(join(root, 'browser', 'cua', 'gone.sock'))).toBe(false);
     expect(statSync(join(root, 'browser', 'cua')).mode & 0o777).toBe(0o700);
@@ -229,11 +230,11 @@ describe('the agent state reset', () => {
     h.cdp(tab).hang.add('Runtime.evaluate');
     void a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Runtime.evaluate', params: {} }).catch(() => {});
     await settle();
-    expect(h.backend.inspect()).toMatchObject({ A: { connections: 1, held: 1, leased: [tab.tab.tabId] } });
+    expect(h.backend.inspect().sessions).toMatchObject({ A: { connections: 1, held: 1, leased: [tab.tab.tabId] } });
     h.cdp(tab).sent.splice(0);
     await a.close();
     await settle();
-    expect(h.backend.inspect()).toMatchObject({ A: { connections: 0, held: 0, leased: [] } });
+    expect(h.backend.inspect().sessions).toMatchObject({ A: { connections: 0, held: 0, leased: [] } });
     expect(h.cdp(tab).methods()).toEqual(['Target.setAutoAttach', 'Page.setInterceptFileChooserDialog', 'Fetch.disable', 'Emulation.clearDeviceMetricsOverride', 'Emulation.setFocusEmulationEnabled']);
     expect([h.cdp(tab).attached, tab.debugger!.leases, h.store.all()]).toEqual([false, 0, [tab]]);
   });

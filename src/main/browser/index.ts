@@ -40,6 +40,7 @@ import { e2eTabIds, reachableSessions, startAgentPresence } from './agent';
 // E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and the control and
 // cursor it drives (M3); the browser tools it replaced left on 2026-10-08 (M4, P1 A-54)
 import { startCuaBackend, type CuaBackend } from './cua';
+import { loadPeerAddon, peerAddonPath, rootOf, type ProcessRoot } from './cua/peer';
 import { TabControls } from './agent/control';
 import { AgentCursor } from './agent/cursor';
 // E13 end
@@ -166,8 +167,14 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // never moves
   const controls = hosts ? new TabControls({ store }) : null;
   const cursor = controls ? new AgentCursor({ store, controls }) : null;
+  // the socket peer check's addon, loaded now so its state shows before the first peer (the socket peer authentication
+  // spec of 2026-10-09, M2): the packaged app's Resources/peer-auth, else the committed prebuild under the development
+  // app root (the working directory, as the sessions and voice read it); under MAWS_E2E alone, the seam's trusted roots
+  const peerAddon = loadPeerAddon(peerAddonPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: process.cwd() }));
+  const trustedRoots = env.MAWS_E2E === '1' ? new Set<ProcessRoot>() : undefined;
   const cua = startCuaBackend({
     store,
+    peer: { addon: peerAddon, trustedRoots },
     ...(controls && cursor && { presence: { controls, cursor } }),
     emit,
     activityStore: index.browserActivity, // cua board #93
@@ -188,8 +195,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts in the
   // index since cua board #93
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
+  // every status of a known session names its engine to the socket's peer check (the pid while it runs, none once exited)
   const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
-    if (status.process !== 'exited' && knownSession(index, appSessionId)) cua.socketPathFor(appSessionId); // never a trust bootstrap's id
+    if (!knownSession(index, appSessionId)) return; // never a trust bootstrap's id
+    if (status.process !== 'exited') cua.socketPathFor(appSessionId);
+    cua.engineProcess(appSessionId, status.process === 'exited' ? null : status.pid);
   });
   // E13 end
   // A request with no page behind it, a favicon fetched on a tab's partition (`ses.fetch`) among them, asks the app for a
@@ -208,7 +218,20 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
-  if (inspector) inspector.cua = cua; // E13: the e2e's fake host reads the socket and the leases
+  // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside
+  // every session's engine, so a host the test runs is let in (the socket peer authentication spec, M2)
+  if (inspector && trustedRoots) {
+    inspector.cua = {
+      socketPathFor: (appSessionId) => cua.socketPathFor(appSessionId),
+      inspect: () => cua.inspect(),
+      holds: (tabId) => cua.holds(tabId),
+      trustRoot: (pid) => {
+        const root = peerAddon ? rootOf(pid, peerAddon) : null;
+        if (root) trustedRoots.add(root);
+        return root !== null;
+      },
+    };
+  }
   if (inspector) inspector.menu = { ...menus.seam, openAllAsked: () => confirmOpenAll.asked() }; // cua #90: the native menus
   if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the

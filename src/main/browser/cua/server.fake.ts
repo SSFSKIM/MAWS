@@ -1,7 +1,9 @@
 // The primitive server's test stand (the in-app browser spec of 2026-10-08, M2 and M3): a real socket per app session,
 // MAWS's real TabStore and TabDebugger over fake views whose webContents.debugger records every command, and the fake
 // host of test/support/cua-fake-host.ts on the other end, as cua's host would be. With `presence`, MAWS's real control
-// and cursor (agent/control.ts, agent/cursor.ts) take part; `emitted` keeps what the server told the windows.
+// and cursor (agent/control.ts, agent/cursor.ts) take part; `emitted` keeps what the server told the windows. Every
+// socket checks its peer (the socket peer authentication spec of 2026-10-09, M2): by default with the committed addon and
+// the test process as a trusted root, so the fake host this process runs is accepted; `peer` replaces both.
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import type { WebContentsView } from 'electron';
@@ -13,7 +15,8 @@ import { connectFakeHost, type FakeHost } from '../../../../test/support/cua-fak
 import { TabControls } from '../agent/control';
 import { AgentCursor } from '../agent/cursor';
 import { TabStore, type TabEntry } from '../tabs';
-import { startCuaBackend, type CuaBackend } from './index';
+import { startCuaBackend, type CuaBackend, type CuaBackendDeps } from './index';
+import { loadPeerAddon, peerAddonPath, rootOf, type ProcessRoot } from './peer';
 
 export const A = 'A' as AppSessionId;
 export const B = 'B' as AppSessionId;
@@ -106,7 +109,15 @@ export async function takeDown(): Promise<void> {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 }
 
-export function harness({ presence = false }: { presence?: boolean } = {}) {
+// The committed addon (vitest runs from the repository root) with this test process as a trusted root.
+export function testPeer(): NonNullable<CuaBackendDeps['peer']> {
+  const addon = loadPeerAddon(peerAddonPath({ packaged: false, resourcesPath: '', appRoot: process.cwd() }));
+  if (!addon) throw new Error('the peer identity addon did not load (run scripts/build-peer-auth.sh)');
+  return { addon, trustedRoots: new Set<ProcessRoot>([rootOf(process.pid, addon)!]) };
+}
+
+// `peer: null` starts the backend without the option at all.
+export function harness({ presence = false, peer = testPeer() }: { presence?: boolean; peer?: CuaBackendDeps['peer'] | null } = {}) {
   const root = mkdtempSync('/tmp/mcua-');
   roots.push(root);
   const emitted: { name: EventName; payload: unknown }[] = [];
@@ -123,8 +134,9 @@ export function harness({ presence = false }: { presence?: boolean } = {}) {
   const cursor = controls ? new AgentCursor({ store, controls }) : null;
   if (controls && cursor) disposables.push(cursor, controls);
   const recorded: MawsDownloadRecorded[] = [];
+  const logs: string[] = [];
   const backend = startCuaBackend({
-    store, windows: () => [{ id: 7, focused: true }], reaches, userData: root, version: '1.2.3', log: () => {},
+    store, windows: () => [{ id: 7, focused: true }], reaches, userData: root, version: '1.2.3', log: (line) => void logs.push(line), ...(peer && { peer }),
     ...(controls && cursor && { presence: { controls, cursor }, emit, recordDownload: async (download: MawsDownloadRecorded) => void recorded.push(download) }),
   });
   backend.onChange((tabId) => changes.push(tabId));
@@ -147,6 +159,6 @@ export function harness({ presence = false }: { presence?: boolean } = {}) {
   };
   const activities = () => emitted.filter((e) => e.name === 'browser.agent.activity').map((e) => e.payload as { appSessionId: string; tabId: string; at: string; activity: { kind: string } & Record<string, unknown> });
   const page = (entry: TabEntry) => entry.view!.webContents as unknown as FakeContents;
-  return { root, store, backend, host, personTab, cdp, idOf, changes, emitted, activities, recorded, controls, page };
+  return { root, store, backend, host, personTab, cdp, idOf, changes, emitted, activities, recorded, controls, page, logs };
 }
 

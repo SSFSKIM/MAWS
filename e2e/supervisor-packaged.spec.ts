@@ -15,7 +15,7 @@ import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { isAlive, killScratchProcesses, ps } from './support/processes';
+import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
@@ -92,6 +92,19 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     expect(binary, 'the supervisor runs the app binary itself').toBe(exe);
     expect(Number(pgid), 'the supervisor leads its own process group').toBe(lock.pid);
     expect(maws.consoleErrors()).toEqual([]);
+
+    // a same-user SIGUSR1 opens no Node inspector in the supervisor (closed 2026-10-10: the socket peer authentication
+    // spec's SIGUSR1 route; `--disable-sigusr1` at the spawn, src/main/hosts/detached-transport.ts, and the entry's
+    // listener, src/engine-host/detached.ts): it stays alive, listens on no new TCP address and its log (its stderr)
+    // holds no inspector line; with 9229 taken an inspector could not bind, so the port must be free first
+    expect(command, 'the supervisor starts with --disable-sigusr1').toMatch(/^maws-supervisor --disable-sigusr1 /);
+    expect(inspectorPortHolders(), 'something already listens on 127.0.0.1:9229: free it, or an inspector could not bind and this check would pass falsely').toEqual([]);
+    const listenersBefore = tcpListeners(lock.pid);
+    process.kill(lock.pid, 'SIGUSR1');
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(isAlive(lock.pid), 'the supervisor survives SIGUSR1').toBe(true);
+    expect(tcpListeners(lock.pid), 'no inspector opened in the supervisor').toEqual(listenersBefore);
+    expect(readFileSync(join(userData, 'supervisor', 'host.log'), 'utf8'), 'no inspector started or tried to start').not.toMatch(INSPECTOR_LINE);
 
     // an unbusy quit stops the supervisor with the app (residue 23)
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
