@@ -5,11 +5,11 @@
 import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ModelCatalogueEntry } from '@shared/sessions/models';
+import type { ModelCatalogue } from '@shared/sessions/models';
 import { DEFAULT_ROW, listName } from '@shared/sessions/model-label';
 import { useCommand } from '../ipc/query';
 import { useSetup } from '../sessions/store';
-import { settingsDirectoryOf } from '../sessions/useSetupIntent';
+import { modelsOf, settingsDirectoryOf } from '../sessions/useSetupIntent';
 import { useSessions } from '../stores/sessions';
 import { effortsOf, presentModels, type ModelRow } from '../widgets/model';
 import { DIRECT_MODEL } from './copy';
@@ -17,16 +17,11 @@ import { directChoice, preselected, useDirectModelPick } from './direct-model';
 import { GatewaySheet } from './GatewaySheet';
 import type { SwitchAnswer } from './switch-route';
 
-// A catalogue entry as a model row: C10's entries are loose, so the capability keys are read as C3 types them, and the
-// untyped `supportedEffortLevels` is parsed (absent: the whole vocabulary).
-const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
-  value: entry.value,
-  displayName: entry.displayName,
-  ...(typeof entry.resolvedModel === 'string' && { resolvedModel: entry.resolvedModel }), // W3: what `default` runs
-  ...(entry.supportsAutoMode !== undefined && { supportsAutoMode: entry.supportsAutoMode }),
-  ...(entry.supportsFastMode !== undefined && { supportsFastMode: entry.supportsFastMode }),
-  supportedEffortLevels: effortsOf({ supportedEffortLevels: entry.supportedEffortLevels }),
-});
+// The catalogue as model rows, through the setup intent's conversion (`modelsOf`: C10's loose entries read as C3 types
+// them, and L99's rule that only an engine-answered list says which model cannot hold auto), with the untyped
+// `supportedEffortLevels` parsed (absent: the whole vocabulary).
+const rowsOf = (catalogue: ModelCatalogue): ModelRow[] =>
+  modelsOf(catalogue).map((info) => ({ ...info, supportedEffortLevels: effortsOf({ supportedEffortLevels: info.supportedEffortLevels }) }));
 
 // The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked), from the
 // direct route's cache: the host keys its catalogue by route, and a route left unnamed answers the latest one updated.
@@ -34,7 +29,7 @@ const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
 export function useClaudeModels(enabled = true, cwd: string | null = null): readonly ModelRow[] | null {
   const read = useCommand('engine.models', cwd === null ? { refresh: false, gateway: 'direct' } : { refresh: false, gateway: 'direct', cwd }, { staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
-  const all = read.data.models.map(rowOfEntry);
+  const all = rowsOf(read.data);
   const rows = all.map((m) => (m.value === DEFAULT_ROW ? { ...m, displayName: listName(m, all) } : m)); // W3: `default` named by the model it runs
   const claude = new Set(presentModels(rows).claude.map((m) => m.value));
   return rows.filter((m) => claude.has(m.value));

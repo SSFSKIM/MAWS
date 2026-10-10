@@ -132,4 +132,29 @@ describe('pickDirectModel', () => {
     expect(await picked).toEqual({ model: 'sonnet', effort: 'high' });
     useSetup.setState({ intents: new Map() });
   });
+
+  // L99 (P2-F): a model's auto verdict is the engine's alone. The built-in list (no engine has answered yet) claims none,
+  // as the setup intent's conversion does; an engine-answered list keeps its own.
+  it.each([
+    { source: 'builtin' as const, caption: false },
+    { source: 'cached' as const, caption: true },
+    { source: 'live' as const, caption: true },
+  ])("captions Haiku 'Cannot hold auto mode' only from an engine-answered list ($source)", async ({ source, caption }) => {
+    backend.script('engine.models', () => ({
+      models: [
+        { value: 'sonnet', displayName: 'Sonnet 5', supportsAutoMode: true },
+        { value: 'haiku', displayName: 'Haiku 4.5', supportsAutoMode: false },
+      ],
+      source,
+      at: null,
+    }));
+    wrap(<GatewayDialogs />);
+    const picked = pickDirectModel(READY);
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+    const haiku = await within(dialog).findByRole('radio', { name: /^Haiku 4\.5/ });
+    expect(haiku.textContent).toBe(caption ? 'Haiku 4.5Cannot hold auto mode' : 'Haiku 4.5');
+    expect(within(dialog).getByRole('radio', { name: /^Sonnet 5/ }).textContent).toBe('Sonnet 5');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(await picked).toBeNull();
+  });
 });
