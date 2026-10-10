@@ -24,6 +24,15 @@ describe('targetOf', () => {
     expect(targetOf({ ...ANCHOR, pageUrl: 'https://example.com/' })).toBeNull();
     expect(targetOf(fileLineAnchor('/r/x.ts', 3))).toBeNull();
   });
+
+  // P2-E2: a page element names its page; a card opened from it with no placement is the browser's
+  it('reads a browser element’s page as a browser target, and its card is the browser host’s', () => {
+    const page: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'http://127.0.0.1:4000/comment.html', css: '#increment' };
+    expect(targetOf(page)).toEqual({ kind: 'browser', pageUrl: 'http://127.0.0.1:4000/comment.html' });
+    expect(targetOf({ ...page, pageUrl: undefined })).toBeNull();
+    openCard(page, { appSessionId: PARENT, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
+    expect(open()).toMatchObject({ host: 'browser', hostId: 'pane-1', rect: null, target: { kind: 'browser' } });
+  });
 });
 
 describe('the one card', () => {

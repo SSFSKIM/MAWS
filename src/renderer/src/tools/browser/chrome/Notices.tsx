@@ -56,6 +56,8 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   // E4d start: comment mode's lines (E4d execution document, Decision Log 35)
   commentUnavailable: 'warning',
   commentCannotName: 'warning',
+  commentCropTooLarge: 'warning', // P2-E2
+  commentCropFailed: 'warning', // P2-E2
   // E4d end
   dialogAnswered: 'info', // E4c
   extensionPopupFailed: 'warning', // cua #90
@@ -84,6 +86,11 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
       return COMMENT_COPY.unavailable;
     case 'commentCannotName':
       return COMMENT_COPY.cannotName;
+    // P2-E2: a card leaves the page uncovered, so its missing crop is said in the chrome too
+    case 'commentCropTooLarge':
+      return COMMENT_COPY.cropTooLarge;
+    case 'commentCropFailed':
+      return COMMENT_COPY.cropFailed;
     // E4d end
     // E4c start
     case 'dialogAnswered':

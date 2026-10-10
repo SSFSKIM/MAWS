@@ -8,6 +8,11 @@
 // the tab's chrome, E4a's notice path, since the toast viewport covers a panel's page and would freeze it to a still
 // picture for the toast's life (E4a's Decision 28); a crop that could not be attached is a toast, since the sheet covers
 // the page by then and a chrome line under it would not be read (Decision Log 9).
+//
+// P2-E2: a pick opens the comment card docked in the strip of the pane that holds the tab's view (`dock.ts`), never over
+// the page and with no cover; the sheet opens only for a tab no pane of this window holds. The card leaves the page on
+// screen, so a missing crop is then a chrome line, as every other word with nothing over the page. The pick's `position`
+// (the element's point in the pane's pixels, main's) is the card's pin; without it the card docks with none.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
@@ -15,6 +20,7 @@ import { toast } from '../../../stores/notices';
 import { openCommentComposer } from '../../code/anchor/anchor';
 import { browser, raiseNotice, type CommentNoticeKind } from '../store';
 import { COMMENT_COPY } from './copy';
+import { dockOf } from './dock';
 import { setCommentArmed } from './store';
 
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
@@ -37,10 +43,19 @@ export function connectBrowserComment(client: MawsBridge = ipc): () => void {
     if (reason === 'refused') sayInChrome(tabId, 'commentCannotName');
     else if (reason === 'unavailable') sayInChrome(tabId, 'commentUnavailable'); // no preload answered (Decision Log 34)
   });
-  const offPicked = client.on('browser.comment.picked', ({ appSessionId, anchor, crop }) => {
-    openCommentComposer(anchor, { appSessionId });
-    if (crop === 'tooLarge') warn(COMMENT_COPY.cropTooLarge);
-    else if (crop === 'failed') warn(COMMENT_COPY.cropFailed);
+  const offPicked = client.on('browser.comment.picked', ({ tabId, appSessionId, anchor, crop, position }) => {
+    const hostId = dockOf(tabId);
+    if (hostId === null) {
+      openCommentComposer(anchor, { appSessionId });
+      if (crop === 'tooLarge') warn(COMMENT_COPY.cropTooLarge);
+      else if (crop === 'failed') warn(COMMENT_COPY.cropFailed);
+      return;
+    }
+    // the pin: the element's point in the pane's pixels, as a rect of no size (the card's pin is its x and its bottom)
+    const rect = position && { x: position.x, y: position.y, width: 0, height: 0 };
+    openCommentComposer(anchor, { appSessionId, placement: { kind: 'card', host: 'browser', hostId, ...(rect && { rect }) } });
+    if (crop === 'tooLarge') sayInChrome(tabId, 'commentCropTooLarge');
+    else if (crop === 'failed') sayInChrome(tabId, 'commentCropFailed');
   });
   return () => {
     offChanged();

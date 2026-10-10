@@ -10,6 +10,8 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useLayout } from '../../stores/layout';
 import { browserTab, T1 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
+import { openCard, useCommentCard } from '../../side/card/store';
+import { dockOf } from './comment/dock';
 import { BROWSER_COPY } from './copy';
 import { resetCovering } from './covering';
 import { BrowserPane } from './Pane';
@@ -195,5 +197,96 @@ describe('the placeholder', () => {
     expect(container.querySelector('img')?.getAttribute('src')).toBe(PLACEHOLDER);
     rerender(<BrowserPane tab={tab({ covered: false })} surface="panel" />);
     expect(container.querySelector('img')).toBeNull();
+  });
+});
+
+// P2-E2: the comment card's dock: a strip under the page's element, registered for the tab while the pane holds its view
+describe('the comment card’s dock', () => {
+  const ANCHOR = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'https://example.com/', css: '#increment' } as const;
+  afterEach(() => act(() => useCommentCard.setState({ open: null })));
+
+  it('registers the pane holding the view as its tab’s dock, and a card opened for it is drawn in the strip under the page', async () => {
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    const hostId = dockOf(T1);
+    expect(hostId).not.toBeNull();
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: hostId! } }));
+    const column = container.querySelector('[data-browser-column]')!;
+    const [page, strip] = [...column.children] as HTMLElement[];
+    expect(page!.matches('[data-browser-pane]')).toBe(true);
+    expect(strip!.matches('[data-card-dock]')).toBe(true);
+    expect(page!.querySelector('[data-comment-card]'), 'nothing over the page').toBeNull();
+    expect(strip!.querySelector('[data-comment-card]')!.getAttribute('data-placement')).toBe('strip');
+  });
+
+  it('another pane taking the view unmounts the strip and the dock: the card closes', async () => {
+    const { rerender, container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    const hostId = dockOf(T1)!;
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId } }));
+    expect(container.querySelector('[data-comment-card]')).not.toBeNull();
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" />);
+    await frames();
+    expect(container.querySelector('[data-card-dock]')).toBeNull();
+    expect(dockOf(T1)).toBeNull();
+    expect(useCommentCard.getState().open).toBeNull();
+  });
+
+  it('a second pane that claims and unmounts before its echo reaches the first leaves the first pane the dock', async () => {
+    const first = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    const paneA = places()[0]!.paneId as string;
+    first.rerender(<BrowserPane tab={tab({ placedIn: { paneId: paneA, surface: 'panel' } })} surface="panel" />);
+    const hostA = dockOf(T1);
+    expect(hostA).not.toBeNull();
+    const second = render(<BrowserPane tab={tab({ placedIn: { paneId: paneA, surface: 'panel' } })} surface="main" />);
+    await frames();
+    expect(places().at(-1)).toMatchObject({ surface: 'main', claim: true });
+    expect(dockOf(T1)).not.toBe(hostA);
+    second.unmount();
+    await frames();
+    // main's listing coalesced: the first pane sees no owner (never the second's name), claims back and stays owner
+    first.rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" />);
+    expect(places().at(-1)).toMatchObject({ paneId: paneA, claim: true });
+    expect(dockOf(T1)).toBe(hostA);
+  });
+
+  it('Close or Escape in the docked card gives focus back to its chrome’s Comment toggle', async () => {
+    render(
+      <div data-browser-view="panel">
+        <button type="button" data-browser-comment="">
+          Comment
+        </button>
+        <BrowserPane tab={tab()} surface="panel" />
+      </div>,
+    );
+    await frames();
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)! } }));
+    const field = screen.getByRole('textbox', { name: 'Comment' });
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(useCommentCard.getState().open).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comment' }));
+  });
+
+  it('Escape in the docked card gives focus to the chrome’s address field while the Comment toggle is disabled', async () => {
+    render(
+      <div data-browser-view="panel">
+        <div data-address-box="">
+          <input role="combobox" aria-label="Address" />
+        </div>
+        <button type="button" data-browser-comment="" disabled>
+          Comment
+        </button>
+        <BrowserPane tab={tab()} surface="panel" />
+      </div>,
+    );
+    await frames();
+    act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)! } }));
+    const field = screen.getByRole('textbox', { name: 'Comment' });
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(useCommentCard.getState().open).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Address' }));
   });
 });
