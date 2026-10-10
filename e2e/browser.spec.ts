@@ -699,11 +699,13 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
     const tab = await tabAt(s, id, url);
     interface ControlSeam {
       __maws_browser: {
-        cua: { socketPathFor(id: string): string };
+        cua: { socketPathFor(id: string): string; trustRoot(pid: number): boolean };
         agent: { sendInput(tab: string, input: Record<string, unknown>): boolean };
       };
     }
     const socket = await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as ControlSeam).__maws_browser.cua.socketPathFor(id), id);
+    // cua #95: the socket's peer check (PR #7) admits only the session's engine's descendants; the test process is trusted through the e2e seam, as browser-cua.spec.ts does.
+    expect(await s.maws.app.evaluate((_electron, pid) => (globalThis as unknown as ControlSeam).__maws_browser.cua.trustRoot(pid), process.pid)).toBe(true);
     const host = await connectFakeHost(socket);
     try {
       const native = (await host.request<{ id: number; url: string }[]>('tabs.query')).find((t) => t.url === url)!;
