@@ -42,3 +42,10 @@ extraResources:
     filter:
       - maws-voice-helper
 # E9 end
+  # Socket peer authentication (cua docs/doperpowers/specs/2026-10-09-maws-socket-peer-auth-design.md, M1): the peer
+  # identity addon, a committed N-API prebuild (`pnpm build:peer-auth` rebuilds it), loaded by
+  # src/main/browser/cua/peer.ts from Resources/peer-auth/peer-auth.node.
+  - from: native/peer-auth/prebuilds/darwin-arm64
+    to: peer-auth
+    filter:
+      - peer-auth.node
