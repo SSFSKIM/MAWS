@@ -117,6 +117,19 @@ describe('WidgetFrame', () => {
       expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy();
     });
 
+    it('a cached answer’s age advances while the frame stays open, with nothing else changing (scale review D scalpel-2#2)', () => {
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      try {
+        setRecord();
+        render(frame({ state: 'dormant', readAt: Date.now() }));
+        expect(screen.getByText('Read just now')).toBeTruthy();
+        act(() => vi.advanceTimersByTime(5 * 60_000));
+        expect(screen.getByText('Read 5 minutes ago')).toBeTruthy();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('starting: "Starting…" above whatever body there is, and no button', () => {
       setRecord();
       const { rerender } = render(frame({ state: 'starting', readAt: Date.now() }));

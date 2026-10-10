@@ -12,6 +12,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { relativeAge } from '../app/relative-age';
+import { useNow } from '../app/use-now';
 import type { WidgetSize } from '../composer/WidgetDialog'; // P2-B (2026-10-09)
 import { useComposerStore } from '../stores/composer';
 import { FRAME } from './copy';
@@ -52,9 +53,16 @@ function focusSearch(event: KeyboardEvent<HTMLDivElement>): boolean {
 // P2-B end
 
 // P2-A start (2026-10-09): the body on a session with no ready process; the line is every surface's (`DormantGesture`)
+// A cached answer's age on the shared clock, so it advances while the frame stays open with nothing else changing (a
+// session that exited stops every read); only this line re-renders on the tick.
+function ReadAgo({ readAt }: { readAt: number }) {
+  const now = useNow();
+  return FRAME.readAgo(relativeAge(Math.max(0, now - readAt)));
+}
+
 function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' | 'unavailable', error: string | null, readAt: number | null | undefined, children: ReactNode): ReactNode {
   const cached = typeof readAt === 'number';
-  const lead = state !== 'dormant' ? null : cached ? FRAME.readAgo(relativeAge(Math.max(0, Date.now() - readAt))) : FRAME.notRead;
+  const lead = state !== 'dormant' ? null : cached ? <ReadAgo readAt={readAt} /> : FRAME.notRead;
   return (
     <>
       <DormantGesture appSessionId={appSessionId} label={cached ? FRAME.refresh : FRAME.loadNow} lead={lead} words={state === 'unavailable' ? error : null} starting={state === 'starting'} />
