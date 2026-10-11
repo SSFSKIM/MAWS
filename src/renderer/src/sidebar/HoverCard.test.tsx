@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { REL } from '../test-support/relative-time';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
@@ -144,7 +145,7 @@ describe('a session row’s hover card', () => {
     render(<Sidebar />);
     const card = await open('Usage reset countdown');
     expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
-    expect(within(card).getByTestId('hover-meta').textContent).toBe('Working · now · ctx 41%');
+    expect(within(card).getByTestId('hover-meta').textContent).toBe(`Working · ${REL.now} · ctx 41%`);
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
     expect(within(card).getByTestId('hover-answer').textContent).toMatch(/^The request succeeded/);
     expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull(); // nothing waits

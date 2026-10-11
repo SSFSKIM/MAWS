@@ -74,3 +74,31 @@ describe('a dated year and an hour estimate, in an explicit locale', () => {
     expect(dateFormats('ko-KR').weekdayHour(at)).toMatch(/^\(목\) /);
   });
 });
+
+// The review of S-locale (the owner's ruling covers every relative time): compact ages and countdowns keep their
+// compactness, their number and unit written by Intl's narrow unit style (2h; 2시간); the chooser's week headings are
+// Intl's relative weeks. English output stays as it was.
+describe('compact amounts, ages and week labels, in an explicit locale', () => {
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+  const en = dateFormats('en-US');
+  const ko = dateFormats('ko-KR');
+
+  it('an amount of one unit, narrow', () => {
+    const amounts = [[2, 'minute'], [2, 'hour'], [3, 'day'], [1, 'week']] as const;
+    expect(amounts.map(([n, unit]) => en.amount(n, unit))).toEqual(['2m', '2h', '3d', '1w']);
+    expect(amounts.map(([n, unit]) => ko.amount(n, unit))).toEqual(['2분', '2시간', '3일', '1주']);
+  });
+
+  it('the compact age: now under a minute, then the largest whole unit', () => {
+    const ages = [0, 59_000, MINUTE, 59 * MINUTE, HOUR, 23 * HOUR, DAY, 7 * DAY, -5_000];
+    expect(ages.map((ms) => en.age(ms))).toEqual(['now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now']);
+    expect(ages.map((ms) => ko.age(ms))).toEqual(['지금', '지금', '1분', '59분', '1시간', '23시간', '1일', '1주', '지금']);
+  });
+
+  it('this week and last week as labels', () => {
+    expect([en.week(0), en.week(1)]).toEqual(['This week', 'Last week']);
+    expect([ko.week(0), ko.week(1)]).toEqual(['이번 주', '지난주']);
+  });
+});

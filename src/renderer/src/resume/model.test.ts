@@ -4,7 +4,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
-import { formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
+import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
 import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
 
 const P = project('p', 0, { name: 'maws' });
@@ -85,25 +85,33 @@ describe('the chooser’s groups', () => {
   const local = (day: number, hour = 10, month = 9, year = 2026) => new Date(year, month, day, hour, 0).getTime();
 
   it('Today, Yesterday, the rest of this week, last week, then one group per week', () => {
-    expect(groupOf(local(8, 9), now)).toMatchObject({ kind: 'today', label: 'Today' });
-    expect(groupOf(local(8, 23), now), 'a time ahead of the clock is today').toMatchObject({ kind: 'today' });
-    expect(groupOf(local(7, 23), now)).toMatchObject({ kind: 'yesterday', label: 'Yesterday' });
-    expect(groupOf(local(5, 0), now)).toMatchObject({ kind: 'thisWeek', label: 'Earlier this week' }); // Monday
-    expect(groupOf(local(4, 23), now)).toMatchObject({ kind: 'lastWeek', label: 'Last week' }); // Sunday
-    expect(groupOf(local(28, 9, 8), now)).toMatchObject({ kind: 'lastWeek' }); // Monday 2026-09-28
-    expect(groupOf(local(27, 9, 8), now)).toMatchObject({ kind: 'week', key: `week:${local(21, 0, 8)}` });
-    expect(groupOf(local(27, 9, 8), now).label).toBe(`Week of ${formatShortDate(local(21, 0, 8), now)}`);
-    expect(groupOf(local(30, 9, 11, 2025), now).label, 'another year names it').toContain('2025');
+    const en = dateFormats('en-US');
+    expect(groupOf(local(8, 9), now, 'en-US')).toMatchObject({ kind: 'today', label: 'Today' });
+    expect(groupOf(local(8, 23), now, 'en-US'), 'a time ahead of the clock is today').toMatchObject({ kind: 'today' });
+    expect(groupOf(local(7, 23), now, 'en-US')).toMatchObject({ kind: 'yesterday', label: 'Yesterday' });
+    expect(groupOf(local(5, 0), now, 'en-US')).toMatchObject({ kind: 'thisWeek', label: 'This week' }); // Monday
+    expect(groupOf(local(4, 23), now, 'en-US')).toMatchObject({ kind: 'lastWeek', label: 'Last week' }); // Sunday
+    expect(groupOf(local(28, 9, 8), now, 'en-US')).toMatchObject({ kind: 'lastWeek' }); // Monday 2026-09-28
+    expect(groupOf(local(27, 9, 8), now, 'en-US')).toMatchObject({ kind: 'week', key: `week:${local(21, 0, 8)}` });
+    expect(groupOf(local(27, 9, 8), now, 'en-US').label).toBe(`Week of ${en.shortDate(local(21, 0, 8), now)}`);
+    expect(groupOf(local(30, 9, 11, 2025), now, 'en-US').label, 'another year names it').toContain('2025');
+  });
+
+  // D2 widened (the review of S-locale): the headings follow the locale as the transcript's day separators do, the
+  // days and weeks in Intl's relative words; "Week of" stays English around the locale's date.
+  it('names the groups in the locale', () => {
+    const days = [local(8, 9), local(7, 23), local(5, 0), local(4, 23), local(27, 9, 8)];
+    expect(days.map((ms) => groupOf(ms, now, 'ko-KR').label)).toEqual(['오늘', '어제', '이번 주', '지난주', 'Week of 9월 21일']);
   });
 
   it('groups rows in order and gives each its time', () => {
     const row = (id: string, ms: number) => ({ record: record(id), at: ms });
-    const groups = chooserGroups([row('a', local(8, 14)), row('b', local(8, 9)), row('c', local(7)), row('d', local(1)), row('e', local(20, 10, 8))], now);
+    const groups = chooserGroups([row('a', local(8, 14)), row('b', local(8, 9)), row('c', local(7)), row('d', local(1)), row('e', local(20, 10, 8))], now, 'en-US');
     expect(groups.map((g) => [g.label, g.rows.map((r) => r.record.appId)])).toEqual([
       ['Today', ['a', 'b']],
       ['Yesterday', ['c']],
       ['Last week', ['d']],
-      [`Week of ${formatShortDate(local(14, 0, 8), now)}`, ['e']],
+      [`Week of ${dateFormats('en-US').shortDate(local(14, 0, 8), now)}`, ['e']],
     ]);
     expect(rowTime(local(8, 14), 'today', now)).toBe(formatClock(local(8, 14)));
     expect(rowTime(local(6, 14), 'thisWeek', now)).toBe(formatWeekdayClock(local(6, 14)));

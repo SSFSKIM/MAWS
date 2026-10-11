@@ -2,6 +2,7 @@
 // system locale, as macOS and the rest of MAWS do (the architect's ruling for P2-D, 2026-10-09; the owner runs a Korean
 // locale). Relative times and month-day dates follow it too (D2 widened at the P2-F sitting: "2 hours ago" reads
 // "2시간 전", "Sep 27" reads "9월 27일", as the Korean Desktop writes them); the words around them stay English.
+// Compact ages and countdowns keep their compactness, their number and unit in Intl's narrow unit style ("2h", "2시간").
 // The budget's `clockTime` (budget/copy.ts) writes through `formatClock` (L129). One set of formatters per locale,
 // built once; the exports below are the system locale's, and `dateFormats(locale)` pins one for a test or a surface
 // that carries its own locale (the transcript's).
@@ -10,8 +11,10 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
+export type AmountUnit = 'minute' | 'hour' | 'day' | 'week';
+
 // The largest unit `ms` holds at least one of, and how many (floored).
-function unitOf(ms: number): [number, Intl.RelativeTimeFormatUnit] {
+function unitOf(ms: number): [number, AmountUnit] {
   if (ms < HOUR) return [Math.floor(ms / MINUTE), 'minute'];
   if (ms < DAY) return [Math.floor(ms / HOUR), 'hour'];
   if (ms < WEEK) return [Math.floor(ms / DAY), 'day'];
@@ -39,6 +42,12 @@ export interface DateFormats {
   until(ms: number): string;
   // A calendar day `daysAgo` before today as a label: Today, Yesterday (오늘, 어제).
   day(daysAgo: 0 | 1): string;
+  // A calendar week `weeksAgo` before this one as a label: This week, Last week (이번 주, 지난주).
+  week(weeksAgo: 0 | 1): string;
+  // An amount of one unit, compact: 2m, 2h, 3d, 1w (2분, 2시간, 3일, 1주).
+  amount(count: number, unit: AmountUnit): string;
+  // The compact age of an elapsed `ms`: "now" under a minute (지금), then the largest whole unit (2m, 2h; 2시간).
+  age(ms: number): string;
 }
 
 function build(locale: string | undefined): DateFormats {
@@ -53,6 +62,12 @@ function build(locale: string | undefined): DateFormats {
   const auto = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const now = auto.format(0, 'second');
   const label = (s: string) => s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+  const units = new Map<AmountUnit, Intl.NumberFormat>();
+  const amount = (count: number, unit: AmountUnit) => {
+    let format = units.get(unit);
+    if (!format) units.set(unit, (format = new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'narrow' })));
+    return format.format(count);
+  };
   return {
     clock: (ms) => clock.format(ms),
     weekdayClock: (ms) => weekdayClock.format(ms),
@@ -71,6 +86,12 @@ function build(locale: string | undefined): DateFormats {
       return narrow.format(count, unit);
     },
     day: (daysAgo) => label(auto.format(-daysAgo, 'day')),
+    week: (weeksAgo) => label(auto.format(-weeksAgo, 'week')),
+    amount,
+    age(ms) {
+      if (ms < MINUTE) return now;
+      return amount(...unitOf(ms));
+    },
   };
 }
 

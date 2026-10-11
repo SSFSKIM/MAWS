@@ -226,10 +226,10 @@ describe('sidebar row text', () => {
     expect(waitingItem([held])?.oldest).toBe(held);
   });
 
-  it('ages read now, minutes, hours, days, weeks', () => {
-    expect([0, 59_000, 60_000, 3_599_000, 3_600_000, 86_399_000, 86_400_000, 7 * 86_400_000, -5000].map(formatAge)).toEqual([
-      'now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now',
-    ]);
+  it('ages read now, minutes, hours, days, weeks, compact in the locale (2h; 2시간)', () => {
+    const ages = [0, 59_000, 60_000, 3_599_000, 3_600_000, 86_399_000, 86_400_000, 7 * 86_400_000, -5000];
+    expect(ages.map((ms) => formatAge(ms, 'en-US'))).toEqual(['now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now']);
+    expect(ages.map((ms) => formatAge(ms, 'ko-KR'))).toEqual(['지금', '지금', '1분', '59분', '1시간', '23시간', '1일', '1주', '지금']);
   });
 
   // E11 F2b (plan 2.4): an outcome (an error, an interruption) says when it happened; a request says how long it has waited
@@ -238,18 +238,19 @@ describe('sidebar row text', () => {
     const now = at('2026-10-08T10:00:00Z');
     expect(itemAge(item('r', 'error', '2026-09-24T10:00:00Z'), now)).toBe(REL.ago(2, 'week'));
     expect(itemAge(item('r', 'interrupted', '2026-10-03T10:00:00Z'), now)).toBe(REL.ago(5, 'day'));
-    expect(itemAge(item('r', 'permission', '2026-10-08T09:55:00Z'), now)).toBe('waiting 5m');
+    expect(itemAge(item('r', 'permission', '2026-10-08T09:55:00Z'), now)).toBe(`waiting ${REL.amount(5, 'minute')}`);
   });
 
   it('a working session is "now"; otherwise the age of its latest movement; a Needs-you row shows its wait', () => {
     const now = at('2026-09-28T10:30:00Z');
     const r = record('r', { updatedAt: '2026-09-28T09:00:00Z' });
-    expect(sessionAge(r, digest('r', { phase: 'working', turnStartedAt: '2026-09-28T08:00:00Z' }), now)).toBe('now');
-    expect(sessionAge(r, digest('r', { phase: 'idle', lastTurnEndedAt: '2026-09-28T10:22:00Z' }), now)).toBe('8m');
-    expect(sessionAge(r, null, now)).toBe('1h');
+    // the system locale's compact amounts (8m; 8분), pinned by `formatAge` above
+    expect(sessionAge(r, digest('r', { phase: 'working', turnStartedAt: '2026-09-28T08:00:00Z' }), now)).toBe(REL.now);
+    expect(sessionAge(r, digest('r', { phase: 'idle', lastTurnEndedAt: '2026-09-28T10:22:00Z' }), now)).toBe(REL.amount(8, 'minute'));
+    expect(sessionAge(r, null, now)).toBe(REL.amount(1, 'hour'));
     // A discovered session: the index wrote the record just now, its transcript last moved two days ago (C4's seed).
     const discovered = record('d', { updatedAt: '2026-09-28T10:29:30Z' });
-    expect(sessionAge(discovered, digest('d', { phase: 'exited', lastTurnEndedAt: '2026-09-26T10:00:00Z' }), now)).toBe('2d');
-    expect(needsYouAge(item('r', 'permission', '2026-09-28T10:26:00Z'), now)).toBe('4m');
+    expect(sessionAge(discovered, digest('d', { phase: 'exited', lastTurnEndedAt: '2026-09-26T10:00:00Z' }), now)).toBe(REL.amount(2, 'day'));
+    expect(needsYouAge(item('r', 'permission', '2026-09-28T10:26:00Z'), now)).toBe(REL.amount(4, 'minute'));
   });
 });

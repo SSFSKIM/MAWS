@@ -6,7 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
-import { formatAgo } from '../app/date-format';
+import { dateFormats, formatAgo } from '../app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
@@ -191,22 +191,12 @@ export function rowBranch(record: SessionRecord): string | null {
   return branchLabel(recordBranch(record));
 }
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-const WEEK = 7 * DAY;
-
-export function formatAge(ms: number): string {
-  if (ms < MINUTE) return 'now';
-  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m`;
-  if (ms < DAY) return `${Math.floor(ms / HOUR)}h`;
-  if (ms < WEEK) return `${Math.floor(ms / DAY)}d`;
-  return `${Math.floor(ms / WEEK)}w`;
-}
+// A row's age, compact in the system locale (`app/date-format.ts`): now, 2m, 2h, 3d, 1w (지금, 2시간); `locale` pins one.
+export const formatAge = (ms: number, locale?: string): string => dateFormats(locale).age(ms);
 
 // A working session is "now"; otherwise the age of its last activity.
 export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number): string {
-  if (isWorking(digest ?? undefined)) return 'now';
+  if (isWorking(digest ?? undefined)) return formatAge(0);
   return formatAge(now - lastActivity(record, digest));
 }
 

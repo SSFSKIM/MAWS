@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { REL } from '../test-support/relative-time';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -403,7 +404,7 @@ describe('an expanded project', () => {
     render(<Sidebar />);
     const charter = row('Charter + research');
     expect(within(charter).queryByText('Running bun test')).toBeNull();
-    expect(charter.textContent).toBe('●Charter + researchnow');
+    expect(charter.textContent).toBe(`●Charter + research${REL.now}`);
     expect(within(row('Workstation north star')).getByRole('img', { name: 'Pinned' })).toBeTruthy();
     expect(within(charter).queryByRole('img', { name: 'Pinned' })).toBeNull();
     expect(within(row('Fix sidebar drag')).getByRole('img', { name: 'Unread' })).toBeTruthy();

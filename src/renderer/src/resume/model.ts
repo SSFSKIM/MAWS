@@ -11,7 +11,7 @@
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
+import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '../app/date-format';
 import { lastActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title';
@@ -101,26 +101,29 @@ const weekStart = (ms: number): number => {
 };
 
 // The group a time falls in, by local calendar: Today, Yesterday, the earlier days of this week, last week, then one
-// group per week ("Week of Sep 14"). A time in the future (a clock moved back) counts as today.
-export function groupOf(at: number, now: number): { key: string; kind: GroupKind; label: string } {
+// group per week ("Week of Sep 14"). A time in the future (a clock moved back) counts as today. The days and weeks are
+// named in the system locale, as the transcript's day separators are (오늘, 어제, 이번 주, 지난주); "Week of" stays English
+// around the locale's date. `locale` pins one (tests).
+export function groupOf(at: number, now: number, locale?: string): { key: string; kind: GroupKind; label: string } {
+  const words = dateFormats(locale);
   const today = midnight(now);
-  if (at >= today) return { key: 'today', kind: 'today', label: 'Today' };
+  if (at >= today) return { key: 'today', kind: 'today', label: words.day(0) };
   // a day's length moves at a time change: yesterday is the calendar day before today, whatever its length
   const yesterday = midnight(today - DAY / 2);
-  if (at >= yesterday) return { key: 'yesterday', kind: 'yesterday', label: 'Yesterday' };
+  if (at >= yesterday) return { key: 'yesterday', kind: 'yesterday', label: words.day(1) };
   const thisWeek = weekStart(now);
-  if (at >= thisWeek) return { key: 'thisWeek', kind: 'thisWeek', label: 'Earlier this week' };
+  if (at >= thisWeek) return { key: 'thisWeek', kind: 'thisWeek', label: words.week(0) };
   const lastWeek = weekStart(thisWeek - DAY / 2);
-  if (at >= lastWeek) return { key: 'lastWeek', kind: 'lastWeek', label: 'Last week' };
+  if (at >= lastWeek) return { key: 'lastWeek', kind: 'lastWeek', label: words.week(1) };
   const week = weekStart(at);
-  return { key: `week:${week}`, kind: 'week', label: `Week of ${formatShortDate(week, now)}` };
+  return { key: `week:${week}`, kind: 'week', label: `Week of ${words.shortDate(week, now)}` };
 }
 
 // Rows (already newest first) in their groups, newest group first.
-export function chooserGroups(rows: readonly ChooserRow[], now: number): ChooserGroup[] {
+export function chooserGroups(rows: readonly ChooserRow[], now: number, locale?: string): ChooserGroup[] {
   const groups: ChooserGroup[] = [];
   for (const row of rows) {
-    const group = groupOf(row.at, now);
+    const group = groupOf(row.at, now, locale);
     const last = groups.at(-1);
     if (last?.key === group.key) last.rows.push(row);
     else groups.push({ ...group, rows: [row] });

@@ -130,7 +130,7 @@ describe('an error notice', () => {
     cleanup();
     await act(async () => void render(<NoticeBody item={item(APP, 'auto_mode_unavailable', new Date(Date.now() - 5 * 60_000).toISOString())} seenHere />));
     expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
-    expect(screen.getByText('waiting 5m')).toBeTruthy();
+    expect(screen.getByText(`waiting ${REL.amount(5, 'minute')}`)).toBeTruthy();
     expect(acknowledged()).toEqual([]);
   });
 });

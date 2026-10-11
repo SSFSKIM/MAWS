@@ -64,7 +64,8 @@ test('usage: Session info keeps reset times while near-limit windows never post 
   try {
     // An unpinned routed session reads the drain target's windows.
     const quota = await open(page, QUOTA);
-    await expect(quota).toHaveText(/^5h 53% · resets in \d+h \d+m · Weekly 63% · resets in \d+[dh] \d+[hm] · from ClaudeUsage, shared by every session$/);
+    // the countdown's numbers and units are the system locale's (2h 37m; 2시간 37분: D2 widened, app/date-format.ts)
+    await expect(quota).toHaveText(/^5h 53% · resets in \d+(h|시간) \d+(m|분) · Weekly 63% · resets in \d+(d|h|일|시간) \d+(h|m|시간|분) · from ClaudeUsage, shared by every session$/);
 
     // A session pinned to another account shows that account's windows.
     const probe = await open(page, PROBE);

@@ -10,4 +10,5 @@ export const REL = {
   ago: (n: number, unit: Unit) => long.format(-n, unit), // 2 days ago, 2일 전
   agoNarrow: (n: number, unit: Unit) => narrow.format(-n, unit), // 3m ago, 3분 전
   in: (n: number, unit: Unit) => narrow.format(n, unit), // in 3m, 3분 후
+  amount: (n: number, unit: 'second' | 'minute' | 'hour' | 'day' | 'week') => new Intl.NumberFormat(undefined, { style: 'unit', unit, unitDisplay: 'narrow' }).format(n), // 2h, 2시간
 };
