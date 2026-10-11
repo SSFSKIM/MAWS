@@ -1,6 +1,6 @@
 // The one compact-summary preview (E11 F2b, plan 2.6): owner-aware, chosen before truncation.
 import { describe, expect, it } from 'vitest';
-import { previewLine } from './preview';
+import { markFreeText, previewLine } from './preview';
 
 describe('previewLine', () => {
   it('a plain answer is its first non-blank line, ANSI stripped and trimmed, capped', () => {
@@ -58,3 +58,34 @@ describe('previewLine', () => {
   });
 });
 
+
+// P2-F (the owner's ruling at P2-F's sitting, A5.3): a side thread's finished summary in its parent's transcript showed
+// the literal tags; the card reads the marks, the row shows the words.
+describe('markFreeText', () => {
+  it('drops every mark kind’s tags and keeps their words where they stood, a question’s choices after its words', () => {
+    const report = [
+      'Done with the pass.',
+      '<to-human>',
+      'The report body.',
+      '<essential>Decisive: ship it.</essential>',
+      '</to-human>',
+      '<need-input>Which branch?',
+      '<choice recommended>main</choice>',
+      '<choice>dev</choice></need-input>',
+      '<insight>A note.</insight>',
+    ].join('\n');
+    expect(markFreeText(report)).toBe('Done with the pass.\nThe report body.\nDecisive: ship it.\nWhich branch?\nmain · dev\nA note.');
+    expect(markFreeText('<need-input><choice recommended>Alpha</choice><choice>Beta</choice></need-input>')).toBe('Alpha · Beta');
+  });
+
+  it('keeps a mark glued to its neighbours apart from them, and plain text as written', () => {
+    expect(markFreeText('Intro<essential>Key</essential>Outro')).toBe('Intro\nKey\nOutro');
+    expect(markFreeText('Plain words, `code` and <div> stay.')).toBe('Plain words, `code` and <div> stay.');
+  });
+
+  it('grammar 2: tags quoted in code keep their literal text, and an unbalanced tag stays as written', () => {
+    expect(markFreeText('Use `<to-human>` to mark a message.\n<to-human>Done.</to-human>')).toBe('Use `<to-human>` to mark a message.\nDone.');
+    expect(markFreeText('```\n<need-input>Quoted?</need-input>\n```')).toBe('```\n<need-input>Quoted?</need-input>\n```');
+    expect(markFreeText('A stray </to-human> tag')).toBe('A stray </to-human> tag');
+  });
+});

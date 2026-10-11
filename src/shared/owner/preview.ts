@@ -38,3 +38,19 @@ export function previewLine(text: string, max: number): string | null {
   const line = candidates.find((candidate) => candidate !== null) ?? null;
   return line === null ? null : line.slice(0, max);
 }
+
+// A text with the owner's marks read through the grammar and their tags dropped (P2-F, the owner's ruling at P2-F's
+// sitting, A5.3): the words a side thread's finished summary shows in its parent's transcript, whose card reads the
+// marks themselves. Each mark's words stay where they stood, on their own line where a tag glued them to a neighbour, and
+// a question's choices follow its words (" · ", as `previewLine` reads them). Tags quoted in code and unbalanced tags
+// stay as written (grammar 2). ANSI is the caller's to strip.
+export function markFreeText(text: string): string {
+  let shown = '';
+  for (const part of parse(text)) {
+    const choices = part.kind === 'need-input' && part.choices ? part.choices.map((choice) => choice.text).join(' · ') : '';
+    const words = [part.text, choices].filter((piece) => piece !== '').join('\n');
+    const glued = shown !== '' && words !== '' && !/\s$/.test(shown) && !/^\s/.test(words);
+    shown += glued ? `\n${words}` : words;
+  }
+  return shown;
+}

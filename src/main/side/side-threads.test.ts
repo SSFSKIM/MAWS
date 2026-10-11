@@ -105,6 +105,18 @@ describe('side-thread rows in the parent’s stream', () => {
     expect(sideThreadEvents({ sessions: index.sessions, sideThreads: index.sideThreads }, parent.appId).find((e) => e.kind === 'side.thread.summarised')).toMatchObject({ text: 'to human Done.', turns: 2 });
   });
 
+  // P2-F (the owner's ruling at P2-F's sitting, A5.3): the row printed the literal to-human tags the card reads as marks
+  it('summarises a report without the owner’s mark tags, read through the grammar before the cap; tags quoted in code stay', () => {
+    index.sideThreads.opened(child.appId, parent.appId, '2026-10-06T12:00:00.000Z');
+    batch(child.appId, turnEnded({ resultText: '<to-human>\nThe count reads 1; `<to-human>` marks this.\n<essential>Ship it.</essential>\n</to-human>' }));
+    expect(emitted.map((e) => SessionEventSchema.parse(e))).toEqual([expect.objectContaining({ kind: 'side.thread.summarised', text: 'The count reads 1; `<to-human>` marks this.\nShip it.', turns: 1 })]);
+    // the cap counts the words shown, so a mark closing past 400 characters is still read
+    expect(summaryText(`<to-human>${'a'.repeat(395)}</to-human>`)).toBe('a'.repeat(395));
+    // a row an earlier build wrote with the tags in it reads clean in the parent's snapshot
+    index.sideThreads.summarised(child.appId, { id: 'e-old' as never, at: '2026-10-08T09:00:00.000Z', text: '<to-human>Done.</to-human>', isError: false });
+    expect(sideThreadEvents({ sessions: index.sessions, sideThreads: index.sideThreads }, parent.appId).find((e) => e.kind === 'side.thread.summarised')).toMatchObject({ text: 'Done.', turns: 2 });
+  });
+
   it('counts nothing from an engine-initiated turn, an echo receipt, an agent’s turn or the disk form, and a repeated batch once', () => {
     index.sideThreads.opened(child.appId, parent.appId, '2026-10-06T12:00:00.000Z');
     batch(child.appId, turnEnded({ origin: 'task-notification' }), turnEnded({ isEchoReceipt: true }), turnEnded({ agentId: 'a1' as never }), turnEnded({ seq: null, origin: null, resultText: null }));

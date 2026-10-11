@@ -44,6 +44,9 @@ const COMMENT = 'Why is the total recomputed here instead of cached?';
 const CHILD_REPLY = 'The total is recomputed because items can change between calls. Caching it would need an invalidation hook.';
 const CHILD_FOLLOW_UP = 'And would a memo help?';
 const CHILD_REPLY_2 = 'A memo keyed on the items array would help. It is cheap to add.';
+// P2-F (the owner's ruling at P2-F's sitting, A5.3): the second reply is a to-human report, whose tags the parent's row
+// must not print (the thread reads the mark)
+const CHILD_REPORT_2 = `<to-human>\n${CHILD_REPLY_2}\n</to-human>`;
 const PROMOTED_REPLY = 'Continuing from the side questions: the word was ZEBRA.';
 
 // ---- the bridge ------------------------------------------------------------------------------------------------------------
@@ -262,7 +265,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   test('2. Side thread: a fork of the parent opens in the Side pane on the line, answers there, sums itself up in the parent and nests under it in the sidebar; the main conversation receives nothing; a /btw typed in it answers under it', async () => {
     test.setTimeout(120_000);
     const c = await begin((cwd, dir) => {
-      const thread = threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY, CHILD_REPLY_2]);
+      const thread = threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY, CHILD_REPORT_2]);
       thread.sideQuestions(SIDE_QUESTION_ROWS);
       return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
     });
@@ -309,6 +312,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await threadPane.locator('[data-submit-state]').click();
     await expect(threadPane.getByText(CHILD_REPLY_2)).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText(`Side thread on app.ts:3 finished (2 turns): ${CHILD_REPLY_2}`);
+    await expect(row, 'the report’s tags are the thread’s to read, not the row’s to print').not.toContainText('to-human>');
     await expect(mainRegion(page).locator('[data-side-thread]'), 'one row per thread').toHaveCount(1);
     expect(writtenUsers(maws, child)).toHaveLength(2);
     expect(writtenUsers(maws, parent)).toHaveLength(1);

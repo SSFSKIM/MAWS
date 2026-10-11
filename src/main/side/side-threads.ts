@@ -7,6 +7,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
+import { markFreeText } from '@shared/owner/preview';
 import { stripAnsi } from '@shared/wire/ansi';
 import type { Emit, HostEvents } from '../sessions/context';
 import type { SideThreadRow, SideThreadStore } from '../index/side-threads';
@@ -30,11 +31,15 @@ const SUMMARY_CUT_FROM = 200;
 // or line end (dropped) past 200, else at 400 with an ellipsis. A sentence end is `.`, `!` or `?` before whitespace or
 // the end, and not an abbreviation's dot (`e.g.`), so a path, a number or an abbreviation is never cut mid-token. The
 // result text is what the engine displayed, so a MessageDisplay hook's colour codes are cleaned first, as the
-// transcript and the digest clean them (E11's sitting: escape fragments around "to human" in a side thread's row).
+// transcript and the digest clean them (E11's sitting: escape fragments around "to human" in a side thread's row). The
+// owner's mark tags are read and dropped before the cap, so a cut never splits a pair (P2-F, the sitting's A5.3: the
+// row printed the literal tags; the thread's card reads the marks).
 const SENTENCE_OR_LINE_END = /(?<!\.\w)[.!?](?=\s|$)|\n/g;
 
+const shownText = (text: string) => markFreeText(stripAnsi(text));
+
 export function summaryText(text: string): string {
-  const trimmed = stripAnsi(text).trim();
+  const trimmed = shownText(text).trim();
   if (trimmed.length <= SUMMARY_MAX) return trimmed;
   SENTENCE_OR_LINE_END.lastIndex = SUMMARY_CUT_FROM;
   const end = SENTENCE_OR_LINE_END.exec(trimmed);
@@ -72,7 +77,7 @@ export function summarisedEvent(row: SideThreadRow, child: SessionRecord): Sessi
     ...base(thread.parent, thread.sessionId, `${row.childAppSessionId}:summarised:${row.turns}`, row.summarisedAt),
     kind: 'side.thread.summarised',
     childAppSessionId: row.childAppSessionId,
-    text: row.text === null ? null : stripAnsi(row.text), // a row written before summaryText cleaned it (E11)
+    text: row.text === null ? null : shownText(row.text), // a row written before summaryText cleaned it (E11, P2-F)
     isError: row.isError,
     turns: row.turns,
   };
