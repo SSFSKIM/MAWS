@@ -23,6 +23,11 @@
 // that pane as the deliverable's re-dock does (the page shows in the main area), so while a browser card draws the
 // thread the pane says so with Show here, which closes the card and draws the thread here again, as Go to tab does for a
 // main tab.
+//
+// P2-F (the owner's ruling at P2-F's sitting, A5b.2): when Browser is a tool of this panel and the Side pane took its
+// place, no pane holds the page, so "Show in browser" is not offered; while the page is still a tab of the thread's
+// browser, "Reopen in browser" makes Browser the panel's tool again on that tab and opens the thread's card for the
+// panel's pane to claim, as "Show in deliverable" does for its viewer.
 import { useEffect } from 'react';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -46,6 +51,12 @@ import { openDeliverable } from '../tools/maws/actions';
 import { closeCard, openCard, targetOf, useCommentCard } from './card/store';
 // P2-E1 end
 import { usePageDock } from '../tools/browser/comment/dock'; // P2-F L146
+// P2-F start: Reopen in browser
+import { panelHost } from '../panel/host';
+import { browserTool, type BrowserParams } from '../tools/browser/BrowserTool';
+import { browserSessionOf } from '../tools/browser/comment/actions';
+import { useBrowser } from '../tools/browser/store';
+// P2-F end
 
 const COPY = SIDE_COPY.pane;
 
@@ -61,6 +72,19 @@ function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: An
 // P2-F L146: the card opens unclaimed, for the browser pane on its page to claim
 const showInBrowser = (parent: AppSessionId, child: AppSessionId, anchor: Anchor): void =>
   openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null } });
+
+// P2-F: the thread's page as a tab of its browser's session, while this panel holds the Browser tool, else null
+function usePanelPageTab(panel: AppSessionId, child: AppSessionId, pageUrl: string | null): { session: AppSessionId; tabId: string } | null {
+  const session = browserSessionOf(child);
+  const tabId = useBrowser((s) => (pageUrl === null ? null : (s.sessions.get(session)?.tabs.find((tab) => tab.url === pageUrl)?.tabId ?? null)));
+  const holdsBrowser = useLayout((s) => s.effectivePanelTabs(panel).some((ref) => ref.toolId === browserTool.id));
+  return tabId !== null && holdsBrowser ? { session, tabId } : null;
+}
+
+function reopenInBrowser(parent: AppSessionId, child: AppSessionId, anchor: Anchor, { session, tabId }: { session: AppSessionId; tabId: string }): void {
+  panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId: session, params: { tabId, appSessionId: session }, activate: true }); // this pane yields the panel
+  openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
+}
 
 // The first question of a promoted thread: the first `Q:` line of its promotion prompt (the user row whose anchor is
 // the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history). The
@@ -98,6 +122,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d end
   const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable
   const pageDock = usePageDock(pageUrl ?? null); // P2-F L146: a pane of this window on the thread's page
+  const panelPage = usePanelPageTab(parent, child, pageUrl ?? null); // P2-F: the page, a tab the panel's Browser holds
 
   return (
     <div data-side-thread-view={child} className="flex h-full min-h-0 flex-col">
@@ -160,6 +185,11 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
         {!inMain && !inCard && pageDock !== null && anchor !== null && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => showInBrowser(parent, child, anchor)}>
             {COPY.showInBrowser}
+          </button>
+        )}
+        {!inMain && !inCard && pageDock === null && panelPage !== null && anchor !== null && (
+          <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => reopenInBrowser(parent, child, anchor, panelPage)}>
+            {COPY.reopenInBrowser}
           </button>
         )}
         {!inMain && (

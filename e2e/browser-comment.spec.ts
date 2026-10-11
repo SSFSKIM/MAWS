@@ -10,7 +10,8 @@
 // bottom band in view, and moves nothing for one the shrunk page still shows; (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
-// pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (3) G2 without E4c: every target's anchor
+// pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (2c) P2-F: the Side pane
+// taking the panel's Browser's place, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -657,6 +658,68 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await expect(pane.getByRole('group', { name: 'Approval needed' })).toContainText('echo the-count');
       await expect(pane.locator('header').getByRole('button', { name: 'Show in browser' })).toBeVisible();
       await expectOnPane(s, t.tabId, paneIn(main), 'main');
+    },
+  );
+});
+
+// ---- (2c) P2-F: the Side pane took the panel's Browser's place ---------------------------------------------------------
+
+test('2c. with Browser the panel’s tool, the Side pane taking its place offers Reopen in browser (not Show in browser), which makes Browser the panel’s tool again with the thread’s card docked under the page', async () => {
+  test.setTimeout(240_000);
+  let parentJournal = '';
+  await commentScene(
+    {
+      titles: ['E4d: parent'],
+      fixtures: (scratch) => {
+        // as case 2b's
+        writeFileSync(join(scratch.config, '.claude.json'), `${JSON.stringify({ projects: { [scratch.repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+        writeFileSync(join(scratch.config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+        const dir = join(scratch.root, 'journals');
+        mkdirSync(dir, { recursive: true });
+        const parent = new SideJournal(PARENT, scratch.repo);
+        parent.turn(MAIN_REPLY);
+        parentJournal = parent.write(dir, 'parent');
+        const thread = new SideJournal(CHILD, scratch.repo);
+        const first = thread.prompt();
+        thread.rename(INCREMENT_LABEL);
+        thread.permission(first, 'Bash', { command: 'echo the-count', description: 'Read the count' });
+        return [thread.write(dir, 'thread')];
+      },
+    },
+    async (s) => {
+      const [parent] = s.ids as [AppSessionId];
+      await launchReady(s.page, parent, parentJournal, { cwd: s.repo, gateway: 'direct' });
+      const t = await openCommentPage(s, parent); // the page in the panel's Browser
+
+      // a Side thread from a pick, handed to the Side pane, which takes the panel from Browser
+      await arm(s, t);
+      await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
+      let card = cardOf(s, INCREMENT_LABEL);
+      await expect(card).toBeVisible();
+      await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
+      await card.getByRole('button', { name: 'Send' }).click();
+      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+      await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission', { timeout: 20_000 });
+      await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
+      await expect(card).toHaveCount(0);
+      const pane = s.panel.locator('[data-side-thread-view]');
+      await expect(pane, 'the Side pane draws the thread').toBeVisible();
+      await expect(t.panel, 'the panel’s Browser gave way').toHaveCount(0);
+      const header = pane.locator('header');
+      await expect(header.getByRole('button', { name: 'Show in browser' }), 'no pane holds the page').toHaveCount(0);
+
+      // Reopen in browser: Browser is the panel's tool again on the page, the thread in the card under it, no caret
+      await header.getByRole('button', { name: 'Reopen in browser' }).click();
+      await expect(t.panel).toBeVisible();
+      await expect(pane).toHaveCount(0);
+      card = t.panel.locator('[data-card-dock] [data-comment-card]');
+      await expect(card).toHaveAttribute('data-card-phase', 'thread');
+      await expect(card.locator('[data-needs-you]'), 'the thread’s request, in the card again').toContainText('Waiting for your permission');
+      await expect(t.panel.locator('[data-card-caret]'), 'no caret: no pick position is stored').toHaveCount(0);
+      await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+      const view = (await viewOf(s, t.tabId))!;
+      expect(view.visible && !(await tabState(s, t.tabId)).tab?.covered, 'the page stays up over the card').toBe(true);
+      expect((await card.boundingBox())!.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);
     },
   );
 });

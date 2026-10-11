@@ -298,6 +298,58 @@ describe('the Side pane', () => {
       render(<ThreadView parent={A} child={ONE} visible />);
       expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
     });
+
+    // P2-F S-browser-return (the owner's ruling at P2-F's sitting, A5b.2): Browser was the panel's tool and the Side pane
+    // took its place, so no pane holds the page; the Side pane reopens Browser in the panel and re-docks the thread there
+    describe('Reopen in browser', () => {
+      const REOPEN = 'Reopen in browser';
+      let main: ReturnType<typeof installFakeMain>;
+      beforeEach(() => {
+        registerPanelTool(browserTool);
+        main = installFakeMain(() => ok());
+        withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
+      });
+      const browserInPanel = () => act(() => void panelHost.addTool(browserTool.id, { appSessionId: A, activate: false }));
+
+      it('is offered while the page is a tab of the parent’s browser held by the panel’s Browser and no pane of this window shows it', () => {
+        withTab(PAGE);
+        act(() => openSideThread(A, ONE));
+        mount();
+        expect(screen.queryByRole('button', { name: REOPEN })).toBeNull(); // the panel holds no Browser
+        browserInPanel();
+        expect(screen.getByRole('button', { name: REOPEN })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
+        act(() => void offs.push(registerDock(T1, 'pane-1')));
+        expect(screen.queryByRole('button', { name: REOPEN }), 'a pane holds the page: Show in browser instead').toBeNull();
+        expect(screen.getByRole('button', { name: SHOW })).toBeTruthy();
+        act(() => offs.splice(0).forEach((off) => off()));
+        withTab('http://127.0.0.1:4000/other.html');
+        expect(screen.queryByRole('button', { name: REOPEN }), 'the page is gone from the browser').toBeNull();
+      });
+
+      it('reopens Browser in the panel on the page’s tab and opens the thread’s card for the panel’s pane to claim', async () => {
+        withTab(PAGE);
+        browserInPanel();
+        act(() => openSideThread(A, ONE));
+        mount();
+        await userEvent.click(screen.getByRole('button', { name: REOPEN }));
+        const browserTabRef = panelOf(A)!.tabs.find((t) => t.toolId === browserTool.id)!;
+        expect(panelOf(A)!.activeTabId, 'Browser is the panel’s tool again').toBe(browserTabRef.id);
+        expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: A, tabId: T1 }]);
+        expect(useCommentCard.getState().open).toMatchObject({
+          parent: A, anchor: ELEMENT, host: 'browser', hostId: null, claimMode: 'panel', rect: null,
+          target: { kind: 'browser', pageUrl: PAGE }, phase: { kind: 'thread', child: ONE, echo: null },
+        });
+      });
+
+      it('is hidden while a main tab shows the thread', () => {
+        withTab(PAGE);
+        browserInPanel();
+        act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: ONE }));
+        render(<ThreadView parent={A} child={ONE} visible />);
+        expect(screen.queryByRole('button', { name: REOPEN })).toBeNull();
+      });
+    });
   });
 });
 
