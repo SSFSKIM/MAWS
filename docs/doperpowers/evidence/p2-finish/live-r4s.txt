@@ -1,0 +1,44 @@
+P2-F live re-run R4s: e2e/p1-live.spec.ts -g S3:
+head e3fbf229257f0da4920cb8e38344d6d4e44aee97; 2026-10-11T17:46:30Z; load { 12.09 16.27 18.50 }
+variables: MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=0.60 MAWS_P1_LIVE_OUT=docs/doperpowers/evidence/p2-finish/r4s
+relay GET /api/hello: 200
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+eligible: load 12.09 after 0s
+harness build: exit 0
+eligible: load 10.74 after 0s
+run: exit 0
+-- the run's lines (results, spend, A-15, survivors, cases):
+[1/4] e2e/p1-live.spec.ts:508:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 1 artifacts: create, main’s real capture whose PNG shows the page’s colour, update; the row, the Deliverables tool, v2 and its switch, the record
+e2e/p1-live.spec.ts:508:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 1 artifacts: create, main’s real capture whose PNG shows the page’s colour, update; the row, the Deliverables tool, v2 and its switch, the record
+   [s3] engine: ~/.local/share/claude/versions/2.1.296 (2.1.296), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641, Haiku, default permission mode; spent so far S3 US$0.0000 of US$0.50, the run US$0.0000 of US$0.60
+   [s3] A-15 before the case: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+   [s3]   charged US$0.3700 to S3 for the launch budget of parent (counted beyond a0053d99-2613-4d66-ad02-96b2a9be7f5f's receipts) [s3:launch:a0053d99-2613-4d66-ad02-96b2a9be7f5f]; S3 US$0.3700 of US$0.50, the run US$0.3700 of US$0.60
+   [s3] parent a0053d99-2613-4d66-ad02-96b2a9be7f5f: launched on Haiku, default mode, maxBudgetUsd 0.3700 (the smaller of what S3 and the run leave, less US$0.1300 held back for the side thread’s allocation and the side question’s reservation), resuming 10e08db2-28ce-4274-ba11-87b756cb15d7 in place; pid 81120
+[2/4] e2e/p1-live.spec.ts:584:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 2 a comment picked on the artifact goes to a Side thread that lives in the card: it edits the page and updates the parent’s artifact (its permissions answered in the card), answers there and sums itself up in the parent; the parent’s turns unchanged
+e2e/p1-live.spec.ts:584:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 2 a comment picked on the artifact goes to a Side thread that lives in the card: it edits the page and updates the parent’s artifact (its permissions answered in the card), answers there and sums itself up in the parent; the parent’s turns unchanged
+   [s3]   charged US$0.0800 to S3 for the side thread’s allocation (reserved until its journal settles it) [s3-fork]; S3 US$0.4500 of US$0.50, the run US$0.4500 of US$0.60
+   [s3] case 2: thread eed30f93-6b08-45e0-991f-2386c74aedde (lineage {"kind":"side-thread","openedBy":"comment","anchor":{"kind":"artifact-element","locator":"#title","label":"P1 page v2 › h1#title “P1 live page, version 2”"}}); its maws calls [["artifact_update",{"id":"p1-page","html_path":"page-v2.html"}]]; artifact_update answered {"status":"updated","id":"p1-page","deliverableId":"1bd6987c-5c47-46a5-9b57-5a2a5ba40c31","version":3,"title":"P1 page","externalReferences":0,"ownerAppSessionId":"a0053d99-2613-4d66-ad02-96b2a9be7f5f"}; the parent's record 2 → 3 versions, the latest's title "P1 live page, commented"; deliverables under the thread: none; the viewer at v3; its reply "ANCHORED"; permissions allowed in the card ["Bash","mcp__maws__artifact_update"]; the parent's row "Side thread on P1 page v2 › h1#title “P1 live page, version 2” finished: ANCHOREDOpen"; the parent's turns 1 → 1, its written prompts 1 → 1; the fork inherits the parent's --max-budget-usd (Q12), within the run's cap by the test's US$0.08 allocation
+   [s3]   side thread eed30f93-6b08-45e0-991f-2386c74aedde stopped; spend 0.0046 for the case's profile so far; journals /private/tmp/maws-e11-p1live-r80306/s3/user-data/engine-host/journal/eed30f93-6b08-45e0-991f-2386c74aedde
+   [s3]   A-15 after side thread: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+   [s3]   charged US$0.0000 to S3 for the side thread beyond its receipts (its journal shows US$0.0021, counted there) [s3-fork]; S3 US$0.3722 of US$0.50, the run US$0.3722 of US$0.60
+[3/4] e2e/p1-live.spec.ts:679:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row
+e2e/p1-live.spec.ts:679:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 3 Send to main: a comment sent mid-turn steers the parent at its next tool boundary, drawn as the anchored prompt row
+   [s3] case 3: the parent may spend up to US$0.3676 more under its launch budget US$0.3700 (reserved); S3 US$0.3722 of US$0.50, the run US$0.3722 of US$0.60
+[4/4] e2e/p1-live.spec.ts:721:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged
+e2e/p1-live.spec.ts:721:7 › S3: deliverables, a side thread, Send to main and /btw through the app (items 5, 6, 10) › 4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged
+   [s3]   charged US$0.0500 to S3 for the /btw side question (reserved: answered with no result frame) [s3-btw]; S3 US$0.4221 of US$0.50, the run US$0.4221 of US$0.60
+   [s3]   parent a0053d99-2613-4d66-ad02-96b2a9be7f5f stopped; spend 0.0053 for the case's profile so far; journals /private/tmp/maws-e11-p1live-r80306/s3/user-data/engine-host/journal/a0053d99-2613-4d66-ad02-96b2a9be7f5f
+   [s3]   A-15 after parent: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+   [s3]   A-15 after the app closed: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+   [s3] survivor check: none of 9 recorded pids (80698, 81120, 83080, 80896, 80903, 80908, 80938, 80939, 82976) and no process naming /private/tmp/maws-e11-p1live-r80306/s3; maws-supervisor processes: 1480 maws-supervisor --disable-sigusr1 /Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-K5vZGsgh.js --detached /Users/new/Library/Application Support/MAWS/supervisor
+   [s3]   charged US$0.3700 to S3 for the launch budget of parent, kept whole: a prompt went unreceipted (its receipts US$0.0032) (counted beyond a0053d99-2613-4d66-ad02-96b2a9be7f5f's receipts) [s3:launch:a0053d99-2613-4d66-ad02-96b2a9be7f5f]; S3 US$0.4221 of US$0.50, the run US$0.4221 of US$0.60
+   [s3] spend: the case's profile 0.0053; S3 US$0.4221 of US$0.50, the run US$0.4221 of US$0.60
+  4 passed (46.5s)
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+survivor check (processes naming a scratch root or a MAWS e2e build, after the run):
+ 6648 /bin/zsh -c source /Users/new/.claude/shell-snapshots/snapshot-zsh-1791607379566-4uniou.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unal
+68212 /bin/zsh /tmp/maws-review/p2f-live-S.sh 4s e2e/p1-live.spec.ts -g S3: -- MAWS_P1_LIVE=1 MAWS_P1_LIVE_MAX_USD=0.60 MAWS_P1_LIVE_OUT=docs/doperpowers/evidence/p2-finish/r4s
+(end of survivor list)
+full log: /tmp/maws-review/p2f-live-r4s.log
+-- spend: receipts US$0.0053 for the S3 profile (the side thread's US$0.0021 inside it; p2f-spend.py over the root US$0.00529); the spec's conservative charge US$0.4221 of its US$0.60 cap (the parent's launch budget US$0.37 kept whole, one prompt unreceipted; the /btw US$0.05 reserved).
+-- the root /private/tmp/maws-e11-p1live-r80306 removed after the run

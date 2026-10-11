@@ -1,0 +1,148 @@
+P2-F live re-run R2bs: e2e/plugins-live.spec.ts 
+head e3fbf229257f0da4920cb8e38344d6d4e44aee97; 2026-10-11T17:35:20Z; load { 8.13 17.46 22.16 }
+variables: MAWS_E8_LIVE=1 MAWS_LIVE_MAX_USD=0.15
+relay GET /api/hello: 200
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+eligible: load 8.13 after 0s
+harness build: exit 0
+eligible: load 7.23 after 0s
+run: exit 1
+-- the run's lines (results, spend, A-15, survivors, cases):
+[1/1] e2e/plugins-live.spec.ts:222:5 › E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session
+  1) e2e/plugins-live.spec.ts:222:5 › E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session 
+    Error: 05-install: expect(locator).toBeVisible() failed |  | Locator: locator('[data-widget="plugins"]').locator('[data-plugins-section="browse"]').locator('[data-browse-card]').first() | Expected: visible | Timeout: 120000ms | Error: element(s) not found
+    09-skills: expect(locator).toBeVisible() failed |  | Locator: locator('[data-widget="skills"]').locator('[data-skills-group="added"] [data-skill-row="e8-probe:e8-hello"]') | Expected: visible | Timeout: 30000ms | Error: element(s) not found
+    +   "05-install: expect(locator).toBeVisible() failed |  | Locator: locator('[data-widget=\"plugins\"]').locator('[data-plugins-section=\"browse\"]').locator('[data-browse-card]').first() | Expected: visible | Timeout: 120000ms | Error: element(s) not found",
+    +   "09-skills: expect(locator).toBeVisible() failed |  | Locator: locator('[data-widget=\"skills\"]').locator('[data-skills-group=\"added\"] [data-skill-row=\"e8-probe:e8-hello\"]') | Expected: visible | Timeout: 30000ms | Error: element(s) not found",
+  1 failed
+    e2e/plugins-live.spec.ts:222:5 › E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session 
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+survivor check (processes naming a scratch root or a MAWS e2e build, after the run):
+ 6648 /bin/zsh -c source /Users/new/.claude/shell-snapshots/snapshot-zsh-1791607379566-4uniou.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unal
+85202 /bin/zsh /tmp/maws-review/p2f-live-S.sh 2bs e2e/plugins-live.spec.ts -- MAWS_E8_LIVE=1 MAWS_LIVE_MAX_USD=0.15
+(end of survivor list)
+full log: /tmp/maws-review/p2f-live-r2bs.log
+-- spend: 1 failed: 05-install's Browse card and 09-skills' row not seen after plugins.available timed out at the bridge (10,002 ms, its CLI still running) at load 17 to 22; a timing-only red, no file of it touched by wave S; retried alone as R2bs2 (live-r2bs2.txt), passed; spend not counted (no transcript usage beyond the retry's scale)
+-- the spec's own log (/private/tmp/maws-e8-live-YpxS7Z/live-run.txt, copied; the root then removed):
+engine cap: US$0.15 at the engine through /private/tmp/maws-e8-live-YpxS7Z/claude-capped
+E8 live run · 2026-10-11T17:35:55.264Z · engine 2.1.296 · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-YpxS7Z/claude-config · marketplace /private/tmp/maws-e8-live-YpxS7Z/market · repository /private/tmp/maws-e8-live-YpxS7Z/e8-repo
+Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet's command and writes, the row's words once it ended) and each listing (the widget's opening reads, Browse's catalogue read). The delta covers the config home (config/…) and the project's .claude/ (project/…); a file's fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.
+
+=== 01-start · a session through + on haiku, one turn so system/init lists its plugins
+session 747e14eb-5c75-46ea-ae23-9b30d2f7f9ad: ready · model claude-haiku-5-5[1m] · gateway routed · plugins loaded 3
+loaded before any install: cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin
+
+=== 02-plugins · /plugins lists the engine’s (empty) registry
+--- listing: opening /plugins (plugin list --json, plugin marketplace list --json)
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.list 718 ms · plugins.list 727 ms
+opening /plugins (plugin list --json, plugin marketplace list --json): a listing (D-12: the catalogue caches and .claude.json bookkeeping only)
+delta: none
+verdict: no configuration write
+installed: Add your first plugins ·  · Give Claude role-level expertise with plugins. Add them from Browse. ·  · MAWS mods · Built in · 1 · To-human · Built in · Agents mark what is for you: messages, must-reads, insights and questions you answer in place. · MAWS gives the agent its instructions · This session · Default (On) · On · Off · Version 1
+loaded line: 3 plugins loaded in this session
+·
+Loaded now
+Reload plugins
+Reload skills
+marketplaces: Manage marketplaces ·  · Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins. ·  · No marketplaces added yet. ·  · Done
+
+=== 03-add-folder · Add › Add marketplace: the scratch folder
+--- marketplace-add: add-folder
+sheet: claude-capped plugin marketplace add /private/tmp/maws-e8-live-YpxS7Z/market --json
+sheet writes: /private/tmp/maws-e8-live-YpxS7Z/claude-config/settings.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/marketplaces/
+sheet then: Nothing to reload: an added marketplace loads no plugin
+row: Successfully added marketplace: e8-scratch (declared in user settings)
+(writesOf marketplace-add, user, directory)
+CLI reads settled in this window: plugins.env 0 ms · marketplaces.add 1 ms · marketplaces.list 717 ms · plugins.list 720 ms
+manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/
+delta:
+  added   config/.last-cleanup   [session files]
+  added   config/plugins/known_marketplaces.json   [manifest]
+  added   config/plugins/marketplaces/   [manifest]
+  changed config/settings.json   [manifest]
+verdict: every configuration write inside the manifest
+
+=== 04-add-repo · Add marketplace: anthropics/claude-plugins-official from GitHub (network-dependent), then Remove…
+--- marketplace-add: add-repo
+sheet: claude-capped plugin marketplace add anthropics/claude-plugins-official --json
+sheet writes: /private/tmp/maws-e8-live-YpxS7Z/claude-config/settings.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/marketplaces/<name>/
+sheet then: Nothing to reload: an added marketplace loads no plugin
+row: SSH not configured, cloning via HTTPS: https://github.com/anthropics/claude-plugins-official.git ⏎ Refreshing marketplace cache (timeout: 120s)… ⏎ Cloning repository (timeout: 120s): https://github.com/anthropics/claude-plugins-official.git ⏎ Clone complete, validating marketplace… ⏎ Cleaning up old marketplace cache… ⏎ Successfully added marketplace: claude-plugins-official (declared in user settings)
+(writesOf marketplace-add, user, null)
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.add 0 ms · marketplaces.list 715 ms · plugins.list 718 ms
+manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/claude-plugins-official/
+delta:
+  added   config/plugins/marketplaces/claude-plugins-official/   [manifest]
+  changed config/plugins/known_marketplaces.json   [manifest]
+  changed config/settings.json   [manifest]
+verdict: every configuration write inside the manifest
+row: claude-plugins-official · anthropics/claude-plugins-official
+--- marketplace-remove: remove-repo
+sheet: claude-capped plugin marketplace remove claude-plugins-official --json
+sheet writes: /private/tmp/maws-e8-live-YpxS7Z/claude-config/settings.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-YpxS7Z/claude-config/plugins/marketplaces/claude-plugins-official/
+sheet then: Reloads plugins in 1 running session
+row: Successfully removed marketplace: claude-plugins-official · Reloaded in 1 session
+(writesOf marketplace-remove, user, github)
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.remove 1 ms · marketplaces.list 724 ms · plugins.list 725 ms
+manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/claude-plugins-official/
+delta:
+  removed config/plugins/marketplaces/claude-plugins-official/   [manifest]
+  changed config/plugins/known_marketplaces.json   [manifest]
+  changed config/settings.json   [manifest]
+verdict: every configuration write inside the manifest
+
+=== 05-install · Install e8-probe@e8-scratch from its Browse card at user scope: reflected, the Loaded list and the panel before any new turn
+--- listing: opening Browse (plugin list --json --available)
+FAILED: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |  | Locator: locator('[data-widget="plugins"]').locator('[data-plugins-section="browse"]').locator('[data-browse-card]').first() | Expected: visible | Timeout: 120000ms | Error: element(s) not found
+
+=== 06-panel-reload · the panel’s Plugins section: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills
+FAILED: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed |  | Locator: locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' }) | Expected substring: [32m"Plugins[7m · 4 loaded[27m"[39m | Received string:    [31m"Plugins[7mPlugins · 3 loadedLoaded nowReload pluginsReload skills[27m"[39m | Timeout: 5000ms
+
+=== 07-refresh · Manage marketplaces › Check for updates on e8-scratch
+--- listing: opening /plugins (plugin list --json, plugin marketplace list --json)
+FAILED: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+
+=== 08-update · plugin.json rewritten to 0.2.0, then Update: 0.1.0 → 0.2.0
+FAILED: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+
+=== 09-skills · /skills after the next turn lists e8-probe:e8-hello under its plugin’s group, badged E8 probe
+FAILED: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |  | Locator: locator('[data-widget="skills"]').locator('[data-skills-group="added"] [data-skill-row="e8-probe:e8-hello"]') | Expected: visible | Timeout: 30000ms | Error: element(s) not found
+
+=== 10-disable · the detail’s switch: disable; the Loaded list loses e8-probe
+--- listing: opening /plugins (plugin list --json, plugin marketplace list --json)
+FAILED: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+
+=== 11-enable · the detail’s switch: enable; the Loaded list regains e8-probe
+FAILED: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+
+=== 12-uninstall · the detail’s Uninstall…: the plugin leaves, the detail returns to the list, the result stays; the Loaded list loses e8-probe
+FAILED: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+
+=== 13-offer-nope · the marketplace offers `nope`: Check for updates reads it in, and Browse lists it
+FAILED: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('button', { name: 'Add', exact: true })[22m | 
+
+=== 14-error · install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code
+--- listing: opening Browse (plugin list --json --available)
+FAILED: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+
+=== 15-reinstall · Install e8-probe@e8-scratch again, so the marketplace is removed with a plugin still installed
+--- listing: opening Browse (plugin list --json --available)
+FAILED: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+
+=== 16-remove-folder · Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays
+FAILED: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('button', { name: 'Add', exact: true })[22m | 
+
+console errors: []
+result: 12 step(s) failed:
+05-install: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |  | Locator: locator('[data-widget="plugins"]').locator('[data-plugins-section="browse"]').locator('[data-browse-card]').first() | Expected: visible | Timeout: 120000ms | Error: element(s) not found
+06-panel-reload: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed |  | Locator: locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' }) | Expected substring: [32m"Plugins[7m · 4 loaded[27m"[39m | Received string:    [31m"Plugins[7mPlugins · 3 loadedLoaded nowReload pluginsReload skills[27m"[39m | Timeout: 5000ms
+07-refresh: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+08-update: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+09-skills: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed |  | Locator: locator('[data-widget="skills"]').locator('[data-skills-group="added"] [data-skill-row="e8-probe:e8-hello"]') | Expected: visible | Timeout: 30000ms | Error: element(s) not found
+10-disable: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+11-enable: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+12-uninstall: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('radio', { name: 'My items' })[22m | 
+13-offer-nope: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('button', { name: 'Add', exact: true })[22m | 
+14-error: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+15-reinstall: plugins.available was answered timeout by the bridge after 10002 ms while its CLI kept running: the audit cannot tell when its writes end
+16-remove-folder: locator.click: Timeout 30000ms exceeded. | Call log: | [2m  - waiting for locator('[data-widget="plugins"]').getByRole('button', { name: 'Add', exact: true })[22m | 

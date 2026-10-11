@@ -1,0 +1,51 @@
+P2-F live re-run R1s: e2e/sessions-available-live.spec.ts 
+head e3fbf229257f0da4920cb8e38344d6d4e44aee97; 2026-10-11T17:31:21Z; load { 8.95 29.16 26.78 }
+variables: MAWS_P2A_LIVE=1 MAWS_LIVE_MAX_USD=0.20
+relay GET /api/hello: 200
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+eligible: load 8.95 after 0s
+harness build: exit 0
+eligible: load 9.77 after 0s
+run: exit 0
+-- the run's lines (results, spend, A-15, survivors, cases):
+[1/1] e2e/sessions-available-live.spec.ts:151:5 › P2-A live: discovered sessions open with nothing started; Send, Load now and Refresh start them; a relaunch keeps the observed facts
+e2e/sessions-available-live.spec.ts:151:5 › P2-A live: discovered sessions open with nothing started; Send, Load now and Refresh start them; a relaunch keeps the observed facts
+  1 passed (13.6s)
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b
+survivor check (processes naming a scratch root or a MAWS e2e build, after the run):
+ 6648 /bin/zsh -c source /Users/new/.claude/shell-snapshots/snapshot-zsh-1791607379566-4uniou.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unal
+ 6654 /bin/zsh /tmp/maws-review/p2f-live-S.sh 1s e2e/sessions-available-live.spec.ts -- MAWS_P2A_LIVE=1 MAWS_LIVE_MAX_USD=0.20
+(end of survivor list)
+full log: /tmp/maws-review/p2f-live-r1s.log
+-- spend: US$0.00237 (the run's journals, /tmp/maws-review/p2f-spend.py); a second, empty module-level root /private/tmp/maws-p2a-live-x32zV2 removed (the tracked P3 row)
+-- the spec's own log (/private/tmp/maws-p2a-live-Id3cMD/live-run.txt, copied; the root then removed):
+P2-A live acceptance · 2026-10-11T17:31:54.505Z · engine 2.1.296 (~/.local/share/claude/versions/2.1.296) · cap US$0.2 at the engine through /private/tmp/maws-p2a-live-Id3cMD/claude-capped · relay http://127.0.0.1:8641 · scratch /private/tmp/maws-p2a-live-Id3cMD
+A-15 before: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files before: ~/.claude.json sha256 a818bf61e695262adbf6163bdf6ca8703bd31de6bbf09f3398fd5c2a2c5648d7 · ~/.claude/settings.json sha256 c6ed4149797b2ed4b0709e3024743dd7e07385a007f78f1a55d28a20f6341534
+discovered: a2a2e000-0000-4000-8000-0000000000a1 → 64cb6c0b-38a2-4956-a5b4-21cbf0a7be39; a2a2e000-0000-4000-8000-0000000000a2 → ba18bf28-af9d-448a-99bd-d327d7ce8b90
+
+=== 01-open · a discovered terminal session opened: nothing launches; Session info reads Not observed yet
+Session info Main: Not observed yet · journal directory: absent
+
+=== 02-send · Send "Reply with OK": the composer reads Starting…, then the reply streams in the same conversation
+control read: Starting…
+spawn args: -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local --permission-mode auto --resume a2a2e000-0000-4000-8000-0000000000a1 --append-system-prompt --settings · engine session a2a2e000-0000-4000-8000-0000000000a1 · model {"requested":null,"resolved":"claude-haiku-5-5[1m]"} · user frames 1
+reply: "Message\n\nOK" · spend US$0.00237
+
+=== 03-stop-send · the sent session stopped
+
+=== 04-skills-prepare · the other session started once with no prompt (Session info’s Refresh) and stopped: an exited MAWS-run session
+launches so far: 1; user frames 0
+
+=== 05-skills · /skills on the exited MAWS-run session: Not read yet. with Load now, which says Starting… and then shows the skill
+frame read: Starting…
+skills rows: ["/\np2a-hello\nSays hello, for the P2-A live acceptance.\nUse in chat"]
+
+=== 06-relaunch · quit and relaunch: the ring reads Last reading, …, Session info Last observed …, and nothing starts
+after relaunch: {"main":"claude-haiku-5-5[1m] · Last observed 지금","context":"18,888 of 1,000,000 · 2% · autocompact at 967,000 · Last observed 지금","ring":"Context window 2% full of 1M · Last reading, 지금"} · engines running: 0
+
+teardown: MAWS closed cleanly
+A-15 after: 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b (identical)
+owner files after: ~/.claude.json sha256 a818bf61e695262adbf6163bdf6ca8703bd31de6bbf09f3398fd5c2a2c5648d7 · ~/.claude/settings.json sha256 c6ed4149797b2ed4b0709e3024743dd7e07385a007f78f1a55d28a20f6341534
+~/.claude.json keys whose digest moved: [] · mtime 2026-10-11T17:31:06.528Z
+spend: US$0.00237 (the sent session's receipts; the two no-prompt starts made no model request)

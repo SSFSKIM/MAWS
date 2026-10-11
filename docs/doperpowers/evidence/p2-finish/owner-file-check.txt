@@ -23,3 +23,20 @@ M4.1, the live re-runs on the final head 9b111d5c (engine 2.1.296 under scratch 
       the spec's conservative charge US$0.4221 (an unreceipted prompt's launch budget kept whole, the /btw reserved)
 Spend so far: receipts about US$0.0367 (L99 US$0.0051 + R1 to R4 about US$0.0316); counted conservatively (R4 at its charge) about US$0.452; both under the child's US$2.00 (Constraint 11).
 A-15 after the last run (2026-10-10): 26 keys, sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b, the M0 baseline unchanged.
+
+Wave S (4.5), the live re-runs on e3fbf229 (code 87053f9d; engine 2.1.296 under scratch config homes, through the relay, Haiku), each
+through /tmp/maws-review/p2f-live-S.sh (a copy of p2f-live.sh) with its A-15 reading before and after; every pair identical (26 keys,
+sha1 ae14a6db5b459b9c44163d3af24237aa8ad1372b); no survivor; every scratch root of these runs removed (two empty module-level roots
+among them, the tracked P3 row). Re-run because each run's surface moved in wave S (Decision Log 29: R1 the launcher and the chip, R2
+the library's dates, R3 the attention dwell and the owner preview, R4 the side thread's launch budget and its summary):
+  R1s  e2e/sessions-available-live.spec.ts: passed; US$0.00237 (journals)                                      live-r1s.txt
+  R2as e2e/plugins-library-live.spec.ts: passed; about US$0.0025 (1 Haiku call; tokens)                        live-r2as.txt
+  R2bs e2e/plugins-live.spec.ts: 1 failed (plugins.available timed out at the bridge at load 17 to 22; 05-install
+       and 09-skills followed from it); about US$0.005 (tokens, by shape)                                        live-r2bs.txt
+  R2bs2 the same, retried alone (Design §9's timing-only rule): passed; about US$0.005 (2 Haiku calls; tokens)    live-r2bs2.txt
+  R3s  e2e/to-human-live.spec.ts (OUT p2-finish/r3s): passed; US$0.0153 (journals)                              live-r3s.txt, r3s/
+  R4s  e2e/p1-live.spec.ts -g "S3:" (OUT p2-finish/r4s): 4 passed; receipts US$0.0053; the spec's conservative
+       charge US$0.4221                                                                                          live-r4s.txt, r4s/
+Wave S's re-runs: receipts about US$0.0355; conservatively about US$0.452.
+Child total: receipts about US$0.072; conservatively about US$0.904; both under the child's US$2.00 (Constraint 11).
+Other e8 roots in /private/tmp (maws-e8-live-4qDqMp, -6wu86U, -q7u3My, maws-e8-fix-review-*), dated before this run, were left alone (not this run's).
