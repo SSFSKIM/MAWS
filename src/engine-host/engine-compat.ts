@@ -1,5 +1,5 @@
 // What MAWS knows about the Claude Code versions it runs (charter D-1 as amended 2026-10-01, W13; waves plan §2 J1),
-// keyed by `claude_code_version`: the version MAWS was verified against (E11's live sittings; the replay fixtures and
+// keyed by `claude_code_version`: the version MAWS was verified against (P2-F's live re-runs; the replay fixtures and
 // conformance tests were recorded on it or an older release, test/support/engine-pin), a comparison, and the one notice a session gets when an engine newer than that sends something MAWS did not understand. Information only:
 // the product runs whatever Claude Code the user has installed and never refuses a version.
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice';
@@ -7,9 +7,11 @@ import type { SessionEvent } from '@shared/graph/events';
 
 export { ENGINE_COMPAT_NOTICE_KEY };
 
-// E11's live sittings ran every P1 live path on the installed 2.1.293 (docs/doperpowers/evidence/p1-e11/prerun.txt and
-// live-s1.txt to live-s8.txt); the fixtures recorded before E11 (2.1.283 to 2.1.292) are older and still replay clean.
-export const TESTED_ENGINE_VERSION = '2.1.293';
+// P2-F's live re-runs R1 to R4 passed on the installed 2.1.296 (docs/doperpowers/evidence/p2-finish/live-r1.txt to
+// live-r4.txt) and the owner moved the tested version to it (P2-F D12, 2026-10-11); E11's sittings had run every P1 live
+// path on 2.1.293 (docs/doperpowers/evidence/p1-e11/live-s1.txt to live-s8.txt). The fixtures (2.1.283 to 2.1.295) are
+// older and still replay clean; their pin (test/support/engine-pin) stays where it is.
+export const TESTED_ENGINE_VERSION = '2.1.296';
 
 // The numeric parts of a version (`2.1.287`, `2.1.290-dev`); null when it does not start with one.
 function partsOf(version: string): number[] | null {

@@ -148,10 +148,11 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
   });
 });
 
-// E11 (M7.2 F2a 2.8): the tested version is the release MAWS was verified against live (2.1.293, E11's sittings); the
-// replay fixtures keep the release most were recorded on, never newer, so a replay never reads as newer than tested.
+// E11 (M7.2 F2a 2.8): the tested version is the release MAWS was verified against live (2.1.296 since P2-F's re-runs R1
+// to R4, D12; 2.1.293 at E11's sittings); the replay fixtures keep the release most were recorded on, never newer, so a
+// replay never reads as newer than tested.
 it('the fixtures’ pin is never newer than the tested version MAWS reports', () => {
-  expect(TESTED_ENGINE_VERSION).toBe('2.1.293');
+  expect(TESTED_ENGINE_VERSION).toBe('2.1.296');
   expect(compareVersions(FIXTURE_ENGINE_VERSION, TESTED_ENGINE_VERSION)).toBeLessThanOrEqual(0);
 });
 
