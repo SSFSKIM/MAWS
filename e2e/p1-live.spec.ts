@@ -30,16 +30,18 @@
 // session counts as spent at the larger of the two), and settled at the case's end once its process is gone: to its
 // receipts, or kept whole when a prompt went unreceipted (a timeout or a crash before its result). So the next case,
 // or a fresh Playwright worker reading the run root, never sees a remainder a running session may still spend.
-// Case 2's side thread is a fork of the parent and takes no `--max-budget-usd` (src/main/sessions/launch-mapping.ts;
-// whether it should is owner question Q12), so the test bounds it: the parent launches with FORK_ALLOCATION_USD and
+// Case 2's side thread is a fork of the parent and takes the parent's own `--max-budget-usd` (Q12 as the owner ruled at
+// P2-F's sitting, D7; src/engine-host/launcher.ts): that number bounds each session, not their sum, so the test still
+// bounds the thread within the run's cap: the parent launches with FORK_ALLOCATION_USD and
 // BTW_RESERVATION_USD held back from its budget, case 2 starts only when what is left covers the allocation, charges it
 // before the comment is sent, stops the thread through the app once its journal's receipts reach it, and after the
 // thread stops settles the charge to its receipts (or keeps the whole allocation when a prompt went unreceipted); the
 // parent's own launch budget stays reserved through the four cases, so case 3 needs no allowance of its own. US$0.08
 // is about two and a half times a recorded fork turn (spikes/protocol-probe/fixtures/resume-fork-*.jsonl: US$0.027 to
 // 0.032). The residual: the test sees the thread's spend only at a receipt, so its first turn is bounded by its prompt
-// (one word, no tools asked) and the timeout, not by a dollar cap; receipts past the allocation once it settled are
-// logged as the finding `fork overspend: <cost> > 0.08 (uncapped fork, Q12)` and fail case 2's spend assertion.
+// (one word, no tools asked), the timeout and the parent's inherited number, not by the allocation; receipts past the
+// allocation once it settled are logged as the finding `fork overspend: <cost> > 0.08 (uncapped fork, Q12)` (the
+// helper's wording, from before D7) and fail case 2's spend assertion.
 // A paid call no receipt shows is charged, never left free: case 4's `/btw` side question is answered by a control
 // response with no result frame, so it is charged BTW_RESERVATION_USD before it is sent. US$0.05: the side question of
 // the recorded fixture (spikes/protocol-probe/fixtures/pass3/p1-side-question-session.jsonl) carried a context of about
@@ -97,7 +99,7 @@ const SHOTS = process.env.MAWS_E11_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpo
 const TURN_MS = 300_000;
 const FIRST_OUTPUT_MS = 30_000; // the engine host's bound (src/engine-host/session.ts, `no_output`)
 const BTW_RESERVATION_USD = 0.05; // case 4's side question, charged since no receipt shows it (the header)
-const FORK_ALLOCATION_USD = 0.08; // case 2's side thread, which takes no --max-budget-usd (the header)
+const FORK_ALLOCATION_USD = 0.08; // case 2's side thread, whose inherited --max-budget-usd bounds it alone (the header)
 
 // The pages of case 1, in two colours the prompt never names (E2's recording proved its capture the same way).
 const V1 = { rgb: [211, 47, 47], word: /red|crimson|scarlet/i } as const;
@@ -581,7 +583,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
 
   test('2 a comment picked on the artifact goes to a Side thread that lives in the card: it edits the page and updates the parent’s artifact (its permissions answered in the card), answers there and sums itself up in the parent; the parent’s turns unchanged', async () => {
     const l = live!;
-    refuseOverCap(note, 'S3 case 2', 's3', { usd: FORK_ALLOCATION_USD, for: 'the side thread’s allocation (a fork takes no --max-budget-usd: Q12)' });
+    refuseOverCap(note, 'S3 case 2', 's3', { usd: FORK_ALLOCATION_USD, for: 'the side thread’s allocation (its inherited --max-budget-usd bounds it alone: Q12)' });
     test.skip(artifact === null, 'case 1 recorded no artifact');
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
@@ -632,7 +634,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const versions = versionsOf();
       const latest = versions.length > 0 ? readFileSync(versions.at(-1)!.path, 'utf8') : '';
       const viewer = viewerOf(l.panel);
-      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_update answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; no --max-budget-usd on the fork (Q12): bounded by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
+      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_update answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; the fork inherits the parent's --max-budget-usd (Q12), within the run's cap by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
       expect(reply).toContain('ANCHORED');
       await expect(card.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the card').not.toHaveCount(0);
       expect(summary).toContain('ANCHORED');
@@ -664,7 +666,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
               : `the side thread: a prompt went unreceipted, so its whole allocation (its journal shows US$${cost.receipted.toFixed(4)}, counted there; charged up to US$${cost.usd.toFixed(4)} in all)`,
             usd: Number((cost.usd - cost.receipted).toFixed(4)),
           });
-          // the uncapped fork's turn may pass its allocation before a receipt shows it: named, and the case failed
+          // the fork's turn may pass its allocation (its own cap is the parent's number) before a receipt shows it: named, and the case failed
           overspend = forkOverspend(cost.receipted, FORK_ALLOCATION_USD);
           if (overspend !== null) note(`case 2: finding: ${overspend}`);
           expect.soft(overspend, `the side thread's receipts within its US$${FORK_ALLOCATION_USD.toFixed(2)} allocation (spend)`).toBeNull();

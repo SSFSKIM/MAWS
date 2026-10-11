@@ -1143,6 +1143,54 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
   // P2-E1 end
 });
 // E2 end
+
+// P2-F wave S (S-budget; the owner's D7, Q12): a side thread (a launch whose artifact scope names its parent) takes its
+// parent's `--max-budget-usd` when the parent's last launch carried one; the number is the parent's own, not a share
+// of an aggregate, and nothing is added where the parent had none
+describe("a side thread and its parent's --max-budget-usd", () => {
+  const budgetOf = (plan: LaunchPlan) => {
+    const at = plan.args.indexOf('--max-budget-usd');
+    return at === -1 ? null : plan.args[at + 1];
+  };
+  async function launchFamily(launches: { id: string; spec?: Partial<LaunchSpec>; artifactScope?: string[] }[]): Promise<Map<string, string | null>> {
+    let transport: ScriptedTransport;
+    const plans: LaunchPlan[] = [];
+    const host = engineHost({ spawn: (plan) => (plans.push(plan), transport), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const budgets = new Map<string, string | null>();
+    for (const { id, spec: overrides = {}, artifactScope } of launches) {
+      transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+      const answer = await host.call('session.launch', { spec: spec({ appSessionId: id as AppSessionId, ...overrides }), ...(artifactScope ? { artifactScope: artifactScope as AppSessionId[] } : {}) });
+      expect(answer, id).toMatchObject({ status: 'launching' });
+      await until(() => host.statuses(id).some((s) => s.process === 'ready'), `${id} ready`);
+      expect(plans, id).toHaveLength(budgets.size + 1);
+      budgets.set(id, budgetOf(plans.at(-1)!));
+      transport.exit(0);
+      await host.ipc.table.get(id as AppSessionId)!.exited;
+    }
+    return budgets;
+  }
+
+  it('a thread of a budgeted parent launches with the same number, and its own thread with it too', async () => {
+    const budgets = await launchFamily([
+      { id: 'app-parent', spec: { maxBudgetUsd: 0.25 } },
+      { id: 'app-thread', spec: { inheritGrantsFrom: 'app-parent' as AppSessionId }, artifactScope: ['app-parent'] },
+      { id: 'app-thread-2', artifactScope: ['app-thread', 'app-parent'] }, // a thread of the thread, resumed or new
+    ]);
+    expect(Object.fromEntries(budgets)).toEqual({ 'app-parent': '0.25', 'app-thread': '0.25', 'app-thread-2': '0.25' });
+  });
+
+  it('a thread of a parent with none launches with none; a thread that names its own keeps it; a plain fork takes none', async () => {
+    const budgets = await launchFamily([
+      { id: 'app-parent', spec: { maxBudgetUsd: 0.25 } },
+      { id: 'app-plain', spec: { maxBudgetUsd: null } },
+      { id: 'app-thread', artifactScope: ['app-plain'] },
+      { id: 'app-own', spec: { maxBudgetUsd: 0.1 }, artifactScope: ['app-parent'] },
+      { id: 'app-fork', spec: { inheritGrantsFrom: 'app-parent' as AppSessionId } }, // a fork the human made: no artifact scope
+    ]);
+    expect(Object.fromEntries(budgets)).toEqual({ 'app-parent': '0.25', 'app-plain': null, 'app-thread': null, 'app-own': '0.1', 'app-fork': null });
+  });
+});
+
 // E4c start: the browser tools left the `maws` server on 2026-10-08 (P1 A-54): their bridge through the host's IPC went
 // with them, and a call naming one is answered by the server itself, nothing relayed for main
 describe('the removed browser bridge over IPC (E4c)', () => {

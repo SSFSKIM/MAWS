@@ -91,6 +91,8 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
     }
 
+    spec = await withParentBudget(spec, artifactScope, deps); // P2-F wave S (S-budget)
+
     let plan: LaunchPlan;
     try {
       plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, ...engine });
@@ -122,6 +124,26 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     return { status: 'launching', session: outcome.session.status() };
   };
 }
+
+// P2-F wave S (S-budget; the owner's D7, Q12 as ruled 2026-10-11): a side thread takes its parent's numeric
+// `--max-budget-usd` when the parent's last launch carried one and the thread's own spec names none: the same number, not
+// a share of an aggregate, and no default where the parent had none. A side thread is the launch whose artifact scope
+// names its ancestors (nearest first, so the first is its parent; a fork the human made, a resume of a root and every
+// other launch has none); the parent's spec is the one the host stored at its last start (`saveLaunchSpec`), so a
+// parent that has exited, or a thread of a thread, reads the same. An unreadable parent spec leaves the thread as it was.
+async function withParentBudget(spec: LaunchSpec, artifactScope: readonly AppSessionId[], deps: Pick<LauncherDeps, 'store' | 'log'>): Promise<LaunchSpec> {
+  const parent = artifactScope[0];
+  if (spec.maxBudgetUsd !== null || parent === undefined) return spec;
+  try {
+    const maxBudgetUsd = (await deps.store.loadLaunchSpec(parent))?.maxBudgetUsd ?? null;
+    return maxBudgetUsd === null ? spec : { ...spec, maxBudgetUsd };
+  } catch (error) {
+    deps.log(`${spec.appSessionId}: the budget of its parent ${parent} was not read: ${messageOf(error)}`);
+    return spec;
+  }
+}
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export function journalDir(userData: string, appSessionId: AppSessionId): string {
   assertSafeAppSessionId(appSessionId);
