@@ -90,23 +90,23 @@ C2 | Korean IME in the composer | [x] | [ ] | [ ] | [ ] | owner answered the com
 C3 | Korean IME in an editor tab, the /plugins search and the chooser's search; Escape ends the composition, the dialog stays | [x] | [ ] | [ ] | [ ] | editor subcase passed by owner: 한그로 정상 동작 after type 한글, composing Backspace once, Enter; no duplicate/residue reported. Assistant created disposable ime-test.txt and focused blank line 3; no save requested; later AX confirms unsaved editor contains 한그. Original draft kept. Owner also explicitly chose 정상, 창도 유지 for Plugins search and 정상, 선택창 유지 for Resume search: type 한글, composing Backspace once, Escape once; normal input and dialog remains open. All three requested input surfaces passed by owner report. |
 C4 | keep-quit on the owner's profile (L31): session live and streaming after relaunch, no stall; the Option-key "Quit and Keep Windows" outcome | [ ] | [ ] | [x] | [ ] | assistant 2026-10-11: saved only disposable ime-test.txt (owner 한그 retained; Unsaved changes removed). Two own-only, text-only Haiku turns: C4_KEEP_QUIT_TEST (100 sentences) and C4_OPTION_QUIT_TEST (250 sentences); no tools/files/settings requested. Both visibly Working/Stop before exit; quit sheet said 1 session mid-turn. First used Command-Q, second selected macOS menu 종료 및 윈도우 유지. Both opened the same ordinary MAWS quit sheet; explicitly chose Quit and keep sessions running in each. Process-list check confirmed app executable absent before rebind/relaunch. First relaunch initially listed scratch project 1 working; after tab hydration both trials had complete numbered output and C4_STREAM_DONE / C4_OPTION_DONE, Idle, no stall. Output completed before the restored transcript observation, so ongoing post-reconnect token streaming is not verified; do not inflate this into the full literal streaming criterion. Tabs restored after initial No open tabs hydration. Terminal showed The previous shell closed when MAWS quit and a fresh prompt (recorded, not C6 sleep evidence). No unrelated session stopped. D14 mapping preference still unanswered. | mcp-plugin_cua_cua_repl-blob-1791726109798-29v5fm.jpg; mcp-plugin_cua_cua_repl-blob-1791726198793-6v0zuh.jpg
 C5 | Command-click a URL in the terminal: where it opens | [x] | [ ] | [ ] | [ ] | owner explicitly answered 외부 브라우저에서 열림: Command-click on printed local synthetic URL opened the external browser. This records observed destination, not a new preference for routing. |
-C6 | sleep and wake: terminal reattaches, the turn streams or says why, the supervisor row reads connected | [ ] | [ ] | [ ] | [ ] | |
+C6 | sleep and wake: terminal reattaches, the turn streams or says why, the supervisor row reads connected | [ ] | [ ] | [ ] | [x] | owner 2026-10-11 explicitly chose 이번에는 건너뛰기 when asked for action-time whole-Mac sleep confirmation. No sleep command or test process started; remains unverified, not a pass. |
 
 -- D. Decisions (answered in the decisions block below; mark the row when the ruling is heard) --
-D1 | Q1 the catalogue key's approximation | [ ] | [ ] | [ ] | [ ] | |
+D1 | Q1 the catalogue key's approximation | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: owner chose P2에서 더 검증; approximation not accepted as final. Investigate real cache/list-versus-launch mismatches before P2 closes, route to architect/executor; no settings changed in sitting.
 D2 | Q2 dates in the display locale, one clock | [x] | [ ] | [ ] | [ ] | owner: 통일하고 P2에서 수정 (2026-10-10 AskUserQuestion); ruling received, not implementation sign-off. |
-D3 | Q3 separate-git-dir checkouts out of scope | [ ] | [ ] | [ ] | [ ] | |
-D4 | Q5 one idle time for row release and the supervisor's exit | [ ] | [ ] | [ ] | [ ] | |
-D5 | Q7 typed values never in an anchor's name | [ ] | [ ] | [ ] | [ ] | |
-D6 | Q11 the imported profile's extensions load at every boot | [ ] | [ ] | [ ] | [ ] | |
-D7 | Q12 side threads and --max-budget-usd | [ ] | [ ] | [ ] | [ ] | |
-D8 | A-35 the in-app browser's rules | [ ] | [ ] | [ ] | [ ] | |
-D9 | A-36 the wallet extension list | [ ] | [ ] | [ ] | [ ] | |
-D10 | P-23 a successful import activates the profile | [ ] | [ ] | [ ] | [ ] | |
-D11 | A-37 how agents and you share a browser page | [ ] | [ ] | [ ] | [ ] | |
-D12 | TESTED_ENGINE_VERSION | [ ] | [ ] | [ ] | [ ] | |
+D3 | Q3 separate-git-dir checkouts out of scope | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: owner: 범위 제외 (Recommended), as proposed.
+D4 | Q5 one idle time for row release and the supervisor's exit | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: owner: 하나로 유지 (Recommended), as proposed.
+D5 | Q7 typed values never in an anchor's name | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: owner: 입력값 제외 유지 (Recommended), as proposed.
+D6 | Q11 the imported profile's extensions load at every boot | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 먼저 로드 유지 (Recommended). Active imported profile extensions load eagerly before first page; communicate to cua owner.
+D7 | Q12 side threads and --max-budget-usd | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 부모 한도 상속 (Recommended). Child inherits same numeric max-budget-usd when parent has one; not a shared aggregate budget, no new product default cap. P2 corrective work required.
+D8 | A-35 the in-app browser's rules | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 현재 규칙 유지 (Recommended). Accept clipboard write within 2s of human input/read denied, editable Google default search, 12 loaded tabs/2GiB suspension caps, beforeunload nonblocking. Notice coalescing remains P3.
+D9 | A-36 the wallet extension list | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 현재 분류 유지 (Recommended). Accept 14 wallet ids plus name heuristic for default unselected import; potential misses/false matches explicitly presented.
+D10 | P-23 a successful import activates the profile | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 자동 활성화 유지 (Recommended). Successful import activates profile, with explicit consent that agent tabs use its logged-in state and visible profile pill.
+D11 | A-37 how agents and you share a browser page | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 실제 동작 유지 (Recommended). Accept actual E13 behavior, not stale script: reads allowed during human control (method whitelist; Runtime.evaluate classified as acting), acting respects 3s human-input grace (wait up to 1.5s then PERSON_USING_TAB), Browser auto-open once per turn only if absent, existing human tab selection retained, agent becomes idle after 10s or lease release, human label persists until Hand back or next agent action, fixed cursor colors. Reconcile documentation; no behavior change requested.
+D12 | TESTED_ENGINE_VERSION | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 2.1.296으로 갱신 (Recommended). Update TESTED_ENGINE_VERSION to passed R1-R4 version 2.1.296; fixture pin unchanged. P2 corrective work, not engine modification.
 D13 | the taste calls of step B (the taste-calls line below) | [ ] | [ ] | [ ] | [ ] | |
-D14 | macOS's "Quit and Keep Windows" | [ ] | [ ] | [ ] | [ ] | |
+D14 | macOS's "Quit and Keep Windows" | [x] | [ ] | [ ] | [ ] | owner 2026-10-11: 세션도 유지 (Recommended). Map system Keep Windows quit to keeping sessions; implementation contingent on distinguishing the system action. |
 
 -- E. Optional --
 E1 | voice in the signed app (two TCC dialogs, "hello world", a language switch) | [ ] | [ ] | [ ] | [ ] | |
@@ -118,20 +118,20 @@ F1 | what still sends the owner to Desktop or a terminal (see the measure line b
 
 == The decisions block ==
 item | proposal | the owner's answer
-D1 Q1 the catalogue key's approximation | final |
+D1 Q1 the catalogue key's approximation | final | Owner 2026-10-11: P2에서 더 검증. Do not close L32 as accepted limitation; further P2 investigation required before final ruling.
 D2 Q2 dates beside the engine's English | the display (system) locale, one clock everywhere | Approved as proposed; owner also requests remaining English plugin dates localized in P2 (통일하고 P2에서 수정). Engine-authored English wording unchanged.
-D3 Q3 separate-git-dir checkouts | out of scope for the worktree service |
-D4 Q5 one idle time for row release and supervisor exit | keep |
-D5 Q7 typed values in an anchor's name | never: keep privacy over label richness |
-D6 Q11 imported profile's extensions | keep eager loading; the question passes to the cua session |
-D7 Q12 side threads and --max-budget-usd | a thread inherits its parent's budget when the parent has one |
-D8 A-35 the in-app browser | as built (clipboard carve-out, Google default, 12-tab and 2 GiB caps, beforeunload never blocking) |
-D9 A-36 the wallet extension list | as built (14 ids and the name heuristic) |
-D10 P-23 import activates the profile | as built (the consent says agents' tabs will be signed in as it) |
-D11 A-37 sharing a browser page | as built (reads proceed while you hold the page, Browser tool opens once, 10 s decay, fixed cursor colours) |
-D12 TESTED_ENGINE_VERSION | move to the newest version where R1 to R4 pass (2.1.296), fixtures' pin unchanged (wave S) |
+D3 Q3 separate-git-dir checkouts | out of scope for the worktree service | Approved as proposed on 2026-10-11: separate-git-dir checkouts and their linked worktrees out of scope.
+D4 Q5 one idle time for row release and supervisor exit | keep | Approved as proposed on 2026-10-11: one idle timeout for release and supervisor exit while app disconnected; not a running-turn limit.
+D5 Q7 typed values in an anchor's name | never: keep privacy over label richness | Approved as proposed on 2026-10-11: no typed form values in agent-facing anchor names; privacy over richer labels.
+D6 Q11 imported profile's extensions | keep eager loading; the question passes to the cua session | Approved 2026-10-11: 먼저 로드 유지 (Recommended). Active imported profile extensions load eagerly before first page; communicate to cua owner.
+D7 Q12 side threads and --max-budget-usd | a thread inherits its parent's budget when the parent has one | Approved 2026-10-11: 부모 한도 상속 (Recommended). Child inherits same numeric max-budget-usd when parent has one; not a shared aggregate budget, no new product default cap. P2 corrective work required.
+D8 A-35 the in-app browser | as built (clipboard carve-out, Google default, 12-tab and 2 GiB caps, beforeunload never blocking) | Approved 2026-10-11: 현재 규칙 유지 (Recommended). Accept clipboard write within 2s of human input/read denied, editable Google default search, 12 loaded tabs/2GiB suspension caps, beforeunload nonblocking. Notice coalescing remains P3.
+D9 A-36 the wallet extension list | as built (14 ids and the name heuristic) | Approved 2026-10-11: 현재 분류 유지 (Recommended). Accept 14 wallet ids plus name heuristic for default unselected import; potential misses/false matches explicitly presented.
+D10 P-23 import activates the profile | as built (the consent says agents' tabs will be signed in as it) | Approved 2026-10-11: 자동 활성화 유지 (Recommended). Successful import activates profile, with explicit consent that agent tabs use its logged-in state and visible profile pill.
+D11 A-37 sharing a browser page | actual E13 rules, corrected from stale proposal | Approved 2026-10-11: 실제 동작 유지 (Recommended). Accept actual E13 behavior, not stale script: reads allowed during human control (method whitelist; Runtime.evaluate classified as acting), acting respects 3s human-input grace (wait up to 1.5s then PERSON_USING_TAB), Browser auto-open once per turn only if absent, existing human tab selection retained, agent becomes idle after 10s or lease release, human label persists until Hand back or next agent action, fixed cursor colors. Reconcile documentation; no behavior change requested.
+D12 TESTED_ENGINE_VERSION | move to the newest version where R1 to R4 pass (2.1.296), fixtures' pin unchanged (wave S) | Approved 2026-10-11: 2.1.296으로 갱신 (Recommended). Update TESTED_ENGINE_VERSION to passed R1-R4 version 2.1.296; fixture pin unchanged. P2 corrective work, not engine modification.
 D13 the taste calls of step B | per call, see the taste-calls line | Partial: L147 fix now, scroll. On 2026-10-11 owner explicitly chose L96 현재 접기 유지, L155 Report 기본 유지, and 현재 배치 승인 for Insight placement and current bar height (keep recorded 35px, reconcile document). L102 still pending.
-D14 "Quit and Keep Windows" (종료 및 윈도우 유지) | maps to MAWS's keep option (wave S, after verifying the hook) | Not yet ruled. Assistant C4 observation: selecting the system menu item during an active turn opens the same ordinary quit sheet; Keep must then be selected explicitly. No distinguishable Electron hook established by this GUI observation.
+D14 "Quit and Keep Windows" (종료 및 윈도우 유지) | maps to MAWS's keep option (wave S, after verifying the hook) | Owner 2026-10-11 approved 세션도 유지 (Recommended), fix in P2 after verifying distinguishable hook. Assistant C4 observation: selecting the system menu item during an active turn opens the same ordinary quit sheet; Keep must then be selected explicitly. No distinguishable Electron hook established by this GUI observation.
 
 Taste calls: L96 [x] keep [ ] fix now [ ] P3 | L102 [ ] keep [ ] fix now [ ] P3 | L147 [ ] keep [x] fix now (scroll) [ ] P3 | L155 [x] keep report default (ask visible in current build; no absence reproduced) [ ] transcript default [ ] P3 | L156 [x] keep 35 px [ ] fix now (32 px) [ ] P3
 
@@ -155,6 +155,10 @@ Browser bottom element | Opening comment strip hid a previously visible Bottom t
 Report question vs continuation | Native AskUserQuestion in a marked turn displayed pending input and answered receipt in Report. Only plain NATIVE_DONE Alpha was folded into Working record. L155 absence not reproduced; L96 reproduced. | owner keeps L96 folding and Report default; architect should reconcile L155 against current build evidence
 
 Terminal Korean composition | Owner reports double input and Backspace only partly removing text; attached screenshot shows jamo/syllable remnants during plain cat test. Initial cat test was MAWS only; later same-sequence byte comparison found MAWS delivered 한\n vs Terminal.app 한그\n. Read-only source diagnosis: terminal/registry.ts:398-413 forwards xterm onData once; pty-host/table.ts:142-150 already enables IUTF8. Existing byte erase test table.test.ts:311-328 uses echo off, so does not verify native IME/visible erase. xterm 6.0.0 composition overlay and canonical wide-character echo remain distinguishable hypotheses, not confirmed causes. Controller left original cat waiting through diagnosis; focus changed to composer and could commit preedit. Later screenshot while preparing Resume search shows ^C and a shell prompt in original terminal; this controller did not send that interruption. Screenshot mcp-plugin_cua_cua_repl-blob-1791722920267-nby9gm.jpg preserved. | C1 fail, byte-level client discrepancy established; P2 corrective work required, executor route at M4.4; exact cause pending
+
+Model catalogue cache approximation | Owner declined final acceptance and chose P2에서 더 검증 for D1. Managed settings, ~/.claude.json env and untrusted/safe-mode differences need an evidence-backed disposition. | owner requests P2 investigation; no closure of L32 from this sitting
+
+D11 stale browser rules | Read-only source investigation at 5cfb59ea: renderer/tools/browser/agent/connect.ts:11-18,34-45 opens once per turn, not session; main/browser/agent/control.ts:9-11,41-45,160-175 makes 3s a grace, not human-to-idle decay. cua/filter.ts:72-93 and connection.ts:365-366,456-475 gate acting only. shared/browser/tab.ts:31-32; preload/browser-cursor.ts:65-67. Owner approved corrected actual behavior, including persistent human label, on 2026-10-11. | parent reconcile D11/A-37 prose against E13; no behavior change requested
 
 == The measure ==
 What, if anything, still sends me to Claude Desktop or a terminal today:
