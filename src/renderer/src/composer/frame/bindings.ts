@@ -24,7 +24,7 @@ import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
 import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { aliasOf, chipLabel, DEFAULT_ROW } from '@shared/sessions/model-label';
+import { aliasOf, chipLabel, DEFAULT_ROW, defaultTarget } from '@shared/sessions/model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -163,12 +163,15 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   };
   // W3: named from the options this mount listed, else the route's catalogue; the effort the engine runs at, else the requested one
   const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
-  // P2-F wave S (A1.6): the model asked for (set_model accepted, or the launch's), else the one the engine reported; marked
-  // requested while the engine's last report names another model, so the chip and the selector's checked row agree
+  // P2-F wave S (A1.6): the value is the model asked for (set_model accepted, or the launch's), else the one the engine
+  // reported. While the engine's last report names another model the chip names the one asked for, marked requested, so
+  // it and the selector's checked row agree; otherwise the reported one (`default` is named by what it runs). `default`
+  // with no catalogue row to say what it runs is not compared.
   const reported = status && (status.model.requested !== null || status.model.resolved !== null) ? status.model : null;
   const { requested, resolved } = reported ?? record?.model ?? { requested: null, resolved: null };
   const current: ModelChoice = { model: requested ?? resolved, effort: status?.effort ?? null };
-  const unconfirmed = requested !== null && resolved !== null && aliasOf(requested, names) !== aliasOf(resolved, names);
+  const comparable = requested !== null && resolved !== null && (requested !== DEFAULT_ROW || defaultTarget(names) !== undefined);
+  const unconfirmed = comparable && aliasOf(requested, names) !== aliasOf(resolved, names);
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
@@ -177,7 +180,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     project: null,
     model: {
       value: current,
-      label: chipLabel(aliasOf(current.model, names), shownEffort),
+      label: chipLabel(aliasOf(unconfirmed ? requested : (resolved ?? requested), names), shownEffort),
       requested: unconfirmed,
       options: [...(reads.models ?? [])],
       disabled: writable,

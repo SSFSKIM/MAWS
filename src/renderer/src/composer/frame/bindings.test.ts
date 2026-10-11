@@ -236,6 +236,8 @@ describe('the model chip names the model and the effort the engine uses', () => 
     expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
     expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
     expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
+    // `default` with no catalogue to say what it runs: nothing to compare, so the reported model, unmarked (never "default")
+    expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), {}).model).toMatchObject({ label: 'opus', requested: false });
     // nothing reported yet (a launch before its first turn): the model asked for, unmarked, as the selector reads it
     expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: false });
     // a record with no process reads the same way: what it asked for, marked while its last run reported another
