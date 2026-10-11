@@ -37,8 +37,12 @@ import { showSideChild, sidePaneOf, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { useCommentCard } from './store';
 
-vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(await original<typeof import('../../composer/submit/send-human-prompt')>()), sendHumanPrompt: vi.fn() }));
-const seam = vi.mocked(sendHumanPrompt);
+// One spy for every run of the mock's factory (P2-F S): vitest caches an async factory's exports only once it resolves,
+// so an importer arriving meanwhile runs the factory again. The transcript's lazy chunks, started at module evaluation,
+// reach this module through the owner report's answering while the file's own imports do; under load the two overlap,
+// and a `vi.fn()` made inside the factory handed the card one spy and this file another (its replies read undefined).
+const seam = vi.hoisted(() => vi.fn<typeof sendHumanPrompt>());
+vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(await original<typeof import('../../composer/submit/send-human-prompt')>()), sendHumanPrompt: seam }));
 
 const PARENT = A;
 const RECORD = '00000000-0000-4000-8000-0000000000e1';
