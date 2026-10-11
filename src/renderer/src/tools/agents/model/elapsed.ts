@@ -29,8 +29,8 @@ export function formatElapsed(ms: number): string {
 // (`app/date-format.ts`): `now`, `3m ago`, `2h ago`, `1d ago` (3분 전).
 export const formatAgo = (ms: number): string => formatAgoIn(ms, { narrow: true });
 
-// E7: how long until a time to come, in the same form (a scheduled job's next run), at least a minute: `in 1m`,
-// `in 3m`, `in 2h`, `in 1d` (3분 후).
+// E7: how long until a time to come, in the same form (a scheduled job's next run): `in <1m` under a minute (an overdue
+// time included), `in 3m`, `in 2h`, `in 1d` (3분 후).
 export const formatIn = (ms: number): string => formatUntil(ms);
 
 // `512`, `38.1k`, `1.2M`: a token count where its column names the unit (a workflow's agent table).

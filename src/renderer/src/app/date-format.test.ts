@@ -48,9 +48,11 @@ describe('relative times and dates, in an explicit locale', () => {
     expect([4_000, 30_000, 90_000].map((ms) => ko.ago(ms, { seconds: true }))).toEqual(['지금', '30초 전', '1분 전']);
   });
 
-  it('a time to come, at least a minute away', () => {
-    expect([10_000, 3 * MINUTE, 2 * HOUR, DAY].map((ms) => en.until(ms))).toEqual(['in 1m', 'in 3m', 'in 2h', 'in 1d']);
-    expect([10_000, 3 * MINUTE, 2 * HOUR, DAY].map((ms) => ko.until(ms))).toEqual(['1분 후', '3분 후', '2시간 후', '1일 후']);
+  // under a minute (an overdue time included) keeps its own reading, not "in 1m" (the review of S-locale)
+  it('a time to come: under a minute, then the largest whole unit', () => {
+    const times = [10_000, 0, -30_000, MINUTE, 3 * MINUTE, 2 * HOUR, DAY];
+    expect(times.map((ms) => en.until(ms))).toEqual(['in <1m', 'in <1m', 'in <1m', 'in 1m', 'in 3m', 'in 2h', 'in 1d']);
+    expect(times.map((ms) => ko.until(ms))).toEqual(['<1분 후', '<1분 후', '<1분 후', '1분 후', '3분 후', '2시간 후', '1일 후']);
   });
 
   it('a calendar day relative to today, capitalised as a label', () => {

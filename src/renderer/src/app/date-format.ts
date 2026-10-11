@@ -38,7 +38,7 @@ export interface DateFormats {
   // `narrow` is the compact form ("2m ago"); `seconds` counts the first minute in seconds ("30 seconds ago"), "now"
   // under five.
   ago(ms: number, options?: { narrow?: boolean; seconds?: boolean }): string;
-  // How long until, compact, at least a minute: "in 3m", "in 2h" (3분 후).
+  // How long until, compact: "in 3m", "in 2h" (3분 후); under a minute, an overdue time included, "in <1m" (<1분 후).
   until(ms: number): string;
   // A calendar day `daysAgo` before today as a label: Today, Yesterday (오늘, 어제).
   day(daysAgo: 0 | 1): string;
@@ -82,8 +82,9 @@ function build(locale: string | undefined): DateFormats {
       return (options.narrow ? narrow : long).format(-count, unit);
     },
     until(ms) {
-      const [count, unit] = unitOf(Math.max(ms, MINUTE));
-      return narrow.format(count, unit);
+      if (ms >= MINUTE) return narrow.format(...unitOf(ms));
+      // the locale's "in 1m" with its number marked as under it (a locale that writes no number keeps its words)
+      return narrow.formatToParts(1, 'minute').map((part) => (part.type === 'integer' ? `<${part.value}` : part.value)).join('');
     },
     day: (daysAgo) => label(auto.format(-daysAgo, 'day')),
     week: (weeksAgo) => label(auto.format(-weeksAgo, 'week')),

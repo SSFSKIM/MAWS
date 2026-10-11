@@ -59,10 +59,13 @@ describe('elapsed', () => {
     expect(formatAgo(-5_000)).toBe(REL.now); // a clock a little behind the engine's
   });
 
-  // E7: a scheduled job's next run, in the same form ahead of now, at least a minute away (in 3m, 3분 후).
+  // E7: a scheduled job's next run, in the same form ahead of now (in 3m, 3분 후); under a minute, an overdue time
+  // included, reads as such (in <1m, <1분 후), never as a whole minute.
   it('formats how long until a time to come', () => {
-    expect(formatIn(40_000)).toBe(REL.in(1, 'minute'));
-    expect(formatIn(-1)).toBe(REL.in(1, 'minute'));
+    expect(formatIn(40_000)).toBe(formatIn(0));
+    expect(formatIn(-1)).toBe(formatIn(0));
+    expect(formatIn(40_000)).not.toBe(REL.in(1, 'minute'));
+    expect(formatIn(40_000)).toContain('<');
     expect(formatIn(180_000)).toBe(REL.in(3, 'minute'));
     expect(formatIn(2 * 3_600_000 + 5)).toBe(REL.in(2, 'hour'));
     expect(formatIn(26 * 3_600_000)).toBe(REL.in(1, 'day'));
