@@ -249,6 +249,14 @@ function fixtureOrder(events: readonly SessionEvent[]): string[] {
     return `${ranks.get(seq!)}:${i} ${e.kind}`;
   });
 }
+// L102's in-page dwell probe (the relaunch case): when the error's notice first showed (wall clock), and the error's
+// state as read a second later on the renderer's clock.
+interface DwellProbe {
+  presentAtInstall: boolean;
+  shownAt: number | null;
+  state: string | null;
+  readAfterMs: number | null;
+}
 const attentionOf = async (page: Page, id: AppSessionId, kind: AttentionItem['kind']): Promise<AttentionItem[]> =>
   value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && i.kind === kind);
 const pendingPermissions = (page: Page, id: AppSessionId) => attentionOf(page, id, 'permission');
@@ -439,6 +447,35 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     log.push(`while closed: ${closed.length - atQuit.length} journal rows written, the task failure (seq ${closed.find(isTaskFailureRow)!.seq}) and the permission request (seq ${closed.find(isRequestRow)!.seq}) among them`);
 
     const second = await s.launch(pace);
+    // L102's dwell, anchored in the page (the review of S-dwell): from the moment the error's notice first shows in its
+    // session, a read a second later is issued on the renderer's own clock, so it always precedes the dwell's two-second
+    // acknowledgement, however loaded the machine; installed before the session's tab is restored
+    await second.page.evaluate((text) => {
+      const probe: DwellProbe = { presentAtInstall: false, shownAt: null, state: null, readAfterMs: null };
+      (window as unknown as { __dwell: DwellProbe }).__dwell = probe;
+      const shown = () => document.querySelector('[data-region="main"]')?.textContent?.includes(text) ?? false;
+      const start = () => {
+        probe.shownAt = Date.now();
+        const t0 = performance.now();
+        setTimeout(() => {
+          probe.readAfterMs = Math.round(performance.now() - t0);
+          void window.maws.invoke('attention.list', undefined).then((answer) => {
+            const items = answer.ok ? (answer.value as { kind: string; state: string; summary: string }[]) : [];
+            probe.state = items.find((i) => i.kind === 'error' && i.summary.includes(text))?.state ?? 'none';
+          });
+        }, 1_000);
+      };
+      if (shown()) {
+        probe.presentAtInstall = true;
+        return start();
+      }
+      const observer = new MutationObserver(() => {
+        if (!shown()) return;
+        observer.disconnect();
+        start();
+      });
+      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+    }, `Background task failed: ${TASK_FAILED}`);
     const status = await s.ready(second.page);
     expect(status.supervisor!.pid, 'the relaunch connects to the same supervisor').toBe(pid);
     expect(s.log().match(/client connected: appPid/g), 'the supervisor logs both apps’ connects').toHaveLength(2);
@@ -471,11 +508,13 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     // it outranks the request. L102 (P2-F wave S, the owner's "2초 확인 후 해제"): seen only after two continuous seconds
     // in front, so a second after its notice shows the error is still in Needs you, and it leaves after the dwell
     await expect(second.page.locator('[data-region="main"]').getByText(`Background task failed: ${TASK_FAILED}`), 'the tail’s error, shown in its session').toBeVisible();
-    const shownAt = Date.now();
-    await new Promise((r) => setTimeout(r, 1_000));
-    expect((await attentionOf(second.page, id, 'error'))[0]?.state, 'a second after its notice showed, the error is still in Needs you').toBe('pending');
+    const dwellProbe = () => second.page.evaluate(() => ({ ...(window as unknown as { __dwell: DwellProbe }).__dwell }));
+    await expect.poll(async () => (await dwellProbe()).state, { message: 'the in-page read a second after the notice showed' }).not.toBeNull();
+    const probe = await dwellProbe();
+    expect(probe.presentAtInstall, 'the probe was in place before the notice showed').toBe(false);
+    expect(probe.state, `a second after its notice showed (read at ${probe.readAfterMs} ms), the error is still in Needs you`).toBe('pending');
     await expect.poll(async () => (await attentionOf(second.page, id, 'error'))[0]?.state, { timeout: 10_000, message: 'seen after the two-second dwell' }).toBe('confirmed');
-    const dwellMs = Date.now() - shownAt;
+    const dwellMs = Date.now() - probe.shownAt!;
     const row = await rowOf(second.page, id);
     await expect
       .poll(async () => {
