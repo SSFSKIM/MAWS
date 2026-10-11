@@ -1,0 +1,15 @@
+P2-F wave S re-gates (Design §3; the architect's Decision Log 29: main, engine-host or preload touched, so the whole chain less the packaged half)
+
+1. waveS-d51df97d.txt: the whole chain less build:app, verify:fuses, e2e:packaged and e2e:supervisor:packaged, plus every e2e:* outside
+   verify but e2e:p1-live, on d51df97d (wave S's S-T, S-M, S-R1 and S-R2 first round, all of main, engine-host and preload's
+   changes), run in a clean detached checkout /private/tmp/maws-p2f-gate-waveS (so the fixers working in the branch's worktree
+   could not enter the build). 30 steps, 29 green; the unit suite red with 12 failures in two files:
+     - src/renderer/src/side/card/CardThread.test.tsx, 11: the tracked failure, its cause found and fixed in wave S (S-CT, bf18f55d:
+       an async vi.mock factory run twice by concurrent imports); green in step 2's full run.
+     - the PTY case "clears an unfinished line at end in /bin/zsh emacs mode before returning the CLI to the foreground": load-only
+       (load 16.5); no file of it touched by wave S; green in step 2's full run.
+2. waveS-renderer-87053f9d.txt: the head after wave S's review fixes (renderer and src/shared/sessions only since d51df97d; no
+   main, engine-host, preload or build change): typecheck, lint, the full unit suite (11,650 passed, 1 skipped), the base e2e
+   (64 passed) and the groups whose code moved (transcript, panel, c7, agents, widgets, settings, side, supervisor, composer,
+   available): 14 of 14 green on the first run.
+L114's count: e2e:c7 at load 12.75 and e2e:requests at load 6.67 (step 1), e2e:c7 at load 7.97 (step 2): 10 of 20 qualifying runs.
