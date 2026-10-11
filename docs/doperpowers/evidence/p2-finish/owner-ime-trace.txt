@@ -1,0 +1,32 @@
+C1 (terminal Korean input): one trace capture, about ten minutes. 터미널 한글 입력(C1) 이벤트 기록 한 번.
+
+Why: the agents' replay of Chromium's macOS IME sequence gives MAWS the right bytes (한그), but your Mac gave 한. The real
+event order on your Mac is the missing fact. This build records the terminal's key, composition and input events and the
+bytes MAWS sends, to one log file. Type nothing else in it, and no passwords: it records every key typed in its terminals.
+
+Before: the build comes from a clean checkout of this branch at d1038cad (the recorder commit), made for this capture so
+no work in progress can enter the build: /private/tmp/maws-p2f-ime-trace (a detached git worktree; its node_modules were
+installed with `pnpm install --frozen-lockfile` on 2026-10-11, so no install is needed). It is not master.
+
+1. Quit the normal MAWS (⌘Q). In the quit sheet, "Quit and keep sessions running" is fine. Never run the trace build while
+   the normal app is running.
+
+2. Build (in Terminal.app; the identity is the one you used in owner-script.txt pre.1):
+     MAWS_SIGN_IDENTITY="Apple Development: ..." pnpm -C /private/tmp/maws-p2f-ime-trace build:app
+
+3. Launch the built binary directly, so the variable reaches it (`open` does not pass the shell's environment):
+     MAWS_IME_TRACE=1 /private/tmp/maws-p2f-ime-trace/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
+
+4. In a disposable project, open a Terminal tab and run:
+     /usr/bin/head -n 1 | /usr/bin/od -An -tx1
+
+5. With 2-Set Korean (두벌식): type 한글, press Backspace once while 글 is still composing, then press Enter. Note the bytes
+   od prints. Run the step 4 command again, then type plain 한글 and press Enter (no Backspace). Note those bytes too.
+
+6. Quit the trace build (⌘Q, as in step 1), then open the normal MAWS as usual.
+
+The trace file: ~/Library/Logs/MAWS/ime-trace.log (one line per event, each starting "[ime-trace]"). Send it, with the two
+od lines, to the architect, or tell the architect it is there.
+
+Nothing else: no settings changes, and no second instance while the normal app runs. The trace build opens your normal MAWS
+profile; the only new thing it writes is that log file.
