@@ -176,3 +176,17 @@ Dispositions after M1 (Task 1.6, 2026-10-10; rows by their M0 line; commit ids o
   Defer rows annotated with owner and reason: 82 (78 kept after the four cua closures); sitting rows annotated "Held for P2-F's sitting": 13
   Rows added during M1, each kept with an owner: W-T2's web-project TS6307 row (P3); the cua session's E13 peer-auth amendment row (the cua_repl session); the review minors W-C2-r1-m1 (the clock pattern, P3), W-C2-r2-m1 (the delivered observers, P3), W-T2-r1-m1 (the live budget's double count, P3); the owner's macOS "Quit and Keep Windows" question (sitting, step D14)
   Tracker: 134 rows at M0 -> 100 rows after 1.6 (tracker-check.txt: pass)
+
+Dispositions after the sitting (Task 4.4, 2026-10-11; the owner's answers in owner-results.txt at 7ea5ec2b; the spec's Decision Log 29 and 30)
+  Closed at the sitting, removed from the tracker:
+    L31 (sitting) step C4: keep-quit with a turn in flight and relaunch on the owner's profile, twice, each session recovered complete and Idle, no stall; closed as bounded by its own clause (post-reattach token streaming not captured: recomposition, not this row)
+    L36, L37 (sitting) D3: Q3 approved, separate-git-dir checkouts and their linked worktrees out of scope for the worktree service
+    L53 (sitting) D2: Q2 approved (the system display locale beside the engine's English); Scheduled rows already format through app/date-format.ts (455720a0); the widened rule's library dates go to wave S (S-locale)
+    L95 (fix, narrowed to the owner's acceptance) steps A6.1 to A6.3 passed: fit, zoom, actual size for a 64 px PNG and a short video in the panel, a main tab and the Files route
+    L96 (sitting) D13: keep (the plain continuation stays folded in the working record); reproduced at B4 and accepted
+    L155 (sitting) D13: keep the report view as the default; the row's "ask absent" was not reproduced on the build: the AskCapsule and the answered receipt showed in the report (A5b.2, B4)
+    L156 (sitting) D13: keep the bar at 35 px; the description in P2-C's document is corrected through the hand-back (this child never edits a sibling's document)
+  Narrowed: L57 (sitting) D8: A-35's rules kept as built; the notice coalescing remains, owner P3
+  Turned into wave-S rows (Owner: P2-F wave S): L32 (D1, an investigation), L82 (D7), L98 (C1, the sitting's one fail), L102 (D13, the 2-second dwell), L147 (D13, the scroll), the macOS "Quit and Keep Windows" row (D14, an investigation first)
+  Added: CardThread.test.tsx load-sensitive (the architect's F gate, 2026-10-10; P3)
+  Tracker: 108 rows at 4.3 -> 101 rows after 4.4 (tracker_check: pass); wave S's commits are recorded here when they land
