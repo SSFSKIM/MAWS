@@ -112,14 +112,46 @@ interface Requested<T> {
   value: T;
   basis: string | null;
 }
+// P2-F wave S (the review of S-chip): a model asked for and not yet reported running, which the selector and the
+// composer's model chip both read (`modelAsk`, @shared/sessions/model-label.ts). `value` null is Default, asked
+// explicitly: the status's null `requested` cannot tell it from no request. `starting` while a session with no ready
+// process starts for the choice (no status holds it yet); once set_model is accepted, `basis` and `resolved` are the
+// status's requested and reported models at the ask, and the memory ends when the engine reports again or another
+// request moves the status.
+export interface HeldModel {
+  value: string | null;
+  starting: boolean;
+  basis: string | null;
+  resolved: string | null;
+}
 interface ModelRequests {
-  model: ReadonlyMap<AppSessionId, Requested<string | null>>;
+  model: ReadonlyMap<AppSessionId, HeldModel>;
   fast: ReadonlyMap<AppSessionId, Requested<boolean | null>>;
 }
 export const useModelRequests = create<ModelRequests>()(() => ({ model: new Map(), fast: new Map() }));
-const rememberModel = (id: AppSessionId, entry: Requested<string | null>) => useModelRequests.setState((s) => ({ model: new Map(s.model).set(id, entry) }));
+const rememberModel = (id: AppSessionId, entry: HeldModel) => useModelRequests.setState((s) => ({ model: new Map(s.model).set(id, entry) }));
 const rememberFast = (id: AppSessionId, entry: Requested<boolean | null>) => useModelRequests.setState((s) => ({ fast: new Map(s.fast).set(id, entry) }));
 export const resetModelRequests = () => useModelRequests.setState({ model: new Map(), fast: new Map() });
+
+// A choice on a session with no ready process, held while the session starts for it; `endModelStart` drops it if the
+// start or the change did not go through (an accepted set_model has replaced it by then).
+export const startModelRequest = (id: AppSessionId, value: string | null) => rememberModel(id, { value, starting: true, basis: null, resolved: null });
+export const endModelStart = (id: AppSessionId) =>
+  useModelRequests.setState((s) => {
+    if (!s.model.get(id)?.starting) return s;
+    const model = new Map(s.model);
+    model.delete(id);
+    return { model };
+  });
+
+// The model request still in effect for a session at its status: a start in flight, or an accepted set_model while the
+// status has neither reported again nor moved to another request.
+export function heldModel(requests: Pick<ModelRequests, 'model'>, id: AppSessionId, status: EngineSessionStatus | null): HeldModel | undefined {
+  const held = requests.model.get(id);
+  if (!held || held.starting) return held;
+  if (!status || status.model.resolved !== held.resolved) return undefined;
+  return status.model.requested === held.basis || status.model.requested === held.value ? held : undefined;
+}
 
 // A memory ends as soon as its session's status moves off the basis, whether or not a widget is open, so a model asked
 // for and later asked away from is never shown again from here.
@@ -127,10 +159,14 @@ const settled = <T>(held: ReadonlyMap<AppSessionId, Requested<T>>, fact: (status
   const kept = new Map([...held].filter(([id, entry]) => engine.has(id) && entry.basis === fact(engine.get(id)!)));
   return kept.size === held.size ? held : kept;
 };
+const settledModels = (held: ReadonlyMap<AppSessionId, HeldModel>, engine: ReadonlyMap<AppSessionId, EngineSessionStatus>) => {
+  const kept = new Map([...held].filter(([id]) => heldModel({ model: held }, id, engine.get(id) ?? null) !== undefined));
+  return kept.size === held.size ? held : kept;
+};
 useSessions.subscribe(({ engine }) => {
   const { model, fast } = useModelRequests.getState();
   if (model.size === 0 && fast.size === 0) return;
-  const next = { model: settled(model, (s) => s.model.requested, engine), fast: settled(fast, fastFact, engine) };
+  const next = { model: settledModels(model, engine), fast: settled(fast, fastFact, engine) };
   if (next.model !== model || next.fast !== fast) useModelRequests.setState(next);
 });
 
@@ -141,14 +177,15 @@ const fastFact = (status: EngineSessionStatus): string => `${status.fastMode.sta
 
 export type ControlAnswer = { ok: true } | { ok: false; error: string; caption: string | null };
 
-// `session.setModel`: `{ ok: false, code }` in words with `error` as the caption; the prior model stays.
+// `session.setModel`: `{ ok: false, code }` in words with `error` as the caption; the prior model stays. An accepted
+// model is held from the status facts at the ask (a status that already moved to it keeps the memory, `heldModel`).
 export async function setModel(input: { appSessionId: AppSessionId; model: string | null }): Promise<ControlAnswer> {
-  const basis = statusOf(input.appSessionId)?.model.requested ?? null;
+  const before = statusOf(input.appSessionId)?.model ?? { requested: null, resolved: null };
   const result = await ipc.invoke('session.setModel', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
   if (!result.value.ok) return { ok: false, error: (result.value.code && MODEL.code[result.value.code]) || MODEL.refused, caption: result.value.error };
-  // remembered only while the status has not moved: a status that arrived before the answer already shows the model
-  if ((statusOf(input.appSessionId)?.model.requested ?? null) === basis) rememberModel(input.appSessionId, { value: input.model, basis });
+  const entry: HeldModel = { value: input.model, starting: false, basis: before.requested, resolved: before.resolved };
+  if (heldModel({ model: new Map([[input.appSessionId, entry]]) }, input.appSessionId, statusOf(input.appSessionId))) rememberModel(input.appSessionId, entry);
   return { ok: true };
 }
 
@@ -168,12 +205,6 @@ export async function applyFlagSettings(input: { appSessionId: AppSessionId; set
   if ('fastMode' in input.settings && (after ? fastFact(after) : null) === basis) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
   return { ok: true };
 }
-
-// The accepted model while the status has not moved since (the gap before C3's status event), else nothing.
-export const acceptedModel = (requests: ModelRequests, id: AppSessionId, status: EngineSessionStatus): string | null | undefined => {
-  const held = requests.model.get(id);
-  return held && held.basis === status.model.requested ? held.value : undefined;
-};
 
 // Whether fast mode was asked to change and the init frame has not reported the change.
 export const fastPending = (requests: ModelRequests, id: AppSessionId, status: EngineSessionStatus): boolean => {

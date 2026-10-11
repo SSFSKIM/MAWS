@@ -24,7 +24,7 @@ import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
 import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { aliasOf, chipLabel, DEFAULT_ROW, reportsRequested } from '@shared/sessions/model-label';
+import { aliasOf, chipLabel, DEFAULT_ROW, modelAsk } from '@shared/sessions/model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -134,6 +134,9 @@ export interface LiveReads {
   directories?: readonly string[] | null;
   git?: GitBranchAnswer | null; // W9 (H2): git's answer for the session's directory, null until it has one
   refresh?: () => void;
+  // P2-F wave S (the review of S-chip): the model this renderer asked for and the engine has not reported since, held
+  // for the selector and the chip alike (widgets/model.ts `heldModel`; `value` null: Default); none when absent
+  asked?: { value: string | null } | null;
 }
 
 // `list_permission_rules`'s workspace directories as paths (the wire types them loosely: a path, or an object naming one).
@@ -163,15 +166,20 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   };
   // W3: named from the options this mount listed, else the route's catalogue; the effort the engine runs at, else the requested one
   const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
-  // P2-F wave S (A1.6): the value is the model asked for (set_model accepted, or the launch's), else the one the engine
-  // reported. While the engine's last report names another model the chip names the one asked for, marked requested, so
-  // it and the selector's checked row agree; otherwise the reported one (`default` is named by what it runs). The two
-  // are compared as exact ids through the catalogue (`reportsRequested`), never by alias; a request the catalogue cannot
-  // resolve is not compared.
+  // P2-F wave S (A1.6 and its review): one rule with the selector (`modelAsk`): the model asked for (the request the
+  // selector holds, a dormant choice or an explicit Default included, else the status's or the launch's) is named and
+  // marked requested until the engine reports running it, compared as exact ids through the catalogue; otherwise the
+  // reported one. `default` is named by what it runs, and by no model when the catalogue cannot say.
   const reported = status && (status.model.requested !== null || status.model.resolved !== null) ? status.model : null;
-  const { requested, resolved } = reported ?? record?.model ?? { requested: null, resolved: null };
-  const current: ModelChoice = { model: requested ?? resolved, effort: status?.effort ?? null };
-  const unconfirmed = requested !== null && resolved !== null && reportsRequested(requested, resolved, names) === false;
+  const facts = reported ?? record?.model ?? { requested: null, resolved: null };
+  const { resolved } = facts;
+  const ask = modelAsk(reads.asked ?? undefined, facts, names);
+  const unconfirmed = ask.pending;
+  const current: ModelChoice = { model: ask.explicit ? ask.asked : resolved, effort: status?.effort ?? null };
+  const named = (id: string | null) => {
+    const alias = aliasOf(id, names);
+    return alias === DEFAULT_ROW ? null : alias;
+  };
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
@@ -180,7 +188,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     project: null,
     model: {
       value: current,
-      label: chipLabel(aliasOf(unconfirmed ? requested : (resolved ?? requested), names), shownEffort),
+      label: chipLabel(unconfirmed ? named(ask.asked ?? DEFAULT_ROW) : named(resolved ?? ask.asked), shownEffort),
       requested: unconfirmed,
       options: [...(reads.models ?? [])],
       disabled: writable,

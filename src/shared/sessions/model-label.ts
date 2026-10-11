@@ -55,6 +55,26 @@ export function reportsRequested(requested: string, resolved: string, rows: read
   return runs === undefined ? null : runs === resolved;
 }
 
+// The model a session asked for and whether the engine has acknowledged it: one rule for the model chip and the
+// selector (P2-F wave S, the review of S-chip). `held` is the request this renderer made and the engine has not reported
+// since (widgets/model.ts), `value` null for Default; it wins over the status, whose null `requested` cannot tell an
+// explicit Default from no request. A request is pending until the engine reports running it (`reportsRequested`),
+// and while nothing is reported at all; one the catalogue cannot resolve is pending only while held, since a report
+// after the ask is all the acknowledgement there is to see.
+export interface ModelAsk {
+  asked: string | null; // the model asked for; null: none, or Default when `explicit`
+  explicit: boolean;
+  pending: boolean;
+}
+export function modelAsk(held: { value: string | null } | undefined, model: { requested: string | null; resolved: string | null }, rows: readonly Row[]): ModelAsk {
+  const asked = held ? held.value : model.requested;
+  const explicit = held !== undefined || asked !== null;
+  if (!explicit) return { asked, explicit, pending: false };
+  if (model.resolved === null) return { asked, explicit, pending: true };
+  const reported = reportsRequested(asked ?? DEFAULT_ROW, model.resolved, rows);
+  return { asked, explicit, pending: reported === null ? held !== undefined : !reported };
+}
+
 // The chip's text: the alias and the effort the engine runs at; the alias alone for a model without effort (Haiku) or
 // while the effort is not known; `Model` while nothing names a model.
 export function chipLabel(alias: string | null, effort: Effort | null | undefined): string {

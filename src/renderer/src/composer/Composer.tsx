@@ -56,6 +56,7 @@ import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
 import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
+import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { isBusy, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -124,9 +125,11 @@ function useLiveReads(
   const modelNames = useModelCatalogue(route, ready, directory);
   const effort = useEffectiveEffort(appSessionId, status, client); // W3: get_settings once per ready and per change
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
+  const asked = useModelRequests((s) => heldModel(s, appSessionId, status)) ?? null; // P2-F S chip (review): the selector's request
   return {
     models,
     modelNames,
+    asked,
     ...(effort !== undefined && { effort }),
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
     git: gitAnswerOf(git),

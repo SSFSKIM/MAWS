@@ -18,7 +18,7 @@ import { isGatewayModel } from '@shared/sessions/models';
 import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
-import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, rowFor } from '@shared/sessions/model-label';
+import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, modelAsk, rowFor } from '@shared/sessions/model-label';
 import { useSetupIntent } from '../composer/setup-intent';
 import { ROUTE, type Route } from '../gateway/copy';
 import { pickDirectModel } from '../gateway/direct-model';
@@ -37,17 +37,19 @@ import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
 import { FRAME, MODEL, SELECTOR } from './copy';
 import {
-  acceptedModel,
   applyFlagSettings,
   effortLevelsOf,
+  endModelStart,
   fastPending,
   fastView,
+  heldModel,
   presentModels,
   rowNamed,
   rowOf,
   setEffort,
   setModel,
   showsGatewayNote,
+  startModelRequest,
   useModelRequests,
   type ControlAnswer,
   type FastView,
@@ -85,16 +87,14 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
   const effort = useShownEffort(appSessionId);
   return useMemo(() => {
     if (!status) return null;
-    const accepted = acceptedModel(requests, appSessionId, status);
-    const asked = accepted !== undefined ? accepted : status.model.requested;
+    // P2-F S chip (review): the composer's model chip reads the same request and the same rule (`modelAsk`)
+    const { asked, pending } = modelAsk(heldModel(requests, appSessionId, status), status.model, models);
     const row = rowOf(models, asked);
-    const confirmed = asked === null || status.model.resolved === null || (row !== undefined && (row.value === status.model.resolved || row.resolvedModel === status.model.resolved));
-    const pending = accepted !== undefined ? accepted !== null && !confirmed : !confirmed;
-    const shownRow = pending ? row : (rowOf(models, status.model.resolved) ?? row); // fast mode follows the model asked for
+    const shownRow = pending ? (row ?? rowFor(models, DEFAULT_ROW)) : (rowOf(models, status.model.resolved) ?? row); // fast mode follows the model asked for
     return {
       models,
       current: asked === null ? null : (row?.value ?? asked),
-      shown: pending ? asked : (status.model.resolved ?? asked), // a model asked for and not confirmed yet is the one named, marked pending
+      shown: pending ? (asked ?? DEFAULT_ROW) : (status.model.resolved ?? asked), // a model asked for and not confirmed yet is the one named, marked pending
       pending,
       effort,
       overridden: status.effort !== null,
@@ -173,14 +173,19 @@ function useDormantBinding(appSessionId: AppSessionId): (Binding & { choosing: b
   const listed = useComposerStore((s) => listedModelsOf(s, appSessionId));
   const catalogue = useModelCatalogue(routeOf(status, record), false, record?.directory ?? null);
   const { facts } = useObservedFacts(appSessionId, { enabled: record !== null && status?.process !== 'ready' });
+  // P2-F S chip (review): a model choice is held in the shared request memory (widgets/model.ts), so the composer's
+  // chip names it while the session starts; the effort choice stays local
+  const held = useModelRequests((s) => heldModel(s, appSessionId, status));
   const [choice, setChoice] = useState<DormantChoice | null>(null);
   if (!record) return null;
   const models: readonly ModelRow[] = listed && listed.length > 0 ? listed : (catalogue ?? []);
-  const asked = choice && 'model' in choice ? choice.model : record.model.requested;
+  const reported = status && (status.model.requested !== null || status.model.resolved !== null) ? status.model : record.model;
+  const { asked, pending } = modelAsk(held, reported, models);
   const effort = choice && 'effort' in choice ? choice.effort : (EffortSchema.safeParse(record.effort).data ?? null);
   const observed = facts?.model ?? null;
   const apply = async (next: DormantChoice, write: () => Promise<ControlAnswer>): Promise<ControlAnswer> => {
     setChoice(next);
+    if ('model' in next) startModelRequest(appSessionId, next.model);
     try {
       const outcome = await acquireSession(appSessionId, 'chip');
       if (outcome.status !== 'ready') return { ok: false, error: refusalWords(outcome) ?? outcome.status, caption: null };
@@ -188,14 +193,15 @@ function useDormantBinding(appSessionId: AppSessionId): (Binding & { choosing: b
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), caption: null };
     } finally {
+      if ('model' in next) endModelStart(appSessionId);
       setChoice(null);
     }
   };
   return {
     models,
     current: asked === null ? null : (rowOf(models, asked)?.value ?? asked),
-    shown: asked ?? observed?.value ?? record.model.resolved,
-    pending: choice !== null && 'model' in choice,
+    shown: pending ? (asked ?? DEFAULT_ROW) : (asked ?? observed?.value ?? record.model.resolved),
+    pending,
     effort,
     overridden: effort !== null,
     mode: record.permissionMode.effective,

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { fixtureLine, RESPONSES } from '../../../test/support/widget-backend';
-import { aliasOf, chipLabel, defaultTarget, reportsRequested, rowFor, shortAlias } from './model-label';
+import { aliasOf, chipLabel, defaultTarget, modelAsk, reportsRequested, rowFor, shortAlias } from './model-label';
 
 const ROOT = join(__dirname, '../../..');
 const CATALOGUE = (fixtureLine(ROOT, RESPONSES.list_models) as ListModelsResponse).models; // pass2/auto-routed seq 143: default and opus share claude-opus-5-5[1m]
@@ -77,5 +77,40 @@ describe('whether the engine reports the model asked for', () => {
     expect(reportsRequested('sonnet', 'claude-sonnet-5[1m]', rows)).toBeNull(); // a row with no resolved id
     expect(reportsRequested('default', 'claude-opus-5-5[1m]', [])).toBeNull();
     expect(reportsRequested('sonnet', 'sonnet', rows)).toBe(true); // the same id needs no catalogue
+  });
+});
+
+// The review of S-chip: one rule for the chip and the selector. A request held since the ask (an explicit Default
+// included, which the status's null cannot tell from no request) is pending until the engine reports running it.
+describe('the model a session asked for, and whether the engine has acknowledged it', () => {
+  const rows = [
+    { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)' },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Opus 5.5 (1M context)' },
+    { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku 5.5' },
+  ];
+  const facts = (requested: string | null, resolved: string | null) => ({ requested, resolved });
+
+  it('nothing asked: not pending, whatever the engine reports', () => {
+    expect(modelAsk(undefined, facts(null, 'claude-haiku-5-5'), rows)).toEqual({ asked: null, explicit: false, pending: false });
+    expect(modelAsk(undefined, facts(null, null), rows)).toEqual({ asked: null, explicit: false, pending: false });
+  });
+
+  it('a request is pending until a report runs it, and while nothing is reported yet', () => {
+    expect(modelAsk(undefined, facts('haiku', 'claude-opus-5-5[1m]'), rows)).toEqual({ asked: 'haiku', explicit: true, pending: true });
+    expect(modelAsk(undefined, facts('haiku', null), rows)).toEqual({ asked: 'haiku', explicit: true, pending: true });
+    expect(modelAsk(undefined, facts('haiku', 'claude-haiku-5-5'), rows)).toEqual({ asked: 'haiku', explicit: true, pending: false });
+  });
+
+  it('a held request wins over the status, Default included, and is pending until the engine runs what it names', () => {
+    expect(modelAsk({ value: 'haiku' }, facts('opus', 'claude-opus-5-5[1m]'), rows)).toMatchObject({ asked: 'haiku', pending: true }); // set_model in flight
+    expect(modelAsk({ value: null }, facts(null, 'claude-haiku-5-5'), rows)).toEqual({ asked: null, explicit: true, pending: true }); // Default asked, Haiku still running
+    expect(modelAsk({ value: null }, facts(null, 'claude-opus-5-5[1m]'), rows)).toEqual({ asked: null, explicit: true, pending: false }); // Default runs Opus
+  });
+
+  it('a request the catalogue cannot resolve is pending only while held: no report has come since the ask', () => {
+    expect(modelAsk({ value: 'fable' }, facts('fable', 'claude-opus-5-5[1m]'), rows).pending).toBe(true);
+    expect(modelAsk(undefined, facts('fable', 'claude-fable-5-1[1m]'), rows).pending).toBe(false);
+    expect(modelAsk({ value: null }, facts(null, 'claude-haiku-5-5'), []).pending).toBe(true);
+    expect(modelAsk(undefined, facts('default', 'claude-haiku-5-5'), []).pending).toBe(false);
   });
 });

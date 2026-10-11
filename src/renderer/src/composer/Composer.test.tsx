@@ -15,7 +15,7 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { insertComposerText, isStarting, prefillComposer, resetComposerStore, useComposerStore } from '../stores/composer';
+import { insertComposerText, isStarting, prefillComposer, requestChipWidget, resetComposerStore, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
@@ -35,6 +35,8 @@ import { currentSet } from '../stores/layout-model';
 import { useSetup } from '../sessions/store'; // P2-A
 import { trustState } from '../test-support/setup-intents'; // P2-A
 import { DictationKeys } from './dictation/DictationKeys'; // E9
+import { modelSelector } from '../widgets/ModelSelector'; // P2-F S chip (review)
+import { resetModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
 
 const A = 'app-a' as AppSessionId;
@@ -61,7 +63,13 @@ beforeEach(() => {
     'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q-1' },
     'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' },
     'session.interrupt': { stillQueued: [], cancelled: [] },
-    'session.listModels': { models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: 'Sonnet', description: 'fast' }] },
+    'session.listModels': {
+      models: [
+        { value: 'default', resolvedModel: 'claude-sonnet', displayName: 'Default (recommended)', description: '' },
+        { value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: 'Sonnet', description: 'fast' },
+        { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku', description: '' },
+      ],
+    },
     'session.listPermissionRules': rules,
     // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
     // (W3: the chip names the row's value, so the two routes' rows differ by value); Haiku's row says what `haiku` runs, so
@@ -468,6 +476,65 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the next turn's init frame
     await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
     expect(chip().textContent).toBe('haiku⌄');
+  });
+
+  // The review of S-chip: the chip and the selector hold one rule on every path, through the request the selector holds
+  // (widgets/model.ts): a dormant choice while its session starts, a request with nothing reported yet, and Default.
+  describe('the model chip beside the real selector', () => {
+    const direct = { mode: 'direct' as const, baseUrl: null, verified: 'direct' as const, autoModeServer: 'unknown' as const, localLane: null };
+    let offs: (() => void)[] = [];
+    beforeEach(() => {
+      offs = [
+        registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: modelSelector('model') }),
+        registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: modelSelector('effort') }),
+      ];
+    });
+    afterEach(() => {
+      offs.forEach((off) => off());
+      resetModelRequests();
+    });
+    const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+    const choose = async (name: RegExp) => {
+      act(() => requestChipWidget(A, 'model', ''));
+      fireEvent.click(await screen.findByRole('menuitemradio', { name }));
+    };
+    const SET = { ok: true, error: null, code: null };
+
+    it('a choice on a session with no ready process is named, marked, while the session starts for it', async () => {
+      live(A, { status: { process: 'exited', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, gateway: direct } });
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+      await choose(/^Haiku/);
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await act(() => fake.reply('session.acquire', { status: 'failed', appSessionId: A, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet')); // nothing applied: the request is gone
+    });
+
+    it('a model chosen before the engine has reported any is marked until it does', async () => {
+      live(A, { status: { model: { requested: null, resolved: null }, gateway: direct } });
+      mount([{ index: 0, id: A }]);
+      await choose(/^Haiku/);
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      await act(() => fake.reply('session.setModel', SET));
+      live(A, { status: { model: { requested: 'haiku', resolved: null }, gateway: direct } }); // the host's status after the answer
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the first init frame
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+    });
+
+    it('Default chosen over another model names what Default runs, marked until the engine runs it', async () => {
+      live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } });
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await choose(/^Default/);
+      await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A, model: null }]));
+      await act(() => fake.reply('session.setModel', SET));
+      live(A, { status: { model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host records the null request
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet, setting…'));
+      live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } }); // the next turn's init frame
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+    });
   });
 
   // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as

@@ -238,10 +238,33 @@ describe('the model chip names the model and the effort the engine uses', () => 
     expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
     // `default` with no catalogue to say what it runs: nothing to compare, so the reported model, unmarked (never "default")
     expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), {}).model).toMatchObject({ label: 'opus', requested: false });
-    // nothing reported yet (a launch before its first turn): the model asked for, unmarked, as the selector reads it
-    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: false });
+    // nothing reported yet (a launch before its first turn): the model asked for, marked until the engine reports it
+    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
+    // nothing asked and nothing reported: no model to name, nothing marked
+    const none = { requested: null, resolved: null };
+    expect(liveBindings({ ...s, model: none }, record(APP, { model: none }), { modelNames: catalogue }).model).toMatchObject({ label: 'Model', requested: false });
     // a record with no process reads the same way: what it asked for, marked while its last run reported another
     expect(liveBindings(null, record(APP, { model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
+  });
+
+  // The review of S-chip: the chip reads the request the selector holds (widgets/model.ts), so a choice in flight and an
+  // explicit Default show at once, marked until the engine reports running them.
+  it('a request held by the selector: a dormant choice while the session starts, and an explicit Default', () => {
+    const rows = [...catalogue, { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku' }];
+    const exited = { ...status(APP), process: 'exited' as const, model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: null };
+    // the session is still starting for the choice: no status names it yet
+    expect(liveBindings(exited, record(APP), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'fable', requested: true });
+    expect(liveBindings(null, record(APP, { model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'fable', requested: true });
+    // Default asked for while Haiku runs: the status's requested is null either way; the held request tells them apart
+    const onHaiku = { ...status(APP), model: { requested: null, resolved: 'claude-haiku-5-5' }, effort: null };
+    expect(liveBindings(onHaiku, record(APP), { modelNames: rows }).model).toMatchObject({ label: 'haiku', requested: false });
+    const asked = liveBindings(onHaiku, record(APP), { modelNames: rows, asked: { value: null } }).model;
+    expect(asked).toMatchObject({ label: 'opus', requested: true }); // what Default runs, never "default"
+    expect(asked.value.model).toBeNull();
+    // the engine reports what Default runs: no longer marked
+    expect(liveBindings({ ...onHaiku, model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: rows, asked: { value: null } }).model).toMatchObject({ label: 'opus', requested: false });
+    // Default with no catalogue to say what it runs: marked, and named by no model rather than by "default"
+    expect(liveBindings(onHaiku, record(APP), { asked: { value: null } }).model).toMatchObject({ label: 'Model', requested: true });
   });
 
   // The review of S-chip: the alias is for display only; acknowledgement compares the exact ids through the catalogue.
