@@ -27,7 +27,9 @@
 // shows, through every scrolling ancestor that clips it and the viewport (re-read at each scroll and resize). When the
 // viewport shrinks, what showed before is brought back by the least scroll: each clipping ancestor, nearest first (an
 // app-style page scrolls a viewport-sized pane, not its root), then the page, never the element's top above what clips
-// it; nothing when it still shows or did not show. Scrolls are vertical, so the card's caret still points at it.
+// it; nothing when it still shows or did not show. Scrolls are vertical, so the card's caret still points at it. The
+// pick stays a subject for its card's life: the strip holds the page's bottom while the card is open, so the viewport
+// back at its height at the pick means the card closed, and the pick is forgotten.
 //
 // The DOM is typed structurally (`CommentPage`), as `describe.ts`'s is: src/preload compiles under the Node program,
 // which has no DOM lib (Decision Log 27(l)).
@@ -184,8 +186,8 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   let pointer: Point | null = null;
   let press: Press | null = null;
   // P2-F L147: the latest pick (its rect in today's viewport, null once it left the page; the element its clipping
-  // ancestors start from; how far down from its top it showed), and the viewport's height
-  type Subject = { rect(): PickRect | null; from: PageElement | null; shown: number | null };
+  // ancestors start from; the viewport's height at the pick; how far down from its top it showed), and the viewport's height
+  type Subject = { rect(): PickRect | null; from: PageElement | null; height: number; shown: number | null };
   let subject: Subject | null = null;
   let viewportHeight = page.innerHeight;
 
@@ -455,7 +457,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
             const now = element.getBoundingClientRect();
             return { ...area, x: area.x + now.left - at.box.x - (element.scrollLeft - at.scrollLeft), y: area.y + now.top - at.box.y - (element.scrollTop - at.scrollTop) };
           };
-    subject = { rect, from: area === null ? element.parentElement : element, shown: null };
+    subject = { rect, from: area === null ? element.parentElement : element, height: page.innerHeight, shown: null };
     subject.shown = shownOf(subject);
   };
   // What showed of the subject (`shown` down from its top) back in view by the least scroll: each clipping ancestor
@@ -479,6 +481,10 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const before = viewportHeight;
     viewportHeight = page.innerHeight;
     if (subject === null) return;
+    if (viewportHeight > before && viewportHeight >= subject.height) {
+      subject = null; // the strip gave the page its bottom back: the card closed
+      return;
+    }
     if (viewportHeight < before && subject.shown !== null) reveal(subject, subject.shown);
     subject.shown = shownOf(subject);
   };

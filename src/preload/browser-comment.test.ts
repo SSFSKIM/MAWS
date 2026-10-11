@@ -725,6 +725,26 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 162));
   });
 
+  it('keeps the pick a subject while the card’s strip holds the page’s bottom, its height changing', () => {
+    pickAt(510, 610); // #long: 600 to 630
+    viewport(568); // the card opens
+    viewport(668); // it shrinks (a sent comment's field cleared): the page grows, still short of its height at the pick
+    place(byId('long'), { left: 500, top: 640, width: 100, height: 30 }); // and its content moved meanwhile
+    win().dispatchEvent(new (win().Event)('scroll'));
+    viewport(568); // it grows again (a reply arrived)
+    expect(scrollBy.mock.calls).toEqual([[step(0, 62)], [step(0, 100)]]); // what showed before (down to 668) back in view
+  });
+
+  it('forgets the pick when the viewport is back to its height at the pick (the card closed): a later shrink moves nothing', () => {
+    pickAt(510, 610);
+    viewport(568);
+    viewport(768); // the card closed
+    place(byId('long'), { left: 500, top: 600, width: 100, height: 30 });
+    win().dispatchEvent(new (win().Event)('scroll'));
+    viewport(568); // the window made shorter, no card open
+    expect(scrollBy).toHaveBeenCalledOnce();
+  });
+
   it('keeps the latest pick only, and nothing before any pick', () => {
     viewport(568);
     pickAt(510, 610);
