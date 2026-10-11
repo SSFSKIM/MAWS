@@ -190,3 +190,14 @@ Dispositions after the sitting (Task 4.4, 2026-10-11; the owner's answers in own
   Turned into wave-S rows (Owner: P2-F wave S): L32 (D1, an investigation), L82 (D7), L98 (C1, the sitting's one fail), L102 (D13, the 2-second dwell), L147 (D13, the scroll), the macOS "Quit and Keep Windows" row (D14, an investigation first)
   Added: CardThread.test.tsx load-sensitive (the architect's F gate, 2026-10-10; P3)
   Tracker: 108 rows at 4.3 -> 101 rows after 4.4 (tracker_check: pass); wave S's commits are recorded here when they land
+
+Wave S (Task 4.5, 2026-10-11; Decision Log 31)
+  L82 closed by 5f34fbd4 (D7); L147 closed by 5dae76c7 (+7614665d, ec59572c); L102 closed by 48d9641c (+be739a5a); the CardThread load row
+  (added at 4.4) closed by bf18f55d (+5b1b1b04; the cause an async vi.mock factory run twice, not load)
+  L32 replaced in place by its narrowed residue (bdacd87f, da25d873, e914ad1a), owner P3
+  The macOS "Quit and Keep Windows" row replaced in place by a P3 row with the owner's words (no hook in Electron 44; no code)
+  L98 open, owner P2-F wave S: not reproduced by the agents; 2dc3d301 (the composition view tokenised), d1038cad and 5613b47f (the
+  temporary recorder for the owner's trace)
+  Added: the strip's card-lifetime inference (S-R1 review minor, P3); the chip's starting mark on a cached-model choice and the
+  countdown's sub-minute words (S-R2 review, P3); Session info's model row (P3); the bookmark sync line's English age (the cua session)
+  Tracker: 101 rows after 4.4 -> 102 (tracker_check: pass)
