@@ -85,11 +85,11 @@ B6 | the error card's dwell (L102); N2.4b: Dismiss clears, the row keeps "ended 
 B7 | anything invented, off or outside the token system on a P2 surface; the usage pill's popover lists every account | [ ] | [ ] | [x] | [ ] | assistant: opened usage popover; it visibly lists 4 Claude accounts and 3 Codex accounts, not only the active route. Claude rows include 5h/weekly/Fable values, route state and no-reading-since-reset copy; Codex rows direct limits to ClaudeUsage. No account/route/refresh action taken. Independent account inventory and overall owner taste not asserted. |
 
 -- C. The native hands --
-C1 | Korean IME in a Terminal tab; L98: the same `cat` sequence in Terminal.app | [ ] | [ ] | [ ] | [x] | assistant preparation: opened a new Terminal tool in disposable demo session, maximized right panel, printed test label/local URL, and started cat. Screen visibly waiting for input. Owner actual Korean composition and Terminal.app comparison pending; no IME pass inferred from ASCII paste. |
+C1 | Korean IME in a Terminal tab; L98: the same `cat` sequence in Terminal.app | [ ] | [x] | [ ] | [ ] | owner 2026-10-11: "이중입력됨 왼지 알수없게. 백스페이스도 몇개만 지우다 다 안지워짐." Attached screenshot shows incremental jamo/syllable remnants on the cat input line, not merely cat echoing a completed line. Preparation was new MAWS Terminal, disposable project, plain cat, maximized panel. Whether same sequence was also performed in Terminal.app and its outcome are not yet established. Failure records owner experience, not proven root cause; read-only implementation/L98 diagnosis dispatched. | owner-attached image in joint-sitting conversation
 C2 | Korean IME in the composer | [ ] | [ ] | [ ] | [ ] | |
 C3 | Korean IME in an editor tab, the /plugins search and the chooser's search; Escape ends the composition, the dialog stays | [ ] | [ ] | [ ] | [ ] | |
 C4 | keep-quit on the owner's profile (L31): session live and streaming after relaunch, no stall; the Option-key "Quit and Keep Windows" outcome | [ ] | [ ] | [ ] | [ ] | |
-C5 | Command-click a URL in the terminal: where it opens | [ ] | [ ] | [ ] | [x] | assistant preparation: local synthetic URL http://127.0.0.1:17493/b3-comment-layout.html printed in MAWS terminal for owner Command-click; not yet clicked. |
+C5 | Command-click a URL in the terminal: where it opens | [x] | [ ] | [ ] | [ ] | owner explicitly answered 외부 브라우저에서 열림: Command-click on printed local synthetic URL opened the external browser. This records observed destination, not a new preference for routing. |
 C6 | sleep and wake: terminal reattaches, the turn streams or says why, the supervisor row reads connected | [ ] | [ ] | [ ] | [ ] | |
 
 -- D. Decisions (answered in the decisions block below; mark the row when the ruling is heard) --
@@ -153,6 +153,8 @@ B2 automation input | The first batched Escape/focus/typeText(/resume)/Return se
 Browser bottom element | Opening comment strip hid a previously visible Bottom target; caret remained and attached screenshot thumbnail showed target, but live page target was outside shrunk viewport. | owner requests fix now: minimal auto-scroll (2026-10-11)
 
 Report question vs continuation | Native AskUserQuestion in a marked turn displayed pending input and answered receipt in Report. Only plain NATIVE_DONE Alpha was folded into Working record. L155 absence not reproduced; L96 reproduced. | owner keeps L96 folding and Report default; architect should reconcile L155 against current build evidence
+
+Terminal Korean composition | Owner reports double input and Backspace only partly removing text; attached screenshot shows jamo/syllable remnants during plain cat test. Native Terminal.app comparison outcome not yet known. | C1 fail; root-cause diagnosis pending, route at M4.4
 
 == The measure ==
 What, if anything, still sends me to Claude Desktop or a terminal today:
