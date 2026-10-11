@@ -452,6 +452,20 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
+  // P2-F wave S (S-chip; the sitting's A1.6): after a set_model on a live session the chip names the model asked for,
+  // marked as the selector marks its row, until an init frame reports running it
+  it('the model chip names a model asked for and not yet reported, marked setting…, until the engine reports it', async () => {
+    const direct = { mode: 'direct' as const, baseUrl: null, verified: 'direct' as const, autoModeServer: 'unknown' as const, localLane: null };
+    live(A, { status: { model: { requested: 'haiku', resolved: 'claude-sonnet' }, gateway: direct } });
+    mount([{ index: 0, id: A }]);
+    const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+    expect(chip().textContent).toBe('haikusetting…⌄');
+    live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the next turn's init frame
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+    expect(chip().textContent).toBe('haiku⌄');
+  });
+
   // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as
   // `/model` from the editor does
   it('the model chip reads `<alias> <effort>` and opens the registered selector, from the chip and from `/model`', async () => {

@@ -432,6 +432,9 @@ test.describe('interactive', () => {
     await list.getByRole('menuitemradio', { name: /^Opus/ }).click(); // applies at once and returns to the effort view
     await expect(selector).toHaveAttribute('data-model-selector', 'effort');
     await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'set_model')).toEqual([{ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } }]);
+    // P2-F wave S (S-chip; the sitting's A1.6): the chip names the model asked for at once, marked as the list marks its
+    // checked row, while the engine's last init frame still names Sonnet
+    await expect(chip).toHaveAttribute('aria-label', 'Model opus high, setting…');
     const fast = selector.getByRole('switch', { name: 'Fast mode' });
     await expect(fast).toBeEnabled(); // opus has fast mode
     await fast.click();

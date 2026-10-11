@@ -43,7 +43,9 @@ export interface ModelChoice {
 
 // W3: the model chip's binding carries its words, `<alias> <effort>` (@shared/sessions/model-label.ts), worked out here from the
 // session's source: the intent with the user's own settings while unstarted, the engine's status and effective effort once live.
-export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string };
+// `requested` (P2-F wave S, the sitting's A1.6): the words name a model the session asked for and the engine has not
+// reported running yet (its last init frame named another); the chip marks it as the selector marks its row.
+export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string; requested?: boolean };
 
 // The toolbar's location chip (W2), read-only: where a started session runs, its branch, and why it cannot move.
 export interface LocationView {
@@ -159,9 +161,14 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   };
-  const current: ModelChoice = { model: status?.model.resolved ?? status?.model.requested ?? record?.model.resolved ?? record?.model.requested ?? null, effort: status?.effort ?? null };
   // W3: named from the options this mount listed, else the route's catalogue; the effort the engine runs at, else the requested one
   const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
+  // P2-F wave S (A1.6): the model asked for (set_model accepted, or the launch's), else the one the engine reported; marked
+  // requested while the engine's last report names another model, so the chip and the selector's checked row agree
+  const reported = status && (status.model.requested !== null || status.model.resolved !== null) ? status.model : null;
+  const { requested, resolved } = reported ?? record?.model ?? { requested: null, resolved: null };
+  const current: ModelChoice = { model: requested ?? resolved, effort: status?.effort ?? null };
+  const unconfirmed = requested !== null && resolved !== null && aliasOf(requested, names) !== aliasOf(resolved, names);
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
@@ -171,13 +178,16 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     model: {
       value: current,
       label: chipLabel(aliasOf(current.model, names), shownEffort),
+      requested: unconfirmed,
       options: [...(reads.models ?? [])],
       disabled: writable,
       set: async (next) => {
         const refused = await acquired(); // P2-A
         if (refused) return refused;
         const picked = reads.models?.find((m) => m.value === next.model);
-        if (next.model !== current.model && !(picked && modelMatches(picked, current.model))) {
+        // the model asked for, by its value or its resolved id; the reported one only while it is the one asked for
+        const same = next.model === current.model || (picked !== undefined && modelMatches(picked, current.model)) || (!unconfirmed && next.model === resolved);
+        if (!same) {
           const result = await client.invoke('session.setModel', { appSessionId, model: next.model });
           if (!result.ok) return { ok: false, error: result.error.message };
           if (!result.value.ok) return { ok: false, error: result.value.error ?? 'The engine refused the model' };

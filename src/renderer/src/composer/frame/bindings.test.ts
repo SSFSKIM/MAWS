@@ -79,7 +79,7 @@ describe('the frame binds its chips to the setup intent or to the live session',
     const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], git: { repository: true, branch: 'main' }, refresh }, client);
     expect(b.location).toEqual({ path: '/work/app-1', branch: 'main', note: LOCATION_FIXED });
     expect(b.project).toBeNull(); // no project row once started
-    expect(b.model.value).toEqual({ model: 'claude-sonnet', effort: 'medium' });
+    expect(b.model.value).toEqual({ model: 'sonnet', effort: 'medium' }); // the model asked for (S-chip), the same one the engine runs
     await b.model.set({ model: 'haiku', effort: 'medium' });
     await b.model.set({ model: 'claude-sonnet', effort: 'high' });
     await b.directories.set(['/a', '/b']);
@@ -220,5 +220,33 @@ describe('the model chip names the model and the effort the engine uses', () => 
     expect(liveBindings({ ...s, effort: 'max' }, record(APP), { modelNames: catalogue }).model.label).toBe('opus max');
     expect(liveBindings({ ...s, model: { requested: 'claude/sol', resolved: 'claude/sol' } }, record(APP), { modelNames: catalogue, effort: 'xhigh' }).model.label).toBe('sol xhigh');
     expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue, effort: null }).model.label).toBe('haiku');
+  });
+
+  // The sitting's A1.6 (P2-F wave S, S-chip): on a live session the closed chip kept the init frame's model after a
+  // set_model until the next turn's init frame, while the picker already checked the new one. One rule: the chip names
+  // the model asked for, marked as requested, until the engine reports running it.
+  it('a live session names the model asked for, marked as requested, until an init frame reports it', () => {
+    const s = { ...status(APP), model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: null };
+    const asked = { ...s, model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }; // set_model accepted, no turn since
+    expect(liveBindings(asked, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'fable medium', requested: true });
+    expect(liveBindings(asked, record(APP), { modelNames: catalogue, effort: 'medium' }).model.value.model).toBe('fable');
+    // the next init frame runs it: no longer marked
+    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: 'claude-fable-5-1[1m]' } }, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'fable medium', requested: false });
+    // an alias and the id it resolves to, `default` and what it runs, a family id with no row: the same model, unmarked
+    expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
+    expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
+    expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
+    // nothing reported yet (a launch before its first turn): the model asked for, unmarked, as the selector reads it
+    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: false });
+    // a record with no process reads the same way: what it asked for, marked while its last run reported another
+    expect(liveBindings(null, record(APP, { model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
+  });
+
+  it('re-picking the running model while another is asked for switches back to it', async () => {
+    const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } } });
+    const s = { ...status(APP), model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' }, effort: null };
+    const b = liveBindings(s, record(APP), { models: catalogue.map((m) => ({ description: '', ...m })) }, client);
+    expect(await b.model.set({ model: 'opus', effort: null })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenCalledWith('session.setModel', { appSessionId: APP, model: 'opus' });
   });
 });

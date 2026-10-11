@@ -3,11 +3,14 @@
 // 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast` widgets with
 // the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from the palette or
 // typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it hands the
-// keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model.
+// keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model. A model
+// asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for its
+// checked row, "setting…" (P2-F wave S, the sitting's A1.6).
 import { Popover } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { closeChipWidget, requestChipWidget, useComposerStore } from '../../stores/composer';
+import { SELECTOR } from '../../widgets/copy';
 import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
 import type { ModelBinding } from './bindings';
 import { CHIP } from './chip-style';
@@ -38,9 +41,14 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
         else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
       }}
     >
-      <Popover.Trigger aria-label={`Model ${binding.label}`} title={binding.disabled ?? 'Model and effort'} className={`${CHIP} shrink-0`}>
+      <Popover.Trigger aria-label={`Model ${binding.label}${binding.requested ? `, ${SELECTOR.setting}` : ''}`} title={binding.disabled ?? 'Model and effort'} className={`${CHIP} shrink-0`}>
         {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
         <span className="truncate">{binding.label}</span>
+        {binding.requested && (
+          <span aria-hidden className="shrink-0 text-fg-faint">
+            {SELECTOR.setting}
+          </span>
+        )}
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
