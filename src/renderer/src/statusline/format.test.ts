@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ago, resetsIn, resetsInCompact, windowShown } from './format';
+import { REL } from '../test-support/relative-time';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -18,10 +19,11 @@ describe('status line time copy', () => {
   });
 
   it('reads how long ago a reading was taken', () => {
-    expect(ago(30_000)).toBe('just now');
-    expect(ago(3 * MIN)).toBe('3m ago');
-    expect(ago(2 * HOUR + 5 * MIN)).toBe('2h ago');
-    expect(ago(3 * DAY)).toBe('3d ago');
+    // compact, in the system locale (3m ago, 3분 전)
+    expect(ago(30_000)).toBe(REL.now);
+    expect(ago(3 * MIN)).toBe(REL.agoNarrow(3, 'minute'));
+    expect(ago(2 * HOUR + 5 * MIN)).toBe(REL.agoNarrow(2, 'hour'));
+    expect(ago(3 * DAY)).toBe(REL.agoNarrow(3, 'day'));
   });
 
   it('a window whose reset time has passed reads 0% with no countdown', () => {

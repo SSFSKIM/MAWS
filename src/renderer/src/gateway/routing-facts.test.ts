@@ -121,13 +121,15 @@ describe('paceLine warns when the window runs out before it resets', () => {
     const at = paceRunsOutAt(copy, 'weekly', NOW)!;
     // 96 h elapsed at 90 %: 10 % more takes 96 / 9 h
     expect(at).toBeCloseTo(NOW + (96 / 9) * 3_600_000, -3);
-    const weekday = new Date(at).toLocaleDateString('en-US', { weekday: 'short' });
-    expect(paceLine(copy, 'weekly', NOW)).toMatch(new RegExp(`^At this rate weekly runs out ${weekday} \\d{1,2} (AM|PM), before it resets$`));
+    // the weekday and the hour in the system locale (Thu 2 PM; (목) 오후 2시)
+    const when = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric' }).format(at).replace(/\s/g, ' ');
+    expect(paceLine(copy, 'weekly', NOW)).toBe(`At this rate weekly runs out ${when}, before it resets`);
   });
 
   it('the 5-hour form names the time; nothing without a reading, at 0 % or at 100 %', () => {
     const five = { percent: 80, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString(), recordedAt: weekly.recordedAt };
-    expect(paceLine(five, 'fiveHour', NOW)).toMatch(/^At this rate the 5-hour window runs out at \d{1,2}:\d{2} (AM|PM)$/);
+    const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(paceRunsOutAt(five, 'fiveHour', NOW)!).replace(/\s/g, ' ');
+    expect(paceLine(five, 'fiveHour', NOW)).toBe(`At this rate the 5-hour window runs out at ${clock}`);
     expect(paceLine(null, 'fiveHour', NOW)).toBeNull();
     expect(paceLine({ ...five, percent: 0 }, 'fiveHour', NOW)).toBeNull();
     expect(paceLine({ ...five, percent: 100 }, 'fiveHour', NOW)).toBeNull();

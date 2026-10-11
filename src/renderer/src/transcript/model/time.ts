@@ -1,6 +1,7 @@
 // Durations and time separators (C6 execution document, Copy and *Time separators* under Derivation). Separator labels
 // depend on "now", the locale and the time zone, so they are configurable: the app leaves the defaults, the snapshot
 // suite pins all three so a snapshot never depends on the machine that took it.
+import { dateFormats } from '../../app/date-format';
 
 export interface TimeConfig {
   now: string; // ISO-8601
@@ -63,8 +64,7 @@ export function separatorLabel(at: string): string {
   const daysAgo = dayNumber(now, timeZone) - dayNumber(instant, timeZone);
   const time = formatter(locale, timeZone, { hour: 'numeric', minute: '2-digit' }).format(instant);
   let day: string;
-  if (daysAgo === 0) day = 'Today';
-  else if (daysAgo === 1) day = 'Yesterday';
+  if (daysAgo === 0 || daysAgo === 1) day = dateFormats(locale).day(daysAgo); // Today, Yesterday; 오늘, 어제
   else if (daysAgo > 1 && daysAgo <= 6) day = formatter(locale, timeZone, { weekday: 'long' }).format(instant);
   else day = formatter(locale, timeZone, { year: 'numeric', month: 'short', day: 'numeric' }).format(instant);
   return `${day} ${time}`;

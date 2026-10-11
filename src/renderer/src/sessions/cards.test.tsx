@@ -34,6 +34,7 @@ import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
+import { REL } from '../test-support/relative-time';
 // C11 end
 
 let fake: FakeClient;
@@ -224,7 +225,7 @@ describe('relay card', () => {
   it("under the 'wait' policy the primary is 'Open ClaudeUsage, then start'; Run direct waits for a Claude model on a gateway model", () => {
     const { rerender } = render(<RelayCard health={health()} policy="wait" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel={false} openClaudeUsage={null} onAccept={vi.fn()} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     expect(screen.getAllByRole('button')[0]!.textContent).toBe('Open ClaudeUsage, then start');
-    expect(screen.getByText(/Waiting for the relay · checked 4 s ago/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`Waiting for the relay · checked ${REL.now}`))).toBeTruthy();
     rerender(<RelayCard health={health()} policy="ask" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel openClaudeUsage={null} onAccept={vi.fn()} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     const direct = screen.getByRole('button', { name: 'Run direct' });
     expect(direct.hasAttribute('disabled')).toBe(true);

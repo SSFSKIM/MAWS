@@ -7,11 +7,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
+import { formatAgo } from '../app/date-format';
 import { useNow } from '../app/use-now';
 import { formatCwd } from '../composer/frame/LocationChip';
 import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
-import { formatAge, type ProjectEntry } from './derive';
+import type { ProjectEntry } from './derive';
 import { SidebarHoverCard } from './HoverCard';
 
 export interface ProjectHoverCardProps {
@@ -35,7 +36,7 @@ const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? pat
 function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
   const { project, sessions, rollup, lastActivity } = entry;
   const now = useNow();
-  const age = lastActivity === null ? null : formatAge(now - lastActivity);
+  const elapsed = lastActivity === null ? null : Math.max(0, now - lastActivity);
   const counts = [plural(sessions.length, 'session', 'sessions'), `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
 
   return (
@@ -48,7 +49,7 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
         {counts}
       </p>
       <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
-        {age === null ? 'No activity yet' : age === 'now' ? 'Active now' : `Last active ${age} ago`}
+        {elapsed === null ? 'No activity yet' : elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`}
       </p>
       <Worktrees directory={project.directory} />
     </div>

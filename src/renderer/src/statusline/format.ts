@@ -1,6 +1,7 @@
 // The status line's time copy (C7 execution document, "Status line popovers and usage"; mockup 04 vignette 5): a
 // window's reset countdown (`resets in 2h 37m` in popovers and banners, `↻2h37m` in the line) and a reading's age.
 import type { UsageWindow } from '@shared/usage/types';
+import { formatAgo } from '../app/date-format';
 
 // A token count as the status line and the context popover write it: `412`, `46k`, `1.2M`.
 export const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
@@ -22,12 +23,8 @@ function parts(ms: number): [string, string] | [string] | null {
 export const resetsIn = (ms: number): string => parts(ms)?.join(' ') ?? 'under a minute';
 export const resetsInCompact = (ms: number): string => parts(ms)?.join('') ?? '<1m';
 
-export function ago(ms: number): string {
-  if (ms < MINUTE) return 'just now';
-  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m ago`;
-  if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
-  return `${Math.floor(ms / DAY)}d ago`;
-}
+// A reading's age, compact and in the system locale (`app/date-format.ts`): "3m ago", "3분 전"; "now" under a minute.
+export const ago = (ms: number): string => formatAgo(ms, { narrow: true });
 
 // What a window shows at `now`: once its reset time has passed, ClaudeUsage has not recorded the new window yet, so
 // the value reads 0% with no countdown (the popover adds `no reading since the window reset`).

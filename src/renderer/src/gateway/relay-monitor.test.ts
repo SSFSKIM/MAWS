@@ -8,6 +8,7 @@ import { createNoticesStore } from '../stores/notices';
 import { createSessionsStore } from '../stores/sessions';
 import { hasLiveGatewaySession, RELAY_BANNER_ID, RELAY_POLL_MS, startRelayMonitor } from './relay-monitor';
 import { createGatewayStore } from './store';
+import { REL } from '../test-support/relative-time';
 
 const URL = 'http://127.0.0.1:8641';
 const health = (ok: boolean, at: number): RelayHealth => ({ url: URL, ok, status: ok ? 200 : null, latencyMs: ok ? 2 : null, checkedAt: new Date(at).toISOString(), error: ok ? null : 'connect ECONNREFUSED 127.0.0.1:8641' });
@@ -47,17 +48,17 @@ describe('relay monitor posts one banner per outage', () => {
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // down
     expect(h.banners()).toEqual([expect.objectContaining({ id: RELAY_BANNER_ID, level: 'warning', dismissible: true })]);
     expect(h.banners()[0]!.text).toBe(
-      "ClaudeUsage's relay stopped answering just now · 1 live session keeps its process; its next request fails until it is back · new sessions will offer Direct",
+      `ClaudeUsage's relay stopped answering ${REL.now} · 1 live session keeps its process; its next request fails until it is back · new sessions will offer Direct`,
     );
     // M5: while it stays down the same banner says for how long, and how many live sessions it is about, in place
     h.live('b');
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // still down
     expect(h.banners()).toHaveLength(1);
     expect(h.banners()[0]!.text).toBe(
-      "ClaudeUsage's relay stopped answering 30 s ago · 2 live sessions keep their process; their next request fails until it is back · new sessions will offer Direct",
+      `ClaudeUsage's relay stopped answering ${REL.ago(30, 'second')} · 2 live sessions keep their process; their next request fails until it is back · new sessions will offer Direct`,
     );
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS);
-    expect(h.banners()[0]!.text).toMatch(/^ClaudeUsage's relay stopped answering 1 min ago · /);
+    expect(h.banners()[0]!.text).toContain(`ClaudeUsage's relay stopped answering ${REL.ago(1, 'minute')} · `);
 
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // back
     expect(h.invoke).toHaveBeenCalledTimes(5);

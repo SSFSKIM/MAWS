@@ -16,6 +16,7 @@ import { FAILS_ID, IMPORT_ID, importBridge, RECORD, WALLET_ID, type ImportBridge
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { browser } from '../tools/browser/store';
 import { BrowserImport } from './BrowserImport';
+import { formatDate } from '../app/date-format';
 
 const A = 'app-a' as AppSessionId;
 let b: ImportBridge;
@@ -96,7 +97,7 @@ describe('an imported profile', () => {
   it('shows its date and summary, each extension with its state and toggle, and the wallet note', async () => {
     renderBlock(withRecord);
     await screen.findByRole('region', { name: 'Person 1' });
-    expect(profile().textContent).toContain('Imported Oct 6, 2026');
+    expect(profile().textContent).toContain(`Imported ${formatDate(Date.parse(RECORD.importedAt))}`);
     expect(profile().textContent).toContain('4 cookies, 4 history entries, 3 extensions · 3 skipped');
     expect(row('Probe').textContent).toContain('Loaded · background running');
     expect(row('Fails').textContent).toContain('Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS');

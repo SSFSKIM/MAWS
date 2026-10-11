@@ -32,6 +32,7 @@ import { sessionInfoTool } from '.';
 // E4a start
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { browser, resetBrowser } from '../browser/store';
+import { REL } from '../../test-support/relative-time';
 // E4a end
 
 const ROOT = join(__dirname, '../../../../..');
@@ -205,12 +206,12 @@ describe('session info of a session with no live process', () => {
       }),
     );
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe('claude-haiku-4-5 · Last observed 2 days ago'));
-    expect(valueOf('Effort')).toBe('high · Last observed 3 hours ago'); // its own age, not the model's
-    expect(valueOf('Output style')).toBe('Explanatory · Last observed 2 days ago');
-    expect(valueOf('Plugins')).toBe('1 loaded · Last observed 2 days ago');
-    expect(valueOf('Mode')).toBe('Plan · Last observed 3 hours ago');
-    expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000 · Last observed 3 hours ago');
+    await waitFor(() => expect(valueOf('Main')).toBe(`claude-haiku-4-5 · Last observed ${REL.ago(2, 'day')}`));
+    expect(valueOf('Effort')).toBe(`high · Last observed ${REL.ago(3, 'hour')}`); // its own age, not the model's
+    expect(valueOf('Output style')).toBe(`Explanatory · Last observed ${REL.ago(2, 'day')}`);
+    expect(valueOf('Plugins')).toBe(`1 loaded · Last observed ${REL.ago(2, 'day')}`);
+    expect(valueOf('Mode')).toBe(`Plan · Last observed ${REL.ago(3, 'hour')}`);
+    expect(valueOf('Context')).toBe(`42,812 of 200,000 · 21% · autocompact at 167,000 · Last observed ${REL.ago(3, 'hour')}`);
     expect(screen.queryByText(/Not running in this app/)).toBeNull();
     expect(backend.calls.filter((c) => c.command !== 'session.observedFacts' && c.command.startsWith('session.get'))).toEqual([]);
   });

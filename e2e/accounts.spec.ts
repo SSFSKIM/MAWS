@@ -123,7 +123,7 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
     await expect(popover).toBeVisible();
     await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Accounts/ })).toHaveCount(0);
     await expect(popover.getByRole('heading', { name: 'Claude Usage' })).toBeVisible();
-    await expect(popover.getByText(/^updated \dm ago$/)).toBeVisible();
+    await expect(popover.getByText(/^updated (\dm ago|\d분 전)$/)).toBeVisible(); // the system locale's compact age (D2 widened)
     await expect(popover.getByText('Usage includes all machines. Activity below is from this Mac.')).toBeVisible();
     const cards = popover.locator('[data-account]:not([data-codex] [data-account])');
     await expect(cards).toHaveCount(5);
@@ -139,7 +139,7 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
     const routing = card(page, '3@example.test');
     await expect(routing).toContainText('Routing here · weekly resets soonest of the usable accounts');
     await expect(routing).toContainText('8 saved sessions');
-    await expect(routing.locator('[data-serving="latest"]')).toHaveText(/^5 requests · 97% cached · (just now|1m ago)$/);
+    await expect(routing.locator('[data-serving="latest"]')).toHaveText(/^5 requests · 97% cached · (now|1m ago|지금|1분 전)$/);
     for (const email of ORDER.slice(1)) {
       await expect(card(page, email)).toContainText('1 saved session');
       await expect(card(page, email)).not.toContainText('Routing here');

@@ -13,7 +13,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { RecentTurn } from '@shared/ipc/schema/session';
 import { formatDateTime } from '../app/date-format';
-import { relativeAge } from '../app/relative-age';
+import { formatAgo } from '../app/date-format';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
@@ -391,7 +391,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
         {branch && <Fact label={COPY.facts.branch}>⎇ {branch}</Fact>}
         {projectName && <Fact label={COPY.facts.project}>{projectName}</Fact>}
         <Fact label={COPY.facts.lastActive} title={formatDateTime(row.at)}>
-          {capitalised(relativeAge(Math.max(0, now - row.at)))}
+          {capitalised(formatAgo(Math.max(0, now - row.at)))}
         </Fact>
         {digest?.lastAssistantLine && (
           <Fact label={COPY.facts.lastAnswer} title={digest.lastAssistantLine}>

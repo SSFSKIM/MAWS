@@ -15,6 +15,7 @@ import { useSessions } from '../../stores/sessions';
 import { loadForRead, useReadLoads } from '../read';
 import { LoadedLine, type LoadedLineProps, type SessionPlugins } from './LoadedLine';
 import type { Reloads } from './reload';
+import { REL } from '../../test-support/relative-time';
 
 const ID = 'app-line' as AppSessionId;
 const NOW = Date.parse('2026-10-09T12:00:00Z');
@@ -68,7 +69,7 @@ describe('the loaded line', () => {
       withSession(availability);
       const el = line({ availability });
       expect(el.textContent).toContain('3 plugins loaded in this session');
-      expect(el.textContent).toContain('Loaded last time, 2 days ago');
+      expect(el.textContent).toContain(`Loaded last time, ${REL.ago(2, 'day')}`);
       expect(screen.getByRole('button', { name: '1 problem' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
       cleanup();
@@ -163,7 +164,7 @@ describe('the loaded line', () => {
     const el = line({ availability: 'missing_directory' });
     expect(screen.getByText('Directory not found: /work/gone')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy(); // main forgets the state at the next attempt
-    expect(el.textContent).toContain('Loaded last time, 2 days ago');
+    expect(el.textContent).toContain(`Loaded last time, ${REL.ago(2, 'day')}`);
   });
 
   it('a still-pending Refresh keeps Starting… once the process is ready, until its outcome lands', async () => {

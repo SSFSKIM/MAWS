@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { dateWords, displayNameOf, groupOfMarketplace, identitiesOf, isNew, loadedOnly, manifestKeyOf, myItems, representativeOf, versionWords, type PluginIdentity } from './library';
+import { REL } from '../../test-support/relative-time';
 
 const HERE = '/work/maws';
 const NOW = Date.parse('2026-10-09T12:00:00');
@@ -186,11 +187,13 @@ describe('the library model: the row’s words', () => {
   });
 
   it('dates relative under a week, then the month and day, the year added when it is not this year', () => {
-    expect(dateWords(ago(3), NOW)?.text).toBe('3 days ago');
-    expect(dateWords(ago(6.9), NOW)?.text).toBe('6 days ago');
-    expect(dateWords(ago(7), NOW)?.text).toBe('Oct 2');
-    expect(dateWords('2025-10-03T12:00:00', NOW)?.text).toBe('Oct 3, 2025');
-    expect(dateWords(ago(3), NOW)?.title).toMatch(/Oct 6, 2026/); // the full date and time in the tooltip
+    // in the system locale (3일 전, 10월 2일; the Korean Desktop's words), as `app/date-format.test.ts` pins
+    const system = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(undefined, options).format(Date.parse(at));
+    expect(dateWords(ago(3), NOW)?.text).toBe(REL.ago(3, 'day'));
+    expect(dateWords(ago(6.9), NOW)?.text).toBe(REL.ago(6, 'day'));
+    expect(dateWords(ago(7), NOW)?.text).toBe(system(ago(7), { month: 'short', day: 'numeric' }));
+    expect(dateWords('2025-10-03T12:00:00', NOW)?.text).toBe(system('2025-10-03T12:00:00', { month: 'short', day: 'numeric', year: 'numeric' }));
+    expect(dateWords(ago(3), NOW)?.title).toBe(system(ago(3), { dateStyle: 'medium', timeStyle: 'short' })); // the full date and time in the tooltip
     expect(dateWords(null, NOW)).toBeNull();
     expect(dateWords('not a date', NOW)).toBeNull();
   });

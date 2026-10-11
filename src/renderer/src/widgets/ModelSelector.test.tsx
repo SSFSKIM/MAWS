@@ -18,6 +18,7 @@ import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
+import { REL } from '../test-support/relative-time';
 
 const SELECTOR_BACK = 'Back to effort';
 
@@ -185,7 +186,7 @@ describe('a session with a record and no ready process', () => {
     expect(acquires()).toEqual([]);
     expect(calls('list_models')).toHaveLength(0); // the catalogue is the host's, no engine read
     fireEvent.click(screen.getByRole('button', { name: SELECTOR_BACK }));
-    await waitFor(() => expect(document.querySelector('[data-model-observed]')?.textContent).toMatch(/· Last observed 2 days ago$/));
+    await waitFor(() => expect(document.querySelector('[data-model-observed]')?.textContent).toMatch(new RegExp(`· Last observed ${REL.ago(2, 'day')}$`)));
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
     fireEvent.click(item(/^Opus/));
     expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // pending from the choice

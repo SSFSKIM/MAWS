@@ -8,7 +8,7 @@
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { isAnthropicDefaultMarketplace } from '@shared/plugins/source-key';
-import { relativeAge } from '../../app/relative-age';
+import { formatAgo, formatDateTime, formatShortDate } from '../../app/date-format';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
 
 export type SourceGroup = 'here' | 'yours' | 'synced' | 'anthropic' | 'added';
@@ -126,15 +126,14 @@ export function isNew(at: string | null, now: number): boolean {
   return Number.isFinite(t) && now - t >= 0 && now - t <= NEW_MS;
 }
 
-// "3 days ago" under a week, then "Oct 3", the year added when it is not this year; the full date and time as its title.
+// "3 days ago" under a week, then "Oct 3", the year added when it is not this year; the full date and time as its title;
+// all in the system locale (`app/date-format.ts`; "3일 전", "10월 3일", as the Korean Desktop writes them).
 export function dateWords(at: string | null, now: number): { text: string; title: string } | null {
   const t = at === null ? NaN : Date.parse(at);
   if (!Number.isFinite(t)) return null;
-  const date = new Date(t);
-  const title = date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-  if (now - t < WEEK_MS) return { text: relativeAge(Math.max(0, now - t)), title };
-  const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  return { text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(!sameYear && { year: 'numeric' }) }), title };
+  const title = formatDateTime(t);
+  if (now - t < WEEK_MS) return { text: formatAgo(Math.max(0, now - t)), title };
+  return { text: formatShortDate(t, now), title };
 }
 
 // A version the engine reports; "unknown" or nothing is none (a 12-character commit prefix is a version as it is).

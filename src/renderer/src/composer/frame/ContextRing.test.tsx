@@ -13,6 +13,7 @@ import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { useReadLoads } from '../../widgets/read';
 import { ContextRing, contextRingOf } from './ContextRing';
+import { REL } from '../../test-support/relative-time';
 
 const A = 'app-a' as AppSessionId;
 const CONTEXT = {
@@ -123,12 +124,12 @@ describe('the context ring of a session with no live process', () => {
     mountExited(observed({ value: { percent: 41, totalTokens: 82_000, maxTokens: 200_000, autoCompactThreshold: 167_000 }, at: threeHoursAgo, launchId: 'L1' }));
     await settle();
     expect(ring().getAttribute('data-context-ring')).toBe('41');
-    expect(ring().getAttribute('aria-label')).toBe('Context window 41% full of 200k · Last reading, 3 hours ago');
+    expect(ring().getAttribute('aria-label')).toBe(`Context window 41% full of 200k · Last reading, ${REL.ago(3, 'hour')}`);
     fireEvent.click(ring());
     await settle();
     const popover = screen.getByRole('dialog', { name: 'Context window' });
     expect(within(popover).getByText('41% of 200k used')).toBeTruthy();
-    expect(within(popover).getByText('Last reading, 3 hours ago')).toBeTruthy();
+    expect(within(popover).getByText(`Last reading, ${REL.ago(3, 'hour')}`)).toBeTruthy();
     expect(fake.invoked('session.getContextUsage')).toEqual([]);
   });
 
@@ -185,7 +186,7 @@ describe('the context ring of a session with no live process', () => {
     const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
     mountWith('exited', { 'session.observedFacts': observed({ value: { ...twelve, percent: 14 }, at: twoHoursAgo, launchId: 'L1' }) });
     await settle();
-    expect(ring().getAttribute('aria-label')).toBe('Context window 14% full of 200k · Last reading, 2 hours ago');
+    expect(ring().getAttribute('aria-label')).toBe(`Context window 14% full of 200k · Last reading, ${REL.ago(2, 'hour')}`);
   });
 
   it('an exited ring whose host kept no reading keeps the digest’s sample; a live one reads no facts', async () => {
@@ -210,8 +211,8 @@ describe('the context ring of a session with no live process', () => {
     await settle();
     expect(within(popover()).queryByText('47k of 200k · autocompact at 167k')).toBeNull();
     expect(within(popover()).getByText('31% of 200k used')).toBeTruthy();
-    expect(within(popover()).getByText('Last reading, 1 hour ago')).toBeTruthy();
-    expect(ring().getAttribute('aria-label')).toBe('Context window 31% full of 200k · Last reading, 1 hour ago');
+    expect(within(popover()).getByText(`Last reading, ${REL.ago(1, 'hour')}`)).toBeTruthy();
+    expect(ring().getAttribute('aria-label')).toBe(`Context window 31% full of 200k · Last reading, ${REL.ago(1, 'hour')}`);
   });
 });
 // P2-A end

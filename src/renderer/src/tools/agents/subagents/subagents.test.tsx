@@ -30,6 +30,9 @@ import { useTaskGraph } from '../store';
 import { SubagentsSummary } from './SubagentsSummary';
 import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
+import { REL } from '../../../test-support/relative-time';
+
+const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
 // K2's test: the drill-in reaches the child through C6's `ipcSource` and builds nothing of its own.
 vi.mock('../../../transcript', async (importOriginal) => {
@@ -211,9 +214,9 @@ describe('subagents lists', () => {
     });
     expect(treeOf('agents')).toEqual(['p', '  c', '  d']);
     expect(rowsOf('agents').map((r) => [r.id, r.elapsed, r.line])).toEqual([
-      ['p', '', 'finished · just now'],
+      ['p', '', `finished · ${REL.now}`],
       ['c', '1m 00s', 'Working'],
-      ['d', '', 'finished · just now'],
+      ['d', '', `finished · ${REL.now}`],
     ]);
     expect(section('done')).toBeNull();
   });
@@ -260,7 +263,7 @@ describe('subagents lists', () => {
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
     // E11 W-D (tracker row E7 "teammate joined extra frozen"): the listing's joined age, frozen at its time, is dropped
-    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · idle · listed 2m ago', 'solo']);
+    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, `  testergeneral-purpose · idle · listed ${REL.agoNarrow(2, 'minute')}`, 'solo']);
     expect(heading('agents')).toBe('Agents · 2 running');
     const group = within(section('agents')!).getByRole('group', { name: 'Team · led by this session' });
     expect(Array.from(group.querySelectorAll<HTMLElement>('[data-agent-row], [data-roster]')).map((el) => el.dataset.agentRow ?? el.dataset.roster)).toEqual([one.agentId, 'tester']);
@@ -361,7 +364,7 @@ describe('subagents lists', () => {
     });
     expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
-    expect(lines).toEqual({ ok: 'finished · 3m ago · Read both files', bad: 'finished with errors · 3m ago', halt: 'stopped · 3m ago', gone: 'ended with the session' });
+    expect(lines).toEqual({ ok: `finished · ${M3} · Read both files`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, gone: 'ended with the session' });
   });
 
   it('a handed-back agent’s Done row shows its report’s first line, never the engine’s pointer (2.1.283 wording)', async () => {
@@ -377,7 +380,7 @@ describe('subagents lists', () => {
     });
     expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
-    expect(lines).toEqual({ hb: 'finished · 3m ago · Found 3 files.', wait: 'finished · 3m ago' });
+    expect(lines).toEqual({ hb: `finished · ${M3} · Found 3 files.`, wait: `finished · ${M3}` });
   });
 
   it('clicking a row opens its drill-in', async () => {
@@ -787,9 +790,9 @@ describe('subagents tool', () => {
     await mount({ events: [started('a1', 1)] });
     push([finished('a1', 2, {}, at(1))]);
     expandDone();
-    expect(rowsOf('done')[0].line).toBe('finished · just now');
+    expect(rowsOf('done')[0].line).toBe(`finished · ${REL.now}`);
     act(() => vi.advanceTimersByTime(90_000));
-    expect(rowsOf('done')[0].line).toBe('finished · 1m ago');
+    expect(rowsOf('done')[0].line).toBe(`finished · ${REL.agoNarrow(1, 'minute')}`);
   });
 
   it('a pinned tab passing through the Overview keeps its view and draft', async () => {

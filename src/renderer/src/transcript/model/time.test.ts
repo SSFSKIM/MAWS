@@ -62,6 +62,13 @@ describe('time separators', () => {
     expect(separatorLabel(at)).toBe('Today 14:30');
   });
 
+  // D2 widened (P2-F wave S): the day words follow the locale like the weekday and the date beside them.
+  it('writes today and yesterday in the locale', () => {
+    configureTime({ now: NOW, locale: 'ko-KR', timeZone: 'UTC' });
+    expect(separatorLabel('2026-09-28T01:12:00.000Z')).toMatch(/^오늘 \S+ 1:12$/);
+    expect(separatorLabel('2026-09-27T23:45:00.000Z')).toMatch(/^어제 \S+ 11:45$/);
+  });
+
   it('follows the configured time zone for the day boundary', () => {
     configureTime({ now: NOW, locale: 'en-US', timeZone: 'Asia/Seoul' }); // 2026-09-29 00:00 KST
     expect(separatorLabel('2026-09-28T15:30:00.000Z')).toBe('Today 12:30 AM');

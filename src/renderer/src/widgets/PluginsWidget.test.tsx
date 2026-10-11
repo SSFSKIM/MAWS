@@ -21,6 +21,7 @@ import type { BuiltInModsState } from './plugins/builtin-mods';
 import { useLibraryStore } from './plugins/library-store';
 import { PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
+import { REL } from '../test-support/relative-time';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
 const NO_MODS = (): BuiltInModsState => ({ read: { state: 'ready', rows: [] }, failure: null, setEnabled: async () => {}, setOverride: async () => {} });
@@ -856,7 +857,7 @@ describe('plugins widget: the library', () => {
     expect(text).not.toContain(cwd);
     expect(text).not.toContain('/work/other');
     expect(row('code-review@claude-plugins-official').textContent).toContain('Code review');
-    expect(row('code-review@claude-plugins-official').textContent).toContain('3 days ago');
+    expect(row('code-review@claude-plugins-official').textContent).toContain(REL.ago(3, 'day'));
     expect(within(row('code-review@claude-plugins-official')).getByText('New').getAttribute('title')).toBe('Added or updated in the last 14 days');
     expect(within(row('frontend-design@claude-plugins-official')).queryByText('New')).toBeNull(); // 20 days
     expect(row('e8-probe@e8-scratch').textContent).toContain('a1b2c3d4e5f6'); // a commit prefix is a version as it is

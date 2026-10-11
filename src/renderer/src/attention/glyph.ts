@@ -5,7 +5,7 @@ import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { relativeAge } from '../app/relative-age';
+import { formatAgo } from '../app/date-format';
 import { isActionable, isOpen } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
@@ -45,7 +45,7 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
     case 'failed':
       return glyph('✕', 'danger', 'Failed');
   }
-  if (ended !== null) return glyph('✕', 'danger', `Ended with an error ${relativeAge(now - Date.parse(ended.createdAt))}`);
+  if (ended !== null) return glyph('✕', 'danger', `Ended with an error ${formatAgo(Math.max(0, now - Date.parse(ended.createdAt)))}`);
   switch (digest?.phase) {
     case 'exited':
       return glyph('✓', 'faint', 'Done');

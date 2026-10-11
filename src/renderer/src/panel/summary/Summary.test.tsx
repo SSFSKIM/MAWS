@@ -18,6 +18,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { A, panelOf, probeTool, resetPanelStores, TestHost } from '../../test-support/panel';
 import { journalToEvents } from '../../transcript/dev/journal';
 import { registerPanelTool } from '../host';
+import { REL } from '../../test-support/relative-time';
 
 const DIR = '/work/app-a'; // A's directory in the builders' record
 const GIT: GitStatus = {
@@ -349,7 +350,7 @@ describe('summary card', () => {
     bridge({ 'session.observedFacts': { version: 1, appSessionId: A, engineSessionId: null, writtenAt: at, source: 'journal', launches: ['L1'], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: { value: { plugins, errors: [], warnings: [] }, at, launchId: 'L1' }, contextUsage: null, complete: true } });
     await mount();
     expect(within(section('Plugins')).getByText('Plugins · 2 loaded')).toBeTruthy();
-    expect(within(section('Plugins')).getByText('Loaded last time, 2 days ago')).toBeTruthy();
+    expect(within(section('Plugins')).getByText(`Loaded last time, ${REL.ago(2, 'day')}`)).toBeTruthy();
     expect(within(section('Plugins')).queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect([...fake.invoked('session.start'), ...fake.invoked('session.launch')]).toEqual([]);
     act(() => useSessions.setState({ engine: new Map([[A, { ...engineStatus(A), plugins: [plugins[0]!], pluginsObservedAt: new Date().toISOString() }]]) }));

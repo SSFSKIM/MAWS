@@ -22,7 +22,7 @@
     "src/engine-host/relay-health.ts",
     "src/engine-host/transport.ts",
     "src/main/git/runner.ts",
-    "src/renderer/src/app/relative-age.ts",
+    "src/renderer/src/app/date-format.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
     "src/renderer/src/harness/api.ts",

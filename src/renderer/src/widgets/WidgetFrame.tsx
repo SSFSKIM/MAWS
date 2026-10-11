@@ -11,7 +11,7 @@
 // the button). Load now and Refresh are the owner's gesture that starts the engine; opening the frame starts nothing.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { relativeAge } from '../app/relative-age';
+import { formatAgo } from '../app/date-format';
 import { useNow } from '../app/use-now';
 import type { WidgetSize } from '../composer/WidgetDialog'; // P2-B (2026-10-09)
 import { useComposerStore } from '../stores/composer';
@@ -57,7 +57,7 @@ function focusSearch(event: KeyboardEvent<HTMLDivElement>): boolean {
 // session that exited stops every read); only this line re-renders on the tick.
 function ReadAgo({ readAt }: { readAt: number }) {
   const now = useNow();
-  return FRAME.readAgo(relativeAge(Math.max(0, now - readAt)));
+  return FRAME.readAgo(formatAgo(Math.max(0, now - readAt)));
 }
 
 function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' | 'unavailable', error: string | null, readAt: number | null | undefined, children: ReactNode): ReactNode {

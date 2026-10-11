@@ -18,7 +18,6 @@ import {
   OTHER_SESSIONS,
   projectList,
   projectSessions,
-  relativeAge,
   rowBranch,
   SESSIONS_CAP,
   sessionAge,
@@ -28,6 +27,7 @@ import {
   type ProjectSessionsInput,
   type SessionTree,
 } from './derive';
+import { REL } from '../test-support/relative-time';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -234,13 +234,10 @@ describe('sidebar row text', () => {
 
   // E11 F2b (plan 2.4): an outcome (an error, an interruption) says when it happened; a request says how long it has waited
   it('an outcome reads "2 weeks ago", a request "waiting 5m"', () => {
-    const DAY = 86_400_000;
-    expect([0, 59_000, 60_000, 120_000, 3_600_000, 7_200_000, DAY, 2 * DAY, 7 * DAY, 14 * DAY].map(relativeAge)).toEqual([
-      'just now', 'just now', '1 minute ago', '2 minutes ago', '1 hour ago', '2 hours ago', '1 day ago', '2 days ago', '1 week ago', '2 weeks ago',
-    ]);
+    // the age's words follow the system locale (2주 전); `app/date-format.test.ts` pins them
     const now = at('2026-10-08T10:00:00Z');
-    expect(itemAge(item('r', 'error', '2026-09-24T10:00:00Z'), now)).toBe('2 weeks ago');
-    expect(itemAge(item('r', 'interrupted', '2026-10-03T10:00:00Z'), now)).toBe('5 days ago');
+    expect(itemAge(item('r', 'error', '2026-09-24T10:00:00Z'), now)).toBe(REL.ago(2, 'week'));
+    expect(itemAge(item('r', 'interrupted', '2026-10-03T10:00:00Z'), now)).toBe(REL.ago(5, 'day'));
     expect(itemAge(item('r', 'permission', '2026-10-08T09:55:00Z'), now)).toBe('waiting 5m');
   });
 

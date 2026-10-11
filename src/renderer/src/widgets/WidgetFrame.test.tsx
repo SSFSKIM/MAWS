@@ -11,6 +11,7 @@ import { NOT_RUNNING } from '../statusline';
 import { useSessions } from '../stores/sessions';
 import { useReadLoads } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { REL } from '../test-support/relative-time';
 
 afterEach(() => {
   cleanup();
@@ -110,7 +111,7 @@ describe('WidgetFrame', () => {
       setRecord();
       const { rerender } = render(frame({ state: 'dormant', readAt: Date.now() - 5 * 60_000 }));
       expect(screen.getByText('the body')).toBeTruthy();
-      expect(screen.getByText('Read 5 minutes ago')).toBeTruthy();
+      expect(screen.getByText(`Read ${REL.ago(5, 'minute')}`)).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
       rerender(frame({ state: 'dormant' }));
       expect(screen.queryByText('the body')).toBeNull();
@@ -122,9 +123,9 @@ describe('WidgetFrame', () => {
       try {
         setRecord();
         render(frame({ state: 'dormant', readAt: Date.now() }));
-        expect(screen.getByText('Read just now')).toBeTruthy();
+        expect(screen.getByText(`Read ${REL.now}`)).toBeTruthy();
         act(() => vi.advanceTimersByTime(5 * 60_000));
-        expect(screen.getByText('Read 5 minutes ago')).toBeTruthy();
+        expect(screen.getByText(`Read ${REL.ago(5, 'minute')}`)).toBeTruthy();
       } finally {
         vi.useRealTimers();
       }

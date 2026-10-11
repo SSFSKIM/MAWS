@@ -8,7 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { Fact, ObservedFactsAnswer, ObservedPlugin, ObservedPluginError, ObservedPluginWarning } from '@shared/engine/observed-facts';
 import type { AppSessionId } from '@shared/graph/ids';
-import { relativeAge } from '../app/relative-age';
+import { formatAgo } from '../app/date-format';
 import { ipc } from '../ipc/client';
 import { IpcCommandError } from '../ipc/query';
 import type { AcquireOutcome } from '@shared/sessions/setup';
@@ -24,7 +24,7 @@ export function freshness(fact: Fact<unknown>, live: boolean): Freshness {
   return fact ? { kind: 'last', at: fact.at } : { kind: 'unknown' };
 }
 
-const ago = (at: string, now: number) => relativeAge(Math.max(0, now - Date.parse(at)));
+const ago = (at: string, now: number) => formatAgo(Math.max(0, now - Date.parse(at)));
 export const FRESHNESS = {
   loadedNow: 'Loaded now',
   loadedLast: (at: string, now = Date.now()) => `Loaded last time, ${ago(at, now)}`,

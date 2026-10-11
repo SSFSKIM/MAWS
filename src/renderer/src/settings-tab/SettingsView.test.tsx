@@ -17,6 +17,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../test/support/builders';
 import { resetBudgetStore, useBudget } from '../budget/store';
 import { useSessions } from '../stores/sessions';
+import { REL } from '../test-support/relative-time';
 // C12 end
 
 let b: SettingsBridge;
@@ -127,7 +128,7 @@ describe('settings tab writes one field per row', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     fireEvent.click(within(row('Direct login')).getByRole('button', { name: 'Copy' }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('claude /login'));
-    await vi.waitFor(() => expect(within(row('Relay')).getByText(/^Relay listening on 127\.0\.0\.1:8641 · checked just now · 2 ms$/)).toBeTruthy());
+    await vi.waitFor(() => expect(within(row('Relay')).getByText(`Relay listening on 127.0.0.1:8641 · checked ${REL.now} · 2 ms`)).toBeTruthy());
   });
 
   it('Appearance: the theme and the monospace font, with a preview line in that family', async () => {

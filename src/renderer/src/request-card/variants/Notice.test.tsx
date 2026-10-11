@@ -7,6 +7,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { item } from '../../../../../test/support/builders';
 import { NoticeBody } from './Notice';
+import { REL } from '../../test-support/relative-time';
 
 const APP = 'app-notice';
 const DAY = 86_400_000;
@@ -30,7 +31,7 @@ describe('an error notice', () => {
   it('says what happened and when, not how long it has waited, and Dismiss retires it', async () => {
     render(<NoticeBody item={error()} />);
     expect(screen.getByText('The turn ended with an error')).toBeTruthy();
-    expect(screen.getByText('2 weeks ago')).toBeTruthy();
+    expect(screen.getByText(REL.ago(2, 'week'))).toBeTruthy();
     expect(screen.queryByText(/waiting/)).toBeNull();
     expect(acknowledged(), 'a card elsewhere is not seeing it in its session').toEqual([]);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })));

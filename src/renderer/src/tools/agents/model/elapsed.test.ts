@@ -4,6 +4,7 @@ import { event } from '../../../../../../test/support/agents-events';
 import { elapsedOf, formatAgo, formatElapsed, formatTokens } from './elapsed';
 import { formatIn } from './elapsed'; // E7
 import { applyTaskEvents, emptyGraph, type TaskNode } from './task-graph';
+import { REL } from '../../../test-support/relative-time';
 
 const T = Date.parse('2026-09-29T10:00:00.000Z');
 const nodeAfter = (...events: Parameters<typeof applyTaskEvents>[1]): TaskNode => [...applyTaskEvents(emptyGraph(), events).tasks.values()][0];
@@ -50,19 +51,20 @@ describe('elapsed', () => {
   });
 
   it('formats how long ago an agent ended', () => {
-    expect(formatAgo(40_000)).toBe('just now');
-    expect(formatAgo(180_000)).toBe('3m ago');
-    expect(formatAgo(2 * 3_600_000 + 5)).toBe('2h ago');
-    expect(formatAgo(26 * 3_600_000)).toBe('1d ago');
-    expect(formatAgo(-5_000)).toBe('just now'); // a clock a little behind the engine's
+    // compact, in the system locale (3m ago, 3분 전)
+    expect(formatAgo(40_000)).toBe(REL.now);
+    expect(formatAgo(180_000)).toBe(REL.agoNarrow(3, 'minute'));
+    expect(formatAgo(2 * 3_600_000 + 5)).toBe(REL.agoNarrow(2, 'hour'));
+    expect(formatAgo(26 * 3_600_000)).toBe(REL.agoNarrow(1, 'day'));
+    expect(formatAgo(-5_000)).toBe(REL.now); // a clock a little behind the engine's
   });
 
-  // E7: a scheduled job's next run, in the same form ahead of now.
+  // E7: a scheduled job's next run, in the same form ahead of now, at least a minute away (in 3m, 3분 후).
   it('formats how long until a time to come', () => {
-    expect(formatIn(40_000)).toBe('in under a minute');
-    expect(formatIn(-1)).toBe('in under a minute');
-    expect(formatIn(180_000)).toBe('in 3m');
-    expect(formatIn(2 * 3_600_000 + 5)).toBe('in 2h');
-    expect(formatIn(26 * 3_600_000)).toBe('in 1d');
+    expect(formatIn(40_000)).toBe(REL.in(1, 'minute'));
+    expect(formatIn(-1)).toBe(REL.in(1, 'minute'));
+    expect(formatIn(180_000)).toBe(REL.in(3, 'minute'));
+    expect(formatIn(2 * 3_600_000 + 5)).toBe(REL.in(2, 'hour'));
+    expect(formatIn(26 * 3_600_000)).toBe(REL.in(1, 'day'));
   });
 });

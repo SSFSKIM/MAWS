@@ -5,10 +5,11 @@
 import type { CookieSkipReason, ExtensionCandidate, HistorySkipReason, ImportedExtension, ImportPhase, ImportReport, KeychainOutcome } from '@shared/browser/import';
 import { extensionBackgroundFailure } from '@shared/browser/extensions';
 import { summaryWords } from '@shared/browser/import-summary';
+import { formatDate } from '../../../app/date-format';
 
 const count = (n: number): string => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many = `${one}s`): string => `${count(n)} ${n === 1 ? one : many}`;
-export const importDate = (iso: string): string => new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+export const importDate = (iso: string): string => formatDate(Date.parse(iso));
 
 // The categories' names, and the two Chrome stores the inspection stages as the rows and the report name them.
 const CATEGORIES = { history: 'History', cookies: 'Cookies', extensions: 'Extensions', bookmarks: 'Bookmarks' /* cua #90 */ } as const;

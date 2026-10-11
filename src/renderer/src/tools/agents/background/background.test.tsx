@@ -34,6 +34,7 @@ import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { flush } from '../fake-work-client';
 import { formatIn } from '../model/elapsed';
+import { REL } from '../../../test-support/relative-time';
 // E7 end
 
 vi.mock('../log/LogTool', async (importOriginal) => {
@@ -326,14 +327,14 @@ describe('background work', () => {
     vi.setSystemTime(Date.parse('2026-09-28T10:03:00.000Z')); // five seconds after the shell's notification (seq 71)
     const { handle, rerender } = await mount({ events: upTo(stopOn, 71) });
     const line = () => document.querySelector('[data-shell="b53no4rmo"] [data-part="line"]')?.textContent;
-    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed just now');
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.now}`);
     act(() => vi.advanceTimersByTime(4 * SLOW_TICK_MS));
-    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed 2m ago');
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.agoNarrow(2, 'minute')}`);
     rerender(<Mounted state={handle} visible={false} />);
     vi.setSystemTime(Date.now() + 10 * 60_000); // ten minutes pass while the tool is hidden: no timer runs
     rerender(<Mounted state={handle} visible />);
     act(() => vi.advanceTimersByTime(0));
-    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed 12m ago');
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.agoNarrow(12, 'minute')}`);
   });
 
   it('open({ taskId }) on a fresh tab scrolls to the card once the graph shows it', async () => {

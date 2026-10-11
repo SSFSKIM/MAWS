@@ -14,6 +14,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { freshness, FRESHNESS, loadedPluginsOf, useLoadedPlugins, useObservedFacts } from './observed';
+import { REL } from '../test-support/relative-time';
 
 const A = 'app-a' as AppSessionId;
 const NOW = Date.parse('2026-10-09T12:00:00.000Z');
@@ -31,9 +32,9 @@ describe('freshness and its words', () => {
 
   it('says when in the person’s words', () => {
     expect(FRESHNESS.loadedNow).toBe('Loaded now');
-    expect(FRESHNESS.loadedLast(TWO_DAYS_AGO, NOW)).toBe('Loaded last time, 2 days ago');
-    expect(FRESHNESS.lastReading('2026-10-09T09:00:00.000Z', NOW)).toBe('Last reading, 3 hours ago');
-    expect(FRESHNESS.lastObserved(TWO_DAYS_AGO, NOW)).toBe('Last observed 2 days ago');
+    expect(FRESHNESS.loadedLast(TWO_DAYS_AGO, NOW)).toBe(`Loaded last time, ${REL.ago(2, 'day')}`);
+    expect(FRESHNESS.lastReading('2026-10-09T09:00:00.000Z', NOW)).toBe(`Last reading, ${REL.ago(3, 'hour')}`);
+    expect(FRESHNESS.lastObserved(TWO_DAYS_AGO, NOW)).toBe(`Last observed ${REL.ago(2, 'day')}`);
     expect(FRESHNESS.notObserved).toBe('Not observed yet');
   });
 });

@@ -11,10 +11,11 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import { formatAge, projectList } from './derive';
+import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
+import { formatAgo } from '../app/date-format';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -233,8 +234,8 @@ describe('a project’s hover card', () => {
     expect(within(card).getByTestId('project-counts').textContent).toBe('4 sessions · 3 waiting · 1 working'); // the 3 s request included
     const s = useSessions.getState();
     const last = projectList({ records: s.records, digests: s.digests, projects: [...s.projects.values()], rows: [] }).find((e) => e.key === 'proj-maws')!.lastActivity!;
-    const age = formatAge(Date.now() - last);
-    expect(within(card).getByTestId('project-activity').textContent).toBe(age === 'now' ? 'Active now' : `Last active ${age} ago`);
+    const elapsed = Date.now() - last;
+    expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`);
     const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
     expect(within(worktrees).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['⎇ mastermain checkout', '⎇ worktree-accept-oneaccept-one']);
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);

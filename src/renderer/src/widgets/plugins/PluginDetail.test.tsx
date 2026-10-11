@@ -22,6 +22,7 @@ import { identitiesOf, installationRef, manifestKeyOf } from './library';
 import type { SessionPlugins } from './LoadedLine';
 import { ManageProvider, type Manage } from './manage';
 import { PluginDetail, type PluginDetailProps } from './PluginDetail';
+import { REL } from '../../test-support/relative-time';
 
 const ID = 'frontend-design@claude-plugins-official';
 const DAY = 86_400_000;
@@ -85,7 +86,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     const at = new Date(Date.now() - 2 * DAY).toISOString();
     show(identityOf(p, viewOf(p)), { loaded: loadedWith([ID], { kind: 'last', at }), loadedIds: new Set([ID]) });
     expect(fact('enabled').textContent).toBe('Not enabled for this project');
-    expect(fact('loaded').textContent).toBe('Loaded in this session · Loaded last time, 2 days ago');
+    expect(fact('loaded').textContent).toBe(`Loaded in this session · Loaded last time, ${REL.ago(2, 'day')}`);
   });
 
   it('enabled and absent from a known list on a dormant session: Refresh, called once from its click and never on mount', async () => {
@@ -145,7 +146,7 @@ describe('the detail: the head', () => {
     const p = inst(ID, { version: 'unknown', lastUpdated: new Date(Date.now() - 3 * DAY).toISOString() });
     const detail = show(identityOf(p, viewOf(p, { author: 'Anthropic' })));
     expect(within(detail).getByRole('heading', { name: 'Frontend design' })).toBeTruthy();
-    expect(detail.querySelector('h3 + p')!.textContent).toBe('by Anthropic · Version not reported · claude-plugins-official · updated 3 days ago');
+    expect(detail.querySelector('h3 + p')!.textContent).toBe(`by Anthropic · Version not reported · claude-plugins-official · updated ${REL.ago(3, 'day')}`);
     expect(detail.textContent).not.toContain('unknown');
   });
 

@@ -18,6 +18,7 @@ import { isActionEnabled, runAction } from '../keymap/actions-runtime';
 import { READ_ONLY_CONTROLS, useUsageControlState } from './controls';
 import { registerUsage } from '.';
 import { UsagePill, useUsagePopover } from './UsagePill';
+import { REL } from '../test-support/relative-time';
 
 const NOW = Date.parse('2026-09-29T07:36:17Z');
 const HINT = "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now";
@@ -118,7 +119,7 @@ describe('the usage popover', () => {
   it("copies ClaudeUsage's panel: header, accounts with activity and limits, add, Codex, toggle, relay and health", async () => {
     const panel = await openPanel();
     expect(within(panel).getByRole('heading', { name: 'Claude Usage' })).toBeTruthy();
-    expect(panel.textContent).toContain('updated 2m ago');
+    expect(panel.textContent).toContain(`updated ${REL.agoNarrow(2, 'minute')}`);
     expect(panel.textContent).toContain('Usage includes all machines. Activity below is from this Mac.');
     const accounts = within(panel).getAllByRole('region').filter((r) => r.hasAttribute('data-account') && !r.closest('[data-codex]'));
     expect(accounts.map((r) => r.getAttribute('aria-label'))).toEqual(['3@example.test', '4@example.test', '1@example.test', '5@example.test', '2@example.test']);
@@ -126,8 +127,8 @@ describe('the usage popover', () => {
     const routing = card(panel, '3@example.test');
     expect(routing.textContent).toContain('Routing here · weekly resets soonest of the usable accounts');
     expect(routing.textContent).toContain('8 saved sessions');
-    expect(routing.querySelector('[data-serving="latest"]')!.textContent).toBe('5 requests · 97% cached · just now');
-    expect(card(panel, '1@example.test').querySelector('[data-serving="recent"]')!.textContent).toBe('1 request · 63% cached · 3m ago');
+    expect(routing.querySelector('[data-serving="latest"]')!.textContent).toBe(`5 requests · 97% cached · ${REL.now}`);
+    expect(card(panel, '1@example.test').querySelector('[data-serving="recent"]')!.textContent).toBe(`1 request · 63% cached · ${REL.agoNarrow(3, 'minute')}`);
     expect(within(routing).getAllByRole('meter').map((m) => [m.getAttribute('aria-label'), m.getAttribute('aria-valuenow')])).toEqual([
       ['Five-hour usage', '53'],
       ['Weekly usage', '63'],
@@ -147,7 +148,7 @@ describe('the usage popover', () => {
 
     const toggle = within(panel).getByRole('checkbox', { name: 'Route Claude Code through this app' });
     expect([(toggle as HTMLInputElement).checked, (toggle as HTMLInputElement).disabled]).toEqual([true, true]);
-    expect(panel.querySelector('[data-relay-line]')!.textContent).toBe('Relay listening on 127.0.0.1:8641 · checked just now · 3 ms');
+    expect(panel.querySelector('[data-relay-line]')!.textContent).toBe(`Relay listening on 127.0.0.1:8641 · checked ${REL.now} · 3 ms`);
     expect(panel.querySelector('[data-health]')!.textContent).toBe('Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held');
     expect(panel.querySelector('[data-health]')!.getAttribute('data-health')).toBe('degraded');
   });

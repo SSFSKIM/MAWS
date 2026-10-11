@@ -40,6 +40,11 @@
     // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
     "e2e/support/live-budget.ts",
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
-    "e2e/support/live-turns.ts"
+    "e2e/support/live-turns.ts",
+    // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
+    // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
+    // reason as C8a's
+    "src/renderer/src/app/date-format.ts",
+    "src/renderer/src/test-support/relative-time.ts"
   ]
 }

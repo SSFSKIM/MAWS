@@ -8,6 +8,7 @@ import type { RelayHealth } from '@shared/engine/relay-health';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
 import { accountsViewModel, automaticChoice, healthLine, severityOf, usagePill } from './model';
+import { REL } from '../test-support/relative-time';
 
 const FIXTURE = join(__dirname, '../../../../test/fixtures/claude-usage');
 const NOW = Date.parse('2026-09-29T07:36:17Z');
@@ -48,7 +49,7 @@ describe('accountsViewModel marks the drain target and states why', () => {
     expect(model.rows.slice(1).every((r) => r.role === 'other' && r.routingWhy === null && r.pinnedSessionCount === 1)).toBe(true);
     expect(model.columns).toBe(2);
     expect(model.updatedAt).toBe('2026-09-29T07:34:17Z');
-    expect(model.relayLine).toBe('Relay listening on 127.0.0.1:8641 · checked just now · 3 ms');
+    expect(model.relayLine).toBe(`Relay listening on 127.0.0.1:8641 · checked ${REL.now} · 3 ms`);
   });
 
   it('limit rows: 5h, Weekly and the scoped model, 100 % marked full, a reset that passed reads 0 %', async () => {

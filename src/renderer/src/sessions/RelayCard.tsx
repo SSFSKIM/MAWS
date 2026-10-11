@@ -4,6 +4,7 @@
 // starts routed by itself once it answers), "Run direct" (`onAccept`), Retry and Cancel (`onDecline`). Under C11's
 // `relayUnreachable: 'wait'` the primary is the ClaudeUsage path; under `ask` both are offered.
 import type { RelayHealth } from '@shared/engine/relay-health';
+import { formatAgo } from '../app/date-format';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
 
 export const RELAY_CARD_TITLE = 'Relay not answering';
@@ -28,7 +29,7 @@ export function RelayCard({
   onDecline(): void;
   onRecheck(): void;
 }) {
-  const age = Math.max(0, Math.round((now - Date.parse(health.checkedAt)) / 1000));
+  const age = formatAgo(Math.max(0, now - Date.parse(health.checkedAt)), { seconds: true });
   const reason = health.error ?? (health.status === null ? 'no answer' : `HTTP ${health.status}`);
   const open = (
     <button key="open" type="button" disabled={openClaudeUsage === null} onClick={() => openClaudeUsage?.()} className={policy === 'wait' ? PRIMARY : SECONDARY}>
@@ -44,7 +45,7 @@ export function RelayCard({
     <div className="flex flex-col gap-2.5 text-ui text-fg">
       <p className="m-0">ClaudeUsage’s relay is not answering</p>
       <p className="m-0 text-ui-sm text-fg-muted">
-        {policy === 'wait' ? `Waiting for the relay · checked ${age} s ago` : `Checked ${age} s ago`} · <span className="font-mono">{health.url}/api/hello</span> · {reason}
+        {policy === 'wait' ? `Waiting for the relay · checked ${age}` : `Checked ${age}`} · <span className="font-mono">{health.url}/api/hello</span> · {reason}
       </p>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-ui-sm text-fg-muted">
         <li>Open ClaudeUsage, then start: starts routed as soon as the relay answers.</li>

@@ -16,6 +16,7 @@ import { CHROME, DISABLED_ID, DONE, FAILS_ID, IMPORT_ID, importBridge, INSPECTIO
 import { IMPORT_COPY } from './copy';
 import { ImportSheet } from './ImportSheet';
 import { browserImport, connectBrowserImport, openImport, resetBrowserImport, showReport } from './store';
+import { formatDate } from '../../../app/date-format';
 
 let b: ImportBridge;
 let disconnect = () => {};
@@ -78,7 +79,7 @@ describe('pick', () => {
     renderSheet({ 'browser.import.profiles': () => ({ ...PROFILES_ANSWER, profiles }) });
     const person = (await within(sheet()).findByRole('radio', { name: /Person 1/ })) as HTMLInputElement;
     expect(person.disabled).toBe(true);
-    await within(sheet()).findByText('Imported Oct 6, 2026');
+    await within(sheet()).findByText(`Imported ${formatDate(Date.parse(RECORD.importedAt))}`);
     expect((within(sheet()).getByRole('radio', { name: /Work/ }) as HTMLInputElement).checked).toBe(true);
   });
 
