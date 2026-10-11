@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -158,6 +158,83 @@ describe('catalogueKey', () => {
     expect(keyA).not.toBe(RELAY);
     expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: b })).toBe(keyA);
     expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: a, flagEnv: { ANTHROPIC_MODEL: 'haiku' } })).toBe(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: null, flagEnv: { ANTHROPIC_MODEL: 'haiku' } }));
+  });
+
+  // P2-F wave S (S-catalogue; the owner's D1): the engine 2.1.296 reads the local store at the repository's canonical
+  // root (the main checkout for a linked worktree, the repository root for a subdirectory), the cwd's own file merged
+  // under it, so a worktree or a subdirectory of a repository whose local settings set model env keys apart
+  describe("the local store at the repository's canonical root", () => {
+    const git = async (dir: string, entries: Record<string, string>) => {
+      for (const [name, text] of Object.entries(entries)) {
+        await mkdir(join(dir, name, '..'), { recursive: true });
+        await writeFile(join(dir, name), text);
+      }
+    };
+    // a repository `main` with a linked worktree `wt` beside it, laid out as `git worktree add ../wt` writes it
+    const repository = async () => {
+      const real = await realpath(root);
+      const main = join(real, 'main');
+      const wt = join(real, 'wt');
+      await mkdir(join(main, '.git'), { recursive: true });
+      await git(main, { '.git/worktrees/wt/commondir': '../..\n', '.git/worktrees/wt/gitdir': `${join(wt, '.git')}\n` });
+      await git(wt, { '.git': `gitdir: ${join(main, '.git', 'worktrees', 'wt')}\n` });
+      await mkdir(join(main, 'sub'), { recursive: true });
+      return { main, wt, sub: join(main, 'sub'), keyed: async () => {
+        const plain = join(real, 'plain');
+        await settings(plain, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'sonnet' } });
+        return catalogueKey('2.1.283', 'gateway', { env: {}, cwd: plain });
+      } };
+    };
+
+    it("keys a linked worktree and a subdirectory by the main checkout's local settings", async () => {
+      const { main, wt, sub, keyed } = await repository();
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: wt })).toBe(RELAY); // nothing sets model env yet
+      await settings(main, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'sonnet' } });
+      const sonnet = await keyed(); // a directory whose own local settings set the same
+      expect(sonnet).not.toBe(RELAY);
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: wt })).toBe(sonnet);
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: sub })).toBe(sonnet);
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: main })).toBe(sonnet);
+    });
+
+    it("reads the cwd's own local settings beneath the canonical store's, which wins a variable both set", async () => {
+      const { main, wt, keyed } = await repository();
+      await settings(wt, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'sonnet' } }); // the legacy overlay alone
+      const sonnet = await keyed();
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: wt })).toBe(sonnet);
+      await settings(main, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'haiku' } });
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: wt })).toBe(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: main }));
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: wt })).not.toBe(sonnet);
+    });
+
+    it('keeps the store at the cwd under a repository rooted at the home directory, and for a .git file that is not a worktree', async () => {
+      const { main, sub } = await repository();
+      await settings(main, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'sonnet' } });
+      expect(await catalogueKey('2.1.283', 'gateway', { env: { HOME: main }, cwd: sub })).toBe(RELAY); // the home is never a repository store
+      const odd = join(await realpath(root), 'odd');
+      await git(odd, { '.git': 'gitdir: /nowhere/at/all\n' });
+      expect(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: odd })).toBe(RELAY);
+    });
+  });
+
+  // P2-F wave S (S-catalogue): the global config's env (`~/.claude.json`, inside CLAUDE_CONFIG_DIR when set) is applied
+  // over the spawn environment and under every settings source, alike for every launch
+  it("layers the global config's env between the spawn environment and the user settings", async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, '.claude.json'), JSON.stringify({ numStartups: 3, env: { ANTHROPIC_MODEL: 'haiku' } }));
+    const env = { HOME: home, ANTHROPIC_MODEL: 'sonnet' };
+    await settings(project, 'settings.json', { env: { ANTHROPIC_MODEL: 'haiku' } }); // what every launch runs with already
+    expect(await catalogueKey('2.1.283', 'gateway', { env, cwd: project })).toBe(RELAY);
+    await settings(project, 'settings.json', { env: { ANTHROPIC_MODEL: 'sonnet' } }); // the spawn's value, which the global config replaced
+    expect(await catalogueKey('2.1.283', 'gateway', { env, cwd: project })).not.toBe(RELAY);
+    const config = join(root, 'config');
+    await mkdir(config, { recursive: true });
+    await writeFile(join(config, '.claude.json'), JSON.stringify({ env: { ANTHROPIC_MODEL: 'sonnet' } }));
+    expect(await catalogueKey('2.1.283', 'gateway', { env: { ...env, CLAUDE_CONFIG_DIR: config }, cwd: project })).toBe(RELAY);
+    await writeFile(join(config, '.config.json'), JSON.stringify({ env: { ANTHROPIC_MODEL: 'haiku' } })); // the legacy file, read while it exists
+    expect(await catalogueKey('2.1.283', 'gateway', { env: { ...env, CLAUDE_CONFIG_DIR: config }, cwd: project })).not.toBe(RELAY);
   });
 
   it('reads an unreadable or malformed settings file as no env', async () => {

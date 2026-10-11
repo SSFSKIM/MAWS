@@ -8,10 +8,11 @@
 // environment of its own keeps its list apart from its route's (`catalogueKey`, debt wave 5). Before any catalogue for a
 // key it answers the built-in list.
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
+import { localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue)
 
 // The built-in list is shared (the renderer shows it when the host cannot answer at all).
 export { BUILTIN_MODELS };
@@ -42,22 +43,27 @@ export interface ModelEnvSources {
   flagEnv?: unknown; // the `--settings` JSON's env
 }
 
-// The key a launch's catalogue lives under. 2.1.283 applies every settings source's `env` over its spawn environment
-// in the order user < project < local < flag (SPEC 03 §12.1, full mode; MAWS launches trusted directories), so the
-// model environment every launch shares is the spawn environment under the user settings, and a launch whose project,
-// local or flag settings change it (the M6 home-directory case: `~` as the project under a scratch config home) keys
-// its catalogue apart, by a digest of the model environment it runs with. Managed settings and `~/.claude.json`'s env
-// apply to every launch alike and are not read; the local store canonicalised to a git root above `cwd` is not either.
+// The key a launch's catalogue lives under. The engine applies the global config's `env` over its spawn environment,
+// then every settings source's in the order user < project < local < flag < managed (SPEC 03 §12.1, full mode, which a
+// print-mode launch always takes: 2.1.296 applies it after setup whatever the workspace's trust, P2-F S-catalogue), so
+// the model environment every launch shares is the spawn environment under the global config and the user settings,
+// and a launch whose project, local or flag settings change it (the M6 home-directory case: `~` as the project under a
+// scratch config home) keys its catalogue apart, by a digest of the model environment it runs with. The local store is
+// read where the engine reads it (`localSettingsFiles`: a worktree's or a subdirectory's at its repository's canonical
+// root, over the cwd's own). Managed settings apply to every launch alike and are not read: a value they override only
+// keys a launch apart whose list is its route's (P2-F S-catalogue's evidence).
 export async function catalogueKey(engineVersion: string, gateway: 'gateway' | 'direct', sources: ModelEnvSources): Promise<string> {
   const route = modelsKey(engineVersion, gateway);
-  const configDir = sources.env.CLAUDE_CONFIG_DIR || (sources.env.HOME ? join(sources.env.HOME, '.claude') : null);
+  const home = sources.env.HOME || null;
+  const configDir = sources.env.CLAUDE_CONFIG_DIR || (home ? join(home, '.claude') : null);
   const project = sources.cwd === null ? null : join(sources.cwd, '.claude');
-  const [user, projectEnv, localEnv] = await Promise.all([
+  const [globalEnv, user, projectEnv, localEnv] = await Promise.all([
+    globalConfigEnv(configDir, sources.env.CLAUDE_CONFIG_DIR || home),
     configDir === null ? {} : settingsEnv(join(configDir, 'settings.json')),
     project === null ? {} : settingsEnv(join(project, 'settings.json')),
-    project === null ? {} : settingsEnv(join(project, 'settings.local.json')),
+    sources.cwd === null ? {} : localSettingsFiles(sources.cwd, home).then(layeredEnv),
   ]);
-  const shared = { ...modelEnvOf(sources.env), ...user };
+  const shared = { ...modelEnvOf(sources.env), ...globalEnv, ...user };
   const launch = { ...shared, ...projectEnv, ...localEnv, ...modelEnvOf(sources.flagEnv) };
   const digest = (env: Record<string, string>) => JSON.stringify(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)));
   if (digest(launch) === digest(shared)) return route;
@@ -72,6 +78,19 @@ function modelEnvOf(env: unknown): Record<string, string> {
     if (MODEL_ENV.test(name) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) picked[name] = String(value);
   }
   return picked;
+}
+
+// The global config's model env: `<config dir>/.config.json` while that legacy file exists, else `.claude.json` in the
+// config directory when CLAUDE_CONFIG_DIR names one, else in the home directory (SPEC 03 §2, the global config).
+async function globalConfigEnv(configDir: string | null, configHome: string | null): Promise<Record<string, string>> {
+  const legacy = configDir === null ? null : join(configDir, '.config.json');
+  if (legacy !== null && (await access(legacy).then(() => true, () => false))) return settingsEnv(legacy);
+  return configHome === null ? {} : settingsEnv(join(configHome, '.claude.json'));
+}
+
+// The model env of settings files applied in order, a later file's value winning.
+async function layeredEnv(files: readonly string[]): Promise<Record<string, string>> {
+  return Object.assign({}, ...(await Promise.all(files.map(settingsEnv)))) as Record<string, string>;
 }
 
 // A settings file's model env; a missing, unreadable or malformed file sets none.
