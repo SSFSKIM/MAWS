@@ -9,6 +9,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import './xterm-overrides.css'; // the composition view in the terminal tokens (C1, P2-F wave S)
 import { version as xtermVersion } from '@xterm/xterm/package.json';
 import {
   ansiNamed,

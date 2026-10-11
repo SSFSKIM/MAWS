@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ITerminalOptions } from '@xterm/xterm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -81,4 +83,37 @@ describe('xterm adapter', () => {
     expect(lines.filter((line) => !buffer.includes(line))).toEqual([]);
     renderer.dispose();
   });
+
+  // C1 (P2-F wave S): the IME's composing text is drawn in the terminal's tokens, never xterm's stock white text on black.
+  // The sheets are the ones xterm.ts imports (happy-dom applies no imported CSS), in the bundle's order.
+  it.each(['light', 'dark'])('draws the composition view in the terminal tokens in %s', (theme) => {
+    const sheets = ['../../../../node_modules/@xterm/xterm/css/xterm.css', '../styles/tokens.css', ...imported(/^\.\/.+\.css$/)];
+    const style = document.createElement('style');
+    style.textContent = sheets.map((sheet) => readFileSync(resolve(__dirname, sheet), 'utf8')).join('\n');
+    document.head.append(style);
+    document.documentElement.dataset.theme = theme;
+    try {
+      const renderer = createXtermRenderer(options);
+      document.body.append(renderer.element);
+      const view = renderer.element.querySelector<HTMLElement>('.composition-view')!;
+      const swatch = document.createElement('div');
+      swatch.style.background = 'var(--term-bg)';
+      swatch.style.color = 'var(--term-fg)';
+      document.body.append(swatch);
+      const drawn = getComputedStyle(view);
+      expect(drawn.backgroundColor).toBe(getComputedStyle(swatch).backgroundColor);
+      expect(drawn.color).toBe(getComputedStyle(swatch).color);
+      expect(drawn.backgroundColor).not.toBe(getComputedStyle(swatch).color); // the tokens resolved: background and text differ
+      renderer.dispose();
+    } finally {
+      style.remove();
+      delete document.documentElement.dataset.theme;
+    }
+  });
 });
+
+// The stylesheets of this directory xterm.ts imports, as paths relative to this file.
+function imported(pattern: RegExp): string[] {
+  const source = readFileSync(resolve(__dirname, 'xterm.ts'), 'utf8');
+  return [...source.matchAll(/^import '([^']+)';/gm)].map((match) => match[1]!).filter((path) => pattern.test(path));
+}

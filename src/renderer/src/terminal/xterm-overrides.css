@@ -1,0 +1,10 @@
+/* Where xterm 6.0.0's own stylesheet draws in literals, the terminal's X7 tokens instead (loaded after
+   `@xterm/xterm/css/xterm.css`, one class deeper so the order of the two sheets in the bundle does not matter).
+   The composition view is the IME's composing text over the cursor cell (C1, P2-F wave S): xterm ships it as white text on
+   black, a black box in the light theme; it reads as the terminal's own text, underlined as macOS marks text being
+   composed, as Terminal.app draws it. */
+.xterm .xterm-helpers .composition-view {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  text-decoration: underline;
+}
