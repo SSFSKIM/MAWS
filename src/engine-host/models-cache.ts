@@ -51,17 +51,22 @@ export interface ModelEnvSources {
 // scratch config home) keys its catalogue apart, by a digest of the model environment it runs with. The local store is
 // read where the engine reads it (`localSettingsFiles`: a worktree's or a subdirectory's at its repository's canonical
 // root, over the cwd's own). Managed settings apply to every launch alike and are not read: a value they override only
-// keys a launch apart whose list is its route's (P2-F S-catalogue's evidence).
+// keys a launch apart whose list is its route's (P2-F S-catalogue's evidence). CLAUDE_CODE_RESTRICTED in the spawn
+// environment empties the engine's setting sources (2.1.296 `vSr`: `--restricted`, which MAWS never passes, or the
+// variable), leaving the global config and the flag settings; CLAUDE_CODE_SAFE_MODE disables customisations, not the
+// settings env, and is not read (P2-F S-catalogue review).
 export async function catalogueKey(engineVersion: string, gateway: 'gateway' | 'direct', sources: ModelEnvSources): Promise<string> {
   const route = modelsKey(engineVersion, gateway);
   const home = sources.env.HOME || null;
   const configDir = sources.env.CLAUDE_CONFIG_DIR || (home ? join(home, '.claude') : null);
-  const project = sources.cwd === null ? null : join(sources.cwd, '.claude');
+  const restricted = envFlag(sources.env.CLAUDE_CODE_RESTRICTED); // no setting source is read but the flag's
+  const cwd = restricted ? null : sources.cwd;
+  const project = cwd === null ? null : join(cwd, '.claude');
   const [globalEnv, user, projectEnv, localEnv] = await Promise.all([
     globalConfigEnv(configDir, sources.env.CLAUDE_CONFIG_DIR || home),
-    configDir === null ? {} : settingsEnv(join(configDir, 'settings.json')),
+    configDir === null || restricted ? {} : settingsEnv(join(configDir, 'settings.json')),
     project === null ? {} : settingsEnv(join(project, 'settings.json')),
-    sources.cwd === null ? {} : localSettingsFiles(sources.cwd, home).then(layeredEnv),
+    cwd === null ? {} : localSettingsFiles(cwd, home).then(layeredEnv),
   ]);
   const shared = { ...modelEnvOf(sources.env), ...globalEnv, ...user };
   const launch = { ...shared, ...projectEnv, ...localEnv, ...modelEnvOf(sources.flagEnv) };
@@ -78,6 +83,11 @@ function modelEnvOf(env: unknown): Record<string, string> {
     if (MODEL_ENV.test(name) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) picked[name] = String(value);
   }
   return picked;
+}
+
+// An environment flag as the engine reads one (2.1.296 `Ne`): 1, true, yes or on, in any case, around blanks.
+function envFlag(value: string | undefined): boolean {
+  return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase().trim());
 }
 
 // The global config's model env: `<config dir>/.config.json` while that legacy file exists, else `.claude.json` in the

@@ -219,6 +219,25 @@ describe('catalogueKey', () => {
 
   // P2-F wave S (S-catalogue): the global config's env (`~/.claude.json`, inside CLAUDE_CONFIG_DIR when set) is applied
   // over the spawn environment and under every settings source, alike for every launch
+  // P2-F S-catalogue review: CLAUDE_CODE_RESTRICTED in the spawn environment empties the engine's setting sources
+  // (2.1.296 `vSr`), so only the global config and the flag settings set env; CLAUDE_CODE_SAFE_MODE changes no env
+  it('reads no user, project or local settings when the spawn environment sets CLAUDE_CODE_RESTRICTED', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_MODEL: 'haiku' } });
+    await settings(project, 'settings.local.json', { env: { ANTHROPIC_MODEL: 'sonnet' } });
+    for (const restricted of [{ CLAUDE_CODE_RESTRICTED: '1' }, { CLAUDE_CODE_RESTRICTED: ' TRUE ' }]) {
+      const env = { HOME: home, ...restricted };
+      expect(await catalogueKey('2.1.283', 'gateway', { env, cwd: project })).toBe(RELAY); // the local settings are not read
+      const flagged = await catalogueKey('2.1.283', 'gateway', { env, cwd: project, flagEnv: { ANTHROPIC_MODEL: 'haiku' } });
+      expect(flagged).not.toBe(RELAY); // the user settings' value is no launch's: the flag's sets the model apart
+      expect(flagged).toBe(await catalogueKey('2.1.283', 'gateway', { env: {}, cwd: null, flagEnv: { ANTHROPIC_MODEL: 'haiku' } }));
+    }
+    const plain = { HOME: home, CLAUDE_CODE_RESTRICTED: '0', CLAUDE_CODE_SAFE_MODE: '1' };
+    expect(await catalogueKey('2.1.283', 'gateway', { env: plain, cwd: project })).toBe(await catalogueKey('2.1.283', 'gateway', { env: { HOME: home }, cwd: project }));
+    expect(await catalogueKey('2.1.283', 'gateway', { env: plain, cwd: project })).not.toBe(RELAY);
+  });
+
   it("layers the global config's env between the spawn environment and the user settings", async () => {
     const home = join(root, 'home');
     const project = join(root, 'project');
