@@ -37,13 +37,16 @@ import { formatIn } from '../model/elapsed';
 import { REL } from '../../../test-support/relative-time';
 // E7 end
 
+// The spies are made once, outside the async factories (P2-F S): vitest runs an async factory again for an importer that
+// arrives before it resolves, and a spy made inside it would leave the code and this file holding different ones.
+const spies = vi.hoisted(() => ({ openLog: vi.fn<typeof openLog>(), useCommand: vi.fn<typeof query.useCommand>() }));
 vi.mock('../log/LogTool', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../log/LogTool')>();
-  return { ...actual, openLog: vi.fn() };
+  return { ...actual, openLog: spies.openLog };
 });
 vi.mock('../../../ipc/query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../ipc/query')>();
-  return { ...actual, useCommand: vi.fn(actual.useCommand) };
+  return { ...actual, useCommand: spies.useCommand.mockImplementation(actual.useCommand) };
 });
 
 const A = 'A' as AppSessionId;

@@ -35,9 +35,12 @@ import { REL } from '../../../test-support/relative-time';
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
 // K2's test: the drill-in reaches the child through C6's `ipcSource` and builds nothing of its own.
+// The spy is made once, outside the async factory (P2-F S): vitest runs an async factory again for an importer that
+// arrives before it resolves, and a spy made inside it would leave the code and this file holding different ones.
+const ipcSourceSpy = vi.hoisted(() => vi.fn<typeof ipcSource>());
 vi.mock('../../../transcript', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../transcript')>();
-  return { ...actual, ipcSource: vi.fn(actual.ipcSource) };
+  return { ...actual, ipcSource: ipcSourceSpy.mockImplementation(actual.ipcSource) };
 });
 
 const A = 'A' as AppSessionId;
