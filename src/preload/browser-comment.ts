@@ -23,11 +23,11 @@
 //
 // P2-F L147 (the owner's ruling at P2-F's sitting, B3): the comment card docks in a strip under the page, so opening it
 // shrinks the viewport from the bottom and could hide the element just picked. The preload keeps the latest pick (the
-// element, or an area's marquee in document coordinates) and, when the viewport shrinks, scrolls the page by the least
-// that brings back what showed of it before (its bottom, clamped to the old viewport: the card's pin), never its top
-// above the viewport; nothing when it still shows or did not show before. The pin's horizontal place does not move, so
-// the card's caret still points at it. Only the viewport scrolls: an element clipped by a scroller of its own is not
-// chased.
+// element, or an area's marquee as an offset in the smallest element holding it) with how far down from its top it
+// shows, through every scrolling ancestor that clips it and the viewport (re-read at each scroll and resize). When the
+// viewport shrinks, what showed before is brought back by the least scroll: each clipping ancestor, nearest first (an
+// app-style page scrolls a viewport-sized pane, not its root), then the page, never the element's top above what clips
+// it; nothing when it still shows or did not show. Scrolls are vertical, so the card's caret still points at it.
 //
 // The DOM is typed structurally (`CommentPage`), as `describe.ts`'s is: src/preload compiles under the Node program,
 // which has no DOM lib (Decision Log 27(l)).
@@ -56,6 +56,7 @@ interface PageRect {
 interface PageElement extends DomElement {
   readonly parentElement: PageElement | null;
   readonly isConnected: boolean;
+  readonly clientTop: number;
   readonly scrollTop: number;
   readonly scrollLeft: number;
   readonly scrollHeight: number;
@@ -168,7 +169,6 @@ const clamp = (value: number, low: number, high: number) => Math.min(Math.max(va
 const contains = (outer: PageRect, inner: PickRect) =>
   outer.left <= inner.x && outer.top <= inner.y && outer.left + outer.width >= inner.x + inner.width && outer.top + outer.height >= inner.y + inner.height;
 const rectOf = (box: PageRect): PickRect => ({ x: box.left, y: box.top, width: box.width, height: box.height });
-const measured = (element: PageElement) => () => (element.isConnected ? rectOf(element.getBoundingClientRect()) : null);
 
 export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalThis as unknown as CommentPage): () => void {
   const doc = page.document;
@@ -183,8 +183,10 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   let hinted = false;
   let pointer: Point | null = null;
   let press: Press | null = null;
-  // P2-F L147: the latest pick's rect in today's viewport (null once its element left the page), and the viewport's height
-  let subject: (() => PickRect | null) | null = null;
+  // P2-F L147: the latest pick (its rect in today's viewport, null once it left the page; the element its clipping
+  // ancestors start from; how far down from its top it showed), and the viewport's height
+  type Subject = { rect(): PickRect | null; from: PageElement | null; shown: number | null };
+  let subject: Subject | null = null;
   let viewportHeight = page.innerHeight;
 
   const set = (node: OwnNode, styles: Record<string, string>) => {
@@ -303,7 +305,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
       page.requestAnimationFrame(() => {
         if (mine !== generation) return; // disarmed or re-armed meanwhile: main would drop it
         const rect = kept === null ? remeasured() : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
-        subject = kept === null ? measured(element) : () => ({ ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY });
+        keep(element, kept === null ? null : rect);
         sendPicked(report, described, rect);
       }),
     );
@@ -415,16 +417,73 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     page.scrollBy(step);
   };
 
-  // P2-F L147: a viewport that shrank keeps the latest pick in view, by the least scroll.
+  // --- P2-F L147: the latest pick kept in view while its card's strip shrinks the viewport ---
+
+  // The ancestors that scroll their own content and so clip the subject, nearest first (the viewport's scroller apart).
+  const clippers = (from: PageElement | null): PageElement[] => {
+    const found: PageElement[] = [];
+    const viewport = doc.scrollingElement ?? doc.documentElement;
+    for (let element = from; element !== null && element !== viewport && element !== doc.documentElement; element = element.parentElement)
+      if (scrollsItself(element) && SCROLLABLE.has(page.getComputedStyle(element).overflowY)) found.push(element);
+    return found;
+  };
+  const clipOf = (element: PageElement) => {
+    const top = element.getBoundingClientRect().top + element.clientTop;
+    return { top, bottom: top + element.clientHeight };
+  };
+  // How far down from its top the subject shows through its clippers and the viewport; null when it does not show.
+  const shownOf = (kept: Subject): number | null => {
+    const rect = kept.rect();
+    if (rect === null) return null;
+    let top = Math.max(rect.y, 0);
+    let bottom = Math.min(rect.y + rect.height, page.innerHeight);
+    for (const clip of clippers(kept.from).map(clipOf)) {
+      top = Math.max(top, clip.top);
+      bottom = Math.min(bottom, clip.bottom);
+    }
+    return bottom > top ? bottom - rect.y : null;
+  };
+  // A pick becomes the subject: the element itself, or (an area) the marquee as an offset in the element holding it,
+  // moving with that element's box and its own scrolled content (an app-style pane holding the marquee).
+  const keep = (element: PageElement, area: PickRect | null) => {
+    const at = area && { box: rectOf(element.getBoundingClientRect()), scrollTop: element.scrollTop, scrollLeft: element.scrollLeft };
+    const rect =
+      area === null || at === null
+        ? () => (element.isConnected ? rectOf(element.getBoundingClientRect()) : null)
+        : () => {
+            if (!element.isConnected) return null;
+            const now = element.getBoundingClientRect();
+            return { ...area, x: area.x + now.left - at.box.x - (element.scrollLeft - at.scrollLeft), y: area.y + now.top - at.box.y - (element.scrollTop - at.scrollTop) };
+          };
+    subject = { rect, from: area === null ? element.parentElement : element, shown: null };
+    subject.shown = shownOf(subject);
+  };
+  // What showed of the subject (`shown` down from its top) back in view by the least scroll: each clipping ancestor
+  // nearest first, then the page, each never past the subject's top; a scroller that moves less passes the rest on.
+  const reveal = (kept: Subject, shown: number) => {
+    const rect = kept.rect();
+    if (rect === null) return;
+    let top = rect.y;
+    const need = (clip: { top: number; bottom: number }) => Math.ceil(Math.min(top + shown - clip.bottom, Math.max(0, top - clip.top)));
+    for (const element of clippers(kept.from)) {
+      const by = need(clipOf(element));
+      if (by <= 0) continue;
+      const was = element.scrollTop;
+      element.scrollBy({ left: 0, top: by, behavior: 'instant' });
+      top -= element.scrollTop - was;
+    }
+    const by = need({ top: 0, bottom: page.innerHeight });
+    if (by > 0) page.scrollBy({ left: 0, top: by, behavior: 'instant' });
+  };
   const onViewport: Listener = () => {
     const before = viewportHeight;
     viewportHeight = page.innerHeight;
-    const rect = viewportHeight < before ? (subject?.() ?? null) : null;
-    if (rect === null || rect.y >= before) return; // it did not show before the shrink
-    const shown = Math.min(rect.y + rect.height, before); // the bottom of what showed: the card's pin
-    if (shown <= 0 || shown <= viewportHeight) return;
-    const by = Math.min(shown - viewportHeight, Math.max(0, rect.y));
-    if (by > 0) page.scrollBy({ left: 0, top: Math.ceil(by), behavior: 'instant' });
+    if (subject === null) return;
+    if (viewportHeight < before && subject.shown !== null) reveal(subject, subject.shown);
+    subject.shown = shownOf(subject);
+  };
+  const onScrolled: Listener = () => {
+    if (subject !== null) subject.shown = shownOf(subject);
   };
 
   // A scroll or resize moves what is under a still pointer: the outline (or the marquee) follows.
@@ -440,7 +499,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const element = hit(x, y);
     const described = describeOrRefuse(element, at, requestId);
     if (described === null || element === null) return;
-    subject = measured(element);
+    keep(element, null);
     sendPicked({ epoch: at, requestId, mode: 'click' }, described, rectOf(element.getBoundingClientRect()));
   };
 
@@ -456,6 +515,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   page.addEventListener('scroll', onLayout, CAPTURE);
   page.addEventListener('resize', onLayout, CAPTURE);
   page.addEventListener('resize', onViewport, CAPTURE);
+  page.addEventListener('scroll', onScrolled, CAPTURE);
   ipc.on(COMMENT_CHANNEL.toPreload, onMessage);
 
   return () => {
@@ -464,6 +524,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     page.removeEventListener('scroll', onLayout, CAPTURE);
     page.removeEventListener('resize', onLayout, CAPTURE);
     page.removeEventListener('resize', onViewport, CAPTURE);
+    page.removeEventListener('scroll', onScrolled, CAPTURE);
     ipc.removeListener(COMMENT_CHANNEL.toPreload, onMessage);
   };
 }

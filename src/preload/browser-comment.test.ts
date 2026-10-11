@@ -603,11 +603,45 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     Object.defineProperty(win(), 'innerHeight', { value: height, configurable: true });
     win().dispatchEvent(new (win().Event)('resize'));
   };
+  // a scroll moves what it scrolls up by as much: the page's every placed box, or a scroller's descendants' boxes
+  const moveUp = (by: number, within?: HappyElement) => {
+    for (const [el, box] of boxes) if (within === undefined ? el !== doc().body : within !== el && within.contains(el)) box.top -= by;
+  };
   let scrollBy: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     viewport(768);
-    scrollBy = vi.spyOn(win() as unknown as CommentPage, 'scrollBy').mockImplementation(() => undefined) as unknown as ReturnType<typeof vi.fn>;
+    scrollBy = vi.spyOn(win() as unknown as CommentPage, 'scrollBy').mockImplementation((to) => moveUp((to as { top: number }).top)) as unknown as ReturnType<typeof vi.fn>;
   });
+  // An app-style page: a pane the viewport's height from `top` that scrolls its own content (overflow-y: auto), and
+  // shrinks with the viewport, as a `position: fixed; inset` pane does
+  const pane = (top: number, extent: { scrollHeight: number; moves?: boolean }) => {
+    const el = byId('scroller');
+    let scrollTop = 0;
+    const height = () => win().innerHeight - top;
+    const paneScrollBy = vi.fn((to: { top: number }) => {
+      if (extent.moves === false) return;
+      const next = Math.min(Math.max(scrollTop + to.top, 0), extent.scrollHeight - height());
+      moveUp(next - scrollTop, el);
+      scrollTop = next;
+    });
+    place(el, { left: 500, top, width: 300, height: height() });
+    Object.defineProperties(el, {
+      scrollHeight: { value: extent.scrollHeight, configurable: true },
+      clientHeight: { get: height, configurable: true },
+      clientTop: { value: 0, configurable: true },
+      scrollTop: { get: () => scrollTop, configurable: true },
+      scrollBy: { value: paneScrollBy, configurable: true },
+    });
+    // its box follows the viewport's height, read live
+    (el as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => {
+      const box = { ...boxes.get(el)!, height: height() };
+      return { ...box, x: box.left, y: box.top, right: box.left + box.width, bottom: box.top + box.height };
+    };
+    undo.push(() => {
+      for (const key of ['scrollHeight', 'clientHeight', 'clientTop', 'scrollTop', 'scrollBy']) delete (el as unknown as Record<string, unknown>)[key];
+    });
+    return { scrollBy: paneScrollBy };
+  };
   const pickAt = (x: number, y: number) => ipc.deliver({ type: 'pickAt', x, y, requestId: 'r', epoch: 1 });
 
   it('scrolls the page by the least that brings a picked element the shrink hid back into view', () => {
@@ -659,6 +693,7 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     viewport(568);
     expect(scrollBy).toHaveBeenLastCalledWith(step(0, 200)); // the showing part's bottom (768) back at the viewport's
     place(byId('long'), { left: 500, top: 100, width: 100, height: 600 }); // taller than the viewport that remains
+    win().dispatchEvent(new (win().Event)('scroll')); // the page scrolled it there
     viewport(400);
     expect(scrollBy).toHaveBeenLastCalledWith(step(0, 100)); // its top at the viewport's top
   });
@@ -670,6 +705,24 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     byId('long').remove();
     viewport(568);
     expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('reveals an element its own scrolling pane clips, scrolling that pane by the least and the page not at all', () => {
+    const { scrollBy: paneScrollBy } = pane(400, { scrollHeight: 1000 }); // 400 to the viewport's bottom
+    place(byId('inner'), { left: 500, top: 700, width: 300, height: 30 }); // 700 to 730 inside it
+    pickAt(510, 710);
+    viewport(568); // the pane now ends at 568
+    expect(paneScrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 162));
+    expect(scrollBy, 'the page itself does not scroll (its root never does on such a page)').not.toHaveBeenCalled();
+  });
+
+  it('passes what a pane cannot scroll on to the page', () => {
+    const { scrollBy: paneScrollBy } = pane(400, { scrollHeight: 1000, moves: false });
+    place(byId('inner'), { left: 500, top: 700, width: 300, height: 30 });
+    pickAt(510, 710);
+    viewport(568);
+    expect(paneScrollBy).toHaveBeenCalledOnce();
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 162));
   });
 
   it('keeps the latest pick only, and nothing before any pick', () => {

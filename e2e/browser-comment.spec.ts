@@ -7,7 +7,7 @@
 // (1) G1: the toggle, the hover outline, a click pick, the card with the crop, no click reaching the page (P2-E2: the
 // card docked in the pane's strip, the view's bounds shrunk to the page's element, no cover, the pick's position and the
 // caret under it); (1b) P2-F L147: the strip opening scrolls the page by the least that keeps a picked element in its
-// bottom band in view, and moves nothing for one the shrunk page still shows; (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
+// bottom band in view, moves nothing for one the shrunk page still shows, and scrolls an app-style page's own pane; (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
 // pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (2c) P2-F: the Side pane
@@ -367,7 +367,7 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
 
 // ---- (1b) P2-F L147: the strip opening keeps the picked element in view ----------------------------------------------
 
-test('1b. the strip opening under the page scrolls it by the least that keeps a picked element in its bottom band in view (the caret where it was); an element the shrunk page still shows does not move', async () => {
+test('1b. the strip opening under the page scrolls it by the least that keeps a picked element in its bottom band in view (the caret where it was); an element the shrunk page still shows does not move; in an app-style pane, the pane scrolls', async () => {
   await commentScene({ titles: ['P2-F: strip scroll'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
     const t = await openCommentPage(s, id);
@@ -412,6 +412,31 @@ test('1b. the strip opening under the page scrolls it by the least that keeps a 
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))); // the resize dispatched
     expect(await scrollOf(page), 'the page did not scroll').toEqual(shownAt);
     await dismiss(s, t, card);
+
+    // an app-style page: the content scrolls in a viewport-sized pane of its own, so the pane is what scrolls, not the root
+    await page.evaluate(() => {
+      window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+      const pane = document.createElement('div');
+      pane.id = 'app-pane';
+      pane.setAttribute('style', 'position: fixed; inset: 0; overflow-y: auto; background: white; z-index: 10');
+      pane.innerHTML = '<div style="position: relative; height: 2400px"><button id="pane-target" style="position: absolute; left: 40px; top: 1400px; width: 160px; height: 32px">Pane target</button></div>';
+      document.body.appendChild(pane);
+      pane.scrollTop = 1400 + 32 - pane.clientHeight + 12; // the target 12 px above the pane's bottom
+    });
+    const paneTarget = page.locator('#pane-target');
+    const inPane = centre(await rectOf(paneTarget));
+    expect(await seamPickAt(s, t.tabId, inPane.x, inPane.y)).toBe(true);
+    const paneCard = cardOf(s, 'button “Pane target”');
+    await expect(paneCard).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.innerHeight), { message: 'the strip took the page’s bottom' }).toBeLessThan(full - 12);
+    await expect
+      .poll(async () => {
+        const [now, clipBottom] = [await rectOf(paneTarget), await page.evaluate(() => document.getElementById('app-pane')!.clientHeight)];
+        return near(now.y + now.height, clipBottom, 1);
+      }, { message: 'the target at the shrunk pane’s bottom edge' })
+      .toBe(true);
+    expect((await scrollOf(page)).y, 'the root did not scroll').toBe(0);
+    await dismiss(s, t, paneCard);
   });
 });
 
