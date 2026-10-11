@@ -20,6 +20,7 @@ import {
   type TerminalRenderer,
   type TerminalTheme,
 } from './renderer';
+import { imeTraceRequested, installImeTrace } from './ime-trace'; // P2-F S ime-trace, temporary
 import { installScrollUpIntoScrollback } from './scroll-up';
 
 const toXtermTheme = (theme: TerminalTheme): ITheme => ({
@@ -62,6 +63,7 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
   terminal.attachCustomKeyEventHandler((ev) => keyFilter(ev));
   installScrollUpIntoScrollback(terminal, { version: xtermVersion, refresh: () => terminal.refresh(0, terminal.rows - 1) });
   terminal.open(element);
+  installImeTrace(terminal.textarea!, (cb) => terminal.onData(cb), imeTraceRequested(location.search)); // P2-F S ime-trace, temporary
 
   let acceleration: Acceleration = 'dom';
   const accelerationListeners = new Set<(a: Acceleration) => void>();
