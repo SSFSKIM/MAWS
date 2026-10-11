@@ -4,7 +4,7 @@ Why: the agents' replay of Chromium's macOS IME sequence gives MAWS the right by
 event order on your Mac is the missing fact. This build records the terminal's key, composition and input events and the
 bytes MAWS sends, to one log file. Type nothing else in it, and no passwords: it records every key typed in its terminals.
 
-Before: the build comes from a clean checkout of this branch at d1038cad (the recorder commit), made for this capture so
+Before: the build comes from a clean checkout of this branch at 5613b47f (the recorder and its review fix), made for this capture so
 no work in progress can enter the build: /private/tmp/maws-p2f-ime-trace (a detached git worktree; its node_modules were
 installed with `pnpm install --frozen-lockfile` on 2026-10-11, so no install is needed). It is not master.
 
