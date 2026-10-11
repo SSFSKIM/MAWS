@@ -44,6 +44,17 @@ export function aliasOf(id: string | null, rows: readonly Row[]): string | null 
   return shortAlias(row?.value ?? (id === DEFAULT_ROW ? (rows.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? id) : id));
 }
 
+// Whether the engine's report `resolved` is the model `requested` runs: the same id, or the id the catalogue resolves
+// the request to (an alias or `default` by its row, a resolved id as itself). Exact ids, never aliases: the alias is for
+// display only, and "haiku" names Haiku 4.5 and 5.5 alike, "glm" two providers' models. Null when the catalogue cannot
+// say what the request runs (an alias it does not list, a row with no resolved id).
+export function reportsRequested(requested: string, resolved: string, rows: readonly Row[]): boolean | null {
+  if (requested === resolved) return true;
+  const row = rows.find((r) => r.value === requested);
+  const runs = row ? row.resolvedModel : rows.some((r) => r.resolvedModel === requested) ? requested : undefined;
+  return runs === undefined ? null : runs === resolved;
+}
+
 // The chip's text: the alias and the effort the engine runs at; the alias alone for a model without effort (Haiku) or
 // while the effort is not known; `Model` while nothing names a model.
 export function chipLabel(alias: string | null, effort: Effort | null | undefined): string {

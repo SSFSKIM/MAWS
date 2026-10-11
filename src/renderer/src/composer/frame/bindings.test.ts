@@ -244,6 +244,19 @@ describe('the model chip names the model and the effort the engine uses', () => 
     expect(liveBindings(null, record(APP, { model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
   });
 
+  // The review of S-chip: the alias is for display only; acknowledgement compares the exact ids through the catalogue.
+  it('a model asked for that reads like the reported one is still marked until the engine runs it', () => {
+    const rows = [
+      { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku 5.5' },
+      { value: 'claude/vendor-a/glm', resolvedModel: 'claude/vendor-a/glm', displayName: 'GLM (A)' },
+      { value: 'claude/vendor-b/glm', resolvedModel: 'claude/vendor-b/glm', displayName: 'GLM (B)' },
+    ];
+    const chip = (requested: string, resolved: string) => liveBindings({ ...status(APP), model: { requested, resolved }, effort: null }, record(APP), { modelNames: rows }).model;
+    expect(chip('haiku', 'claude-haiku-4-5-20251001')).toMatchObject({ label: 'haiku', requested: true }); // Haiku 5.5 asked for, 4.5 still running
+    expect(chip('claude/vendor-a/glm', 'claude/vendor-b/glm')).toMatchObject({ label: 'glm', requested: true }); // two providers' glm
+    expect(chip('haiku', 'claude-haiku-5-5')).toMatchObject({ label: 'haiku', requested: false });
+  });
+
   it('re-picking the running model while another is asked for switches back to it', async () => {
     const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } } });
     const s = { ...status(APP), model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' }, effort: null };

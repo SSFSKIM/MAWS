@@ -64,9 +64,13 @@ beforeEach(() => {
     'session.listModels': { models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: 'Sonnet', description: 'fast' }] },
     'session.listPermissionRules': rules,
     // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
-    // (W3: the chip names the row's value, so the two routes' rows differ by value)
+    // (W3: the chip names the row's value, so the two routes' rows differ by value); Haiku's row says what `haiku` runs, so
+    // the chip can tell a request for it from the model reported (exact ids, the review of S-chip)
     'engine.models': (input: { gateway?: string }) => ({
-      models: [{ value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: 'Sonnet' }],
+      models: [
+        { value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: 'Sonnet' },
+        { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku' },
+      ],
       source: 'cached',
       at: '2026-09-29T09:00:00.000Z',
     }),
