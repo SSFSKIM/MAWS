@@ -147,6 +147,7 @@ const byId = (id: string) => doc().getElementById(id)!;
 // vitest copies the window's properties onto globalThis as plain values; one test moves `scrollY`, and every test ends
 // with it restored
 const SCROLL_Y = Object.getOwnPropertyDescriptor(globalThis, 'scrollY')!;
+const INNER_HEIGHT = Object.getOwnPropertyDescriptor(globalThis, 'innerHeight')!;
 
 let ipc: ReturnType<typeof fakeIpc>;
 let uninstall: () => void;
@@ -188,6 +189,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete (doc() as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
   Object.defineProperty(win(), 'scrollY', SCROLL_Y);
+  Object.defineProperty(win(), 'innerHeight', INNER_HEIGHT);
 });
 
 describe('arming', () => {
@@ -592,6 +594,91 @@ describe('pickAt (the context menu)', () => {
     ipc.deliver({ type: 'pickAt', x: Number.NaN, y: 40, requestId: 'r-3', epoch: 4 });
     ipc.deliver({ type: 'pickAt', x: 250, y: 40, requestId: 7, epoch: 4 });
     expect(ipc.sent()).toEqual([]);
+  });
+});
+
+describe('a viewport that shrinks under the picked element (P2-F L147: the comment strip opening under the page)', () => {
+  // the view's height in CSS px, as main's `setBounds` changes it: the page sees its viewport resize
+  const viewport = (height: number) => {
+    Object.defineProperty(win(), 'innerHeight', { value: height, configurable: true });
+    win().dispatchEvent(new (win().Event)('resize'));
+  };
+  let scrollBy: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    viewport(768);
+    scrollBy = vi.spyOn(win() as unknown as CommentPage, 'scrollBy').mockImplementation(() => undefined) as unknown as ReturnType<typeof vi.fn>;
+  });
+  const pickAt = (x: number, y: number) => ipc.deliver({ type: 'pickAt', x, y, requestId: 'r', epoch: 1 });
+
+  it('scrolls the page by the least that brings a picked element the shrink hid back into view', () => {
+    pickAt(510, 610); // #long: 600 to 630
+    viewport(568); // a 200 px strip
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 62));
+  });
+
+  it('does the same for an element picked with the pointer, once its report is sent', () => {
+    ipc.deliver({ type: 'arm', epoch: 2 });
+    click({ x: 510, y: 610 });
+    frame();
+    frame();
+    ipc.deliver({ type: 'disarm' }); // main disarms after the pick; the card opens after
+    viewport(600);
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 30));
+  });
+
+  it('keeps an area pick in view by its marquee, in document coordinates', () => {
+    ipc.deliver({ type: 'arm', epoch: 2 });
+    pointer('pointerdown', { x: 22, y: 122 });
+    pointer('pointermove', { x: 200, y: 230 });
+    pointer('pointerup', { x: 200, y: 230 });
+    frame();
+    frame();
+    viewport(200); // the marquee runs from 122 to 230
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 30));
+  });
+
+  it('does not move a picked element the shrunk viewport still shows', () => {
+    pickAt(250, 40); // #increment: 32 to 62
+    viewport(568);
+    viewport(62);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('does not chase an element that was out of view before the shrink', () => {
+    place(byId('long'), { left: 500, top: 900, width: 100, height: 30 }); // below the viewport (a pick past it, as a test can)
+    pickAt(510, 910);
+    viewport(568);
+    place(byId('long'), { left: 500, top: -60, width: 100, height: 30 }); // and above it
+    viewport(400);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('brings back what showed of an element that ran past the bottom, never its top above the viewport', () => {
+    place(byId('long'), { left: 500, top: 700, width: 100, height: 200 }); // 700 to 900: 68 px showed
+    pickAt(510, 710);
+    viewport(568);
+    expect(scrollBy).toHaveBeenLastCalledWith(step(0, 200)); // the showing part's bottom (768) back at the viewport's
+    place(byId('long'), { left: 500, top: 100, width: 100, height: 600 }); // taller than the viewport that remains
+    viewport(400);
+    expect(scrollBy).toHaveBeenLastCalledWith(step(0, 100)); // its top at the viewport's top
+  });
+
+  it('ignores a viewport that grows, and an element removed from the page', () => {
+    pickAt(510, 610);
+    viewport(900);
+    expect(scrollBy).not.toHaveBeenCalled();
+    byId('long').remove();
+    viewport(568);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the latest pick only, and nothing before any pick', () => {
+    viewport(568);
+    pickAt(510, 610);
+    viewport(768);
+    pickAt(250, 40); // #increment replaces #long
+    viewport(568);
+    expect(scrollBy).not.toHaveBeenCalled();
   });
 });
 

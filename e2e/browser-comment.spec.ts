@@ -6,7 +6,8 @@
 //
 // (1) G1: the toggle, the hover outline, a click pick, the card with the crop, no click reaching the page (P2-E2: the
 // card docked in the pane's strip, the view's bounds shrunk to the page's element, no cover, the pick's position and the
-// caret under it); (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
+// caret under it); (1b) P2-F L147: the strip opening scrolls the page by the least that keeps a picked element in its
+// bottom band in view, and moves nothing for one the shrunk page still shows; (2) G1: Send to main and a Side thread from a pick on a live parent (E3's replay journals): the
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
 // pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (3) G2 without E4c: every target's anchor
@@ -360,6 +361,56 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     await dismiss(s, t, card);
     await expectPageHeardNothing(page);
     expect(await page.evaluate(() => document.getElementById('count')!.textContent)).toBe('0');
+  });
+});
+
+// ---- (1b) P2-F L147: the strip opening keeps the picked element in view ----------------------------------------------
+
+test('1b. the strip opening under the page scrolls it by the least that keeps a picked element in its bottom band in view (the caret where it was); an element the shrunk page still shows does not move', async () => {
+  await commentScene({ titles: ['P2-F: strip scroll'] }, async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    const t = await openCommentPage(s, id);
+    const { page } = t;
+    // the sitting's scene (B3): a target low in a long page, scrolled into the band the strip will take
+    await page.evaluate(() => {
+      const target = document.createElement('button');
+      target.id = 'bottom-target';
+      target.textContent = 'Bottom target';
+      target.setAttribute('style', 'position: absolute; left: 40px; top: 1400px; width: 160px; height: 32px');
+      document.body.appendChild(target);
+    });
+    const target = page.locator('#bottom-target');
+    const full = await page.evaluate(() => window.innerHeight);
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 1400 + 32 - window.innerHeight + 12, behavior: 'instant' }));
+    const before = await rectOf(target);
+    expect(near(before.y + before.height, full - 12, 1), `the target 12 px above the page's bottom: ${JSON.stringify({ before, full })}`).toBe(true);
+
+    const at = centre(before);
+    expect(await seamPickAt(s, t.tabId, at.x, at.y)).toBe(true);
+    const card = cardOf(s, 'button “Bottom target”');
+    await expect(card).toBeVisible();
+    const { position } = await lastPicked(s, 1);
+    await expect.poll(() => page.evaluate(() => window.innerHeight), { message: 'the strip took the page’s bottom' }).toBeLessThan(full - 12);
+    // the least scroll: the target's bottom at the shrunk page's bottom edge, its column unchanged, so the caret still points at it
+    await expect
+      .poll(async () => {
+        const [now, height] = [await rectOf(target), await page.evaluate(() => window.innerHeight)];
+        return near(now.y + now.height, height, 1) && now.x === before.x;
+      }, { message: 'the target at the shrunk page’s bottom edge' })
+      .toBe(true);
+    await expect(t.panel.locator('[data-card-dock] [data-card-caret]')).toHaveAttribute('data-card-caret', String(position!.x));
+    await dismiss(s, t, card);
+
+    // a target the shrunk page still shows: nothing moves
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 1300, behavior: 'instant' }));
+    const shownAt = await scrollOf(page);
+    const visible = centre(await rectOf(target));
+    expect(await seamPickAt(s, t.tabId, visible.x, visible.y)).toBe(true);
+    await expect(card).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.innerHeight), { message: 'the strip took the page’s bottom' }).toBeLessThan(full - 12);
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))); // the resize dispatched
+    expect(await scrollOf(page), 'the page did not scroll').toEqual(shownAt);
+    await dismiss(s, t, card);
   });
 });
 

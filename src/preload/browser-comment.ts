@@ -21,6 +21,14 @@
 // (`isTrusted`). Nothing is posted to the page and no page string becomes markup (the badge is `textContent`). Styles
 // are inline `!important` CSSOM writes, which a page's CSP does not govern.
 //
+// P2-F L147 (the owner's ruling at P2-F's sitting, B3): the comment card docks in a strip under the page, so opening it
+// shrinks the viewport from the bottom and could hide the element just picked. The preload keeps the latest pick (the
+// element, or an area's marquee in document coordinates) and, when the viewport shrinks, scrolls the page by the least
+// that brings back what showed of it before (its bottom, clamped to the old viewport: the card's pin), never its top
+// above the viewport; nothing when it still shows or did not show before. The pin's horizontal place does not move, so
+// the card's caret still points at it. Only the viewport scrolls: an element clipped by a scroller of its own is not
+// chased.
+//
 // The DOM is typed structurally (`CommentPage`), as `describe.ts`'s is: src/preload compiles under the Node program,
 // which has no DOM lib (Decision Log 27(l)).
 import {
@@ -160,6 +168,7 @@ const clamp = (value: number, low: number, high: number) => Math.min(Math.max(va
 const contains = (outer: PageRect, inner: PickRect) =>
   outer.left <= inner.x && outer.top <= inner.y && outer.left + outer.width >= inner.x + inner.width && outer.top + outer.height >= inner.y + inner.height;
 const rectOf = (box: PageRect): PickRect => ({ x: box.left, y: box.top, width: box.width, height: box.height });
+const measured = (element: PageElement) => () => (element.isConnected ? rectOf(element.getBoundingClientRect()) : null);
 
 export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalThis as unknown as CommentPage): () => void {
   const doc = page.document;
@@ -174,6 +183,9 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   let hinted = false;
   let pointer: Point | null = null;
   let press: Press | null = null;
+  // P2-F L147: the latest pick's rect in today's viewport (null once its element left the page), and the viewport's height
+  let subject: (() => PickRect | null) | null = null;
+  let viewportHeight = page.innerHeight;
 
   const set = (node: OwnNode, styles: Record<string, string>) => {
     for (const [name, value] of Object.entries(styles)) node.style.setProperty(name, value, 'important');
@@ -291,6 +303,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
       page.requestAnimationFrame(() => {
         if (mine !== generation) return; // disarmed or re-armed meanwhile: main would drop it
         const rect = kept === null ? remeasured() : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
+        subject = kept === null ? measured(element) : () => ({ ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY });
         sendPicked(report, described, rect);
       }),
     );
@@ -402,6 +415,18 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     page.scrollBy(step);
   };
 
+  // P2-F L147: a viewport that shrank keeps the latest pick in view, by the least scroll.
+  const onViewport: Listener = () => {
+    const before = viewportHeight;
+    viewportHeight = page.innerHeight;
+    const rect = viewportHeight < before ? (subject?.() ?? null) : null;
+    if (rect === null || rect.y >= before) return; // it did not show before the shrink
+    const shown = Math.min(rect.y + rect.height, before); // the bottom of what showed: the card's pin
+    if (shown <= 0 || shown <= viewportHeight) return;
+    const by = Math.min(shown - viewportHeight, Math.max(0, rect.y));
+    if (by > 0) page.scrollBy({ left: 0, top: Math.ceil(by), behavior: 'instant' });
+  };
+
   // A scroll or resize moves what is under a still pointer: the outline (or the marquee) follows.
   const onLayout: Listener = () => {
     if (epoch === null || picked || pointer === null) return;
@@ -414,7 +439,9 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   const pickAt = (x: number, y: number, requestId: string, at: number) => {
     const element = hit(x, y);
     const described = describeOrRefuse(element, at, requestId);
-    if (described !== null && element !== null) sendPicked({ epoch: at, requestId, mode: 'click' }, described, rectOf(element.getBoundingClientRect()));
+    if (described === null || element === null) return;
+    subject = measured(element);
+    sendPicked({ epoch: at, requestId, mode: 'click' }, described, rectOf(element.getBoundingClientRect()));
   };
 
   const onMessage = (_event: unknown, message: unknown) => {
@@ -428,6 +455,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   for (const type of TAKEN) page.addEventListener(type, onPointer, CAPTURE);
   page.addEventListener('scroll', onLayout, CAPTURE);
   page.addEventListener('resize', onLayout, CAPTURE);
+  page.addEventListener('resize', onViewport, CAPTURE);
   ipc.on(COMMENT_CHANNEL.toPreload, onMessage);
 
   return () => {
@@ -435,6 +463,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     for (const type of TAKEN) page.removeEventListener(type, onPointer, CAPTURE);
     page.removeEventListener('scroll', onLayout, CAPTURE);
     page.removeEventListener('resize', onLayout, CAPTURE);
+    page.removeEventListener('resize', onViewport, CAPTURE);
     ipc.removeListener(COMMENT_CHANNEL.toPreload, onMessage);
   };
 }
