@@ -2,10 +2,11 @@ import { mkdirSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, session, type WebContents } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import type { WindowState } from '@shared/ipc/schema/layout';
 import { buildCsp } from './csp';
 import { appWindows, registerAppWindow } from './windows'; // E2
+import { recordImeTrace } from './ime-trace'; // P2-F S ime-trace, temporary
 import { showAppWindow } from './window-show';
 // E2 start
 import { attributeConsole, guardFrames, isCspExempt } from './deliverables/policies';
@@ -96,22 +97,13 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
 
   // P2-F S ime-trace, temporary: the page learns the flag from its own URL (renderer/src/terminal/ime-trace.ts)
   const traced = process.env.MAWS_IME_TRACE === '1';
-  if (traced) recordImeTrace(win.webContents);
+  if (traced) {
+    mkdirSync(app.getPath('logs'), { recursive: true });
+    recordImeTrace(win.webContents, (line) => appendFile(join(app.getPath('logs'), 'ime-trace.log'), line));
+  }
   if (pageUrl) void win.loadURL(traced ? `${pageUrl}${pageUrl.includes('?') ? '&' : '?'}imeTrace=1` : pageUrl);
   else void win.loadFile(pageFile, traced ? { query: { imeTrace: '1' } } : {});
   return win;
-}
-
-// P2-F S ime-trace, temporary (removed once tracker L98's fix is pinned by a replay of its trace): under
-// MAWS_IME_TRACE=1 the page's `[ime-trace]` console lines are appended to <logs>/ime-trace.log; nothing otherwise.
-function recordImeTrace(contents: WebContents): void {
-  const file = join(app.getPath('logs'), 'ime-trace.log');
-  mkdirSync(app.getPath('logs'), { recursive: true });
-  let writes = Promise.resolve();
-  contents.on('console-message', ({ message }) => {
-    if (!message.startsWith('[ime-trace] ')) return;
-    writes = writes.then(() => appendFile(file, `${message}\n`)).catch((error: unknown) => console.warn('[ime-trace] could not append', error));
-  });
 }
 
 export function applyWindowBackground(theme: ResolvedTheme): void {
