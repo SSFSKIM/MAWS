@@ -468,8 +468,14 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
     // E11 F2b (plan 2.4): the relaunch restores this session's tab, so the error's notice shows in the opened session; seen
     // there with the window in front it leaves Needs you (confirmed) and the glyph reads the pending request; while unseen
-    // it outranks the request
+    // it outranks the request. L102 (P2-F wave S, the owner's "2초 확인 후 해제"): seen only after two continuous seconds
+    // in front, so a second after its notice shows the error is still in Needs you, and it leaves after the dwell
     await expect(second.page.locator('[data-region="main"]').getByText(`Background task failed: ${TASK_FAILED}`), 'the tail’s error, shown in its session').toBeVisible();
+    const shownAt = Date.now();
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect((await attentionOf(second.page, id, 'error'))[0]?.state, 'a second after its notice showed, the error is still in Needs you').toBe('pending');
+    await expect.poll(async () => (await attentionOf(second.page, id, 'error'))[0]?.state, { timeout: 10_000, message: 'seen after the two-second dwell' }).toBe('confirmed');
+    const dwellMs = Date.now() - shownAt;
     const row = await rowOf(second.page, id);
     await expect
       .poll(async () => {
@@ -495,7 +501,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items[0]!.request.requestId).toBe(requested.requestId);
     expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: shown in its restored session); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: shown in its restored session, seen ${dwellMs} ms after its notice showed); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 

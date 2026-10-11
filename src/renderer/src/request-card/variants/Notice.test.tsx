@@ -1,5 +1,6 @@
 // E11 F2b (plan 2.4; owner decision 1): an error's notice says what happened in words and when ("2 weeks ago"), offers
-// Dismiss, and once shown in its opened session while the window is in front it counts as seen (out of Needs you).
+// Dismiss, and once shown in its opened session for two continuous seconds while the window is in front it counts as
+// seen (out of Needs you; L102's dwell, the owner's ruling at P2-F's sitting).
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -38,19 +39,87 @@ describe('an error notice', () => {
     expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }]);
   });
 
-  it('shown in its opened session with the window in front, it is seen', async () => {
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-    await act(async () => void render(<NoticeBody item={error()} seenHere />));
-    expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'seen' }]);
-  });
+  // L102 (P2-F wave S; the owner at the sitting, B6: "2초 확인 후 해제"): seen only after two continuous seconds in
+  // front; the window going behind or the document hiding restarts the count.
+  describe('the two-second dwell', () => {
+    let visibility: DocumentVisibilityState;
+    let focused: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      vi.useFakeTimers();
+      visibility = 'visible';
+      vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+      focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    });
+    afterEach(() => vi.useRealTimers());
+    const advance = (ms: number) => act(async () => void vi.advanceTimersByTime(ms));
+    const SEEN = [{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'seen' }];
 
-  it('with the window behind, it waits until the window comes forward', async () => {
-    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
-    await act(async () => void render(<NoticeBody item={error()} seenHere />));
-    expect(acknowledged()).toEqual([]);
-    focused.mockReturnValue(true);
-    await act(async () => void window.dispatchEvent(new Event('focus')));
-    expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'seen' }]);
+    it('shown in its opened session with the window in front, it is seen after two seconds, not at 1.9', async () => {
+      await act(async () => void render(<NoticeBody item={error()} seenHere />));
+      await advance(1_900);
+      expect(acknowledged()).toEqual([]);
+      await advance(100);
+      expect(acknowledged()).toEqual(SEEN);
+      await advance(5_000);
+      expect(acknowledged(), 'once').toEqual(SEEN);
+    });
+
+    it('a hide at 1.5 s restarts the count when the document shows again', async () => {
+      await act(async () => void render(<NoticeBody item={error()} seenHere />));
+      await advance(1_500);
+      visibility = 'hidden';
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')));
+      await advance(3_000);
+      expect(acknowledged(), 'nothing counts while hidden').toEqual([]);
+      visibility = 'visible';
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')));
+      await advance(1_900);
+      expect(acknowledged()).toEqual([]);
+      await advance(100);
+      expect(acknowledged()).toEqual(SEEN);
+    });
+
+    it('the window going behind at 1.5 s restarts the count when it comes forward', async () => {
+      await act(async () => void render(<NoticeBody item={error()} seenHere />));
+      await advance(1_500);
+      focused.mockReturnValue(false);
+      await act(async () => void window.dispatchEvent(new Event('blur')));
+      await advance(3_000);
+      expect(acknowledged()).toEqual([]);
+      focused.mockReturnValue(true);
+      await act(async () => void window.dispatchEvent(new Event('focus')));
+      await advance(1_900);
+      expect(acknowledged()).toEqual([]);
+      await advance(100);
+      expect(acknowledged()).toEqual(SEEN);
+    });
+
+    it('with the window behind at mount, it counts from when the window comes forward', async () => {
+      focused.mockReturnValue(false);
+      await act(async () => void render(<NoticeBody item={error()} seenHere />));
+      await advance(5_000);
+      expect(acknowledged()).toEqual([]);
+      focused.mockReturnValue(true);
+      await act(async () => void window.dispatchEvent(new Event('focus')));
+      await advance(2_000);
+      expect(acknowledged()).toEqual(SEEN);
+    });
+
+    it('the same item re-read from the store (a new object) does not restart the count', async () => {
+      const view = await act(async () => render(<NoticeBody item={error()} seenHere />));
+      await advance(1_500);
+      await act(async () => void view.rerender(<NoticeBody item={error()} seenHere />));
+      await advance(500);
+      expect(acknowledged()).toEqual(SEEN);
+    });
+
+    it('a notice that unmounts before two seconds is not seen', async () => {
+      await act(async () => void render(<NoticeBody item={error()} seenHere />));
+      await advance(1_500);
+      cleanup();
+      await advance(5_000);
+      expect(acknowledged()).toEqual([]);
+    });
   });
 
   it('once seen it is not acknowledged again and still offers Dismiss; another kind offers neither and keeps its wait', async () => {
