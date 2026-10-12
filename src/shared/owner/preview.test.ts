@@ -20,6 +20,7 @@ describe('previewLine', () => {
     const question = `${essential}\n<need-input>Which branch should I use?\n<choice recommended>main</choice>\n<choice>dev</choice></need-input>`;
     expect(previewLine(question, 160)).toBe('Which branch should I use?');
     expect(previewLine('Intro\n<to-human>Report body.</to-human>', 160)).toBe('Report body.');
+    expect(previewLine('Intro\n<message>\nReport body.\n</message>', 160)).toBe('Report body.');
     expect(previewLine('<insight>Just a note</insight>\nPlain words', 160)).toBe('Plain words');
   });
 

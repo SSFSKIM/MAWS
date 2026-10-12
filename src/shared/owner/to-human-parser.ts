@@ -23,7 +23,7 @@ const STRICT: Fences = { open: /^[ \t]*(`{3,}|~{3,})(.*)$/, close: /^[ \t]*(`{3,
 // The glued reading (F-AB; Decision Log 27): mark tags are transparent at a fence line's edges, so `<to-human>` glued
 // before an opening fence or `</to-human>` after a closing one still means the fence, the tags outside the region. It
 // is a recovery only (`partsOf`): a report the strict reading balances never reads through it.
-const MARK_TAGS = String.raw`(?:<\/?(?:to-human|essential|need-input|insight)>[ \t]*)*`;
+const MARK_TAGS = String.raw`(?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)*`;
 const GLUED: Fences = {
   open: new RegExp(String.raw`^[ \t]*${MARK_TAGS}(\x60{3,}|~{3,})(.*)$`),
   close: new RegExp(String.raw`^[ \t]*(\x60{3,}|~{3,})[ \t]*(${MARK_TAGS})$`),
@@ -117,7 +117,8 @@ export function parse(text: string): Part[] {
 // block's marks still open at its end counting as paired).
 function readingOf(text: string, regions: readonly CodeRegion[], live: boolean) {
   const inCode = insideCode(regions);
-  const tokens = [...text.matchAll(/<(\/?)(to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index));
+  // `<message>` (contract 2) is the to-human kind under its new name; it pairs only with its own closer.
+  const tokens = [...text.matchAll(/<(\/?)(message|to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index));
   const stack: number[] = [];
   const paired = new Set<number>();
   for (let i = 0; i < tokens.length; i++) {
@@ -160,7 +161,7 @@ function partsOf(text: string, live: boolean): Part[] {
     take(text.slice(last, token.index));
     last = token.index + token[0].length;
     if (token[1]) open.pop();
-    else open.push(token[2] as Kind);
+    else open.push(token[2] === 'message' ? 'to-human' : (token[2] as Kind));
     // A nested mark is a new contiguous run even when it repeats the outer kind.
     parts.push({ kind: open.at(-1) ?? 'plain', text: '' });
     starts.push(last);

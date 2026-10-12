@@ -86,7 +86,7 @@ describe('whether the selected style carries a compatible contract', () => {
   });
 
   it('a version outside the compatible set, a value that is no integer, or no key is not compatible', async () => {
-    for (const key of ['2', '1.5', 'one', '', null]) {
+    for (const key of ['3', '1.5', 'one', '', null]) {
       put(join(home, 'output-styles/report.md'), style('report', key));
       userSettings({ outputStyle: 'report' });
       expect(await resolveStyle(ctx())).toEqual({ name: 'report', compatible: false, contract: null, unresolved: null });

@@ -9,6 +9,16 @@ describe('stored owner marks', () => {
       { kind: 'plain', text: '\n' }, { kind: 'essential', text: 'Tests fail.' }, { kind: 'plain', text: '\nAfter.' },
     ]);
   });
+  it('contract 2: <message> is the to-human kind, closed only by its own tag', () => {
+    expect(parse('Reading.\n<message>Done.</message>\n<need-input>Which?\n<choice>A</choice></need-input>')).toEqual([
+      { kind: 'plain', text: 'Reading.\n' }, { kind: 'to-human', text: 'Done.' }, { kind: 'plain', text: '\n' },
+      { kind: 'need-input', text: 'Which?', choices: [{ text: 'A', recommended: false }] },
+    ]);
+    expect(parse('<message>Open.</to-human> after')).toEqual([{ kind: 'plain', text: '<message>Open.</to-human> after' }]);
+    expect(parse('<message>Outer <to-human>old</to-human> rest</message>')).toEqual([
+      { kind: 'to-human', text: 'Outer' }, { kind: 'to-human', text: 'old' }, { kind: 'to-human', text: 'rest' },
+    ]);
+  });
   it('splits nested marks into contiguous runs, resuming the outer mark', () => {
     expect(parse('<to-human>Done.\n<essential>Tests fail.</essential>\nMore.</to-human>')).toEqual([
       { kind: 'to-human', text: 'Done.' }, { kind: 'essential', text: 'Tests fail.' }, { kind: 'to-human', text: 'More.' },

@@ -9,7 +9,7 @@
 import { stripAnsi } from '../wire/ansi';
 import { codeRegions, insideCode, parse, type Kind, type Part } from './to-human-parser';
 
-const OWNER_MARK = /<\/?(?:to-human|essential|need-input|insight)>|<choice(?: recommended)?>|<\/choice>/g;
+const OWNER_MARK = /<\/?(?:message|to-human|essential|need-input|insight)>|<choice(?: recommended)?>|<\/choice>/g;
 
 // Code regions are read over the whole text, not per line: an inline span may cross a line break within its paragraph.
 const firstLine = (text: string): string | null => {

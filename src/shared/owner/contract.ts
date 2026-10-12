@@ -8,7 +8,9 @@ export const TO_HUMAN_CONTRACT_VERSION = 1;
 export const CONTRACT_HEADER = (version: number): string => `# Messages to the human (MAWS to-human contract ${version})`;
 
 // Every contract version MAWS can present: a style declaring one of them in its front matter needs no appended contract.
-export const COMPATIBLE_CONTRACTS: readonly number[] = [1];
+// Contract 2 (doperpowers 7.147.0): the message mark is `<message>` and `<essential>` is no longer asked for; the
+// parser reads `<message>` as the to-human kind and the old tags as before, so a 2 style presents through grammar 2.
+export const COMPATIBLE_CONTRACTS: readonly number[] = [1, 2];
 
 // The front-matter key by which an output style declares the contract version it carries.
 export const STYLE_CONTRACT_KEY = 'maws-to-human-contract';
