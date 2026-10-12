@@ -1,0 +1,39 @@
+C1 / L98: owner's native keyboard capture, 2026-10-12
+Parent: docs/doperpowers/plans/2026-10-09-p2-f-finish.md, P2-F; source pin 3652d887.
+Evidence only. No change to the tracker, parent documents, executable source or engine.
+
+Build and setup
+- Built master 3652d887 from the clean tracked working tree. Frozen-lockfile install reported already up to date.
+- Voice helper and electron-vite build succeeded. Packaging/signing succeeded with Apple Development identity; codesign reported dev.maws.app and the expected Apple Development authority.
+- Normal MAWS quit before packaging. Launched the binary with MAWS_IME_TRACE=1; cua observed index.html?imeTrace=1.
+- Used the existing Done acceptance session 'C4 acceptance again'. Its /private/tmp/maws-accept directory was absent, causing the first shell to exit; recreated that empty disposable directory and started a new Terminal tool shell. No prompt was sent to the session. Its existing unsent draft was preserved.
+- Each sample used /usr/bin/head -n 1 | /usr/bin/od -An -tx1.
+
+Results, owner keyboard with macOS 2-Set Korean
+1. Type 한글, Backspace while 글 composes, Enter: 한그, ed 95 9c ea b7 b8 0a. Owner report, screenshot and trace agree.
+2. Same with a pause: 한그, same bytes. Requested about 5 seconds; trace measures about 2.94 seconds from final composition input to Backspace. Do not claim an exact 5-second trial.
+3. Same, during an attempted accessibility-observation experiment: 한그, same bytes. The background interval yielded only 1 successful observation and 46 errors, without reliable overlap evidence. INVALID as an accessibility-polling experiment; valid only as another ordinary keyboard capture.
+4. Plain 한글, Enter, no Backspace: 한글, ed 95 9c ea b8 80 0a. Owner report, screenshot and trace agree.
+
+Trace interpretation
+- The Backspace captures show keyCode 229 and isComposing=true, followed by compositionupdate to 그. No premature commit is visible in these samples.
+- onData sends 한 and then 그, followed by carriage return; canonical terminal input yields newline in od.
+- The plain sample sends 한 and then 글, followed by carriage return.
+- Automated cua pressKey attempts did not exercise native composition: they generated individual jamo with keyCode 71/75/etc., no composition events. Exclude that attempt from acceptance evidence.
+- The captured source excerpts are in owner-ime-capture-2026-10-12-events.txt. The complete local trace remains ~/Library/Logs/MAWS/ime-trace.log, with a copy /tmp/maws-review/trace-capture/ime-trace-final.log.
+
+Conclusion and limits
+The earlier failure did not reproduce in these captures. This does not prove that it was fixed or establish its cause. Between the earlier sitting's 5cfb59ea and this build, terminal-path changes comprise composition-view styling and the recorder, not a demonstrated behavioral fix. Recording can affect timing; no flag-off keyboard comparison was run here. The earlier sitting's evidence remains valid historical evidence. Do not close L98 on an invented cause or this capture alone. Parent architect owns disposition and any further implementation or recorder removal.
+Earlier assistant claims excluding all focus/timer causes or attributing failure to accessibility activity exceeded the evidence; those hypotheses remain unproven. No further speculative experiments were run.
+
+Cleanup, verified 2026-10-12 around 05:24 PDT
+- Stopped the attempted observation interval.
+- Quit trace MAWS and confirmed no matching executable process remained.
+- Reopened MAWS normally, without the flag. cua observed index.html with no imeTrace query, and the restored terminal's previous-shell notice.
+- cua end_task returned ended.
+- Temporary capture directories remain for evidence. No unrelated project files, user settings files or engine files were edited. Normal quit semantics apply to hosted sessions; no claim is made that all pre-existing idle sessions stayed live.
+
+Local evidence references
+- Build logs: /tmp/maws-review/trace-capture/build-stage1.log and build-stage2.log.
+- Final screenshot shows all four owner outputs: tool-results/mcp-plugin_cua_cua_repl-blob-1791807840190-editjb.jpg under fork session 87b18b8a-cd40-4914-9b8c-03ed76d59be5.
+- Full trace SHA-256: 800a0c61811294a6560b07f9944ec7338e07ab0877fc9a41037ea857c19a975a.
