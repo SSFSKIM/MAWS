@@ -19,6 +19,16 @@
 // sends the document's latest `restored` directly after its step 2, so a replica that was away learns of a restore it
 // missed. `onRestored` fires once per restore this replica did not see: never twice for one `versionId`, and not for
 // the restore its first sync is told of (that state is simply the document it opened).
+//
+// The composition hold (this child's Decision Log 20). While an editor composes text through an IME, a remote update
+// that touches the composing node ends the composition early and doubles jamo. `holdRemote(true)` buffers inbound
+// step 2 and update frames in arrival order (and a `restored` behind them); a host step 1 is still answered, and
+// awareness and acks pass. `holdRemote(false)` applies the buffer in order; the hold clears itself after 5 s; a
+// disconnect discards the buffer, since the next step 2 re-delivers everything.
+//
+// A broken peer is one whose frame does not decode or whose payload fails to apply: the provider logs, disconnects and
+// keeps its accounting. An exception from an application listener (`subscribe`, `onRestored`) is the application's:
+// every listener still runs, the connection stays, and the first error is rethrown to the caller once state is settled.
 import * as awarenessProtocol from '@y/protocols/awareness';
 import { applyV1, diffV1, onUpdate, stateVector, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
@@ -44,6 +54,9 @@ export interface Restored {
   versionId: number;
 }
 
+// The longest a composition hold stands before the provider clears it (Decision Log 20).
+export const HOLD_LIMIT_MS = 5_000;
+
 export class PortProvider {
   readonly awareness: awarenessProtocol.Awareness;
   private readonly ownsAwareness: boolean; // made here, so destroyed here (its outdated-state timer)
@@ -58,6 +71,9 @@ export class PortProvider {
   private everSynced = false; // a step 2 from the host has been applied on some connection before this one's
   private catchUp: 'none' | 'first' | 'later' = 'none'; // whether the next frame may be the attach-time `restored`
   private restoreSeen: number | null = null; // the latest restore's version id this replica knows of
+  private held = false;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  private buffered: Frame[] = []; // inbound frames waiting out a hold, in arrival order
   private readonly listeners = new Set<(state: SaveState) => void>();
   private readonly restoredListeners = new Set<(restored: Restored) => void>();
   private readonly log: (line: string) => void;
@@ -123,12 +139,30 @@ export class PortProvider {
     this.phase = 'off';
     this.synced = false;
     this.catchUp = 'none';
+    this.buffered = [];
     const others = [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID);
     awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
     this.emit();
   }
 
+  // Sets or clears the composition hold. Setting it again restarts its 5 s limit.
+  holdRemote(on: boolean): void {
+    if (this.holdTimer !== null) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
+    this.held = on;
+    if (on) {
+      this.holdTimer = setTimeout(() => this.holdRemote(false), HOLD_LIMIT_MS);
+      return;
+    }
+    const frames = this.buffered;
+    this.buffered = [];
+    if (frames.length > 0) this.process(frames);
+  }
+
   destroy(): void {
+    if (this.holdTimer !== null) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
+    this.held = false;
     this.disconnect();
     this.offUpdate();
     this.awareness.off('update', this.onAwarenessUpdate);
@@ -162,17 +196,44 @@ export class PortProvider {
     try {
       frame = decodeFrame(data);
     } catch (error) {
-      this.log(`dropped the connection: ${error instanceof Error ? error.message : String(error)}`);
-      return this.disconnect();
+      return this.broken(error);
     }
+    const remoteContent = frame.type === 'step2' || frame.type === 'update' || (frame.type === 'restored' && this.buffered.length > 0);
+    if (this.held && remoteContent) {
+      this.buffered.push(frame);
+      return;
+    }
+    this.process([frame]);
+  }
+
+  // Applies frames in order; a payload that fails ends the connection (the rest are dropped with it). Listeners run
+  // once, after the frames.
+  private process(frames: Frame[]): void {
+    const restores: Restored[] = [];
+    for (const frame of frames) {
+      if (!this.port) break;
+      let restored: Restored | null;
+      try {
+        restored = this.apply(frame);
+      } catch (error) {
+        this.broken(error);
+        break;
+      }
+      if (restored) restores.push(restored);
+    }
+    this.notify(restores);
+  }
+
+  private apply(frame: Frame): Restored | null {
     const catchUp = this.catchUp;
     this.catchUp = 'none';
     switch (frame.type) {
       case 'step1': {
-        this.send({ type: 'step2', update: diffV1(this.doc, frame.sv) });
+        const step2 = diffV1(this.doc, frame.sv);
+        this.send({ type: 'step2', update: step2 });
         if (this.carried > 0) this.carriedFrame = this.sent;
         this.phase = 'live';
-        break;
+        return null;
       }
       case 'step2':
       case 'update':
@@ -182,10 +243,10 @@ export class PortProvider {
           this.catchUp = this.everSynced ? 'later' : 'first';
           this.everSynced = true;
         }
-        break;
+        return null;
       case 'awareness':
         awarenessProtocol.applyAwarenessUpdate(this.awareness, frame.update, this);
-        break;
+        return null;
       case 'ack':
         this.revision = frame.revision;
         while (this.unacked.length > 0 && this.unacked[0] <= frame.frames) this.unacked.shift();
@@ -193,15 +254,18 @@ export class PortProvider {
           this.carried = 0;
           this.carriedFrame = Infinity;
         }
-        break;
+        return null;
       case 'restored':
-        if (frame.versionId === this.restoreSeen) break;
+        if (frame.versionId === this.restoreSeen) return null;
         this.restoreSeen = frame.versionId;
-        if (catchUp === 'first') break; // the restore the opened document already reflects
-        for (const listener of [...this.restoredListeners]) listener({ revision: frame.revision, versionId: frame.versionId });
-        break;
+        if (catchUp === 'first') return null; // the restore the opened document already reflects
+        return { revision: frame.revision, versionId: frame.versionId };
     }
-    this.emit();
+  }
+
+  private broken(error: unknown): void {
+    this.log(`dropped the connection: ${error instanceof Error ? error.message : String(error)}`);
+    this.disconnect();
   }
 
   private send(frame: Frame): void {
@@ -210,7 +274,22 @@ export class PortProvider {
   }
 
   private emit(): void {
+    this.notify([]);
+  }
+
+  // Runs every listener even when one throws, then rethrows the first error: the provider's state is already settled.
+  private notify(restores: Restored[]): void {
+    const errors: unknown[] = [];
+    const run = (call: () => void) => {
+      try {
+        call();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    for (const restored of restores) for (const listener of [...this.restoredListeners]) run(() => listener(restored));
     const state = this.state;
-    for (const listener of [...this.listeners]) listener(state);
+    for (const listener of [...this.listeners]) run(() => listener(state));
+    if (errors.length > 0) throw errors[0];
   }
 }

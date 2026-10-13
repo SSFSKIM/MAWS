@@ -1,3 +1,4 @@
+import { encodeAwarenessUpdate } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import { applyV1, checkUpdate, diffV1, newDoc, stateVector, transact, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
@@ -306,6 +307,225 @@ describe('PortProvider', () => {
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/unknown frame type/));
     expect(replicaEnd.closed).toBe(true);
     expect(provider.state).toMatchObject({ phase: 'off', unsaved: 1 });
+  });
+
+  describe('a well-framed frame whose payload is broken', () => {
+    // A live replica with one unacked local update, so the accounting a broken peer must not lose is visible.
+    function liveWithUnsaved() {
+      const host = new TestHost();
+      host.holdAcks = true;
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      host.attach(hostEnd);
+      const doc = newDoc();
+      const log = vi.fn();
+      const provider = new PortProvider(doc, { log });
+      provider.connect(replicaEnd);
+      pump(replicaEnd, hostEnd);
+      type(doc, 0, 'x');
+      pump(replicaEnd, hostEnd);
+      expect(provider.state).toMatchObject({ phase: 'live', unsaved: 1 });
+      return { provider, log, replicaEnd, hostEnd };
+    }
+
+    it.each([
+      ['an awareness update', { type: 'awareness', update: new Uint8Array([255]) }],
+      ['a state vector', { type: 'step1', sv: new Uint8Array([5, 1]) }],
+      ['a sync update', { type: 'update', update: new Uint8Array([255, 255, 255]) }],
+      ['a step 2', { type: 'step2', update: new Uint8Array([1, 2, 3, 255]) }],
+    ] as [string, Frame][])('logs and disconnects on %s that does not decode, keeping what was unsaved', (_, frame) => {
+      const { provider, log, replicaEnd, hostEnd } = liveWithUnsaved();
+      hostEnd.postMessage(encodeFrame(frame));
+      expect(() => replicaEnd.deliver()).not.toThrow();
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/dropped the connection/));
+      expect(replicaEnd.closed).toBe(true);
+      expect(provider.state).toMatchObject({ phase: 'off', synced: false, unsaved: 1 });
+    });
+  });
+
+  describe('listeners that throw', () => {
+    it('surface a subscriber’s error without dropping the connection or the other subscribers', () => {
+      const host = new TestHost();
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      host.attach(hostEnd);
+      const doc = newDoc();
+      const log = vi.fn();
+      const provider = new PortProvider(doc, { log });
+      provider.connect(replicaEnd);
+      pump(replicaEnd, hostEnd);
+      const seen: SaveState[] = [];
+      provider.subscribe(() => {
+        throw new Error('the editor’s bug');
+      });
+      provider.subscribe((state) => seen.push(state));
+      const before = stateVector(host.doc);
+      type(host.doc, 0, 'remote');
+      hostEnd.postMessage(encodeFrame({ type: 'update', update: diffV1(host.doc, before) }));
+      expect(() => replicaEnd.deliver()).toThrow('the editor’s bug');
+      expect(text(doc)).toBe('remote');
+      expect(seen.length).toBeGreaterThan(0);
+      expect(log).not.toHaveBeenCalled();
+      expect(provider.state.phase).toBe('live');
+      expect(replicaEnd.closed).toBe(false);
+    });
+
+    it('surface an onRestored listener’s error without dropping the connection', () => {
+      const host = new TestHost();
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      host.attach(hostEnd);
+      const provider = new PortProvider(newDoc(), { log: quiet });
+      provider.connect(replicaEnd);
+      pump(replicaEnd, hostEnd);
+      provider.onRestored(() => {
+        throw new Error('the editor’s bug');
+      });
+      hostEnd.postMessage(encodeFrame({ type: 'restored', revision: 3, versionId: 1 }));
+      expect(() => replicaEnd.deliver()).toThrow('the editor’s bug');
+      expect(provider.state.phase).toBe('live');
+      expect(replicaEnd.closed).toBe(false);
+    });
+  });
+
+  describe('holdRemote (the composition hold, Decision Log 20)', () => {
+    // A live replica of a host whose later writes are sent as update frames; `write` returns nothing, `remote` the doc.
+    function heldReplica() {
+      const host = new TestHost();
+      host.holdAcks = true;
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      host.attach(hostEnd);
+      const doc = newDoc();
+      const provider = new PortProvider(doc, { log: quiet });
+      provider.connect(replicaEnd);
+      pump(replicaEnd, hostEnd);
+      const write = (at: number, value: string) => {
+        const before = stateVector(host.doc);
+        type(host.doc, at, value);
+        hostEnd.postMessage(encodeFrame({ type: 'update', update: diffV1(host.doc, before) }));
+      };
+      return { host, provider, doc, replicaEnd, hostEnd, write };
+    }
+
+    it('buffers remote updates while held and applies them in order when cleared', () => {
+      const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+      provider.holdRemote(true);
+      write(0, 'one ');
+      write(4, 'two'); // depends on the first
+      pump(replicaEnd, hostEnd);
+      expect(text(doc)).toBe('');
+      provider.holdRemote(false);
+      expect(text(doc)).toBe('one two');
+    });
+
+    it('answers a host step 1 at once while held, and buffers the host’s step 2', () => {
+      const host = new TestHost();
+      type(host.doc, 0, 'on the host');
+      const doc = newDoc();
+      const provider = new PortProvider(doc, { log: quiet });
+      provider.holdRemote(true);
+      type(doc, 0, 'composing ');
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      host.attach(hostEnd);
+      provider.connect(replicaEnd);
+      pump(replicaEnd, hostEnd);
+      expect(provider.state).toMatchObject({ phase: 'live', synced: false, unsaved: 0 });
+      expect(text(host.doc)).toContain('composing');
+      expect(text(doc)).toBe('composing ');
+      provider.holdRemote(false);
+      expect(provider.state.synced).toBe(true);
+      expect(text(doc)).toBe(text(host.doc));
+    });
+
+    it('buffers a restored frame behind the updates already buffered, so it still follows its update', () => {
+      const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+      const events: string[] = [];
+      provider.onRestored(({ versionId }) => events.push(`${versionId}:${text(doc)}`));
+      provider.holdRemote(true);
+      write(0, 'restored text');
+      hostEnd.postMessage(encodeFrame({ type: 'restored', revision: 9, versionId: 4 }));
+      pump(replicaEnd, hostEnd);
+      expect(events).toEqual([]);
+      provider.holdRemote(false);
+      expect(events).toEqual(['4:restored text']);
+    });
+
+    it('lets a restored frame through when nothing is buffered', () => {
+      const { provider, replicaEnd, hostEnd, write } = heldReplica();
+      const events: number[] = [];
+      provider.onRestored(({ versionId }) => events.push(versionId));
+      write(0, 'x'); // so the restored frame is not the one directly after the step 2 (the first sync's catch-up)
+      pump(replicaEnd, hostEnd);
+      provider.holdRemote(true);
+      hostEnd.postMessage(encodeFrame({ type: 'restored', revision: 9, versionId: 4 }));
+      pump(replicaEnd, hostEnd);
+      expect(events).toEqual([4]);
+    });
+
+    it('lets awareness and acks through while held', () => {
+      const { host, provider, doc, replicaEnd, hostEnd } = heldReplica();
+      provider.holdRemote(true);
+      type(doc, 0, 'typed while composing');
+      pump(replicaEnd, hostEnd);
+      expect(provider.state.unsaved).toBe(1);
+      host.ack(hostEnd);
+      const peer = new PortProvider(newDoc(), { log: quiet });
+      peer.awareness.setLocalState({ user: { name: 'Claude' } });
+      hostEnd.postMessage(encodeFrame({ type: 'awareness', update: encodeAwarenessUpdate(peer.awareness, [peer.doc.clientID]) }));
+      pump(replicaEnd, hostEnd);
+      expect(provider.state.unsaved).toBe(0);
+      expect(provider.awareness.getStates().get(peer.doc.clientID)).toEqual({ user: { name: 'Claude' } });
+      peer.destroy();
+    });
+
+    it('clears a hold by itself after 5 s', () => {
+      vi.useFakeTimers();
+      try {
+        const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+        provider.holdRemote(true);
+        write(0, 'late');
+        pump(replicaEnd, hostEnd);
+        vi.advanceTimersByTime(4999);
+        expect(text(doc)).toBe('');
+        vi.advanceTimersByTime(1);
+        expect(text(doc)).toBe('late');
+        write(4, ' and live'); // the hold is off: applied on arrival
+        pump(replicaEnd, hostEnd);
+        expect(text(doc)).toBe('late and live');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('restarts the 5 s when the hold is set again', () => {
+      vi.useFakeTimers();
+      try {
+        const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+        provider.holdRemote(true);
+        write(0, 'late');
+        pump(replicaEnd, hostEnd);
+        vi.advanceTimersByTime(4000);
+        provider.holdRemote(true);
+        vi.advanceTimersByTime(4000);
+        expect(text(doc)).toBe('');
+        vi.advanceTimersByTime(1000);
+        expect(text(doc)).toBe('late');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('discards the buffer on disconnect; the next connection’s step 2 brings everything', () => {
+      const { host, provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+      provider.holdRemote(true);
+      write(0, 'from the host');
+      pump(replicaEnd, hostEnd);
+      hostEnd.close();
+      provider.holdRemote(false);
+      expect(text(doc)).toBe('');
+      const [replicaEnd2, hostEnd2] = MemoryPort.pair();
+      host.attach(hostEnd2);
+      provider.connect(replicaEnd2);
+      pump(replicaEnd2, hostEnd2);
+      expect(text(doc)).toBe('from the host');
+    });
   });
 
   it('exchanges awareness, and forgets the other side’s states when the connection ends', () => {
