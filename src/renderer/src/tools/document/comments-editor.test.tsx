@@ -59,7 +59,7 @@ async function mount() {
   const view = render(<Surface />);
   await until(() => current !== null && current.getText().includes('quarterly'), 'the editor to bind');
   act(() => void select(current!, 'ships quarterly'));
-  act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Comment', exact: true })));
+  act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Comment' })));
   await act(() => ticks(4));
   const open = useCommentCard.getState().open!;
   const threadId = open.target?.kind === 'artifact' ? open.target.threadId : '';
