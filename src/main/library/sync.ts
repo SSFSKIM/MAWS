@@ -199,7 +199,8 @@ export class LibrarySync {
     while (!this.stopped && this.textOut.size < TEXT_IN_FLIGHT && this.textQueue.size > 0) {
       const [artifactId] = this.textQueue;
       this.textQueue.delete(artifactId);
-      if (!this.source.streaming() || !this.store.needsText(artifactId)) continue;
+      // A newer revision still settling holds the read back; its timer queues it again when it fires.
+      if (this.settling.has(artifactId) || !this.source.streaming() || !this.store.needsText(artifactId)) continue;
       this.textOut.add(artifactId);
       void this.readText(artifactId);
     }
@@ -214,7 +215,7 @@ export class LibrarySync {
       if (!this.stopped) console.warn(`[library] the text of ${artifactId} could not be read from the engine host:`, reasonOf(error));
     } finally {
       this.textOut.delete(artifactId);
-      if (this.textAgain.delete(artifactId)) this.textQueue.add(artifactId);
+      if (this.textAgain.delete(artifactId) && !this.settling.has(artifactId)) this.textQueue.add(artifactId); // else its settle queues it
       this.pumpText();
     }
   }

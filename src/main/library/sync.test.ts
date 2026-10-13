@@ -428,6 +428,48 @@ describe('LibrarySync', () => {
       expect(index.library.needingText()).toEqual([]);
     });
 
+    it('a queued read waits for a newer revision’s settle when a slot frees before it expires', async () => {
+      await start();
+      source.snapshots[0].resolve(snapshot([entry(1, { updatedAt: 30 }), entry(2, { updatedAt: 20 }), entry(3, { updatedAt: 10, revision: 1 })]));
+      await settle();
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toEqual([`text ${uuid(1)}`, `text ${uuid(2)}`]); // 3's settled revision 1 is queued
+      source.changed(3, 'updated', 2);
+      await settle();
+      source.pendingEntry(3).resolve({ artifact: entry(3, { updatedAt: 10, revision: 2 }), links: [] });
+      await settle();
+      source.pendingText(1).resolve({ revision: 1, text: 'one' }); // a slot frees while 3's revision 2 settles
+      await settle();
+      expect(textReads()).toHaveLength(2);
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toEqual([`text ${uuid(1)}`, `text ${uuid(2)}`, `text ${uuid(3)}`]);
+      source.pendingText(3).resolve({ revision: 2, text: 'three at two' });
+      await settle();
+      expect(index.library.list({ query: 'three at two' }).rows).toHaveLength(1);
+    });
+
+    it('a read out when a newer revision lands is not followed by another until that revision settles', async () => {
+      await start();
+      source.snapshots[0].resolve(snapshot([entry(1, { revision: 1 })]));
+      await settle();
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toHaveLength(1); // revision 1's read is out
+      source.changed(1, 'updated', 2);
+      await settle();
+      source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 2 }), links: [] });
+      await settle();
+      source.pendingText(1).resolve({ revision: 1, text: 'old' }); // back before revision 2 settled
+      await settle();
+      expect(textReads()).toHaveLength(1);
+      await clock.advance(SETTLE_MS - 1);
+      expect(textReads()).toHaveLength(1);
+      await clock.advance(1);
+      expect(textReads()).toHaveLength(2);
+      source.pendingText(1).resolve({ revision: 2, text: 'new' });
+      await settle();
+      expect(index.library.needingText()).toEqual([]);
+    });
+
     it('a deletion during the settle cancels the read', async () => {
       await start();
       source.snapshots[0].resolve(snapshot([entry(1), entry(2)]));
