@@ -812,3 +812,188 @@ Pitfall 9 (one scratch clientID per restore) accepted as is. The questions as as
 5. Floor provenance times to the minute at write rather than after 30 days? Recommended: yes.
 Not tested in S3: Chromium timing and IME (S4, S7); the version's pinned design system and assets in the preview; Make a
 copy; restore of a version older than a compaction (needs only states; source).
+
+## S5 — Comment marks through every ordinary edit
+
+**Verdict: §4.4's comment design holds on Yjs v14; nothing failed on v14 alone.** The pin survives every ordinary edit
+on both replicas and undo restores it every time. Five parts of §4.4 are wrong or underspecified, each with a tested fix:
+drop the mark's `orphan` attribute; resolve is a threads-map write, never a mark write; orphaned is derived, never
+stored; the stored relative-position pair drifts and needs a refresh; restore takes conversations back unless told not
+to. Confidence high on what ran, moderate on the clipboard (a synthetic DataTransfer, not the OS clipboard).
+
+Method: Node 22, happy-dom, real Tiptap 3.31.3 editors on S1's exact v14 pins: replica A (the panel), replica B (the main
+tab) and an agent replica synced to a host doc through y-protocols frames by S1's logging hub; S1's `collab.mjs` and
+`schema.mjs` copied into `s5/lib/` with provenance headers; one `@y/y` and one prosemirror-model verified in
+`s5/node_modules/.pnpm`. No Electron run. Install `pnpm -C spikes/p3-store/s5 install --ignore-workspace`; run
+`node spikes/p3-store/s5/s5-pins.mjs` (211/211), `s5-concurrency.mjs` (14/14), `s5-read.mjs` (10/10),
+`probe-markkey.mjs`, `probe-scale.mjs`; outputs `s5/out/`. Executor re-runs: pins 211/211, read 10/10.
+
+### 1. The mark and the threads map (verified)
+The mark `comment` (`s5/lib/comments.mjs` `Comment`): `excludes: ''`, `inclusive: false`, rendered `span[data-thread]`;
+two overlapping comments are stored under two hashed keys (`comment--MFSnIQ==`, `comment--x9eWww==`) and a peer renders
+them nested. The threads map: `doc.get('threads')`, a v14 `Y.Node` used as a map, threadId → `Y.Node('thread')` with
+attributes `status`, `quote`, `anchor {start, end, block}` (relative positions as JSON), `blockId`, `createdBy`,
+`createdAt`, `resolvedBy`, `resolvedAt`, and the messages as the node's children (`addThread`, `reply`, `resolve`,
+`reopen`). Create (`commentSelection`) is two updates: the mark (about 101 B V2, `addToHistory: false`) then the thread
+record (423 to 449 B); use raw `tr.addMark`, not Tiptap's `setMark`, which copies an overlapping comment's attributes into
+the new one (source).
+Resolve flags the thread in the map and never touches the text: one 100 B update; the display plugin `CommentDisplay`
+decorates open threads only and redraws on threads-map changes. Verified: after a resolve on B, A stops highlighting while
+the mark stays; the agent lists the thread resolved; Ctrl+Z does not reopen it; a reopen from the agent re-highlights
+the passage including words typed while resolved. Not removing the mark because a reopen could not put it back on edited
+text; not BlockNote's flag on the mark (tested as contrast) because it rewrites the passage's formatting under a new
+hashed key (129 B), puts every resolve and reopen into the text's history as a format change, and makes the mark's
+attributes mutable, which the key scheme punishes (pitfall 1). A resolved thread whose text is deleted is listed
+resolved, not orphaned; reopened, it shows orphaned.
+
+### 2. The pin through every ordinary edit (verified, `s5-pins.mjs` `scenario()`)
+Each row from a fresh world: t1 = "ships quarterly with design review" and t2 = "design review notes" overlapping on p1,
+t3 on p2. Checked per row: A, B, host and agent docs identical; covered text equal on A and B; thread states; exactly 3
+thread records; undo of the whole edit restores text, marks and derived states on both replicas (A's undo for human
+edits, a `Y.UndoManager` with origin `'agent'` on the agent replica for agent edits; comment creation is outside the
+history). "Stored pair": where t1's stored relative-position pair resolves after the edit, before the host refresh
+(`""` collapsed, `∅` no longer resolves).
+
+| Edit | t1 / t2 after (both replicas) | Threads | Update V2 B | Stored pair | Undo |
+|---|---|---|---|---|---|
+| type before the passage or at its start | unchanged | open | 41 / 47 | ok | restored |
+| type inside | ships very quarterly … / unchanged | open | 41 | ok | restored |
+| type right after t1 (inside t2), right after t2 | t1 not extended; t2 grows only inside it | open | 38 | ok | restored |
+| delete a word inside | ships with design review | open | 24 | ok | restored |
+| Enter in the middle of the passage | `ships quarterly ` and `with design review`, both marked | open | 420 | shrinks | restored |
+| Enter before the passage (mid-paragraph) | unchanged, moves to the new block | open | 438 | `""` | restored |
+| Enter at the paragraph's start | unchanged | open | 73 | ok | restored |
+| Backspace joining p2 into p1, or p1 into the heading | unchanged | open | 177 / 416 | moved text's pair collapses | restored |
+| type change → heading, bullet item, quote | unchanged, same id | open | 453 / 495 / 475 | `""` | restored |
+| type change → code block | — / — | t1, t2 orphaned | 185 | `""` | restored |
+| cut the passage, paste into p3 | moved to p3, one range each | open (orphaned between) | 37+350 | `""` | restored |
+| cut "quarterly " (part of t1), paste | stays in p1; pasted word unmarked (t1 still live) | open | 24+45 | ok | restored |
+| copy and paste | p1 unchanged; the copy plain | open | 75 | ok | restored |
+| cut, paste, paste again | the second paste plain | open | 37+350+75 | `""` | restored |
+| paste a foreign `span[data-thread]` | stripped | open | 57 | ok | restored |
+| contrast, no paste dedupe: copy and paste | both copies marked (duplicate) | open | 348 | — | restored |
+| delete the passage / the whole paragraph | — / — | orphaned | 37 / 37 | `""` | restored, un-orphaned |
+| agent: one word inside (quarterly → monthly) | ships monthly with design review | open | 55 | ok | restored |
+| agent: rewords t2 in place (→ "a short summary") | `ships quarterly with ` / `a short summary` | open | 183 | ok | restored |
+| … strict rule (inherit only strictly inside) | `ships quarterly with ` / — | t2 orphaned | 81 | ok | restored |
+| … contrast, hunks not merged across spaces | `ships quarterly with a short` / `a short summary` | open | 104 | — | restored |
+| agent: deletes t2's words | ships quarterly / — | t2 orphaned | 35 | ok | restored |
+| agent: rewrites the whole sentence | — / — | both orphaned | 91 | `""` | restored |
+| … contrast, hunks not merged across spaces | ` is monthly` / `is monthly now` (stray) | open (wrong) | 125 | — | restored |
+| agent: type change → heading, marks carried | unchanged | open | 453 | `∅` | restored |
+
+Restart (verified): the host state re-encoded as V2 into a new host and two new editors brings back marks, statuses and
+highlights (a resolved thread stays unhighlighted); the stored pair still resolves; binding writes nothing.
+Restore (verified, state level, S3's `revertUpdate` in `s5/lib/restore.mjs`): from t1 resolved with an agent reply, t2
+orphaned by the agent and a new t4, restoring v1 brings back v1's text and marks on both editors, un-orphans t2, reopens
+t1, removes t4's record and mark, and **also removes the reply posted after v1** (one 253 B update, 1 to 3 ms). The
+variant `restoreKeepingConversation` (verified, one 715 B update) restores text, marks and statuses, keeps t1's reply and
+keeps t4 as an orphan.
+The agent rewrite (`s5/lib/rewrite.mjs` `rewriteBlock`, a word diff of Y operations on the agent replica): unchanged
+words keep every format; deleted words lose theirs; inserted words carry a comment when it covers both neighbours or
+covered every word the hunk replaces; other format keys passed as explicit nulls. Agent type change (`retypeBlock`):
+delete and re-insert the block under the same id with its content and marks.
+
+### 3. Orphan display (verified; `locate`, `refreshAnchors` in `s5/lib/comments.mjs`)
+The thread keeps the stored quote, author, time and messages; orphaned is derived: open and no live text carries the mark
+(`threadStates`, `liveIdsY`). `locate`: a passage deleted in place gives the gap where it was (`The plan ‸. Owners`); a
+deleted block gives, from the block's own relative position in the root, the nearest surviving block (`block-gap`, h1);
+Enter before the passage then a delete gives, without a refresh, the split point at the end of the adjacent block, and
+after the host's `refreshAnchors`, index 0 of the passage's own new block. The pair drifts (the binding re-creates text
+on a split tail, a join, a type change and a cut and paste: 10 of the 30 rows collapsed it); `refreshAnchors` rewrites a
+drifted pair from the live mark (271 to 511 B, only when the pair no longer brackets the mark), after which every row's
+pair brackets its mark. Un-orphaning needs no thread write: undo (also after another replica typed in between), restore,
+pasting a cut back. Scale (`probe-scale.mjs`, 4,000 paragraphs, 300 threads, 1.2 MB V2): `liveRanges` over the PM doc
+(the display plugin, per change) 0.7 ms; `liveIdsY` over Y (the host's orphan derivation, per update) 4.1 ms;
+`markExtentY` per thread 3.7 ms, so a refresh computes all extents in one walk.
+
+### 4. Concurrency (verified, `s5-concurrency.mjs`; offline ports, then reconnect with the handshake)
+The human comments while the agent rewrites the passage: an agent word change inside lands inside both comments; an
+agent rewrite or deletion of the whole sentence leaves both new threads converged orphaned with their quotes (the owner's
+just-made comment becomes an orphan at once; the UI should say why). Edge ordering (40 trials, random client ids): an
+agent replacement of the new comment's first word lands inside 40/40; of its last word inside or outside by client-id
+order (16/24 in one run, 20/20 in a rerun), converged either way. Two replicas commenting on overlapping passages: both
+marks and threads everywhere; on the identical passage: two threads, two distinct keys. Resolve while another replica
+replies: with the nested thread node both land (contrast: a thread stored as one JSON value lost a write). Concurrent
+resolve and reopen: one status wins everywhere. A deletes the passage while B resolves: resolved, not orphaned. Map
+resolve while another replica types inside: nothing highlighted, the mark covers the typed word. Randomized, 200/200
+trials converge (21 s): 1 to 3 random offline operations on A and on B (type, delete, Enter, comment, resolve or reopen,
+reply, retype) and 1 to 2 agent word rewrites, then sync; invariants: PM docs and threads maps equal on host, A, B and
+agent; derived states equal; covered text equal on A and B; every live mark has a thread; no mark carries a flag; 324
+thread outcomes, 36 orphaned.
+
+### 5. The agent's read format (verified, `s5-read.mjs`, `s5/lib/read.mjs`)
+GFM with `^id` block markers plus comment milestones: `<c:ID>` where an open thread's text starts and `</c:ID>` where it
+ends (each closing tag names its thread, so overlaps need no nesting); resolved threads unmarked; a footer lists open
+threads and orphans with their quote and nearest block. `@tiptap/markdown` cannot serialize overlapping same-type marks
+(`renderNodesWithMarkBoundaries` keys active marks by type; source, dist line 1099), so the milestones go in as sentinel
+characters before serializing and are replaced after. Worked example:
+
+    The plan <c:t1>ships **quarterly** with <c:t2>design review</c:t1> notes</c:t2>. Owners track the budget. ^p1
+
+    ---
+    Comments: 3 open (1 orphaned), 1 resolved (not shown; artifact_comments {status: "all"})
+    - c:t1 on ^p1 "ships quarterly with design review" — owner: Should this be monthly?
+    - c:t2 on ^p1 "design review notes" — owner: Which notes? Link them.
+    - c:t4 orphaned (its text was deleted; was "Third", near ^p3) — owner: Rename this.
+
+Tools: `artifact_comments {status: open | resolved | all}` → `[{threadId, status, orphan, quote, block | near, createdBy,
+createdAt, resolvedBy?, messages[]}]`; `artifact_reply {threadId, body}`; `artifact_resolve {threadId, reopen?}`;
+`artifact_edit {ops: [replace_text {block: 'p1', old: '<c:t1>ships quarterly', new: 'ships monthly'}], answering: 't1'}`
+(the host strips markers from `old` and `new` before matching). Run: t1 stays on "ships monthly with design review" on
+both editors, the reply appears in the thread, `artifact_resolve t1` removes the highlight and t1 is listed resolved, the
+next read shows only `<c:t2>`; each agent write 72 to 160 B. Markdown emphasis inside `old` (`**monthly**`) does not match
+plain text: S4's matching rule settles it.
+
+### Pitfalls
+1. The mark's attributes are its storage key: `comment--<hash(mark.toJSON())>` covers every attribute and its default
+   (verified, `probe-markkey.mjs`): `orphan: true` gives a different key; a schema adding one attribute makes a newer
+   editor re-key every comment on bind (a normalization write per document, attributed to whoever opens it) and an
+   older client re-keys it back (two schema versions ping-pong). Freeze the mark at `{threadId}`. Not v14-only: v13's
+   y-prosemirror uses the same scheme with a sha256 hash (source, `sync-plugin.js:1126`); the keys differ between them.
+2. The relative-position pair drifts (table above).
+3. A token word diff matches the spaces of a rewritten sentence, leaving comments on stray new words (contrast rows):
+   merge hunks separated only by whitespace (`wordHunks`). S4's `diffCells` uses the same tokenizer.
+4. Overlapping inline decorations merge into one span (classes concatenate, other attributes overwrite): the thread id
+   goes in a class.
+5. The code block admits only the attribution marks in S1's schema, so retyping to code orphans comments: allow
+   `comment` on `codeBlock`.
+6. A drag-move runs `transformPasted` before deleting the source, so the dedupe strips a dragged comment unless guarded
+   (`view.dragging.move`; source only, happy-dom has no coordinates).
+7. Creation is two updates (mark, then thread): a peer can see the mark first (display ignores marks without a thread);
+   a crash between them leaves an invisible mark. Write the thread first, or the host strips marks without a thread.
+8. **pnpm 11 ignores `pnpm.overrides` in a package.json** (verified, install warning): the "override forcing one `@y/y`"
+   in S1, S4 and S6's packages is a no-op there; exact pins are what deduplicated them. Overrides belong in the workspace
+   settings (the root `pnpm-workspace.yaml` already carries `overrides:`).
+9. The OS clipboard round trip of `data-thread` is not run (Chromium keeps `data-*` in text/html, as ProseMirror's
+   `data-pm-slice` relies on; source).
+
+### Copy (P3-B)
+`s5/lib/comments.mjs` (the mark, the threads model, derived states, `CommentDisplay`, `CommentPaste` with Outline's rule,
+`locate`, `refreshAnchors`); `s5/lib/read.mjs` (the milestones and the three tools' shapes); `s5/lib/rewrite.mjs`'s
+mark-inheritance rule and whitespace merge, folded into S4's writer (not a second writer); `s5/lib/restore.mjs`
+`restoreKeepingConversation`; `s5/lib/world.mjs` and `s5-pins.mjs` as the regression suite.
+
+### §4.4 amendments proposed
+A1. The mark is `comment {threadId}`, attribute set frozen; orphaned is derived (open and no live text), never stored on
+the mark or in the map; `artifact_threads` computes it. A2. A thread is a nested node (`status`, `quote`, `anchor`,
+`blockId`, `tabId`, author and times) with messages as a sequence, never one JSON value; `tabId` is missing from §4.4
+(threads are document-wide, tabs are fragments). A3. Resolve and reopen write the map only; creation, resolve and reply
+are outside Ctrl+Z; text-edit undo restores marks. A4. Paste: keep a pasted comment mark only if its thread is in this
+document and no live text carries it; a drag-move counts the source as gone. A5. Patch writer: the inheritance rule
+above, hunks merged across whitespace, a comment orphaned only when all its words go (reconcile with S4's
+`mergeFormats`). A6. The relative-position pair refreshed by the host at its post-update hook (or idle checkpoints) from
+the live mark, or replaced by a lookup in the latest retained version where the mark was live. A7. Restore keeps
+conversations (question 1).
+
+### Questions for the architect (S5)
+1. Restore and threads: S3's revert takes back replies and threads posted since the version. Recommended: restore
+   reverts text, marks and statuses but never conversations (`restoreKeepingConversation`, one update); needs the
+   owner's nod because §2 item 4 says threads are restored.
+2. The agent replaces exactly the commented words: keep the pin on the new words (as run) or orphan the thread (the
+   strict rule)? Recommended: keep (§2 item 3, "the pin survives the agent's rewrite"), with `answering` posting the edit
+   into the thread.
+3. Anchor drift: host refresh (tested, about 500 B per structural edit) or a version lookup at display time (no writes,
+   not tested)? Recommended: the refresh at the host's per-update hook beside the id repair, all extents in one walk.
+4. Markers in the agent's `new` text: ignored (as run) or honoured as "keep this comment on these words"? Recommended:
+   ignored for now.
