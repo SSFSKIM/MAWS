@@ -6,8 +6,9 @@
 // (the service's checks are A's and are tested there). Portable: a web page has `MessageChannel` too.
 import type { Actor } from '@shared/artifacts/actor';
 import { decodeFrame, encodeFrame, type Frame } from '../../provider/frames';
-import { PortProvider, type Restored, type SaveState } from '../../provider/port';
+import { PortProvider, type Restored } from '../../provider/port';
 import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../yjs';
+import type { DocumentState } from '../../host';
 import type { DocumentHandleWithHold, EditorHost } from './host-types';
 
 interface Connection {
@@ -96,8 +97,9 @@ export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (lin
     provider,
     doc,
     awareness: provider.awareness,
-    state: (): SaveState => provider.state,
-    subscribe: (listener) => provider.subscribe(listener),
+    // The in-memory host never refuses a write, so the store is never read-only (A's DocumentState, its M4).
+    state: (): DocumentState => ({ ...provider.state, readOnly: false }),
+    subscribe: (listener) => provider.subscribe((state) => listener({ ...state, readOnly: false })),
     onRestored: (listener) => provider.onRestored(listener),
     holdRemote: (on) => provider.holdRemote(on),
     close: () => provider.destroy(),
