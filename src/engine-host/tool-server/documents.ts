@@ -142,20 +142,18 @@ async function documentOf(tool: Tool, store: ArtifactStore, ref: string, ctx: Mc
   return artifact;
 }
 
-// The artifact a write's ref names, as its idempotent operation's key (§4.3: the tool-use id is the operation's identity,
-// and a repeated id answers the recorded result whatever the store holds now): resolved in the session's lineage, a
-// UUID naming a deleted artifact included, so only an unknown ref is refused before the operation's replay lookup.
-async function writeTargetOf(tool: Tool, store: ArtifactStore, ref: string, ctx: McpToolContext, deps: DocumentToolDeps): Promise<string> {
-  const lineage = [ctx.appSessionId, ...(deps.artifactScope ?? [])];
-  const id = await store.readCommitted(() => store.resolve(ref, lineage) ?? (store.get(ref, { includeDeleted: true }) ? ref : null));
-  if (id === null) throw refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`);
-  return id;
+// What a write's ref names now, for its operation's record (§4.3: the tool-use id alone is the operation's identity; A's
+// ledger looks a repeated id up by it and answers the recorded result, the artifact id being only what a fresh op files
+// its row and its turn result under). Never a refusal: a ref naming nothing live (a handle whose artifact was deleted
+// since) still enters the operation, whose replay lookup comes first; a fresh operation refuses it (`liveDocumentIn`).
+function opTargetOf(store: ArtifactStore, ref: string, ctx: McpToolContext, deps: DocumentToolDeps): string | null {
+  return store.resolve(ref, [ctx.appSessionId, ...(deps.artifactScope ?? [])]);
 }
 
-// Inside a fresh operation: the live document the write applies to, refused (after the batch commits) when it was
-// deleted or is not a document.
-async function liveDocumentIn(tool: Tool, store: ArtifactStore, id: string, ref: string): Promise<Artifact> {
-  const artifact = store.get(id);
+// Inside a fresh operation: the live document the write applies to, refused (after the batch commits) when nothing live
+// is named, it was deleted, or it is not a document.
+async function liveDocumentIn(tool: Tool, store: ArtifactStore, id: string | null, ref: string): Promise<Artifact> {
+  const artifact = id === null ? null : store.get(id);
   if (!artifact) return refusedAfterCommit(store, refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`));
   if (artifact.kind !== 'document') return refusedAfterCommit(store, refuse(tool, { reason: 'invalid', kind: artifact.kind }, `${ref} is a ${artifact.kind} artifact; ${tool} works on documents`));
   return artifact;
@@ -233,21 +231,22 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
       const store = storeOf(TOOL, deps);
-      const adapter = documentAdapterOf(store);
-      if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, 'documents are not registered with the artifact store in this run of MAWS');
-      const id = await writeTargetOf(TOOL, store, input.artifact, ctx, deps);
+      const target = opTargetOf(store, input.artifact, ctx, deps);
       const ops = input.ops as Op[];
       const actor = actorOf(ctx);
       const presence = actorDisplay(actor);
-      const shown: { agent?: AgentReplica } = {}; // the replica whose presence the batch published
+      const shown: { agent?: AgentReplica; id?: string } = {}; // the replica whose presence the batch published, and its artifact
       // Everything that reads the store's current state runs inside the operation, after its replay lookup.
       const result = await store.writeCommitted(() =>
         store.withOp(
           opIdOf(ctx),
           TOOL,
-          id,
+          target,
           async (op) => {
-            const artifact = await liveDocumentIn(TOOL, store, id, input.artifact);
+            const adapter = documentAdapterOf(store);
+            if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, 'documents are not registered with the artifact store in this run of MAWS');
+            const artifact = await liveDocumentIn(TOOL, store, target, input.artifact);
+            const id = artifact.id;
             if (input.mode === 'suggest' || artifact.agentEditsAsSuggestions) return suggest(store, artifact, input.mode === 'suggest');
             const live = store.revision(id);
             if (input.baseRevision > live) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`));
@@ -296,6 +295,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                   clearTimeout(deps.session.presence.get(id));
                   agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
                   shown.agent = agent;
+                  shown.id = id;
                 },
               },
             );
@@ -306,8 +306,8 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
           { actor },
         ),
       );
-      const { agent } = shown;
-      if (agent) {
+      const { agent, id } = shown;
+      if (agent && id) {
         const timer = setTimeout(() => {
           deps.session.presence.delete(id);
           agent.setPresence(presence);
@@ -372,7 +372,7 @@ export function artifactCommentsTool(deps: DocumentToolDeps): McpToolDefinition 
 async function threadWrite<R extends { revision: number }>(
   tool: 'artifact_reply' | 'artifact_resolve',
   store: ArtifactStore,
-  target: { id: string; ref: string },
+  target: { id: string | null; ref: string },
   threadId: string,
   ctx: McpToolContext,
   write: (doc: Doc, artifact: Artifact) => Omit<R, 'revision'> | { unchanged: Omit<R, 'revision'> },
@@ -429,7 +429,7 @@ export function artifactReplyTool(deps: DocumentToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const { threadId, body } = parsed.data;
       const store = storeOf(TOOL, deps);
-      const target = { id: await writeTargetOf(TOOL, store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
+      const target = { id: opTargetOf(store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
       const result = await threadWrite<ArtifactReplyResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
         const messageId = `${threadId}:${nanoid8()}`;
         reply(doc, threadId, { id: messageId, by: actorOf(ctx), at: now(), body });
@@ -449,7 +449,7 @@ export function artifactResolveTool(deps: DocumentToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const { threadId, reopen: opening = false } = parsed.data;
       const store = storeOf(TOOL, deps);
-      const target = { id: await writeTargetOf(TOOL, store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
+      const target = { id: opTargetOf(store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
       const result = await threadWrite<ArtifactResolveResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
         const answer = { status: opening ? 'reopened' : 'resolved', artifactId: artifact.id, threadId, line: `${opening ? 'reopened' : 'resolved'} c:${threadId}` } as const;
         if (getThread(doc, threadId)!.status === (opening ? 'open' : 'resolved')) return { unchanged: answer };

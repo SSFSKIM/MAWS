@@ -6,10 +6,10 @@ import { DocIndex } from '@artifacts/document/block-index';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
 import { getThread } from '@artifacts/document/threads';
-import { body, nodeOf, TAB, textOf } from '@artifacts/document/writer.fixture';
+import { body, nodeOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJSON, createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
-import { stateV2, transact } from '@artifacts/yjs';
+import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import committedFingerprint from '@artifacts/document/fingerprint.json';
@@ -454,5 +454,26 @@ describe('fix wave 1: replay before current-state guards, the live revision, the
     const content = Array.from({ length: 2001 }, (_, i) => `Paragraph ${i}.`).join('\n\n');
     expect(refusalOf(await call(documentCreateTool(deps()), { kind: 'document', title: 'Huge', content }))).toMatchObject({ reason: 'invalid' });
     expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Huge')).toEqual([]);
+  });
+});
+
+// M7's re-review, fix wave 2: the replay lookup by tool-use id comes before the handle is resolved (§4.3).
+describe('fix wave 2: a call naming a deleted artifact by handle replays its recorded result', () => {
+  it('replays edit, reply and resolve by their tool-use ids after the artifact named by handle was deleted; a new call is refused', async () => {
+    const artifact = await world.store.create({ kind: 'document', title: 'Gone plan', handle: 'gone-plan' }, { kind: 'session', appSessionId: SELF });
+    const seed = diffV1(seedDoc());
+    await world.service.writeAs(artifact.id, HUMAN, (doc) => applyV1(doc, seed));
+    const { revision } = json<{ revision: number }>(await read({ artifact: 'gone-plan' }));
+    const calls: Array<[McpToolDefinition, Record<string, unknown>, ToolUseId]> = [
+      [artifactEditTool(deps()), { artifact: 'gone-plan', baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Once.' }] }, 'toolu_gone_edit' as ToolUseId],
+      [artifactReplyTool(deps()), { artifact: 'gone-plan', threadId: 't1', body: 'Noted.' }, 'toolu_gone_reply' as ToolUseId],
+      [artifactResolveTool(deps()), { artifact: 'gone-plan', threadId: 't2' }, 'toolu_gone_resolve' as ToolUseId],
+    ];
+    const first: McpToolResult[] = [];
+    for (const [tool, args, toolUseId] of calls) first.push(await call(tool, args, { toolUseId }));
+    for (const result of first) json(result);
+    await world.store.delete(artifact.id);
+    for (const [i, [tool, args, toolUseId]] of calls.entries()) expect(await call(tool, args, { toolUseId })).toEqual(first[i]);
+    expect(refusalOf(await call(calls[0][0], calls[0][1]))).toMatchObject({ reason: 'notFound', artifact: 'gone-plan' });
   });
 });
