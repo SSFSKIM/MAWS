@@ -13,8 +13,11 @@ import type { Doc } from './doc';
 
 // Null when `update` may be applied to `doc`; otherwise why not. The update must decode; each client's structs must
 // continue from what the doc has (no gap); every left and right origin and every ID parent must exist in the doc (not
-// behind a skip) or in the update itself, and an ID parent must be a type; deletions may name only clocks the doc or
-// the update has.
+// behind a skip) or in the update itself; deletions may name only clocks the doc or the update has. A live ID parent
+// must be a type (anything else is a forged structure). A parent that is deleted, or collected to a GC struct or to
+// ContentDeleted, is admitted: v14's integrator (encoding.js, the parent branch of `readStructs`' integration, and
+// `Item.integrate`) turns an item under it into a tombstone with nothing pending, which is what a concurrent "type
+// into a node another replica deleted" must do.
 export function checkUpdate(doc: Doc, update: Uint8Array): string | null {
   let decoded: ReturnType<typeof Y.decodeUpdate>;
   try {
@@ -26,13 +29,17 @@ export function checkUpdate(doc: Doc, update: Uint8Array): string | null {
   // Pass 1: per client, the clock the doc plus the update reach; a gap is refused here.
   const reach = new Map<number, number>();
   const have = (client: number) => Math.max(reach.get(client) ?? 0, store.getClock(client));
-  const items = new Map<number, Y.Item[]>(); // the update's own items, for parents created in the same update
+  const items = new Map<number, Y.Item[]>(); // the update's own items per client, in clock order (as decoded)
   for (const struct of decoded.structs) {
     if (struct instanceof Y.Skip) return 'an update with a skip (a gap)';
     const { client, clock } = struct.id;
     if (clock > have(client)) return `a gap for client ${client} (clock ${clock}, have ${have(client)})`;
     reach.set(client, Math.max(have(client), clock + struct.length));
-    if (struct instanceof Y.Item) items.set(client, [...(items.get(client) ?? []), struct]);
+    if (struct instanceof Y.Item) {
+      const own = items.get(client);
+      if (own) own.push(struct);
+      else items.set(client, [struct]);
+    }
   }
   // Pass 2: references, against everything the update brings (Yjs encodes clients in descending order, so an origin
   // may sit in a later block of the same update).
@@ -44,9 +51,9 @@ export function checkUpdate(doc: Doc, update: Uint8Array): string | null {
     const parent = struct.parent as unknown;
     if (parent instanceof Y.ID) {
       if (!exists(parent)) return `a parent that does not exist (${parent.client}:${parent.clock})`;
-      const own = items.get(parent.client)?.find((item) => item.id.clock <= parent.clock && parent.clock < item.id.clock + item.length);
-      const target = own ?? (parent.clock < store.getClock(parent.client) ? store.getItem(parent) : null);
-      if (target instanceof Y.Item && !(target.content instanceof Y.ContentType)) return 'a parent that is not a type';
+      // The doc's own struct wins over a re-sent copy in the update: it carries the deletion state.
+      const target = parent.clock < store.getClock(parent.client) ? store.getItem(parent) : ownItemAt(items.get(parent.client), parent.clock);
+      if (target instanceof Y.Item && !target.deleted && !(target.content instanceof Y.ContentType)) return 'a parent that is not a type';
     }
   }
   let refused: string | null = null;
@@ -54,6 +61,21 @@ export function checkUpdate(doc: Doc, update: Uint8Array): string | null {
     if (refused === null && range.clock + range.len > have(client)) refused = `a deletion past clock ${have(client)} for client ${client}`;
   });
   return refused;
+}
+
+// The update's item covering `clock`, by binary search over one client's items in clock order.
+function ownItemAt(items: Y.Item[] | undefined, clock: number): Y.Item | null {
+  if (!items) return null;
+  let low = 0;
+  let high = items.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const item = items[mid];
+    if (clock < item.id.clock) high = mid - 1;
+    else if (clock >= item.id.clock + item.length) low = mid + 1;
+    else return item;
+  }
+  return null;
 }
 
 // After an apply: parked structs or deletions, or a hole behind a skip, mean `checkUpdate` missed a case and the doc

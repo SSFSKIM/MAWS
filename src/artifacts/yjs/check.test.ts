@@ -66,6 +66,72 @@ describe('checkUpdate', () => {
     expect(checkUpdate(host, deletionOnly)).toMatch(/deletion past clock/);
   });
 
+  it('refuses a live parent that is not a type (a forged structure)', () => {
+    const forger = newDoc();
+    forger.clientID = 2;
+    forger.get('content').push([new Y.Node('paragraph')]); // 2:0 is a type in the forger's doc
+    const sv = stateVector(forger);
+    (forger.get('content').get(0) as Y.Node).insert(0, 'zz'); // parent ID 2:0
+    const forged = diffV1(forger, sv);
+    const other = newDoc();
+    other.clientID = 2;
+    other.get('t').insert(0, 'q'); // in the host, 2:0 is a string
+    const host = newDoc();
+    applyV1(host, diffV1(other));
+    expect(checkUpdate(host, forged)).toMatch(/not a type/);
+  });
+
+  it('accepts text for a node another replica deleted meanwhile, which the integrator tombstones', () => {
+    const base = newDoc();
+    base.get('content').push([new Y.Node('paragraph')]);
+    const baseState = diffV1(base);
+    const deleter = newDoc();
+    applyV1(deleter, baseState);
+    const deleterBefore = stateVector(deleter);
+    deleter.get('content').delete(0, 1);
+    const deletion = diffV1(deleter, deleterBefore);
+    const writer = newDoc();
+    applyV1(writer, baseState);
+    const writerBefore = stateVector(writer);
+    (writer.get('content').get(0) as Y.Node).insert(0, 'late text'); // its first text: the parent goes by ID
+    const late = diffV1(writer, writerBefore);
+
+    const host = newDoc(); // gc on: the deleted paragraph's item now holds ContentDeleted
+    applyV1(host, baseState);
+    applyV1(host, deletion);
+    expect(checkUpdate(host, late)).toBeNull();
+    applyV1(host, late);
+    expect(hasPending(host)).toBe(false);
+    expect(host.get('content').toString()).not.toContain('late text');
+  });
+
+  it('accepts text for a node whose ancestor was deleted and collected to a GC struct', () => {
+    const base = newDoc();
+    base.transact(() => {
+      const section = new Y.Node('section');
+      base.get('content').push([section]);
+      section.push([new Y.Node('paragraph')]);
+    });
+    const baseState = diffV1(base);
+    const deleter = newDoc();
+    applyV1(deleter, baseState);
+    const deleterBefore = stateVector(deleter);
+    deleter.get('content').delete(0, 1);
+    const deletion = diffV1(deleter, deleterBefore);
+    const writer = newDoc();
+    applyV1(writer, baseState);
+    const writerBefore = stateVector(writer);
+    ((writer.get('content').get(0) as Y.Node).get(0) as Y.Node).insert(0, 'late');
+    const late = diffV1(writer, writerBefore);
+
+    const host = newDoc();
+    applyV1(host, baseState);
+    applyV1(host, deletion);
+    expect(checkUpdate(host, late)).toBeNull();
+    applyV1(host, late);
+    expect(hasPending(host)).toBe(false);
+  });
+
   it('refuses bytes that do not decode', () => {
     expect(checkUpdate(newDoc(), new Uint8Array([0xff, 0xff, 0xff, 0xff, 0x01]))).toMatch(/undecodable/);
   });
