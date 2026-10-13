@@ -77,4 +77,43 @@ describe('values for Office', () => {
     const derived = officeThemeXmlLocal({ properties: HOUSE_TOKENS.properties }, 'Derived');
     expect(derived).toContain('<a:minorFont><a:latin typeface="SF Pro Text"/>');
   });
+
+  // X28 as D's M6 took B's request: `officeThemeXml(tokens, name, overrides?)`, so a document's `dsOverrides` reach the
+  // Word theme part: a colour or a font stack replaces its role's slots; anything else (a `var()`, a gradient) is left
+  // to the styles; a slot the system wrote as a literal (its Office fonts) stays.
+  it('puts a document’s colour and font overrides on the roles’ Office slots', () => {
+    const xml = officeThemeXmlLocal({ properties: HOUSE_TOKENS.properties }, 'Doc', {
+      '--ds-color-accent': '#0b5fff',
+      '--ds-color-text': 'rgb(17 34 51)',
+      '--ds-color-bg': 'linear-gradient(red, blue)',
+      '--ds-font-body': '"Iowan Old Style", Georgia, serif',
+      '--ds-font-display': 'var(--elsewhere)',
+    });
+    expect(xml).toContain('<a:accent1><a:srgbClr val="0B5FFF"/></a:accent1>');
+    expect(xml).toContain('<a:hlink><a:srgbClr val="0B5FFF"/></a:hlink>');
+    expect(xml).toContain('<a:dk1><a:srgbClr val="112233"/></a:dk1>');
+    expect(xml).toContain('<a:lt1><a:srgbClr val="FAF9F6"/></a:lt1>'); // the gradient is not a colour: the system's stays
+    expect(xml).toContain('<a:minorFont><a:latin typeface="Iowan Old Style"/>');
+    expect(xml).toContain('<a:majorFont><a:latin typeface="SF Pro Display"/>'); // a var() is not a face
+    const literal = officeThemeXmlLocal(HOUSE_TOKENS, 'Doc', { '--ds-font-body': 'Georgia, serif' });
+    expect(literal).toContain('<a:minorFont><a:latin typeface="Segoe UI"/>'); // the system's own Office font stays
+  });
+
+  it('hands the document’s overrides to the system’s helpers (D’s signatures), not a pre-resolved text', () => {
+    const calls: unknown[] = [];
+    const design = exportDesign(
+      {
+        ...houseSystem,
+        resolveDsVars: (css, tokens, medium, overrides) => (calls.push(['css', medium, overrides]), houseSystem.resolveDsVars(css, tokens, medium, overrides)),
+        officeThemeXml: (tokens, name, overrides) => (calls.push(['theme', name, overrides]), houseSystem.officeThemeXml(tokens, name, overrides)),
+      },
+      { '--ds-color-accent': '#0b5fff' },
+    );
+    expect(design.resolveCss('a { color: var(--ds-color-accent); }')).toBe('a { color: #0b5fff; }');
+    expect(design.officeThemeXml()).toContain('<a:accent1><a:srgbClr val="0B5FFF"/></a:accent1>');
+    expect(calls).toEqual([
+      ['css', 'document', { '--ds-color-accent': '#0b5fff' }],
+      ['theme', 'MAWS', { '--ds-color-accent': '#0b5fff' }],
+    ]);
+  });
 });

@@ -1,12 +1,13 @@
 // The design system as the document exporters see it (D12 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md;
-// the ledger's X28 row): D's export helpers `resolveDsVars(cssText, tokens, medium)` and `officeThemeXml(tokens, name)`
-// over a system's tokens, and the document's own `dsOverrides` (TokenOverrides) on top. D's
+// the ledger's X28 row): D's export helpers `resolveDsVars(cssText, tokens, medium, overrides?)` and
+// `officeThemeXml(tokens, name, overrides?)` over a system's tokens, handed the document's own `dsOverrides`
+// (TokenOverrides), which they set after the system's values (D's M6 signatures, so overrides reach the Word theme). D's
 // `src/artifacts/design-system/apply.ts` and `office.ts` are not on this branch's base, so the exporters take the
 // helpers through `DesignSystemExport`, whose two functions have the ledger's shapes, and default to a local system
 // over a local token shape: the house system's resolved `--ds-*` properties of the document medium, mirrored from D's
 // `defaults/maws/tokens.tokens.json` (p3-d-design-systems 257bcbd5), so an export before and after D's landing looks
-// the same. When D lands, M8 passes `{name: view.name, tokens: view.tokens, resolveDsVars, officeThemeXml}` and this
-// file's local half goes.
+// the same. When D lands, the caller passes `{name: view.name, tokens: view.tokens, resolveDsVars, officeThemeXml}`
+// from D's apply API and this file's local half goes.
 import type { TokenOverrides } from '../meta';
 
 export type Medium = 'document' | 'deck';
@@ -16,10 +17,10 @@ export type DsName = `--ds-${string}`;
 export interface DesignSystemExport<T = unknown> {
   name: string;
   tokens: T;
-  /** CSS text with every `var(--ds-*)` the system defines replaced by its value (X28, D's semantics). */
-  resolveDsVars(cssText: string, tokens: T, medium: Medium): string;
-  /** The DrawingML theme part, `word/theme/theme1.xml` (X28's `officeThemeXml`). */
-  officeThemeXml(tokens: T, name: string): string;
+  /** CSS text with every `var(--ds-*)` the system defines, `overrides` after it, replaced by its value (X28, D's semantics). */
+  resolveDsVars(cssText: string, tokens: T, medium: Medium, overrides?: TokenOverrides): string;
+  /** The DrawingML theme part, `word/theme/theme1.xml` (X28's `officeThemeXml`), a colour or font override on its role's slots. */
+  officeThemeXml(tokens: T, name: string, overrides?: TokenOverrides): string;
 }
 
 export interface OfficeFonts {
@@ -130,9 +131,9 @@ export function substituteVars(cssText: string, lookup: (name: string) => string
 }
 
 /** The local `resolveDsVars`: D's semantics over `LocalTokens`, which hold the document medium's values only. */
-export function resolveDsVarsLocal(cssText: string, tokens: LocalTokens): string {
-  const properties = tokens.properties as Record<string, string>;
-  return substituteVars(cssText, (name) => (Object.hasOwn(properties, name) ? properties[name] : undefined), 'take');
+export function resolveDsVarsLocal(cssText: string, tokens: LocalTokens, _medium: Medium = 'document', overrides: TokenOverrides = {}): string {
+  const values = { ...(tokens.properties as Record<string, string>), ...(overrides as Record<string, string>) };
+  return substituteVars(cssText, (name) => (Object.hasOwn(values, name) ? values[name] : undefined), 'take');
 }
 
 // XML 1.0 attribute text: the five entities, and no character the format forbids.
@@ -201,13 +202,23 @@ export function officeFace(familyCss: string | null | undefined): string {
 const SOLID = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>';
 const line = (width: number) => `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${SOLID}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln>`;
 
-/** The local `officeThemeXml`: D's part, written from the local tokens (colours by role, the Office fonts). */
-export function officeThemeXmlLocal(tokens: LocalTokens, name: string): string {
+// An override the theme part takes (D's rule, X28): a colour it can read, or a font stack (no function in it).
+const colourOverride = (value: string | undefined): string | null => (value === undefined ? null : hexOf(value));
+const fontOverride = (value: string | undefined): string | undefined => (value !== undefined && value.trim() !== '' && !value.includes('(') ? value : undefined);
+
+/**
+ * The local `officeThemeXml`: D's part, written from the local tokens (colours by role, the Office fonts), with the
+ * document's overrides on the roles they name: a readable colour replaces every slot of its role, a font stack the face
+ * Office derives from the role; anything else, and the system's own Office fonts (literals), stay.
+ */
+export function officeThemeXmlLocal(tokens: LocalTokens, name: string, overrides: TokenOverrides = {}): string {
   const properties = tokens.properties as Record<string, string | undefined>;
+  const own = overrides as Record<string, string | undefined>;
   const title = xmlAttr(name);
-  const colour = (slot: (typeof OFFICE_SLOTS)[number]) => hexOf(properties[SLOT_ROLE[slot]]) ?? (slot.startsWith('lt') ? 'FFFFFF' : '000000');
+  const colour = (slot: (typeof OFFICE_SLOTS)[number]) =>
+    colourOverride(own[SLOT_ROLE[slot]]) ?? hexOf(properties[SLOT_ROLE[slot]]) ?? (slot.startsWith('lt') ? 'FFFFFF' : '000000');
   const fonts = (given: OfficeFonts | undefined, role: DsName): string => {
-    const latin = given?.latin ?? officeFace(properties[role]);
+    const latin = given?.latin ?? officeFace(fontOverride(own[role]) ?? properties[role]);
     return `<a:latin typeface="${xmlAttr(latin)}"/><a:ea typeface="${xmlAttr(given?.ea ?? '')}"/><a:cs typeface=""/>`;
   };
   return [
@@ -242,14 +253,10 @@ export interface ExportDesign {
 }
 
 export function exportDesign<T>(system: DesignSystemExport<T>, overrides: TokenOverrides): ExportDesign {
-  const own = overrides as Record<string, string>;
   return {
     name: system.name,
-    resolveCss: (cssText) => {
-      const overridden = substituteVars(cssText, (name) => (Object.hasOwn(own, name) ? own[name] : undefined), 'keep');
-      return system.resolveDsVars(overridden, system.tokens, 'document');
-    },
-    officeThemeXml: () => system.officeThemeXml(system.tokens, system.name),
+    resolveCss: (cssText) => system.resolveDsVars(cssText, system.tokens, 'document', overrides),
+    officeThemeXml: () => system.officeThemeXml(system.tokens, system.name, overrides),
   };
 }
 
