@@ -27,6 +27,7 @@ import { relativePositionToJSON } from '../../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../../yjs/prosemirror';
 import { listTabs, tabBody } from '../../tabs';
 import { addThread, getThread, liveIdsY, observeThreads, threadStatus } from '../../threads';
+import { touchedRanges } from '../touched';
 
 /** The origin of the editor's own threads-map writes (no binding's: never in the editor's undo). */
 export const COMMENTS_ORIGIN = 'document-comments';
@@ -110,32 +111,20 @@ function rebuild(doc: PMNode, ydoc: Doc, active: string | null): DecorationSet {
   return DecorationSet.create(doc, out);
 }
 
-// The textblocks a transaction changed, in its resulting doc: each step's range mapped through the steps after it. A
-// mark or attribute step maps nothing (its map is empty), so its own range is read from the step.
-function touchedBlocks(tr: Transaction): Array<[number, number]> {
+// The textblocks a transaction changed, in its resulting doc (`touchedRanges`), or null when the transaction has too
+// many steps to map (a rebind): the display is then rebuilt whole.
+function touchedBlocks(tr: Transaction): Array<[number, number]> | null {
+  const ranges = touchedRanges(tr);
+  if (ranges === null) return null;
   const out: Array<[number, number]> = [];
-  const { doc, mapping } = tr;
-  const touch = (index: number, start: number, end: number) => {
-    const rest = mapping.slice(index + 1);
-    const from = Math.max(0, Math.min(rest.map(start, -1), doc.content.size));
-    const to = Math.max(from, Math.min(rest.map(end, 1), doc.content.size));
+  const { doc } = tr;
+  for (const [from, to] of ranges) {
     doc.nodesBetween(from, Math.min(to + 1, doc.content.size), (node, pos) => {
       if (!node.isTextblock) return true;
       out.push([pos, pos + node.nodeSize]);
       return false;
     });
-  };
-  tr.steps.forEach((step, index) => {
-    let mapped = false;
-    tr.mapping.maps[index]!.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-      mapped = true;
-      touch(index, newStart, newEnd);
-    });
-    if (mapped) return;
-    const { from, to, pos } = step as { from?: unknown; to?: unknown; pos?: unknown };
-    if (typeof from === 'number' && typeof to === 'number') touch(index, from, to);
-    else if (typeof pos === 'number') touch(index, pos, pos + 1);
-  });
+  }
   return out;
 }
 
@@ -169,8 +158,10 @@ function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Pl
           return { active, decorations: rebuild(state.doc, ydoc, active) };
         }
         if (!tr.docChanged) return old;
+        const blocks = touchedBlocks(tr);
+        if (blocks === null) return { active: old.active, decorations: rebuild(tr.doc, ydoc, old.active) };
         let decorations = old.decorations.map(tr.mapping, tr.doc);
-        for (const [from, to] of touchedBlocks(tr)) {
+        for (const [from, to] of blocks) {
           const fresh: Decoration[] = [];
           decorate(tr.doc, from, to, ydoc, old.active, fresh);
           decorations = decorations.remove(decorations.find(from, to)).add(tr.doc, fresh);
