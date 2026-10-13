@@ -56,9 +56,14 @@ import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-repor
 import * as mods from './schema/mods';
 import * as ownerChannel from './schema/owner-channel'; // M4
 // P2-C end
+// P3-A start (M4)
+import * as artifacts from './schema/artifacts';
+import * as spaces from './schema/spaces';
+import { artifactRefusalOf } from './schema/artifacts';
+// P3-A end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -592,7 +597,7 @@ describe('ipc schema validates both directions', () => {
       // `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1639,4 +1644,71 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P2-C end
+
+  // P3-A start (M4): the artifact store's surface (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4)
+  describe('P3-A entries', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const human = { kind: 'human' };
+    const artifact = { id, kind: 'document', title: 'Plan', createdBy: human, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 0 };
+
+    it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
+      const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open']);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
+      expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+    });
+
+    it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {
+      expect(validateCommandOutput('artifacts.get', { artifact }).ok).toBe(true);
+      expect(validateCommandOutput('artifacts.get', { artifact: null }).ok).toBe(true);
+      for (const key of ['revision', 'agentEditsAsSuggestions'] as const) {
+        const without: Record<string, unknown> = { ...artifact };
+        delete without[key];
+        expect(validateCommandOutput('artifacts.list', { artifacts: [without] }).ok, key).toBe(false);
+      }
+    });
+
+    it('takes a byte kind’s content as bytes or a path, never both shapes at once', () => {
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), name: 'index.html' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'file', title: 'Report', content: { path: '/tmp/report.pdf' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: [60] } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), path: '/tmp/x' } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'document', title: '' }).ok).toBe(false);
+    });
+
+    it('names a version state by exactly one of its id and its seq', () => {
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, seq: 0 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3, seq: 4 }).ok).toBe(false);
+      expect(validateCommandOutput('artifacts.versionState', { bytes: new Uint8Array(4) }).ok).toBe(true);
+    });
+
+    it('caps an uploaded asset at 16 MiB and takes the test writer’s three operations only', () => {
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(16 * 1024 * 1024 + 1) }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(8) }).ok).toBe(true);
+      const ops = [{ op: 'setAttr', key: 'title', value: { nested: [1, 'two'] } }, { op: 'insertText', index: 0, text: 'hi', root: 'body' }, { op: 'deleteText', index: 0, length: 1 }];
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops, appSessionId: 'sess-1' }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [{ op: 'format', index: 0 }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [] }).ok).toBe(false);
+    });
+
+    it('carries the change feed’s four artifact changes and three Space changes', () => {
+      for (const change of ['created', 'updated', 'deleted', 'linked']) expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change }).ok).toBe(true);
+      expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change: 'resync' }).ok).toBe(false);
+      for (const change of ['created', 'updated', 'deleted']) expect(validateEventPayload('spaces.changed', { spaceId: id, change }).ok).toBe(true);
+      expect(validateEventPayload('spaces.changed', { spaceId: id, change: 'linked' }).ok).toBe(false);
+    });
+
+    it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
+      const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
+      expect(artifactRefusalOf({ code: 'timeout', message: 'slow' })).toBeNull();
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'bad', issues: [{ path: ['x'] }] })).toBeNull();
+    });
+  });
+  // P3-A end
 });

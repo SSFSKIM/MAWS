@@ -18,6 +18,7 @@ describe('the artifact entity (X23)', () => {
     updatedAt: 1_760_000_100_000,
     lastViewedAt: null,
     pinned: false,
+    agentEditsAsSuggestions: false, // M4 (Decision Log 31a)
   };
 
   it('parses an artifact with only its required fields, and with every optional one', () => {

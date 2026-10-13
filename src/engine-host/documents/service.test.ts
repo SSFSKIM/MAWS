@@ -6,11 +6,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc } from '@artifacts/yjs';
+import { applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc, type Node } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
-import { DocumentService, type Committed, type ServiceOptions } from './service';
+import { DocumentService, IDLE_UNLOAD_MS, type Committed, type ServiceOptions } from './service';
 import { SqliteDocumentStorage, StoreTooNewError } from './storage';
 
 // The real check, made skippable once: the pending-state case needs an update the check would refuse to get through.
@@ -63,6 +63,7 @@ afterEach(() => {
 // A replica end driven frame by frame: what the host sends is decoded into `received`; `send` hands the host a frame.
 function raw(artifactId: string, actor: Actor) {
   let onMessage: ((data: unknown) => void) | null = null;
+  let onClose: (() => void) | null = null;
   const end = {
     received: [] as Frame[],
     closed: false,
@@ -75,12 +76,13 @@ function raw(artifactId: string, actor: Actor) {
       end.send({ type: 'update', update: diffV1(end.doc, before) });
     },
     take: () => end.received.splice(0),
+    hangUp: () => onClose!(), // the replica closed its end (a window closed)
   };
   const port: HostPort = {
     send: (frame) => end.received.push(decodeFrame(frame)),
     close: () => void (end.closed = true),
     onMessage: (listener) => void (onMessage = listener),
-    onClose: () => {},
+    onClose: (listener) => void (onClose = listener),
   };
   const conn = service.attach(artifactId, port, actor);
   return Object.assign(end, { conn });
@@ -231,10 +233,8 @@ describe('DocumentService: untrusted frames', () => {
     a.send({ type: 'ack', frames: 1, revision: 1 });
     expect(a.closed).toBe(true);
     tick();
-    expect(service.loaded('a1')).toBeNull(); // nobody holds it: unloaded after the flush
+    expect(service.loaded('a1')?.get('t').toString()).toBe(''); // nothing applied
     expect(rowCount()).toBe(0);
-    raw('a1', human);
-    expect(service.loaded('a1')?.get('t').toString()).toBe('');
   });
 
   it('refuses a new struct under a clientID bound to another actor (a forged authorship), and accepts a restatement of it', () => {
@@ -487,6 +487,92 @@ describe('DocumentService: host-originated writes', () => {
     tick();
     await kept;
     expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
+  });
+});
+
+describe('DocumentService: the idle unload (Decision Log 29b)', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+  afterEach(() => vi.useRealTimers());
+  // Event-loop turns (the agent replica's ports), since `setTimeout` is faked here.
+  const settle = async (test: () => boolean) => {
+    for (let i = 0; i < 2_000 && !test(); i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(test()).toBe(true);
+  };
+
+  it('keeps a document loaded for 60 s after its last connection closes, and a reattach within them gets the same doc', () => {
+    make();
+    const load = vi.spyOn(storage, 'load');
+    const a = raw('a1', human);
+    a.edit((doc) => doc.get('t').insert(0, 'abc'));
+    tick();
+    const doc = service.loaded('a1');
+    a.hangUp();
+    tick();
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS - 1);
+    expect(service.loaded('a1')).toBe(doc);
+    const b = raw('a1', human); // within the grace period: no reload
+    expect(service.loaded('a1')).toBe(doc);
+    expect(load).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS); // held again: the first grace period was called off
+    expect(service.loaded('a1')).toBe(doc);
+    b.hangUp();
+    tick();
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS - 1);
+    expect(service.loaded('a1')).toBe(doc); // counted from the last close
+    vi.advanceTimersByTime(1);
+    expect(service.loaded('a1')).toBeNull();
+    raw('a1', human);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(service.loaded('a1')?.get('t').toString()).toBe('abc');
+  });
+
+  it('counts the grace period of a document nobody attached from its last write, and never unloads under uncommitted rows', async () => {
+    make();
+    const first = service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'one'));
+    tick();
+    await first;
+    const doc = service.loaded('a1');
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS - 1);
+    const second = service.writeAs('a1', agent, (doc) => doc.get('t').insert(3, ' two')); // its rows wait for the commit
+    vi.advanceTimersByTime(1); // the grace period ends with the write uncommitted: the doc stays
+    expect(service.loaded('a1')).toBe(doc);
+    tick();
+    expect(await second).toBe(service.revision('a1'));
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS - 1);
+    expect(service.loaded('a1')).toBe(doc);
+    vi.advanceTimersByTime(1);
+    expect(service.loaded('a1')).toBeNull();
+    expect(service.readState('a1').revision).toBe(await second);
+  });
+
+  it('never unloads a document while an agent replica holds it; the grace period starts when the replica closes', async () => {
+    make({}, true);
+    const r = service.replica(sid('app-1'), 'a1');
+    await r.whenSynced();
+    r.doc.get('t').insert(0, 'agent text');
+    await r.whenSaved();
+    const doc = service.loaded('a1');
+    vi.advanceTimersByTime(10 * IDLE_UNLOAD_MS);
+    expect(service.loaded('a1')).toBe(doc);
+    service.closeSession(sid('app-1'));
+    await settle(() => vi.getTimerCount() === 1); // the replica's port closed and the flush started the grace period
+    vi.advanceTimersByTime(IDLE_UNLOAD_MS - 1);
+    expect(service.loaded('a1')).toBe(doc);
+    vi.advanceTimersByTime(1);
+    expect(service.loaded('a1')).toBeNull();
+  });
+
+  it('unloads at once at shutdown, leaving no timer behind', () => {
+    make();
+    const a = raw('a1', human);
+    a.edit((doc) => doc.get('t').insert(0, 'abc'));
+    tick();
+    a.hangUp();
+    tick();
+    expect(vi.getTimerCount()).toBe(1);
+    service.close();
+    expect(service.loaded('a1')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -772,6 +858,60 @@ describe('DocumentService: what the hooks return (Decision Log 23c, 25j)', () =>
     expect(insertedBy(service.provenance('a1'), b1)?.actor).toBe('session:app-1'); // the cache agrees
   });
 
+  it('carries authorship into every row of a frame: the forwarded edit’s and the repair’s, in seq order against the rows before them (Decision Log 29a)', () => {
+    const ids = (text: Node, from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => idAt(text, from + i)!).map(({ client, clock }) => [client, clock] as [number, number]);
+    let humanText: [number, number][] = []; // the ids of the human's "hello", which the hooks copy
+    const adapter: KindAdapter = {
+      kind: 'document',
+      // the agent's keystroke landed in a block the human's text was moved out of: the hook replays "he" where it lives now
+      beforeApply: (_live, _incoming, info) => (info.actor.kind === 'session' && !info.step2 ? (doc) => doc.get('fwd').insert(0, 'he') : null),
+      afterUpdate(doc, info) {
+        if (info.actor.kind !== 'session') return;
+        doc.get('rep').insert(0, 'hello'); // a repair copying the forwarded "he" and the human's "llo"
+        const fwd = ids(doc.get('fwd'), 0, 2);
+        const rep = ids(doc.get('rep'), 0, 5);
+        return {
+          provenance: [
+            { kind: 'move', from: humanText.slice(0, 2), to: fwd }, // the forwarding row: from rows of earlier frames
+            { kind: 'retype', from: [...fwd, ...humanText.slice(2)], to: rep }, // the repair row: "he" from the forwarding row of this frame
+          ],
+        };
+      },
+    };
+    make({ adapters: [adapter], kindOf: () => 'document' });
+    const h = raw('a1', human);
+    h.edit((doc) => doc.get('t').insert(0, 'hello'));
+    tick();
+    humanText = ids(h.doc.get('t'), 0, 5);
+    const humanAt = now - (now % MIN);
+    now += 7 * MIN;
+    const a = raw('a1', agent);
+    a.edit((doc) => doc.get('t').insert(0, 'X'));
+    tick();
+
+    const live = service.loaded('a1')!;
+    expect([live.get('t').toString(), live.get('fwd').toString(), live.get('rep').toString()]).toEqual(['Xhello', 'he', 'hello']);
+    const seqs = (committed("SELECT seq FROM artifact_updates WHERE artifactId = 'a1' ORDER BY seq") as { seq: number }[]).map((row) => row.seq);
+    expect(seqs).toHaveLength(4); // the human's row, then the frame's three: its own update, the forwarding, the repair
+    const rows = committed("SELECT fromSeq, bytes FROM artifact_attributions WHERE artifactId = 'a1' ORDER BY fromSeq") as { fromSeq: number; bytes: Uint8Array }[];
+    expect(rows.map((row) => row.fromSeq)).toEqual(seqs); // one attribution row per log row
+    const [, own, forwarded, repaired] = rows.map((row) => decodeMap(row.bytes));
+    const at = (id: [number, number]) => ({ client: id[0], clock: id[1] });
+    const agentAt = now - (now % MIN);
+    expect(insertedBy(own, idAt(live.get('t'), 0)!)).toEqual({ actor: 'session:app-1', at: agentAt }); // no carry: as before
+    const fwd = ids(live.get('fwd'), 0, 2).map(at);
+    const rep = ids(live.get('rep'), 0, 5).map(at);
+    for (const id of fwd) expect([insertedBy(forwarded, id), carriedBy(forwarded, id)]).toEqual([{ actor: 'human', at: humanAt }, 'move']);
+    for (const id of rep) expect([insertedBy(repaired, id), carriedBy(repaired, id)]).toEqual([{ actor: 'human', at: humanAt }, 'retype']);
+
+    const answer = (map: ReturnType<typeof service.provenance>) => [...fwd, ...rep].map((id) => insertedBy(map, id)?.actor);
+    const everyHuman = Array.from({ length: 7 }, () => 'human');
+    expect(answer(service.provenance('a1'))).toEqual(everyHuman); // the cache agrees
+    reopen();
+    expect(answer(service.provenance('a1'))).toEqual(everyHuman); // and so does a reload
+  });
+
   it('runs writeAs’s afterWrite and inFrame inside the write’s savepoint: one commit, and a throw takes the write back', async () => {
     make({}, true);
     const revision = await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'restored'), {
@@ -820,7 +960,7 @@ describe('DocumentService: what the hooks return (Decision Log 23c, 25j)', () =>
   });
 
   it('reads a doc’s state without opening it, and rewrites a requested head after the next commit', async () => {
-    make({}, true);
+    make({ idleUnloadMs: 0 }, true);
     const revision = await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'hello'));
     await until(() => service.loaded('a1') === null);
     const { revision: at, state } = service.readState('a1');

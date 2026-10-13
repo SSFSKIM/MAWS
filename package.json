@@ -41,6 +41,7 @@
     "e2e:tools": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/maws-tools.spec.ts",
     "e2e:deliverables": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/deliverables.spec.ts",
     "e2e:scm": "electron-vite build && MAWS_SCM_E2E=1 playwright test e2e/scm.spec.ts",
+    "e2e:artifacts": "electron-vite build && playwright test e2e/artifacts-store.spec.ts",
     "e2e:supervisor": "electron-vite build && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",
     "e2e:supervisor:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached playwright test e2e/supervisor-packaged.spec.ts",
     "verify:fuses": "out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo \"$out\" && echo \"$out\" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }",

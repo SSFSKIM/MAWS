@@ -47,6 +47,10 @@ import * as browser from './schema/browser';
 import * as mods from './schema/mods';
 import * as ownerChannel from './schema/owner-channel'; // M4
 // P2-C end
+// P3-A start (M4)
+import * as artifacts from './schema/artifacts';
+import * as spaces from './schema/spaces';
+// P3-A end
 
 export {
   HostPingSchema,
@@ -136,6 +140,8 @@ export const commands = {
   // E4a end
   ...mods.commands, // P2-C (2026-10-09)
   ...ownerChannel.commands, // P2-C M4 (2026-10-09)
+  ...artifacts.commands, // P3-A M4
+  ...spaces.commands, // P3-A M4
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -175,6 +181,8 @@ export const events = {
   // E4a end
   ...mods.events, // P2-C (2026-10-09)
   ...ownerChannel.events, // P2-C M4 (2026-10-09)
+  ...artifacts.events, // P3-A M4
+  ...spaces.events, // P3-A M4
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -209,6 +217,7 @@ export const HOST_EVENTS = [
   'maws.pane.show',
   'maws.artifact.capture',
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
+  'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
 ] as const satisfies readonly EventName[];
 // E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
