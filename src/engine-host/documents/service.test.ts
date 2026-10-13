@@ -444,19 +444,6 @@ describe('DocumentService: host-originated writes', () => {
     expect(reader.doc.get('t').toString()).toBe('# > hello!');
   });
 
-  it('treats the document key as opaque: `<artifactId>:suggest` is a doc of its own beside the artifact’s', async () => {
-    make({}, true);
-    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'main'));
-    await service.writeAs('a1:suggest', agent, (doc) => doc.get('t').insert(0, 'suggested'));
-    reopen({}, true);
-    for (const [key, text] of [['a1', 'main'], ['a1:suggest', 'suggested']] as const) {
-      const reader = service.replica(sid('app-9'), key);
-      await reader.whenSynced();
-      expect(reader.doc.get('t').toString()).toBe(text);
-    }
-    expect(committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq')).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
-  });
-
   it('rejects a write whose edit throws, takes back its rows and evicts the doc', async () => {
     make({}, true);
     await service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'kept'));
@@ -523,6 +510,116 @@ describe('DocumentService: host-originated writes', () => {
     tick();
     await kept;
     expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
+  });
+});
+
+describe('DocumentService: suggestion docs (M8; Decision Log 23e)', () => {
+  const text = (key: string) => service.live(key).get('t').toString();
+  const keys = () => committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq');
+
+  it('opens an artifact’s suggestion doc under `<artifactId>:suggest`: gc off, holding the main doc, its writes its own rows', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    expect(key).toBe('a1:suggest');
+    expect(service.suggestionDoc('a1')).toBe(key);
+    expect(service.live(key).gc).toBe(false);
+    expect(text(key)).toBe('The plan.');
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(8, ' and more'));
+    expect(text(key)).toBe('The plan and more.');
+    expect(text('a1')).toBe('The plan.');
+    expect(keys()).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
+    expect(service.revision(key)).toBe(2);
+    expect(() => service.suggestionDoc(key)).toThrow(/is a suggestion doc/);
+  });
+
+  it('keeps it in step with the main doc after the main doc’s commit, logging nothing twice, and rebuilds it from both after a reload', async () => {
+    make();
+    const main = raw('a1', human);
+    main.edit((doc) => doc.get('t').insert(0, 'one'));
+    tick();
+    const key = service.suggestionDoc('a1');
+    const view = raw(key, human);
+    view.send({ type: 'step1', sv: stateVector(view.doc) });
+    tick();
+    for (const frame of view.take()) if (frame.type === 'step2') applyV1(view.doc, frame.update);
+    expect(view.doc.get('t').toString()).toBe('one');
+    main.edit((doc) => doc.get('t').insert(0, 'zero '));
+    expect(view.received).toEqual([]); // nothing revealed before the main doc’s row commits
+    tick();
+    const update = view.take().find((frame) => frame.type === 'update');
+    expect(update).toBeDefined();
+    applyV1(view.doc, (update as { update: Uint8Array }).update);
+    expect(view.doc.get('t').toString()).toBe('zero one');
+    expect(keys()).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1', actor: 'human' }]);
+
+    void service.writeAs(key, agent, (doc) => doc.get('t').insert(8, ' (suggested)'));
+    tick();
+    reopen();
+    void service.writeAs('a1', human, (doc) => doc.get('n').setAttr('status', 'done')); // while the suggestion doc is not loaded
+    tick();
+    expect(service.loaded(key)).toBeNull();
+    expect(text(key)).toBe('zero one (suggested)');
+    expect(service.live(key).get('n').getAttr('status')).toBe('done');
+    expect(keys().filter((row) => (row as { artifactId: string }).artifactId === key)).toHaveLength(1);
+  });
+
+  it('drops a loaded suggestion doc with its main doc when a main write is taken back, so it never holds what the main doc lost', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'kept'));
+    const key = service.suggestionDoc('a1');
+    await expect(
+      service.writeAs('a1', human, (doc) => {
+        doc.get('t').insert(0, 'half ');
+        throw new Error('broken edit');
+      }),
+    ).rejects.toThrow(/broken edit/);
+    expect(service.loaded(key)).toBeNull();
+    expect(text(key)).toBe('kept');
+  });
+
+  it('refuses a main doc frame carrying new structs under a clientID the suggestion doc binds to another actor (an editor applying a proposal itself)', () => {
+    make();
+    void service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    const synced = (end: ReturnType<typeof raw>) => {
+      end.send({ type: 'step1', sv: stateVector(end.doc) });
+      tick();
+      for (const frame of end.take()) if (frame.type === 'step2') applyV1(end.doc, frame.update);
+    };
+    const proposer = raw(service.suggestionDoc('a1'), agent);
+    synced(proposer);
+    proposer.edit((doc) => doc.get('t').insert(4, ' and more'));
+    tick();
+    const forge = () => {
+      const editor = raw('a1', human);
+      synced(editor);
+      const before = stateVector(editor.doc);
+      applyV1(editor.doc, diffV1(proposer.doc, before)); // the agent's proposal, its structs under the agent's clientID
+      editor.send({ type: 'update', update: diffV1(editor.doc, before) });
+      return editor;
+    };
+    expect(forge().closed).toBe(true);
+    expect(service.stats.rejected.at(-1)?.reason).toMatch(/bound to another actor/);
+    expect(text('a1')).toBe('base');
+    reopen(); // the suggestion doc not loaded: its binding is read from the store
+    expect(forge().closed).toBe(true);
+    expect(service.loaded('a1:suggest')).toBeNull();
+    expect(text('a1')).toBe('base');
+  });
+
+  it('writes through a host replica of the suggestion doc that keeps deleted content (gc off), as the doc itself does', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'abc'));
+    const key = service.suggestionDoc('a1');
+    let replicaGc: boolean | null = null;
+    await service.writeAs(key, agent, (doc) => {
+      replicaGc = doc.gc;
+      doc.get('t').delete(1, 1);
+    });
+    expect(replicaGc).toBe(false);
+    expect(text(key)).toBe('ac');
+    expect(text('a1')).toBe('abc');
   });
 });
 
