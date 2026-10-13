@@ -52,13 +52,13 @@ export class MainDocRelay {
   }
 
   // False (nothing asked, the port untouched) when no connection is served.
-  open({ channel, artifactId, actor }: HostDoc, port: RelayPort, owner: number | null): boolean {
+  open({ channel, artifactId, actor, doc }: HostDoc, port: RelayPort, owner: number | null): boolean {
     const link = this.link;
     if (!link) return false;
     this.forget(channel)?.port.close(); // a number main reused: the stale port goes with it
     const entry: Relayed = { port, owner };
     this.channels.set(channel, entry);
-    link.postMessage({ t: 'documents.open', channel, artifactId, actor });
+    link.postMessage({ t: 'documents.open', channel, artifactId, actor, ...(doc && { doc }) });
     port.on('message', ({ data }) => {
       if (this.channels.get(channel) === entry && data instanceof Uint8Array) this.link?.postDoc(channel, data);
     });

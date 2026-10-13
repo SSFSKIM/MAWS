@@ -71,6 +71,9 @@ describe('MainDocRelay', () => {
     relay.deliver(4, Uint8Array.from([3]));
     relay.deliver(5, Uint8Array.from([9])); // a channel main does not know: in flight across a close
     expect(port.posted).toEqual([Uint8Array.from([3])]);
+    // P3-A M8: a suggestion doc's channel names it to the host
+    expect(relay.open({ ...doc(6), doc: 'suggestions' }, new FakePort(), 7)).toBe(true);
+    expect(l.lines.at(-1)).toEqual({ t: 'documents.open', channel: 6, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' });
   });
 
   it('tells the host when the window’s end goes, once', () => {

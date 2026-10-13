@@ -59,6 +59,9 @@ describe('artifacts.open (main)', () => {
     expect(h.postDocPort).toHaveBeenNthCalledWith(1, { t: 'doc', channel: first.channel, artifactId: ID, actor: { kind: 'human' } }, h.ports[0], h.sender.id);
     expect(h.sender.postMessage).toHaveBeenNthCalledWith(1, DOC_PORT_CHANNEL, { channel: first.channel, artifactId: ID }, [h.ports[1]]);
     expect(h.ports.every((p) => !p.closed)).toBe(true);
+    // P3-A M8: the suggestion doc travels as `doc` on the host's message, after the same check
+    const third = await openDocument(h.deps, ID, h.sender as never, 'suggestions');
+    expect(h.postDocPort).toHaveBeenLastCalledWith({ t: 'doc', channel: third.channel, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' }, h.ports[4], h.sender.id);
   });
 
   it('refuses a byte kind as invalid and a missing artifact as notFound, opening no channel', async () => {

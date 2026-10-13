@@ -40,6 +40,8 @@ describe('HostDocChannels', () => {
     h.channels.open(open(4));
     expect(h.opened.map((o) => o.message)).toEqual([{ t: 'doc', channel: 4, artifactId: ID, actor: { kind: 'human' } }]);
     expect(h.channels.size).toBe(1);
+    h.channels.open({ ...open(5), doc: 'suggestions' }); // P3-A M8
+    expect(h.opened.at(-1)!.message).toEqual({ t: 'doc', channel: 5, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' });
   });
 
   it('delivers frames in order, holding those that arrive before the port is started; drops a frame for an unknown channel', () => {

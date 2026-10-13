@@ -4,7 +4,9 @@
 export const commands = [
   'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete', 'artifacts.duplicate',
   'artifacts.search', 'artifacts.versions', 'artifacts.saveVersion', 'artifacts.nameVersion', 'artifacts.restore', 'artifacts.markViewed',
-  'artifacts.pruneVersions', 'artifacts.versionState', 'artifacts.attributions', 'artifacts.uploadAsset',
+  'artifacts.pruneVersions', 'artifacts.versionState', 'artifacts.attributions',
+  'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', // P3-A M8
+  'artifacts.uploadAsset',
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
   'artifacts.export', // P3-A M7: main's
 ] as const;

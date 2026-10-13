@@ -13,9 +13,9 @@
 //
 // What an editor shows (P3-G's header maps it): the provider's SaveState, and `readOnly` when the store is (a newer app
 // wrote it), asked at each connect. A renderer replica throttles its cursor awareness to one frame per 50 ms.
-import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
-import { newDoc } from '@artifacts/yjs';
+import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
@@ -69,8 +69,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   });
 
   class Replica implements DocumentHandle {
-    readonly doc = newDoc();
-    readonly provider = new PortProvider(this.doc, { log, awarenessThrottleMs: AWARENESS_THROTTLE_MS });
+    readonly doc: Doc;
+    readonly provider: PortProvider;
     private readOnly = false;
     private closed = false;
     private connecting = false; // an open is in flight
@@ -82,7 +82,12 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private settleFirst: { resolve: () => void; reject: (error: unknown) => void } | null = null;
     readonly first: Promise<void>;
 
-    constructor(readonly artifactId: string) {
+    constructor(
+      readonly artifactId: string,
+      private readonly which: ArtifactDocOption['doc'],
+    ) {
+      this.doc = which === 'suggestions' ? newSuggestionDoc() : newDoc();
+      this.provider = new PortProvider(this.doc, { log, awarenessThrottleMs: AWARENESS_THROTTLE_MS });
       this.first = new Promise((resolve, reject) => (this.settleFirst = { resolve, reject }));
       this.provider.subscribe((state) => this.changed(state));
     }
@@ -122,7 +127,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       const generation = this.generation;
       const stale = () => this.closed || generation !== this.generation;
       try {
-        const { channel } = await call('artifacts.open', { artifactId: this.artifactId });
+        const { channel } = await call('artifacts.open', { artifactId: this.artifactId, ...(this.which && { doc: this.which }) });
         if (stale()) return; // a port that still comes is closed by the window's route when nobody takes it
         const port = await ports.take(channel);
         if (stale()) return port.close();
@@ -205,8 +210,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   }
 
   return {
-    async open(artifactId) {
-      const replica = new Replica(artifactId);
+    async open(artifactId, options) {
+      const replica = new Replica(artifactId, options?.doc);
       replicas.add(replica);
       void replica.connect();
       await replica.first;
@@ -222,7 +227,9 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       return { path };
     },
     versionState: async (artifactId, version) => (await call('artifacts.versionState', typeof version === 'number' ? { artifactId, versionId: version } : { artifactId, seq: version.seq })).bytes,
-    attributions: async (artifactId, fromSeq, toSeq) => (await call('artifacts.attributions', { artifactId, fromSeq, toSeq })).bytes,
+    attributions: async (artifactId, fromSeq, toSeq, options) => (await call('artifacts.attributions', { artifactId, fromSeq, toSeq, ...(options?.doc && { doc: options.doc }) })).bytes,
+    acceptSuggestion: (artifactId, ranges) => call('artifacts.acceptSuggestion', { artifactId, ranges }),
+    rejectSuggestion: (artifactId, ranges) => call('artifacts.rejectSuggestion', { artifactId, ranges }),
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
   };

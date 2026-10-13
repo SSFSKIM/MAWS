@@ -83,6 +83,15 @@ export const ArtifactsChangedSchema = z.strictObject({
 export type ArtifactsChanged = z.infer<typeof ArtifactsChangedSchema>;
 
 // What a store refusal carries in `IpcError.issues`.
+// Which of an artifact's documents a replica opens or an attribution read covers (Decision Log 45): its suggestion doc,
+// the artifact with its pending proposals on it; omitted, the artifact's own.
+export const ArtifactDocSchema = z.enum(['suggestions']);
+// A range of an artifact's suggestion doc (Decision Log 45): the ids of the items an editor's selection starts and ends
+// at (`@y/prosemirror`'s `mapResolvedPositionsToRelativePositions`, `relStart.item` and `relEnd.item`).
+const ItemIdSchema = z.strictObject({ client: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), clock: z.number().int().nonnegative() });
+export const SuggestionRangeSchema = z.strictObject({ start: ItemIdSchema, end: ItemIdSchema });
+const SuggestionRanges = z.array(SuggestionRangeSchema).min(1).max(1_000);
+
 export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */] as const;
 export const ArtifactRefusalSchema = z.strictObject({ reason: z.enum(ARTIFACT_REFUSALS), data: z.record(z.string(), z.unknown()) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
@@ -157,7 +166,14 @@ export const commands = {
     z.strictObject({ bytes: Bytes }),
   ),
   // The merged attribution (an encoded ContentMap) of every row overlapping [fromSeq, toSeq] (Decision Log 23a).
-  'artifacts.attributions': host(z.strictObject({ artifactId: Id, fromSeq: Seq, toSeq: Seq }), z.strictObject({ bytes: Bytes })),
+  // `doc: 'suggestions'`: the suggestion doc's (who proposed what; Decision Log 45).
+  'artifacts.attributions': host(z.strictObject({ artifactId: Id, fromSeq: Seq, toSeq: Seq, doc: ArtifactDocSchema.optional() }), z.strictObject({ bytes: Bytes })),
+  // The owner accepts proposals (Decision Log 45): copied into the artifact as the human's write, credited to their
+  // suggester; `revision` the artifact's after it. A range that takes words of an inserted block without the block is
+  // refused `invalid {reason: 'partialBlock'}`; one naming no proposal, `invalid {range}`.
+  'artifacts.acceptSuggestion': host(z.strictObject({ artifactId: Id, ranges: SuggestionRanges }), z.strictObject({ revision: Seq })),
+  // The owner rejects proposals: proposed content leaves the suggestion doc; content a proposal deleted comes back.
+  'artifacts.rejectSuggestion': host(z.strictObject({ artifactId: Id, ranges: SuggestionRanges }), z.strictObject({ revision: Seq })),
   // The human's asset upload (Decision Log 25l): content-addressed, deduplicated per artifact, ≤ 16 MiB.
   'artifacts.uploadAsset': host(
     z.strictObject({ artifactId: Id, name: z.string().min(1).max(255), mime: z.string().min(1).max(255), bytes: Bytes.refine((bytes) => bytes.length <= ARTIFACT_MAX_BYTES, `at most ${ARTIFACT_MAX_BYTES} bytes`) }),
@@ -191,7 +207,8 @@ export const commands = {
   ),
   // A replica's port to the document (X24, Decision Log 13): main posts the port to the asking window on `maws:doc-port`
   // with this `channel`, and the host attaches the other end with the human as actor. Refused for a byte kind (`invalid`).
-  'artifacts.open': main(z.strictObject({ artifactId: Id }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
+  // `doc: 'suggestions'` opens the artifact's suggestion doc (Decision Log 45).
+  'artifacts.open': main(z.strictObject({ artifactId: Id, doc: ArtifactDocSchema.optional() }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
   // The library's Export (X31; M7): main's export service writes the artifact's live revision, or a version's, as
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the

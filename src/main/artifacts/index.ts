@@ -38,7 +38,7 @@ export interface ArtifactsDeps {
 
 export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
-  register('artifacts.open', ({ artifactId }, { sender }) => openDocument(deps, artifactId, sender));
+  register('artifacts.open', ({ artifactId, doc }, { sender }) => openDocument(deps, artifactId, sender, doc));
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);
