@@ -12,7 +12,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 export interface OpScope {
-  // Writes the op row now. Called inside the savepoint of the write that completes the op; anywhere else it throws.
+  // Writes the op row now. Called inside the savepoint of the write that completes the op (its last: a write after it
+  // would fall outside the op's atomicity, which nothing here can detect); outside any savepoint it throws.
   record(result: unknown): void;
 }
 
