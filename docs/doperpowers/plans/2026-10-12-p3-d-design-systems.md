@@ -21,7 +21,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
 
 - [x] (2026-10-12 21:20 PDT) Grounding at master 4a51531b with A's branch merged (65f9a0f5 + fac0d0e1): the parent's §4 and §5, the ledger, A's execution document and its M1 code (`src/artifacts/host.ts`, the binding module, the guides' placeholders under `src/artifacts/types/design_system/`, `src/shared/artifacts/`), the `ask` tool's schema (`src/shared/maws/tools.ts`), the settings schema at version 13, the app's tokens, the designer skill's `SKILL.md`, `guidelines-authoring.md` and the FRAME example, U1's record of Claude's shape, the DTCG 2025.10 format (designtokens.org/tr/2025.10/format).
 - [x] (2026-10-12 21:40 PDT) This document written; the three stances commissioned for the owner (§D11).
-- [ ] M1 — The token core: the DTCG model, the roles, `tokens.css`, the Office mapping.
+- [x] (2026-10-12 23:05 PDT) M1 — The token core: the DTCG model, the roles, `tokens.css`, the Office mapping. Commits 53a9d07f, fixes d124f508..87603f16 (the task review's four Important findings: an opaque-alpha fixed point, nested `$extends`, location-level `$ref` cycles, type classes through whole-typography aliases); re-review clean. 57/57 in `src/artifacts/design-system`; typecheck and lint green.
 - [ ] M2 — The law, the canon, the hard-don'ts check and the Claude-shape converter.
 - [ ] M3 — The document model and the kind adapter.
 - [ ] M4 — The apply-and-restyle API and the Design System page.
