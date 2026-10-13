@@ -1,6 +1,7 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
-import { checkUpdate, hasPending } from './check';
+import { contentIdsOf } from './attribution';
+import { checkUpdate, hasPending, newStructClients, wouldChange } from './check';
 import { applyV1, diffV1, mergeUpdates, newDoc, stateVector } from './doc';
 
 // Each bad shape is first applied unchecked to a scratch doc, to show it is one plain v14 would hold outside its log
@@ -222,5 +223,39 @@ describe('checkUpdate', () => {
     expect(checkUpdate(host, update)).toBeNull();
     applyV1(host, update);
     expect(hasPending(host)).toBe(false);
+  });
+});
+
+// What the host asks of an update before it applies one (Decision Log 6 and 12): which clientIDs it writes new structs
+// under (a clientID bound to another actor may not gain any), and whether it would change the doc at all (a store
+// opened read-only refuses only a frame that would).
+describe('newStructClients and wouldChange', () => {
+  it('names only the clients whose structs reach past what the doc has', () => {
+    const a = newDoc();
+    a.get('t').insert(0, 'abc');
+    const host = newDoc();
+    applyV1(host, diffV1(a));
+    const b = newDoc();
+    applyV1(b, diffV1(host));
+    b.get('t').insert(3, 'def');
+    const step2 = diffV1(b); // restates a's structs, which the host has, and carries b's new ones
+    expect(newStructClients(host, contentIdsOf(step2))).toEqual([b.clientID]);
+    expect(newStructClients(host, contentIdsOf(diffV1(a)))).toEqual([]);
+  });
+
+  it('is false for a restatement of what the doc holds and true for a new insert or a new deletion', () => {
+    const a = newDoc();
+    a.get('t').insert(0, 'abcdef');
+    a.get('t').delete(0, 1);
+    const host = newDoc();
+    applyV1(host, diffV1(a));
+    expect(wouldChange(host, contentIdsOf(diffV1(a)))).toBe(false);
+    expect(wouldChange(host, contentIdsOf(diffV1(newDoc())))).toBe(false);
+    const sv = stateVector(a);
+    a.get('t').delete(0, 2); // deletions only: no struct reaches past the host's clocks
+    expect(newStructClients(host, contentIdsOf(diffV1(a, sv)))).toEqual([]);
+    expect(wouldChange(host, contentIdsOf(diffV1(a, sv)))).toBe(true);
+    a.get('t').insert(0, 'x');
+    expect(wouldChange(host, contentIdsOf(diffV1(a, sv)))).toBe(true);
   });
 });

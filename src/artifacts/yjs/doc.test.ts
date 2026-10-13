@@ -3,7 +3,7 @@ import { Schema } from '@tiptap/pm/model';
 import * as Y from '@y/y';
 import { ySyncPluginKey } from '@y/prosemirror';
 import { describe, expect, it } from 'vitest';
-import { applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, onUpdate, stateV2, stateVector, transact } from './doc';
+import { adoptClientId, applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, onUpdate, stateV2, stateVector, transact } from './doc';
 
 describe('the binding module’s docs and encodings', () => {
   it('round-trips a schema-agnostic doc through the wire (V1), a version state (V2) and a reload, identically', () => {
@@ -53,6 +53,23 @@ describe('the binding module’s docs and encodings', () => {
 
   it('names its pins', () => {
     expect(bindingVersion).toBe('y14-rc28/ypm2-15');
+  });
+
+  it('writes under an adopted clientID, continuing the clocks a reload holds (a host replica keeps one per actor)', () => {
+    const first = newDoc();
+    adoptClientId(first, 4242);
+    first.get('t').insert(0, 'abc');
+    expect(first.clientID).toBe(4242);
+    const reloaded = newDoc();
+    applyV1(reloaded, diffV1(first)); // loaded under its own random clientID, then adopts the bound one
+    adoptClientId(reloaded, 4242);
+    reloaded.get('t').insert(3, 'd');
+    expect(reloaded.clientID).toBe(4242);
+    const host = newDoc();
+    applyV1(host, diffV1(first));
+    applyV1(host, diffV1(reloaded, stateVector(host)));
+    expect(host.get('t').toString()).toBe('abcd');
+    expect([...Y.decodeStateVector(stateVector(host)).keys()]).toEqual([4242]); // one writer, one clientID
   });
 });
 

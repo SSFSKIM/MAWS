@@ -81,6 +81,24 @@ function ownItemAt(items: Y.Item[] | undefined, clock: number): Y.Item | null {
   return null;
 }
 
+// The clientIDs under which an update (as its content ids) writes structs the doc does not have yet: what the host
+// binds to the sending actor, or refuses when bound to another (Decision Log 6). Structs it restates are no-ops.
+export function newStructClients(doc: Doc, ids: Y.ContentIds): number[] {
+  const clients: number[] = [];
+  ids.inserts.forEach((range, client) => {
+    if (range.clock + range.len > doc.store.getClock(client) && clients.at(-1) !== client) clients.push(client);
+  });
+  return clients;
+}
+
+// Whether applying an update (as its content ids) would change the doc: a new struct, or a deletion of content the doc
+// has not deleted. A step 2 restates its sender's whole delete set, so only the difference counts. Building the doc's
+// delete set walks its store: for the rare caller (a store opened read-only), not the commit path.
+export function wouldChange(doc: Doc, ids: Y.ContentIds): boolean {
+  if (newStructClients(doc, ids).length > 0) return true;
+  return !Y.diffIdSet(ids.deletes, Y.createDeleteSetFromStructStore(doc.store)).isEmpty();
+}
+
 // After an apply: parked structs or deletions, or a hole behind a skip, mean `checkUpdate` missed a case and the doc
 // holds state the log does not (the caller evicts it).
 export const hasPending = (doc: Doc): boolean => doc.store.pendingStructs !== null || doc.store.pendingDs !== null || !doc.store.skips.isEmpty();

@@ -16,6 +16,13 @@ export const bindingVersion = 'y14-rc28/ypm2-15';
 // gc on: deleted content is collected, versions are full states (no state-pair snapshots).
 export const newDoc = (): Doc => new Y.Doc({ gc: true });
 
+// Makes `doc` write under a known clientID (the host's replica of one actor reuses its bound clientID across reloads,
+// so the state vector holds one host clientID per actor). Only after the doc has loaded that clientID's whole history:
+// v14 gives a doc a fresh clientID whenever an applied (non-local) update carries structs of its own.
+export function adoptClientId(doc: Doc, clientId: number): void {
+  doc.clientID = clientId;
+}
+
 // The wire (y-protocols sync) and the update log carry V1; version states are V2, which is smaller.
 export const stateVector = (doc: Doc): Uint8Array => Y.encodeStateVector(doc);
 export const diffV1 = (doc: Doc, sv?: Uint8Array): Uint8Array => Y.encodeStateAsUpdate(doc, sv);
