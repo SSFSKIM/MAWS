@@ -388,6 +388,28 @@ describe('lettered and roman lists', () => {
     letteredInNumbered: { type: 'orderedList', attrs: { start: 1, type: null }, content: [{ type: 'listItem', content: [p(t('n')), list('a', 1, 'x', 'y')] }] },
     multiParagraph: list('a', 1, [p(t('first')), p(t('second'))], 'next'),
   };
+  it.each([
+    ['a', 1],
+    ['i', 1],
+    ['I', 4],
+  ])('keeps whitespace-only lines of code in an item of a `%s` list exactly', (type, start) => {
+    const code = 'one\n\ntwo\n  \nthree\n\t\nfour\n \t ';
+    const doc = docOf([schema.nodeFromJSON(list(type as string, start as number, [p(t('steps')), { type: 'codeBlock', attrs: { language: 'ts' }, content: [t(code)] }], 'next'))]);
+    const [back] = md.parse(md.serialize(doc));
+    expect(back.child(0).child(1).textContent).toBe(code);
+    expect(stored(docOf([back]))).toEqual(stored(doc));
+  });
+
+  // The recorded residual (Decision Log 19): a one-item list whose marker reads as a letter and as a roman numeral
+  // cannot say which; a single letter reads as a letter except `i`, which reads as roman.
+  it.each([
+    ['lettered from i (the ninth letter)', { type: 'a', start: 9 }, { type: 'i', start: 1 }],
+    ['roman from v (five)', { type: 'i', start: 5 }, { type: 'a', start: 22 }],
+  ])('known gap: a one-item list %s reads back as the other style', (_name, attrs, read) => {
+    const [back] = md.parse(md.serialize(docOf([schema.nodeFromJSON(list(attrs.type, attrs.start, 'only'))])));
+    expect({ type: back.attrs.type, start: back.attrs.start }).toEqual(read);
+  });
+
   it.each(Object.entries(lists))('reads the serializer’s %s back as the same list', (_name, json) => {
     const doc = docOf([schema.nodeFromJSON(json)]);
     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids }))))).toEqual(stored(doc));

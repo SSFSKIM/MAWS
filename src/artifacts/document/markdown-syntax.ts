@@ -170,7 +170,8 @@ function letteredListToken(src: string, lexer: Lexer): MarkdownToken | undefined
   for (const [at, line] of lines.entries()) {
     const current = items[items.length - 1];
     if (current && !/\S/.test(line)) {
-      current.lines.push('');
+      // a blank line; inside code, a whitespace-only line keeps what it holds past the item's indentation
+      current.lines.push(raw ? line.slice(Math.min(column, /^ */.exec(line)![0].length)) : '');
       blank = true;
       continue;
     }
