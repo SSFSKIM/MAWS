@@ -10,7 +10,7 @@
 import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
-import type { DocumentHandleWithHold } from '@artifacts/document/editor/host-types';
+import type { DocumentHandle } from '@artifacts/document/editor/host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
@@ -46,7 +46,7 @@ const SEED = {
 
 interface World {
   host: MemoryDocumentHost;
-  handles: Record<Replica, DocumentHandleWithHold>;
+  handles: Record<Replica, DocumentHandle>;
 }
 
 async function openWorld(): Promise<World> {

@@ -10,14 +10,14 @@ import { schemaFor } from '../../schema';
 import { addTab } from '../../tabs';
 import { addThread, getThread, listThreads, reply, resolve } from '../../threads';
 import { DocumentEditor } from '../DocumentEditor';
-import type { DocumentHandleWithHold } from '../host-types';
+import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, ticks, until } from '../test-world';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
 import { covered, findPos, highlighted, select } from './test-support';
 
 let world: World | null = null;
-let handles: DocumentHandleWithHold[] = [];
+let handles: DocumentHandle[] = [];
 afterEach(() => {
   cleanup();
   for (const handle of handles) handle.close();
@@ -31,7 +31,7 @@ const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color:
 
 interface Mounted {
   editor: () => Editor;
-  handle: DocumentHandleWithHold;
+  handle: DocumentHandle;
   opened: CommentedPassage[];
   overlay: () => CommentOverlayProps;
 }

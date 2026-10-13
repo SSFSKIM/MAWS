@@ -9,7 +9,7 @@ import { decodeFrame, encodeFrame, type Frame } from '../../provider/frames';
 import { PortProvider, type Restored } from '../../provider/port';
 import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../yjs';
 import type { DocumentState } from '../../host';
-import type { DocumentHandleWithHold, EditorHost } from './host-types';
+import type { DocumentHandle, EditorHost } from './host-types';
 
 interface Connection {
   port: MessagePort;
@@ -88,7 +88,7 @@ export class MemoryDocumentHost {
 }
 
 /** A replica of the host's document as an editor holds it, over a fresh connection. */
-export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (line: string) => void } = {}): DocumentHandleWithHold & { provider: PortProvider } {
+export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (line: string) => void } = {}): DocumentHandle & { provider: PortProvider } {
   const doc = newDoc();
   const provider = new PortProvider(doc, { log: options.log });
   const port = host.connect();
@@ -107,7 +107,7 @@ export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (lin
 }
 
 /** Resolves once the handle has applied the host's step 2 (the document as the host holds it). */
-export function whenSynced(handle: DocumentHandleWithHold): Promise<void> {
+export function whenSynced(handle: DocumentHandle): Promise<void> {
   if (handle.state().synced) return Promise.resolve();
   return new Promise((resolve) => {
     const off = handle.subscribe((state) => {

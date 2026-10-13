@@ -9,12 +9,12 @@ import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
 import { listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
-import type { DocumentHandleWithHold, EditorHost } from './host-types';
+import type { DocumentHandle, EditorHost } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { TAB, World, doc, endOf, para, until } from './test-world';
 
 let world: World | null = null;
-let handles: DocumentHandleWithHold[] = [];
+let handles: DocumentHandle[] = [];
 afterEach(() => {
   cleanup();
   for (const handle of handles) handle.close();
@@ -25,7 +25,7 @@ afterEach(() => {
 
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
-async function mount(content: JSONContent, host: EditorHost = owner): Promise<{ editor: () => Editor; handle: DocumentHandleWithHold }> {
+async function mount(content: JSONContent, host: EditorHost = owner): Promise<{ editor: () => Editor; handle: DocumentHandle }> {
   world = new World(content);
   const handle = openMemoryHandle(world.host, { log: () => {} });
   handles.push(handle);

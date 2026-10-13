@@ -26,7 +26,7 @@ import { ThreadsRail } from './comments/ThreadsRail';
 import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
 import { FindBar } from './Find';
-import { cssColor, type DocumentHandleWithHold, type EditorHost } from './host-types';
+import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
 import type { ViewEnvironment } from './nodes/views';
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
@@ -36,7 +36,7 @@ import './theme.css';
 
 export interface DocumentEditorProps {
   artifactId: string;
-  handle: DocumentHandleWithHold;
+  handle: DocumentHandle;
   host: EditorHost;
   /** Draws a diagram; mermaid, loaded on first use, by default. */
   renderDiagram?: ViewEnvironment['renderDiagram'];
@@ -221,7 +221,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 
 // The page's scroll box and, over it, the comment surface's overlay with the editor's reach. The overlay re-renders at
 // most once a frame as the passages move (an edit, a scroll, a resize); the page does not.
-function PageFrame({ editor, handle, author, comments }: { editor: Editor; handle: DocumentHandleWithHold; author: CommentAuthor; comments: DocumentComments | undefined }) {
+function PageFrame({ editor, handle, author, comments }: { editor: Editor; handle: DocumentHandle; author: CommentAuthor; comments: DocumentComments | undefined }) {
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
   const pending = useRef<number | null>(null);

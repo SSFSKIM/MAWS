@@ -11,7 +11,7 @@ import { relativePositionsToResolvedPositions, ynodeToPmnode } from '../../../yj
 import { schemaFor } from '../../schema';
 import { tabBody } from '../../tabs';
 import { getThread, listThreads, liveThreadIds, threadStates } from '../../threads';
-import type { DocumentHandleWithHold } from '../host-types';
+import type { DocumentHandle } from '../host-types';
 import { TAB, World, ticks, until, type Replica } from '../test-world';
 import { Comments, commentSelection, liveRanges } from './plugins';
 
@@ -36,7 +36,7 @@ export interface CommentWorld {
   world: World;
   A: Replica;
   B: Replica;
-  agent: DocumentHandleWithHold;
+  agent: DocumentHandle;
   /** Every replica holds the host's state and every editor shows its replica's body. */
   settle(): Promise<void>;
   /** A fresh pair of editors over the same host (a reload). */
@@ -50,7 +50,7 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
 /** A world; `paste: false` builds the editors without the paste dedupe (S5's contrast). */
 export async function commentWorld({ paste = true, seed = seedJSON() }: { paste?: boolean; seed?: JSONContent } = {}): Promise<CommentWorld> {
   const world = new World(seed);
-  const withComments = (handle: DocumentHandleWithHold) => [Comments.configure({ doc: handle.doc, tabId: TAB, paste })];
+  const withComments = (handle: DocumentHandle) => [Comments.configure({ doc: handle.doc, tabId: TAB, paste })];
   const A = await world.replica('a', withComments);
   const B = await world.replica('b', withComments);
   const agent = await world.bare();

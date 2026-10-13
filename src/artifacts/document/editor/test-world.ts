@@ -6,7 +6,7 @@ import { Collaboration } from '../collab';
 import { coreExtensionOptions } from '../ids';
 import { extensions, schemaFor } from '../schema';
 import { createDocument, tabBody } from '../tabs';
-import type { DocumentHandleWithHold } from './host-types';
+import type { DocumentHandle } from './host-types';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from './memory-host';
 
 export const TAB = 't1';
@@ -27,14 +27,14 @@ export const ticks = async (n = 10): Promise<void> => {
 };
 
 export interface Replica {
-  handle: DocumentHandleWithHold;
+  handle: DocumentHandle;
   editor: Editor;
 }
 
 export class World {
   readonly host = new MemoryDocumentHost();
   private readonly replicas: Replica[] = [];
-  private readonly bareHandles: DocumentHandleWithHold[] = [];
+  private readonly bareHandles: DocumentHandle[] = [];
   private n = 0;
 
   constructor(content: JSONContent) {
@@ -42,7 +42,7 @@ export class World {
   }
 
   /** A replica with an editor bound to a tab, once its content has rendered; `extra` adds extensions over its handle. */
-  async replica(name: string, extra: (handle: DocumentHandleWithHold) => Extensions = () => [], tabId = TAB): Promise<Replica> {
+  async replica(name: string, extra: (handle: DocumentHandle) => Extensions = () => [], tabId = TAB): Promise<Replica> {
     const handle = openMemoryHandle(this.host, { log: () => {} });
     await whenSynced(handle);
     const element = document.createElement('div');
@@ -63,7 +63,7 @@ export class World {
   }
 
   /** A replica with no editor (the agent's stands behind the host in the product). */
-  async bare(): Promise<DocumentHandleWithHold> {
+  async bare(): Promise<DocumentHandle> {
     const handle = openMemoryHandle(this.host, { log: () => {} });
     await whenSynced(handle);
     this.bareHandles.push(handle);

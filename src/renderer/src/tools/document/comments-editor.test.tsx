@@ -9,7 +9,7 @@ import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { select } from '@artifacts/document/editor/comments/test-support';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
-import type { DocumentHandleWithHold } from '@artifacts/document/editor/host-types';
+import type { DocumentHandle } from '@artifacts/document/editor/host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { World, doc, para, ticks, until } from '@artifacts/document/editor/test-world';
 import { schemaFor } from '@artifacts/document/schema';
@@ -27,7 +27,7 @@ const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
 let world: World | null = null;
-let handle: DocumentHandleWithHold | null = null;
+let handle: DocumentHandle | null = null;
 let offComposer = () => {};
 beforeEach(() => {
   resetShellStores();

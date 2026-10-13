@@ -3,12 +3,8 @@
 // The handle is opened and owned outside the editor (the tab's store handle, M8), so a remount never reopens it.
 import type { ArtifactHost, DocumentHandle } from '../../host';
 
-/**
- * The handle as the editor drives it: X24's `DocumentHandle` plus the provider's composition hold, which the ledger's
- * X24 row puts on the handle (H1 request k, landing in A's M4). Until A's handle carries it, the renderer's wrapper
- * (M8) supplies it from the provider, and every fake in the tests implements exactly this interface.
- */
-export type DocumentHandleWithHold = DocumentHandle & { holdRemote(on: boolean): void };
+/** The handle as the editor drives it: X24's `DocumentHandle`, the provider's composition hold on it since A's M4. */
+export type { DocumentHandle };
 
 /** The part of `ArtifactHost` the editor calls: an image's URL, an upload, and who is typing. */
 export type EditorHost = Pick<ArtifactHost, 'assetUrl' | 'uploadAsset' | 'identity'>;

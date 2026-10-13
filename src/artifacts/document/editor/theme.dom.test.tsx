@@ -9,7 +9,7 @@ import tokensCss from '../../../renderer/src/styles/tokens.css?raw';
 import chromeCss from './chrome.css?raw';
 import { DocumentEditor } from './DocumentEditor';
 import themeCss from './theme.css?raw';
-import type { DocumentHandleWithHold } from './host-types';
+import type { DocumentHandle } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { World, doc, para, until } from './test-world';
 
@@ -90,7 +90,7 @@ describe('the author colours', () => {
 });
 
 describe('the rendered page without a design system', () => {
-  let handle: DocumentHandleWithHold | null = null;
+  let handle: DocumentHandle | null = null;
   let world: World | null = null;
   beforeAll(() => {
     const style = document.createElement('style');
