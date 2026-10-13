@@ -56,12 +56,13 @@ interface Drag {
   source: Slot;
   sourceSlots: Slot[];
   node: Slot;
+  name: string; // the source node's type: a re-insert as another type is a retype
 }
 
 /** Edits that reached a carried block's old copy before the update performing the carry (seen before the apply). */
 interface Late {
   carry: Carry;
-  inserts: Array<{ text: string; slots: Slot[]; after: Slot | null; block: Slot }>;
+  inserts: Array<{ text: string; slots: Slot[]; after: Slot | null; before: Slot | null; block: Slot }>;
   deletes: Slot[];
 }
 
@@ -167,27 +168,43 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
       const node = item.content.type as Node;
       const id: unknown = node.getAttr('id');
       const now = typeof id === 'string' ? inserted.get(id) : undefined;
-      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), node: now });
+      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), node: now, name: node.name });
     });
     return out;
   }
 
-  /** What reached a carried block's old copy that the carry did not take along (seen before the apply). */
-  function lateEdits(live: Doc, carry: Carry): Late | null {
+  /**
+   * What reached a carried block's old copy after the agent's replica took it (seen before the apply): characters the
+   * carry did not take along and the performing update does not delete (the agent's own replaced words it deletes),
+   * and carried characters deleted since.
+   */
+  function lateEdits(live: Doc, carry: Carry, deletes: ContentIds['deletes']): Late | null {
     const source = carry.source && nodeAt(live, carry.source);
     if (!source) return null;
     const from = new Set(carry.from.map(slotKey));
     const late: Late = { carry, inserts: [], deletes: carry.from.filter((slot) => !itemAt(live, slot) || itemAt(live, slot)!.deleted) };
     for (const block of textblocksY(source)) {
+      // a run of late characters sits right after the carried character it follows; one that follows words the agent
+      // replaced sits before the next carried character, after the agent's new words
       let previous: Slot | null = null;
       let run: Late['inserts'][number] | null = null;
+      const open: Array<Late['inserts'][number]> = [];
       for (const { slot, ch } of charSlots(block)) {
-        if (from.has(slotKey(slot))) run = null;
+        if (from.has(slotKey(slot))) {
+          for (const waiting of open.splice(0)) waiting.before = slot;
+          previous = slot;
+          run = null;
+        } else if (deletes.has(slot[0], slot[1])) {
+          previous = null;
+          run = null;
+        }
         else if (run) {
           run.text += ch;
           run.slots.push(slot);
-        } else late.inserts.push((run = { text: ch, slots: [slot], after: previous, block: itemOf(block) }));
-        previous = slot;
+        } else {
+          late.inserts.push((run = { text: ch, slots: [slot], after: previous, before: null, block: itemOf(block) }));
+          open.push(run);
+        }
       }
     }
     return late.inserts.length || late.deletes.length ? late : null;
@@ -216,7 +233,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
     const carriedNodes = new Set(performing.map((carry) => carry.node).filter((slot): slot is Slot => slot !== undefined).map(slotKey));
     const inserted = insertedBlocks(items);
     const moved = ids.deletes.isEmpty() ? [] : drags(live, inserted, ds, carriedNodes);
-    const late = performing.map((carry) => lateEdits(live, carry)).filter((entry): entry is Late => entry !== null);
+    const late = performing.map((carry) => lateEdits(live, carry, ds)).filter((entry): entry is Late => entry !== null);
     if (performing.length === 0 && moved.length === 0 && !registry.hasActive) return null;
     // Deletions that are part of a move are not edits: the moves this update performs (registered or a drag), and any
     // re-insert of a block an earlier carry moved (a stale replica moving the old copy again).
@@ -225,7 +242,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
       // the carries this update performs are live from here on; their own deletions are not edits to replay
       for (const carry of performing) registry.activate(carry);
       for (const { carry, inserts, deletes } of late) {
-        for (const run of inserts) replay(doc, run.text, run.slots, run.after, null, run.block);
+        for (const run of inserts) replay(doc, run.text, run.slots, run.after, run.before, run.block);
         for (const slot of deletes) {
           const k = carry.from.findIndex((from) => slotKey(from) === slotKey(slot));
           const at = k >= 0 ? locateSlot(doc, carry.to[k] as Slot) : null;
@@ -258,7 +275,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
         const now = deepSlotIds(node);
         if (now.length !== drag.sourceSlots.length) continue;
         registry.addCopy(drag.node, drag.blockId, new Map(now.map((slot, k) => [slotKey(slot), drag.sourceSlots[k]])));
-        carries.push({ kind: 'move', blockId: drag.blockId, from: drag.sourceSlots, to: now, source: drag.source, node: drag.node });
+        carries.push({ kind: node.name === drag.name ? 'move' : 'retype', blockId: drag.blockId, from: drag.sourceSlots, to: now, source: drag.source, node: drag.node });
       }
       if (carries.length) stash.set(doc, carries);
     };

@@ -215,6 +215,40 @@ describe('forwarding (S4 moves A)', () => {
     expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
     expect(dupes(ids(host.live))).toEqual([]);
   });
+  it('a keystroke that raced the agent’s rewrite into another type is carried over, and the words the agent replaced stay replaced', () => {
+    const adapter = documentAdapter();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer();
+    const applied = applyEdit(agent, [{ op: 'replace_block', id: 'p4', markdown: '## Closing words of this section, with enough words to look like prose that a person wrote.' }]);
+    adapter.registerCarries(ARTIFACT, applied.carries);
+    typeAt(person, 'p4', textOf(person, 'p4').length - 1, ' today'); // before the final period, into the old paragraph
+    typeAt(person, 'p4', 'Closing paragraph'.length, ' text'); // right after a word the agent replaces
+    host.send(person, human);
+    const { outcome } = { outcome: host.send(agent, agent1) };
+    host.pull(person);
+    expect(nodeOf(host.live, 'p4').name).toBe('heading');
+    expect(textOf(host.live, 'p4')).toBe('Closing words text of this section, with enough words to look like prose that a person wrote today.');
+    expect(outcome?.provenance?.[0]?.kind).toBe('retype');
+    expect(textOf(person, 'p4')).toBe(textOf(host.live, 'p4'));
+  });
+
+  it('a human retype (the editor re-inserting a block under its id as another type) keeps the characters’ authors, marked retyped', () => {
+    const adapter = documentAdapter();
+    const host = new Host(seedDoc(), adapter);
+    const person = host.peer();
+    const index = DocIndex.of(person);
+    const p2 = index.find('p2')!.top;
+    const heading = schemaFor().nodes.heading.create({ id: 'p2', level: 2 }, index.pm(p2).content);
+    const at = order(person).indexOf('p2');
+    transact(person, () => {
+      body(person).delete(at, 1);
+      body(person).insert(at, [pmnodeToDelta(heading)]);
+    });
+    const outcome = host.send(person, human);
+    expect(outcome?.provenance?.map((carry) => carry.kind)).toEqual(['retype']);
+    expect(carriedBy(host.provenance(), nodeOf(host.live, 'p2')._start!.id)).toBe('retype');
+  });
 });
 
 describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
