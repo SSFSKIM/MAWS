@@ -76,6 +76,40 @@ describe('the claude export of a system’s document', () => {
     expect(validateClaudeTokens(tokens)).toEqual([]);
   });
 
+  // Review M7b-1 (Important): the export reads the references the renderer reads, not a delimiter scan of the text
+  it.each([
+    ['a name with a space', 'assets/Iowan Regular.woff2', 'assets/Iowan Regular.woff2'],
+    ['a ./ prefix', './assets/iowan.woff2', 'assets/iowan.woff2'],
+    ['parentheses', 'assets/iowan(regular).woff2', 'assets/iowan(regular).woff2'],
+    ['a percent-encoding', 'assets/iowan%20regular.woff2', 'assets/iowan regular.woff2'],
+  ])('takes a face’s file as the renderer does, with %s', (_, url, ref) => {
+    const doc = systemDoc({ 'components/document.css': `@font-face { font-family: "Iowan Old Style"; font-weight: 400; src: url("${url}") format("woff2"); }` });
+    expect(claudeExportAssetRefs(doc)).toEqual([ref]);
+    const files = claudeExportFiles(doc, { [ref]: bytesOf('face') });
+    const name = ref.slice('assets/'.length);
+    expect(tokensOf(files).type.fonts).toEqual([{ family: 'Iowan Old Style', file: name, weight: '400', style: 'normal' }]);
+    expect(files[`fonts/${name}`]).toEqual(bytesOf('face'));
+  });
+
+  it('takes canon’s references as the renderer’s frames do: URL attributes, srcset, style and presentation attributes, style blocks', () => {
+    const layout = [
+      '<section id="cover">',
+      '<!-- <img src="assets/commented.png"> -->',
+      '<style>.cover { background: url("./assets/Cover Photo.jpg"); }</style>',
+      '<img src="./assets/Mark Logo.png" srcset="assets/mark@2x.png 2x, assets/mark%203x.png 3x" alt="">',
+      '<div style="background-image: url(&quot;assets/band (wide).png&quot;)"></div>',
+      '<svg><rect fill="url(assets/pattern.svg#dots)"/><use href=\'assets/icons.svg#tick\'/></svg>',
+      '<a href="https://example.com/assets/elsewhere.png">x</a>',
+      '<h1 data-ph="title">Title</h1>',
+      '</section>',
+    ].join('');
+    const doc = systemDoc({ 'layouts/cover.html': layout, 'components/document.css': '.ds-doc blockquote { background: url("assets/quote mark.svg"); }' });
+    // the commented image is a mention in prose, read as a supplementary reference; the remote URL names no asset
+    expect(claudeExportAssetRefs(doc)).toEqual([
+      'assets/Cover Photo.jpg', 'assets/Mark Logo.png', 'assets/band (wide).png', 'assets/commented.png', 'assets/icons.svg', 'assets/mark 3x.png', 'assets/mark@2x.png', 'assets/pattern.svg', 'assets/quote mark.svg',
+    ]);
+  });
+
   it('leaves out a face none of whose files the store holds', () => {
     const doc = systemDoc({ 'components/document.css': DOCUMENT_CSS });
     const files = claudeExportFiles(doc, { 'assets/iowan-regular.woff2': bytesOf('regular') });

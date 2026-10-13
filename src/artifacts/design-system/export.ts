@@ -6,16 +6,51 @@
 // for Claude", zipped. Portable (§4.10).
 import type { Doc } from '../yjs';
 import { systemFaces } from './assets';
-import { assetPathOf, DOCUMENT_CSS_PATH } from './canon';
+import { assetPathOf, DOCUMENT_CSS_PATH, PRESENTATION_ATTRS } from './canon';
+import { urlsIn } from './css-read';
 import { toClaude, type ClaudeFont } from './claude';
 import { readSystem } from './model';
 
 /** A file of Claude's shape: text, or an asset's bytes. */
 export type ClaudeExportFile = string | Uint8Array;
 
-// An `assets/…` reference in a law, a canon file or a stylesheet; `assetPathOf` then normalizes it (its query and
-// fragment dropped, decoded, `..` resolved) or refuses it.
+// An `assets/…` name in prose (the law, a comment): a supplementary reference, such as a face's licence. Prose has no
+// delimiters, so a name read this way ends at a space; what the renderer loads is read from the markup instead.
 const ASSET_MENTION = /(?<![\w/.-])assets\/[^\s"'`()<>,;\\]+/g;
+const COMMENT = /\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g;
+
+// The attributes whose value is one URL, as the canon frames rewrite them (page/frame.ts).
+const URL_ATTRS = new Set(['src', 'href', 'poster', 'xlink:href', 'background', 'data']);
+const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
+const TAG = /<[a-zA-Z][^\s/>]*((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+const ENTITIES: Record<string, string> = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: '\u00a0' };
+const decodeEntities = (text: string) =>
+  text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body: string) => {
+    if (body[0] === '#') return String.fromCodePoint(body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : Number(body.slice(1)));
+    return ENTITIES[body.toLowerCase()] ?? entity;
+  });
+
+/**
+ * The URLs a canon HTML file loads, read as the canon frames read them (`rewriteHtmlAssets`, which has the renderer's
+ * DOMParser; main has none): the URL attributes, each `srcset` candidate, the CSS of `style` and the SVG presentation
+ * attributes, and `<style>` blocks. Comments are not markup.
+ */
+function htmlUrls(html: string): string[] {
+  const markup = html.replace(/<!--[\s\S]*?-->/g, '');
+  const urls: string[] = [];
+  for (const [, css = ''] of markup.matchAll(STYLE_BLOCK)) urls.push(...urlsIn(css));
+  for (const [, attributes = ''] of markup.replace(STYLE_BLOCK, '').matchAll(TAG)) {
+    for (const [, rawName = '', double, single, bare] of attributes.matchAll(ATTRIBUTE)) {
+      const name = rawName.toLowerCase();
+      const value = decodeEntities(double ?? single ?? bare ?? '');
+      if (URL_ATTRS.has(name)) urls.push(value);
+      else if (name === 'srcset') urls.push(...value.split(',').map((candidate) => candidate.trim().split(/\s+/)[0] ?? ''));
+      else if (name === 'style' || PRESENTATION_ATTRS.has(name)) urls.push(...urlsIn(value));
+    }
+  }
+  return urls;
+}
 
 function readExportable(doc: Doc) {
   const system = readSystem(doc);
@@ -24,18 +59,25 @@ function readExportable(doc: Doc) {
 }
 
 /**
- * The assets the export reads (`assets/<name>`, sorted): every one the system's law or canon names, in a URL or in
- * prose (a face's licence named in a comment travels with the face). An asset nothing names is not exported.
+ * The assets the export reads (`assets/<name>`, sorted): what the renderer loads from the system's files, read with its
+ * semantics (`assetPathOf`, the CSS URL reader): the faces of `components/document.css` (`systemFaces`), every `url()`
+ * of a stylesheet, and the URLs of canon HTML; and, as supplementary references, the names the law and the files'
+ * comments mention (a face's licence travels with the face). An asset nothing names is not exported.
  */
 export function claudeExportAssetRefs(doc: Doc): string[] {
-  const { law, files } = readExportable(doc);
+  const { law, tokens, files } = readExportable(doc);
   const refs = new Set<string>();
-  for (const text of [law, ...Object.values(files)]) {
-    for (const [mention] of text.matchAll(ASSET_MENTION)) {
-      const ref = assetPathOf(mention.replace(/\.+$/, '')); // a sentence's full stop is not the name's
-      if (ref) refs.add(ref);
-    }
+  const add = (url: string) => {
+    const ref = assetPathOf(url);
+    if (ref) refs.add(ref);
+  };
+  for (const face of systemFaces(files[DOCUMENT_CSS_PATH], tokens)) for (const ref of face.refs) refs.add(ref);
+  for (const [path, text] of Object.entries(files)) {
+    if (path.endsWith('.css')) urlsIn(text).forEach(add);
+    else if (path.endsWith('.html')) htmlUrls(text).forEach(add);
   }
+  const prose = [law, ...Object.values(files).flatMap((text) => text.match(COMMENT) ?? [])];
+  for (const text of prose) for (const [mention] of text.matchAll(ASSET_MENTION)) add(mention.replace(/\.+$/, '')); // a sentence's full stop is not the name's
   return [...refs].sort();
 }
 
