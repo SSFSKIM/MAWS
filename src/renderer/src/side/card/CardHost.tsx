@@ -34,10 +34,11 @@ export interface CardFrame {
   locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
   showVersion?(version: number | null): void; // the host viewer's onVersion; null: the latest
   // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
-  // card's header before Close (its Resolve or Reopen), and a send of the card's composer that went (a refusal is not),
-  // told before the card turns into its thread or closes (the document records the comment in its thread)
+  // card's header before Close (its Resolve or Reopen), and a send of the card's composer as it sets out; the call it
+  // returns is told whether the send went, before the card turns into its thread or closes, and also after the card went
+  // (a send completes after its card is dismissed or replaced): the document records the comment in its thread
   actions?(card: OpenCard): ReactNode;
-  onSent?(card: OpenCard, sent: { text: string; destination: 'thread' | 'main' }): void;
+  onSending?(card: OpenCard, sending: { text: string; destination: 'thread' | 'main' }): (went: boolean) => void;
   // P3-B end
 }
 

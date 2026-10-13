@@ -130,12 +130,8 @@ function ThreadGlyph({ child }: { child: AppSessionId }) {
 function CardComposer({ card, frame, onDismiss }: { card: OpenCard; frame: CardFrame; onDismiss(): void }) {
   const { anchor, parent, serial } = card;
   const gone = () => cardGone(serial);
-  const onSent = ({ child, text }: { child?: AppSessionId; text: string }) => {
-    frame.onSent?.(card, { text, destination: child ? 'thread' : 'main' }); // P3-B
-    if (child) enterThread(serial, child, text);
-    else onDismiss();
-  };
-  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent });
+  const { onSending } = frame; // P3-B
+  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }) });
   return (
     <>
       {form.screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}

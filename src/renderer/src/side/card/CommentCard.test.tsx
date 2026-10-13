@@ -320,8 +320,8 @@ describe('dismissal', () => {
 });
 
 // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a host's frame may add actions to the card's header
-// (the document's Resolve) and is told of a send that went, before the card turns into its thread or closes (the
-// document records the comment in its thread); a send that did not go tells it nothing
+// (the document's Resolve) and is told of each send as it sets out and then whether it went, before the card turns into
+// its thread or closes and also after the card went (the document keeps the thread and records the comment in it)
 describe('the frame’s card hooks (P3-B)', () => {
   it('draws the frame’s actions in the card’s header, for the card it shows', () => {
     mount('anchored', { ...FRAME, actions: (shown) => <button type="button">Resolve {shown.anchor.locator}</button> });
@@ -329,25 +329,41 @@ describe('the frame’s card hooks (P3-B)', () => {
     expect(card()!.querySelector('header')!.textContent).toContain('Resolve #hero');
   });
 
-  it('tells the frame of a Send to main and a Side thread that went, with the text sent; not of a refusal', async () => {
-    const onSent = vi.fn();
-    mount('anchored', { ...FRAME, onSent });
+  it('tells the frame of each send as it sets out, then whether it went: Send to main, a refusal, a Side thread on Retry', async () => {
+    const settled = vi.fn();
+    const onSending = vi.fn(() => settled);
+    mount('anchored', { ...FRAME, onSending });
     pick();
     await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
     await userEvent.type(field(), ' Look here {Enter}');
-    expect(onSent).toHaveBeenCalledTimes(1);
-    expect(onSent.mock.calls[0]![0]).toMatchObject({ anchor: ANCHOR });
-    expect(onSent.mock.calls[0]![1]).toEqual({ text: 'Look here', destination: 'main' });
+    expect(onSending).toHaveBeenCalledTimes(1);
+    expect(onSending.mock.calls[0]).toMatchObject([{ anchor: ANCHOR }, { text: 'Look here', destination: 'main' }]);
+    expect(settled.mock.calls).toEqual([[true]]);
 
     fake = fakeClient({ 'session.intent.get': null });
     window.maws = fake.client;
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
+    expect(onSending).toHaveBeenCalledTimes(2);
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'no_engine_session', message: 'Not yet' }));
-    expect(onSent).toHaveBeenCalledTimes(1);
+    expect(settled.mock.calls).toEqual([[true], [false]]);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'b2222222-2222-4222-8222-222222222222' }));
-    expect(onSent).toHaveBeenCalledTimes(2);
-    expect(onSent.mock.calls[1]![1]).toEqual({ text: 'Why?', destination: 'thread' });
+    expect(onSending.mock.calls[2]![1]).toEqual({ text: 'Why?', destination: 'thread' });
+    expect(settled.mock.calls).toEqual([[true], [false], [true]]);
+  });
+
+  it('tells the frame how a send ended after its card was closed', async () => {
+    const settled = vi.fn();
+    mount('anchored', { ...FRAME, onSending: () => settled });
+    fake = fakeClient({ 'session.intent.get': null });
+    window.maws = fake.client;
+    pick();
+    await userEvent.type(field(), 'Why?{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(card()).toBeNull();
+    expect(settled).not.toHaveBeenCalled();
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'b2222222-2222-4222-8222-222222222222' }));
+    expect(settled.mock.calls).toEqual([[true]]);
   });
 });

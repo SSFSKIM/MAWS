@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addThread, resolve as resolveThread, threadStatus } from '@artifacts/document/threads';
+import { addThread, discardThread, getThread, reply, resolve as resolveThread, threadStatus } from '@artifacts/document/threads';
 import type { CommentOverlayProps } from '@artifacts/document/editor/comments/surface';
 import { newDoc, type Doc } from '@artifacts/yjs';
 import { AnchorSchema } from '@shared/anchor/anchor';
@@ -157,5 +157,96 @@ describe('the card on a document', () => {
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
     expect(reach.setActive).toHaveBeenLastCalledWith(null);
     expect(reach.focus).toHaveBeenCalled();
+  });
+});
+
+// Fix wave 1 (the task review's finding 1): P2's send completes after its card went, by design (a Side thread the card
+// no longer shows is revealed; a late refusal is a toast), so a comment whose send set out is no draft: the thread stays
+// whatever becomes of its card or its host, and the comment is recorded in it when the send went. Only a draft nothing
+// was sent in, or whose send was refused, is withdrawn.
+describe('a comment on its way outlives its card', () => {
+  const CHILD = 'b2222222-2222-4222-8222-222222222222';
+  const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
+
+  // The editor's reach over a real threads map, as DocumentEditor's records and discards.
+  function liveReach(doc: Doc): CommentOverlayProps {
+    return {
+      ...editorReach(doc),
+      record: vi.fn((threadId: string, body: string) => {
+        if (getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:m1`, by: { kind: 'human' }, at: 2, body });
+      }),
+      discard: vi.fn((threadId: string) => void discardThread(doc, threadId)),
+    };
+  }
+  function mountLive() {
+    const doc = newDoc();
+    for (const p of [passage, second]) addThread(doc, { threadId: p.threadId, tabId: 'tab1', blockId: 'p1', quote: p.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    const reach = liveReach(doc);
+    let open: ((p: typeof passage) => void) | null = null;
+    const view = render(<Editor reach={reach} onOpen={(o) => (open = o)} />);
+    return { doc, reach, view, comment: (p: typeof passage = passage) => act(() => open!(p)) };
+  }
+  const bodies = (doc: Doc, threadId: string) => getThread(doc, threadId)?.messages.map((message) => message.body) ?? null;
+  async function sendSideThread(text: string) {
+    await userEvent.type(field(), `${text}{Enter}`);
+    expect(fake.invoked('side.thread.open')).toHaveLength(1);
+  }
+
+  it('Send then Close: the thread stays and the comment is recorded once the request answers', async () => {
+    const { doc, comment } = mountLive();
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
+  });
+
+  it('Send then another comment replacing the card: the first thread stays with its comment', async () => {
+    const { doc, comment } = mountLive();
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    comment(second);
+    await act(async () => {});
+    expect(useCommentCard.getState().open?.target).toMatchObject({ threadId: second.threadId });
+    expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
+  });
+
+  it('Send then the editor unmounting: the thread stays with its comment', async () => {
+    const { doc, view, comment } = mountLive();
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    view.unmount();
+    expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
+  });
+
+  it('a send refused after its card went withdraws the draft (P2 toasts the refusal)', async () => {
+    const { doc, comment } = mountLive();
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD, reason: 'no_engine_session', message: 'Not yet' }));
+    expect(getThread(doc, passage.threadId)).toBeNull();
+    expect(useNotices.getState().notices).toHaveLength(1);
+  });
+
+  it('a send refused while its card shows leaves a draft: Close then withdraws it', async () => {
+    const { doc, comment } = mountLive();
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD, reason: 'no_engine_session', message: 'Not yet' }));
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(bodies(doc, passage.threadId)).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(getThread(doc, passage.threadId)).toBeNull();
   });
 });
