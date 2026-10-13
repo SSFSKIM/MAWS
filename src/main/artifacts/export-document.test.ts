@@ -8,6 +8,7 @@ import { exportSource } from '@artifacts/document/export/source';
 import { schemaFor } from '@artifacts/document/schema';
 import { addTab, createDocument } from '@artifacts/document/tabs';
 import { newDoc, stateV2 } from '@artifacts/yjs';
+import { ExporterRegistry } from './export';
 import { DOCUMENT_EXPORTERS, registerDocumentExporters, type DocumentExportContext, type DocumentExportFormat, type DocumentExportRequest } from './export-document';
 
 const schema = schemaFor();
@@ -45,12 +46,13 @@ function context(state = documentState()) {
     readAsset: vi.fn(async (ref: string) => (ref === 'assets/chart.png' ? { bytes: PNG, mime: 'image/png' } : null)),
     printToPdf: vi.fn(async (html: string) => (printed.push(html), PDF)),
     writeFile: vi.fn(async (path: string, data: Uint8Array | string) => void written.set(path, data)),
+    signal: new AbortController().signal,
   };
   return { ctx, written, printed };
 }
 
 const exporter = (format: DocumentExportFormat) => DOCUMENT_EXPORTERS.find((e) => e.format === format)!;
-const request = (format: DocumentExportFormat, extra: Partial<DocumentExportRequest> = {}): DocumentExportRequest => ({ artifactId: 'a1', format, revision: 7, path: `/exports/7-${format}`, ...extra });
+const request = (format: DocumentExportFormat, extra: Partial<DocumentExportRequest> = {}): DocumentExportRequest => ({ artifactId: 'a1', kind: 'document', format, revision: 7, path: `/exports/7-${format}`, ...extra });
 
 describe('the document exporters', () => {
   it('are registered for document × {md, html, docx, pdf} through one call, and removed by its answer', () => {
@@ -63,6 +65,15 @@ describe('the document exporters', () => {
     expect(registered).toEqual(['document:md', 'document:html', 'document:docx', 'document:pdf']);
     off();
     expect(removed).toEqual(['md', 'html', 'docx', 'pdf']);
+  });
+
+  it('register into A’s export registry, the service’s lookup finding each format', () => {
+    const registry = new ExporterRegistry();
+    const off = registerDocumentExporters((e) => registry.register(e));
+    expect(['md', 'html', 'docx', 'pdf'].map((format) => registry.get('document', format as DocumentExportFormat)?.format)).toEqual(['md', 'html', 'docx', 'pdf']);
+    expect(registry.get('document', 'png')).toBeUndefined();
+    off();
+    expect(registry.get('document', 'pdf')).toBeUndefined();
   });
 
   it('writes Markdown from the state the service hands it, every tab under its title', async () => {

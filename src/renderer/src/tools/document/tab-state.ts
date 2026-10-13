@@ -72,9 +72,6 @@ export interface DocumentTabSnapshot {
   exporting: ExportStatus | null;
 }
 
-// `ArtifactHost.export` with the page size (Letter or A4, the owner's Decision Log 43), which A's service is asked to
-// take with the request; until it does, the argument is not read.
-type ExportWithPage = (artifactId: string, format: string, version: number | undefined, options: { pageSize: PageSize }) => Promise<{ path: string }>;
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -263,7 +260,7 @@ export class DocumentTabState {
     if (this.current.exporting?.phase === 'running') return;
     this.set({ exporting: { phase: 'running', format } });
     try {
-      const { path } = await (this.deps.host.export as ExportWithPage)(this.artifactId, format, undefined, { pageSize });
+      const { path } = await this.deps.host.export(this.artifactId, format, undefined, { pageSize });
       if (!this.disposed) this.set({ exporting: { phase: 'done', format, path } });
     } catch (error) {
       this.deps.log(`document ${this.artifactId}: the ${format} export failed: ${messageOf(error)}`);

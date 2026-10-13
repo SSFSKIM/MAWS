@@ -4,15 +4,15 @@
 // reaching the other; the X32 header stays All changes saved around an acknowledged keystroke (M9: "Saving…" only for
 // edits left waiting past the tab's delay, so it never flickers) and says Reconnecting… across a
 // host restart, after which the typing still lands; History lists A's versions, Save version adds a named one, and
-// Restore brings it back with the banner. The exporters run in main (through their e2e seam, until A's export service
-// registers them) and write `.md`, `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and
-// on A4; the header's Export menu reaches the host's export and says its answer in the header's action.
+// Restore brings it back with the banner. The document exports through A's export service (M9's fix wave): `.md`,
+// `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and on A4, from the header's Export
+// menu (the header says the file written) and from `artifacts.export`; an image uploaded as an asset renders in the
+// editor through the `maws-artifact:` scheme under the app's CSP.
 // M9 (Acceptance 3 and 4): commented text copied through the Mac's pasteboard pastes without a second comment, a cut and
 // paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
 // a reply posted after the version stays and a thread made after it shows orphaned.
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -29,13 +29,12 @@ const hostState = (page: Page) => ok<{ state: string; pid: number | null }>(page
 
 let launch: MawsLaunch | null = null;
 let userData: string | null = null;
-let scratch: string | null = null;
 
 test.afterEach(async () => {
   await launch?.cleanup();
   launch = null;
-  for (const dir of [userData, scratch]) if (dir) rmSync(dir, { recursive: true, force: true });
-  userData = scratch = null;
+  if (userData) rmSync(userData, { recursive: true, force: true });
+  userData = null;
 });
 
 // The panel's harness scenario (C8a): two synthetic sessions main serves, so a session's panel can hold tools.
@@ -190,7 +189,21 @@ function pdfPages(bytes: Buffer): { pages: number; width: number; height: number
   return { pages, width: Math.round(Number(box?.[1])), height: Math.round(Number(box?.[2])) };
 }
 
-test('the exporters write Markdown, HTML, DOCX and a paged PDF in main; the Export menu says the host’s answer', async () => {
+// A 2 × 2 PNG, red and blue, as a person would pick from disk.
+const TWO_BY_TWO_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DwnwEIGBgYGBgYAAAy7QL+1Hdq+wAAAABJRU5ErkJggg==', 'base64');
+
+test('an image uploaded as an asset renders in the editor through the maws-artifact scheme under the app’s CSP', async () => {
+  const page = await start();
+  const { main } = await openInMain(page, 'Pictures');
+  await main.locator('.ds-doc .ProseMirror').click();
+  await main.getByLabel('Image file').setInputFiles({ name: 'two.png', mimeType: 'image/png', buffer: TWO_BY_TWO_PNG });
+  const img = main.locator('.ds-doc .ProseMirror').getByRole('img', { name: 'two.png' });
+  await expect(img).toHaveAttribute('src', /^maws-artifact:/, { timeout: 15_000 });
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => (el.complete ? el.naturalWidth : -1)), { timeout: 15_000, message: 'the image loaded' }).toBe(2);
+  expect(launch!.consoleErrors(), 'no CSP refusal, no load error').toEqual([]);
+});
+
+test('the document exports through A’s export service: Markdown, HTML, DOCX and a paged PDF on Letter and A4, from the Export menu and `artifacts.export`', async () => {
   test.setTimeout(150_000);
   const page = await start();
   const { id, main } = await openInMain(page, 'Quarterly plan');
@@ -208,59 +221,35 @@ test('the exporters write Markdown, HTML, DOCX and a paged PDF in main; the Expo
   }
   await expect(mainHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
 
-  // the Export menu reaches the host's export; its answer is said in the header's own action
+  // the header's Export menu reaches A's service, and the header says the file it wrote
   await mainHeader.getByRole('button', { name: 'Export' }).click();
   await page.getByRole('menuitem', { name: 'PDF, A4 (.pdf)' }).click();
-  await expect(mainHeader.getByRole('button', { name: /^PDF export failed: / })).toBeVisible({ timeout: 10_000 });
+  const done = mainHeader.getByRole('button', { name: /^Exported \S+\.pdf$/ });
+  await expect(done).toBeVisible({ timeout: 60_000 });
 
-  // the state as of a version, through the exporters in main
-  const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'For export' });
-  const state = await page.evaluate(
-    async ([artifactId, version]) => {
-      const result = (await (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean; value: { bytes: Uint8Array } }> } }).maws.invoke('artifacts.versionState', { artifactId, versionId: version })) as { ok: boolean; value: { bytes: Uint8Array } };
-      let binary = '';
-      for (const byte of result.value.bytes) binary += String.fromCharCode(byte);
-      return btoa(binary);
-    },
-    [id, versionId] as const,
-  );
-  scratch = mkdtempSync('/tmp/maws-e2e-document-export-');
-  const exportTo = async (format: string, name: string, pageSize?: string) => {
-    const path = join(scratch!, name);
-    await launch!.app.evaluate(
-      async (_electron, request) => (globalThis as unknown as { __maws_document_export: { export(r: unknown): Promise<void> } }).__maws_document_export.export(request),
-      { title: 'Quarterly plan', state, format, path, ...(pageSize ? { pageSize } : {}) },
-    );
+  // the four formats through the service's own command (the library's and the menu's route), Letter and A4
+  const exported = async (format: string, pageSize?: string) => {
+    const { path } = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: id, format, ...(pageSize ? { pageSize } : {}) });
     return readFileSync(path);
   };
-
-  const md = (await exportTo('md', 'plan.md')).toString('utf8');
+  const md = (await exported('md')).toString('utf8');
   expect(md).toContain('The launch waits for the review.');
   expect(md).toContain('안녕하세요, 팀 여러분.');
   expect(md).not.toMatch(/\^[0-9a-z]{8}/); // no block ids in the file
 
-  const html = (await exportTo('html', 'plan.html')).toString('utf8');
+  const html = (await exported('html')).toString('utf8');
   expect(html.startsWith('<!doctype html>')).toBe(true);
   expect(html).toContain('Budget notes for October.');
   expect(html).not.toContain('var(--ds-');
 
-  const docx = await exportTo('docx', 'plan.docx');
+  const docx = await exported('docx');
   expect(docx.subarray(0, 2).toString('latin1')).toBe('PK');
 
-  const letter = await exportTo('pdf', 'plan.pdf');
+  const letter = await exported('pdf');
   expect(letter.subarray(0, 5).toString('latin1')).toBe('%PDF-');
   expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter
-  const a4 = await exportTo('pdf', 'plan-a4.pdf', 'a4');
+  const a4 = await exported('pdf', 'a4');
   expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4
-
-  // a page far past a `data:` URL's 2 MB (a document's images are inlined) prints all the same
-  const long = `<!doctype html><html><head><meta charset="utf-8"><style>@page { size: 8.5in 11in; margin: 1in; }</style></head><body>${'<p>The launch waits for the review of every line in this long appendix.</p>'.repeat(40_000)}</body></html>`;
-  expect(long.length).toBeGreaterThan(3_000_000);
-  const bigPath = join(scratch, 'long.pdf');
-  await launch!.app.evaluate(async (_electron, [html, path]) => (globalThis as unknown as { __maws_document_export: { print(h: string, p: string): Promise<void> } }).__maws_document_export.print(html, path), [long, bigPath] as const);
-  const big = readFileSync(bigPath);
-  expect(big.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-  expect(pdfPages(big).pages).toBeGreaterThan(100);
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
