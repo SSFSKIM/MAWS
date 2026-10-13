@@ -118,6 +118,14 @@
 .doc-toolbar-spacer {
   flex: 1;
 }
+.doc-toolbar-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  margin-left: var(--space);
+  font-size: var(--text-ui-sm);
+  color: var(--danger);
+}
 
 /* ── menus and popovers ── */
 .doc-menu,

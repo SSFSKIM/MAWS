@@ -93,6 +93,7 @@ export function Toolbar({ editor, artifactId, host, onFind }: { editor: Editor; 
     }),
   });
   const [menu, setMenu] = useState<'insert' | 'link' | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
   const run = () => editor.chain().focus();
 
@@ -101,13 +102,19 @@ export function Toolbar({ editor, artifactId, host, onFind }: { editor: Editor; 
     else run().setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 }).run();
   };
 
+  // A failed read or upload inserts nothing and says so in the toolbar until dismissed or the next upload.
   const uploadImage = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const { assetId, ref } = await host.uploadAsset(artifactId, bytes, { name: file.name, mime: file.type || 'application/octet-stream' });
-    if (!editor.isDestroyed) run().insertContent({ type: 'image', attrs: { src: ref, alt: file.name, assetId } }).run();
+    setUploadError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { assetId, ref } = await host.uploadAsset(artifactId, bytes, { name: file.name, mime: file.type || 'application/octet-stream' });
+      if (!editor.isDestroyed) run().insertContent({ type: 'image', attrs: { src: ref, alt: file.name, assetId } }).run();
+    } catch (error) {
+      setUploadError(`Couldn’t upload ${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const inserts: Array<[string, () => void]> = [
@@ -243,6 +250,14 @@ export function Toolbar({ editor, artifactId, host, onFind }: { editor: Editor; 
         )}
       </span>
       <input ref={imageFile} type="file" accept="image/*" aria-label="Image file" hidden onChange={(event) => void uploadImage(event)} />
+      {uploadError && (
+        <span className="doc-toolbar-error">
+          <span role="alert">{uploadError}</span>
+          <Tool label="Dismiss upload error" onClick={() => setUploadError(null)}>
+            ×
+          </Tool>
+        </span>
+      )}
       {state.table && (
         <>
           <span className="doc-toolbar-separator" />

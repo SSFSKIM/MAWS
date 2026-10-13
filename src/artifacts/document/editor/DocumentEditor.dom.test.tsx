@@ -9,7 +9,7 @@ import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
 import { listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
-import type { DocumentHandleWithHold } from './host-types';
+import type { DocumentHandleWithHold, EditorHost } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { TAB, World, doc, endOf, para, until } from './test-world';
 
@@ -23,9 +23,9 @@ afterEach(() => {
   world = null;
 });
 
-const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
+const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
-async function mount(content: JSONContent): Promise<{ editor: () => Editor; handle: DocumentHandleWithHold }> {
+async function mount(content: JSONContent, host: EditorHost = owner): Promise<{ editor: () => Editor; handle: DocumentHandleWithHold }> {
   world = new World(content);
   const handle = openMemoryHandle(world.host, { log: () => {} });
   handles.push(handle);
@@ -156,6 +156,21 @@ describe('the toolbar', () => {
     editor().state.doc.forEach((node) => expect(node.attrs.id).toMatch(/^[0-9a-z]{8}$|^p1$/));
     expect(ynodeToPmnode(tabBody(handle.doc, TAB)!, schemaFor()).toJSON()).toEqual(json);
     await until(() => JSON.stringify(ynodeToPmnode(tabBody(world!.host.doc, TAB)!, schemaFor()).toJSON()) === JSON.stringify(json), 'the host to hold it');
+  });
+
+  it('shows a failed image upload in the toolbar and inserts nothing', async () => {
+    // a rejection the toolbar left unhandled would fail this run as an unhandled error
+    const failing: EditorHost = { ...owner, uploadAsset: () => Promise.reject(new Error('The disk is full')) };
+    const { editor } = await mount(doc(para('p1', 'Start')), failing);
+    const before = JSON.stringify(editor().getJSON());
+    insert('Image…');
+    act(() => void fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [new File([new Uint8Array([137, 80, 78, 71])], 'chart.png', { type: 'image/png' })] } }));
+    const alert = await within(toolbar()).findByRole('alert');
+    expect(alert.textContent).toContain('chart.png');
+    expect(alert.textContent).toContain('The disk is full');
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+    press('Dismiss upload error');
+    expect(within(toolbar()).queryByRole('alert')).toBeNull();
   });
 
   it('applies the marks and a link', async () => {
