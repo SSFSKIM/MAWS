@@ -103,6 +103,9 @@ class Drafts {
 }
 
 const draftsByHost = new Map<string, Drafts>();
+// The card hosts whose overlay is mounted. DocumentEditor remounts the overlay with the page on every tab switch while the
+// host id stays the document's, and P2's card host keeps its card through a remount within a microtask; so does this.
+const mountedOverlays = new Set<string>();
 function draftsOf(hostId: string): Drafts {
   let drafts = draftsByHost.get(hostId);
   if (!drafts) draftsByHost.set(hostId, (drafts = new Drafts(hostId)));
@@ -135,8 +138,11 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
   const { artifactId, hostId, mode, visible } = binding;
   const { doc, locate, layoutKey, setActive, resolve, reopen, record, discard, focus } = editor;
 
-  // The card on screen draws its thread as active; a draft whose card went with nothing on its way is withdrawn.
+  // The card on screen draws its thread as active; a draft whose card went with nothing on its way is withdrawn. The
+  // overlay going is the card going only when no overlay of this host is back a microtask later (P2's host closes the
+  // card then); a remount (a tab switch) keeps the composing card, and so its draft.
   useEffect(() => {
+    mountedOverlays.add(hostId);
     let shown: string | null = null;
     const follow = (open: OpenCard | null) => {
       const mine = open?.hostId === hostId ? open : null;
@@ -151,7 +157,10 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     const stop = useCommentCard.subscribe((state) => follow(state.open));
     return () => {
       stop();
-      draftsOf(hostId).follow(null, discard);
+      mountedOverlays.delete(hostId);
+      queueMicrotask(() => {
+        if (!mountedOverlays.has(hostId)) draftsOf(hostId).follow(null, discard);
+      });
     };
   }, [hostId, discard, setActive]);
 
