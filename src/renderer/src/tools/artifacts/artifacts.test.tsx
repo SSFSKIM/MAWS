@@ -10,7 +10,7 @@ import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
-import { connectLibrary, resetLibrary } from '../../library/store';
+import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
@@ -437,45 +437,112 @@ describe('in the panel', () => {
     expect(editorHostOf({ surface: 'panel', tabId })).toBeNull();
   });
 
-  // The review's interleaving: closing the tab waits on the first artifact's guard while a re-target, which that guard
-  // allowed, shows a second artifact whose guard refuses; the first approval must not close over the second.
-  it('a close approved for the artifact it was asked about asks again when the tab moved to another meanwhile', async () => {
-    registerPanelTool(artifactsTool);
-    const dispose = vi.fn();
-    const createState = vi.fn(({ artifactId }: { artifactId: string }) => ({ artifactId, allowClose: true }));
-    let releaseFirst!: (allowed: boolean) => void;
-    let firstAsks = 0;
-    function Panel({ state, scope }: ArtifactEditorProps<{ artifactId: string; allowClose: boolean }>) {
-      useEditorHost(scope, {
-        title: state.artifactId,
-        closeGuard: () => {
-          if (state.artifactId !== NOTES.id) return Promise.resolve(state.allowClose);
-          firstAsks += 1;
-          return firstAsks === 1 ? new Promise<boolean>((resolve) => (releaseFirst = resolve)) : Promise.resolve(true);
-        },
-      });
-      return <p>editing {state.artifactId}</p>;
+  // While the tab is closing (from the host marking it closing, in the tick it asks the shown editor's guard, until the
+  // close resolves) its record view is frozen: a Back or re-target asked meanwhile is dropped, and a move already waiting
+  // on a guard does not land. So the guard the host asked is the only one the close needs, and no editor shown after it
+  // asked can be disposed unasked.
+  describe('while the tab is closing', () => {
+    type GuardState = { artifactId: string };
+    // Each artifact's guard answers at once with its `allow` entry, else when the test releases it (`answer`, in the
+    // order it was asked).
+    function guardedEditor() {
+      const dispose = vi.fn();
+      const createState = vi.fn(({ artifactId }: { artifactId: string }): GuardState => ({ artifactId }));
+      const held = new Map<string, ((allowed: boolean) => void)[]>();
+      const asked: string[] = [];
+      const allow = new Map<string, boolean>();
+      function Panel({ state, scope }: ArtifactEditorProps<GuardState>) {
+        useEditorHost(scope, {
+          title: state.artifactId,
+          closeGuard: () => {
+            asked.push(state.artifactId);
+            const now = allow.get(state.artifactId);
+            if (now !== undefined) return Promise.resolve(now);
+            return new Promise<boolean>((resolve) => held.set(state.artifactId, [...(held.get(state.artifactId) ?? []), resolve]));
+          },
+        });
+        return <p>editing {state.artifactId}</p>;
+      }
+      registerArtifactEditor('document', { Panel, createState, dispose });
+      const answer = async (artifactId: string, allowed: boolean) => {
+        const resolve = held.get(artifactId)!.shift()!;
+        await act(async () => resolve(allowed));
+      };
+      return { dispose, createState, asked, allow, answer };
     }
-    registerArtifactEditor('document', { Panel, createState, dispose });
-    render(<TestHost />);
-    let tabId = '';
-    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: NOTES.id } })));
-    await screen.findByText(`editing ${NOTES.id}`);
 
-    let closed: Promise<boolean> | undefined;
-    act(() => void (closed = panelHost.closeTab(tabId))); // the first artifact's guard is still answering
-    act(() => void panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: SPEC.id } })); // allowed at once
-    await screen.findByText(`editing ${SPEC.id}`);
-    const second = createState.mock.results[1]!.value as { allowClose: boolean };
-    second.allowClose = false;
-    await act(async () => releaseFirst(true));
-    expect(await closed, 'the second artifact’s guard was asked and refused').toBe(false);
-    expect(panelOf(A)!.tabs.map((t) => t.id)).toEqual([tabId]);
-    expect(dispose.mock.calls.map(([state]) => state), 'only the first artifact’s state went').toEqual([createState.mock.results[0]!.value]);
-    expect(screen.getByText(`editing ${SPEC.id}`)).toBeTruthy();
+    async function opened(target: string) {
+      registerPanelTool(artifactsTool);
+      render(<TestHost />);
+      let tabId = '';
+      act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target } })));
+      await screen.findByText(`editing ${target}`);
+      return tabId;
+    }
+    const retarget = (target?: string) => act(() => void panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target } }));
 
-    second.allowClose = true;
-    expect(await act(() => panelHost.closeTab(tabId))).toBe(true);
-    expect(dispose).toHaveBeenCalledTimes(2);
+    // The review's three-artifact interleaving (its rendered, cached probe): re-targets to a second and a third artifact
+    // (the third's row already in the library store, so it would mount at once) while the first's guard answers.
+    it('drops a re-target asked during the close; the close disposes only the artifact its guard was asked about', async () => {
+      const editor = guardedEditor();
+      const third = row(7, { title: 'Third' });
+      rows = [...rows, third];
+      const unwatch = watchLibraryRow(third.id);
+      await settle();
+      unwatch();
+      const tabId = await opened(NOTES.id);
+      editor.allow.set(SPEC.id, true);
+      editor.allow.set(third.id, false);
+
+      let closed!: Promise<boolean>;
+      act(() => void (closed = panelHost.closeTab(tabId))); // NOTES's guard is still answering
+      retarget(SPEC.id);
+      retarget(third.id);
+      retarget(); // Back to the list
+      await settle();
+      expect(screen.getByText(`editing ${NOTES.id}`), 'the record view stayed').toBeTruthy();
+      await editor.answer(NOTES.id, true);
+      expect(await closed).toBe(true);
+      expect(editor.createState.mock.calls.map(([t]) => t.artifactId), 'no other editor was made').toEqual([NOTES.id]);
+      expect(editor.dispose.mock.calls.map(([state]) => state.artifactId)).toEqual([NOTES.id]);
+      expect(editor.asked, 'the host asked one guard, once').toEqual([NOTES.id]);
+      expect(panelOf(A)!.tabs).toEqual([]);
+    });
+
+    it('a move already waiting on its guard when the close begins does not land, even once allowed', async () => {
+      const editor = guardedEditor();
+      const tabId = await opened(NOTES.id);
+      editor.allow.set(SPEC.id, false);
+      retarget(SPEC.id); // asks NOTES's guard, held
+      let closed!: Promise<boolean>;
+      act(() => void (closed = panelHost.closeTab(tabId))); // asks it again, held too
+      expect(editor.asked).toEqual([NOTES.id, NOTES.id]);
+      await editor.answer(NOTES.id, true); // the re-target's answer
+      await settle();
+      expect(screen.getByText(`editing ${NOTES.id}`), 'the re-target stayed frozen').toBeTruthy();
+      await editor.answer(NOTES.id, true); // the close's
+      expect(await closed).toBe(true);
+      expect(editor.createState.mock.calls.map(([t]) => t.artifactId)).toEqual([NOTES.id]);
+      expect(editor.dispose.mock.calls.map(([state]) => state.artifactId)).toEqual([NOTES.id]);
+    });
+
+    it('a vetoed close thaws the record view: the next re-target asks its guard and lands; the dropped one is not replayed', async () => {
+      const editor = guardedEditor();
+      const tabId = await opened(NOTES.id);
+      let closed!: Promise<boolean>;
+      act(() => void (closed = panelHost.closeTab(tabId)));
+      retarget(SPEC.id); // dropped
+      await editor.answer(NOTES.id, false);
+      expect(await closed).toBe(false);
+      await settle();
+      expect(screen.getByText(`editing ${NOTES.id}`)).toBeTruthy();
+      expect(editor.asked).toEqual([NOTES.id]);
+
+      editor.allow.set(NOTES.id, true);
+      retarget(SPEC.id);
+      await screen.findByText(`editing ${SPEC.id}`);
+      expect(editor.dispose.mock.calls.map(([state]) => state.artifactId)).toEqual([NOTES.id]);
+      expect(panelOf(A)!.tabs.map((t) => t.id)).toEqual([tabId]);
+    });
   });
 });
