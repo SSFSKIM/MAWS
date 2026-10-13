@@ -472,6 +472,11 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
    - A partial `dev.maws.office` extension is filled in slot by slot and face by face.
 
    **Limits.** D12's limits of 512 tokens and 64 per group are enforced in `validateTokenFile`.
+9. 2026-10-12 (the revised previews, 8b538853, `stance-<key>-v2.png`): these are M5's source.
+   - **`classroom`** is set in Seravek with Apple SD Gothic Neo. Seravek's tailed l keeps l, I and 1 apart in chemistry text. Body is 16/1.65 on paper and 48 px on decks. Radii are 4, 8 and 12. The Office Latin face is Trebuchet MS. The signature is a square cobalt part tab.
+   - **`official`** keeps its look and closes with a US signature block.
+   - **Noto Serif KR is bundled as full-Hangul WOFF2 subsets.** The set is 11,172 syllables plus KS X 1001 symbols, jamo, Basic Latin and punctuation, from notofonts/noto-cjk's Korean OTFs via pyftsubset. Regular is 1.81 MB and Bold 1.90 MB, 3.54 MB together. Rejected: the KS X 1001 set (1.13 MB), which fails on rarer syllables the owner types. The OFL text ships beside the fonts. Office names Batang as the East Asian minor face, and US Windows without Korean supplemental fonts substitutes.
+   - M5 runs in a sibling worktree on disjoint files (`src/artifacts/types/design_system/`) while M2 and M3 run here. Its law-against-canon test waits for M2's `parseLaw` and `checkHardDonts`.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
