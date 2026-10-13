@@ -28,10 +28,12 @@ import { importMarkdown } from '@artifacts/document/import/markdown';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { readDocument, ReadError, type ReadOptions } from '@artifacts/document/read';
 import { nanoid8 } from '@artifacts/document/schema';
+import { textblocksY } from '@artifacts/document/structs';
 import { createDocument } from '@artifacts/document/tabs';
 import { getThread, liveThreadIds, locate, reopen, reply, resolve as resolveThread, threadStates, type ThreadState } from '@artifacts/document/threads';
 import { KIND_GUIDES } from '@artifacts/types/guides';
-import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
+import { applyV2, newDoc, type Doc, type Node } from '@artifacts/yjs';
+import { createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { Artifact, ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -62,6 +64,7 @@ import {
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import { documentAdapterOf } from '../documents/kinds/document';
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
+import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
 import { toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 
@@ -139,6 +142,25 @@ async function documentOf(tool: Tool, store: ArtifactStore, ref: string, ctx: Mc
   return artifact;
 }
 
+// The artifact a write's ref names, as its idempotent operation's key (§4.3: the tool-use id is the operation's identity,
+// and a repeated id answers the recorded result whatever the store holds now): resolved in the session's lineage, a
+// UUID naming a deleted artifact included, so only an unknown ref is refused before the operation's replay lookup.
+async function writeTargetOf(tool: Tool, store: ArtifactStore, ref: string, ctx: McpToolContext, deps: DocumentToolDeps): Promise<string> {
+  const lineage = [ctx.appSessionId, ...(deps.artifactScope ?? [])];
+  const id = await store.readCommitted(() => store.resolve(ref, lineage) ?? (store.get(ref, { includeDeleted: true }) ? ref : null));
+  if (id === null) throw refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`);
+  return id;
+}
+
+// Inside a fresh operation: the live document the write applies to, refused (after the batch commits) when it was
+// deleted or is not a document.
+async function liveDocumentIn(tool: Tool, store: ArtifactStore, id: string, ref: string): Promise<Artifact> {
+  const artifact = store.get(id);
+  if (!artifact) return refusedAfterCommit(store, refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`));
+  if (artifact.kind !== 'document') return refusedAfterCommit(store, refuse(tool, { reason: 'invalid', kind: artifact.kind }, `${ref} is a ${artifact.kind} artifact; ${tool} works on documents`));
+  return artifact;
+}
+
 // A refusal computed from the store's state, released once the batch open now has committed (A's Decision Log 33).
 async function refusedAfterCommit(store: ArtifactStore, refusal: Refusal): Promise<never> {
   await store.readCommitted(() => null);
@@ -158,25 +180,49 @@ function definition(name: DocumentToolName, call: McpToolDefinition['call']): Mc
 
 // ── artifact_edit ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const targetsOf = (op: Op): string[] => {
-  switch (op.op) {
-    case 'replace_text':
-      return op.block ? [op.block] : [];
-    case 'replace_block':
-    case 'delete':
-      return [op.id];
-    case 'insert':
-      return [op.after ?? op.before!];
-    case 'move':
-      return [op.id];
-    case 'set_cell':
-      return [op.table];
-  }
-};
-
 // The writer's refusal as the tool's: the sentence, the reason with what it names, and the live revision (a retry
 // from it is validated against what the refusal showed).
 const editRefusal = (error: EditError, liveRevision: number): Refusal => refuse('artifact_edit', { ...error.refusal, liveRevision }, error.message);
+
+/** The id of `node` or of its nearest ancestor that has one. */
+const blockIdOf = (node: Node | null): string | null => {
+  for (let at = node; at; at = at.parent) {
+    const id: unknown = at.getAttr('id');
+    if (typeof id === 'string') return id;
+  }
+  return null;
+};
+
+/**
+ * The blocks a landed batch touched, in op order, as the editor outlines them (D11): each op's resolved target (the
+ * block an unscoped quote matched, a cell, a moved block) and the blocks it made (the outermost new ones), never an
+ * insert's anchor or a deleted block. Read after the write, when the doc's index holds the new blocks.
+ */
+function touchedBlocksOf(doc: Doc, ops: readonly Op[], results: readonly { target: string; newIds: string[] }[]): string[] {
+  const index = DocIndex.of(doc);
+  const out: string[] = [];
+  results.forEach((result, i) => {
+    const op = ops[i];
+    if (op.op === 'delete') return;
+    if (op.op !== 'insert') out.push(...result.target.split(','));
+    const made = new Set(result.newIds);
+    for (const id of result.newIds) {
+      const found = index.find(id);
+      const parent = found ? blockIdOf(found.node.parent) : null;
+      if (found && (parent === null || !made.has(parent))) out.push(id);
+    }
+  });
+  return [...new Set(out)].filter((id) => index.find(id) !== null);
+}
+
+/** The agent's cursor at the start of the first touched block's first textblock, as the editors' cursor plugin reads it. */
+function cursorAt(doc: Doc, blockId: string | undefined): { anchor: unknown; head: unknown } | undefined {
+  const found = blockId === undefined ? null : DocIndex.of(doc).find(blockId);
+  const textblock = found ? textblocksY(found.node)[0] : undefined;
+  if (!textblock) return undefined;
+  const at = relativePositionToJSON(createRelativePositionFromTypeIndex(textblock, 0));
+  return { anchor: at, head: at };
+}
 
 export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
   const TOOL = 'artifact_edit';
@@ -189,95 +235,89 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
       const store = storeOf(TOOL, deps);
       const adapter = documentAdapterOf(store);
       if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, 'documents are not registered with the artifact store in this run of MAWS');
-      const artifact = await documentOf(TOOL, store, input.artifact, ctx, deps);
+      const id = await writeTargetOf(TOOL, store, input.artifact, ctx, deps);
       const ops = input.ops as Op[];
-      if (input.mode === 'suggest' || artifact.agentEditsAsSuggestions) return toolText(await suggest(store, artifact, input.mode === 'suggest'));
-      const revision = await store.readCommitted(() => store.revision(artifact.id));
-      if (input.baseRevision > revision) throw refuse(TOOL, { reason: 'invalid', liveRevision: revision }, `baseRevision ${input.baseRevision} is newer than the live revision ${revision}`);
-      const restoredSince = await store.readCommitted(() => store.listVersions(artifact.id).some((version) => version.kind === 'restore' && version.seq > input.baseRevision));
       const actor = actorOf(ctx);
-      const replica = store.service.replica(ctx.appSessionId, artifact.id); // keeps the document loaded; presence; carets
       const presence = actorDisplay(actor);
-      const editing = [...new Set(ops.flatMap(targetsOf))];
-      clearTimeout(deps.session.presence.get(artifact.id));
-      replica.setPresence({ ...presence, editing: { blocks: editing } });
-
-      try {
-        const result = await store.writeCommitted(() =>
-          store.withOp(
-            opIdOf(ctx),
-            TOOL,
-            artifact.id,
-            async (op) => {
-              const outcome: { result?: ArtifactEditResult; refusal?: Refusal; doc?: Doc } = {};
-              await store.service.writeAs(
-                artifact.id,
-                actor,
-                (doc) => {
-                  outcome.doc = doc;
-                  const view = deps.session.views.base(doc, input.baseRevision);
-                  try {
-                    refuseInsertsIntoFullTabs(doc, ops);
-                    const applied = applyEdit(doc, ops, {
-                      since: view?.epoch ?? -1, // a base the session never saw here: every checked target counts as changed
-                      carets: caretsOf(replica.provider.awareness.getStates(), doc, replica.provider.awareness.clientID),
-                      restoredAway: restoredSince && view ? view.ids : undefined,
-                      answering: input.answering,
-                    });
-                    adapter.registerCarries(artifact.id, applied.carries);
-                    let answered: ArtifactEditResult['answered'];
-                    if (applied.answer) {
-                      const messageId = `${applied.answer.threadId}:${nanoid8()}`;
-                      reply(doc, applied.answer.threadId, { id: messageId, by: actor, at: now(), body: applied.answer.body });
-                      answered = { threadId: applied.answer.threadId, messageId };
-                    }
-                    outcome.result = { status: 'edited', artifactId: artifact.id, revision: 0, results: applied.results, orphaned: applied.orphaned, ...(answered && { answered }) };
-                  } catch (error) {
-                    if (!(error instanceof EditError)) throw error;
-                    const live = store.service.revision(artifact.id);
-                    if (error.reason === 'staleTargets') deps.session.views.record(doc, live); // the refusal showed the targets as they are now
-                    outcome.refusal = editRefusal(error, live);
+      const shown: { agent?: AgentReplica } = {}; // the replica whose presence the batch published
+      // Everything that reads the store's current state runs inside the operation, after its replay lookup.
+      const result = await store.writeCommitted(() =>
+        store.withOp(
+          opIdOf(ctx),
+          TOOL,
+          id,
+          async (op) => {
+            const artifact = await liveDocumentIn(TOOL, store, id, input.artifact);
+            if (input.mode === 'suggest' || artifact.agentEditsAsSuggestions) return suggest(store, artifact, input.mode === 'suggest');
+            const live = store.revision(id);
+            if (input.baseRevision > live) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`));
+            const restoredSince = store.listVersions(id).some((version) => version.kind === 'restore' && version.seq > input.baseRevision);
+            const agent = store.service.replica(ctx.appSessionId, id); // keeps the document loaded; carets; presence
+            const outcome: { result?: ArtifactEditResult; refusal?: Refusal; doc?: Doc } = {};
+            await store.service.writeAs(
+              id,
+              actor,
+              (doc) => {
+                outcome.doc = doc;
+                const view = deps.session.views.base(doc, input.baseRevision);
+                try {
+                  const applied = applyEdit(doc, ops, {
+                    since: view?.epoch ?? -1, // a base the session never saw here: every checked target counts as changed
+                    carets: caretsOf(agent.provider.awareness.getStates(), doc, agent.provider.awareness.clientID),
+                    restoredAway: restoredSince && view ? view.ids : undefined,
+                    answering: input.answering,
+                    blocksPerTab: DOCUMENT_LIMITS.blocksPerTab,
+                  });
+                  adapter.registerCarries(id, applied.carries);
+                  let answered: ArtifactEditResult['answered'];
+                  if (applied.answer) {
+                    const messageId = `${applied.answer.threadId}:${nanoid8()}`;
+                    reply(doc, applied.answer.threadId, { id: messageId, by: actor, at: now(), body: applied.answer.body });
+                    answered = { threadId: applied.answer.threadId, messageId };
                   }
+                  outcome.result = { status: 'edited', artifactId: id, revision: 0, results: applied.results, orphaned: applied.orphaned, ...(answered && { answered }) };
+                } catch (error) {
+                  if (!(error instanceof EditError)) throw error;
+                  const liveRevision = store.service.revision(id);
+                  if (error.reason === 'staleTargets') deps.session.views.record(doc, liveRevision); // the refusal showed the targets as they are now
+                  outcome.refusal = editRefusal(error, liveRevision);
+                }
+              },
+              {
+                inFrame: (at) => {
+                  if (!outcome.result || !outcome.doc) return;
+                  outcome.result.revision = at;
+                  deps.session.views.record(outcome.doc, at); // the session's own write is a revision it knows
+                  op.record(outcome.result);
+                  // D11: the agent's cursor and the blocks it touched, published with the write (nothing of it is
+                  // revealed before this frame commits), dropped PRESENCE_EDITING_MS after
+                  const blocks = touchedBlocksOf(outcome.doc, ops, outcome.result.results);
+                  const cursor = cursorAt(outcome.doc, blocks[0]);
+                  clearTimeout(deps.session.presence.get(id));
+                  agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
+                  shown.agent = agent;
                 },
-                {
-                  inFrame: (at) => {
-                    if (!outcome.result) return;
-                    outcome.result.revision = at;
-                    if (outcome.doc) deps.session.views.record(outcome.doc, at); // the session's own write is a revision it knows
-                    op.record(outcome.result);
-                  },
-                },
-              );
-              if (outcome.refusal) return refusedAfterCommit(store, outcome.refusal);
-              await store.link(artifact.id, ctx.appSessionId, 'edited');
-              return outcome.result!;
-            },
-            { actor },
-          ),
-        );
-        return toolText(result);
-      } finally {
+              },
+            );
+            if (outcome.refusal) return refusedAfterCommit(store, outcome.refusal);
+            await store.link(id, ctx.appSessionId, 'edited');
+            return outcome.result!;
+          },
+          { actor },
+        ),
+      );
+      const { agent } = shown;
+      if (agent) {
         const timer = setTimeout(() => {
-          deps.session.presence.delete(artifact.id);
-          replica.setPresence(presence);
+          deps.session.presence.delete(id);
+          agent.setPresence(presence);
         }, deps.presenceEditingMs ?? PRESENCE_EDITING_MS);
         timer.unref?.();
-        deps.session.presence.set(artifact.id, timer);
+        deps.session.presence.set(id, timer);
       }
+      return toolText(result);
     }),
   );
-}
-
-// A tab already holding DOCUMENT_LIMITS.blocksPerTab top-level blocks takes no more inserts.
-function refuseInsertsIntoFullTabs(doc: Doc, ops: readonly Op[]): void {
-  const index = DocIndex.of(doc);
-  ops.forEach((op, opIndex) => {
-    if (op.op !== 'insert') return;
-    const found = index.find(op.after ?? op.before!);
-    if (found && index.tops(found.top.tabId).length >= DOCUMENT_LIMITS.blocksPerTab) {
-      throw new EditError({ reason: 'invalid', opIndex, message: `the tab holds ${DOCUMENT_LIMITS.blocksPerTab} blocks, the most a tab takes` }, `op ${opIndex}: the tab holds ${DOCUMENT_LIMITS.blocksPerTab} top-level blocks, the most a tab takes; start another document or tab`);
-    }
-  });
 }
 
 // The suggest path (D14): refused with nothing written until A's suggestion service is on this branch (A's M8; Decision
@@ -332,18 +372,19 @@ export function artifactCommentsTool(deps: DocumentToolDeps): McpToolDefinition 
 async function threadWrite<R extends { revision: number }>(
   tool: 'artifact_reply' | 'artifact_resolve',
   store: ArtifactStore,
-  artifact: Artifact,
+  target: { id: string; ref: string },
   threadId: string,
   ctx: McpToolContext,
-  write: (doc: Doc) => Omit<R, 'revision'> | { unchanged: Omit<R, 'revision'> },
+  write: (doc: Doc, artifact: Artifact) => Omit<R, 'revision'> | { unchanged: Omit<R, 'revision'> },
 ): Promise<R> {
   const actor = actorOf(ctx);
   return store.writeCommitted(() =>
     store.withOp(
       opIdOf(ctx),
       tool,
-      artifact.id,
+      target.id,
       async (op) => {
+        const artifact = await liveDocumentIn(tool, store, target.id, target.ref);
         const outcome: { answer?: Omit<R, 'revision'>; unchanged?: Omit<R, 'revision'>; missing?: boolean; result?: R } = {};
         await store.service.writeAs(
           artifact.id,
@@ -353,7 +394,7 @@ async function threadWrite<R extends { revision: number }>(
               outcome.missing = true;
               return;
             }
-            const written = write(doc);
+            const written = write(doc, artifact);
             if ('unchanged' in written) outcome.unchanged = written.unchanged;
             else outcome.answer = written;
           },
@@ -388,8 +429,8 @@ export function artifactReplyTool(deps: DocumentToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const { threadId, body } = parsed.data;
       const store = storeOf(TOOL, deps);
-      const artifact = await documentOf(TOOL, store, parsed.data.artifact, ctx, deps);
-      const result = await threadWrite<ArtifactReplyResult>(TOOL, store, artifact, threadId, ctx, (doc) => {
+      const target = { id: await writeTargetOf(TOOL, store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
+      const result = await threadWrite<ArtifactReplyResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
         const messageId = `${threadId}:${nanoid8()}`;
         reply(doc, threadId, { id: messageId, by: actorOf(ctx), at: now(), body });
         return { status: 'replied', artifactId: artifact.id, threadId, messageId, threadStatus: getThread(doc, threadId)!.status, line: `replied on c:${threadId}` };
@@ -408,8 +449,8 @@ export function artifactResolveTool(deps: DocumentToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const { threadId, reopen: opening = false } = parsed.data;
       const store = storeOf(TOOL, deps);
-      const artifact = await documentOf(TOOL, store, parsed.data.artifact, ctx, deps);
-      const result = await threadWrite<ArtifactResolveResult>(TOOL, store, artifact, threadId, ctx, (doc) => {
+      const target = { id: await writeTargetOf(TOOL, store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
+      const result = await threadWrite<ArtifactResolveResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
         const answer = { status: opening ? 'reopened' : 'resolved', artifactId: artifact.id, threadId, line: `${opening ? 'reopened' : 'resolved'} c:${threadId}` } as const;
         if (getThread(doc, threadId)!.status === (opening ? 'open' : 'resolved')) return { unchanged: answer };
         if (opening) reopen(doc, threadId, actorOf(ctx), now());
@@ -457,7 +498,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             const doc = newDoc();
             try {
               applyV2(doc, store.versionState(artifact.id, version.id));
-              return { version, read: readDocument(doc, options) };
+              return { version, live: store.revision(artifact.id), read: readDocument(doc, options) };
             } catch (error) {
               if (error instanceof ReadError) throw readRefusal(error);
               throw error;
@@ -465,7 +506,9 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
               doc.destroy();
             }
           });
-          result = { ...head, revision: read.version.seq, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId) };
+          // the live revision, as every read answers (§4.3); the version's own in its summary. A version read records no
+          // view, so a batch from this revision is validated as from a base the session never saw
+          result = { ...head, revision: read.live, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId) };
         } else {
           const actor = actorOf(ctx);
           store.service.replica(ctx.appSessionId, artifact.id); // the session's replica keeps the document loaded
@@ -533,9 +576,8 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         } catch (error) {
           throw refuse(TOOL, { reason: 'invalid' }, `the content is not the document kind's markdown: ${error instanceof Error ? error.message : String(error)}`);
         }
-        if (handle !== undefined) {
-          const taken = await store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null));
-          if (taken) throw refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`);
+        if (body.childCount > DOCUMENT_LIMITS.blocksPerTab) {
+          throw refuse(TOOL, { reason: 'invalid', blocks: body.childCount }, `the content holds ${body.childCount} top-level blocks; a tab takes at most ${DOCUMENT_LIMITS.blocksPerTab}: create the document with less and insert the rest elsewhere, or split it`);
         }
         const created = await store.writeCommitted(() =>
           store.withOp(
@@ -543,6 +585,11 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
             TOOL,
             null,
             async (op) => {
+              // the handle is checked inside the operation, after its replay lookup: a repeated call answers its result
+              if (handle !== undefined) {
+                const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
+                if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
+              }
               const made: { artifact?: Artifact; doc?: Doc; answer?: { artifactId: string; title: string; revision: number; handle?: string } } = {};
               const creating = store.create({ kind: 'document', title: input.title, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
               // the first tab, written through the session's host replica in the batch that holds the entity row

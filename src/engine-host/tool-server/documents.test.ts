@@ -7,7 +7,7 @@ import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
 import { getThread } from '@artifacts/document/threads';
 import { body, nodeOf, TAB, textOf } from '@artifacts/document/writer.fixture';
-import { relativePositionToJSON, createRelativePositionFromTypeIndex } from '@artifacts/yjs/document';
+import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJSON, createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { stateV2, transact } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
@@ -273,14 +273,29 @@ describe('artifact_edit', () => {
     expect(message.body).toContain('^p2');
   });
 
-  it('publishes the session’s presence naming the blocks while the batch lands, and drops them after', async () => {
+  it('publishes the agent’s cursor and the blocks the batch touched (an unscoped quote’s block, an insert’s new block), then drops both', async () => {
     const { id, revision } = await readSeed();
-    json(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_block', id: 'p1', markdown: 'New first paragraph.' }] }));
+    const answer = json<{ results: Array<{ newIds: string[] }> }>(
+      await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', old: 'scheduled for Friday', new: 'scheduled for Monday' }, { op: 'insert', after: 'h1', markdown: 'Here.' }] }),
+    );
+    const inserted = answer.results[1].newIds[0];
     const replica = world.service.replica(SELF, id);
-    expect(replica.provider.awareness.getLocalState()).toMatchObject({ editing: { blocks: ['p1'] } });
+    const state = replica.provider.awareness.getLocalState() as { editing?: { blocks: string[] }; cursor?: { anchor: unknown; head: unknown } };
+    expect(state.editing?.blocks).toEqual(['p2', inserted]);
+    const at = createAbsolutePositionFromRelativePosition(createRelativePositionFromJSON(state.cursor!.head), live(id), false)!;
+    expect((at.type as unknown as { getAttr(key: string): unknown }).getAttr('id')).toBe('p2');
+    expect(at.index).toBe(0);
     await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(replica.provider.awareness.getLocalState()).not.toHaveProperty('editing');
-    expect(replica.provider.awareness.getLocalState()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+    const after = replica.provider.awareness.getLocalState();
+    expect(after).not.toHaveProperty('editing');
+    expect(after).not.toHaveProperty('cursor');
+    expect(after).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+  });
+
+  it('publishes no presence for a refused batch', async () => {
+    const { id, revision } = await readSeed();
+    refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', old: 'no such words', new: 'x' }] }));
+    expect(world.service.replica(SELF, id).provider.awareness.getLocalState() ?? {}).not.toHaveProperty('editing');
   });
 
   it('the turn’s end writes a turn version whose summary is the batch’s lines', async () => {
@@ -368,5 +383,76 @@ describe('the tools’ guards', () => {
     const id = await world.seeded();
     expect(textOfResult(await edit({ artifact: id, baseRevision: 0, ops: [{ op: 'insert', after: 'p1', before: 'p2', markdown: 'x' }] }))).toMatch(/^artifact_edit: invalid arguments: ops\.0: an insert names one of after or before/);
     expect(textOfResult(await edit({ artifact: id, baseRevision: 0, ops: Array.from({ length: 101 }, () => ({ op: 'delete', id: 'p1' })) }))).toMatch(/^artifact_edit: invalid arguments: ops/);
+  });
+});
+
+// M7's review, fix wave 1: the reviewer's reproductions (/tmp/maws-review/m7-focused/focused.test.ts) as regressions.
+describe('fix wave 1: replay before current-state guards, the live revision, the tab limit on the result', () => {
+  it('replays a document create with a chosen handle (the handle check runs inside the idempotent operation)', async () => {
+    const create = documentCreateTool(deps());
+    const args = { kind: 'document', title: 'Once', handle: 'review-once', content: 'Text.' };
+    const toolUseId = 'toolu_review_handle' as ToolUseId;
+    const first = json(await call(create, args, { toolUseId }));
+    const again = await call(create, args, { toolUseId });
+    expect(json(again).artifactId).toBe(first.artifactId);
+    expect(refusalOf(await call(create, args))).toMatchObject({ reason: 'handleTaken', handle: 'review-once' }); // a new call is still refused
+  });
+
+  it('replays an applied direct edit after the owner turned suggestions on (routing runs inside the idempotent operation)', async () => {
+    const { id, revision } = await readSeed();
+    const args = { artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Once.' }] };
+    const toolUseId = 'toolu_review_setting' as ToolUseId;
+    const first = await edit(args, { toolUseId });
+    await world.store.update(id, { agentEditsAsSuggestions: true });
+    expect(await edit(args, { toolUseId })).toEqual(first);
+    expect(refusalOf(await edit(args))).toMatchObject({ reason: 'unavailable', setting: true }); // a new call is routed to suggestions
+  });
+
+  it('a retained-version read answers the live revision, the version’s own in its summary, and is no base for a batch', async () => {
+    const id = await world.seeded();
+    const versionId = (await world.store.createVersion(id, { kind: 'named', actor: HUMAN, label: 'Earlier' }))!;
+    const versionSeq = world.store.revision(id);
+    await world.service.writeAs(id, HUMAN, (doc) => transact(doc, () => nodeOf(doc, 'p1').insert(0, 'Later. ')));
+    const answer = json<{ revision: number; version: { revision: number } }>(await read({ artifact: id, version: versionId }));
+    expect(answer.revision).toBe(world.store.revision(id));
+    expect(answer.version.revision).toBe(versionSeq);
+    // the session saw only historical content: a replace_block from that revision is validated as from an unseen base
+    expect(refusalOf(await edit({ artifact: id, baseRevision: answer.revision, ops: [{ op: 'replace_block', id: 'p1', markdown: 'Over it.' }] })).reason).toBe('staleTargets');
+  });
+
+  async function nearlyFull(): Promise<{ id: string; revision: number }> {
+    const id = await world.seeded();
+    const extra = Array.from({ length: 1991 }, (_, i) => pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: `r${i}` }, content: [{ type: 'text', text: 'Small.' }] })));
+    await world.service.writeAs(id, HUMAN, (doc) => transact(doc, () => body(doc).insert(8, extra)));
+    const answer = json<{ revision: number; tabs: Array<{ blocks: number }> }>(await read({ artifact: id, count: 1 }));
+    expect(answer.tabs[0].blocks).toBe(1999);
+    return { id, revision: answer.revision };
+  }
+  const tops = (id: string) => DocIndex.of(live(id)).tops(TAB).length;
+
+  it('refuses a batch whose inserts would take a tab past 2,000 blocks, writing nothing', async () => {
+    const { id, revision } = await nearlyFull();
+    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'One.\n\nTwo.' }] }))).toMatchObject({ reason: 'invalid', opIndex: 0 });
+    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'One.' }, { op: 'insert', after: 'p1', markdown: 'Two.' }] }))).toMatchObject({ reason: 'invalid', opIndex: 1 });
+    expect(tops(id)).toBe(1999);
+    json(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'One.' }] })); // up to the limit lands
+    expect(tops(id)).toBe(2000);
+  });
+
+  it('refuses a replace_block that expands a tab past 2,000 blocks; a batch that shrinks an over-full tab lands', async () => {
+    const { id, revision } = await nearlyFull();
+    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_block', id: 'p4', markdown: 'One.\n\nTwo.\n\nThree.' }] }))).toMatchObject({ reason: 'invalid' });
+    expect(tops(id)).toBe(1999);
+    await world.service.writeAs(id, HUMAN, (doc) => transact(doc, () => body(doc).insert(8, [pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: 'h2x' } })), pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: 'h3x' } }))])));
+    const { revision: over } = json<{ revision: number }>(await read({ artifact: id, count: 1 }));
+    expect(tops(id)).toBe(2001); // the person may type past it; the agent may still edit without growing it
+    json(await edit({ artifact: id, baseRevision: over, ops: [{ op: 'replace_text', block: 'p1', old: 'It has two sentences.', new: 'It has two.' }, { op: 'delete', id: 'h2x' }] }));
+    expect(tops(id)).toBe(2000);
+  });
+
+  it('refuses a create whose content holds more than 2,000 top-level blocks, creating nothing', async () => {
+    const content = Array.from({ length: 2001 }, (_, i) => `Paragraph ${i}.`).join('\n\n');
+    expect(refusalOf(await call(documentCreateTool(deps()), { kind: 'document', title: 'Huge', content }))).toMatchObject({ reason: 'invalid' });
+    expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Huge')).toEqual([]);
   });
 });
