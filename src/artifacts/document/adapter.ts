@@ -81,6 +81,11 @@ function itemsIn(doc: Doc, set: ContentIds['inserts'], visit: (item: Item) => vo
   });
 }
 
+const carriesAny = (have: ReadonlySet<string>, wanted: ReadonlySet<string>): boolean => {
+  for (const id of have) if (wanted.has(id)) return true;
+  return false;
+};
+
 const threadRow = (thread: Thread): ThreadRow => ({
   threadId: thread.id,
   status: thread.status,
@@ -131,7 +136,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
     for (const top of changed) for (const id of index.threads(top)) threads.add(id);
     return {
       threads,
-      blocks: (tabId: string) => (threads.size === 0 ? [] : index.tops(tabId).filter((top) => [...index.threads(top)].some((id) => threads.has(id))).map((top) => top.node)),
+      blocks: (tabId: string) => (threads.size === 0 ? [] : index.tops(tabId).filter((top) => carriesAny(index.threads(top), threads)).map((top) => top.node)),
     };
   }
 
