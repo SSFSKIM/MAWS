@@ -8,7 +8,7 @@
 // write's last log row (Decision Log 11).
 import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
-import type { DocumentStorage, StoredDoc } from '@artifacts/host';
+import type { DocumentStorage, StoredDoc, ThreadChange } from '@artifacts/host';
 import { decodeMap, encodeMap, mergeMaps, PROVENANCE_STEP_MS } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
@@ -96,20 +96,53 @@ export class SqliteDocumentStorage implements DocumentStorage {
     };
   }
 
-  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance: Uint8Array; bindClients: number[]; hostClient?: number }): number {
+  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number }): number {
     this.begin();
-    const key = actorKey(row.actor);
-    if (!this.actorsCommitted.has(key) && !this.actorsInBatch.has(key) && !this.actorsInFrame.has(key)) {
-      this.sql('INSERT OR IGNORE INTO actors (key, json, firstAt) VALUES (?, ?, ?)').run(key, JSON.stringify(row.actor), row.at);
-      (this.frame ? this.actorsInFrame : this.actorsInBatch).add(key);
-    }
+    const key = this.actorInBatch(row.actor, row.at);
     const seq = Number(this.sql('INSERT INTO artifact_updates (artifactId, actor, at, bytes) VALUES (?, ?, ?, ?)').run(row.artifactId, key, row.at, row.update).lastInsertRowid);
-    const at = floor(row.at, PROVENANCE_STEP_MS);
-    this.sql("INSERT INTO artifact_attributions (artifactId, fromSeq, toSeq, tier, fromAt, toAt, bytes) VALUES (?, ?, ?, 'update', ?, ?, ?)").run(row.artifactId, seq, seq, at, at, row.provenance);
+    if (row.provenance) this.attributeInBatch({ artifactId: row.artifactId, seq, at: row.at, provenance: row.provenance });
     for (const clientId of row.bindClients) {
       this.sql('INSERT INTO client_actors (artifactId, clientId, actor, firstSeq, host) VALUES (?, ?, ?, ?, ?)').run(row.artifactId, clientId, key, seq, clientId === row.hostClient ? 1 : 0);
     }
     return seq;
+  }
+
+  // A byte kind's write (Decision Log 7): a log row with no update, its `content` the JSON of the stored file, so the
+  // live revision is the same global seq for every kind. `content` is built from the row's seq (the file's place).
+  appendContentInBatch(row: { artifactId: string; actor: Actor; at: number; content: (seq: number) => string }): number {
+    this.begin();
+    const key = this.actorInBatch(row.actor, row.at);
+    const seq = Number(this.sql("INSERT INTO artifact_updates (artifactId, actor, at, content) VALUES (?, ?, ?, '{}')").run(row.artifactId, key, row.at).lastInsertRowid);
+    this.sql('UPDATE artifact_updates SET content = ? WHERE seq = ?').run(row.content(seq), seq);
+    return seq;
+  }
+
+  // The `update`-tier attribution row of log row `seq` (Decision Log 5), its time floored to the minute.
+  attributeInBatch(row: { artifactId: string; seq: number; at: number; provenance: Uint8Array }): void {
+    this.begin();
+    const at = floor(row.at, PROVENANCE_STEP_MS);
+    this.sql("INSERT INTO artifact_attributions (artifactId, fromSeq, toSeq, tier, fromAt, toAt, bytes) VALUES (?, ?, ?, 'update', ?, ?, ?)").run(row.artifactId, row.seq, row.seq, at, at, row.provenance);
+  }
+
+  // Records `actor` in `actors` once (inside the open batch) and answers its key.
+  actorInBatch(actor: Actor, at: number): string {
+    this.begin();
+    const key = actorKey(actor);
+    if (!this.actorsCommitted.has(key) && !this.actorsInBatch.has(key) && !this.actorsInFrame.has(key)) {
+      this.sql('INSERT OR IGNORE INTO actors (key, json, firstAt) VALUES (?, ?, ?)').run(key, JSON.stringify(actor), at);
+      (this.frame ? this.actorsInFrame : this.actorsInBatch).add(key);
+    }
+    return key;
+  }
+
+  writeThreads(artifactId: string, change: ThreadChange): void {
+    this.begin();
+    for (const t of change.upsert ?? []) {
+      this.sql(
+        'INSERT INTO artifact_threads (artifactId, threadId, status, quote, createdAt, updatedAt, resolvedAt, appSessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (artifactId, threadId) DO UPDATE SET status = excluded.status, quote = excluded.quote, createdAt = excluded.createdAt, updatedAt = excluded.updatedAt, resolvedAt = excluded.resolvedAt, appSessionId = excluded.appSessionId',
+      ).run(artifactId, t.threadId, t.status, t.quote, t.createdAt, t.updatedAt, t.resolvedAt ?? null, t.appSessionId ?? null);
+    }
+    for (const threadId of change.remove ?? []) this.sql('DELETE FROM artifact_threads WHERE artifactId = ? AND threadId = ?').run(artifactId, threadId);
   }
 
   beginFrame(): void {
@@ -170,6 +203,11 @@ export class SqliteDocumentStorage implements DocumentStorage {
 
   provenance(artifactId: string): Uint8Array[] {
     return (this.sql('SELECT bytes FROM artifact_attributions WHERE artifactId = ? ORDER BY fromSeq').all(artifactId) as { bytes: Uint8Array }[]).map((row) => row.bytes);
+  }
+
+  // The attribution rows (of any tier) overlapping the seq range [fromSeq, toSeq] (Decision Log 23a).
+  attributions(artifactId: string, fromSeq: number, toSeq: number): Uint8Array[] {
+    return (this.sql('SELECT bytes FROM artifact_attributions WHERE artifactId = ? AND fromSeq <= ? AND toSeq >= ? ORDER BY fromSeq').all(artifactId, toSeq, fromSeq) as { bytes: Uint8Array }[]).map((row) => row.bytes);
   }
 
   clientActor(artifactId: string, clientId: number): Actor | null {
