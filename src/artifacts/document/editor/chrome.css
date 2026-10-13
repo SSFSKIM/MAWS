@@ -666,6 +666,17 @@
 .doc-pill-dismiss {
   padding-left: 0;
 }
+.doc-history-tab {
+  padding: 0 var(--space);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+}
+.doc-history-tab[data-current],
+.doc-history-bar select[data-current] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .doc-history-tab-note {
   padding: 0 var(--space);
   color: var(--danger);

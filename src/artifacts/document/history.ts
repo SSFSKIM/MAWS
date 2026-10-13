@@ -92,18 +92,29 @@ export function diffTabs(diff: Pick<Diff, 'prevDoc' | 'nextDoc'>): DiffTab[] {
 /** The body to draw for a tab of a comparison: the later state's, or a removed tab's as deleted (`removedBody`). */
 export const diffBody = (diff: Diff, tabId: string): YType | undefined => tabBody(diff.nextDoc, tabId) ?? diff.removedBody(tabId);
 
-/**
- * "N changes" of a whole comparison: the changes of every tab the later state has, and one for each tab removed or
- * renamed (a new tab counts by its content, which reads as inserted).
- */
-export function countChanges(diff: Diff): number {
-  let count = 0;
-  for (const tab of diffTabs(diff)) {
-    if (tab.change === 'removed' || tab.change === 'renamed') count += 1;
-    if (tab.change !== 'removed') count += changeList(renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer)).length;
-  }
-  return count;
+/** One tab's part of a comparison's changes: the tab's own change (renamed or removed), then its body's changes. */
+export interface TabChanges {
+  tab: DiffTab;
+  /** The tab itself changed: one change, before its body's. */
+  entry: 'renamed' | 'removed' | null;
+  /** How many changes its body holds (a removed tab's content is its entry, not counted again). */
+  body: number;
 }
+
+/**
+ * The changes of a whole comparison, tab by tab in the comparison's tab order: the one list behind every "N changes"
+ * (the pill's and the preview's) and the preview's ↑ ↓. A new tab counts by its content, which reads as inserted.
+ */
+export function documentChanges(diff: Diff): TabChanges[] {
+  return diffTabs(diff).map((tab) => ({
+    tab,
+    entry: tab.change === 'renamed' || tab.change === 'removed' ? tab.change : null,
+    body: tab.change === 'removed' ? 0 : changeList(renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer)).length,
+  }));
+}
+
+/** "N changes" of a whole comparison. */
+export const countChanges = (diff: Diff): number => documentChanges(diff).reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0);
 
 export type RunKind = 'ins' | 'del' | 'fmt' | 'attrs';
 

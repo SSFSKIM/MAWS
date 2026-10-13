@@ -11,7 +11,7 @@ import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
-import { addTab, createDocument, deleteTab, tabBody } from '../../tabs';
+import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
@@ -414,6 +414,51 @@ describe('a deleted tab and a failed count', () => {
     click(screen.getByRole('button', { name: 'Count the new changes again' }));
     await until(() => screen.queryByRole('button', { name: 'See 1 new change' }) !== null, 'the counted pill');
     expect(screen.queryByRole('button', { name: 'Count the new changes again' })).toBeNull();
+  });
+});
+
+// M5's fix wave 2: the bar counts and steps through the whole comparison, tab changes included, as the pill counts it.
+describe('the bar’s count', () => {
+  it('counts a rename-only change on a one-tab document, steps to it and shows the rename', async () => {
+    await setup(async ({ host: h, history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Before the rename' });
+      h.write((doc) => renameTab(doc, TAB, 'Field notes'), AGENT);
+      hist.version('turn', AGENT, { summary: 'Renamed the tab' });
+    });
+    await openHistory();
+    click(row('.*Renamed the tab'));
+    await previewing();
+    expect(within(bar()).getByText('1 change')).toBeTruthy();
+    const tab = within(bar()).getByText('Field notes (renamed from Main)');
+    const next = within(bar()).getByRole('button', { name: 'Next change' }) as HTMLButtonElement;
+    expect(next.disabled).toBe(false);
+    click(next);
+    expect(tab.hasAttribute('data-current')).toBe(true);
+  });
+
+  it('counts every tab’s changes and steps across tabs', async () => {
+    await setup(async ({ host: h, history: hist }) => {
+      h.write((doc) => addTab(doc, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'x1' }, content: [{ type: 'text', text: 'Raw numbers.' }] }] }) }));
+      hist.version('named', HUMAN, { label: 'Two tabs' });
+      h.write((doc) => {
+        (tabBody(doc, TAB)!.get(0) as { insert(i: number, s: string): void }).insert(0, 'First. ');
+        (tabBody(doc, 'tab2')!.get(0) as { insert(i: number, s: string): void }).insert(0, 'Second. ');
+      }, AGENT);
+      hist.version('turn', AGENT, { summary: 'Two tabs edited' });
+    });
+    await openHistory();
+    click(row('.*Two tabs edited'));
+    await previewing();
+    expect(within(bar()).getByText('2 changes')).toBeTruthy();
+    const tabs = within(bar()).getByRole('combobox', { name: 'Tab' }) as HTMLSelectElement;
+    expect(tabs.value).toBe(TAB);
+    click(within(bar()).getByRole('button', { name: 'Next change' }));
+    await until(() => document.querySelector('.doc-change-current')?.textContent === 'First. ', 'the first tab’s change');
+    click(within(bar()).getByRole('button', { name: 'Next change' }));
+    await until(() => tabs.value === 'tab2' && document.querySelector('.doc-change-current')?.textContent === 'Second. ', 'the second tab’s change');
+    click(within(bar()).getByRole('button', { name: 'Next change' })); // wraps to the first tab
+    await until(() => tabs.value === TAB && document.querySelector('.doc-change-current')?.textContent === 'First. ', 'the wrap');
+    expect(within(bar()).getByText('2 changes')).toBeTruthy();
   });
 });
 

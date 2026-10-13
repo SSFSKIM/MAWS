@@ -10,7 +10,7 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import { decodeMap, stateV2, type Carry, type ContentMap } from '../../../yjs';
 import type { DocumentHandle } from '../../../host';
 import type { VersionView } from '../../collab';
-import { carriedBlocks, countChanges, diffBody, diffTabs, openDiff, showEditors, type Diff, type DiffTab } from '../../history';
+import { carriedBlocks, countChanges, diffBody, diffTabs, documentChanges, openDiff, showEditors, type Diff, type DiffTab, type TabChanges } from '../../history';
 import { dsOverrides, type TokenOverrides } from '../../meta';
 import { tabBody } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -33,6 +33,10 @@ export interface Preview {
   tokens: TokenOverrides;
   /** The version Restore and Make a copy act on; null when comparing. */
   versionId: number | null;
+  /** The whole comparison's changes, tab by tab: the bar's "N changes" and ↑ ↓, the same list the pill counts. */
+  changes: TabChanges[];
+  /** What ↑ ↓ reached in the shown tab when it is not a body change: the tab's own change, or a body change to reach. */
+  focus: number | 'tab' | null;
 }
 
 export interface Pill {
@@ -178,13 +182,20 @@ export class HistoryController {
   setShowChanges(on: boolean): void {
     const loaded = this.loaded;
     if (!loaded) return;
-    this.show(loaded, { ...loaded.preview, showChanges: on });
+    this.show(loaded, { ...loaded.preview, showChanges: on, focus: null });
   }
 
-  setTab(tabId: string): void {
+  /** Shows another tab of the comparison; `focus` is what ↑ ↓ reaches there (a body change's index, or the tab). */
+  setTab(tabId: string, focus: Preview['focus'] = null): void {
     const loaded = this.loaded;
     if (!loaded || !loaded.preview.tabs.some((tab) => tab.id === tabId)) return;
-    this.show(loaded, { ...loaded.preview, tabId });
+    this.show(loaded, { ...loaded.preview, tabId, focus });
+  }
+
+  /** What ↑ ↓ reached in the shown tab: its own change (`'tab'`), or none beyond the editor's own. */
+  setFocus(focus: Preview['focus']): void {
+    const loaded = this.loaded;
+    if (loaded && loaded.preview.focus !== focus) this.show(loaded, { ...loaded.preview, focus });
   }
 
   /** Back to the live document; the owner has now seen it. */
@@ -303,6 +314,8 @@ export class HistoryController {
         carried: new Map(),
         tokens: next ? { ...tokens, ...dsOverrides(diff.nextDoc) } : {},
         versionId: target.kind === 'version' ? target.versionId : null,
+        changes: documentChanges(diff),
+        focus: null,
       };
       this.loaded = { preview, diff, attributions: provenance };
       this.show(this.loaded, preview, true);

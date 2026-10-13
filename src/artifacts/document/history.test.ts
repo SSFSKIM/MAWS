@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyV2, newDoc } from '../yjs';
 import { applyEdit } from './patch-writer';
-import { attributedRuns, carriedBlocks, changeList, countChanges, diffBody, diffTabs, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
+import { attributedRuns, carriedBlocks, changeList, countChanges, diffBody, diffTabs, documentChanges, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
 import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body, markFormat, seededHub, textOf, yblock, type Version } from './history.fixture';
 import { schemaFor } from './schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from './tabs';
@@ -398,3 +398,24 @@ describe('Show editors on containers', () => {
     expect(editors[0].kinds).toEqual(['attrs:tone']);
   });
 });
+
+// M5 fix wave 2 (the re-review's probe): the preview's count and the pill's are one list, tab changes included.
+describe('the whole comparison’s changes', () => {
+  it('lists a rename-only change as the one change the pill counts', () => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { id: TAB, title: 'Before', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Unchanged text' }] }] }) }));
+    const before = hub.version('before', HUMAN);
+    renameTab(hub.connect(AGENT_1), TAB, 'After');
+    const after = hub.version('after', AGENT_1);
+    const diff = openDiff({ prevState: before.state, nextState: after.state, attributions: hub.attributions() });
+    try {
+      const changes = documentChanges(diff);
+      expect(changes.map(({ tab, entry, body: inBody }) => ({ id: tab.id, title: tab.title, previousTitle: tab.previousTitle, entry, inBody }))).toEqual([{ id: TAB, title: 'After', previousTitle: 'Before', entry: 'renamed', inBody: 0 }]);
+      expect(countChanges(diff)).toBe(1);
+      expect(changeList(renderDiff(body(diff.nextDoc), diff.renderer))).toHaveLength(0); // the body alone has none
+    } finally {
+      diff.destroy();
+    }
+  });
+});
+

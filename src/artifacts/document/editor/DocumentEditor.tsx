@@ -38,7 +38,7 @@ import type { HistoryApi } from './history/api';
 import type { HistoryController, HistorySnapshot, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
 import { HistoryRail } from './history/HistoryRail';
-import { setCarried } from './history/paint';
+import { goToChange, setCarried } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
@@ -192,7 +192,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     },
     [tabId, handle, host, artifactId],
   );
-  usePreview(editor, preview?.view ?? null, preview?.carried ?? NO_CARRIES, handle, tabId, historyController);
+  usePreview(editor, preview?.view ?? null, preview?.carried ?? NO_CARRIES, preview?.focus ?? null, handle, tabId, historyController);
 
   // Comment the selection: the thread and the mark, the passage drawn active, then the surface opens its card.
   useLayoutEffect(() => {
@@ -394,9 +394,9 @@ function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string
   return { x: line.left - origin.left, y: line.top - origin.top, width: line.width, height: line.height };
 }
 
-// Puts the editor on the preview's view (or back on the live tab), labels its moved and retyped blocks, and tells the
-// controller what is shown so the docs of what is not can go.
-function usePreview(editor: Editor, view: VersionView | null, carried: ReadonlyMap<string, Carry['kind']>, handle: DocumentHandle, tabId: string, controller: HistoryController | null) {
+// Puts the editor on the preview's view (or back on the live tab), labels its moved and retyped blocks, reaches the
+// change ↑ ↓ asked for there, and tells the controller what is shown so the docs of what is not can go.
+function usePreview(editor: Editor, view: VersionView | null, carried: ReadonlyMap<string, Carry['kind']>, focus: number | 'tab' | null, handle: DocumentHandle, tabId: string, controller: HistoryController | null) {
   const shown = useRef<VersionView | null>(null);
   useEffect(() => {
     if (editor.isDestroyed) return;
@@ -404,6 +404,7 @@ function usePreview(editor: Editor, view: VersionView | null, carried: ReadonlyM
     else if (shown.current && inHistory(editor.state, tabBody(handle.doc, tabId) ?? null)) editor.commands.leaveHistory();
     shown.current = view;
     setCarried(editor, view ? carried : NO_CARRIES);
+    if (view && focus !== null) goToChange(editor, focus === 'tab' ? null : focus);
     controller?.applied(view);
-  }, [editor, view, carried, handle, tabId, controller]);
+  }, [editor, view, carried, focus, handle, tabId, controller]);
 }

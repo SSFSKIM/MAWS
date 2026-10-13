@@ -10,7 +10,7 @@ import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } 
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Carry } from '../../../yjs';
 import { ySyncPluginKey } from '../../../yjs/prosemirror';
-import { attributedRuns, changeList, nextChange, prevChange, type Change } from '../../history';
+import { attributedRuns, changeList, type Change } from '../../history';
 import { authorOf } from './model';
 
 interface PaintState {
@@ -103,18 +103,12 @@ export function setCarried(editor: Editor, carried: ReadonlyMap<string, Carry['k
   if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(historyPaintKey, { carried } satisfies PaintMeta).setMeta('addToHistory', false));
 }
 
-/** ↓ or ↑: selects the next or previous change, wrapping, and scrolls it into view. */
-export function stepChange(editor: Editor, direction: 1 | -1): void {
-  const { changes, current } = changesOf(editor.state);
-  if (changes.length === 0) return;
-  const at = current === null ? (direction === 1 ? -1 : editor.state.doc.content.size + 1) : changes[current].from;
-  const change = direction === 1 ? nextChange(changes, at) : prevChange(changes, at);
-  if (!change) return;
-  const { doc } = editor.state;
-  const tr = editor.state.tr
-    .setSelection(TextSelection.near(doc.resolve(Math.min(change.from + 1, doc.content.size))))
-    .setMeta(historyPaintKey, { current: changes.indexOf(change) } satisfies PaintMeta)
-    .setMeta('addToHistory', false)
-    .scrollIntoView();
+/** Selects the shown tab's change `index` and scrolls it into view; null clears what ↑ ↓ reached. */
+export function goToChange(editor: Editor, index: number | null): void {
+  if (editor.isDestroyed) return;
+  const { changes } = changesOf(editor.state);
+  const change = index === null ? undefined : changes[index];
+  let tr = editor.state.tr.setMeta(historyPaintKey, { current: change ? index : null } satisfies PaintMeta).setMeta('addToHistory', false);
+  if (change) tr = tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(change.from + 1, tr.doc.content.size)))).scrollIntoView();
   editor.view.dispatch(tr);
 }
