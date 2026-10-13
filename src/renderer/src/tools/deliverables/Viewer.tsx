@@ -31,12 +31,12 @@ import { openFile } from '../code/open-file';
 import { FileBody } from '../code/viewer/FileViewer';
 import { useViewer } from '../code/viewer/viewer-store';
 import { mawsTranscriptActions } from '../maws/actions';
+import { HtmlFrame, type FrameHandle } from '../artifacts/viewers/frames/HtmlFrame'; // P3-L (M5b): shared with the artifact viewers
+import { Media } from '../artifacts/viewers/frames/Media';
+import { PdfFrame } from '../artifacts/viewers/frames/PdfFrame';
 import { artifactElementAnchor, type PickMessage } from './comment/pick';
 import { ConsoleChip } from './ConsoleChip';
 import { DELIVERABLES_COPY } from './copy';
-import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
-import { Media } from './frames/Media';
-import { PdfFrame } from './frames/PdfFrame';
 import { basename, bodyOf, latestVersion, titleOf, underSession, versionPath, type BodyKind } from './model';
 import { clearConsole, lookup, lookupKey, useDeliverables } from './store';
 import { Versions } from './Versions';
@@ -262,9 +262,7 @@ function Body({ record, shown, reloads, path, body, title, picking, onPick, onFr
           key={url}
           url={url}
           title={DELIVERABLES_COPY.frameTitle(title)}
-          appSessionId={record.appSessionId}
-          deliverableId={record.id}
-          version={shown}
+          onMount={() => clearConsole(record.appSessionId, record.id, shown)}
           picking={picking}
           onPick={onPick}
           onFrame={onFrame}

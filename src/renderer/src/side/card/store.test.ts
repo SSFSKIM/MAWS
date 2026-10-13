@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { deliverableUrl } from '@shared/maws/deliverable';
+import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { fileLineAnchor } from '../../tools/code/anchor/anchor';
 import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, openCard, targetOf, useCommentCard } from './store';
 
@@ -23,6 +24,16 @@ describe('targetOf', () => {
     expect(targetOf(ANCHOR)).toEqual({ kind: 'deliverable', appSessionId: PARENT, deliverableId: RECORD, version: 2 });
     expect(targetOf({ ...ANCHOR, pageUrl: 'https://example.com/' })).toBeNull();
     expect(targetOf(fileLineAnchor('/r/x.ts', 3))).toBeNull();
+  });
+
+  // P3-L (M5b, Decision Log 10): a page on the artifact store's scheme is the `artifact-page` host's, beside the deliverable
+  it('reads an artifact store page into its artifact and revision, and its card is the artifact-page host’s', () => {
+    const page: Anchor = { ...ANCHOR, pageUrl: artifactUrl(RECORD, 14, 'index.html') };
+    expect(targetOf(page)).toEqual({ kind: 'artifact-page', artifactId: RECORD, revision: 14 });
+    expect(targetOf({ ...page, pageUrl: 'maws-artifact://not-an-id/14/index.html' })).toBeNull();
+    openCard(page, { appSessionId: PARENT });
+    expect(open()?.host).toBe('artifact-page');
+    expect(open()?.target).toEqual({ kind: 'artifact-page', artifactId: RECORD, revision: 14 });
   });
 
   // P2-E2: a page element names its page; a card opened from it with no placement is the browser's

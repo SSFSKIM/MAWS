@@ -3,7 +3,8 @@
 // (also on Shift+F10) and in its context menu. Every write goes through P3-A's `artifacts.*` (the library's actions),
 // and the list shows it once main's index has it; a refusal is toasted, or said in the sheet that asked. Delete asks
 // first; a design system still styling artifacts is refused `designSystemInUse`, answered by a sheet that names them,
-// each opening in a tab. Export joins at M5 (A's M7).
+// each opening in a tab. M5b: Export, a submenu of the formats main's exporters serve for the kind and, for a File
+// artifact, "Save a copy…" (export.ts), shown when the kind has either.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -12,6 +13,8 @@ import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { deleteArtifact, duplicateArtifact, moveArtifactToSpace, openArtifactTab, renameArtifact, setArtifactPinned } from './actions';
 import { DIALOG_COPY as D, ROW_COPY as R } from './copy';
+import { exportArtifact, saveArtifactCopy, useExportFormats } from './export';
+import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { closeLibraryDialog, openLibraryDialog, replaceLibraryDialog, toastFailure, type ArtifactRef, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
@@ -71,11 +74,43 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
       <M.Item className={MENU_ITEM} onSelect={() => void reportFailure(duplicateArtifact(row.id))}>
         {R.duplicate}
       </M.Item>
+      <ExportItems M={M} row={row} />
       <M.Separator className="my-1 h-px bg-border" />
       <M.Item className={`${MENU_ITEM} text-danger`} onSelect={() => openLibraryDialog({ kind: 'delete', artifact: ref })}>
         {R.delete}
       </M.Item>
     </>
+  );
+}
+
+// M5b: Export ›, its formats and a File artifact's Save a copy…; nothing when the kind has neither.
+function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
+  const formats = useExportFormats(row.kind);
+  const copies = row.kind === 'file';
+  if (formats.length === 0 && !copies) return null;
+  return (
+    <M.Sub>
+      <M.SubTrigger className={`${MENU_ITEM} justify-between data-[state=open]:bg-bg-hover`}>
+        {R.export}
+        <span aria-hidden className="text-fg-faint">
+          ›
+        </span>
+      </M.SubTrigger>
+      <M.Portal>
+        <M.SubContent sideOffset={4} className={MENU}>
+          {formats.map((format) => (
+            <M.Item key={format} className={MENU_ITEM} onSelect={() => void exportArtifact(row.id, format)}>
+              {VIEWERS_COPY.exportFormats[format]}
+            </M.Item>
+          ))}
+          {copies && (
+            <M.Item className={MENU_ITEM} onSelect={() => void saveArtifactCopy(row.id)}>
+              {VIEWERS_COPY.saveCopy}
+            </M.Item>
+          )}
+        </M.SubContent>
+      </M.Portal>
+    </M.Sub>
   );
 }
 

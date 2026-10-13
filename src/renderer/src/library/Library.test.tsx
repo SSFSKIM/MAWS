@@ -18,6 +18,7 @@ import { allTabs } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { useLibraryDialog } from './dialogs';
+import { resetExportFormats } from './export';
 import { Library } from './Library';
 import { connectLibrary, resetLibrary } from './store';
 import { resetLibraryView } from './view';
@@ -106,6 +107,7 @@ beforeEach(() => {
   resetLibrary();
   resetLibraryView();
   resetArtifactEditors();
+  resetExportFormats();
   useLibraryDialog.setState({ open: null });
   spaces = [
     { id: WORK, name: 'Work', createdAt: 1, linkedDir: '/Users/me/work', count: 1 },
@@ -382,6 +384,31 @@ describe('the row actions', () => {
     await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Move to Space' }));
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'No Space' }));
     await waitFor(() => expect(main.callsOf('artifacts.update')).toContainEqual({ artifactId: id(1), spaceId: null }));
+  });
+
+  // M5b (Decision Log 14): Export lists the formats main's exporters serve for the kind, and a File artifact's Save a copy…
+  it('Export › a format exports the artifact and saves it; a File artifact saves a copy; a kind with neither has no Export', async () => {
+    answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
+    answers['artifacts.export'] = () => ok({ path: '/store/x/exports/1-pdf.pdf', revision: 1 });
+    answers['library.saveAs'] = () => ok({ saved: true, path: '/Users/me/Downloads/Pricing page.pdf' });
+    const user = userEvent.setup();
+    render(<Library />);
+    await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
+    const formats = await screen.findAllByRole('menuitem', { name: /^(PDF|PNG|Save a copy…)$/ });
+    expect(formats.map((item) => item.textContent)).toEqual(['PDF', 'PNG']);
+    fireEvent.click(formats[0]!);
+    await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: id(2), source: { export: { revision: 1, format: 'pdf' } } }]));
+    expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: id(2), format: 'pdf' }]);
+
+    await user.keyboard('{Escape}');
+    await user.click(within(await openMenu(user, 'export.csv')).getByRole('menuitem', { name: 'Export' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save a copy…' }));
+    await waitFor(() => expect(main.callsOf('library.saveAs')).toContainEqual({ artifactId: id(4), source: { content: {} } }));
+
+    await user.keyboard('{Escape}');
+    const menu = await openMenu(user, 'Launch plan');
+    await waitFor(() => expect(main.callsOf('library.exportFormats')).toContainEqual({ kind: 'document' }));
+    expect(within(menu).queryByRole('menuitem', { name: 'Export' })).toBeNull();
   });
 
   it('Move to Space › New Space… makes the Space and moves the artifact into it', async () => {

@@ -124,6 +124,7 @@ export const ROW_COPY = {
   noSpace: 'No Space',
   newSpace: 'New Space…',
   duplicate: 'Duplicate',
+  export: 'Export', // M5b
   delete: 'Delete…',
 };
 
