@@ -47,5 +47,6 @@
     // reason as C8a's
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/test-support/relative-time.ts"
-  ]
+  ],
+  "exclude": ["src/artifacts/document/editor/**"] // P3-B: the document editor's React and DOM, typechecked by tsconfig.web.json
 }
