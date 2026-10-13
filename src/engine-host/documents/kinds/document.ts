@@ -3,8 +3,11 @@
 // `registerAdapter`, so A's document service runs its hooks (forwarding, the id repair, the anchor refresh, the threads
 // mirror, provenance carries, the restore scope, the turn summary) on every update of a document artifact, keyed by the
 // artifact id A passes. The adapter's carry registry is per artifact and is dropped when the artifact is deleted. The
-// tools reach the adapter through the store (`documentAdapterOf`), so no other wiring carries it.
+// tools reach the adapter through the store (`documentAdapterOf`), so no other wiring carries it. M8: while the kind is
+// registered, a document in a linked Space is mirrored as `<slug>.md` (L's `registerMirrorWriter`).
 import { documentAdapter, type DocumentAdapter } from '@artifacts/document/adapter';
+import { documentMirrorWriter } from '@artifacts/document/mirror';
+import { registerMirrorWriter } from '@artifacts/library/mirror';
 import type { ArtifactStore } from '../store';
 
 export interface DocumentKind {
@@ -18,7 +21,14 @@ export function registerDocumentKind(store: ArtifactStore): DocumentKind {
   const off = store.onChange((change) => {
     if (change.change === 'deleted' && change.kind === 'document') adapter.forgetArtifact(change.artifactId);
   });
-  return { adapter, close: off };
+  const offMirror = registerMirrorWriter('document', documentMirrorWriter);
+  return {
+    adapter,
+    close: () => {
+      off();
+      offMirror();
+    },
+  };
 }
 
 /** The document adapter registered with `store`, or null when the document kind is not registered. */

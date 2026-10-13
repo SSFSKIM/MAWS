@@ -6,6 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { carriedBy, decodeMap, idAt, mergeMaps, transact } from '@artifacts/yjs';
 import { DocIndex } from '@artifacts/document/block-index';
+import { documentMirrorWriter } from '@artifacts/document/mirror';
+import { mirrorWriterFor } from '@artifacts/library/mirror';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { schemaFor } from '@artifacts/document/schema';
 import { addThread, anchorOfMark } from '@artifacts/document/threads';
@@ -30,6 +32,12 @@ describe('the document kind on A’s store', () => {
   it('registers its adapter for the document kind', () => {
     expect(world.service.adapterFor('document')).toBe(world.kind.adapter);
     expect(world.store.service.adapterFor('document')?.kind).toBe('document');
+  });
+
+  it('registers the document mirror writer while the kind is registered (M8: a linked Space mirrors <slug>.md)', () => {
+    expect(mirrorWriterFor('document')).toBe(documentMirrorWriter);
+    world.kind.close();
+    expect(mirrorWriterFor('document')).toBeUndefined();
   });
 
   it('a duplicate id a replica wrote is repaired by A’s service through the adapter, the text kept', async () => {
