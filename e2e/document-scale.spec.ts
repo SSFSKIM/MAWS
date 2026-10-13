@@ -184,9 +184,13 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   const id = await seeded(page, seam, 'Scale 200', large.state);
   const smallId = await seeded(page, seam, 'Scale 20', small.state);
   await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Seeded', note: 'S7b seed' });
+  // the host's modules warmed (the schema, the markdown dialect, the tools a read builds) by one read of the small
+  // document, then released: the idle heap the close is judged against holds what any first read loads for good
+  await seam.call('perf-warm', 'artifact_read', { artifact: smallId });
+  await seam.release('perf-warm');
   await sleep(UNLOAD_WAIT_MS);
   const idle1 = await seam.heap();
-  rows.write({ heap: { idle0: MB(idle0.heapUsed), idleAfterSeedAndUnload: MB(idle1.heapUsed) } });
+  rows.write({ heap: { idle0: MB(idle0.heapUsed), idleWarmAfterUnload: MB(idle1.heapUsed) } });
 
   await test.step('6: first sync to interactive, cold and warm, at 20 and at 200 pages', async () => {
     const small20 = small.stats.topBlocks - 5;
@@ -341,14 +345,14 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   await test.step('8: the host’s heap loaded and, after close and unload, against idle; the renderers', async () => {
     const memory = await processMemory(app);
     const loaded = await seam.heap();
-    rows.add('8 host loaded', 'host heap delta with the 200-page document open in two windows and two agent replicas (from idle after the seeds’ unload)', MB(loaded.heapUsed - idle1.heapUsed), 'MB', 100, '≤ +100 MB', `idle ${MB(idle1.heapUsed)} → ${MB(loaded.heapUsed)} MB; host working set ${memory.utility.map((u) => `${u.name} ${u.workingSetMB}`).join(', ')} MB`);
-    for (const renderer of memory.renderers) rows.add(`8 renderer steady ${renderer.windowId}`, `renderer working set (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', 500, '≤ 500 MB');
+    rows.add('8 host loaded', 'host heap delta with the 200-page document open in two windows and two agent replicas (from the warm idle)', MB(loaded.heapUsed - idle1.heapUsed), 'MB', 100, '≤ +100 MB', `idle ${MB(idle1.heapUsed)} → ${MB(loaded.heapUsed)} MB; host working set ${memory.utility.map((u) => `${u.name} ${u.workingSetMB}`).join(', ')} MB`);
+    for (const renderer of memory.renderers) rows.add(`8 renderer collected ${renderer.windowId}`, `renderer working set once the previews' garbage is collected (window ${renderer.windowId}; a forced collection)`, renderer.workingSetMB, 'MB', 500, '≤ 500 MB');
     await closeTab(page, 'Scale 200');
     await pageB.close();
     for (const agent of agents) await seam.release(agent.session);
     await sleep(UNLOAD_WAIT_MS);
     const after = await seam.heap();
-    rows.add('8 host after close', 'host heap after close and unload, from idle (after the seeds’ unload)', MB(after.heapUsed - idle1.heapUsed), 'MB', 5, 'within 5 MB of idle', `idle ${MB(idle1.heapUsed)} (at launch ${MB(idle0.heapUsed)}) → ${MB(after.heapUsed)} MB`);
+    rows.add('8 host after close', 'host heap after close and unload, from the warm idle (its modules loaded by one read, the documents unloaded)', MB(after.heapUsed - idle1.heapUsed), 'MB', 5, 'within 5 MB of idle', `idle ${MB(idle1.heapUsed)} (at launch ${MB(idle0.heapUsed)}) → ${MB(after.heapUsed)} MB`);
   });
 
   rows.write({ loads });
