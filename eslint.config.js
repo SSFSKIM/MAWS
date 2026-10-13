@@ -24,6 +24,9 @@ const YJS_PATTERNS = [
     message: 'Yjs is called only through the binding module, src/artifacts/yjs/ (Decision Log 25): import from there, or add what you need to it.',
   },
 ];
+// `no-restricted-imports` does not see `import()`; this does (`.` again stands for the slash).
+const YJS_DYNAMIC = { selector: 'ImportExpression[source.value=/^@y.(?:y|prosemirror)(?:\\W.*)?$/]', message: YJS_PATTERNS[0].message };
+const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE };
 // P3-A end
 
 module.exports = defineConfig(
@@ -40,6 +43,14 @@ module.exports = defineConfig(
     languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
   },
+  // P3-A start: `no-restricted-syntax`'s options are replaced per block too, so the blocks below that set it for parts of
+  // src/ repeat YJS_DYNAMIC; this one covers the rest of src/ outside src/artifacts/.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/artifacts/**'],
+    rules: { 'no-restricted-syntax': ['error', YJS_DYNAMIC] },
+  },
+  // P3-A end
   // P2-F W-V (L154): the React Compiler turned a used postfix `spans[kind]++` into a prefix increment (P2-C, 26ef4b47),
   // so the built app read ordinal + 1 while every uncompiled test passed. In renderer code a postfix `++`/`--` stands
   // only as a statement or a for loop's update, where its value is never read.
@@ -52,6 +63,7 @@ module.exports = defineConfig(
           selector: 'UpdateExpression[prefix=false]:not(ExpressionStatement > UpdateExpression):not(ForStatement > UpdateExpression.update):not(ForStatement > SequenceExpression.update > UpdateExpression)',
           message: 'A postfix ++/-- whose value is read can compile to the prefix form under the React Compiler (L154): save the value you need first (const old = n), then increment or decrement as its own statement (n++).',
         },
+        YJS_DYNAMIC, // P3-A
       ],
     },
   },
@@ -63,6 +75,7 @@ module.exports = defineConfig(
       'no-restricted-syntax': [
         'error',
         { selector: "MemberExpression[object.name='console']", message: 'Log through importLog in src/main/browser/import/log.ts: nothing under the import logs a value.' },
+        YJS_DYNAMIC, // P3-A
       ],
     },
   },
@@ -85,8 +98,16 @@ module.exports = defineConfig(
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],
+    ignores: ['src/artifacts/yjs/**'],
+    rules: { 'no-restricted-syntax': ['error', PORTABLE_DYNAMIC_SYNTAX, YJS_DYNAMIC] },
+  },
+  {
+    files: ['src/artifacts/yjs/**/*.{ts,tsx}'],
+    rules: { 'no-restricted-syntax': ['error', PORTABLE_DYNAMIC_SYNTAX] },
+  },
+  {
+    files: ['src/artifacts/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-syntax': ['error', { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE }],
       'no-restricted-properties': [
         'error',
         { object: 'window', property: 'maws', message: PORTABLE },

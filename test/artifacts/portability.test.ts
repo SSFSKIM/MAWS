@@ -86,6 +86,28 @@ describe('the binding-module rule (Yjs only through src/artifacts/yjs/)', () => 
     },
   );
 
+  const lazy = "export const load = () => [import('@y/y'), import('@y/prosemirror'), import('@y/y/meta')];\n";
+
+  it.each([
+    'src/artifacts/provider/__lint_fixture__.ts',
+    'src/engine-host/documents/__lint_fixture__.ts',
+    'src/renderer/src/__lint_fixture__.tsx',
+    'src/main/browser/import/__lint_fixture__.ts',
+    'src/main/browser/import/log.ts',
+  ])('refuses a dynamic import of them in %s', async (file) => {
+    expect(await rulesFired(lazy, file)).toEqual(['no-restricted-syntax', 'no-restricted-syntax', 'no-restricted-syntax']);
+  });
+
+  it('lets src/artifacts/yjs/ import them lazily, and a lazy @y/protocols anywhere', async () => {
+    expect(await rulesFired(lazy, 'src/artifacts/yjs/__lint_fixture__.ts')).toEqual([]);
+    expect(await rulesFired("export const load = () => import('@y/protocols/awareness');\n", 'src/renderer/src/__lint_fixture__.tsx')).toEqual([]);
+  });
+
+  it('keeps the other no-restricted-syntax rules of the files it shares (the renderer’s postfix rule, the import log rule)', async () => {
+    expect(await rulesFired('export const bump = (counter: { n: number }) => counter.n++;\n', 'src/renderer/src/__lint_fixture__.tsx')).toEqual(['no-restricted-syntax']);
+    expect(await rulesFired("console.log('x');\n", 'src/main/browser/import/__lint_fixture__.ts')).toEqual(['no-restricted-syntax']);
+  });
+
   it('still refuses Node in src/artifacts/yjs/', async () => {
     expect(await rulesFired("import { readFileSync } from 'node:fs';\nexport const read = readFileSync;\n", 'src/artifacts/yjs/__lint_fixture__.ts')).toEqual(['no-restricted-imports']);
   });
