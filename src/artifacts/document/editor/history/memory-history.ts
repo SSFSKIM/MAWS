@@ -108,6 +108,18 @@ export class MemoryHistory implements HistoryApi {
     return { revision: this.host.revision, versionId: restored.id };
   }
 
+  /** The names given to versions through `nameVersion`, as sent. */
+  readonly namings: Array<{ versionId: number; label: string; note?: string | null }> = [];
+
+  async nameVersion(versionId: number, naming: { label: string; note?: string | null }): Promise<void> {
+    const version = this.get(versionId);
+    this.namings.push({ versionId, ...naming });
+    version.label = naming.label;
+    if (naming.note === null) delete version.note;
+    else if (naming.note !== undefined) version.note = naming.note;
+    this.notify();
+  }
+
   async duplicate(versionId: number): Promise<{ artifactId: string }> {
     this.get(versionId);
     this.copies.push(versionId);

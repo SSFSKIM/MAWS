@@ -13,13 +13,15 @@ interface Props {
   controller: HistoryController;
   snapshot: HistorySnapshot;
   sessionTitle?: (appSessionId: string) => string | undefined;
+  /** Whether the Save version form is open (the editor holds it, so the header's Save version can open it). */
+  saving: boolean;
+  onSaving(open: boolean): void;
   onClose(): void;
 }
 
-export function HistoryRail({ controller, snapshot, sessionTitle, onClose }: Props) {
+export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSaving: setSaving, onClose }: Props) {
   const [namedOnly, setNamedOnly] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
-  const [saving, setSaving] = useState(false);
   const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: Date.now(), namedOnly }), [snapshot.versions, namedOnly]);
   const select = (version: ArtifactVersion, event: MouseEvent) => void controller.select(version.id, { extend: event.shiftKey });
   const row = (version: ArtifactVersion) => <VersionRow key={version.id} version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} onSelect={select} />;

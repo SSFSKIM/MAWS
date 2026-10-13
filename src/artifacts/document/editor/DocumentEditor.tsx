@@ -21,7 +21,7 @@
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { inHistory, type VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
 import type { Carry } from '../../yjs';
@@ -62,9 +62,23 @@ export interface DocumentEditorProps {
   comments?: DocumentComments;
   /** The document's versions and history actions (M5); without it, version history is not offered. */
   history?: HistoryApi;
+  /**
+   * The rail beside the page, when the caller holds it (M8: the X32 header toggles History and Comments from outside the
+   * body, and the rail stays open across a remount); the editor's own toggles then ask through `onRailChange`. Without
+   * it the editor holds its rail itself.
+   */
+  rail?: DocumentRail;
+  onRailChange?(rail: DocumentRail): void;
+  /** A new value opens the history rail on its Save version form (the header's Save version); the value at mount is not new. */
+  saveVersionRequest?: number;
+  /** What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without. */
+  pageScope?: ComponentType<{ children: ReactNode }>;
+  /** The page's element as it appears and goes (the shell's Mark-up surface). */
+  onPage?(element: HTMLElement | null): void;
 }
 
-type Rail = 'comments' | 'history' | null;
+export type DocumentRail = 'comments' | 'history' | null;
+type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
 
 /** A request to show a thread's passage: a new serial for each ask, so asking twice shows twice. */
@@ -77,7 +91,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const { doc } = props.handle;
   const tabs = useTabs(doc);
   const [selected, setSelected] = useState<string | null>(null);
-  const [rail, setRail] = useState<Rail>(null);
+  const [ownRail, setOwnRail] = useState<Rail>(null);
+  const held = props.rail !== undefined;
+  const rail = held ? (props.rail ?? null) : ownRail;
+  const [saving, setSaving] = useState(false);
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
@@ -87,11 +104,29 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const snapshot = useHistorySnapshot(history);
   const preview = snapshot?.preview ?? null;
   useEffect(() => history?.setLiveTab(active?.id ?? null), [history, active?.id]);
-  // Leaving the history rail leaves history: the page shows the live document again.
+  // Leaving the history rail leaves history: the page shows the live document again (whoever closed the rail).
+  const { onRailChange, saveVersionRequest } = props;
   const openRail = (next: Rail) => {
-    if (rail === 'history' && next !== 'history') history?.close();
-    setRail(next);
+    if (!held) setOwnRail(next);
+    onRailChange?.(next);
   };
+  useEffect(() => {
+    if (rail !== 'history') {
+      history?.close();
+      setSaving(false);
+    }
+  }, [rail, history]);
+  // Save version asked from outside: the history rail on its form. A request already made when the editor mounted is
+  // not new (the body remounts on a tab switch).
+  const seenSaveRequest = useRef(saveVersionRequest);
+  useEffect(() => {
+    if (saveVersionRequest === seenSaveRequest.current) return;
+    seenSaveRequest.current = saveVersionRequest;
+    if (!history) return;
+    setSaving(true);
+    if (!held) setOwnRail('history');
+    onRailChange?.('history');
+  }, [saveVersionRequest, history, held, onRailChange]);
   return (
     <div className="doc-editor" data-document-editor="">
       {!preview && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} onSelect={setSelected} />}
@@ -106,6 +141,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
       <div className="doc-editor-body">
         {active ? (
           <TabEditor
+            {...props}
             key={active.id}
             tabId={active.id}
             tabTitle={active.title}
@@ -118,7 +154,6 @@ export function DocumentEditor(props: DocumentEditorProps) {
             onPassageClick={() => !preview && openRail('comments')}
             historyController={history}
             historySnapshot={snapshot}
-            {...props}
           />
         ) : (
           <div className="doc-editor-loading" role="status">
@@ -139,7 +174,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
             onClose={() => openRail(null)}
           />
         )}
-        {rail === 'history' && history && snapshot && <HistoryRail controller={history} snapshot={snapshot} sessionTitle={props.history?.sessionTitle?.bind(props.history)} onClose={() => openRail(null)} />}
+        {rail === 'history' && history && snapshot && (
+          <HistoryRail controller={history} snapshot={snapshot} sessionTitle={props.history?.sessionTitle?.bind(props.history)} saving={saving} onSaving={setSaving} onClose={() => openRail(null)} />
+        )}
       </div>
     </div>
   );
@@ -161,7 +198,7 @@ interface TabEditorProps extends DocumentEditorProps {
   onPassageClick(): void;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, showing, onShown, onActiveThread, onPassageClick }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -280,6 +317,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         preview={preview}
         history={historyController}
         pill={preview ? null : (historySnapshot?.pill ?? null)}
+        pageScope={pageScope}
+        onPage={onPage}
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -300,10 +339,12 @@ interface PageFrameProps {
   preview: Preview | null;
   history: HistoryController | null;
   pill: HistorySnapshot['pill'];
+  pageScope: DocumentEditorProps['pageScope'];
+  onPage: DocumentEditorProps['onPage'];
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, handle, author, comments, tabId, preview, history, pill, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(editor, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -356,16 +397,23 @@ function PageFrame({ editor, handle, author, comments, tabId, preview, history, 
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;
   const page = useRef<HTMLDivElement>(null);
   const ground = usePageGround(page, tokens);
+  useLayoutEffect(() => {
+    onPage?.(page.current);
+    return () => onPage?.(null);
+  }, [onPage]);
+  const sheet = (
+    <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
+      <div className="ds-doc-page">
+        <EditorContent editor={editor} />
+      </div>
+    </div>
+  );
   return (
     <div ref={frame} className="doc-page-frame" onContextMenu={editors.onContextMenu}>
-      <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
-        <div className="ds-doc-page">
-          <EditorContent editor={editor} />
-        </div>
-      </div>
+      <div className="doc-page-scope">{Scope ? <Scope>{sheet}</Scope> : sheet}</div>
       {comments?.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}` })}
       {pill && (
-        <div className="doc-pill">
+        <div className="doc-pill" data-markup-occluder>
           <button type="button" className="doc-pill-open" onClick={onNewChanges}>
             {pill.count === null ? 'See new changes' : `See ${pill.count} new ${pill.count === 1 ? 'change' : 'changes'}`}
           </button>

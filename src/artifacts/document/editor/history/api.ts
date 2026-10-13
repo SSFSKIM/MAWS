@@ -16,6 +16,11 @@ export interface HistoryApi {
   attributions(fromSeq: number, toSeq: number): Promise<Uint8Array>;
   /** "Save version" (`artifacts.saveVersion`): a named version of the live state. */
   saveVersion(version: { label: string; note?: string }): Promise<{ versionId: number }>;
+  /**
+   * "Name this version" (`artifacts.nameVersion`, any version, §4.7): its label becomes `label`; `note` omitted keeps the
+   * version's note, `null` clears it. Without it, naming is not offered.
+   */
+  nameVersion?(versionId: number, naming: { label: string; note?: string | null }): Promise<void>;
   /** Artifact-wide restore (`artifacts.restore`): `versionId` is the new `restore` version. */
   restore(versionId: number): Promise<{ revision: number; versionId: number }>;
   /** "Make a copy" of a version (`artifacts.duplicate {versionId}`): the new artifact. */

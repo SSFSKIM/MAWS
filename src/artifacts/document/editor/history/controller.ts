@@ -230,6 +230,26 @@ export class HistoryController {
     }
   }
 
+  /** Whether a version can be named here (the api names versions). */
+  get canName(): boolean {
+    return typeof this.api.nameVersion === 'function';
+  }
+
+  /** Names the previewed version by its label alone (its note stays as it was). */
+  async name(label: string): Promise<boolean> {
+    const versionId = this.loaded?.preview.versionId;
+    if (versionId == null || !this.api.nameVersion) return false;
+    try {
+      await this.api.nameVersion(versionId, { label });
+      await this.refresh();
+      this.set({ status: `Named “${label}”.` });
+      return true;
+    } catch (error) {
+      this.set({ error: message(error) });
+      return false;
+    }
+  }
+
   /** Restores the previewed version (a new `restore` version) and leaves history; the banner follows the restore. */
   async restore(): Promise<void> {
     const versionId = this.loaded?.preview.versionId;

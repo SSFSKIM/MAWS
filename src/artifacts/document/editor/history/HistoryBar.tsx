@@ -2,11 +2,11 @@
 // formatting toolbar while the editor shows a version: what is shown, its tab (with the tabs a comparison added,
 // renamed or deleted marked as such, a deleted one still shown; a single tab's change named beside the heading), Show
 // changes (on by default), "N changes" of the whole comparison with ↑ ↓ stepping through every tab's changes in order
-// (a tab's own rename or deletion first, then its body's), Restore this version (confirmed first), Make a copy, and Back
-// to document. The count is the controller's whole-document list, the one the pill counts.
+// (a tab's own rename or deletion first, then its body's), Restore this version (confirmed first), Make a copy, Name this
+// version (M8: its label alone, A's `artifacts.nameVersion`), and Back to document. The count is the controller's whole-document list, the one the pill counts.
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
-import { useState, type ReactNode } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import type { DiffTab, TabChanges } from '../../history';
 import type { HistoryController, Preview } from './controller';
 import { changesOf, goToChange } from './paint';
@@ -48,6 +48,7 @@ function step(editor: Editor, preview: Preview, controller: HistoryController, d
 
 export function HistoryBar({ editor, preview, controller, onBack }: { editor: Editor; preview: Preview; controller: HistoryController; onBack(): void }) {
   const [confirming, setConfirming] = useState(false);
+  const [naming, setNaming] = useState(false);
   // re-rendered as ↑ ↓ moves within the tab (the count itself is the whole comparison's)
   useEditorState({ editor, selector: ({ editor: e }) => (e ? changesOf(e.state).current : null) });
   const count = preview.changes.reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0);
@@ -100,12 +101,18 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
             <Button label="Make a copy" onClick={() => void controller.duplicate()}>
               Make a copy
             </Button>
+            {controller.canName && (
+              <Button label="Name this version" onClick={() => setNaming(true)}>
+                Name this version
+              </Button>
+            )}
           </>
         )}
         <Button label="Back to document" onClick={onBack}>
           Back to document
         </Button>
       </div>
+      {naming && <NameForm onName={(label) => controller.name(label)} onDone={() => setNaming(false)} />}
       {confirming && (
         <div className="doc-history-confirm" role="alertdialog" aria-label="Restore this version?">
           <p>Restore this version? The document goes back to it as a new version; everything since stays in history, and comment conversations are kept.</p>
@@ -144,5 +151,29 @@ function Button({ label, disabled, onClick, children }: { label: string; disable
     <button type="button" className="doc-tool" aria-label={label} title={label} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>
       {children}
     </button>
+  );
+}
+
+// Name this version: the label only (the version keeps its note).
+function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>; onDone(): void }) {
+  const [label, setLabel] = useState('');
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const name = label.trim();
+    if (name === '') return;
+    void onName(name).then((named) => named && onDone());
+  };
+  return (
+    <form className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
+      <input aria-label="Version name" placeholder="Name, e.g. Draft to legal" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
+      <div className="doc-history-save-actions">
+        <Button label="Cancel" onClick={onDone}>
+          Cancel
+        </Button>
+        <button type="submit" className="doc-tool" disabled={label.trim() === ''}>
+          Save
+        </button>
+      </div>
+    </form>
   );
 }

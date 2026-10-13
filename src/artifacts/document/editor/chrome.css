@@ -35,8 +35,17 @@
   flex: 1;
   min-height: 0;
 }
-.doc-page-frame > .ds-doc {
+/* the page, in the design system's scope when the shell gives one (D's DesignSystemScope, M8), fills the frame */
+.doc-page-scope,
+.doc-page-scope > :not(.ds-doc) {
+  display: flex;
+  flex-direction: column;
   flex: 1;
+  min-height: 0;
+}
+.doc-page-scope .ds-doc {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 .doc-editor-loading {

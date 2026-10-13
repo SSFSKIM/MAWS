@@ -319,6 +319,39 @@ describe('the owner’s actions', () => {
     expect(screen.getByText('A copy of this version was made.')).toBeTruthy();
   });
 
+  // M8 (§4.7: any automatic version nameable; A's `artifacts.nameVersion`, Decision Log 28): the previewed version is
+  // named by its label alone, so the note it had stays as it was.
+  it('names a previewed automatic version, sending the label only', async () => {
+    const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
+      hist.version('auto', HUMAN);
+      await agentWrites(agentAppends(' Later.'));
+      hist.version('named', HUMAN, { label: 'Later one' });
+    });
+    await openHistory();
+    const auto = (await h.versions()).find((v) => v.kind === 'auto')!;
+    click(within(rail()).getAllByRole('button', { name: /^Version / }).find((b) => !/Later one/.test(b.getAttribute('aria-label') ?? ''))!);
+    await previewing();
+    click(within(bar()).getByRole('button', { name: 'Name this version' }));
+    const field = screen.getByRole('textbox', { name: 'Version name' });
+    act(() => void fireEvent.change(field, { target: { value: '  Before legal  ' } }));
+    act(() => void fireEvent.submit(field.closest('form')!));
+    await until(() => h.namings.length === 1, 'the naming');
+    expect(h.namings).toEqual([{ versionId: auto.id, label: 'Before legal' }]);
+    await until(() => within(rail()).queryByRole('button', { name: /^Version Before legal/ }) !== null, 'the list re-read with the name');
+    expect((await h.versions()).find((v) => v.id === auto.id)).toMatchObject({ kind: 'auto', label: 'Before legal' });
+  });
+
+  it('offers no naming without the api’s nameVersion', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+      (hist as { nameVersion?: unknown }).nameVersion = undefined;
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    expect(within(bar()).queryByRole('button', { name: 'Name this version' })).toBeNull();
+  });
+
   it('offers See N new changes after an agent changed the document since the last view, and opens that comparison', async () => {
     const t = { value: Date.now() - 60 * 60_000 };
     const { history: h, editor } = await setup(
@@ -462,3 +495,68 @@ describe('the bar’s count', () => {
   });
 });
 
+
+// M8 (X32): the header above the editor opens and closes its rails, and asks for Save version, from outside the body, so
+// the shell holds the rail; the editor follows it and leaves history when the history rail goes.
+describe('a rail the caller holds', () => {
+  it('opens the history rail and its Save version form on request, and leaves history when the caller closes it', async () => {
+    const { history: h, editor } = await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    cleanup();
+    const handle = openMemoryHandle(host!, { log: () => {}, actor: HUMAN });
+    handles.push(handle);
+    await whenSynced(handle);
+    const changes: Array<string | null> = [];
+    const mount = (rail: 'history' | 'comments' | null, saveVersionRequest?: number) => (
+      <DocumentEditor
+        artifactId="doc1"
+        handle={handle}
+        host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })}
+        history={h}
+        rail={rail}
+        onRailChange={(next) => changes.push(next)}
+        saveVersionRequest={saveVersionRequest}
+      />
+    );
+    const { rerender } = render(mount(null, 3));
+    await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null, 'the editor');
+    expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull(); // a request seen at mount is not new
+
+    rerender(mount('history', 3));
+    await until(() => within(rail()).queryAllByRole('button', { name: /^Version / }).length > 0, 'the version list');
+    expect(screen.queryByRole('textbox', { name: 'Version name' })).toBeNull();
+    rerender(mount('history', 4));
+    expect(screen.getByRole('textbox', { name: 'Version name' })).toBeTruthy();
+
+    click(row('Clean draft'));
+    await previewing();
+    rerender(mount(null, 4));
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull();
+
+    // the editor's own toggles ask the caller
+    click(within(toolbar()).getByRole('button', { name: 'Version history' }));
+    expect(changes.at(-1)).toBe('history');
+    expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull(); // until the caller says so
+    void editor;
+  });
+
+  it('asks for Save version from a closed rail: the rail opens on the form', async () => {
+    const { history: h } = await setup();
+    cleanup();
+    const handle = openMemoryHandle(host!, { log: () => {}, actor: HUMAN });
+    handles.push(handle);
+    await whenSynced(handle);
+    const changes: Array<string | null> = [];
+    const mount = (rail: 'history' | 'comments' | null, saveVersionRequest: number) => (
+      <DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={h} rail={rail} onRailChange={(next) => changes.push(next)} saveVersionRequest={saveVersionRequest} />
+    );
+    const { rerender } = render(mount(null, 0));
+    await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null, 'the editor');
+    rerender(mount(null, 1));
+    expect(changes).toEqual(['history']);
+    rerender(mount('history', 1));
+    await until(() => screen.queryByRole('textbox', { name: 'Version name' }) !== null, 'the Save version form');
+  });
+});

@@ -50,14 +50,14 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
   const style = { left: open.x, top: open.y };
   if (!open.asked)
     return (
-      <div className="doc-menu doc-context-menu" role="menu" aria-label="Selection" style={style}>
+      <div className="doc-menu doc-context-menu" role="menu" aria-label="Selection" style={style} data-markup-occluder>
         <button type="button" role="menuitem" className="doc-menu-item" onClick={onShow}>
           Show editors
         </button>
       </div>
     );
   return (
-    <div className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style}>
+    <div className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
       <header className="doc-editors-header">
         <span>Editors of the selection</span>
         <button type="button" className="doc-tool" aria-label="Close editors" onClick={onClose}>

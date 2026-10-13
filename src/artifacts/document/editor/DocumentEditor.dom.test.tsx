@@ -4,6 +4,7 @@
 // stepping through matches.
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
@@ -231,5 +232,27 @@ describe('find', () => {
     act(() => fireEvent.keyDown(input, { key: 'Escape' }));
     expect(screen.queryByRole('searchbox')).toBeNull();
     expect(editor().view.dom.querySelectorAll('.find-match')).toHaveLength(0);
+  });
+});
+
+// M8: the shell wraps the page in the governing design system's scope (D's DesignSystemScope, `.ds-doc` on the page
+// alone, Decision Log 22) and registers the page as a Mark-up surface (G's `useRegionMarkupSurface`).
+describe('the page for the shell', () => {
+  it('is drawn inside the scope the shell gives, and reported as it appears and goes', async () => {
+    world = new World(doc(para('p1', 'one')));
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    const pages: Array<HTMLElement | null> = [];
+    const Scope = ({ children }: { children: ReactNode }) => <div data-testid="scope">{children}</div>;
+    const { unmount } = render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} pageScope={Scope} onPage={(element) => pages.push(element)} />);
+    await until(() => document.querySelector('.ds-doc .ProseMirror')?.textContent === 'one', 'the page');
+    const page = document.querySelector<HTMLElement>('.ds-doc')!;
+    expect(screen.getByTestId('scope').contains(page)).toBe(true);
+    expect(screen.getByTestId('scope').classList.contains('ds-doc')).toBe(false); // `.ds-doc` is the page's alone
+    expect(document.querySelector('.ds-doc-page')!.parentElement).toBe(page);
+    expect(pages.at(-1)).toBe(page);
+    unmount();
+    expect(pages.at(-1)).toBeNull();
   });
 });
