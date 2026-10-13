@@ -84,12 +84,12 @@ describe('the patch writer at 200 pages', () => {
       t0 = performance.now();
       for (const update of updates) {
         if (checkUpdate(live, update)) throw new Error('the binding check refused a writer update');
-        const forward = adapter.beforeApply!(live, update, { actor, step2: false });
+        const forward = adapter.beforeApply!(live, update, { artifactId: 'bench', actor, step2: false });
         applyV1(live, update);
         applyV1(replica, update);
         transact(replica, () => {
           forward?.(replica);
-          adapter.afterUpdate!(replica, { update, actor });
+          adapter.afterUpdate!(replica, { artifactId: 'bench', update, actor });
         });
         attributionMap(contentIdsOf(update), { insertActor: 'session:bench', deleteActor: 'session:bench', at: Date.now() });
       }

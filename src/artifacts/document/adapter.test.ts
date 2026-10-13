@@ -117,7 +117,7 @@ class Host {
   receive(update: Uint8Array, actor: Actor, { step2 = false } = {}): ReturnType<NonNullable<KindAdapter['afterUpdate']>> {
     const conn = { actor };
     this.writers.set(conn, actor);
-    const forward = this.adapter.beforeApply?.(this.live, update, { actor, step2 }) ?? null;
+    const forward = this.adapter.beforeApply?.(this.live, update, { artifactId: this.artifactId, actor, step2 }) ?? null;
     let applied: Uint8Array | null = null;
     const off = onUpdate(this.live, (u) => (applied ??= u));
     this.deferring = true;
@@ -126,7 +126,7 @@ class Host {
     const doc = this.replicaOf(actor);
     if (forward) transact(doc, () => forward(doc), doc);
     const box: { outcome?: ReturnType<NonNullable<KindAdapter['afterUpdate']>> } = {};
-    if (applied) transact(doc, () => (box.outcome = this.adapter.afterUpdate?.(doc, { update: applied!, actor })), doc);
+    if (applied) transact(doc, () => (box.outcome = this.adapter.afterUpdate?.(doc, { artifactId: this.artifactId, update: applied!, actor })), doc);
     this.deferring = false;
     this.attribute(box.outcome?.provenance);
     if (box.outcome?.threads) this.threadChanges.push(box.outcome.threads);
@@ -585,7 +585,7 @@ describe('restore (revertScope, afterRestore)', () => {
     reply(live, 't9', { id: 't9:m1', by: agent2, at: now(), body: 'And a reply.' });
     const old = newDoc();
     applyV2(old, version);
-    const scope = adapter.revertScope!(live, old);
+    const scope = adapter.revertScope!(live, old, { artifactId: ARTIFACT });
     applyV2(live, revertUpdate(version, stateV2(live), scope?.keep ?? null));
     expect(textOf(live, 'p4').startsWith('Closing paragraph')).toBe(true);
     expect(getThread(live, 't1')?.status).toBe('open');
@@ -608,7 +608,7 @@ describe('restore (revertScope, afterRestore)', () => {
     owners.set(doc, ARTIFACT);
     transact(doc, () => body(doc).insert(0, [pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'dup' }] }))]));
     const box: { outcome?: ReturnType<NonNullable<KindAdapter['afterRestore']>> } = {};
-    transact(doc, () => (box.outcome = adapter.afterRestore!(doc, { versionId: 3 })));
+    transact(doc, () => (box.outcome = adapter.afterRestore!(doc, { artifactId: ARTIFACT, versionId: 3 })));
     expect(box.outcome?.threads?.upsert?.map((row) => row.threadId).sort()).toEqual(listThreads(doc).map((thread) => thread.id).sort());
     expect(dupes(ids(doc))).toEqual([]);
   });
