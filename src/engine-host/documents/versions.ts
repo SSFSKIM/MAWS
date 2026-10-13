@@ -2,9 +2,10 @@
 // `spikes/p3-store/s7/soak/store.mjs`). A Y kind's version row holds zstd V2 bytes, `enc` either `full` (a keyframe) or
 // `delta` from the previous retained version of the artifact (by id): a keyframe whenever the deltas since the last one
 // would outweigh it. A byte kind's version names its write's file (`content`). Reading a version reconstructs it from its
-// keyframe forward. Thinning (nightly) keeps every version but `auto` ones, and of those all within 24 hours, the newest
-// per hour to 7 days, per day to 30 days, per ISO week after, the newest version and every pinned one (a design-system
-// pin's target); dropping a delta's base folds the dropped bytes into the next retained row in the same transaction.
+// keyframe forward. Thinning (nightly) keeps every version but unnamed `auto` ones, and of those all within 24 hours,
+// the newest per hour to 7 days, per day to 30 days, per ISO week after, the newest version and every pinned one (a
+// design-system pin's target); an `auto` version the owner named keeps its kind and is never thinned (Decision Log 37d).
+// Dropping a delta's base folds the dropped bytes into the next retained row in the same transaction.
 //
 // Every write here runs inside a savepoint of the document service's open batch (the caller's `inBatch` or a write's
 // `inFrame`), so a version commits with the change it records.
@@ -85,18 +86,13 @@ export class VersionStore {
 
   list(artifactId: string): ArtifactVersion[] {
     const rows = this.db.prepare('SELECT * FROM artifact_versions WHERE artifactId = ? ORDER BY id').all(artifactId) as unknown as Row[];
-    return rows.map((row) => ({
-      id: row.id,
-      seq: row.seq,
-      at: row.at,
-      actor: actorFromKey(row.actor),
-      kind: row.kind,
-      ...(row.label === null ? {} : { label: row.label }),
-      ...(row.note === null ? {} : { note: row.note }),
-      ...(row.summary === null ? {} : { summary: row.summary }),
-      ...(row.designSystemRef === null ? {} : { designSystemRef: JSON.parse(row.designSystemRef) as DesignSystemRef }),
-      assetRefs: JSON.parse(row.assetRefs) as string[],
-    }));
+    return rows.map(toVersion);
+  }
+
+  // One version as history lists it.
+  version(artifactId: string, versionId: number): ArtifactVersion | undefined {
+    const row = this.get(artifactId, versionId);
+    return row && toVersion(row);
   }
 
   // A Y kind's version of `state` (the doc's V2 state at `seq`). Answers the row's id. When the latest version already
@@ -156,20 +152,25 @@ export class VersionStore {
   }
 
   // An `auto` row taking the metadata of the version written at its seq, the pin and the asset refs as they are now (a
-  // null pin clears it; omitted ones are kept).
+  // null pin clears it; omitted ones are kept). A name the owner gave the auto row stays unless the version brings one.
   private upgrade(id: number, meta: VersionMeta): number {
+    const named = meta.label !== undefined && meta.label !== null;
     const set: [string, SQLInputValue][] = [
       ['kind', meta.kind],
       ['actor', meta.actor],
       ['at', meta.at],
-      ['label', meta.label ?? null],
-      ['note', meta.note ?? null],
       ['summary', meta.summary ?? null],
     ];
+    if (named) set.push(['label', meta.label!], ['note', meta.note ?? null]);
     if (meta.designSystemRef !== undefined) set.push(['designSystemRef', meta.designSystemRef ? JSON.stringify(meta.designSystemRef) : null]);
     if (meta.assetRefs !== undefined) set.push(['assetRefs', JSON.stringify(meta.assetRefs)]);
     this.db.prepare(`UPDATE artifact_versions SET ${set.map(([column]) => `${column} = ?`).join(', ')} WHERE id = ?`).run(...set.map(([, value]) => value), id);
     return id;
+  }
+
+  // Names a version (Decision Log 37d): its label and note become these, its kind and everything else stay.
+  name(id: number, label: string, note: string | null): void {
+    this.db.prepare('UPDATE artifact_versions SET label = ?, note = ? WHERE id = ?').run(label, note, id);
   }
 
   // A Y kind's version state (V2): its keyframe merged with the deltas after it (Decision Log 22c).
@@ -196,15 +197,15 @@ export class VersionStore {
     }));
   }
 
-  // The rows thinning drops for one artifact at `now` (auto only; never the newest or a pinned one).
+  // The rows thinning drops for one artifact at `now` (unnamed autos only; never the newest or a pinned one).
   thinnable(artifactId: string, now: number, pinned: Set<string>): number[] {
-    const rows = this.db.prepare('SELECT id, seq, at, kind FROM artifact_versions WHERE artifactId = ? ORDER BY id').all(artifactId) as { id: number; seq: number; at: number; kind: VersionKind }[];
+    const rows = this.db.prepare('SELECT id, seq, at, kind, label FROM artifact_versions WHERE artifactId = ? ORDER BY id').all(artifactId) as { id: number; seq: number; at: number; kind: VersionKind; label: string | null }[];
     if (rows.length === 0) return [];
     const newest = rows[rows.length - 1].id;
     const winners = new Map<string, number>();
     const candidates: number[] = [];
     for (const row of rows) {
-      if (row.kind !== 'auto' || row.id === newest || pinned.has(`${artifactId}\u0000${row.seq}`)) continue;
+      if (row.kind !== 'auto' || row.label !== null || row.id === newest || pinned.has(`${artifactId}\u0000${row.seq}`)) continue;
       const age = now - row.at;
       if (age < DAY) continue;
       candidates.push(row.id);
@@ -265,4 +266,19 @@ export class VersionStore {
     if (artifactId === undefined) this.last.clear();
     else this.last.delete(artifactId);
   }
+}
+
+function toVersion(row: Row): ArtifactVersion {
+  return {
+    id: row.id,
+    seq: row.seq,
+    at: row.at,
+    actor: actorFromKey(row.actor),
+    kind: row.kind,
+    ...(row.label === null ? {} : { label: row.label }),
+    ...(row.note === null ? {} : { note: row.note }),
+    ...(row.summary === null ? {} : { summary: row.summary }),
+    ...(row.designSystemRef === null ? {} : { designSystemRef: JSON.parse(row.designSystemRef) as DesignSystemRef }),
+    assetRefs: JSON.parse(row.assetRefs) as string[],
+  };
 }

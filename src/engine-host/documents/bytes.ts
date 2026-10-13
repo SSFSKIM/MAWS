@@ -91,6 +91,11 @@ export class ArtifactFiles {
     rmSync(join(this.dirOf(artifactId), dirname(ref.path)), { recursive: true, force: true });
   }
 
+  // Deletes everything stored for an artifact no committed row names (a copy or an import whose write was taken back).
+  removeAll(artifactId: string): void {
+    rmSync(this.dirOf(artifactId), { recursive: true, force: true });
+  }
+
   // A `file` artifact's referenced file, described in place (hashed in chunks: it may be large).
   describe(path: string): { name: string; sha256: string; size: number } {
     const size = statSync(path).size;
