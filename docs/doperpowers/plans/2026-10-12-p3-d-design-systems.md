@@ -493,6 +493,17 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
       - `deck-<role>` type styles fold into that role's deck scale.
     - **Claude export.** Colours are written as 8-digit hex, and translucent shadow colours as `rgb()`. Importing an export restores every role's value.
     - **Modules.** The CSS reader is `css-read.ts` and Claude's grammar is `claude-grammar.ts`. The mapping in `claude.ts` is about 850 lines; its role tables may move out if it grows.
+12. 2026-10-13 (M3's decisions, folded from its report; the API is in it).
+    - **The diff.** The law's character diff is `fast-diff` 1.3.0, already in the tree and now declared as a direct devDependency.
+    - **What a law conflict is.** Law hunks conflict when they share a character, or when an insertion falls inside or at the edge of the other side's change. A hunk both sides made identically is not a conflict.
+    - **Refusal is separate from conflict.** Content the system cannot hold is refused with `SystemFilesError` (`code: 'invalid'`, `data.problems`), and `force` does not get past it. That covers generated files, `sources/claude/`, `assets/`, unknown paths, an invalid token file and the limits.
+    - **A failing merge is a conflict.** A merged token file that fails validation is reported as a conflict, for example when the agent deletes a token the human has just aliased.
+    - **Only changed tokens are written.** A token whose value did not change is not rewritten, so each token keeps its own author.
+    - **Claude imports.** Imported Claude files live read-only under `files` at `sources/claude/`.
+    - **The adapter.** `createDesignSystemAdapter({parser?})` checks canon structure only when it is given a parser.
+    - **The Yjs boundary.** `model.ts` is not re-exported from `index.ts`, so token-only consumers do not load Yjs.
+
+    **`force` (the controller's decision, overriding the first build):** for this kind, `force` means "the agent wins where both sides changed the same unit, and everything else still merges". The units are a token, a law hunk and a canon file. It does not mean "write the sent file verbatim". A's Decision Log 10 says force skips layers 2 and 3 "for the files sent". This kind merges below the file, so that skip applies to the colliding units. Writing `tokens.tokens.json` verbatim would revert a human's concurrent recolour of a token the agent never touched, which no agent intends by retrying with `force`.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
