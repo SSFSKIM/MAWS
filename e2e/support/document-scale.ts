@@ -170,11 +170,13 @@ export class Agent {
   }
 
   /**
-   * The first batch after the agent's first read (M9's review): five ops, every target among the sections that read
-   * showed (`sections` below `upTo`), the fifth an unscoped quote of a sentence it read (no insert of its own yet).
+   * The first batch after the agent's first read (M9's review): five ops, every target in a section that read showed
+   * whole, the fifth an unscoped quote of a sentence it read (no insert of its own yet).
    */
-  firstBatch(upTo: number): { ops: Record<string, unknown>[]; run: number } {
-    this.within = (s) => s < upTo;
+  firstBatch(): { ops: Record<string, unknown>[]; run: number } {
+    // only sections every target of which the read showed: the quoted paragraph, the rewritten one, the heading, the
+    // fifth op's paragraph, and a table where a cell is set
+    this.within = (s) => ['p2', 'p4', 'h', 'p5'].every((part) => this.blocks.has(`s${s}${part}`)) && (s % 3 !== 1 || this.blocks.has(`s${s}t`));
     try {
       const batch = this.nextBatch();
       if (batch.ops.length < 5) {

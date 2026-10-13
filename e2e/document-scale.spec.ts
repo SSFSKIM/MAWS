@@ -231,7 +231,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const read = await readFirst(seam, agent, id);
     rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`);
     const shown = Math.max(...[...agent.blocks.keys()].map((blockId) => /^s(\d+)p5$/.exec(blockId)).filter((m) => m !== null).map((m) => Number(m![1]))) + 1;
-    const { ops, run } = agent.firstBatch(shown);
+    const { ops, run } = agent.firstBatch();
     const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
     agent.record(run, answer);
     expect(answer.isError, answer.text).toBe(false);
