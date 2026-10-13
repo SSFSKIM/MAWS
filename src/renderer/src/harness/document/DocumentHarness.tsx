@@ -12,6 +12,7 @@ import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { DocumentHarnessApi, Replica } from './api';
+import { placeCaret } from './caret';
 
 declare global {
   interface Window {
@@ -118,12 +119,12 @@ export function DocumentHarness() {
       },
       caretAtEnd: (replica, id) => {
         const editor = editorOf(replica);
-        editor.chain().focus().setTextSelection(endOf(editor, id)).run();
+        return placeCaret(editor, endOf(editor, id));
       },
       newLineAtEnd: (replica) => {
         const editor = editorOf(replica);
-        editor.chain().focus().insertContentAt(editor.state.doc.content.size, { type: 'paragraph' }).run();
-        editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+        editor.commands.insertContentAt(editor.state.doc.content.size, { type: 'paragraph' });
+        return placeCaret(editor, editor.state.doc.content.size - 1);
       },
       startRemoteTyping: (id, text, everyMs) => {
         if (typing) clearInterval(typing.timer);

@@ -18,10 +18,13 @@ export interface DocumentHarnessApi {
   hostJson(tabId?: string): unknown;
   /** The text of the top-level block `id` in a replica's editor, or null. */
   blockText(replica: Replica, id: string): string | null;
-  /** Focuses a replica's editor with the caret at the end of block `id`. */
-  caretAtEnd(replica: Replica, id: string): void;
-  /** Focuses a replica's editor in a new empty paragraph at the end of the tab, as a click below the last block would. */
-  newLineAtEnd(replica: Replica): void;
+  /** Focuses a replica's editor with the caret at the end of block `id`; resolves once keys sent would land there. */
+  caretAtEnd(replica: Replica, id: string): Promise<void>;
+  /**
+   * Focuses a replica's editor in a new empty paragraph at the end of the tab, as a click below the last block would;
+   * resolves once keys sent would land there.
+   */
+  newLineAtEnd(replica: Replica): Promise<void>;
   /** Replica B types `text` at the end of block `id`, one character every `everyMs`, until stopped; a remote edit for A. */
   startRemoteTyping(id: string, text: string, everyMs: number): void;
   /** Stops it; resolves with the characters typed. */
