@@ -1,0 +1,43 @@
+
+v13 state-pair snapshot, stock StarterKit (codeBlock marks ""): 8/13  (code block rendered: false, table rendered: true, live unchanged: true, exit ok: true)
+  ok  human-ins-p1         ins by human
+  ok  agent-ins-p1         ins by agent:session-1
+  MISS human-bold-p1        not rendered
+  ok  agent-del-p2         del by agent:session-1
+  ok  agent-ins-p2         ins by agent:session-1
+  ok  agent-new-para       ins by agent:session-1
+  MISS human-heading-level  not rendered
+  MISS agent-code-del       not rendered
+  MISS agent-code-ins       not rendered
+  MISS agent-code-lang      not rendered
+  ok  agent-cell-del       del by agent:session-1
+  ok  agent-cell-ins       ins by agent:session-1
+  ok  human-del-p4         del by human
+
+v13 state-pair snapshot, codeBlock admits ychange: 10/13  (code block rendered: true, table rendered: true, live unchanged: true, exit ok: true)
+  ok  human-ins-p1         ins by human
+  ok  agent-ins-p1         ins by agent:session-1
+  MISS human-bold-p1        not rendered
+  ok  agent-del-p2         del by agent:session-1
+  ok  agent-ins-p2         ins by agent:session-1
+  ok  agent-new-para       ins by agent:session-1
+  MISS human-heading-level  not rendered
+  ok  agent-code-del       del by agent:session-1
+  ok  agent-code-ins       ins by agent:session-1
+  MISS agent-code-lang      not rendered
+  ok  agent-cell-del       del by agent:session-1
+  ok  agent-cell-ins       ins by agent:session-1
+  ok  human-del-p4         del by human
+
+spans (codeBlock admits ychange):
+  paragraph#p1 ins by agent:session-1 " (agent note)"
+  paragraph#p1 ins by human " Added by human."
+  paragraph#p2 del by agent:session-1 "the middle of"
+  paragraph#p2 ins by agent:session-1 "a part of"
+  paragraph#pA ins by agent:session-1 [node] "Agent inserted paragraph."
+  paragraph#pA ins by agent:session-1 "Agent inserted paragraph."
+  codeBlock#c1 del by agent:session-1 "2"
+  codeBlock#c1 ins by agent:session-1 "3\nconst c = 4"
+  paragraph#td2p del by agent:session-1 "1"
+  paragraph#td2p ins by agent:session-1 "42"
+  paragraph#p4 del by human "Closing "

@@ -1,0 +1,30 @@
+[
+  {
+    "label": "v13 @tiptap/y-tiptap 3.0.9",
+    "chars": "500 blocks",
+    "bindMs": 43,
+    "keystrokeMs": {
+      "p50": 0.42,
+      "p95": 0.94,
+      "max": 3.56
+    },
+    "remoteEditMs": {
+      "p50": 1.56,
+      "p95": 3.21
+    }
+  },
+  {
+    "label": "v14 @y/prosemirror 2.0.0-15",
+    "chars": "500 blocks",
+    "bindMs": 89,
+    "keystrokeMs": {
+      "p50": 0.89,
+      "p95": 1.73,
+      "max": 7.69
+    },
+    "remoteEditMs": {
+      "p50": 0.85,
+      "p95": 1.81
+    }
+  }
+]

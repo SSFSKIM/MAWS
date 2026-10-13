@@ -1,0 +1,485 @@
+[
+  {
+    "schema": "stock StarterKit (codeBlock marks \"\")",
+    "sizes": {
+      "v1": 760,
+      "v2": 989
+    },
+    "score": [
+      {
+        "id": "human-ins-p1",
+        "kind": "ins",
+        "who": "human",
+        "text": " Added by human.",
+        "where": "paragraph#p1",
+        "ok": true,
+        "got": "ins by human"
+      },
+      {
+        "id": "agent-ins-p1",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": " (agent note)",
+        "where": "paragraph#p1",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-bold-p1",
+        "kind": "fmt",
+        "who": "human",
+        "text": "opening",
+        "where": "paragraph#p1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-del-p2",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "the middle of",
+        "where": "paragraph#p2",
+        "ok": true,
+        "got": "del by agent:session-1"
+      },
+      {
+        "id": "agent-ins-p2",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "a part of",
+        "where": "paragraph#p2",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "agent-new-para",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "Agent inserted paragraph.",
+        "where": "paragraph#pA",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-heading-level",
+        "kind": "attrs",
+        "who": "human",
+        "attr": "level",
+        "where": "heading#h1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-code-del",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "2",
+        "where": "codeBlock#c1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-code-ins",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "3\nconst c = 4",
+        "where": "codeBlock#c1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-code-lang",
+        "kind": "attrs",
+        "who": "agent:session-1",
+        "attr": "language",
+        "where": "codeBlock#c1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-cell-del",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "1",
+        "where": "paragraph#td2p",
+        "ok": true,
+        "got": "del by agent:session-1"
+      },
+      {
+        "id": "agent-cell-ins",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "42",
+        "where": "paragraph#td2p",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-del-p4",
+        "kind": "del",
+        "who": "human",
+        "text": "Closing ",
+        "where": "paragraph#p4",
+        "ok": true,
+        "got": "del by human"
+      }
+    ],
+    "spans": [
+      {
+        "kind": "none",
+        "text": "Quarterly plan",
+        "where": "heading#h1"
+      },
+      {
+        "kind": "none",
+        "text": "The human wrote this opening sentence.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": " (agent note)",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "none",
+        "text": " It has a second sentence.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "ins",
+        "who": "human",
+        "text": " Added by human.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "none",
+        "text": "Agent will rewrite ",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "the middle of",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "a part of",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "none",
+        "text": " this paragraph soon.",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "where": "paragraph#pA",
+        "node": true,
+        "text": "Agent inserted paragraph."
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "Agent inserted paragraph.",
+        "where": "paragraph#pA"
+      },
+      {
+        "kind": "none",
+        "text": "Name",
+        "where": "paragraph#th1p"
+      },
+      {
+        "kind": "none",
+        "text": "Value",
+        "where": "paragraph#th2p"
+      },
+      {
+        "kind": "none",
+        "text": "alpha",
+        "where": "paragraph#td1p"
+      },
+      {
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "1",
+        "where": "paragraph#td2p"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "42",
+        "where": "paragraph#td2p"
+      },
+      {
+        "kind": "del",
+        "who": "human",
+        "text": "Closing ",
+        "where": "paragraph#p4"
+      },
+      {
+        "kind": "none",
+        "text": "line.",
+        "where": "paragraph#p4"
+      }
+    ],
+    "codeRendered": false,
+    "tableRendered": true,
+    "errors": [],
+    "liveUnchangedByHistory": true,
+    "exitShowsLive": true
+  },
+  {
+    "schema": "codeBlock admits ychange",
+    "sizes": {
+      "v1": 760,
+      "v2": 988
+    },
+    "score": [
+      {
+        "id": "human-ins-p1",
+        "kind": "ins",
+        "who": "human",
+        "text": " Added by human.",
+        "where": "paragraph#p1",
+        "ok": true,
+        "got": "ins by human"
+      },
+      {
+        "id": "agent-ins-p1",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": " (agent note)",
+        "where": "paragraph#p1",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-bold-p1",
+        "kind": "fmt",
+        "who": "human",
+        "text": "opening",
+        "where": "paragraph#p1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-del-p2",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "the middle of",
+        "where": "paragraph#p2",
+        "ok": true,
+        "got": "del by agent:session-1"
+      },
+      {
+        "id": "agent-ins-p2",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "a part of",
+        "where": "paragraph#p2",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "agent-new-para",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "Agent inserted paragraph.",
+        "where": "paragraph#pA",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-heading-level",
+        "kind": "attrs",
+        "who": "human",
+        "attr": "level",
+        "where": "heading#h1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-code-del",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "2",
+        "where": "codeBlock#c1",
+        "ok": true,
+        "got": "del by agent:session-1"
+      },
+      {
+        "id": "agent-code-ins",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "3\nconst c = 4",
+        "where": "codeBlock#c1",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "agent-code-lang",
+        "kind": "attrs",
+        "who": "agent:session-1",
+        "attr": "language",
+        "where": "codeBlock#c1",
+        "ok": false,
+        "got": "not rendered"
+      },
+      {
+        "id": "agent-cell-del",
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "1",
+        "where": "paragraph#td2p",
+        "ok": true,
+        "got": "del by agent:session-1"
+      },
+      {
+        "id": "agent-cell-ins",
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "42",
+        "where": "paragraph#td2p",
+        "ok": true,
+        "got": "ins by agent:session-1"
+      },
+      {
+        "id": "human-del-p4",
+        "kind": "del",
+        "who": "human",
+        "text": "Closing ",
+        "where": "paragraph#p4",
+        "ok": true,
+        "got": "del by human"
+      }
+    ],
+    "spans": [
+      {
+        "kind": "none",
+        "text": "Quarterly plan",
+        "where": "heading#h1"
+      },
+      {
+        "kind": "none",
+        "text": "The human wrote this opening sentence.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": " (agent note)",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "none",
+        "text": " It has a second sentence.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "ins",
+        "who": "human",
+        "text": " Added by human.",
+        "where": "paragraph#p1"
+      },
+      {
+        "kind": "none",
+        "text": "Agent will rewrite ",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "the middle of",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "a part of",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "none",
+        "text": " this paragraph soon.",
+        "where": "paragraph#p2"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "where": "paragraph#pA",
+        "node": true,
+        "text": "Agent inserted paragraph."
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "Agent inserted paragraph.",
+        "where": "paragraph#pA"
+      },
+      {
+        "kind": "none",
+        "text": "const a = 1\nconst b = ",
+        "where": "codeBlock#c1"
+      },
+      {
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "2",
+        "where": "codeBlock#c1"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "3\nconst c = 4",
+        "where": "codeBlock#c1"
+      },
+      {
+        "kind": "none",
+        "text": "Name",
+        "where": "paragraph#th1p"
+      },
+      {
+        "kind": "none",
+        "text": "Value",
+        "where": "paragraph#th2p"
+      },
+      {
+        "kind": "none",
+        "text": "alpha",
+        "where": "paragraph#td1p"
+      },
+      {
+        "kind": "del",
+        "who": "agent:session-1",
+        "text": "1",
+        "where": "paragraph#td2p"
+      },
+      {
+        "kind": "ins",
+        "who": "agent:session-1",
+        "text": "42",
+        "where": "paragraph#td2p"
+      },
+      {
+        "kind": "del",
+        "who": "human",
+        "text": "Closing ",
+        "where": "paragraph#p4"
+      },
+      {
+        "kind": "none",
+        "text": "line.",
+        "where": "paragraph#p4"
+      }
+    ],
+    "codeRendered": true,
+    "tableRendered": true,
+    "errors": [],
+    "liveUnchangedByHistory": true,
+    "exitShowsLive": true
+  }
+]

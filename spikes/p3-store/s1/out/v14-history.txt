@@ -1,0 +1,52 @@
+[y/prosemirror] a view-side change removed the render-only attribution format "y-attributed-attrs"; it was swallowed - Yjs and its renderer own the attributions, so it is not written back, and it is not re-asserted on the view either (a mark the schema cannot hold would loop forever). This view may render stale attribution for that range until a Y change re-renders it. If the bind-time warning about node types that do not allow attribution marks also fired, whitelist "y-attributed-attrs" on the node type it named; otherwise check what is editing the attribution projection.
+log window: 2:human 3:human 4:human 5:human 6:agent:session-1 7:agent:session-1 8:agent:session-1 9:agent:session-1 10:agent:session-1
+
+v14 headless (ynodeToPmnode + DiffRenderer): 13/13
+  ok  human-ins-p1         ins by human at 09:00:02
+  ok  agent-ins-p1         ins by agent:session-1 at 09:00:06
+  ok  human-bold-p1        fmt by human at 09:00:03
+  ok  agent-del-p2         del by agent:session-1 at 09:00:07
+  ok  agent-ins-p2         ins by agent:session-1 at 09:00:07
+  ok  agent-new-para       ins by agent:session-1 at 09:00:08
+  ok  human-heading-level  attrs by human at 09:00:04
+  ok  agent-code-del       del by agent:session-1 at 09:00:09
+  ok  agent-code-ins       ins by agent:session-1 at 09:00:09
+  ok  agent-code-lang      attrs by agent:session-1 at 09:00:09
+  ok  agent-cell-del       del by agent:session-1 at 09:00:10
+  ok  agent-cell-ins       ins by agent:session-1 at 09:00:10
+  ok  human-del-p4         del by human at 09:00:05
+
+v14 editor (read-only Tiptap + DiffRenderer): 13/13
+  ok  human-ins-p1         ins by human at 09:00:02
+  ok  agent-ins-p1         ins by agent:session-1 at 09:00:06
+  ok  human-bold-p1        fmt by human at 09:00:03
+  ok  agent-del-p2         del by agent:session-1 at 09:00:07
+  ok  agent-ins-p2         ins by agent:session-1 at 09:00:07
+  ok  agent-new-para       ins by agent:session-1 at 09:00:08
+  ok  human-heading-level  attrs by human at 09:00:04
+  ok  agent-code-del       del by agent:session-1 at 09:00:09
+  ok  agent-code-ins       ins by agent:session-1 at 09:00:09
+  ok  agent-code-lang      attrs by agent:session-1 at 09:00:09
+  ok  agent-cell-del       del by agent:session-1 at 09:00:10
+  ok  agent-cell-ins       ins by agent:session-1 at 09:00:10
+  ok  human-del-p4         del by human at 09:00:05
+
+spans (headless):
+  heading#h1 attrs(level) by human at 09:00:04 [node]
+  paragraph#p1 fmt by human at 09:00:03 "opening"
+  paragraph#p1 ins by agent:session-1 at 09:00:06 " (agent note)"
+  paragraph#p1 ins by human at 09:00:02 " Added by human."
+  paragraph#p2 del by agent:session-1 at 09:00:07 "the middle of"
+  paragraph#p2 ins by agent:session-1 at 09:00:07 "a part of"
+  paragraph#pA ins by agent:session-1 at 09:00:08 [node]
+  paragraph#pA attrs(id) by agent:session-1 at 09:00:08 [node]
+  paragraph#pA ins by agent:session-1 at 09:00:08 "Agent inserted paragraph."
+  codeBlock#c1 attrs(language) by agent:session-1 at 09:00:09 [node]
+  codeBlock#c1 del by agent:session-1 at 09:00:09 "2"
+  codeBlock#c1 ins by agent:session-1 at 09:00:09 "3\nconst c = 4"
+  paragraph#td2p del by agent:session-1 at 09:00:10 "1"
+  paragraph#td2p ins by agent:session-1 at 09:00:10 "42"
+  paragraph#p4 del by human at 09:00:05 "Closing "
+
+headless doc.check(): valid | version docs unchanged by the editor render: true | exit: {"rebindShowsLive":true,"liveUnchangedByHistory":true,"typingAfterExitReachesLive":true}
+sizes: {"v1":793,"v2":1032,"logWindowBytes":506,"attributionsEncoded":313} | headless render ms: 5.4
