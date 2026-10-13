@@ -1,0 +1,270 @@
+── item 2: the pin through ordinary edits ──
+PASS type before the passage (start of paragraph): replicas converge (A, B, host, agent)
+PASS type before the passage (start of paragraph): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type before the passage (start of paragraph): thread states — t1:open t2:open t3:open
+PASS type before the passage (start of paragraph): threads map untouched (3 threads, no duplicate)
+PASS type before the passage (start of paragraph): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed none)
+PASS type before the passage (start of paragraph): undo restores text, marks and thread state on both
+PASS type right before the passage (at its start): replicas converge (A, B, host, agent)
+PASS type right before the passage (at its start): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type right before the passage (at its start): thread states — t1:open t2:open t3:open
+PASS type right before the passage (at its start): threads map untouched (3 threads, no duplicate)
+PASS type right before the passage (at its start): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed none)
+PASS type right before the passage (at its start): undo restores text, marks and thread state on both
+PASS type inside the passage: replicas converge (A, B, host, agent)
+PASS type inside the passage: marks on both replicas as expected — A {"t1":"ships very quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type inside the passage: thread states — t1:open t2:open t3:open
+PASS type inside the passage: threads map untouched (3 threads, no duplicate)
+PASS type inside the passage: after the host's refresh, t1's pair brackets its mark — "ships very quarterly with design review" (refreshed none)
+PASS type inside the passage: undo restores text, marks and thread state on both
+PASS type right after t1 (inside t2): replicas converge (A, B, host, agent)
+PASS type right after t1 (inside t2): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design reviewX notes","t3":"keeps going"}
+PASS type right after t1 (inside t2): thread states — t1:open t2:open t3:open
+PASS type right after t1 (inside t2): threads map untouched (3 threads, no duplicate)
+PASS type right after t1 (inside t2): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1)
+PASS type right after t1 (inside t2): undo restores text, marks and thread state on both
+PASS type right after the passage: replicas converge (A, B, host, agent)
+PASS type right after the passage: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type right after the passage: thread states — t1:open t2:open t3:open
+PASS type right after the passage: threads map untouched (3 threads, no duplicate)
+PASS type right after the passage: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t2)
+PASS type right after the passage: undo restores text, marks and thread state on both
+PASS delete a word inside the passage: replicas converge (A, B, host, agent)
+PASS delete a word inside the passage: marks on both replicas as expected — A {"t1":"ships with design review","t2":"design review notes","t3":"keeps going"}
+PASS delete a word inside the passage: thread states — t1:open t2:open t3:open
+PASS delete a word inside the passage: threads map untouched (3 threads, no duplicate)
+PASS delete a word inside the passage: after the host's refresh, t1's pair brackets its mark — "ships with design review" (refreshed none)
+PASS delete a word inside the passage: undo restores text, marks and thread state on both
+PASS Enter in the middle of the passage: replicas converge (A, B, host, agent)
+PASS Enter in the middle of the passage: marks on both replicas as expected — A {"t1":"ships quarterly |with design review","t2":"design review notes","t3":"keeps going"}
+PASS Enter in the middle of the passage: thread states — t1:open t2:open t3:open
+PASS Enter in the middle of the passage: threads map untouched (3 threads, no duplicate)
+PASS Enter in the middle of the passage: after the host's refresh, t1's pair brackets its mark — "ships quarterly ¶with design review" (refreshed t1,t2)
+PASS Enter in the middle of the passage: undo restores text, marks and thread state on both
+PASS Enter before the passage (mid-paragraph): replicas converge (A, B, host, agent)
+PASS Enter before the passage (mid-paragraph): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS Enter before the passage (mid-paragraph): thread states — t1:open t2:open t3:open
+PASS Enter before the passage (mid-paragraph): threads map untouched (3 threads, no duplicate)
+PASS Enter before the passage (mid-paragraph): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS Enter before the passage (mid-paragraph): undo restores text, marks and thread state on both
+PASS Enter at the start of the paragraph: replicas converge (A, B, host, agent)
+PASS Enter at the start of the paragraph: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS Enter at the start of the paragraph: thread states — t1:open t2:open t3:open
+PASS Enter at the start of the paragraph: threads map untouched (3 threads, no duplicate)
+PASS Enter at the start of the paragraph: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed none)
+PASS Enter at the start of the paragraph: undo restores text, marks and thread state on both
+PASS Backspace joining p2 into p1: replicas converge (A, B, host, agent)
+PASS Backspace joining p2 into p1: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS Backspace joining p2 into p1: thread states — t1:open t2:open t3:open
+PASS Backspace joining p2 into p1: threads map untouched (3 threads, no duplicate)
+PASS Backspace joining p2 into p1: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t3)
+PASS Backspace joining p2 into p1: undo restores text, marks and thread state on both
+PASS Backspace joining p1 into the heading: replicas converge (A, B, host, agent)
+PASS Backspace joining p1 into the heading: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS Backspace joining p1 into the heading: thread states — t1:open t2:open t3:open
+PASS Backspace joining p1 into the heading: threads map untouched (3 threads, no duplicate)
+PASS Backspace joining p1 into the heading: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS Backspace joining p1 into the heading: undo restores text, marks and thread state on both
+PASS type change: paragraph → heading: replicas converge (A, B, host, agent)
+PASS type change: paragraph → heading: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type change: paragraph → heading: thread states — t1:open t2:open t3:open
+PASS type change: paragraph → heading: threads map untouched (3 threads, no duplicate)
+PASS type change: paragraph → heading: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS type change: paragraph → heading: undo restores text, marks and thread state on both
+PASS type change: paragraph → bullet list item: replicas converge (A, B, host, agent)
+PASS type change: paragraph → bullet list item: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type change: paragraph → bullet list item: thread states — t1:open t2:open t3:open
+PASS type change: paragraph → bullet list item: threads map untouched (3 threads, no duplicate)
+PASS type change: paragraph → bullet list item: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS type change: paragraph → bullet list item: undo restores text, marks and thread state on both
+PASS type change: paragraph → quote: replicas converge (A, B, host, agent)
+PASS type change: paragraph → quote: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS type change: paragraph → quote: thread states — t1:open t2:open t3:open
+PASS type change: paragraph → quote: threads map untouched (3 threads, no duplicate)
+PASS type change: paragraph → quote: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS type change: paragraph → quote: undo restores text, marks and thread state on both
+PASS type change: paragraph → code block (S1's codeBlock admits only the attribution marks): replicas converge (A, B, host, agent)
+PASS type change: paragraph → code block (S1's codeBlock admits only the attribution marks): marks on both replicas as expected — A {"t3":"keeps going"}
+PASS type change: paragraph → code block (S1's codeBlock admits only the attribution marks): thread states — t1:open:orphan t2:open:orphan t3:open
+PASS type change: paragraph → code block (S1's codeBlock admits only the attribution marks): threads map untouched (3 threads, no duplicate)
+PASS type change: paragraph → code block (S1's codeBlock admits only the attribution marks): undo restores text, marks and thread state on both
+PASS cut the whole passage and paste it into p3: replicas converge (A, B, host, agent)
+PASS cut the whole passage and paste it into p3: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS cut the whole passage and paste it into p3: thread states — t1:open t2:open t3:open
+PASS cut the whole passage and paste it into p3: threads map untouched (3 threads, no duplicate)
+PASS cut the whole passage and paste it into p3: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS cut the whole passage and paste it into p3: undo restores text, marks and thread state on both
+PASS cut part of the passage ("quarterly ") and paste into p3: replicas converge (A, B, host, agent)
+PASS cut part of the passage ("quarterly ") and paste into p3: marks on both replicas as expected — A {"t1":"ships with design review","t2":"design review notes","t3":"keeps going"}
+PASS cut part of the passage ("quarterly ") and paste into p3: thread states — t1:open t2:open t3:open
+PASS cut part of the passage ("quarterly ") and paste into p3: threads map untouched (3 threads, no duplicate)
+PASS cut part of the passage ("quarterly ") and paste into p3: after the host's refresh, t1's pair brackets its mark — "ships with design review" (refreshed none)
+PASS cut part of the passage ("quarterly ") and paste into p3: undo restores text, marks and thread state on both
+PASS copy the passage and paste it into p3: replicas converge (A, B, host, agent)
+PASS copy the passage and paste it into p3: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS copy the passage and paste it into p3: thread states — t1:open t2:open t3:open
+PASS copy the passage and paste it into p3: threads map untouched (3 threads, no duplicate)
+PASS copy the passage and paste it into p3: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed none)
+PASS copy the passage and paste it into p3: undo restores text, marks and thread state on both
+PASS cut, paste, then paste the same clipboard again: replicas converge (A, B, host, agent)
+PASS cut, paste, then paste the same clipboard again: marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS cut, paste, then paste the same clipboard again: thread states — t1:open t2:open t3:open
+PASS cut, paste, then paste the same clipboard again: threads map untouched (3 threads, no duplicate)
+PASS cut, paste, then paste the same clipboard again: after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS cut, paste, then paste the same clipboard again: undo restores text, marks and thread state on both
+PASS paste a foreign comment span (another document): replicas converge (A, B, host, agent)
+PASS paste a foreign comment span (another document): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS paste a foreign comment span (another document): thread states — t1:open t2:open t3:open
+PASS paste a foreign comment span (another document): threads map untouched (3 threads, no duplicate)
+PASS paste a foreign comment span (another document): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed none)
+PASS paste a foreign comment span (another document): undo restores text, marks and thread state on both
+PASS CONTRAST without the paste dedupe: copy and paste: replicas converge (A, B, host, agent)
+PASS CONTRAST without the paste dedupe: copy and paste: marks on both replicas as expected — A {"t1":"ships quarterly with design review|ships quarterly with design review","t2":"design review notes|design review notes","t3":"keeps going"}
+PASS CONTRAST without the paste dedupe: copy and paste: thread states — t1:open t2:open t3:open
+PASS CONTRAST without the paste dedupe: copy and paste: threads map untouched (3 threads, no duplicate)
+PASS CONTRAST without the paste dedupe: copy and paste: a duplicated mark has no single extent (the refresh brackets both copies) — "ships quarterly with design review notes. Owners track the …
+PASS CONTRAST without the paste dedupe: copy and paste: undo restores text, marks and thread state on both
+PASS delete the whole passage (orphans t1 and t2): replicas converge (A, B, host, agent)
+PASS delete the whole passage (orphans t1 and t2): marks on both replicas as expected — A {"t3":"keeps going"}
+PASS delete the whole passage (orphans t1 and t2): thread states — t1:open:orphan t2:open:orphan t3:open
+PASS delete the whole passage (orphans t1 and t2): threads map untouched (3 threads, no duplicate)
+PASS delete the whole passage (orphans t1 and t2): undo restores text, marks and thread state on both
+PASS delete the whole paragraph p1 (block gone): replicas converge (A, B, host, agent)
+PASS delete the whole paragraph p1 (block gone): marks on both replicas as expected — A {"t3":"keeps going"}
+PASS delete the whole paragraph p1 (block gone): thread states — t1:open:orphan t2:open:orphan t3:open
+PASS delete the whole paragraph p1 (block gone): threads map untouched (3 threads, no duplicate)
+PASS delete the whole paragraph p1 (block gone): undo restores text, marks and thread state on both
+── item 2: the agent rewrites the sentence (word diff on its replica) ──
+PASS agent: one word inside (quarterly → monthly): replicas converge (A, B, host, agent)
+PASS agent: one word inside (quarterly → monthly): marks on both replicas as expected — A {"t1":"ships monthly with design review","t2":"design review notes","t3":"keeps going"}
+PASS agent: one word inside (quarterly → monthly): thread states — t1:open t2:open t3:open
+PASS agent: one word inside (quarterly → monthly): threads map untouched (3 threads, no duplicate)
+PASS agent: one word inside (quarterly → monthly): after the host's refresh, t1's pair brackets its mark — "ships monthly with design review" (refreshed none)
+PASS agent: one word inside (quarterly → monthly): undo restores text, marks and thread state on both
+PASS agent: rewords t2 in place (design review notes → a short summary): replicas converge (A, B, host, agent)
+PASS agent: rewords t2 in place (design review notes → a short summary): marks on both replicas as expected — A {"t1":"ships quarterly with ","t2":"a short summary","t3":"keeps going"}
+PASS agent: rewords t2 in place (design review notes → a short summary): thread states — t1:open t2:open t3:open
+PASS agent: rewords t2 in place (design review notes → a short summary): threads map untouched (3 threads, no duplicate)
+PASS agent: rewords t2 in place (design review notes → a short summary): after the host's refresh, t1's pair brackets its mark — "ships quarterly with " (refreshed none)
+PASS agent: rewords t2 in place (design review notes → a short summary): undo restores text, marks and thread state on both
+PASS agent: same, strict rule (insertions only inside a comment): replicas converge (A, B, host, agent)
+PASS agent: same, strict rule (insertions only inside a comment): marks on both replicas as expected — A {"t1":"ships quarterly with ","t3":"keeps going"}
+PASS agent: same, strict rule (insertions only inside a comment): thread states — t1:open t2:open:orphan t3:open
+PASS agent: same, strict rule (insertions only inside a comment): threads map untouched (3 threads, no duplicate)
+PASS agent: same, strict rule (insertions only inside a comment): after the host's refresh, t1's pair brackets its mark — "ships quarterly with " (refreshed none)
+PASS agent: same, strict rule (insertions only inside a comment): undo restores text, marks and thread state on both
+PASS agent: same, word hunks not merged across spaces (contrast): replicas converge (A, B, host, agent)
+PASS agent: same, word hunks not merged across spaces (contrast): marks on both replicas as expected — A {"t1":"ships quarterly with a short","t2":"a short summary","t3":"keeps going"}
+PASS agent: same, word hunks not merged across spaces (contrast): thread states — t1:open t2:open t3:open
+PASS agent: same, word hunks not merged across spaces (contrast): threads map untouched (3 threads, no duplicate)
+PASS agent: same, word hunks not merged across spaces (contrast): after the host's refresh, t1's pair brackets its mark — "ships quarterly with a short" (refreshed none)
+PASS agent: same, word hunks not merged across spaces (contrast): undo restores text, marks and thread state on both
+PASS agent: deletes t2's words: replicas converge (A, B, host, agent)
+PASS agent: deletes t2's words: marks on both replicas as expected — A {"t1":"ships quarterly","t3":"keeps going"}
+PASS agent: deletes t2's words: thread states — t1:open t2:open:orphan t3:open
+PASS agent: deletes t2's words: threads map untouched (3 threads, no duplicate)
+PASS agent: deletes t2's words: after the host's refresh, t1's pair brackets its mark — "ships quarterly" (refreshed none)
+PASS agent: deletes t2's words: undo restores text, marks and thread state on both
+PASS agent: rewrites the whole sentence: replicas converge (A, B, host, agent)
+PASS agent: rewrites the whole sentence: marks on both replicas as expected — A {"t3":"keeps going"}
+PASS agent: rewrites the whole sentence: thread states — t1:open:orphan t2:open:orphan t3:open
+PASS agent: rewrites the whole sentence: threads map untouched (3 threads, no duplicate)
+PASS agent: rewrites the whole sentence: undo restores text, marks and thread state on both
+PASS agent: type change (paragraph → heading, marks carried): replicas converge (A, B, host, agent)
+PASS agent: type change (paragraph → heading, marks carried): marks on both replicas as expected — A {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS agent: type change (paragraph → heading, marks carried): thread states — t1:open t2:open t3:open
+PASS agent: type change (paragraph → heading, marks carried): threads map untouched (3 threads, no duplicate)
+PASS agent: type change (paragraph → heading, marks carried): after the host's refresh, t1's pair brackets its mark — "ships quarterly with design review" (refreshed t1,t2)
+PASS agent: type change (paragraph → heading, marks carried): undo restores text, marks and thread state on both
+PASS agent: whole sentence, hunks not merged across spaces (contrast): replicas converge (A, B, host, agent)
+PASS agent: whole sentence, hunks not merged across spaces (contrast): marks on both replicas as expected — A {"t1":" is monthly","t2":"is monthly now","t3":"keeps going"}
+PASS agent: whole sentence, hunks not merged across spaces (contrast): thread states — t1:open t2:open t3:open
+PASS agent: whole sentence, hunks not merged across spaces (contrast): threads map untouched (3 threads, no duplicate)
+PASS agent: whole sentence, hunks not merged across spaces (contrast): after the host's refresh, t1's pair brackets its mark — " is monthly" (refreshed none)
+PASS agent: whole sentence, hunks not merged across spaces (contrast): undo restores text, marks and thread state on both
+── item 1: create, overlap, resolve, reopen ──
+PASS create: overlapping t1 and t2 stored under two hashed keys
+PASS create: B highlights both open threads (decorations) — {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS resolve on B: A stops highlighting t1, the mark stays in the text — highlighted {"t2":"design review notes","t3":"keeps going"}
+PASS resolve: t1 listed as resolved on the agent replica
+PASS resolve: one update, no text write — 100 B (V2)
+PASS resolve: not in the owner's undo stack (Ctrl+Z does not reopen)
+PASS reopen (by the agent): A and B highlight t1 again, edits made while resolved included — ships very quarterly with design review
+PASS resolved thread whose text is deleted is listed resolved, not orphaned
+PASS reopening it shows it orphaned (open, no live text) — t1:open t2:open:orphan t3:open
+PASS reply: the thread lists both messages on A
+PASS CONTRAST flag-on-mark: rewrites the text's format under a new hashed key (orphan is part of the hash) — 129 B (V2) vs 100 B for the map write; keys ["comment--GcQ9CQ=="]; marks "keeps going"
+── item 2: restart (reload from the stored state) ──
+PASS restart: marks back on both new editors — {"t1":"ships very quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS restart: threads and statuses back
+PASS restart: resolved t2 not highlighted, t1 and t3 are — {"t1":"ships very quarterly with design review","t3":"keeps going"}
+PASS restart: t1's stored anchor still resolves to its passage — ships very quarterly with design review
+PASS restart: no normalization write on bind — ["host"]
+── item 2: restore an older version (state-level, S3's revert) ──
+PASS before restore: t2 orphaned, t1 resolved, t4 new — t1:resolved t2:open:orphan t3:open t4:open
+PASS restore: text and marks of v1 back on both editors (t2 un-orphaned by restore) — {"t1":"ships quarterly with design review","t2":"design review notes","t3":"keeps going"}
+PASS restore: thread statuses of v1 (t1 open again), t4 gone with its mark — t1:open t2:open t3:open
+PASS restore: replies made after v1 are reverted too (a product call; see findings) — 1 message(s)
+PASS restore: A highlights the v1 open set
+  restore update 253 B (V2), computed in 1.3 ms
+PASS restore keeping conversations: v1's text, marks and statuses; t1 keeps the reply; t4 kept as an orphan; one update — t1:open t2:open t3:open t4:open:orphan; t1 2 messages; owner:restore:717
+── item 3: orphan display ──
+PASS orphan (a) passage deleted: quote, author, time and messages are in the record
+PASS orphan (a): the pair resolves to the gap where the passage was, in p1 — {"how":"text","blockId":"p1","index":9,"endIndex":9} "The plan ‸. Owner"
+PASS orphan (a): un-orphaned by undo, with no thread write — t1:open t2:open t3:open
+PASS orphan (b) block deleted: the nearest surviving block is named — {"how":"block-gap","blockId":"h1","index":1}
+PASS orphan (c) split then deleted, without the host refresh: the pair names the block before (p1, the split point) — {"how":"text","blockId":"p1","index":9,"endIndex":9}; blocks heading#h1 paragraph#p1 paragraph#7kzb6amr paragraph#p2 paragraph#p3
+PASS orphan (c) split then deleted, after the host refresh: the pair names the passage's own block — {"how":"text","blockId":"xz677l7z","index":0,"endIndex":0}; blocks heading#h1 paragraph#p1 paragraph#xz677l7z paragraph#p2 paragraph#p3
+PASS orphan (d): B deletes t2's text, A types elsewhere, B undoes: t2 live again on A — t1:open t2:open:orphan t3:open → t1:open t2:open t3:open
+
+| Edit | t1 / t2 / t3 after (both replicas) | Threads | Edit update(s), V2 B | t1's stored pair resolves to | After the host refresh | Undo |
+|---|---|---|---|---|---|---|
+| type before the passage (start of paragraph) | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 41 | "ships quarterly with design review" | no rewrite | restored |
+| type right before the passage (at its start) | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 47 | "ships quarterly with design review" | no rewrite | restored |
+| type inside the passage | ships very quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 41 | "ships very quarterly with design review" | no rewrite | restored |
+| type right after t1 (inside t2) | ships quarterly with design review / design reviewX notes / keeps going | t1:open t2:open t3:open | 38 | "ships quarterly with design reviewX" | "ships quarterly with design review" (t1 rewritten, 271 B) | restored |
+| type right after the passage | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 37 | "ships quarterly with design review" | "ships quarterly with design review" (t2 rewritten, 270 B) | restored |
+| delete a word inside the passage | ships with design review / design review notes / keeps going | t1:open t2:open t3:open | 24 | "ships with design review" | no rewrite | restored |
+| Enter in the middle of the passage | ships quarterly |with design review / design review notes / keeps going | t1:open t2:open t3:open | 420 | "ships quarterly " | "ships quarterly ¶with design review" (t1,t2 rewritten, 503 B) | restored |
+| Enter before the passage (mid-paragraph) | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 438 | "" | "ships quarterly with design review" (t1,t2 rewritten, 511 B) | restored |
+| Enter at the start of the paragraph | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 73 | "ships quarterly with design review" | no rewrite | restored |
+| Backspace joining p2 into p1 | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 177 | "ships quarterly with design review" | "ships quarterly with design review" (t3 rewritten, 271 B) | restored |
+| Backspace joining p1 into the heading | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 411 | "" | "ships quarterly with design review" (t1,t2 rewritten, 497 B) | restored |
+| type change: paragraph → heading | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 453 | "" | "ships quarterly with design review" (t1,t2 rewritten, 500 B) | restored |
+| type change: paragraph → bullet list item | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 498 | "" | "ships quarterly with design review" (t1,t2 rewritten, 500 B) | restored |
+| type change: paragraph → quote | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 475 | "" | "ships quarterly with design review" (t1,t2 rewritten, 500 B) | restored |
+| type change: paragraph → code block (S1's codeBlock admits only the attribution marks) | — / — / keeps going | t1:open:orphan t2:open:orphan t3:open | 185 | "" | no rewrite | restored |
+| cut the whole passage and paste it into p3 | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 37+350 | "" | "ships quarterly with design review" (t1,t2 rewritten, 505 B) | restored |
+| cut part of the passage ("quarterly ") and paste into p3 | ships with design review / design review notes / keeps going | t1:open t2:open t3:open | 24+45 | "ships with design review" | no rewrite | restored |
+| copy the passage and paste it into p3 | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 75 | "ships quarterly with design review" | no rewrite | restored |
+| cut, paste, then paste the same clipboard again | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 36+350+75 | "" | "ships quarterly with design review" (t1,t2 rewritten, 504 B) | restored |
+| paste a foreign comment span (another document) | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 57 | "ships quarterly with design review" | no rewrite | restored |
+| CONTRAST without the paste dedupe: copy and paste | ships quarterly with design review|ships quarterly with design review / design review notes|design review notes / keeps going | t1:open t2:open t3:open | 350 | "ships quarterly with design review" | "ships quarterly with design review notes. Owners track the budget.¶Second paragraph keeps going here.¶Third paragraph.ships quarterly with design review" (t1,t2 rewritten, 501 B) | restored |
+| delete the whole passage (orphans t1 and t2) | — / — / keeps going | t1:open:orphan t2:open:orphan t3:open | 37 | "" | no rewrite | restored |
+| delete the whole paragraph p1 (block gone) | — / — / keeps going | t1:open:orphan t2:open:orphan t3:open | 37 | "" | no rewrite | restored |
+| agent: one word inside (quarterly → monthly) | ships monthly with design review / design review notes / keeps going | t1:open t2:open t3:open | 55 | "ships monthly with design review" | no rewrite | restored |
+| agent: rewords t2 in place (design review notes → a short summary) | ships quarterly with  / a short summary / keeps going | t1:open t2:open t3:open | 183 | "ships quarterly with " | no rewrite | restored |
+| agent: same, strict rule (insertions only inside a comment) | ships quarterly with  / — / keeps going | t1:open t2:open:orphan t3:open | 81 | "ships quarterly with " | no rewrite | restored |
+| agent: same, word hunks not merged across spaces (contrast) | ships quarterly with a short / a short summary / keeps going | t1:open t2:open t3:open | 103 | "ships quarterly with a short" | no rewrite | restored |
+| agent: deletes t2's words | ships quarterly / — / keeps going | t1:open t2:open:orphan t3:open | 33 | "ships quarterly" | no rewrite | restored |
+| agent: rewrites the whole sentence | — / — / keeps going | t1:open:orphan t2:open:orphan t3:open | 91 | "" | no rewrite | restored |
+| agent: type change (paragraph → heading, marks carried) | ships quarterly with design review / design review notes / keeps going | t1:open t2:open t3:open | 452 | "∅" | "ships quarterly with design review" (t1,t2 rewritten, 495 B) | restored |
+| agent: whole sentence, hunks not merged across spaces (contrast) |  is monthly / is monthly now / keeps going | t1:open t2:open t3:open | 125 | " is monthly" | no rewrite | restored |
+  type change: paragraph → heading: heading#h1 heading#p1 paragraph#p2 paragraph#p3
+  type change: paragraph → bullet list item: heading#h1 bulletList#7s7v89p8 paragraph#p2 paragraph#p3
+  type change: paragraph → quote: heading#h1 blockquote#r4zcf64x paragraph#p2 paragraph#p3
+  type change: paragraph → code block (S1's codeBlock admits only the attribution marks): heading#h1 codeBlock#p1 paragraph#p2 paragraph#p3; t1→{"how":"block","blockId":"p1","index":1} t2→{"how":"block","blockId":"p1","index":1}
+  cut the whole passage and paste it into p3: between cut and paste: t1:open:orphan t2:open:orphan t3:open; clipboard 173 B html
+  copy the passage and paste it into p3: pasted text "Third paragraph.ships quarterly with design review notes"
+  delete the whole passage (orphans t1 and t2): t1→{"how":"text","blockId":"p1","index":9,"endIndex":9} t2→{"how":"text","blockId":"p1","index":9,"endIndex":9}
+  delete the whole paragraph p1 (block gone): heading#h1 paragraph#p2 paragraph#p3; t1→{"how":"block-gap","blockId":"h1","index":1} t2→{"how":"block-gap","blockId":"h1","index":1}
+  agent: one word inside (quarterly → monthly): hunks ["quarterly→monthly"]
+  agent: rewords t2 in place (design review notes → a short summary): hunks ["design review notes→a short summary"]
+  agent: same, strict rule (insertions only inside a comment): hunks ["design review notes→a short summary"]; t2→{"how":"text","blockId":"p1","index":30,"endIndex":45}
+  agent: same, word hunks not merged across spaces (contrast): hunks ["design→a","review→short","notes→summary"]
+  agent: deletes t2's words: hunks [" with design review notes→"]; t2→{"how":"text","blockId":"p1","index":24,"endIndex":24}
+  agent: rewrites the whole sentence: hunks ["The plan ships quarterly with design review notes→Shipping is monthly now"]; t1→{"how":"text","blockId":"p1","index":0,"endIndex":0} t2→{"how":"text","blockId":"p1","index":0,"endIndex":23}
+  agent: type change (paragraph → heading, marks carried): heading#h1 heading#p1 paragraph#p2 paragraph#p3
+  agent: whole sentence, hunks not merged across spaces (contrast): hunks ["The plan ships quarterly with→Shipping","design→is","review→monthly","notes→now"]
+
+211/211 checks passed

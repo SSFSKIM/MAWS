@@ -1,0 +1,91 @@
+── the agent's read (artifact_read) ──
+# Plan ^h1
+
+The plan <c:t1>ships **quarterly** with <c:t2>design review</c:t1> notes</c:t2>. Owners track the budget. ^p1
+
+Second paragraph keeps going here. ^p2
+
+paragraph. ^p3
+
+---
+Comments: 3 open (1 orphaned), 1 resolved (not shown; artifact_comments {status: "all"})
+- c:t1 on ^p1 "ships quarterly with design review" — owner: Should this be monthly?
+- c:t2 on ^p1 "design review notes" — owner: Which notes? Link them.
+- c:t4 orphaned (its text was deleted; was "Third", near ^p3) — owner: Rename this.
+
+PASS read: open comments as milestones, overlap expressed by named closing tags — The plan <c:t1>ships **quarterly** with <c:t2>design review</c:t1> notes</c:t2>. Owners track the budget. ^p1
+PASS read: the resolved thread is not marked
+PASS read: the footer lists open threads, the orphan with its quote and nearest block
+PASS read: stripping the markers gives the plain markdown
+── artifact_comments {status: "open"} ──
+[
+ {
+  "threadId": "t1",
+  "status": "open",
+  "orphan": false,
+  "quote": "ships quarterly with design review",
+  "block": "p1",
+  "createdBy": "owner",
+  "createdAt": 1760000001000,
+  "messages": [
+   {
+    "by": "owner",
+    "at": 1760000001000,
+    "body": "Should this be monthly?"
+   }
+  ]
+ },
+ {
+  "threadId": "t2",
+  "status": "open",
+  "orphan": false,
+  "quote": "design review notes",
+  "block": "p1",
+  "createdBy": "owner",
+  "createdAt": 1760000002000,
+  "messages": [
+   {
+    "by": "owner",
+    "at": 1760000002000,
+    "body": "Which notes? Link them."
+   }
+  ]
+ },
+ {
+  "threadId": "t4",
+  "status": "open",
+  "orphan": true,
+  "quote": "Third",
+  "block": null,
+  "near": "p3",
+  "createdBy": "owner",
+  "createdAt": 1760000004000,
+  "messages": [
+   {
+    "by": "owner",
+    "at": 1760000004000,
+    "body": "Rename this."
+   }
+  ]
+ }
+]
+PASS artifact_comments: t1, t2 and orphaned t4, each with quote, block and messages
+PASS edit answering t1: the comment stays on the reworded passage on both editors — {"t1":"ships monthly with design review","t2":"design review notes","t3":"keeps going"}; hunks [{"from":15,"to":24,"nFrom":15,"nTo":22}]
+PASS edit answering t1: the reply is in the thread on the owner's side
+PASS artifact_resolve t1: gone from A's highlight, still listed resolved; t2 open with the agent's question — t1:resolved t2:open t3:resolved t4:open:orphan; updates agent:s1:73 agent:s1:139 agent:s1:103 agent:s1:161
+── the read after the agent's turn ──
+# Plan ^h1
+
+The plan ships monthly with <c:t2>design review notes</c:t2>. Owners track the budget. ^p1
+
+Second paragraph keeps going here. ^p2
+
+paragraph. ^p3
+
+---
+Comments: 2 open (1 orphaned), 2 resolved (not shown; artifact_comments {status: "all"})
+- c:t2 on ^p1 "design review notes" — owner: Which notes? Link them. (+1 reply)
+- c:t4 orphaned (its text was deleted; was "Third", near ^p3) — owner: Rename this.
+
+PASS read after: t1 unmarked (resolved), t2 still marked
+PASS replace_text: markdown emphasis in `old` does not match plain text (S4's matching rule decides) — replace_text: "ships **monthly**" is absent in ^p1

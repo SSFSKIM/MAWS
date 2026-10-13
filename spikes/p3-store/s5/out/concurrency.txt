@@ -1,0 +1,21 @@
+── the human comments on a passage while the agent rewrites it ──
+PASS concurrent comment × agent rewords one word inside: converged; marks {"t1":"ships monthly with design review","t9":"monthly with design"} — t1:open t9:open; text "The plan ships monthly with design review notes. Owners track the budget."
+PASS concurrent comment × agent rewrites the whole sentence: converged; marks {} — t1:open:orphan t9:open:orphan; text "Shipping is monthly now. Owners track the budget."
+PASS concurrent comment × agent deletes the commented words: converged; marks {} — t1:open:orphan t9:open:orphan; text "The plan. Owners track the budget."
+PASS a concurrent replacement of a new comment's first word lands inside it; of its last word, inside or outside by client-id order — {"start":{"inside":40,"outside":0},"end":{"inside":20,"outside":20}}
+── two replicas comment concurrently ──
+PASS overlapping passages from two replicas: both marks, both threads, everywhere — {"t5":"plan ships quarterly","t6":"quarterly with design","t7":"Owners track","t8":"Owners track"}
+PASS the identical passage from two replicas: two threads, two marks (distinct hashed keys) — t5:open t6:open t7:open t8:open
+PASS both highlighted on B
+── one replica resolves while another replies ──
+PASS nested thread node: the resolve and the reply both land — resolved, 2 messages
+PASS CONTRAST thread as one JSON value: one of the two writes is lost — {"status":"open","messages":[{"id":"m0"},{"id":"m1"}]}
+PASS concurrent resolve and reopen: one status wins, the same on every replica — resolved
+PASS A deletes the passage while B resolves: resolved, not orphaned — t1:resolved
+── resolve while another replica types inside the passage ──
+PASS map resolve × typing inside: nothing highlighted, the mark covers the typed word — {"t1":"ships very quarterly with design review"}
+PASS CONTRAST flag-on-mark resolve × typing inside: no split (Yjs format boundaries cover the concurrent insert) — "ships very quarterly with design review":true
+── randomized: 200 trials of offline edits on A, B and the agent, then sync ──
+PASS randomized: 200/200 trials converge (PM docs, threads maps, derived states, covered text on A and B; every mark has a thread; no mark flagged) — 200/200; 324 thread outcomes, 36 orphaned by concurrent deletes and rewrites; 21894 ms
+
+14/14 checks passed

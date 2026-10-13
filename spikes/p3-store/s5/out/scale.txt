@@ -1,0 +1,4 @@
+doc: 4000 paragraphs, 1070858 PM positions, 300 threads; V2 state 1213414 B
+liveRanges(pmDoc) [display plugin, per doc change as written]: 0.7 ms
+liveIdsY(root) [host orphan derivation, per applied update as written]: 4.1 ms
+markExtentY(root, one thread) [the refresh, per thread]: 3.7 ms
