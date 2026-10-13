@@ -508,6 +508,7 @@ describe('a rail the caller holds', () => {
     handles.push(handle);
     await whenSynced(handle);
     const changes: Array<string | null> = [];
+    const shown: boolean[] = [];
     const mount = (rail: 'history' | 'comments' | null, saveVersionRequest?: number) => (
       <DocumentEditor
         artifactId="doc1"
@@ -517,6 +518,7 @@ describe('a rail the caller holds', () => {
         rail={rail}
         onRailChange={(next) => changes.push(next)}
         saveVersionRequest={saveVersionRequest}
+        onPreviewChange={(on) => shown.push(on)}
       />
     );
     const { rerender } = render(mount(null, 3));
@@ -531,8 +533,10 @@ describe('a rail the caller holds', () => {
 
     click(row('Clean draft'));
     await previewing();
+    expect(shown.at(-1)).toBe(true); // the header says read-only while a version shows
     rerender(mount(null, 4));
     await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    expect(shown.at(-1)).toBe(false);
     expect(screen.queryByRole('complementary', { name: 'Version history' })).toBeNull();
 
     // the editor's own toggles ask the caller

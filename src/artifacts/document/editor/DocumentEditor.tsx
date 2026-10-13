@@ -75,6 +75,8 @@ export interface DocumentEditorProps {
   pageScope?: ComponentType<{ children: ReactNode }>;
   /** The page's element as it appears and goes (the shell's Mark-up surface). */
   onPage?(element: HTMLElement | null): void;
+  /** Whether a version is shown in place of the live document (the header says read-only meanwhile). */
+  onPreviewChange?(previewing: boolean): void;
 }
 
 export type DocumentRail = 'comments' | 'history' | null;
@@ -105,7 +107,11 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const preview = snapshot?.preview ?? null;
   useEffect(() => history?.setLiveTab(active?.id ?? null), [history, active?.id]);
   // Leaving the history rail leaves history: the page shows the live document again (whoever closed the rail).
-  const { onRailChange, saveVersionRequest } = props;
+  const { onRailChange, saveVersionRequest, onPreviewChange } = props;
+  const previewing = preview !== null;
+  useEffect(() => {
+    onPreviewChange?.(previewing);
+  }, [previewing, onPreviewChange]);
   const openRail = (next: Rail) => {
     if (!held) setOwnRail(next);
     onRailChange?.(next);

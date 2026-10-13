@@ -96,8 +96,8 @@ function editorReach(doc: Doc): CommentOverlayProps {
   };
 }
 
-function Editor({ reach, onOpen }: { reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void }) {
-  const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
+function Editor({ reach, onOpen, holdForSend }: { reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; holdForSend?: () => () => void }) {
+  const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', holdForSend });
   onOpen(comments.opened);
   return <div className="relative">{comments.overlay(reach)}</div>;
 }
@@ -178,12 +178,12 @@ describe('a comment on its way outlives its card', () => {
       discard: vi.fn((threadId: string) => void discardThread(doc, threadId)),
     };
   }
-  function mountLive() {
+  function mountLive(holdForSend?: () => () => void) {
     const doc = newDoc();
     for (const p of [passage, second]) addThread(doc, { threadId: p.threadId, tabId: 'tab1', blockId: 'p1', quote: p.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach = liveReach(doc);
     let open: ((p: typeof passage) => void) | null = null;
-    const view = render(<Editor reach={reach} onOpen={(o) => (open = o)} />);
+    const view = render(<Editor reach={reach} onOpen={(o) => (open = o)} holdForSend={holdForSend} />);
     return { doc, reach, view, comment: (p: typeof passage = passage) => act(() => open!(p)) };
   }
   const bodies = (doc: Doc, threadId: string) => getThread(doc, threadId)?.messages.map((message) => message.body) ?? null;
@@ -225,6 +225,26 @@ describe('a comment on its way outlives its card', () => {
     expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
+  });
+
+  // Decision Log 27, M8's: a send may land after the editor and its tab went; the tab keeps the replica the message is
+  // recorded in until the send settles, held from the moment it sets out.
+  it('holds what the recording needs from a send’s setting out until it settles, whatever went meanwhile', async () => {
+    const held: string[] = [];
+    const holdForSend = vi.fn(() => {
+      held.push('held');
+      return () => held.push('released');
+    });
+    const { doc, view, comment } = mountLive(holdForSend);
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    expect(held).toEqual(['held']);
+    view.unmount();
+    expect(held).toEqual(['held']);
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
+    expect(held).toEqual(['held', 'released']);
   });
 
   it('a send refused after its card went withdraws the draft (P2 toasts the refusal)', async () => {
