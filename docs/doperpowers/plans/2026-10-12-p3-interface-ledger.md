@@ -80,4 +80,5 @@ Times are the recording commits' times (PDT).
 - 2026-10-12 20:30: A's hook split for S4's rules accepted (`beforeApply` and `afterUpdate` as A's hook points, the bodies in B's and C's adapters).
 - 2026-10-12 20:40: S7b's interim recorded (X24: the hold flushes one merged update; X26: touched-parent validation binding).
 - 2026-10-12 20:55: S7a recorded (X24: delta versions with `artifact_head`, `enc` and zstd bytes, the provenance tiers, `revertUpdateFixed`).
+- 2026-10-12 21:05: A confirmed zstd inside Electron 44.4.5's Node 24.21.0 (`node:zlib` `zstdCompressSync`, a 100 kB round-trip) and folded Decision Log 36 (its 31fbdc22); M1's fix wave 2 complete (ee663d48), under re-review.
 - 2026-10-12 19:55: A's `afterUpdate` and `revertScope {keepConversations?}` hooks recorded; host repairs credited to the triggering actor, no system actor.
