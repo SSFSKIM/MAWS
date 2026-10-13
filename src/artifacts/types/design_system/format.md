@@ -88,6 +88,7 @@ A rule may carry several tags. An unknown tag is reported, not ignored; an untag
 - **A component** (`components/<name>.html`) is one root element in the slide dialect.
 - **`components/document.css`** styles document blocks only under `.ds-doc`, with element and attribute selectors (`.ds-doc h1`, `.ds-doc table`, `.ds-doc blockquote`, `.ds-doc [data-callout-tone="warn"]`), and takes colours, faces, sizes and spacing only as `var(--ds-*)`. `@font-face` rules for the system's own fonts may load from `assets/`.
 - In every canon file: inline styles only in layouts and components; `var()` only of `--ds-*` names; no script; no URL outside `assets/`.
+- The slide dialect's shape holds in layouts and components: text sits in a text element (`h1` to `h3`, `p`, `ul`, `ol`), never directly in a `div`; an `li` holds only plain text and the inline set (`b`, `i`, `u`, an https `a`, a colour `span`, `br`); `display`, `gap` and alignment go on a `section` or `div`; a table cell takes only `width`, `height`, `padding`, `text-align` and `color` (and `font-weight` on a `th`), a row only a `background`, and the table carries the face, the size and the rules.
 
 ## Limits
 

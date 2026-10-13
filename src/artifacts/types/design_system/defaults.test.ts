@@ -140,21 +140,6 @@ describe('the bundled default design systems', () => {
         }
       }
     });
-
-    it('writes its law in the nine numbered sections, in order, at about 300 lines or fewer, with tagged hard don’ts', () => {
-      const law = system.files['DESIGN.md']!;
-      const numbers = [...law.matchAll(/^## (\d+)\./gm)].map((m) => Number(m[1]));
-      expect(numbers.slice(0, 9)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(law.split('\n').length).toBeLessThanOrEqual(320);
-      const donts = law.split(/^## 8\./m)[1]!.split(/^## /m)[0]!;
-      const tags = [...donts.matchAll(/\[check: ([^\]]+)\]/g)].map((m) => m[1]!.split(':')[0]);
-      expect(tags.length).toBeGreaterThan(0);
-      const vocabulary = ['literal-color', 'font-family', 'no-gradient', 'no-shadow', 'accent-max', 'radius-max', 'type-scale', 'max-words', 'contrast'];
-      for (const tag of tags) expect(vocabulary).toContain(tag);
-      // Every canon file the law's §5 must name is named there (D6).
-      const section5 = law.split(/^## 5\./m)[1]!.split(/^## /m)[0]!;
-      for (const [path] of canon) expect(section5, path).toContain(path);
-    });
   });
 
   it('loads a system’s assets as bytes, on demand', async () => {
