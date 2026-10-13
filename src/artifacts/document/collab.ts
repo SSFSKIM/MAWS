@@ -18,9 +18,9 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Awareness } from '@y/protocols/awareness';
-import { isBindingTransaction, type Node as YType } from '../yjs';
+import { isBindingTransaction, newDoc, type Doc, type Node as YType } from '../yjs';
 import { UndoManager } from '../yjs/document';
-import { configureYProsemirror, defaultMapAttributionToMark, redoCommand, syncPlugin, undoCommand, yCursorPlugin, ySyncPluginKey, yUndoPlugin } from '../yjs/prosemirror';
+import { configureYProsemirror, defaultMapAttributionToMark, redoCommand, syncPlugin, undoCommand, yCursorPlugin, ySyncPluginKey, yUndoPlugin, yUndoPluginKey } from '../yjs/prosemirror';
 import { attributedNodes } from './schema';
 
 /** What the hold is set on: the document handle (`DocumentHandle.holdRemote`, X24). */
@@ -49,7 +49,8 @@ export interface CollaborationOptions {
 }
 
 interface CollaborationStorage {
-  undoManager: UndoManager | null;
+  undoManager: UndoManager | null; // the document's, from the view's creation (mount) on
+  scratch: { undoManager: UndoManager; doc: Doc } | null; // the undo plugin's until then (the StrictMode guard)
   history: VersionView | null;
   offRestored: (() => void) | null;
 }
@@ -82,7 +83,7 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
   priority: 1000,
 
   addOptions: () => ({ ytype: null, awareness: null, user: null, hold: null, onRestored: null, cursors: null }),
-  addStorage: () => ({ undoManager: null, history: null, offRestored: null }),
+  addStorage: () => ({ undoManager: null, scratch: null, history: null, offRestored: null }),
 
   addCommands() {
     const refused = (state: EditorState) => inHistory(state, this.options.ytype);
@@ -139,14 +140,48 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
     this.storage.offRestored = null;
     this.storage.undoManager?.destroy();
     this.storage.undoManager = null;
+    this.storage.scratch?.undoManager.destroy();
+    this.storage.scratch?.doc.destroy();
+    this.storage.scratch = null;
   },
 
   addProseMirrorPlugins() {
     const { ytype, awareness, user, hold, cursors } = this.options;
     if (!ytype) return [];
-    // An empty tracked set: the undo plugin adds the sync plugin, so only this binding's own changes are undoable.
-    const undoManager = new UndoManager(ytype, { trackedOrigins: new Set() });
-    this.storage.undoManager = undoManager;
+    const storage = this.storage;
+    // The StrictMode guard (Decision Log 22): the document's UndoManager is made once the editor's view is in the page
+    // (Tiptap draws a new editor into a detached element and EditorContent moves it in, updating the view), and is
+    // swapped into the undo plugin; until then the plugin holds one over a scratch doc of its own. A dev build's
+    // StrictMode constructs `useEditor`'s editor twice and discards one, never shown, so that one never observes the
+    // document. An empty tracked set: the undo plugin adds the sync plugin, so only this binding's own changes are
+    // undoable.
+    const scratch = newDoc();
+    const placeholder = new UndoManager(scratch.get('undo'), { trackedOrigins: new Set() });
+    const attachUndo = new Plugin({
+      key: new PluginKey('collaborationUndoManager'),
+      view: (view) => {
+        let undoManager: UndoManager | null = null;
+        const attach = () => {
+          if (undoManager || !view.dom.isConnected) return;
+          const made = new UndoManager(ytype, { trackedOrigins: new Set() });
+          undoManager = made;
+          storage.undoManager = made;
+          queueMicrotask(() => {
+            if (!view.isDestroyed && undoManager === made) view.dispatch(view.state.tr.setMeta(yUndoPluginKey, { undoManager: made }));
+          });
+        };
+        attach();
+        return {
+          update: attach,
+          destroy: () => {
+            undoManager?.destroy();
+            if (storage.undoManager === undoManager) storage.undoManager = null;
+            undoManager = null;
+          },
+        };
+      },
+    });
+    storage.scratch = { undoManager: placeholder, doc: scratch };
     if (awareness && user) awareness.setLocalStateField('user', user);
 
     // While history is shown, refuse every local document change: commands still run on a read-only view and would
@@ -168,7 +203,8 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
       syncPlugin({ mapAttributionToMark: defaultMapAttributionToMark, attributedNodes }),
       bind,
       readOnlyHistory,
-      yUndoPlugin(undoManager),
+      yUndoPlugin(placeholder),
+      attachUndo,
       ...(awareness ? [yCursorPlugin(awareness, cursors ?? {})] : []),
       ...(hold ? [compositionHold(hold)] : []),
       caretFollowsId(),

@@ -18,4 +18,5 @@ export {
   ynodeToPmnode,
   ySyncPluginKey,
   yUndoPlugin,
+  yUndoPluginKey, // M8: the UndoManager swapped in at mount (the StrictMode guard)
 } from '@y/prosemirror';

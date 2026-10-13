@@ -2,13 +2,21 @@
 // of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): convergence, undo scoped to the local binding, history mode's
 // refusals, the UndoManager cleared by a restore, the composition hold, the caret following its block's id, and a
 // remote write that writes nothing back.
+import { Editor } from '@tiptap/core';
+import { EditorContent } from '@tiptap/react';
+import { act, cleanup, render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { onUpdate, type Node as YType } from '../../yjs';
 import { YNode, newDocGcOff } from '../../yjs/document';
 import { pmnodeToDelta, ynodeToPmnode } from '../../yjs/prosemirror';
 import { applyV2, stateV2 } from '../../yjs';
-import { schemaFor } from '../schema';
+import { Collaboration } from '../collab';
+import { coreExtensionOptions } from '../ids';
+import { extensions, schemaFor } from '../schema';
 import { tabBody } from '../tabs';
+import { DocumentEditor } from './DocumentEditor';
+import { memoryEditorHost } from './memory-host';
 import { TAB, World, blocks, doc, endOf, para, ticks, until } from './test-world';
 
 let world: World | null = null;
@@ -157,5 +165,57 @@ describe('the caret', () => {
     expect([$head.parent.attrs.id, $head.parentOffset]).toEqual(['p2', 2]);
     a.editor.commands.insertContent('X');
     expect(blocks(a.editor)[2]).toEqual(['p2', 'beXta']);
+  });
+});
+
+// Decision Log 22 (3), M8's: React's StrictMode builds `useEditor`'s editor twice in a dev build and discards one, which
+// Tiptap destroys a moment later; the discarded editor is never mounted, so it must never put an UndoManager on the
+// document, even for that moment. An UndoManager is one `afterTransaction` observer of its doc (lib0's Observable).
+describe('the StrictMode guard', () => {
+  const undoManagersOn = (d: unknown) => (d as { _observers: Map<string, Set<unknown>> })._observers.get('afterTransaction')?.size ?? 0;
+
+  it('puts no UndoManager on the document for an editor not shown, and one once EditorContent shows it', async () => {
+    world = new World(doc(para('p1', 'one')));
+    const handle = await world.bare();
+    const before = undoManagersOn(handle.doc);
+    const editor = new Editor({
+      coreExtensionOptions,
+      extensions: [...extensions(), Collaboration.configure({ ytype: tabBody(handle.doc, TAB)!, awareness: handle.awareness, user: { name: 'a', color: 'var(--author-1)' } })],
+    });
+    await until(() => editor.getText() === 'one', 'the editor to bind');
+    await ticks(5);
+    expect(undoManagersOn(handle.doc), 'the editor not shown').toBe(before);
+    render(<EditorContent editor={editor} />);
+    await ticks(2);
+    expect(undoManagersOn(handle.doc), 'the editor shown').toBe(before + 1);
+    editor.chain().insertContentAt(endOf(editor, 'p1'), ' two').run();
+    expect(editor.getText()).toBe('one two');
+    expect(editor.commands.undo()).toBe(true);
+    expect(editor.getText()).toBe('one');
+    cleanup();
+    editor.destroy();
+    expect(undoManagersOn(handle.doc), 'the destroyed editor').toBe(before);
+  });
+
+  it('keeps one UndoManager on the document for a DocumentEditor under StrictMode, from its first render', async () => {
+    world = new World(doc(para('p1', 'one')));
+    const handle = await world.bare();
+    const before = undoManagersOn(handle.doc);
+    let editor: Editor | null = null;
+    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
+    render(
+      <StrictMode>
+        <DocumentEditor artifactId="d1" handle={handle} host={host} onEditor={(e) => e && (editor = e)} />
+      </StrictMode>,
+    );
+    expect(undoManagersOn(handle.doc), 'right after the first render').toBeLessThanOrEqual(before + 1);
+    await until(() => editor !== null && editor.getText() === 'one', 'the editor to bind');
+    expect(undoManagersOn(handle.doc)).toBe(before + 1);
+    act(() => void editor!.chain().insertContentAt(endOf(editor!, 'p1'), ' two').run());
+    act(() => void editor!.commands.undo());
+    expect(editor!.getText()).toBe('one');
+    cleanup();
+    await ticks(5);
+    expect(undoManagersOn(handle.doc), 'after unmount').toBe(before);
   });
 });
