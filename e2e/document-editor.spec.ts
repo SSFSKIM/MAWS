@@ -238,7 +238,7 @@ test.describe('the document editor', () => {
     // anchored: the card's top-left corner sits under the passage's first line, 4 px below it
     const mark = content(page, 'a').locator(`[data-thread="${threadId}"]`).first();
     await expect(mark).toHaveText(QUOTE);
-    await expect(mark).toHaveClass(/comment-active/);
+    await expect(content(page, 'a').locator(`.comment-active.comment-${threadId}`)).toHaveText(QUOTE); // the display's decoration
     const line = await mark.evaluate((el) => {
       const r = el.getClientRects()[0]!;
       return { left: r.left, bottom: r.bottom };
