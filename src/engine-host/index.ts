@@ -72,6 +72,7 @@ const register: HostRegister = (on, emit, client) => {
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
   const designSystems = registerDesignSystems({ documents }); // P3-D: the kind's adapter, its mirror writer, the create context and the seeded defaults
+  const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -84,6 +85,7 @@ const register: HostRegister = (on, emit, client) => {
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
+    artifacts: () => store, // P3-A (M6)
   });
   ({ table } = ipc);
   table.startSampling();

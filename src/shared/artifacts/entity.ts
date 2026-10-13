@@ -4,7 +4,7 @@
 // stay in the store.
 import * as z from 'zod';
 import { AppSessionIdSchema, ProjectIdSchema } from '../graph/ids';
-import { ARTIFACT_ID } from '../maws/tools';
+import { ARTIFACT_ID } from '../maws/artifact-id';
 import { ActorSchema } from './actor';
 
 export const ARTIFACT_KINDS = ['document', 'presentation', 'design', 'design_system', 'dashboard', 'html', 'file'] as const;

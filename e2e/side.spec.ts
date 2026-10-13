@@ -123,6 +123,22 @@ function parentJournal(cwd: string): SideJournal {
   return journal;
 }
 
+// P3-A (M6): the parent's first turn makes its page through the artifact store, `artifact_create` of the heading page
+// (allowed by a rule), whose X12 record the host mirrors under the parent; `parentPage` reads that record.
+function pageParentJournal(cwd: string): SideJournal {
+  const journal = new SideJournal(PARENT, cwd);
+  const prompt = journal.prompt();
+  journal.mawsToolCall('artifact_create', { id: 'dash', content: HEADING_PAGE, title: 'Dashboard' }, { status: 'created', id: 'dash', version: 1, title: 'Dashboard' }, { asked: false });
+  journal.reply(prompt, FIRST_REPLY);
+  journal.completed(prompt);
+  return journal;
+}
+function parentPage(userData: string, parent: string): DeliverableRecord {
+  const dir = join(userData, 'deliverables', parent);
+  const records = readdirSync(dir).filter((name) => name.endsWith('.json')).map((name) => JSON.parse(readFileSync(join(dir, name), 'utf8')) as DeliverableRecord);
+  return records.find((record) => record.artifactId === 'dash')!;
+}
+
 // A side thread's journal: its first prompt (the anchored comment), the rename `finishBinding` writes, the reply; then
 // one more turn per follow-up.
 function threadJournal(sessionId: string, cwd: string, title: string, replies: string[]): SideJournal {
@@ -912,21 +928,22 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   test('12. the thread updates the page it comments on: Allow in the card, the parent’s record one version longer and nothing under the thread, the viewer on v2 with the card open and pinned, and the thread’s “Updated artifact … · v2” row showing v2 in the same viewer', async () => {
     test.setTimeout(150_000);
     // the thread's journal is written again once the record and the parent's runtime id exist (its launch reads it then)
-    const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent'), updateJournal(cwd, {}).write(dir, 'thread')]);
+    // P3-A (M6): the parent made its page through the artifact store (its create allowed by a rule), so the thread can
+    // read it and publish over it
+    const c = await begin((cwd, dir) => [pageParentJournal(cwd).write(dir, 'parent'), updateJournal(cwd, {}).write(dir, 'thread')]);
     const { page, maws, parent, repo } = c;
-    const { card, tools, record } = await commentOnHeading(c);
-    updateJournal(repo.root, { status: 'updated', id: 'dash', deliverableId: record.id, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: parent }).write(c.journals, 'thread');
+    const { card, tools, record } = await commentOnHeading(c, parentPage(maws.userData, parent));
+    updateJournal(repo.root, { status: 'published', id: 'dash', deliverableId: record.id, version: 2, title: 'Dashboard', changed: ['index.html'], ownerAppSessionId: parent }).write(c.journals, 'thread');
     await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
     const child = await sideThreadOf(page, parent, 'comment');
 
-    // the thread asks to update the page: C7's request card inside the card and the strip; the page rewritten in the
-    // repository, then Allow there
+    // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
+    // strip, then Allow there
     const request = card.locator('[data-request-card]');
     await expect(request).toContainText('Approval needed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
-    writeFileSync(join(repo.root, 'dashboard.html'), HEADING_PAGE_V2);
     await request.getByRole('radio', { name: 'Allow once' }).click();
     await request.getByRole('button', { name: 'Allow', exact: true }).click();
 
@@ -934,11 +951,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // no deliverable under the thread
     const rows = () => journal(maws, child) as unknown as Parameters<typeof mcpCalls>[0];
     const served = () => {
-      const call = mcpCalls(rows()).find((entry) => entry.name === 'artifact_update');
+      const call = mcpCalls(rows()).find((entry) => entry.name === 'artifact_publish');
       const result = call ? mcpResultOf(rows(), call.requestId) : null;
       return result ? (JSON.parse(resultText(result)) as Record<string, unknown>) : null;
     };
-    await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'updated', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
+    await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'published', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
     const stored = JSON.parse(readFileSync(recordPath(maws.userData, record), 'utf8')) as DeliverableRecord;
     expect(stored.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual([HEADING_PAGE, HEADING_PAGE_V2]);
     expect(stored.versions[1]!.path).toBe(join(maws.userData, 'deliverables', parent, record.id, 'v2.html'));
@@ -975,14 +992,16 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   });
 });
 
-// P2-E1 (M5): a side thread that updates its parent's page: the anchored prompt, the rename, `artifact_update` of the
-// page's id from the repository's `dashboard.html` (asked, allowed, served by the host), the reply. `answer` is the JSON
-// the engine's tool result carries (the host's own answer is what the replay checks and the test reads).
+// P2-E1 (M5): a side thread that updates its parent's page: the anchored prompt, the rename, the update (P3-A M6:
+// `artifact_read` of the page, allowed by a rule, then `artifact_publish` of the new page from the revision the read
+// returned, the parent's create being the store's first write; asked, allowed, served by the host), the reply. `answer`
+// is the JSON the engine's tool result carries (the host's own answer is what the replay checks and the test reads).
 function updateJournal(cwd: string, answer: Record<string, unknown>): SideJournal {
   const thread = new SideJournal(CHILD, cwd);
   const prompt = thread.prompt();
   thread.rename(HERO);
-  thread.mawsToolCall('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, answer);
+  thread.mawsToolCall('artifact_read', { artifact: 'dash' }, { status: 'read', id: 'dash', kind: 'html', revision: 1 }, { asked: false });
+  thread.mawsToolCall('artifact_publish', { artifact: 'dash', baseRevision: 1, files: { 'index.html': HEADING_PAGE_V2 } }, answer);
   thread.reply(prompt, CARD_UPDATED);
   thread.completed(prompt);
   return thread;
@@ -1026,9 +1045,10 @@ const CARD_UPDATED = 'The heading now reads “Sales overview, larger” at 48 p
 
 // The parent's page seeded as its artifact (the store's own layout), opened in the panel's Deliverables tool, Comment,
 // the heading clicked: answers the card (composing), the panel's tool strip and the seeded record.
-async function commentOnHeading(c: Case & { parent: string }): Promise<{ card: Locator; tools: Locator; record: DeliverableRecord }> {
+// `existing`: the page's record when the parent made it (P3-A M6), else one is seeded.
+async function commentOnHeading(c: Case & { parent: string }, existing?: DeliverableRecord): Promise<{ card: Locator; tools: Locator; record: DeliverableRecord }> {
   const { page, maws, parent } = c;
-  const record = seedArtifact(maws.userData, parent as AppSessionId, 'dash', 'Dashboard', [HEADING_PAGE]);
+  const record = existing ?? seedArtifact(maws.userData, parent as AppSessionId, 'dash', 'Dashboard', [HEADING_PAGE]);
   const panel = panelRegion(page);
   await panel.getByRole('button', { name: 'Add a tool' }).click();
   await page.getByRole('menuitem', { name: 'Deliverables' }).click();

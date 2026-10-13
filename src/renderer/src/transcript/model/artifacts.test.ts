@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
+import { presentationOf, tableRowOf } from './classify';
+import { artifactHeading } from './copy';
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -131,6 +133,54 @@ describe('the artifact row', () => {
     own.toolUse('toolu_o', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
     own.result('toolu_o', updated(2));
     expect(ofKind(expandedRows(own.events), 'artifact')[0]).not.toHaveProperty('ownerAppSessionId');
+  });
+});
+
+// P3-A (M6; X25): `artifact_publish` replaced E2's update, and its row reads as the update's did; an E2 journal's
+// `artifact_update` keeps reading as it was written. The namespace's other tools are standalone cells.
+describe('the artifact row of a publish (P3-A)', () => {
+  const PUBLISH = 'mcp__maws__artifact_publish';
+  const published = (version: number) =>
+    json({ status: 'published', artifactId: DELIVERABLE, kind: 'html', title: 'Dashboard', revision: 4, changed: ['index.html'], kept: [], removed: [], id: 'dash', deliverableId: DELIVERABLE, version, externalReferences: 0 });
+
+  it('names the artifact the call named and fills the version from an html publish’s answer; a file kind’s answer leaves none', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_p', PUBLISH, { artifact: 'dash', baseRevision: 3, files: { 'index.html': '<p/>' } });
+    expect(ofKind(expandedRows(b.events), 'artifact')[0]).toMatchObject({ action: 'update', artifactId: 'dash', title: null, version: null, answered: false });
+    b.result('toolu_p', published(2));
+    expect(ofKind(expandedRows(b.events), 'artifact')[0]).toMatchObject({ action: 'update', artifactId: 'dash', title: 'Dashboard', deliverableId: DELIVERABLE, version: 2, answered: true });
+    b.toolUse('toolu_f', PUBLISH, { artifact: 'site', baseRevision: 3, files: { 'a.css': 'x' } });
+    b.result('toolu_f', json({ status: 'published', artifactId: DELIVERABLE, kind: 'design', title: 'Site', revision: 5, changed: ['a.css'], kept: [], removed: [] }));
+    expect(ofKind(expandedRows(b.events), 'artifact')[1]).toMatchObject({ artifactId: 'site', deliverableId: null, version: null, answered: true });
+  });
+
+  it('a create names its artifact by handle and its page by path; a refusal reads without the tool’s prefix or the refusal’s JSON', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_c', CREATE, { handle: 'dash', path: 'dashboard.html', title: 'Dashboard' });
+    b.toolUse('toolu_n', PUBLISH, { artifact: 'dash', baseRevision: 1, files: { 'index.html': '<p/>' } });
+    b.result('toolu_n', 'artifact_publish: changed by someone else since your read: index.html {"reason":"conflict","paths":["index.html"]}', { isError: true });
+    const [create, refused] = ofKind(expandedRows(b.events), 'artifact');
+    expect(create).toMatchObject({ artifactId: 'dash', htmlPath: 'dashboard.html' });
+    expect(artifactHeading(refused!)).toBe('Could not register artifact dash: changed by someone else since your read: index.html');
+  });
+
+  it('classes the other artifact tools as standalone cells, and the retired update still as a row', () => {
+    for (const name of ['artifact_read', 'artifact_describe_type', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export']) {
+      expect(presentationOf(`mcp__maws__${name}`), name).toBe('cell');
+      expect(tableRowOf(`mcp__maws__${name}`), name).toMatchObject({ groupable: false });
+    }
+    expect(presentationOf(UPDATE)).toBe('artifact');
+    expect(presentationOf(PUBLISH)).toBe('artifact');
+  });
+
+  it('counts a library listing as it counted E2’s', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_l', LIST, {});
+    b.result('toolu_l', json({ status: 'listed', artifacts: [{ id: DELIVERABLE, handle: 'dash', kind: 'html', title: 'Dashboard', revision: 2, updatedAt: '2026-10-13T00:00:00.000Z', lastEditor: null }] }));
+    expect(ofKind(expandedRows(b.events), 'cell').find((cell) => cell.toolUseId === 'toolu_l')?.label).toBe('Listed 1 artifact');
   });
 });
 

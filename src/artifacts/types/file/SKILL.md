@@ -12,7 +12,7 @@ Call `send_file` with the files' paths (absolute or relative to the working dire
 
 ## Reading and editing
 
-`artifact_read` returns a File artifact's name, path, size and type, and its text when it is a text file under 1 MiB. To deliver a changed file, write it and call `send_file` again.
+`artifact_read` returns a File artifact's name, path, size and content hash, whether the file is still there, and its text when it is a UTF-8 text file under 1 MiB. A File artifact is not published to: to deliver a changed file, write it and call `send_file` again, which delivers it as a new File artifact. `artifact_create` with `kind: "file"`, a `path` and a `title` delivers one file the same way, with a title of your choosing.
 
 ## Before you finish
 

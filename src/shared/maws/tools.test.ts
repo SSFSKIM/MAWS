@@ -10,10 +10,14 @@ import {
   ArtifactCreateResultSchema,
   ArtifactListInputSchema,
   ArtifactListResultSchema,
+  ArtifactDeliverySchema,
+  ArtifactPublishInputSchema,
+  ArtifactPublishResultSchema,
+  ArtifactReadInputSchema,
+  artifactRefusalOf,
+  DOCUMENT_READ_FIELDS,
   ArtifactScreenshotInputSchema,
   ArtifactScreenshotResultSchema,
-  ArtifactUpdateInputSchema,
-  ArtifactUpdateResultSchema,
   AskInputSchema,
   AskResultSchema,
   MAWS_SERVER_NAME,
@@ -29,14 +33,17 @@ import {
   ShowPaneResultSchema,
   TOOL_ERRORS,
 } from './tools';
+import { ArtifactUpdateInputSchema, ArtifactUpdateResultSchema } from './artifact-update';
 
-describe('X9: the maws server and its seven tools', () => {
-  it('names the server and the tools as the contract says (E2 appends the four artifact tools)', () => {
+describe('X9: the maws server and its twelve tools', () => {
+  it('names the server and the tools as the contract says (E2 appends the artifact tools; P3-A M6 retires artifact_update and appends six)', () => {
     expect(MAWS_SERVER_NAME).toBe('maws');
     expect(MAWS_TOOL_NAMES).toEqual([
-      'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
+      'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
       // E4c's six browser tools left on 2026-10-08 (P1 A-54): none of them, and no other tool moved
+      'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
     ]);
+    expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
     expect(mawsServerInfo('0.9.0')).toEqual({ name: 'maws', version: '0.9.0' });
     expect(MAWS_TOOL_ANNOTATIONS).toEqual({ readOnlyHint: true, openWorldHint: false });
@@ -70,9 +77,14 @@ describe('X9: the maws server and its seven tools', () => {
       ['ask', { readOnlyHint: true, openWorldHint: false, title: 'Ask questions' }],
       ['show_pane', { readOnlyHint: true, openWorldHint: false, title: 'Show pane' }],
       ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }],
-      ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
       ['artifact_list', { readOnlyHint: true, openWorldHint: false, title: 'List artifacts' }],
       ['artifact_screenshot', { readOnlyHint: true, openWorldHint: false, title: 'Screenshot artifact' }],
+      ['artifact_describe_type', { readOnlyHint: true, openWorldHint: false, title: 'Describe artifact kind' }],
+      ['artifact_read', { readOnlyHint: true, openWorldHint: false, title: 'Read artifact' }],
+      ['artifact_publish', { readOnlyHint: false, openWorldHint: false, title: 'Publish artifact' }],
+      ['artifact_upload_asset', { readOnlyHint: false, openWorldHint: false, title: 'Upload artifact asset' }],
+      ['artifact_list_assets', { readOnlyHint: true, openWorldHint: false, title: 'List artifact assets' }],
+      ['artifact_export', { readOnlyHint: false, openWorldHint: false, title: 'Export artifact' }],
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });
@@ -177,44 +189,28 @@ describe('X9 artifact tools (E2)', () => {
     for (const id of ['/x', ' ', '', 'x'.repeat(65), '.hidden', '-x', 'a/b', 'a b']) expect(ARTIFACT_ID.test(id), id).toBe(false);
   });
 
-  it('describes each tool word for word, the fallback sentence first', () => {
-    expect(MAWS_TOOLS.artifact_create).toMatchObject({ title: 'Create artifact' });
-    expect(MAWS_TOOLS.artifact_create.description).toBe(
-      "Register a self-contained HTML file you wrote as a MAWS artifact the user can view and comment on; without this tool, write the HTML file and tell the user its path. Give it a short id you will reuse for updates, the path of the HTML file (absolute or relative to the working directory) and a title. MAWS copies the file, keeps every version, shows it in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs) and reports how many external URLs it found. Returns the artifact's deliverable id and version 1.",
-    );
-    expect(MAWS_TOOLS.artifact_update).toMatchObject({ title: 'Update artifact' });
-    expect(MAWS_TOOLS.artifact_update.description).toBe(
-      "Add a new version of a MAWS artifact from an HTML file you rewrote; without this tool, write the HTML file and tell the user its path. Names the artifact by the id you gave artifact_create; the user can switch between versions, and a title replaces the artifact's title. Returns the new version number.",
-    );
-    expect(MAWS_TOOLS.artifact_list).toMatchObject({ title: 'List artifacts' });
-    expect(MAWS_TOOLS.artifact_list.description).toBe(
-      'List the artifacts this session registered with MAWS, with their ids, titles and version counts; without this tool, keep your own list of the HTML files you wrote.',
-    );
-    expect(MAWS_TOOLS.artifact_screenshot).toMatchObject({ title: 'Screenshot artifact' });
-    expect(MAWS_TOOLS.artifact_screenshot.description).toBe(
-      'Capture a PNG screenshot of a MAWS artifact as the user sees it, rendered in a sandboxed frame with no network; without this tool, describe the page from its source. Names the artifact by id and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
-    );
+  it('names the artifact tools by their titles (their descriptions open with the fallback sentence, above)', () => {
+    expect(MAWS_TOOLS.artifact_create.description).toContain('id and html_path are older names for handle and path');
+    expect(MAWS_TOOLS.artifact_publish.description).toContain('baseRevision is the revision your last artifact_read');
   });
 
   it("publishes each input's JSON schema: strict, with the bounds of the contract", () => {
-    const schemaOf = (name: 'artifact_create' | 'artifact_update' | 'artifact_list' | 'artifact_screenshot') => mawsToolList().find((t) => t.name === name)!.inputSchema;
+    const schemaOf = (name: 'artifact_create' | 'artifact_list' | 'artifact_screenshot' | 'artifact_publish') => mawsToolList().find((t) => t.name === name)!.inputSchema;
     const id = { type: 'string', pattern: ARTIFACT_ID.source };
     expect(schemaOf('artifact_create')).toMatchObject({
-      type: 'object', additionalProperties: false, required: ['id', 'html_path', 'title'],
-      properties: { id, html_path: { type: 'string', minLength: 1, maxLength: 4096 }, title: { type: 'string', minLength: 1, maxLength: 200 } },
+      type: 'object', additionalProperties: false, required: ['title'],
+      properties: { id, handle: id, html_path: { type: 'string', minLength: 1, maxLength: 4096 }, path: { type: 'string', minLength: 1, maxLength: 4096 }, title: { type: 'string', minLength: 1, maxLength: 200 } },
     });
-    expect(schemaOf('artifact_update')).toMatchObject({
-      type: 'object', additionalProperties: false, required: ['id', 'html_path'],
-      properties: { id, html_path: { type: 'string', minLength: 1, maxLength: 4096 }, title: { type: 'string', minLength: 1, maxLength: 200 } },
-    });
-    expect(schemaOf('artifact_list')).toMatchObject({ type: 'object', additionalProperties: false, properties: {} });
+    expect(schemaOf('artifact_list')).toMatchObject({ type: 'object', additionalProperties: false, properties: { scope: { enum: ['session', 'all'] } } });
     expect(schemaOf('artifact_screenshot')).toMatchObject({
       type: 'object', additionalProperties: false, required: ['id'],
       properties: { id, version: { type: 'integer', minimum: 1 }, width: { type: 'integer', minimum: 320, maximum: 2560 }, height: { type: 'integer', minimum: 240, maximum: 2560 } },
     });
+    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision', 'files'] });
   });
 
   it('parses the inputs strictly and never defaults', () => {
+    // E2's create keeps parsing as it was written; P3-A's names and kinds beside it
     expect(ArtifactCreateInputSchema.parse({ id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' })).toEqual({ id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' });
     expect(ArtifactCreateInputSchema.safeParse({ id: 'dash', html_path: 'dashboard.html' }).success).toBe(false); // a title is required
     expect(ArtifactCreateInputSchema.safeParse({ id: 'dash', html_path: '', title: 'D' }).success).toBe(false);
@@ -222,11 +218,18 @@ describe('X9 artifact tools (E2)', () => {
     expect(ArtifactCreateInputSchema.safeParse({ id: 'dash', html_path: 'a.html', title: 'x'.repeat(201) }).success).toBe(false);
     expect(ArtifactCreateInputSchema.safeParse({ id: '/x', html_path: 'a.html', title: 'D' }).success).toBe(false);
     expect(ArtifactCreateInputSchema.safeParse({ id: 'dash', html_path: 'a.html', title: 'D', extra: 1 }).success).toBe(false);
-    expect(ArtifactUpdateInputSchema.parse({ id: 'dash', html_path: 'a.html' })).toEqual({ id: 'dash', html_path: 'a.html' });
-    expect(ArtifactUpdateInputSchema.safeParse({ id: 'dash', html_path: 'a.html', title: 'Sales dashboard, Q3' }).success).toBe(true);
-    expect(ArtifactUpdateInputSchema.safeParse({ id: 'dash', html_path: 'a.html', title: '' }).success).toBe(false);
+    expect(ArtifactCreateInputSchema.safeParse({ handle: 'dash', content: '<p/>', title: 'D' }).success).toBe(true);
+    expect(ArtifactCreateInputSchema.safeParse({ kind: 'design', title: 'D', files: { 'a.css': 'x' } }).success).toBe(true);
+    expect(ArtifactCreateInputSchema.safeParse({ kind: 'presentation', title: 'D' }).success).toBe(true);
+    expect(ArtifactCreateInputSchema.safeParse({ kind: 'file', path: 'r.pdf', title: 'R' }).success).toBe(true);
+    for (const bad of [{ title: 'D' }, { title: 'D', path: 'a.html', content: 'x' }, { kind: 'file', title: 'D' }, { kind: 'design', title: 'D', path: 'a' }, { kind: 'document', title: 'D', files: {} }, { id: 'a', handle: 'b', content: 'x', title: 'D' }, { html_path: 'a', path: 'b', title: 'D' }]) {
+      expect(ArtifactCreateInputSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
     expect(ArtifactListInputSchema.parse({})).toEqual({});
     expect(ArtifactListInputSchema.safeParse({ all: true }).success).toBe(false);
+    expect(ArtifactReadInputSchema.safeParse({ artifact: 'dash', paths: [] }).success).toBe(false);
+    expect(ArtifactPublishInputSchema.safeParse({ artifact: 'dash', baseRevision: 3, files: { 'index.html': '<p/>', 'gone.css': null } }).success).toBe(true);
+    expect(ArtifactPublishInputSchema.safeParse({ artifact: 'dash', baseRevision: 3, files: {} }).success).toBe(false);
     expect(ArtifactScreenshotInputSchema.parse({ id: 'dash' })).toEqual({ id: 'dash' });
     expect(ArtifactScreenshotInputSchema.safeParse({ id: 'dash', version: 2, width: 320, height: 240 }).success).toBe(true);
     expect(ArtifactScreenshotInputSchema.safeParse({ id: 'dash', width: 2560, height: 2560 }).success).toBe(true);
@@ -235,16 +238,45 @@ describe('X9 artifact tools (E2)', () => {
     }
     const refused = parseToolArguments('artifact_screenshot', { id: 'dash', width: 10 });
     expect(refused.ok === false && refused.error).toMatch(/^artifact_screenshot: invalid arguments: width: /);
+    // the retired update's schemas stay for the journals written before
+    expect(ArtifactUpdateInputSchema.parse({ id: 'dash', html_path: 'a.html' })).toEqual({ id: 'dash', html_path: 'a.html' });
   });
 
-  it('parses the results and refuses a stray key', () => {
-    expect(ArtifactCreateResultSchema.safeParse({ status: 'created', id: 'dash', deliverableId: UUID, version: 1, title: 'Dashboard', externalReferences: 0 }).success).toBe(true);
-    expect(ArtifactCreateResultSchema.safeParse({ status: 'created', id: 'dash', deliverableId: UUID, version: 2, title: 'Dashboard', externalReferences: 0 }).success).toBe(false);
-    expect(ArtifactUpdateResultSchema.safeParse({ status: 'updated', id: 'dash', deliverableId: UUID, version: 2, title: 'Dashboard', externalReferences: 3 }).success).toBe(true);
-    expect(ArtifactUpdateResultSchema.safeParse({ status: 'updated', id: 'dash', deliverableId: UUID, version: 1, title: 'Dashboard', externalReferences: 0 }).success).toBe(false);
-    const listed = { id: 'dash', deliverableId: UUID, title: 'Dashboard', versions: 2, createdAt: '2026-10-06T00:00:00.000Z', updatedAt: '2026-10-06T00:01:00.000Z' };
+  // P3-B's wiring (ledger X25, the architect 2026-10-13): the document read fields and a document's markdown create
+  it('admits P3-B’s document read fields on artifact_read and advertises them in tools/list', () => {
+    const read = { artifact: 'notes', tab: 'Draft', from: 'b-12', count: 40, sinceRevision: 7 };
+    expect(parseToolArguments('artifact_read', read)).toEqual({ ok: true, data: read });
+    for (const bad of [{ count: 0 }, { count: 1001 }, { count: 1.5 }, { tab: '' }, { tab: 'x'.repeat(65) }, { from: '' }, { sinceRevision: -1 }]) {
+      expect(ArtifactReadInputSchema.safeParse({ artifact: 'notes', ...bad }).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(Object.keys(DOCUMENT_READ_FIELDS)).toEqual(['tab', 'from', 'count', 'sinceRevision']);
+    expect(mawsToolList().find((t) => t.name === 'artifact_read')!.inputSchema).toMatchObject({
+      properties: { tab: { type: 'string', minLength: 1, maxLength: 64 }, from: { type: 'string', minLength: 1, maxLength: 64 }, count: { type: 'integer', minimum: 1, maximum: 1000 }, sinceRevision: { type: 'integer', minimum: 0 } },
+    });
+    expect(MAWS_TOOLS.artifact_read.description).toContain('tab, from, count and sinceRevision');
+  });
+
+  it('admits a document created from markdown content, and no other Y kind’s content', () => {
+    expect(parseToolArguments('artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }).ok).toBe(true);
+    expect(ArtifactCreateInputSchema.safeParse({ kind: 'presentation', title: 'Deck', content: '# Deck' }).success).toBe(false);
+    expect(MAWS_TOOLS.artifact_create.description).toContain('a document starts empty or from markdown content');
+  });
+
+  it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {
+    const created = { status: 'created', artifactId: UUID, kind: 'html', title: 'Dashboard', revision: 1, handle: 'dash', id: 'dash', deliverableId: UUID, version: 1, externalReferences: 0 };
+    expect(ArtifactCreateResultSchema.safeParse(created).success).toBe(true);
+    expect(ArtifactCreateResultSchema.safeParse({ ...created, version: 2 }).success).toBe(false);
+    expect(ArtifactCreateResultSchema.safeParse({ ...created, extra: 1 }).success).toBe(false);
+    const published = { status: 'published', artifactId: UUID, kind: 'html', title: 'Dashboard', revision: 4, changed: ['index.html'], kept: [], removed: [], id: 'dash', deliverableId: UUID, version: 2, externalReferences: 0 };
+    expect(ArtifactPublishResultSchema.safeParse(published).success).toBe(true);
+    const e2Create = { status: 'created', id: 'dash', deliverableId: UUID, version: 1, title: 'Dashboard', externalReferences: 0 };
+    const e2Update = { status: 'updated', id: 'dash', deliverableId: UUID, version: 2, title: 'Dashboard', externalReferences: 3 };
+    expect(ArtifactUpdateResultSchema.safeParse(e2Update).success).toBe(true);
+    for (const answer of [created, published, e2Create, e2Update]) expect(ArtifactDeliverySchema.parse(answer)).toMatchObject({ id: 'dash', deliverableId: UUID, title: 'Dashboard' });
+    expect(ArtifactDeliverySchema.safeParse({ ...published, id: undefined, deliverableId: undefined, version: undefined }).success).toBe(false); // a file kind's publish registers none
+    const listed = { id: UUID, handle: 'dash', kind: 'html', title: 'Dashboard', revision: 2, updatedAt: '2026-10-06T00:01:00.000Z', lastEditor: { by: 'this session', at: '2026-10-06T00:01:00.000Z' } };
     expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [listed] }).success).toBe(true);
-    expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [] }).success).toBe(true);
+    expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [{ ...listed, lastEditor: null }] }).success).toBe(true);
     expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [{ ...listed, extra: 1 }] }).success).toBe(false);
     const captured = { status: 'captured', id: 'dash', deliverableId: UUID, title: 'Dashboard', version: 1, width: 64, height: 64, bytes: 132, consoleErrors: ['Uncaught Error: E2_BOOM'] };
     expect(ArtifactScreenshotResultSchema.safeParse(captured).success).toBe(true);
@@ -252,19 +284,22 @@ describe('X9 artifact tools (E2)', () => {
   });
 
   it('carries the exact texts of every artifact refusal, each naming the tool whose call it answers', () => {
-    expect(TOOL_ERRORS.artifactNotAFile('artifact_update', '/r/x.html')).toBe('artifact_update: not a file: /r/x.html');
+    expect(TOOL_ERRORS.artifactNotAFile('artifact_upload_asset', '/r/x.png')).toBe('artifact_upload_asset: not a file: /r/x.png');
     expect(TOOL_ERRORS.notHtml('artifact_create', '/r/x.txt')).toBe('artifact_create: not an HTML file: /r/x.txt');
     expect(TOOL_ERRORS.tooLarge('artifact_create', '/r/x.html', 16777217)).toBe('artifact_create: too large: /r/x.html (16777217 bytes; the limit is 16 MiB)');
-    expect(TOOL_ERRORS.artifactExists('dash')).toBe('artifact_create: an artifact "dash" already exists in this session; use artifact_update');
-    expect(TOOL_ERRORS.noArtifact('artifact_update', 'nope')).toBe('artifact_update: no artifact "nope" in this session; use artifact_create');
+    expect(TOOL_ERRORS.artifactExists('dash')).toBe('artifact_create: an artifact "dash" already exists in this session; use artifact_publish');
+    expect(TOOL_ERRORS.noArtifact('artifact_publish', 'nope')).toBe('artifact_publish: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noArtifact('artifact_screenshot', 'nope')).toBe('artifact_screenshot: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noVersion('dash', 3, 2)).toBe('artifact_screenshot: version 3 does not exist; "dash" has 2 version(s)');
     expect(TOOL_ERRORS.captureFailed('did-fail-load -3 ERR_ABORTED')).toBe('artifact_screenshot: MAWS could not capture the artifact: did-fail-load -3 ERR_ABORTED');
     expect(TOOL_ERRORS.captureTimeout).toBe('artifact_screenshot: MAWS did not answer within 45 s');
-    expect(TOOL_ERRORS.notRecorded('artifact_update', '/r/x.html', 'ENOSPC')).toBe('artifact_update: /r/x.html was not recorded: ENOSPC');
+    const stale = TOOL_ERRORS.refused('artifact_publish', { reason: 'staleBase', liveRevision: 7 }, 'read the artifact again');
+    expect(stale).toBe('artifact_publish: read the artifact again {"reason":"staleBase","liveRevision":7}');
+    expect(artifactRefusalOf(stale)).toEqual({ reason: 'staleBase', liveRevision: 7 });
+    expect(artifactRefusalOf('artifact_publish: no artifact "x" in this session')).toBeNull();
     expect(TOOL_ERRORS.deliverableNotFound('d1')).toBe('show_pane: no deliverable "d1" in this session');
     expect(TOOL_ERRORS.deliverableUnreadable('d1', 'EIO')).toBe('show_pane: could not read deliverable "d1": EIO');
-    expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot'); // E4c: thirteen; P1 A-54: seven again
+    expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve
   });
 });
 // E2 end

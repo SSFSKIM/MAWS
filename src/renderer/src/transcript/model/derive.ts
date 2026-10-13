@@ -9,7 +9,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
-import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/maws/tools'; // E2
+import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
@@ -1206,11 +1206,12 @@ function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | und
 
 // E2 start: the artifact row from its record. The call's arguments are read as recorded, so a call whose arguments the
 // host refused still names what it tried (its result carries the refusal); the event, when the journal has one,
-// overrides what the result said.
+// overrides what the result said. P3-A: a create names its artifact by `handle` (E2's `id`) and its page by `path` (E2's
+// `html_path`); a publish, which replaced E2's update, by `artifact`.
 function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
   const input = record(use.input);
   return {
-    use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id), htmlPath: str(input.html_path),
+    use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id ?? input.handle ?? input.artifact), htmlPath: str(input.html_path ?? input.path),
     title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false, ownerAppSessionId: null,
   };
 }
@@ -1222,10 +1223,10 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
     return;
   }
   if (artifact.announced) return;
-  const parsed = (artifact.action === 'create' ? ArtifactCreateResultSchema : ArtifactUpdateResultSchema).safeParse(firstJsonBlock(result.content));
+  const parsed = ArtifactDeliverySchema.safeParse(firstJsonBlock(result.content)); // P3-A: any answer that registered an X12 version
   if (!parsed.success) return;
   // P2-E1: the result names the owner too, since a session read from disk has no host event to say it
-  const owner = 'ownerAppSessionId' in parsed.data ? (parsed.data.ownerAppSessionId ?? null) : null;
+  const owner = parsed.data.ownerAppSessionId ?? null;
   Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title, ownerAppSessionId: owner });
 }
 
