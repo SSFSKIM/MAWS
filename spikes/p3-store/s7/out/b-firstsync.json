@@ -1,0 +1,408 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        11.42,
+        12.99,
+        21.02
+      ]
+    },
+    {
+      "at": "firstsync trial 0",
+      "load": [
+        11.85,
+        13,
+        20.89
+      ]
+    },
+    {
+      "at": "firstsync trial 1",
+      "load": [
+        11.85,
+        13,
+        20.89
+      ]
+    },
+    {
+      "at": "firstsync trial 2",
+      "load": [
+        13.63,
+        13.35,
+        20.97
+      ]
+    }
+  ],
+  "storeAfterAgents": {
+    "rows": [
+      {
+        "t": "updates",
+        "n": 67
+      },
+      {
+        "t": "attributions",
+        "n": 67
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "store": {
+      "db": 4096,
+      "wal": 2706872
+    },
+    "agentStats": {
+      "a1": {
+        "batches": 34,
+        "ops": {
+          "replace_block": 41,
+          "replace_text": 42,
+          "insert": 26,
+          "set_cell": 19,
+          "delete": 13
+        },
+        "applyMs": {
+          "p50": 2.99,
+          "p95": 4.41,
+          "max": 4.85
+        },
+        "batchToAckMs": {
+          "p50": 6.92,
+          "p95": 10.98,
+          "max": 18.86
+        },
+        "bytes": {
+          "p50": 1004,
+          "max": 2340
+        }
+      },
+      "a2": {
+        "batches": 33,
+        "ops": {
+          "replace_text": 48,
+          "insert": 31,
+          "replace_block": 37,
+          "set_cell": 11,
+          "delete": 14
+        },
+        "applyMs": {
+          "p50": 3.39,
+          "p95": 4.47,
+          "max": 8.29
+        },
+        "batchToAckMs": {
+          "p50": 6.24,
+          "p95": 10.91,
+          "max": 14.09
+        },
+        "bytes": {
+          "p50": 972,
+          "max": 1847
+        }
+      }
+    }
+  },
+  "summary": {
+    "coldOpenToSyncedMs": [
+      116,
+      117,
+      118
+    ],
+    "coldOpenToPaintMs": [
+      380,
+      388,
+      388
+    ],
+    "coldHostLoadMs": [
+      48,
+      48,
+      49
+    ],
+    "coldStep2ApplyMs": [
+      53,
+      54,
+      54
+    ],
+    "coldBindMs": [
+      242,
+      250,
+      249
+    ],
+    "warmOpenToSyncedMs": [
+      66,
+      71,
+      65
+    ],
+    "warmOpenToPaintMs": [
+      341,
+      357,
+      339
+    ],
+    "warmStep2ApplyMs": [
+      56,
+      58,
+      54
+    ],
+    "warmBindMs": [
+      253,
+      265,
+      253
+    ]
+  },
+  "trials": [
+    {
+      "trial": 0,
+      "load": [
+        11.85,
+        13,
+        20.89
+      ],
+      "cold": {
+        "tMain": 1791860311332.4858,
+        "tPort": 1791860311333.1,
+        "tSynced": 1791860311448.7,
+        "step2ApplyMs": 52.69999980926514,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860311449.4,
+        "tEditorCreated": 1791860311470.2,
+        "tBound": 1791860311712.5,
+        "tPaint": 1791860311712.7,
+        "tPost": 1791860311827.8,
+        "childCount": 1484,
+        "openToSyncedMs": 116.214111328125,
+        "syncedToBoundMs": 263.800048828125,
+        "openToPaintMs": 380.214111328125,
+        "openToPostPaintMs": 495.314208984375,
+        "editorConstructMs": 20.800048828125,
+        "bindMs": 242.300048828125,
+        "domNodes": 5783,
+        "hostLoadMs": 48.153458,
+        "attachMs": 48.56595800000002
+      },
+      "warm": {
+        "tMain": 1791860311957.2708,
+        "tPort": 1791860311957.9001,
+        "tSynced": 1791860312023.7002,
+        "step2ApplyMs": 56.09999990463257,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860312024.6,
+        "tEditorCreated": 1791860312045.7002,
+        "tBound": 1791860312298.3,
+        "tPaint": 1791860312298.3,
+        "tPost": 1791860312420.6,
+        "childCount": 1484,
+        "openToSyncedMs": 66.429443359375,
+        "syncedToBoundMs": 274.599853515625,
+        "openToPaintMs": 341.029296875,
+        "openToPostPaintMs": 463.329345703125,
+        "editorConstructMs": 21.10009765625,
+        "bindMs": 252.599853515625,
+        "domNodes": 5783,
+        "hostLoadMs": 48.153458,
+        "attachMs": 0.1456670000000031
+      },
+      "metrics": {
+        "host": {
+          "workingSetMB": 155.7,
+          "privateMB": null
+        },
+        "renderers": {
+          "C0": {
+            "workingSetMB": 279.2,
+            "privateMB": null
+          },
+          "D0": {
+            "workingSetMB": 280.5,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 153.1
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 77
+          }
+        ]
+      }
+    },
+    {
+      "trial": 1,
+      "load": [
+        13.63,
+        13.35,
+        20.97
+      ],
+      "cold": {
+        "tMain": 1791860312722.226,
+        "tPort": 1791860312722.9001,
+        "tSynced": 1791860312839.6,
+        "step2ApplyMs": 53.90000009536743,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860312840.4001,
+        "tEditorCreated": 1791860312860.3,
+        "tBound": 1791860313109.9001,
+        "tPaint": 1791860313110,
+        "tPost": 1791860313223.8,
+        "childCount": 1484,
+        "openToSyncedMs": 117.3740234375,
+        "syncedToBoundMs": 270.300048828125,
+        "openToPaintMs": 387.77392578125,
+        "openToPostPaintMs": 501.573974609375,
+        "editorConstructMs": 19.89990234375,
+        "bindMs": 249.60009765625,
+        "domNodes": 5783,
+        "hostLoadMs": 47.89333399999998,
+        "attachMs": 48.362750000000005
+      },
+      "warm": {
+        "tMain": 1791860313411.6611,
+        "tPort": 1791860313412.3,
+        "tSynced": 1791860313482.3,
+        "step2ApplyMs": 57.5,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860313483,
+        "tEditorCreated": 1791860313503.9,
+        "tBound": 1791860313768.8,
+        "tPaint": 1791860313768.9,
+        "tPost": 1791860313883.8,
+        "childCount": 1484,
+        "openToSyncedMs": 70.638916015625,
+        "syncedToBoundMs": 286.5,
+        "openToPaintMs": 357.23876953125,
+        "openToPostPaintMs": 472.138916015625,
+        "editorConstructMs": 20.89990234375,
+        "bindMs": 264.900146484375,
+        "domNodes": 5783,
+        "hostLoadMs": 47.89333399999998,
+        "attachMs": 0.15391599999998107
+      },
+      "metrics": {
+        "host": {
+          "workingSetMB": 153.9,
+          "privateMB": null
+        },
+        "renderers": {
+          "C1": {
+            "workingSetMB": 278.9,
+            "privateMB": null
+          },
+          "D1": {
+            "workingSetMB": 279.8,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 154.3
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 79.3
+          }
+        ]
+      }
+    },
+    {
+      "trial": 2,
+      "load": [
+        13.63,
+        13.35,
+        20.97
+      ],
+      "cold": {
+        "tMain": 1791860314180.7888,
+        "tPort": 1791860314181.2,
+        "tSynced": 1791860314299,
+        "step2ApplyMs": 53.700000047683716,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860314299.8,
+        "tEditorCreated": 1791860314319.2,
+        "tBound": 1791860314568.3,
+        "tPaint": 1791860314568.4,
+        "tPost": 1791860314682.2,
+        "childCount": 1484,
+        "openToSyncedMs": 118.211181640625,
+        "syncedToBoundMs": 269.300048828125,
+        "openToPaintMs": 387.611083984375,
+        "openToPostPaintMs": 501.4111328125,
+        "editorConstructMs": 19.39990234375,
+        "bindMs": 249.10009765625,
+        "domNodes": 5783,
+        "hostLoadMs": 48.52766700000001,
+        "attachMs": 49.06099999999998
+      },
+      "warm": {
+        "tMain": 1791860314812.1694,
+        "tPort": 1791860314812.7002,
+        "tSynced": 1791860314877.2002,
+        "step2ApplyMs": 54,
+        "step2Bytes": 1394110,
+        "tEditorStart": 1791860314877.9001,
+        "tEditorCreated": 1791860314897.8,
+        "tBound": 1791860315150.7002,
+        "tPaint": 1791860315150.8,
+        "tPost": 1791860315264.9001,
+        "childCount": 1484,
+        "openToSyncedMs": 65.03076171875,
+        "syncedToBoundMs": 273.5,
+        "openToPaintMs": 338.630615234375,
+        "openToPostPaintMs": 452.730712890625,
+        "editorConstructMs": 19.89990234375,
+        "bindMs": 252.900146484375,
+        "domNodes": 5783,
+        "hostLoadMs": 48.52766700000001,
+        "attachMs": 0.16216700000006767
+      },
+      "metrics": {
+        "host": {
+          "workingSetMB": 154.1,
+          "privateMB": null
+        },
+        "renderers": {
+          "C2": {
+            "workingSetMB": 279.1,
+            "privateMB": null
+          },
+          "D2": {
+            "workingSetMB": 280.4,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 154.8
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 80
+          }
+        ]
+      }
+    }
+  ],
+  "encodings": {
+    "host": {
+      "v1Bytes": 1394105,
+      "v2Bytes": 1082261,
+      "v1EncodeMs": 8.3,
+      "v2EncodeMs": 9
+    },
+    "renderer": {
+      "v1Bytes": 1394105,
+      "v2Bytes": 1082261,
+      "applyV1Ms_0": 38.6,
+      "applyV2Ms_0": 38.9,
+      "applyV1Ms_1": 29.5,
+      "applyV2Ms_1": 23,
+      "applyV1Ms_2": 27.8,
+      "applyV2Ms_2": 20.7
+    }
+  }
+}

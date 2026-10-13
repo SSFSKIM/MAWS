@@ -1,0 +1,137 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        8.86,
+        11.42,
+        14.53
+      ]
+    },
+    {
+      "at": "kill",
+      "load": [
+        8.95,
+        11.4,
+        14.5
+      ]
+    }
+  ],
+  "hostLoopDelayAfterRestartMs": {
+    "p50": 55.8,
+    "p99": 57.3,
+    "max": 57.3,
+    "n": 5
+  },
+  "timeline": {
+    "killAtMs": 5006,
+    "exitSeenMs": 12,
+    "forkToStartedMs": 162,
+    "storeReloadMs": 54,
+    "reopenAtMs": 6261,
+    "killToAllLiveMs": 1455,
+    "forkToAllLiveMs": 441,
+    "A": {
+      "at": 1791861452226.8508,
+      "loadMs": 41.755708999999996
+    },
+    "B": {
+      "at": 1791861452284.724,
+      "loadMs": 41.755708999999996
+    }
+  },
+  "A": {
+    "clientId": 3606659012755645,
+    "keystrokes": 119,
+    "typedBeforeKill": 49,
+    "ackedBeforeKill": 49,
+    "ackedBeforeKillLost": 0,
+    "typedWhileDown": 15,
+    "durableAtKill": 49,
+    "inStoreAtEnd": 119,
+    "lostAtEnd": 0,
+    "ackMs": {
+      "n": 119,
+      "p50": 12.3,
+      "p95": 961,
+      "p99": 1284.1,
+      "max": 1393.4
+    },
+    "frameMs": {
+      "n": 119,
+      "p50": 7.4,
+      "p95": 10.1,
+      "p99": 17.4,
+      "max": 24.8
+    },
+    "unsavedAtEnd": 0
+  },
+  "agents": {
+    "ackedBatchesBeforeKill": 10,
+    "ackedBeforeKillLost": 0,
+    "after": {
+      "a1": {
+        "batches": 5,
+        "ops": {
+          "replace_block": 6,
+          "replace_text": 7,
+          "insert": 4,
+          "set_cell": 4
+        },
+        "applyMs": {
+          "p50": 4.8,
+          "p95": 6.48,
+          "max": 6.48
+        },
+        "batchToAckMs": {
+          "p50": 5.79,
+          "p95": 30.73,
+          "max": 30.73
+        },
+        "bytes": {
+          "p50": 952,
+          "max": 1447
+        }
+      },
+      "a2": {
+        "batches": 5,
+        "ops": {
+          "replace_text": 6,
+          "insert": 5,
+          "replace_block": 5,
+          "set_cell": 1,
+          "delete": 1
+        },
+        "applyMs": {
+          "p50": 4.74,
+          "p95": 9.78,
+          "max": 9.78
+        },
+        "batchToAckMs": {
+          "p50": 7.83,
+          "p95": 27.04,
+          "max": 27.04
+        },
+        "bytes": {
+          "p50": 1043,
+          "max": 1315
+        }
+      }
+    }
+  },
+  "converged": {
+    "AeqHost": true,
+    "BeqHost": true,
+    "storeEqHost": true
+  },
+  "rejected": {
+    "framesIn": 147,
+    "contentFramesIn": 70,
+    "rowsAppended": 67,
+    "commits": 114,
+    "rejected": 0,
+    "rejectedReasons": []
+  },
+  "pageErrors": []
+}

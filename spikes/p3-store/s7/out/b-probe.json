@@ -1,0 +1,169 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        13.73,
+        12.67,
+        16.32
+      ]
+    }
+  ],
+  "mounted": {
+    "tMain": 1791858475939.1296,
+    "tPort": 1791858475941.7,
+    "tSynced": 1791858476050,
+    "step2ApplyMs": 50.700000047683716,
+    "step2Bytes": 1348380,
+    "tEditorStart": 1791858476050.9,
+    "tEditorCreated": 1791858476074.2,
+    "tBound": 1791858476324.5,
+    "tPaint": 1791858476324.7,
+    "tPost": 1791858476438.2,
+    "childCount": 1454,
+    "openToSyncedMs": 110.870361328125,
+    "syncedToBoundMs": 274.5,
+    "openToPaintMs": 385.5703125,
+    "openToPostPaintMs": 499.0703125,
+    "editorConstructMs": 23.300048828125,
+    "bindMs": 250.300048828125,
+    "domNodes": 5781,
+    "hostLoadMs": 45.641459,
+    "attachMs": 46.13804099999999
+  },
+  "caret": {
+    "pos": 390731,
+    "hasFocus": false,
+    "visibility": "visible"
+  },
+  "visibility": {
+    "focus": true,
+    "hidden": false,
+    "vis": "visible"
+  },
+  "rafPerSecond": 121,
+  "typed": {
+    "keystrokes": 30,
+    "inputToTxMs": {
+      "n": 30,
+      "p50": 7.7,
+      "p95": 12.6,
+      "p99": 18.8,
+      "max": 18.8
+    },
+    "inputToFrameMs": {
+      "n": 30,
+      "p50": 7.8,
+      "p95": 12.8,
+      "p99": 19.4,
+      "max": 19.4
+    },
+    "inputToPostPaintMs": {
+      "n": 30,
+      "p50": 10.1,
+      "p95": 15,
+      "p99": 21.6,
+      "max": 21.6
+    },
+    "inputToAckMs": {
+      "n": 30,
+      "p50": 11.7,
+      "p95": 15.8,
+      "p99": 23.9,
+      "max": 23.9
+    },
+    "noTransaction": 0,
+    "over16msToFrame": 1,
+    "longTasks": {
+      "n": 0,
+      "totalMs": 0,
+      "max": 0
+    },
+    "slowEvents": {
+      "n": 120,
+      "byName": {
+        "keydown": 30,
+        "keypress": 30,
+        "beforeinput": 30,
+        "input": 30
+      },
+      "maxDuration": 32
+    },
+    "remoteFrames": {
+      "n": 0,
+      "handleMs": {
+        "n": 0
+      },
+      "bytes": {
+        "n": 0
+      }
+    }
+  },
+  "text": {
+    "editor": "Their market budget latency table budget retention thread between notes because plan onboarding between comment metrics scope. Hiring research revenue restore thread onboarding because memory element owners history comment. Metrics latency with agents plan quarterly metrics their comment restore with element design which. Across deck beta revenue users notes design onboarding thread risks version metrics during because. Review hiring metrics users callout owners table notes timeline draft draft final risks support version history scope deck table slide. Plan element ships history beta timeline element timeline quarterly slide draft design plan thread their agents market customer.the quick brown fox jumps over",
+    "dom": "Their market budget latency table budget retention thread between notes because plan onboarding between comment metrics scope. Hiring research revenue restore thread onboarding because memory element owners history comment. Metrics latency with agents plan quarterly metrics their comment restore with element design which. Across deck beta revenue users notes design onboarding thread risks version metrics during because. Review hiring metrics users callout owners table notes timeline draft draft final risks support version history scope deck table slide. Plan element ships history beta timeline element timeline quarterly slide draft design plan thread their agents market customer.the quick brown fox jumps over"
+  },
+  "metrics": {
+    "host": {
+      "workingSetMB": 103.1,
+      "privateMB": null
+    },
+    "renderers": {
+      "A": {
+        "workingSetMB": 264.9,
+        "privateMB": null
+      }
+    },
+    "browser": [
+      {
+        "workingSetMB": 151.1
+      }
+    ],
+    "gpu": [
+      {
+        "workingSetMB": 67
+      }
+    ]
+  },
+  "hostStats": {
+    "pid": 5196,
+    "fullfsync": true,
+    "mem": {
+      "heapUsedMB": 27.4,
+      "heapTotalMB": 39.8,
+      "externalMB": 25.6,
+      "arrayBuffersMB": 0,
+      "rssMB": 108.2
+    },
+    "store": {
+      "db": 4096,
+      "wal": 1755152
+    },
+    "rows": [
+      {
+        "t": "updates",
+        "n": 30
+      },
+      {
+        "t": "attributions",
+        "n": 30
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "revision": 30,
+    "loadMs": 45.641459,
+    "loaded": true,
+    "service": {
+      "framesIn": 65,
+      "contentFramesIn": 31,
+      "rowsAppended": 30,
+      "commits": 32,
+      "rejected": 0,
+      "rejectedReasons": []
+    }
+  }
+}
