@@ -76,6 +76,10 @@ export class ArtifactFiles {
     return readFileSync(this.resolve(artifactId, ref));
   }
 
+  readAsset(artifactId: string, sha256: string): Uint8Array {
+    return readFileSync(join(this.dirOf(artifactId), ArtifactFiles.assetPath(sha256)));
+  }
+
   exists(artifactId: string, relative: string): boolean {
     return existsSync(join(this.dirOf(artifactId), relative));
   }

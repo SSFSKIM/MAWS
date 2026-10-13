@@ -472,6 +472,22 @@ describe('DocumentService: host-originated writes', () => {
     expect(reader.doc.get('t').toString()).toBe('kept');
     expect(rowCount()).toBe(1);
   });
+
+  it('leaves a taken-back write’s actor out of the commit’s writers (M3 review finding 3)', async () => {
+    make();
+    const seen: Committed[] = [];
+    service.onCommitted((change) => seen.push(change));
+    const kept = service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'kept'));
+    await expect(
+      service.writeAs('a1', agent, (doc) => {
+        doc.get('t').insert(0, 'lost');
+        throw new Error('invalid edit');
+      }),
+    ).rejects.toThrow(/invalid edit/);
+    tick();
+    await kept;
+    expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
+  });
 });
 
 describe('DocumentService on a newer app’s store', () => {

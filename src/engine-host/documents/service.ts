@@ -301,6 +301,16 @@ export class DocumentService {
     });
   }
 
+  // Settles once the open batch commits, rejecting when it is lost (the idempotency ledger waits for its op row's
+  // commit with it); with nothing open, after the next flush.
+  whenCommitted(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('the document service is closed'));
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
+      this.scheduleFlush();
+    });
+  }
+
   // The doc's state (V2) and the revision it is at: the live doc's when open, else read from the store without
   // opening it.
   readState(artifactId: string): { revision: number; state: Uint8Array } {
@@ -564,7 +574,9 @@ export class DocumentService {
   // Runs one frame's work inside a savepoint of the batch. On a throw the frame's rows are taken back and the doc is
   // evicted; answers why, or null when the frame stands.
   private inFrame(hostDoc: HostDoc, run: () => void): string | null {
+    // What the batch says of this doc before the frame (its revision and its writers), put back if the frame is.
     const dirtyBefore = this.dirty.get(hostDoc.id);
+    const actorsBefore = this.dirtyActors.has(hostDoc.id) ? new Map(this.dirtyActors.get(hostDoc.id)) : undefined;
     try {
       this.storage.beginFrame();
     } catch (error) {
@@ -589,6 +601,8 @@ export class DocumentService {
       }
       if (dirtyBefore === undefined) this.dirty.delete(hostDoc.id);
       else this.dirty.set(hostDoc.id, dirtyBefore);
+      if (actorsBefore === undefined) this.dirtyActors.delete(hostDoc.id);
+      else this.dirtyActors.set(hostDoc.id, actorsBefore);
       this.evict(hostDoc, reason);
       return reason;
     }
