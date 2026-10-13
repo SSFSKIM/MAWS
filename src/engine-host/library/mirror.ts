@@ -61,6 +61,7 @@ export class LibraryMirror {
   private readonly timers = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>();
   private readonly manifests = new Map<string, Manifest>(); // by the resolved linked directory, as loaded or written
   private readonly failing = new Set<string>(); // linked directories whose last load failed
+  private readonly unlinked = new Set<string>(); // directories no Space links whose mirror is not yet fully removed
   private readonly saved = new Map<string, string>(); // per directory, the manifest as last written
   private chain: Promise<void> = Promise.resolve();
   private reconcileQueued = false;
@@ -151,20 +152,28 @@ export class LibraryMirror {
     const { store } = this.documents;
     const { spaces, artifacts } = await store.readCommitted(() => ({ spaces: store.listSpaces(), artifacts: store.list() }));
     const linked = linkedDirs(spaces);
-    for (const dir of new Set([...linked.keys(), ...this.manifests.keys()])) {
-      const target = linked.get(dir);
-      const members = target ? artifacts.filter((artifact) => artifact.spaceId !== undefined && target.spaceIds.has(artifact.spaceId)) : [];
+    for (const dir of new Set([...this.manifests.keys(), ...this.unlinked])) if (!linked.has(dir)) this.unlinked.add(dir);
+    for (const dir of linked.keys()) this.unlinked.delete(dir); // linked again: reconciled below as any linked one
+    this.cleanUnlinked();
+    for (const [dir, target] of linked) {
+      const members = artifacts.filter((artifact) => artifact.spaceId !== undefined && target.spaceIds.has(artifact.spaceId));
       let manifest: Manifest;
       try {
         manifest = this.load(dir);
       } catch (error) {
-        this.log(target ? `the Space ${target.names.join(', ')} could not be mirrored to ${dir}: ${reasonOf(error)}` : `the unlinked directory ${dir} could not be cleaned: ${reasonOf(error)}`);
-        this.manifests.delete(dir);
-        if (target) this.failing.add(dir);
+        this.log(`the Space ${target.names.join(', ')} could not be mirrored to ${dir}: ${reasonOf(error)}`);
+        this.failing.add(dir); // a cached manifest stays: if the Space is unlinked meanwhile, its files are still known
         continue;
       }
       try {
-        for (const artifactId of Object.keys(manifest.artifacts)) if (!members.some((artifact) => artifact.id === artifactId)) this.remove(dir, manifest, artifactId);
+        for (const artifactId of Object.keys(manifest.artifacts)) {
+          if (members.some((artifact) => artifact.id === artifactId)) continue;
+          try {
+            this.remove(dir, manifest, artifactId);
+          } catch (error) {
+            this.log(`${artifactId} could not be removed from the mirror in ${dir}: ${reasonOf(error)}`);
+          }
+        }
         for (const artifact of members) {
           if (this.stopped) return;
           try {
@@ -174,12 +183,37 @@ export class LibraryMirror {
           }
           await new Promise((resolve) => setImmediate(resolve)); // a reconciliation of many never holds the host's loop
         }
-      } catch (error) {
-        this.log(`the mirror in ${dir} could not be brought up to date: ${reasonOf(error)}`);
       } finally {
         this.saveLogged(dir, manifest);
       }
-      if (!target) this.manifests.delete(dir);
+    }
+  }
+
+  // The directories no Space links any more: every file their manifests name removed. One stays pending (in memory
+  // only, so until the host restarts) until its removals and its manifest's removal have all succeeded, and is tried
+  // again at every later step.
+  private cleanUnlinked(): void {
+    for (const dir of [...this.unlinked]) {
+      let manifest: Manifest;
+      try {
+        manifest = this.load(dir);
+      } catch (error) {
+        // kept pending: a directory that is away (an unmounted volume, a moved folder) may come back with the files
+        if (existsSync(dir)) this.log(`the unlinked directory ${dir} could not be cleaned: ${reasonOf(error)}`);
+        continue;
+      }
+      for (const artifactId of Object.keys(manifest.artifacts)) {
+        try {
+          this.remove(dir, manifest, artifactId);
+        } catch (error) {
+          this.log(`${artifactId} could not be removed from the unlinked directory ${dir}: ${reasonOf(error)}`);
+        }
+      }
+      if (this.saveLogged(dir, manifest) && Object.keys(manifest.artifacts).length === 0) {
+        this.unlinked.delete(dir);
+        this.manifests.delete(dir);
+        this.failing.delete(dir);
+      }
     }
   }
 
@@ -191,8 +225,9 @@ export class LibraryMirror {
       return { artifact: found, space: found?.spaceId === undefined ? undefined : store.listSpaces().find((candidate) => candidate.id === found.spaceId) };
     });
     const dir = artifact && space?.linkedDir !== undefined ? resolve(space.linkedDir) : null;
+    this.cleanUnlinked();
     for (const [known, manifest] of this.manifests) {
-      if (known === dir || !manifest.artifacts[artifactId]) continue;
+      if (known === dir || this.unlinked.has(known) || !manifest.artifacts[artifactId]) continue;
       try {
         this.remove(known, manifest, artifactId);
       } catch (error) {
@@ -246,7 +281,7 @@ export class LibraryMirror {
         continue;
       }
       const target = join(root, file);
-      if (!mine.has(file) && (owned.has(file) || existsSync(target))) {
+      if (!mine.has(file) && (owned.has(file) || occupied(target))) {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
       }
@@ -257,16 +292,29 @@ export class LibraryMirror {
       try {
         writeReadOnly(root, file, data);
       } catch (error) {
-        failure = { error };
+        failure ??= { error };
         break;
       }
       written.push(file);
     }
-    // The entry names every file of the artifact the mirror has on disk, so a write that failed half-way leaves no file
-    // unowned; it keeps the old files and is retried at the next change (no revision matches -1).
-    const stale = failure ? [] : [...mine].filter((file) => !written.includes(file));
-    for (const file of stale) removeFile(root, file);
-    const kept = [...new Set([...written, ...[...mine].filter((file) => !stale.includes(file))])].sort();
+    // The entry names every file of the artifact the mirror has on disk: what it just wrote, and what it no longer
+    // produces but could not remove (all of it, after a write that failed half-way). Any failure leaves the entry at
+    // revision -1, which no revision matches, so the next change tries again.
+    const leftover: string[] = [];
+    for (const file of mine) {
+      if (written.includes(file)) continue;
+      if (failure) {
+        leftover.push(file);
+        continue;
+      }
+      try {
+        removeFile(root, file);
+      } catch (error) {
+        failure = { error };
+        leftover.push(file);
+      }
+    }
+    const kept = [...new Set([...written, ...leftover])].sort();
     if (kept.length > 0) manifest.artifacts[artifactId] = { revision: failure ? -1 : revision, slug: mirrorSlug(artifact), files: kept };
     else delete manifest.artifacts[artifactId];
     if (failure) throw failure.error;
@@ -290,9 +338,24 @@ export class LibraryMirror {
     }
   }
 
+  // Removes the artifact's files; the entry keeps the ones whose removal failed (at revision -1) and the first failure
+  // is thrown after it is recorded.
   private remove(dir: string, manifest: Manifest, artifactId: string): void {
-    for (const file of manifest.artifacts[artifactId]?.files ?? []) removeFile(join(dir, MIRROR_DIR), file);
-    delete manifest.artifacts[artifactId];
+    const entry = manifest.artifacts[artifactId];
+    if (!entry) return;
+    let failure: { error: unknown } | null = null;
+    const left = entry.files.filter((file) => {
+      try {
+        removeFile(join(dir, MIRROR_DIR), file);
+        return false;
+      } catch (error) {
+        failure ??= { error };
+        return true;
+      }
+    });
+    if (left.length > 0) manifest.artifacts[artifactId] = { ...entry, revision: -1, files: left };
+    else delete manifest.artifacts[artifactId];
+    if (failure) throw (failure as { error: unknown }).error;
   }
 
   // The directory's manifest, cached once read. The linked directory must exist; its `artifacts/` need not yet.
@@ -316,11 +379,13 @@ export class LibraryMirror {
     return manifest;
   }
 
-  private saveLogged(dir: string, manifest: Manifest): void {
+  private saveLogged(dir: string, manifest: Manifest): boolean {
     try {
       this.save(dir, manifest);
+      return true;
     } catch (error) {
       this.log(`the mirror manifest in ${dir} could not be written: ${reasonOf(error)}`);
+      return false;
     }
   }
 
@@ -380,8 +445,8 @@ function realDirsUnder(root: string, file: string): boolean {
     let stat;
     try {
       stat = lstatSync(dir);
-    } catch {
-      return true; // missing: everything below it is made by the mirror
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT'; // missing: everything below it is made by the mirror
     }
     if (!stat.isDirectory()) return false;
   }
@@ -392,6 +457,16 @@ function realDirsUnder(root: string, file: string): boolean {
 function isMirrorPath(file: string): boolean {
   const segments = file.split('/');
   return file !== MIRROR_MANIFEST && segments.every((segment) => segment !== '' && segment !== '.' && segment !== '..' && !segment.includes('\\') && !segment.includes('\u0000'));
+}
+
+// A name is taken when anything is there, a dangling link included (`existsSync` follows links and would say no).
+function occupied(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // `artifacts/` is made in the linked directory only while that exists: never the linked directory itself.

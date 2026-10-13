@@ -75,6 +75,12 @@ describe('extractText: an html page', () => {
     expect(extractText({ kind: 'html', bytes: bytes(page) })).toBe(`Q3 & Q4 Plan Price <10> "quoted" 'single' 😀 — café &unknown;`);
   });
 
+  it('reads a script or style tag inside a comment as part of the comment, and a comment opener inside a script as script', () => {
+    expect(extractText({ kind: 'html', bytes: bytes('<!-- <script> --> <p>Visible needle</p>') })).toBe('Visible needle');
+    expect(extractText({ kind: 'html', bytes: bytes('<!-- <style> --> <p>Styled needle</p><!-- </style> -->') })).toBe('Styled needle');
+    expect(extractText({ kind: 'html', bytes: bytes('<script>const a = "<!--";</script><p>After the script</p><!-- -->') })).toBe('After the script');
+  });
+
   it('reads a page that is not valid UTF-8 with replacement characters rather than failing', () => {
     expect(extractText({ kind: 'html', bytes: new Uint8Array([0x3c, 0x70, 0x3e, 0x68, 0x69, 0xff, 0x3c, 0x2f, 0x70, 0x3e]) })).toBe('hi�');
   });

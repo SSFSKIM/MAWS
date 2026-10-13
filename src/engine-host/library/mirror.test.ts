@@ -1,14 +1,15 @@
 // The linked-directory mirror over a real store (the P3-L document, M2; Decision Log 12): a linked Space's artifacts
 // written read-only under `<linkedDir>/artifacts/` after each change settles, the manifest owning exactly what the
 // mirror wrote, and a host start bringing the directory up to date.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mirrorSlug, registerMirrorWriter } from '@artifacts/library/mirror';
+import { mirrorSlug, registerMirrorWriter, type MirrorOutput } from '@artifacts/library/mirror';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openDocuments, type Documents } from '../documents';
+import { CHANGE_COALESCE_MS } from '../documents/store';
 import { LibraryMirror, MIRROR_MANIFEST } from './mirror';
 
 const human: Actor = { kind: 'human' };
@@ -254,6 +255,89 @@ describe('the linked-directory mirror (M2)', () => {
     await store().updateSpace(one.id, { linkedDir: null });
     await mirror!.flush();
     expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(b)}.html`]);
+  });
+
+  it('leaves a foreign dangling link at the target name alone and unowned', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Page', content: html('mine') }, agent);
+    mkdirSync(out(), { recursive: true });
+    const name = `${mirrorSlug(page)}.html`;
+    symlinkSync(join(project, 'nowhere.html'), out(name));
+    await store().update(page.id, { spaceId: space.id });
+    await mirror!.flush();
+    expect(lstatSync(out(name)).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(out(name))).toBe(join(project, 'nowhere.html'));
+    expect(existsSync(out(MIRROR_MANIFEST)) ? manifest().artifacts[page.id]?.files ?? [] : []).toEqual([]);
+    expect(logs.some((line) => line.includes(name) && line.includes('not written'))).toBe(true);
+  });
+
+  it('owns what it wrote when removing a stale file fails, and removes it at the next change', async () => {
+    // version 1 writes keep/one.txt and locked/two.txt; version 2 drops two.txt and adds keep/three.txt
+    offs.push(
+      registerMirrorWriter('document', ({ doc }): MirrorOutput =>
+        doc!.get('root').toString().includes('v2')
+          ? { files: { 'keep/one.txt': doc!.get('root').toString(), 'keep/three.txt': 'three' } }
+          : { files: { 'keep/one.txt': doc!.get('root').toString(), 'locked/two.txt': 'two' } },
+      ),
+    );
+    await startMirror();
+    const space = await linkedSpace();
+    const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+    await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+    await mirror!.flush();
+    expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'locked/two.txt']);
+
+    chmodSync(out('locked'), 0o555); // its files cannot be removed
+    try {
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50)); // the store's feed holds a second commit this long
+      await mirror!.flush();
+      expect(read('keep', 'three.txt')).toBe('three');
+      expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'keep/three.txt', 'locked/two.txt']); // the new file owned, the stale one kept
+    } finally {
+      chmodSync(out('locked'), 0o755);
+    }
+    await store().update(doc.id, { pinned: true }); // a later change: retried even though the revision did not move
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, 'keep', 'keep/one.txt', 'keep/three.txt']);
+    expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'keep/three.txt']);
+  });
+
+  it('remembers an unlinked directory whose cleanup failed and cleans it at a later change', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    chmodSync(out(), 0o555);
+    try {
+      await store().updateSpace(space.id, { linkedDir: null });
+      await mirror!.flush();
+      expect(listed()).toContain(`${mirrorSlug(page)}.html`);
+    } finally {
+      chmodSync(out(), 0o755);
+    }
+    await store().create({ kind: 'html', title: 'Elsewhere', content: html('y') }, agent); // any later change
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
+  it('remembers an unlinked directory that was away when it was unlinked, and cleans it once it is back', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    const away = `${project}-away`;
+    renameSync(project, away); // the linked directory's load fails while it is away
+    await store().create({ kind: 'html', title: 'Second', spaceId: space.id, content: html('y') }, agent);
+    await mirror!.flush();
+    await store().updateSpace(space.id, { linkedDir: null });
+    await mirror!.flush();
+    renameSync(away, project);
+    expect(listed()).toHaveLength(2); // the first page and the manifest
+    await store().create({ kind: 'html', title: 'Elsewhere', content: html('z') }, agent); // any later change
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
   });
 
   it('never trusts a manifest’s path out of its directory, and never follows a link inside it', async () => {

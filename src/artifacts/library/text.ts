@@ -75,8 +75,9 @@ function docText(doc: Doc): string {
 
 // ---- html ----------------------------------------------------------------------------------------------------------
 
-const RAW_TEXT = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi; // an unclosed one runs to the end, as a browser reads it
-const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
+// A comment or a script or style element, whichever opens first, so a `<script>` inside a comment is the comment's
+// and a `<!--` inside a script is the script's; an unclosed one runs to the end, as a browser reads it.
+const COMMENT_OR_RAW_TEXT = /<!--[\s\S]*?(?:-->|$)|<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 const DECLARATION = /<[!?][^>]*>/g; // doctype, CDATA's opener, processing instructions
 const TAG = /<\/?[a-zA-Z](?:[^>"']|"[^"]*"|'[^']*')*>/g; // an attribute value may hold a `>`
 
@@ -96,7 +97,7 @@ function decodeEntities(text: string): string {
 }
 
 function htmlText(markup: string): string {
-  const stripped = markup.replace(RAW_TEXT, ' ').replace(COMMENT, ' ').replace(DECLARATION, ' ').replace(TAG, ' ');
+  const stripped = markup.replace(COMMENT_OR_RAW_TEXT, ' ').replace(DECLARATION, ' ').replace(TAG, ' ');
   return decodeEntities(stripped).replace(/\s+/g, ' ').trim();
 }
 
