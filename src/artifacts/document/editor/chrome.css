@@ -1,5 +1,6 @@
 /* The document editor's chrome (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the tab strip, the toolbar,
-   menus, the find bar, find's highlights and the other replicas' cursors. These are the app's UI around and over the
+   menus, the find bar, find's highlights, the other replicas' cursors, and (M4) the comment highlights and the threads
+   rail. These are the app's UI around and over the
    page, so they read the app's tokens directly (the page itself is theme.css's, in the design system's). No literal
    colour (theme.dom.test.tsx). */
 
@@ -13,13 +14,27 @@
   font-family: var(--font-ui);
   font-size: var(--text-ui);
 }
+.doc-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
 .doc-tab-editor {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
-.doc-tab-editor > .ds-doc {
+/* the page's scroll box, and over it the comment card's host (absolute, filling the frame; M4) */
+.doc-page-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.doc-page-frame > .ds-doc {
   flex: 1;
   overflow-y: auto;
 }
@@ -231,4 +246,133 @@
 }
 .ds-doc .ProseMirror-yjs-selection {
   background: color-mix(in oklab, var(--user-color) 20%, transparent);
+}
+
+/* ── comments (M4): the open threads' passages, the active one, and the threads rail ── */
+.ds-doc .comment {
+  background: color-mix(in oklab, var(--warning) 18%, transparent);
+  border-bottom: 2px solid color-mix(in oklab, var(--warning) 60%, transparent);
+}
+.ds-doc .comment.comment-active {
+  background: color-mix(in oklab, var(--warning) 36%, transparent);
+  border-bottom-color: var(--warning);
+}
+.doc-rail {
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--space) * 76);
+  flex-shrink: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+.doc-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+.doc-rail-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.doc-rail-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+  padding: calc(var(--space) * 2);
+}
+.doc-rail-empty {
+  margin: 0;
+  color: var(--fg-muted);
+}
+.doc-rail-resolved {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+}
+.doc-rail-section {
+  font: inherit;
+  text-align: left;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  padding: var(--space) 0;
+}
+.doc-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  padding: calc(var(--space) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.doc-thread[data-status='resolved'] {
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+.doc-thread-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid var(--warning);
+  padding: 0 0 0 calc(var(--space) * 2);
+  cursor: pointer;
+}
+.doc-thread-quote-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.doc-thread-tab {
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+}
+.doc-thread-note {
+  margin: 0;
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+}
+.doc-thread-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.doc-thread-message {
+  display: flex;
+  flex-direction: column;
+}
+.doc-thread-author {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.doc-thread-chip {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-sm);
+}
+.doc-thread-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.doc-thread-actions {
+  display: flex;
+  justify-content: flex-end;
 }

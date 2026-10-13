@@ -1,6 +1,7 @@
 // The formatting toolbar (D1's `Toolbar.tsx`; M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): undo and
 // redo, the block style, the marks and a link, the lists, quote and code, the Insert menu for every other block kind of
-// the schema, the table's row and column controls while the caret is in a table, a code block's language, and Find.
+// the schema, the table's row and column controls while the caret is in a table, a code block's language, Comment and
+// the comments rail (M4), and Find.
 // An inserted atom (math, a diagram, a chip, a pending section) is selected with its field focused, so the person types
 // its content next.
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -67,11 +68,20 @@ function insertBlock(editor: Editor, node: JSONContent, then: 'edit' | 'inside')
   else if (pos >= 0) editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos + 1)))); // the first textblock inside
 }
 
-export function Toolbar({ editor, artifactId, host, onFind }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void }) {
+/** The toolbar's comment controls (M4): Comment the selection (absent when commenting is not offered), and the rail. */
+export interface CommentControls {
+  comment: (() => void) | null;
+  railOpen: boolean;
+  openCount: number;
+  toggleRail(): void;
+}
+
+export function Toolbar({ editor, artifactId, host, onFind, comments }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
       editable: e.isEditable,
+      selected: !e.state.selection.empty,
       canUndo: e.can().undo(),
       canRedo: e.can().redo(),
       block: blockStyle(e),
@@ -269,6 +279,14 @@ export function Toolbar({ editor, artifactId, host, onFind }: { editor: Editor; 
         </>
       )}
       <span className="doc-toolbar-spacer" />
+      {comments.comment && (
+        <Tool label="Comment" disabled={disabled || !state.selected} onClick={comments.comment}>
+          Comment
+        </Tool>
+      )}
+      <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
+        Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
+      </Tool>
       <Tool label="Find" onClick={onFind}>
         Find
       </Tool>
