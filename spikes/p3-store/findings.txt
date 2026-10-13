@@ -426,3 +426,178 @@ provenance from v14 attributions.
 ### Questions (S6; the architect's answers of 2026-10-12 in brackets)
 1. Tables: row ids, positional cells [accepted]. 2. Refusals at property level, naming element and property [accepted].
 3. Unknown inline tags hold the slide [accepted]. 4. Repairs by the host only [accepted]. 5. A7 above [new].
+
+## S3 — History on the real editor and artifact-wide restore
+
+**Verdict: passes on v14.** Two stored full V2 states render through `DiffRenderer` in the live Tiptap 3.31.3 editor
+with authors and times from provenance that stay right after a log compaction; "N changes" with ↑ ↓ and "Show editors"
+work; leaving history leaves the live doc byte-unchanged; restore is one kind-agnostic host operation (revert since the
+version, `Y.undoContentIds`) that brings back tabs, threads, deck and slides and merges with a concurrent edit. Three
+gaps upstream does not handle are fixed here: undo in history, commands run on the read-only preview, undo after a
+restore. Nothing v14-specific failed.
+
+Method: Node 22, happy-dom, real Tiptap 3.31.3 on S1's exact v14 pins (`s3/package.json`, plus `@tiptap/extension-list`
+for task lists); replicas through S1's logging hub; host doc gc on. Schema (`s3/lib/schema.mjs`): S1's hardened schema
+extended to §4.4's shape (headings 1 to 3, bullet, ordered and nested lists, task list, quote, code block, table with row
+and cell ids, a `callout {tone}` container, an inline `image {src, alt, assetId}`, bold, italic, link, code,
+`comment {threadId, orphan}` overlapping and non-inclusive); UniqueID with S1's v14 filter; the document in a `tabs` map
+(tab → `{title, order, body}`) beside a `threads` map. No Chromium run: every time below is happy-dom.
+Run (install `pnpm -C spikes/p3-store/s3 install --ignore-workspace`): `node spikes/p3-store/s3/s3-history.mjs [100]`,
+`node spikes/p3-store/s3/s3-restore.mjs [100]`, `node spikes/p3-store/s3/s3-bugs.mjs`, `node spikes/p3-store/s3/
+probe-diff.mjs`; outputs `s3/out/{history,restore,bugs}.*`, `history-100.*`, `restore-100.*`. Executor re-runs:
+history (17 changes, every guard as below), restore 30/30 and 13/13, bugs 26/26.
+
+### 1. Versions and the preview (verified, `s3-history.mjs`)
+A 25-section document (302 top-level blocks, 1,159 block ids, 23k characters, 72.9 KB live state) through five phases
+captured as versions V0 to V5 (full V2 states of 72.0 to 72.8 KB, `createStore().version`, `s3/lib/provenance.mjs`): the
+human typing keystroke by keystroke and splitting; agent session 1 on its replica rewriting a word, inserting a section
+after a heading, setting a cell, editing a code block; the human changing a heading level, a task's `checked`, a
+callout's tone, an image's `alt`, bolding; agent session 2 adding a table row, changing a code block's `language` and
+text, deleting a paragraph, adding a comment mark; the human typing and deleting imported words.
+- Compaction folds the log up to V3 (53 rows, 73.9 KB → one 72.4 KB base state, rows dropped); provenance is kept as one
+  encoded `Y.ContentMap` per update written at landing (27 rows, 2.5 KB), the 43 oldest bucketed into one merged map
+  (`store.compact`, `store.bucket`).
+- The diff V0→V5 from provenance alone, after compaction (`openDiff`, `renderDiff`, `s3/lib/history.mjs`): 19/19
+  expectations (kind, author, a time inside the right phase), covering edits older than the compaction, attribute
+  changes (`level`, `checked`, `tone`, `alt`, `language`), a format change, code blocks, cells, a new row, a deleted
+  paragraph; `doc.check()` valid; V0→V3 and V1→V3 from provenance after compaction identical span for span to S1's
+  log-window build before it; an arbitrary pair (V2→V4) works.
+- "N changes" (`changeList`): runs that overlap or touch merge into one change (a replace counts once; a new block with
+  its text once): 17 changes from 102 attributed runs, the same headless and in the editor; ↓ ↑ visit all 17 and wrap
+  (`nextChange`, `prevChange`).
+- "Show editors" after compaction (`showEditors`: a PM selection → Y items through block ids → provenance): 7/7 equal the
+  full-log truth (e.g. `s10c → agent:session-2@09:00:55[attrs:language,ins], import@09:00:01`).
+
+| happy-dom | 25 sections (302 blocks, 23k chars) | 100 sections (1,202 blocks, 91k chars, 287 KB) |
+|---|---|---|
+| Headless `ynodeToPmnode` with `DiffRenderer` | 30–32 ms | 106 ms |
+| Editor `showVersion`, median of 5 | 33–41 ms | 124 ms |
+| `leaveHistory` | 19–22 ms | 87 ms |
+
+Linear in size; S7 re-measures in Chromium. Provenance size (times per update, so typing makes one run per keystroke):
+merged over the whole log 1,257 B with exact times (102 rendered runs), 387 B floored to 10 s (62), 302 B floored to the
+minute (58).
+
+### 2. Leaving history and undo (verified)
+The live editor enters with `configureYProsemirror({ytype: versionFragment, renderer})` and leaves with `{ytype: live,
+renderer: null}` (`showVersion`, `leaveHistory`, `s3/lib/collab.mjs`); after leaving, replica and host bytes equal those
+before entering. Undo is blocked in history: `editor.commands.undo()` false, Mod-Z inert, the stack and the live bytes
+unchanged. Control with S1's unguarded commands: undo in history returns true, edits the live doc behind the preview and
+the user's typed text disappears on the host — upstream has no guard. Commands such as `insertContent` still run on a
+non-editable view and would write into the throwaway version doc; a `filterTransaction` refusing local doc changes in
+history fixes it (version docs byte-unchanged), though the command still returns true. An agent edit arriving during a
+preview is not shown in it, appears on leaving, and undo works again after.
+
+### 3. Artifact-wide restore (verified, `s3-restore.mjs`)
+After V0: in the document, typing, a deleted paragraph, a heading level, a format, a task, a tone, a new thread th3 (mark
+and map entry), an agent rewrite, an inserted paragraph, a cell, a code block, a block moved (delete and re-insert with
+the same id), paragraph s20p2 replaced by nB; tab t2 renamed "Appendix B" and edited, a new tab t3, th2 resolved, the
+human typing inside th1's marked text; in a stand-in deck (`deck` map, `slides` map id → slide with fractional order,
+`style:*`, notes text, `elements` map id → `{tag, z, style:*, text}`), slide s3 deleted, s13 added, an element moved, the
+deck retitled, a slide re-ordered, notes and element text edited, an element deleted, a thread resolved. The host
+computes one update R from (V0's state, the live state) and applies it with origin `{actor: 'human:restore'}` while
+agent 2's replica edits concurrently in content the restore keeps, in content it removes, and inside rewritten text.
+
+| | (a) revert: `revertUpdate` | (b) structural diff, children paired by name | (b′) paired by name and `id` |
+|---|---|---|---|
+| Document checks | 30/30 | 28/30 | 30/30 |
+| Deck checks | 13/13 | 13/13 | 13/13 |
+| Concurrent edit into a replaced block | dropped (the CRDT rule) | grafted into the restored s20p2 | dropped |
+| Update size (25 and 100 sections, same edits) | 1.14 KB | 1.12 KB | 1.16 KB |
+| Compute, 25 / 100 sections | 7–23 / 23–72 ms | 43 / 119 ms | 32 / 135–297 ms |
+| Deck compute | 0.7 ms | 3 ms | 3 ms |
+| Needs | the version state and the live state only | a v14 workaround (pitfall 5) | that, plus an id on every node |
+
+Applying R at the host takes 0.3 ms for all three. **(a) chosen**: correct on every check, fastest, kind-agnostic (one
+operation for documents and decks), CRDT-exact, needs only states (so it works across compaction by construction). How:
+a scratch gc-off doc gets the old state then the live state; the changes since are `excludeContentIds(ids(scratch),
+ids(old))`; `Y.undoContentIds(scratch, since)` deletes what was inserted since and re-inserts what was deleted since, and
+the update it emits is shipped (about 15 lines; the primitive `DiffRenderer.rejectChanges` uses; `s3/lib/restore.mjs`).
+What (a) brings back: the prose fragment equal to V0 block for block apart from the concurrent edits; block ids in V0
+order without duplicates, the moved block in place, th1's mark span exactly its words; code text and language, the cell,
+heading level, task, tone, bold; t2's title "Appendix" and body equal to V0, t3 gone; th2 unresolved, th3 and its mark
+gone, the threads map equal to V0; slide s3 back with its 5 elements, notes and text, s13 gone, the moved element back,
+title, order, notes, text and the deleted element restored; concurrent edits in kept content survive (an append, an
+insert inside rewritten text, an element move, a notes edit), the edit into removed content is dropped; three replicas
+converge; the human's editor shows the restored doc, `check()` valid. Attribution after restore: every change credited to
+`human:restore` or the concurrent agent; an untouched paragraph still shows `import` only; restored text (new ids) shows
+the restorer. Never destroys: restoring the version taken just before the restore gives the pre-restore state back.
+**Undo after a restore is a real hazard** (verified): with the human's undo stack kept, the first ⌘Z skips 24 no-op items
+then redoes the human's earlier deletion of s2p4, which the restore already brought back — paragraph s2p4 twice. Clearing
+every bound editor's UndoManager when a restore lands fixes it.
+
+### 4. The five frozen 1.x bugs on v14 (verified, `s3-bugs.mjs`, 26/26, headless and in a read-only editor with identical JSON)
+#82 (deleted nodes lose attrs) fixed: a heading's level and id, a callout's tone, an image's src and alt, a task's checked,
+a code block's language and text survive deletion. #128 (null PUD) gone: `attributions: null` renders. #177 (checked
+invisible) fixed: `attrs(checked)`. #189 (code blocks) fixed. #72 (restore) not applicable (no restore meta; the remaining
+hazard is the undo duplicate above). Also passing: code text plus language, tone, image src and alt, an inline image
+inserted, heading level; tables (add or delete a row or column; bold, link and comment marks in cells; a link's href);
+lists (indent, outdent, bullet → ordered); deleted containers through the `--attributed` variants (list item with a
+nested list, blockquote, task item, callout); an agent edit inside a callout. Needing UI care: type changes, indent,
+outdent and list toggles render as delete plus insert of the whole block; a new node also carries `y-attributed-attrs`
+for each of its attributes (folded into the insertion by `changeList`); a comment mark shows as a format change keyed
+`comment--<hash>`; adding a column counts one change per cell.
+
+### Pitfalls (verified unless marked)
+1. S1's undo and redo commands undo into the live doc while history is shown: refuse them when the binding is not on the
+   live ytype or a renderer is set.
+2. Commands still run on a read-only view and write into the throwaway version doc: a `filterTransaction` refusing local
+   doc changes in history.
+3. Commands calling `configureYProsemirror` need `tr.setMeta('preventDispatch', true)` (S1's pitfall 2 again).
+4. Undo after a restore resurrects content the restore brought back: clear every bound editor's UndoManager when a
+   restore lands (likewise for any revert made on another replica; source: `rejectChanges` uses the same redo).
+5. v14 rough edge: `applyDelta` with a `setAttr` whose value is a delta holding nested `setAttr` deltas throws
+   "Unexpected content type" (`Y.Node.from` converts one level; `probe-diff.mjs`); convert deeply (`materialize`,
+   `s3/lib/restore.mjs`). Matters to any deck writer.
+6. `lib0/delta.diff` pairs children by name, grafting a concurrent edit into a replaced block: pair by id, or use (a).
+7. Node writers produce mark keys through `pmnodeToDelta` with the editor's schema (a hand-written `comment--th3` was
+   dropped, "schema declares no mark").
+8. Per-keystroke times fragment runs (102 for 17 changes): merge touching runs; quantizing times shrinks provenance
+   about 4×.
+9. Each restore writes as a fresh scratch clientID (the state vector grows one client per restore; provenance credits the
+   actor).
+10. A concurrent agent write into content the restore removes is dropped silently (the CRDT rule).
+11. Restored content gets new ids, so "Show editors" credits the restorer.
+
+### Copy
+P3-A: `s3/lib/restore.mjs` `revertUpdate` (the restore: the host applies it with origin `{actor}`, takes an auto version
+before and a `restore` version after, and signals `restored` to replicas); `s3/lib/provenance.mjs` (`contentMapOf`,
+`createStore`: land, compact, bucket, attributions); `showEditors` in `s3/lib/history.mjs` if the host answers it.
+P3-B: `s3/lib/collab.mjs` (history mode, the undo guard, the read-only filter, the UndoManager clear on restore);
+`s3/lib/history.mjs` (`openDiff`, `renderDiff`, `attributedRuns`, `changeList`, `nextChange`, `prevChange`);
+`s3/lib/schema.mjs`'s additions (the comment mark, callout, image, task list, the `taskItem` and `callout` `--attributed`
+variants beside S1's blockquote and listItem).
+
+### §4.2 and §4.7 amendments proposed
+1. §4.2 history renderer: "History renders with v14's `DiffRenderer(prevDoc, nextDoc, {attributions})` over two
+   throwaway gc-off docs loaded from version states; the editor enters with `configureYProsemirror({ytype: version
+   fragment, renderer})` and leaves with `{ytype: live, renderer: null}`; the live doc is never written" (replacing
+   state-pair mode and `unrenderSnapshot()`).
+2. §4.2 schema marks: "the four `y-attributed-*` marks (insert, delete, format, attrs) allowed on every node type, and
+   `--attributed` variants of the strict containers (blockquote, listItem, taskItem, callout), in every schema from day
+   one" (replacing "the `ychange` mark and the block attribute").
+3. §4.2 provenance: one encoded `Y.ContentMap` per update, never folded; bucketing merges maps (`Y.mergeContentMaps`);
+   times floored to the minute at write (the display granularity; about 4× smaller).
+4. §4.2 restore: "one kind-agnostic host operation that reverts the changes since the version (`Y.undoContentIds` on a
+   scratch gc-off doc holding version ⊕ live), shipped as one update of the restorer; per-kind adapters handle only the
+   after-effects (mirror threads to `artifact_threads`, recompute orphans, run the id repair); on landing every bound
+   editor clears its UndoManager" (replacing "a host operation per kind that diff-applies": a name-paired structural
+   diff is wrong under concurrency).
+5. §4.2 undo: both guards (undo and redo refuse when the binding is not live; a transaction filter refuses local doc
+   changes in history).
+6. §4.7: "N changes" counts touching runs merged; comment marks are excluded from changes (filter `comment` keys out of
+   `y-attributed-format`; not tested beyond seeing the key); attribute marks on new nodes are not shown as attribute
+   changes; same-id type changes may later be drawn as "type changed".
+
+### Questions for the architect (S3)
+1. Adopt (a) revert-since-version as the one restore operation? Recommended: yes.
+2. Restore lineage (new id range → original range) so "Show editors" says "restored by X, originally by Y"? Recommended:
+   not now; credit the restorer as §4.7 and Google Docs do.
+3. A concurrent agent write into restored-away content is lost silently. Recommended: the host answers that session's
+   next batch whose targets vanished with a rejection naming the blocks "removed by restore" (the batch already validates
+   targets against `baseRevision`).
+4. "See N new changes" needs a state at the owner's last view, and compaction prevents rebuilding an arbitrary seq.
+   Recommended: write an `auto` version when the owner views the artifact and it changed since the last version.
+5. Floor provenance times to the minute at write rather than after 30 days? Recommended: yes.
+Not tested in S3: Chromium timing and IME (S4, S7); the version's pinned design system and assets in the preview; Make a
+copy; restore of a version older than a compaction (needs only states; source).
