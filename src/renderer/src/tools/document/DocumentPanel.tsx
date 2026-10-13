@@ -27,6 +27,7 @@ const NO_SESSION = '' as AppSessionId;
 
 export function DocumentBody({ artifactId, state, scope, visible, onShown, surface }: DocumentEditorProps & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
+  const title = snapshot.title || 'Document'; // until the artifact's row is read
   const commands = useMemo<DocumentHeaderCommands>(
     () => ({
       toggleRail: (rail) => state.toggleRail(rail),
@@ -41,14 +42,14 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   useEditorHost(
     scope,
     documentHeader(
-      { title: snapshot.title, document: snapshot.document, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
+      { title, document: snapshot.document, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
       commands,
     ),
   );
 
   // Comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered.
   const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title: snapshot.title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdForSend: state.holdForSend });
+  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdForSend: state.holdForSend });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -57,7 +58,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     page.current = element;
     setPageShown(element !== null);
   }, []);
-  useRegionMarkupSurface(page, `“${snapshot.title}”`, visible && pageShown);
+  useRegionMarkupSurface(page, `“${title}”`, visible && pageShown);
 
   const onEditor = useCallback(
     (editor: Editor | null) => {
