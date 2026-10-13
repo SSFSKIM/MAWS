@@ -9,7 +9,7 @@ The document kind of the co-work layer: one schema module that every writer and 
 ## Progress
 
 - [x] (2026-10-13 04:20Z) Residue grilled against the parent, the ledger, the findings and the code; this document written.
-- [~] M1 — The schema module and the document model (Node): executed (f8c5de0e..1c38c453; typecheck, lint and the full suite green), under review.
+- [x] (2026-10-13 08:10Z) M1 — The schema module and the document model (Node): f8c5de0e..45d18a0a after c18f7cb9, 40bd4ea1, 292d4c27, eaf44719; three fix waves (0b1d6763..1c85059b, f4d9c2be..a54621c6, d2f68026); review clean (one Minor logged: the singleton lettered/roman ambiguity).
 - [ ] M2 — The patch writer and the document kind adapter (Node).
 - [ ] M3 — The editor core: binding, blocks, theme, find (DOM).
 - [ ] M4 — Comments: marks, threads, the card's artifact target, the routes.
