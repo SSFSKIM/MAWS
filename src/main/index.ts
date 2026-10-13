@@ -568,6 +568,7 @@ void startWithProfileLock(app, () => {
   const artifacts = startArtifacts({
     hosts,
     register: registerMainHandler,
+    emit, // P3-A M5: artifacts.resync
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     env: process.env,

@@ -17,13 +17,11 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
 import { newDoc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
-import { isDocPortMessage } from '@shared/ipc/doc-port';
 import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
-const PORT_WAIT_MS = 10_000; // how long an answered open waits for its port
 
 // A command the store refused; `error` is the IpcError (its `issues` an ArtifactRefusal when the store named why).
 export class ArtifactCommandError extends Error {
@@ -34,56 +32,10 @@ export class ArtifactCommandError extends Error {
 }
 
 // The ports the preload posts to the page, awaited by channel. A port can arrive before or after the open's answer.
+// The window's own are `windowDocPorts` (window-ports.ts); this module touches no DOM type, so a Node test can drive the
+// ArtifactHost over another route (P3-A M5's detached-channel test).
 export interface DocPorts {
   take(channel: number, timeoutMs?: number): Promise<PortLike>;
-}
-
-// The page's side of the preload's route (src/preload/doc-port.ts): only a message whose source is this window itself is
-// a port from main; a frame inside the page posting the same shape is ignored. A port nobody takes within the wait is
-// closed.
-export function windowDocPorts(win: Window): DocPorts & { dispose(): void } {
-  const early = new Map<number, { port: MessagePort; timer: ReturnType<typeof setTimeout> }>();
-  const waiting = new Map<number, (port: MessagePort) => void>();
-  const onMessage = (event: MessageEvent) => {
-    if (event.source !== win || !isDocPortMessage(event.data) || event.ports.length !== 1) return;
-    const { channel } = event.data;
-    const port = event.ports[0];
-    const waiter = waiting.get(channel);
-    if (waiter) {
-      waiting.delete(channel);
-      return waiter(port);
-    }
-    early.set(channel, { port, timer: setTimeout(() => early.delete(channel) && port.close(), PORT_WAIT_MS) });
-  };
-  win.addEventListener('message', onMessage);
-  return {
-    take: (channel, timeoutMs = PORT_WAIT_MS) => {
-      const arrived = early.get(channel);
-      if (arrived) {
-        early.delete(channel);
-        clearTimeout(arrived.timer);
-        return Promise.resolve(arrived.port as unknown as PortLike);
-      }
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          waiting.delete(channel);
-          reject(new Error(`no port arrived for document channel ${channel}`));
-        }, timeoutMs);
-        waiting.set(channel, (port) => {
-          clearTimeout(timer);
-          resolve(port as unknown as PortLike);
-        });
-      });
-    },
-    dispose: () => {
-      win.removeEventListener('message', onMessage);
-      for (const { port, timer } of early.values()) {
-        clearTimeout(timer);
-        port.close();
-      }
-      early.clear();
-    },
-  };
 }
 
 export interface ArtifactHostDeps {

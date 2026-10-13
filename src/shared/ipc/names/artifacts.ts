@@ -8,7 +8,7 @@ export const commands = [
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
 ] as const;
 
-export const events = ['artifacts.changed'] as const;
+export const events = ['artifacts.changed', 'artifacts.resync' /* P3-A M5: main's */] as const;
 
 // Only main relays the design-system defaults it owns in settings, and only main's `maws-artifact:` scheme resolves a
 // stored file's path (P3-A Decision Log 14, 22d).

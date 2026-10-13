@@ -142,7 +142,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     if (docHandler) throw new Error('a document port handler is already installed');
     docHandler = handler;
   };
-  const docPort = (message: HostDoc, docPortEnd: MessagePortMain) => {
+  const docPort = (message: HostDoc, docPortEnd: DocPortEnd) => {
     if (!docHandler) {
       console.error(`[host] closed the port of document channel ${message.channel}: this host serves no documents`);
       return docPortEnd.close();
@@ -291,11 +291,18 @@ export interface HostRuntime {
 
 // P3-A M4 start (docs/doperpowers/plans/2026-10-12-p3-a-store.md, Decision Log 13): a document's port as main posts it on
 // the parent port, and the handler the engine host's register installs for it (`onDocPort`, once). A handler that
-// throws costs that port only: the runtime closes it. Detached mode (M5) reaches the same handler through its socket
-// channels.
-export type DocPortHandler = (message: HostDoc, port: MessagePortMain) => void;
+// throws costs that port only: the runtime closes it. P3-A M5: detached mode reaches the same handler through its socket
+// channels (doc-channels.ts), whose ends have the MessagePortMain shape below, so the handler never knows which.
+export interface DocPortEnd {
+  postMessage(message: unknown): void;
+  on(event: 'message', listener: (event: { data: unknown }) => void): unknown;
+  on(event: 'close', listener: () => void): unknown;
+  start(): void;
+  close(): void;
+}
+export type DocPortHandler = (message: HostDoc, port: DocPortEnd) => void;
 export interface HostRuntime {
   onDocPort(handler: DocPortHandler): void;
-  docPort(message: HostDoc, port: MessagePortMain): void;
+  docPort(message: HostDoc, port: DocPortEnd): void;
 }
 // P3-A M4 end

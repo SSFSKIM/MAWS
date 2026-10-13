@@ -6,7 +6,8 @@ import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames
 import type { PortLike } from '@artifacts/provider/port';
 import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, type Doc } from '@artifacts/yjs';
 import type { CommandName, CommandResult, EventName, MawsBridge } from '@shared/ipc/schema';
-import { createArtifactHost, RECONNECT_BACKOFF_MS, windowDocPorts, type DocPorts } from './host';
+import { createArtifactHost, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
+import { windowDocPorts } from './window-ports';
 
 type Listener = (event: { data?: unknown }) => void;
 

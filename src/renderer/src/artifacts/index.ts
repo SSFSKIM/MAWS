@@ -2,7 +2,8 @@
 // validated IPC client and the preload's document ports; what B, C, D and E's editors open documents through.
 import type { ArtifactHost } from '@artifacts/host';
 import { ipc } from '../ipc/client';
-import { createArtifactHost, windowDocPorts } from './host';
+import { createArtifactHost } from './host';
+import { windowDocPorts } from './window-ports';
 
 let host: ArtifactHost | null = null;
 

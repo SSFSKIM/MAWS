@@ -1705,6 +1705,53 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('spaces.changed', { spaceId: id, change: 'linked' }).ok).toBe(false);
     });
 
+    // P3-A M5: main's one hook for a reconcile read after events the renderer may have missed (Decision Log in M5)
+    it('announces a resync from main, outside the host wire, with nothing in it', () => {
+      expect(validateEventPayload('artifacts.resync', {}).ok).toBe(true);
+      expect(validateEventPayload('artifacts.resync', { artifactId: id }).ok).toBe(false);
+      expect([...NAMES.artifacts.events]).toContain('artifacts.resync');
+      expect(HOST_EVENTS).not.toContain('artifacts.resync');
+    });
+
+    // P3-A M5: a setAttr value is a JSON value, never `undefined`, so the detached JSON line cannot drop it
+    it('takes a JSON value for the test writer’s setAttr, and no undefined', () => {
+      for (const value of ['s', 1, true, null, [1, { a: 2 }], { nested: { deep: [null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value: undefined }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k' }] }).ok).toBe(false);
+    });
+
+    // The value is checked all the way down: what JSON would drop or rewrite (undefined to null or nothing, NaN and
+    // Infinity to null) is refused at any depth, since the detached line would carry something else than was sent.
+    it('refuses a non-JSON value at any depth in a setAttr value', () => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      const nonJson: [string, unknown][] = [
+        ['undefined in an array', [undefined]],
+        ['undefined in a record', { nested: undefined }],
+        ['undefined at depth', { a: [{ b: [1, { c: undefined }] }] }],
+        ['a function', { f: () => 1 }],
+        ['a function at depth', [[{ f: () => 1 }]]],
+        ['NaN', [Number.NaN]],
+        ['Infinity at depth', { a: { b: [Number.POSITIVE_INFINITY] } }],
+        ['-Infinity', { a: Number.NEGATIVE_INFINITY }],
+        ['a bigint', [1n]],
+        ['a symbol', { s: Symbol('x') }],
+        ['a Date', { d: new Date(0) }],
+        ['a Map', { m: new Map() }],
+        ['a typed array', { b: new Uint8Array(2) }],
+        ['a sparse array', [1, , 3]], // eslint-disable-line no-sparse-arrays
+        ['a cycle', cyclic],
+      ];
+      for (const [label, value] of nonJson) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, label).toBe(false);
+      }
+      for (const value of [[], {}, [[], {}], { a: { b: [0, -0, 1.5, 'x', true, null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+    });
+
     it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
       const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
       expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
