@@ -77,6 +77,8 @@ beforeEach(() => {
   resetComposerStore();
   useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
   useNotices.setState({ notices: [] });
+  // main's library reads, which the editor's title asks for (Decision Log 29); a case that needs more installs its own
+  installFakeMain((name, input) => (name === 'library.get' ? ok({ row: ROWS.find((r) => r.id === input.artifactId) ?? null }) : listed(input)));
 });
 afterEach(() => {
   cleanup();
