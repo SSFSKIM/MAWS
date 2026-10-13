@@ -605,4 +605,9 @@ describe('restore (revertScope, afterRestore)', () => {
     expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }, { line: 'deleted ^p2' }] }, { results: [{ line: 'moved ^p3 after ^c1' }] }])).toBe('replaced ^p1\ndeleted ^p2\nmoved ^p3 after ^c1');
     expect(adapter.summarizeTurn!([{ ok: true }, {}])).toBe('2 edits');
   });
+
+  it('takes a reply’s or a resolve’s own line beside the batches’ lines, in call order', () => {
+    const adapter = adapterOf();
+    expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }] }, { status: 'replied', line: 'replied on c:t1' }, { status: 'resolved', line: 'resolved c:t1' }])).toBe('replaced ^p1\nreplied on c:t1\nresolved c:t1');
+  });
 });

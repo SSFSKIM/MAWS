@@ -372,9 +372,11 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
       return upsert.length ? { threads: { upsert } } : undefined;
     },
     summarizeTurn(results) {
+      // a batch's result lines (artifact_edit), or a call's own line (artifact_reply, artifact_resolve)
       const lines = results.flatMap((result) => {
-        const list = (result as { results?: unknown } | null)?.results;
-        return Array.isArray(list) ? list.map((entry) => (entry as { line?: unknown } | null)?.line).filter((line): line is string => typeof line === 'string') : [];
+        const { results: list, line } = (result ?? {}) as { results?: unknown; line?: unknown };
+        if (typeof line === 'string') return [line];
+        return Array.isArray(list) ? list.map((entry) => (entry as { line?: unknown } | null)?.line).filter((entry): entry is string => typeof entry === 'string') : [];
       });
       return lines.length ? lines.join('\n') : `${results.length} edits`;
     },
