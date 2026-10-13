@@ -35,6 +35,18 @@ describe('find', () => {
     expect(decorated(e, 'find-match-current')).toEqual(['apple']);
   });
 
+  it('stays case-insensitive in a block whose lower-casing changes its length, at the original positions', () => {
+    // 'İ' lower-cases to two code units ('i̇'), so a lower-cased copy of this block is longer than the block
+    const e = make(doc(para('p1', 'İ Apple, then 𝐀 APPLE'), para('p2', 'Straße STRASSE')));
+    e.commands.setFindQuery('apple');
+    expect(findState(e.state).count).toBe(2);
+    expect(decorated(e, 'find-match')).toEqual(['Apple', 'APPLE']);
+    e.commands.findNext();
+    expect(selected(e)).toBe('APPLE');
+    e.commands.setFindQuery('straße');
+    expect(decorated(e, 'find-match')).toEqual(['Straße']);
+  });
+
   it('steps forward and back through the matches, wrapping, and selects the current one', () => {
     const e = make(corpus);
     e.commands.setFindQuery('apple');

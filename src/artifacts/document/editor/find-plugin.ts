@@ -42,9 +42,13 @@ const EMPTY: FindPluginState = { query: '', matches: [], current: -1, decoration
 // An inline node stands in the searchable text as one character no query contains.
 const BREAK = '￿';
 
+// Case-insensitive by Unicode's simple case folding, over the text as written: each match's offsets are the block's own
+// (lower-casing a copy can change its length, 'İ' to 'i̇', and so misplace them).
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function matchesIn(doc: PMNode, query: string): Match[] {
-  const needle = query.toLowerCase();
-  if (!needle) return [];
+  if (!query) return [];
+  const needle = new RegExp(escapeRegExp(query), 'giu');
   const matches: Match[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
@@ -56,11 +60,10 @@ function matchesIn(doc: PMNode, query: string): Match[] {
       for (let i = 0; i < chars.length; i += 1) at.push(start + i);
       text += chars;
     });
-    const haystack = text.toLowerCase();
-    // lower-casing that changes a string's length would misplace the positions: search those blocks as written
-    const source = haystack.length === text.length ? haystack : text;
-    for (let i = source.indexOf(needle); i >= 0; i = source.indexOf(needle, i + 1)) {
-      matches.push({ from: at[i], to: at[i + needle.length - 1] + 1 });
+    needle.lastIndex = 0;
+    for (let found = needle.exec(text); found; found = needle.exec(text)) {
+      matches.push({ from: at[found.index], to: at[found.index + found[0].length - 1] + 1 });
+      needle.lastIndex = found.index + 1; // overlapping matches count, as each start is a place to step to
     }
     return false;
   });
