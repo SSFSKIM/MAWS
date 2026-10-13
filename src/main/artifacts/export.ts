@@ -18,8 +18,11 @@
 // `about:`; every other request is cancelled and counted into the answer (`blockedRequests`), so an exporter learns its
 // HTML named a remote resource.
 //
-// At most EXPORT_CONCURRENCY exports run at once; each has EXPORT_GUARD_MS, and one still waiting for a slot after
-// EXPORT_QUEUE_MS is answered busy, so every answer leaves main inside the host's EXPORT_ANSWER_MS.
+// Fix wave 2: one budget covers a whole export, from the moment main takes the request to the last file put in place
+// (EXPORT_BUDGET_MS, an `ExportBudget`): the wait for a slot, the snapshot's host reads, the exporter's run and the
+// publication all end at its deadline, after which nothing is written and the answer is the timeout. It is shorter than
+// the host's EXPORT_ANSWER_MS by a margin, so an export the bridge gave up on never later lands. At most
+// EXPORT_CONCURRENCY exports run at once, and one still waiting for a slot after EXPORT_QUEUE_MS is answered busy.
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -39,8 +42,8 @@ import { restrictRequests, type SeamEnv } from '../deliverables/policies';
 import { CommandFailure } from '../ipc/router';
 import type { ContentLookup } from './protocol';
 
-export const EXPORT_GUARD_MS = 30_000;
-export const EXPORT_QUEUE_MS = 25_000; // with the guard, 55 s: inside the host's 60
+export const EXPORT_BUDGET_MS = 55_000; // from main's receipt: inside the host's 60 s (EXPORT_ANSWER_MS) with 5 s to spare
+export const EXPORT_QUEUE_MS = 25_000; // the longest wait for a slot (inside the budget, leaving 30 s to run)
 const EXPORT_CONCURRENCY = 2;
 export const PNG_DEFAULT_WIDTH = 1280;
 const PNG_FIRST_HEIGHT = 800; // the window's height before a whole-page PNG measures the page
@@ -115,52 +118,111 @@ export interface ExportSources {
 // A page printed to PDF: `signal` ends it (its window destroyed), `blocked` hears each request its filter cancelled.
 export type PdfPrinter = (html: string, job: { signal: AbortSignal; blocked(url: string): void }) => Promise<Uint8Array>;
 
-// One export, start to finish: the exporter runs with a context whose writes are staged; when it finishes within
-// `guardMs` they are put in place and the answer names the request's revision and path; otherwise (a failure, the
-// deadline) the export is cancelled and nothing it wrote, or writes later, lands. Never rejects.
-export async function runExport(registry: ExporterRegistry, request: ExportRequest, sources: ExportSources, guardMs = EXPORT_GUARD_MS): Promise<MawsArtifactExportAnswer> {
+// One export's time (fix wave 2): `ms` from its creation, which the service makes when main takes the request. `signal`
+// aborts at the deadline, and when the job ends (`end`), so nothing started under it writes afterwards; `within` races
+// a step (a host read, the exporter's run) against the deadline.
+export class ExportBudget {
+  private readonly controller = new AbortController();
+  private timer!: ReturnType<typeof setTimeout>;
+  private readonly expiry: Promise<never>;
+  private timedOut = false;
+
+  constructor(readonly ms: number) {
+    this.expiry = new Promise<never>((_, reject) => {
+      this.timer = setTimeout(() => {
+        this.timedOut = true;
+        this.controller.abort();
+        reject(new Error(`the export did not finish within ${ms / 1000} s`));
+      }, ms);
+    });
+    this.expiry.catch(() => {}); // observed by `within`
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  // Whether the deadline has passed.
+  get expired(): boolean {
+    return this.timedOut;
+  }
+
+  // `step`'s outcome, unless the deadline comes first (then the deadline's error; the step's own outcome is dropped).
+  within<T>(step: Promise<T>): Promise<T> {
+    if (this.timedOut) {
+      step.catch(() => {});
+      return this.expiry;
+    }
+    return Promise.race([step, this.expiry]);
+  }
+
+  // The job is over: its signal aborts (late writes refused, windows destroyed) and the timer stops.
+  end(): void {
+    clearTimeout(this.timer);
+    this.controller.abort();
+  }
+}
+
+const cancelled = () => new Error('the export was cancelled; nothing more is written');
+
+// One export, start to finish, within `budget` (a number: a budget of that many ms from now): the exporter runs with a
+// context whose writes are staged; when it finishes in time they are put in place, each only while the deadline has not
+// passed, and the answer names the request's revision and path; otherwise (a failure, the deadline) nothing it wrote,
+// or writes later, lands. Ends the budget. Never rejects.
+export async function runExport(registry: ExporterRegistry, request: ExportRequest, sources: ExportSources, budget: ExportBudget | number = EXPORT_BUDGET_MS): Promise<MawsArtifactExportAnswer> {
+  const time = typeof budget === 'number' ? new ExportBudget(budget) : budget;
   const exporter = registry.get(request.kind, request.format);
-  if (!exporter) return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
-  const cancel = new AbortController();
+  if (!exporter) {
+    time.end();
+    return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+  }
+  const { signal } = time;
   const staged = new Map<string, string>(); // path → its staged temporary file
+  const temps = new Set<string>(); // every temporary file made, tracked before it is written
   let blocked = 0;
   const context: ExportContext = {
     title: sources.title,
     state: () => sources.state(),
     readAsset: (ref) => sources.readAsset(ref),
-    printToPdf: (html) => sources.print(html, { signal: cancel.signal, blocked: () => void (blocked += 1) }),
+    printToPdf: (html) => sources.print(html, { signal, blocked: () => void (blocked += 1) }),
     writeFile: async (path, data) => {
-      if (cancel.signal.aborted) throw new Error('the export was cancelled; nothing more is written');
+      if (signal.aborted) throw cancelled();
       await mkdir(dirname(path), { recursive: true });
       const temp = join(dirname(path), `.${randomUUID()}.tmp`);
-      await writeFile(temp, data);
-      if (cancel.signal.aborted) {
-        await rm(temp, { force: true });
-        throw new Error('the export was cancelled; nothing more is written');
+      temps.add(temp);
+      try {
+        await writeFile(temp, data);
+        if (signal.aborted) throw cancelled();
+      } catch (error) {
+        temps.delete(temp);
+        await rm(temp, { force: true }).catch(() => {});
+        throw error;
       }
       const earlier = staged.get(path);
       staged.set(path, temp);
-      if (earlier) await rm(earlier, { force: true });
+      if (earlier) {
+        temps.delete(earlier);
+        await rm(earlier, { force: true });
+      }
     },
-    signal: cancel.signal,
+    signal,
   };
-  let guard: ReturnType<typeof setTimeout> | undefined;
   try {
-    const timedOut = new Promise<never>((_, reject) => {
-      guard = setTimeout(() => reject(new Error(`the export did not finish within ${guardMs / 1000} s`)), guardMs);
-    });
-    await Promise.race([exporter.run(request, context), timedOut]);
-    cancel.abort(); // the exporter is done: anything it still writes is refused
+    await time.within(exporter.run(request, context));
     if (!staged.has(request.path)) throw new Error('the exporter wrote no file');
-    for (const [path, temp] of staged) await rename(temp, path);
-    staged.clear();
+    // publication: each file put in place only while the deadline has not passed
+    for (const [path, temp] of staged) {
+      if (time.expired) throw new Error(`the export did not finish within ${time.ms / 1000} s`);
+      await rename(temp, path);
+      temps.delete(temp);
+    }
     return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
   } catch (error) {
-    cancel.abort();
     return { ok: false, error: messageOf(error) };
   } finally {
-    clearTimeout(guard);
-    for (const temp of staged.values()) await rm(temp, { force: true }).catch(() => {});
+    time.end(); // the exporter is done or abandoned: anything it still writes is refused
+    for (const temp of temps) await rm(temp, { force: true }).catch(() => {});
   }
 }
 
@@ -192,16 +254,16 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   // The export's snapshot, taken as it starts: its title, and a document's state with the revision it is at (the
   // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
   // request's revision is immutable, so its request stands as it was asked.
-  const snapshot = async (request: ExportRequest): Promise<{ request: ExportRequest; sources: ExportSources }> => {
-    const { artifact } = await required('artifacts.get', { artifactId: request.artifactId });
+  const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources }> => {
+    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId }));
     if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
     let state: Uint8Array | null = null;
     let taken = request;
     if (isDocKind(request.kind)) {
       if (request.versionId !== undefined) {
-        state = (await required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId })).bytes;
+        state = (await time.within(required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId }))).bytes;
       } else {
-        const live = await required('artifacts.state', { artifactId: request.artifactId });
+        const live = await time.within(required('artifacts.state', { artifactId: request.artifactId }));
         state = live.bytes;
         taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format)) };
       }
@@ -216,51 +278,75 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         },
         readAsset: async (ref) => {
           if (!ref.startsWith('assets/')) return null; // the content file is not an asset
-          const found = await call('artifacts.content', { artifactId: request.artifactId, path: ref });
+          const found = await time.within(call('artifacts.content', { artifactId: request.artifactId, path: ref }));
           if (!found.ok) {
             if ((found.error.issues as ArtifactRefusal | undefined)?.reason === 'notFound') return null;
             throw new Error(`the asset ${ref} could not be read: ${found.error.message}`);
           }
-          return { bytes: new Uint8Array(await readFile(found.value.path)), mime: mimeOf(found.value.name) };
+          return { bytes: new Uint8Array(await time.within(readFile(found.value.path))), mime: mimeOf(found.value.name) };
         },
         print,
       },
     };
   };
-  // A request run in its turn (a kind and format no exporter serves is answered at once). Never rejects.
-  const queued = async (request: ExportRequest): Promise<MawsArtifactExportAnswer> => {
-    if (!registry.get(request.kind, request.format)) return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
-    return slot(async () => {
+  // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
+  // answered at once). Never rejects; ends the budget.
+  const queued = async (request: ExportRequest, time: ExportBudget): Promise<MawsArtifactExportAnswer> => {
+    if (!registry.get(request.kind, request.format)) {
+      time.end();
+      return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+    }
+    const answered = await slot(async () => {
       let taken: Awaited<ReturnType<typeof snapshot>>;
       try {
-        taken = await snapshot(request);
+        taken = await snapshot(request, time);
       } catch (error) {
         return { ok: false, error: messageOf(error) } satisfies MawsArtifactExportAnswer;
       }
-      return runExport(registry, taken.request, taken.sources);
+      return runExport(registry, taken.request, taken.sources, time);
     }, busy);
+    time.end();
+    return answered;
   };
 
   const stop = onEvent('maws.artifact.export', (request) => {
     const { appSessionId, requestId, ...job } = request;
-    void queued(job)
+    void queued(job, new ExportBudget(EXPORT_BUDGET_MS))
       .then((result) => answer({ appSessionId, requestId, answer: result }))
       .catch((error: unknown) => console.error('[artifacts] could not answer an export', error));
   });
 
   return {
     async exportForLibrary({ artifactId, format, versionId, pageSize, width, height }) {
-      const { artifact } = await required('artifacts.get', { artifactId });
+      const time = new ExportBudget(EXPORT_BUDGET_MS);
+      let artifact: CommandOutput<'artifacts.get'>['artifact'];
+      try {
+        ({ artifact } = await time.within(required('artifacts.get', { artifactId })));
+      } catch (error) {
+        time.end();
+        throw error;
+      }
+      if (!artifact) {
+        time.end();
+        throw refusal('notFound', `no artifact ${artifactId}`);
+      }
       if (!artifact) throw refusal('notFound', `no artifact ${artifactId}`);
       let revision = artifact.revision;
       if (versionId !== undefined) {
-        const version = (await required('artifacts.versions', { artifactId })).versions.find((candidate) => candidate.id === versionId);
-        if (!version) throw refusal('notFound', `no version ${versionId} of ${artifactId}`, { versionId });
+        const versions = await time.within(required('artifacts.versions', { artifactId })).catch((error: unknown) => {
+          time.end();
+          throw error;
+        });
+        const version = versions.versions.find((candidate) => candidate.id === versionId);
+        if (!version) {
+          time.end();
+          throw refusal('notFound', `no version ${versionId} of ${artifactId}`, { versionId });
+        }
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
       const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
-      const result = await queued(request);
+      const result = await queued(request, time);
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
     },
@@ -279,17 +365,28 @@ export function printRequestAllowed(url: string, page: string): boolean {
 // in the OS's temporary directory (Chromium caps a `data:` URL at 2 MB) and removed after; its requests limited to
 // `printRequestAllowed`'s, each other one cancelled and told to `blocked` (Decision Log 44b); `preferCSSPageSize` makes
 // the page's `@page` rule the paper and the margins; headings become the outline. `signal` destroys the window.
+// Fix wave 2: the page is prepared (its directory, its file) before the window exists, cancellation is checked after each
+// of those steps, and the window is made and its destruction tied to `signal` in one synchronous step, so a cancellation
+// during the preparation never leaves a window behind.
 export const printHtmlToPdf: PdfPrinter = async (html, { signal, blocked }) => {
-  if (signal.aborted) throw new Error('the export was cancelled');
+  if (signal.aborted) throw cancelled();
   const dir = await mkdtemp(join(tmpdir(), 'maws-print-'));
+  const page = join(dir, 'page.html');
+  const pageUrl = pathToFileURL(page).href;
+  try {
+    if (signal.aborted) throw cancelled();
+    await writeFile(page, html, 'utf8');
+    if (signal.aborted) throw cancelled();
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
   const win = new BrowserWindow({
     show: false,
     width: 816, // a Letter page at 96 px per inch, so a layout read before printing is the page's
     height: 1056,
     webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, partition: CAPTURE_PARTITION, backgroundThrottling: false, disableDialogs: true, spellcheck: false },
   });
-  const page = join(dir, 'page.html');
-  const pageUrl = pathToFileURL(page).href;
   const unrestrict = restrictRequests(win.webContents.id, (url) => {
     if (printRequestAllowed(url, pageUrl)) return false;
     blocked(url);
@@ -299,11 +396,13 @@ export const printHtmlToPdf: PdfPrinter = async (html, { signal, blocked }) => {
     if (!win.isDestroyed()) win.destroy();
   };
   signal.addEventListener('abort', destroy, { once: true });
+  if (signal.aborted) destroy(); // tied to a signal already aborted: at once
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   try {
-    await writeFile(page, html, 'utf8');
+    if (signal.aborted) throw cancelled();
     await win.loadURL(pageUrl);
+    if (signal.aborted) throw cancelled();
     const pdf = await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true, generateDocumentOutline: true });
     return new Uint8Array(pdf.buffer, pdf.byteOffset, pdf.byteLength);
   } finally {

@@ -8,7 +8,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { EXPORT_QUEUE_MS, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
+import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -306,6 +306,68 @@ describe('the export service', () => {
       message: 'MAWS cannot export a document artifact as docx yet',
       issues: { reason: 'exportUnavailable', data: { kind: 'document', format: 'docx' } },
     });
+  });
+});
+
+// fix wave 2, the re-review's finding 2: one budget from receipt to publication, inside the bridge's 60 s
+describe('the export’s one budget (EXPORT_BUDGET_MS from main’s receipt)', () => {
+  // Real I/O while setTimeout and Date are faked: setImmediate stays real, so the staged writes can finish.
+  const io = async (test: () => boolean | Promise<boolean>) => {
+    for (let i = 0; i < 2_000 && !(await test()); i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(await test()).toBe(true);
+  };
+  const slowHost = (host: ReturnType<typeof fakeHost>, ms: number) => {
+    const deps = host.deps;
+    return (registry: ExporterRegistry): ExportServiceDeps => {
+      const made = deps(registry);
+      return { ...made, call: ((name: CommandName, input: unknown) => new Promise((resolve) => setTimeout(resolve, ms)).then(() => made.call(name as never, input as never))) as ExportServiceDeps['call'] };
+    };
+  };
+
+  it('answers the timeout at the deadline when slow snapshot reads and the run overrun it, and publishes nothing after', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    expect(EXPORT_BUDGET_MS).toBeLessThan(60_000); // the bridge's EXPORT_ANSWER_MS
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    let wrote: Promise<unknown> | null = null;
+    registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      wrote = ctx.writeFile(req.path, '%PDF late');
+      await wrote;
+    } });
+    startExportService(slowHost(host, 20_000)(registry)); // artifacts.get and artifacts.state take 20 s each
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', revision: 7, path: join(root, DOC, 'exports', '7-pdf.pdf') }));
+    await vi.advanceTimersByTimeAsync(EXPORT_BUDGET_MS - 1);
+    expect(host.answered).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2);
+    await io(() => host.answered.length === 1);
+    expect(host.answered[0]!.answer).toEqual({ ok: false, error: `the export did not finish within ${EXPORT_BUDGET_MS / 1000} s` });
+    await vi.advanceTimersByTimeAsync(10_000); // the run's own 20 s end at 60 s
+    await io(() => wrote !== null);
+    await expect(wrote).rejects.toThrow(/cancelled/);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('puts nothing in place when the exporter staged its file before the deadline but finished after it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    let staged = false;
+    registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => {
+      await new Promise((resolve) => setTimeout(resolve, EXPORT_BUDGET_MS - 5_000));
+      await ctx.writeFile(req.path, '%PDF staged');
+      staged = true;
+      await new Promise((resolve) => setTimeout(resolve, 10_000)); // its publication would come after the deadline
+    } });
+    startExportService(host.deps(registry));
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', revision: 7, path: join(root, DOC, 'exports', '7-pdf.pdf') }));
+    await vi.advanceTimersByTimeAsync(EXPORT_BUDGET_MS - 5_000);
+    await io(() => staged);
+    await vi.advanceTimersByTimeAsync(5_001);
+    await io(() => host.answered.length === 1);
+    expect(host.answered[0]!.answer).toMatchObject({ ok: false, error: expect.stringContaining('did not finish') });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await io(async () => (await readdir(join(root, DOC, 'exports'))).length === 0);
   });
 });
 
