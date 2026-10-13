@@ -37,6 +37,7 @@ beforeEach(() => {
   resetArtifactEditors();
   window.maws = fakeClient({ 'session.intent.get': null }).client;
   sent = [];
+  noContentMs = undefined;
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -58,6 +59,7 @@ const until = async (check: () => boolean, what: string) => {
 
 // The commands the tab sent, by name.
 let sent: string[] = [];
+let noContentMs: number | undefined;
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
@@ -76,7 +78,7 @@ function deps(): DocumentTabDeps {
     versionState: async () => new Uint8Array(),
     attributions: async () => new Uint8Array(),
   } as unknown as ArtifactHost;
-  return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [] };
+  return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [], ...(noContentMs !== undefined && { noContentMs }) };
 }
 
 // What L's record view does: the kind's Panel with the state held for this scope.
@@ -151,6 +153,19 @@ describe('the document editor in L’s registry', () => {
       raf.mockRestore();
       caf.mockRestore();
     }
+  });
+
+  // M8 fix wave 2: a document still without its first tab past the bound says why, in place of an endless "Loading…".
+  it('says a document without its first tab has no content yet, then shows it once the tab arrives', async () => {
+    noContentMs = 30;
+    memory.destroy();
+    memory = new MemoryDocumentHost();
+    mount();
+    await until(() => screen.queryByText(/This document has no content yet/) !== null, 'the notice');
+    expect(screen.getByRole('status').textContent).toContain('it was created before the host could initialise it');
+    act(() => memory.write((doc) => createDocument(doc, { title: 'Launch plan' })));
+    await shown();
+    expect(screen.queryByText(/This document has no content yet/)).toBeNull();
   });
 
   it('registers the X32 header under the scope given: the title, the saved word, the rail the tab holds, the tab’s guard', async () => {

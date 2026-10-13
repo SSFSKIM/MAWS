@@ -34,7 +34,7 @@ const until = async (check: () => boolean, what: string) => {
   }
 };
 
-function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new MemoryDocumentHost()) {
+function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new MemoryDocumentHost(), extra: Partial<DocumentTabDeps> = {}) {
   hosts.push(memory);
   const handles: Array<DocumentHandle & { closed?: boolean }> = [];
   const calls: Array<[string, unknown]> = [];
@@ -75,7 +75,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
     attributions: async () => new Uint8Array(),
   } as unknown as ArtifactHost;
   const confirm = vi.fn(() => false);
-  const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm, sessionTitle: () => undefined, sessions: () => [] };
+  const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm, sessionTitle: () => undefined, sessions: () => [], ...extra };
   const emit = (name: string, payload: unknown) => {
     for (const listener of listeners.get(name) ?? []) listener(payload);
   };
@@ -120,6 +120,18 @@ describe('a document tab’s state', () => {
     await until(() => [w.memory.doc, ...w.handles.map((h) => h.doc)].every((doc) => text(doc).includes('Alpha') && text(doc).includes('Beta')), 'both replicas’ typing everywhere');
     expect(w.handles.map((h, i) => tabBody(h.doc, 'tab00001') === bound[i])).toEqual([true, true]);
     expect(listTabs(w.memory.doc)).toHaveLength(1);
+  });
+
+  // M8 fix wave 2: a document the host has not given its first tab (until A's `initial` hook, a host stopped between
+  // the creation and that write) is said so after a bound, not shown loading forever; the tab arriving clears it.
+  it('says the document has no content yet when its first tab has not come within the bound, and clears it when it does', async () => {
+    const w = world({}, new MemoryDocumentHost(), { noContentMs: 40 });
+    const state = w.open();
+    await ready(state);
+    expect(state.snapshot().noContent).toBe(false);
+    await until(() => state.snapshot().noContent, 'the bound');
+    w.memory.write((doc) => createDocument(doc, { title: 'Late', id: 'tab00001' }));
+    await until(() => !state.snapshot().noContent, 'the tab to clear it');
   });
 
   it('counts the open threads and follows the replica’s saved state', async () => {

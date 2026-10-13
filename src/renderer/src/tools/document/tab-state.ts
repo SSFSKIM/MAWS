@@ -10,7 +10,9 @@
 //
 // A replica never initialises its document: the host writes a new document's first tab (kinds/document.ts in the
 // engine host; fix wave 1), and the editor shows "Loading…" until that tab has arrived, then binds it.
+import { listTabs } from '@artifacts/document/tabs';
 import { listThreads, observeThreads } from '@artifacts/document/threads';
+import { onUpdate } from '@artifacts/yjs';
 import type { DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
@@ -26,6 +28,7 @@ import { documentMentions } from './mentions';
 
 const ROW_QUIET_MS = 500; // a burst of writes reads the row once
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks
+const NO_CONTENT_MS = 5_000; // the wait for a new document's first tab before saying it has none
 
 export interface DocumentTabDeps {
   host: ArtifactHost;
@@ -36,6 +39,8 @@ export interface DocumentTabDeps {
   sessionTitle(appSessionId: string): string | undefined;
   /** The sessions a mention can name, most recent first, by their shown titles. */
   sessions(): Array<{ appSessionId: string; title: string }>;
+  /** How long an open document may wait for its first tab before the tab says it has no content yet (5 s). */
+  noContentMs?: number;
 }
 
 export interface DocumentTabSnapshot {
@@ -51,6 +56,8 @@ export interface DocumentTabSnapshot {
   suggestions: boolean | null;
   rail: DocumentRail;
   saveVersionRequest: number;
+  /** The document has waited past the bound for its first tab, which the host writes (shown in place of "Loading…"). */
+  noContent: boolean;
   previewing: boolean;
   exporting: ExportStatus | null;
 }
@@ -86,7 +93,7 @@ export class DocumentTabState {
   ) {
     this.artifactId = target.artifactId;
     this.host = deps.host;
-    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, previewing: false, exporting: null };
+    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, exporting: null };
     this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
     this.history = createHistoryApi({
       artifactId: this.artifactId,
@@ -139,8 +146,29 @@ export class DocumentTabState {
     this.stops.push(
       handle.subscribe((document) => this.set({ document })),
       observeThreads(handle.doc, () => this.set({ unresolved: openThreads() })),
+      this.awaitFirstTab(handle),
     );
     this.set({ handle, document: handle.state(), unresolved: openThreads(), ready: true });
+  }
+
+  // A document's first tab is the host's (kinds/document.ts); until A's `initial` hook writes it with the creation, a
+  // host that stopped between the two leaves the document without one until its next start. Past the bound the tab
+  // says so rather than loading forever, and the tab arriving clears it.
+  private awaitFirstTab(handle: DocumentHandle): () => void {
+    if (listTabs(handle.doc).length > 0) return () => {};
+    const timer = setTimeout(() => {
+      if (listTabs(handle.doc).length === 0) this.set({ noContent: true });
+    }, this.deps.noContentMs ?? NO_CONTENT_MS);
+    const off = onUpdate(handle.doc, () => {
+      if (listTabs(handle.doc).length === 0) return;
+      clearTimeout(timer);
+      off();
+      if (this.current.noContent) this.set({ noContent: false });
+    });
+    return () => {
+      clearTimeout(timer);
+      off();
+    };
   }
 
   // The artifact's row: the title and the suggestions setting follow it; the last view is the first read's (the view
