@@ -11,7 +11,7 @@ import { DocumentEditor } from './DocumentEditor';
 import themeCss from './theme.css?raw';
 import type { DocumentHandle } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
-import { World, doc, para, until } from './test-world';
+import { World, doc, para, ticks, until } from './test-world';
 
 // The X28 row's CSS names (docs/doperpowers/plans/2026-10-12-p3-interface-ledger.md).
 const DS_NAMES = new Set([
@@ -21,6 +21,8 @@ const DS_NAMES = new Set([
   ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `--ds-space-${n}`),
   ...['sm', 'md', 'lg', 'full'].map((n) => `--ds-radius-${n}`),
   ...['sm', 'md', 'lg'].map((n) => `--ds-shadow-${n}`),
+  // the page size D's generator derives from `$extensions["dev.maws.page"]` (X28, D's M4), document medium only
+  ...['width', 'height', 'margin'].map((n) => `--ds-page-${n}`),
 ]);
 const LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(|(?<![\w-])(?:black|white|red|green|blue|gr[ae]y|yellow|orange|purple|pink|silver|navy|teal|maroon|olive|lime|aqua|fuchsia|gold|brown|cyan|magenta|violet|indigo|crimson|coral|salmon|tomato)(?![\w-])/i;
 
@@ -165,6 +167,66 @@ describe('the rendered page without a design system', () => {
     expect(getComputedStyle(container.querySelector('.ds-doc h1')!).color).toBe('#123456');
     expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#654321');
     scope.remove();
+  });
+
+  // M8 (Decision Log 23, X28's page names): the page is the system's page wide, Letter without one, and its margin
+  // pads the text (never more than the column allows, so a narrow panel keeps a readable measure).
+  it('is the system’s page wide with its margin, Letter and 1in without one', async () => {
+    const container = await mountEveryKind();
+    const page = container.querySelector<HTMLElement>('.ds-doc-page')!;
+    // a length as this engine computes it
+    const computed = (property: 'maxWidth', value: string) => {
+      const probe = document.body.appendChild(document.createElement('div'));
+      probe.style[property] = value;
+      const out = getComputedStyle(probe)[property];
+      probe.remove();
+      return out;
+    };
+    expect(getComputedStyle(page).maxWidth).toBe(computed('maxWidth', '8.5in'));
+    // happy-dom computes no `min()` with container units: the declaration is read instead
+    expect(declarations(themeCss).filter((d) => d.selector === '.ds-doc-page' && d.property.startsWith('padding')).map((d) => `${d.property}: ${d.value}`)).toEqual(['padding: min(var(--ds-page-margin, 1in), 12cqi)']);
+    const scope = document.head.appendChild(document.createElement('style'));
+    scope.textContent = '.ds-doc { --ds-page-width: 210mm; --ds-page-margin: 20mm; }';
+    expect(getComputedStyle(page).maxWidth).toBe(computed('maxWidth', '210mm'));
+    expect(getComputedStyle(page).maxWidth).not.toBe(computed('maxWidth', '8.5in'));
+    scope.remove();
+  });
+
+  // Decision Log 22 (2), M8's: code takes shiki's dark colours on a dark ground, the page's own (the system's
+  // `--ds-color-bg`), never because the app is dark; without a system the ground is the app's, so it follows the app.
+  it('colours code by the page’s ground, not the app’s theme', async () => {
+    world = new World(doc({ type: 'codeBlock', attrs: { id: 'c1', language: 'js' }, content: [{ type: 'text', text: 'const x = 1;' }] }));
+    handle = openMemoryHandle(world.host, { log: () => {} });
+    await whenSynced(handle);
+    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
+    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} />);
+    await until(() => container.querySelectorAll('.doc-code-token').length > 1, 'the highlighted code');
+    const page = container.querySelector<HTMLElement>('.ds-doc')!;
+    expect(page.dataset.ground).toBe('light');
+    // the dark colours are picked by the page's ground alone (happy-dom does not weigh `!important` against an inline
+    // style, so the rule is read here and its effect in the product build's e2e)
+    const rules = declarations(themeCss).filter((d) => d.value.includes('--shiki-dark'));
+    expect(rules.map((d) => `${d.selector} { ${d.property}: ${d.value} }`)).toEqual(['.ds-doc[data-ground="dark"] .doc-code-token { color: var(--shiki-dark) !important }']);
+    // the app goes dark under a light system: the ground stays light
+    const system = document.head.appendChild(document.createElement('style'));
+    system.textContent = '.ds-doc { --ds-color-bg: #ffffff; }';
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      await ticks(3);
+      expect(page.dataset.ground).toBe('light');
+      // a dark system: the ground is dark, whatever the app's theme
+      system.textContent = '.ds-doc { --ds-color-bg: #1f1e1b; }';
+      await until(() => page.dataset.ground === 'dark', 'the dark ground read');
+      delete document.documentElement.dataset.theme;
+      await ticks(3);
+      expect(page.dataset.ground).toBe('dark');
+      // no system: the app's ground (here the light app's)
+      system.remove();
+      await until(() => page.dataset.ground === 'light', 'the app’s ground again');
+    } finally {
+      system.remove();
+      delete document.documentElement.dataset.theme;
+    }
   });
 
   it('takes its code type from the design system too, the app’s code size only a fallback', async () => {

@@ -8,6 +8,7 @@
    chrome.css's, in the app's own tokens. */
 
 .ds-doc {
+  container-type: inline-size; /* the page's margin is measured against the column it is shown in */
   background: var(--ds-color-bg, var(--bg));
   color: var(--ds-color-text, var(--fg));
   font-family: var(--ds-font-body, var(--font-prose));
@@ -18,9 +19,11 @@
 
 .ds-doc-page {
   box-sizing: border-box;
-  max-width: 8.5in; /* a US Letter page wide, the documents' default page (D12), not the transcript's measure */
+  /* the system's page (D's `dev.maws.page`, X28), a US Letter page without one (D12), not the transcript's measure; its
+     margin pads the text, never more than an eighth of a narrow column (a panel keeps a readable measure) */
+  max-width: var(--ds-page-width, 8.5in);
   margin: 0 auto;
-  padding: var(--ds-space-6, calc(var(--space) * 8)) var(--ds-space-7, calc(var(--space) * 12));
+  padding: min(var(--ds-page-margin, 1in), 12cqi);
 }
 
 .ds-doc .doc-content {
@@ -259,8 +262,8 @@
   min-height: var(--ds-space-8, calc(var(--space) * 16));
 }
 
-/* code highlighting: shiki's light colour inline, its dark one picked while the app is dark (the interim until D's
-   scope draws the system's own ground) */
-[data-theme="dark"] .ds-doc .doc-code-token {
+/* code highlighting: shiki's light colour inline, its dark one on a dark ground, the page's own (`data-ground`, read
+   from the page's computed background: the system's `--ds-color-bg`, the app's without a system), never the app theme */
+.ds-doc[data-ground="dark"] .doc-code-token {
   color: var(--shiki-dark) !important;
 }

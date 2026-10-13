@@ -53,12 +53,13 @@ body { background: var(--ds-color-bg); }
 }
 `;
 
-// The theme as the file needs it: no comments (they name `--ds-*`), and no rule keyed to the app's theme (the editor's
-// interim dark code colours): a file has no app theme, and the system's ground picks the code colours (highlight.ts).
+// The theme as the file needs it: no comments (they name `--ds-*`), and no rule keyed to the editor's reading of the
+// page's ground (its dark code colours): the file's code is coloured as it is written, by the system's ground
+// (highlight.ts).
 const themeForFile = (css: string): string =>
   css
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/[^{}]*\[data-theme[^{}]*\{[^{}]*\}/g, '')
+    .replace(/[^{}]*\[data-(?:theme|ground)[^{}]*\{[^{}]*\}/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 

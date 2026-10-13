@@ -21,8 +21,9 @@
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { inHistory, type VersionView } from '../collab';
+import { isDarkGround } from '../export/highlight';
 import type { Carry } from '../../yjs';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
@@ -353,9 +354,11 @@ function PageFrame({ editor, handle, author, comments, tabId, preview, history, 
 
   // a version is drawn with the design-system tokens it pinned (and its own overrides)
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;
+  const page = useRef<HTMLDivElement>(null);
+  const ground = usePageGround(page, tokens);
   return (
     <div ref={frame} className="doc-page-frame" onContextMenu={editors.onContextMenu}>
-      <div className="ds-doc" style={tokens} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
+      <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
         <div className="ds-doc-page">
           <EditorContent editor={editor} />
         </div>
@@ -379,6 +382,30 @@ function PageFrame({ editor, handle, author, comments, tabId, preview, history, 
       {editors.open && <ShowEditorsMenu open={editors.open} onShow={editors.show} onClose={editors.close} />}
     </div>
   );
+}
+
+// The page's ground, light or dark, as its computed background reads (the system's `--ds-color-bg`, the app's without
+// a system; Decision Log 22): what the code highlighting keys its colours to. Read again when the app's theme, a
+// stylesheet (a design-system scope's) or the page's own tokens change.
+function usePageGround(page: RefObject<HTMLElement | null>, tokens: CSSProperties | undefined): 'light' | 'dark' {
+  const [ground, setGround] = useState<'light' | 'dark'>('light');
+  useLayoutEffect(() => {
+    const element = page.current;
+    if (!element) return;
+    const read = () => {
+      const background = getComputedStyle(element).backgroundColor;
+      const clear = background === '' || background === 'transparent' || /^rgba\(.*,\s*0\)$/.test(background);
+      setGround(!clear && isDarkGround(background) ? 'dark' : 'light');
+    };
+    read();
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    if (element.parentElement) observer.observe(element.parentElement, { attributes: true });
+    return () => observer.disconnect();
+  }, [page, tokens]);
+  return ground;
 }
 
 const SAFE_ID = /^[\w-]+$/;
