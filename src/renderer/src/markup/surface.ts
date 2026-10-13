@@ -51,15 +51,39 @@ export function onMarkupSurfaceRemoved(listener: (surface: MarkupSurface) => voi
   return () => void removed.delete(listener);
 }
 
-// The DOM route's still: the window's own page at the rect, taken by main. Null when main could not take it.
+// The Shell's layers drawn over panel content (the floating card's layer, the comment card's host) carry this attribute:
+// the DOM route's still is the surface alone, so they are hidden while main takes it.
+const MARKUP_OCCLUDER = 'data-markup-occluder';
+
+// The DOM route's still: the window's own page at the rect, taken by main. Null when main could not take it. The
+// occluders are hidden for the capture with `visibility: hidden`, never unmounted (the card's composer keeps its draft and
+// its caret, and nothing reflows under the rect), and shown again whatever the capture did; the focus one of them held
+// goes back to it.
 export async function captureWindowRegion(rect: CaptureRect, client: MawsBridge = ipc): Promise<CapturedImage | null> {
-  const result = await client.invoke('layout.captureRegion', { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } });
-  if (!result.ok) {
-    console.warn(`[markup] the capture was refused: ${result.error.message}`);
-    return null;
+  const focused = document.activeElement;
+  const hidden = [...document.querySelectorAll<HTMLElement>(`[${MARKUP_OCCLUDER}]`)].map((element) => {
+    const visibility = element.style.visibility;
+    element.style.visibility = 'hidden';
+    return { element, visibility };
+  });
+  try {
+    if (hidden.length > 0) await painted(); // the window shows them hidden before main takes it
+    const result = await client.invoke('layout.captureRegion', { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } });
+    if (!result.ok) {
+      console.warn(`[markup] the capture was refused: ${result.error.message}`);
+      return null;
+    }
+    return result.value.image;
+  } finally {
+    for (const { element, visibility } of hidden) element.style.visibility = visibility;
+    // a focused element under a hidden layer loses the focus (it is not focusable while hidden): it comes back
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (lost && focused instanceof HTMLElement && focused.isConnected && hidden.some(({ element }) => element.contains(focused))) focused.focus({ preventScroll: true });
   }
-  return result.value.image;
 }
+
+// Two frames: the style change is in a frame the compositor has drawn.
+const painted = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
 // A surface the renderer draws (the DOM route), registered under the body's scope while `enabled`: the element's rect
 // captured from the window, nothing to freeze. The deliverable viewer's now; P3-B's and P3-C's editors the same way. The

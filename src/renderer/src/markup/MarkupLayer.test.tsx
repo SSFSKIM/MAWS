@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
-import { resetComposerStore, useComposerStore } from '../stores/composer';
+import { registerFocusTarget, resetComposerStore, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -117,7 +117,7 @@ describe('MarkupLayer', () => {
     expect(useMarkup.getState().session).toBeNull();
     expect(end).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('region', { name: 'Mark-up' })).toBeNull();
-    expect(useComposerStore.getState().prefills.size).toBe(0);
+    expect(useComposerStore.getState().attachmentQueue.size).toBe(0);
   });
 
   it('Add to chat delivers the composite to the shown session and ends', async () => {
@@ -125,7 +125,26 @@ describe('MarkupLayer', () => {
     drag([[310, 130], [320, 140]]);
     await userEvent.click(screen.getByRole('button', { name: 'Add to chat' }));
     await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
-    expect(useComposerStore.getState().prefills.get(A)).toMatchObject({ text: 'Mark-up of Page A ', images: [{ name: 'mark-up.png', mediaType: 'image/png', data: 'AQID' }] });
+    const [queued] = useComposerStore.getState().attachmentQueue.get(A) ?? [];
+    expect(queued.text).toBe('Mark-up of Page A ');
+    expect(queued.files.map((f) => [f.name, f.type, f.size])).toEqual([['mark-up.png', 'image/png', 3]]);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it('a composer that refuses (busy) leaves the overlay and its drawing, and Add to chat can be pressed again', async () => {
+    let accepts = false;
+    registerFocusTarget(A, { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn(), attachFiles: async () => accepts });
+    await open();
+    drag([[310, 130], [320, 140]]);
+    const add = screen.getByRole('button', { name: 'Add to chat' });
+    await userEvent.click(add);
+    await vi.waitFor(() => expect(add).toHaveProperty('disabled', false));
+    expect(useMarkup.getState().session).not.toBeNull();
+    expect(paths()).toEqual(['M10 10L20 20']);
+    expect(end).not.toHaveBeenCalled();
+    accepts = true;
+    await userEvent.click(add);
+    await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
     expect(end).toHaveBeenCalledTimes(1);
   });
 });

@@ -99,7 +99,8 @@ export function FloatingCardLayer({ body }: { body: RefObject<HTMLElement | null
   const columnRect = useRectIn(area, column);
   const pillHosted = useFloatingCard((s) => s.pillHost !== null);
   return (
-    <div ref={area} data-floating-layer className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top: top ?? 0 }}>
+    // P3-G (§D4.1): a layer over panel content, hidden while the DOM route takes a mark-up still (markup/surface.ts)
+    <div ref={area} data-floating-layer data-markup-occluder className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top: top ?? 0 }}>
       {session !== null &&
         top !== null &&
         bounds &&

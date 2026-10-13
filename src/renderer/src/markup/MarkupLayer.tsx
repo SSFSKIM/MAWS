@@ -176,6 +176,7 @@ function MarkupOverlay({ session }: { session: MarkupSession }) {
   const add = async () => {
     setAdding(true);
     await addMarkupToChat(drawing.marks);
+    setAdding(false); // a busy composer refused it: the drawing stays, and Add to chat can be pressed again
   };
 
   return (

@@ -1,6 +1,7 @@
 // P3-G (§D4.1 to §D4.4): a mark-up session over the selected panel tab's surface: the still taken before anything is
 // drawn, a refused capture's toast, the endings (Escape, the surface going, a tab switch, the panel collapsing), and Add
-// to chat's delivery to the shown session's composer (its focus target when mounted, else a prefill).
+// to chat's delivery to the shown session's composer (its focus target when mounted and able to take it, else the
+// composer store's queue; a busy composer keeps the session open with a toast).
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
@@ -107,6 +108,7 @@ describe('the session’s endings', () => {
     expect(s.end).toHaveBeenCalledTimes(1);
     expect(useMarkup.getState().session).toBeNull();
     expect(useComposerStore.getState().prefills.size).toBe(0);
+    expect(useComposerStore.getState().attachmentQueue.size).toBe(0);
   });
 
   it('ends when the surface unregisters (it unmounted)', async () => {
@@ -134,6 +136,9 @@ describe('addMarkupToChat', () => {
   const marks: Mark[] = [{ tool: 'box', ink: 'red', from: { x: 1, y: 1 }, to: { x: 9, y: 9 } }];
   const png = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
 
+  const queued = () => (useComposerStore.getState().attachmentQueue.get(A) ?? []).map(({ files, text }) => ({ files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })), text }));
+  const LABEL = 'Mark-up of "Page A" — http://127.0.0.1/a.html ';
+
   it('composites at the session’s size, attaches mark-up.png to the mounted composer, puts the label in the draft and focuses it', async () => {
     const s = surface();
     registerMarkupSurface(scope, s);
@@ -146,6 +151,7 @@ describe('addMarkupToChat', () => {
       attachFiles: async (attached) => {
         files.push(...attached);
         calls.push('attach');
+        return true;
       },
     } as FocusTarget);
     await startMarkup();
@@ -154,25 +160,64 @@ describe('addMarkupToChat', () => {
     expect(render).toHaveBeenCalledWith(still, marks, 800);
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({ name: 'mark-up.png', type: 'image/png', size: 4 });
-    expect(calls).toEqual(['attach', 'insert Mark-up of "Page A" — http://127.0.0.1/a.html ', 'focus']);
+    expect(calls).toEqual([`attach`, `insert ${LABEL}`, 'focus']);
+    expect(s.end).toHaveBeenCalledTimes(1);
+    expect(useMarkup.getState().session).toBeNull();
+    expect(useComposerStore.getState().prefills.size).toBe(0);
+  });
+
+  it('queues it for the session when no composer is mounted (the card closed to its pill), never as a prefill that would replace the draft', async () => {
+    const s = surface();
+    registerMarkupSurface(scope, s);
+    await startMarkup();
+    await addMarkupToChat(marks, async () => png);
+    expect(queued()).toEqual([{ files: [{ name: 'mark-up.png', type: 'image/png', size: 4 }], text: LABEL }]);
+    expect(useComposerStore.getState().prefills.size).toBe(0);
     expect(s.end).toHaveBeenCalledTimes(1);
     expect(useMarkup.getState().session).toBeNull();
   });
 
-  it('prefills the session’s composer when none is mounted (the card closed to its pill), the image by name, type and base64', async () => {
-    registerMarkupSurface(scope, surface());
+  it('a busy composer refuses: the session and its surface stay, nothing is queued, and the toast says to try again', async () => {
+    const s = surface();
+    registerMarkupSurface(scope, s);
+    const insertText = vi.fn();
+    registerFocusTarget(A, { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText, attachFiles: async () => false });
+    await startMarkup();
+    const session = useMarkup.getState().session;
+    await addMarkupToChat(marks, async () => png);
+    expect(useMarkup.getState().session).toBe(session);
+    expect(s.end).not.toHaveBeenCalled();
+    expect(insertText).not.toHaveBeenCalled();
+    expect(queued()).toEqual([]);
+    expect(toasts()).toEqual([MARKUP_COPY.composerBusy]);
+    expect(MARKUP_COPY.composerBusy).toBe('The composer is busy — try again in a moment');
+  });
+
+  it('a composer gone while it attached (it refused as it unmounted) leaves the picture in the queue, and the session ends', async () => {
+    const s = surface();
+    registerMarkupSurface(scope, s);
+    let off = () => {};
+    off = registerFocusTarget(A, {
+      focusEditor: vi.fn(),
+      focusFrame: vi.fn(),
+      insertText: vi.fn(),
+      attachFiles: async () => {
+        off();
+        return false;
+      },
+    });
     await startMarkup();
     await addMarkupToChat(marks, async () => png);
-    expect(useComposerStore.getState().prefills.get(A)).toEqual({
-      text: 'Mark-up of "Page A" — http://127.0.0.1/a.html ',
-      images: [{ name: 'mark-up.png', mediaType: 'image/png', data: 'iVBORw==' }],
-    });
+    expect(queued()).toEqual([{ files: [{ name: 'mark-up.png', type: 'image/png', size: 4 }], text: LABEL }]);
+    expect(toasts()).toEqual([]);
+    expect(s.end).toHaveBeenCalledTimes(1);
+    expect(useMarkup.getState().session).toBeNull();
   });
 
   it('names a JPEG fallback mark-up.jpg', async () => {
     registerMarkupSurface(scope, surface());
     await startMarkup();
     await addMarkupToChat([], async () => new Blob([new Uint8Array([255, 216])], { type: 'image/jpeg' }));
-    expect(useComposerStore.getState().prefills.get(A)?.images).toEqual([{ name: 'mark-up.jpg', mediaType: 'image/jpeg', data: '/9g=' }]);
+    expect(queued()).toEqual([{ files: [{ name: 'mark-up.jpg', type: 'image/jpeg', size: 2 }], text: LABEL }]);
   });
 });

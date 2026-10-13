@@ -1,13 +1,14 @@
 // P3-G (§D4.1 to §D4.4): one mark-up session at a time, over the selected panel tab's surface. Start takes the still
 // before anything is drawn (so neither capture route sees the overlay) and freezes the surface; the overlay
-// (MarkupLayer) draws over the still; Add to chat composites and delivers to the shown session's composer; Escape, the
-// surface unmounting, a panel tab switch and the panel collapsing discard. The page or artifact is never changed.
+// (MarkupLayer) draws over the still; Add to chat composites and adds it to the shown session's draft (never replacing
+// it), ending the session only once the composer took it; Escape, the surface unmounting, a panel tab switch and the
+// panel collapsing discard. The page or artifact is never changed.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
 import type { EditorHostScope } from '../panel/editor-host';
 import { selectedPanelTabId, shownSession } from '../panel/host';
-import { prefillComposer, useComposerStore } from '../stores/composer';
+import { queueComposerAttachment, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { compositeMarkup } from './composite';
@@ -19,6 +20,7 @@ export const MARKUP_COPY = {
   noSession: 'Open a session to mark up',
   captureFailed: 'Couldn’t capture this page',
   addFailed: 'Couldn’t add the mark-up to the chat',
+  composerBusy: 'The composer is busy — try again in a moment',
   layer: 'Mark-up',
   tools: 'Mark-up tool',
   inks: 'Ink colour',
@@ -122,7 +124,8 @@ export function endMarkup(): void {
   finish(true);
 }
 
-// Add to chat: the still and the marks as one picture, attached to the shown session's composer with the label.
+// Add to chat: the still and the marks as one picture, added to the shown session's draft with the label. The session
+// ends once the picture is delivered; a composer that refuses it (busy) leaves the overlay and its drawing, with a toast.
 export async function addMarkupToChat(marks: readonly Mark[], render: typeof compositeMarkup = compositeMarkup): Promise<void> {
   const session = useMarkup.getState().session;
   if (session === null) return;
@@ -136,30 +139,32 @@ export async function addMarkupToChat(marks: readonly Mark[], render: typeof com
     return;
   }
   if (useMarkup.getState().session !== session) return; // discarded meanwhile
-  finish(false);
   const target = shownSession();
-  if (target !== null) await deliver(target, picture, session.label);
+  if (target !== null && !(await deliver(target, picture, session.label))) {
+    toast({ level: 'warning', text: MARKUP_COPY.composerBusy, actions: [], dismissible: true });
+    return;
+  }
+  if (useMarkup.getState().session === session) finish(false);
 }
 
-async function deliver(appSessionId: AppSessionId, picture: Blob, label: string): Promise<void> {
+// Whether the picture was delivered: to the session's mounted composer, which adds it to its draft and takes the label at
+// the caret, or (none mounted, or it went while it was asked) to the composer store's queue, which the session's next
+// composer drains. False only when a composer still mounted refused it (a send in flight).
+async function deliver(appSessionId: AppSessionId, picture: Blob, label: string): Promise<boolean> {
   const name = picture.type === 'image/jpeg' ? 'mark-up.jpg' : 'mark-up.png';
+  const file = new File([picture], name, { type: picture.type });
   const text = MARKUP_COPY.draft(label);
   const composer = useComposerStore.getState().focusTargets.get(appSessionId);
   if (composer?.attachFiles) {
-    await composer.attachFiles([new File([picture], name, { type: picture.type })]);
-    composer.insertText(text);
-    composer.focusEditor();
-    return;
+    if (await composer.attachFiles([file])) {
+      composer.insertText(text);
+      composer.focusEditor();
+      return true;
+    }
+    if (useComposerStore.getState().focusTargets.get(appSessionId) === composer) return false;
   }
-  // no composer of the session is mounted (the card closed to its pill): the composer takes it when it mounts
-  prefillComposer(appSessionId, { text, images: [{ name, mediaType: picture.type, data: await base64(picture) }] });
-}
-
-async function base64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
+  queueComposerAttachment(appSessionId, { files: [file], text });
+  return true;
 }
 
 // Tests.

@@ -49,7 +49,9 @@ export interface EditorHandle {
   clear(): void;
   removeAttachment(id: string): void;
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
-  attachFiles(files: File[]): Promise<void>; // P3-G (§D4.3): as a drop of the files at the caret (Mark-up's Add to chat)
+  // P3-G (§D4.3): as a drop of the files at the caret, once the stored draft is restored (Mark-up's Add to chat, the
+  // composer store's attachment queue); whether the editor took them (false while busy, or once unmounted)
+  attachFiles(files: File[]): Promise<boolean>;
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -147,6 +149,7 @@ export class EditorController {
   private silent = false;
   private busy = false;
   private loaded = false;
+  private restoring: Promise<void> = Promise.resolve(); // P3-G: this mount's draft restoration
   private revision = 0; // local edits and submission invalidate pending restoration
   private lifetime = 0;
   private live = false;
@@ -260,7 +263,7 @@ export class EditorController {
       this.setDoc(flight.doc, { silently: true, caret: null });
       void this.followSubmission(flight);
     }
-    void this.drafts.load().then((draft) => {
+    this.restoring = this.drafts.load().then((draft) => {
       if (!this.live || this.lifetime !== lifetime) return;
       const doc = docOfDraft(draft);
       if (this.revision === revision && !this.busy && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
@@ -490,38 +493,57 @@ export class EditorController {
     if (this.editor) this.setAttachments([...attachmentsOf(this.editor.getJSON()), attachment]);
   }
 
-  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number): Promise<void> {
+  // False when the editor stopped taking attachments meanwhile (a submission, an unmount); a refused or unreadable image
+  // is warned about and counts as taken.
+  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number): Promise<boolean> {
     try {
       const out = await downscaleImage(blob, mediaType);
-      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return false;
       const refusal = imageRefusal(name, out.bytes);
-      if (refusal) return warn(refusal);
-      this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
+      if (refusal) warn(refusal);
+      else this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
     } catch {
       warn(`${name} could not be read as an image`);
     }
+    return true;
   }
 
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
-  // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip.
-  async addFiles(files: File[], at?: number): Promise<void> {
-    if (this.busy || !this.live) return;
+  // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip. Whether
+  // every file was taken: false when the editor was busy or unmounted, or became so before the last one landed.
+  async addFiles(files: File[], at?: number): Promise<boolean> {
+    if (this.busy || !this.live) return false;
     const epoch = this.attachmentEpoch;
+    const taking = () => this.live && !this.busy && this.attachmentEpoch === epoch;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
     for (const file of files) {
-      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+      if (!taking()) return false;
       const action = classifyFile(file, this.client.pathForFile(file));
-      if (action.kind === 'image') await this.attachImage(file.name, file, file.type, epoch);
-      else if (action.kind === 'pdf') {
+      if (action.kind === 'image') {
+        if (!(await this.attachImage(file.name, file, file.type, epoch))) return false;
+      } else if (action.kind === 'pdf') {
         const data = await fileBase64(file);
-        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        if (!taking()) return false;
         this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
       } else if (action.kind === 'mention') this.insertMention(action.path);
       else if (action.kind === 'text') {
         const text = await file.text();
-        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        if (!taking()) return false;
         this.insertPasted(text, file.name);
       } else warn(action.reason);
+    }
+    return true;
+  }
+
+  // P3-G (§D4.3): files from outside the editor (Mark-up's Add to chat, the attachment queue) wait for the stored draft
+  // to be restored, so they join it: the restoration fills only an editor still empty, and would otherwise be skipped
+  // (and the draft written over). A remount meanwhile is waited for in its turn.
+  private async attachFromOutside(files: File[]): Promise<boolean> {
+    for (;;) {
+      const lifetime = this.lifetime;
+      await this.restoring;
+      if (!this.live) return false;
+      if (this.lifetime === lifetime) return this.addFiles(files);
     }
   }
 
@@ -604,7 +626,7 @@ export class EditorController {
           }
         }
       },
-      attachFiles: (files) => this.addFiles(files), // P3-G
+      attachFiles: (files) => this.attachFromOutside(files), // P3-G
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

@@ -24,14 +24,16 @@ let noticesFrame = 0;
 let domCovered = false;
 let overviewOpen = false;
 let told = false; // what main was last told
+let answered: Promise<void> = Promise.resolve(); // P3-G: main's answer to the last `covered: true`
 
 function sync(): void {
   const covered = panes.size > 0 && (domCovered || overviewOpen || holds.size > 0);
   if (covered === told) return;
   told = covered;
-  void ipc.invoke('browser.view.cover', { covered }).then((result) => {
+  const answer = ipc.invoke('browser.view.cover', { covered }).then((result) => {
     if (!result.ok) console.warn(`[browser] the cover was refused: ${result.error.message}`);
   });
+  if (covered) answered = answer;
 }
 
 const rects = () => [...panes].flatMap((rectOf) => rectOf() ?? []);
@@ -100,6 +102,12 @@ export function holdCover(): () => void {
   };
 }
 
+// P3-G (the M4 review's ruling 4): once main has answered the window's cover (at once when nothing is covered), so
+// Mark-up draws its overlay only after the request reached main.
+export function coverAcknowledged(): Promise<void> {
+  return told ? answered : Promise.resolve();
+}
+
 // Tests.
 export function resetCovering(): void {
   watch?.unwatch();
@@ -110,4 +118,5 @@ export function resetCovering(): void {
   domCovered = false;
   overviewOpen = false;
   told = false;
+  answered = Promise.resolve();
 }

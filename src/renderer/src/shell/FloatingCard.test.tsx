@@ -1,6 +1,6 @@
 // P3-G (§D1.4, acceptance 1, 3, 4, 5, 7): the floating card inside C5's real Shell. The composer slot is a probe that
 // registers a focus target as C7's composer does, so "one composer per session" is the composer store's own count.
-import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,11 @@ import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
+import { resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
+import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
+import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
+import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
+import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -342,5 +347,90 @@ describe('the floating card in the Shell', () => {
     expect(pill()).toBeNull();
     act(() => release());
     expect(pill()).not.toBeNull();
+  });
+});
+
+// P3-G (§D4.1, the M4 review's ruling 2): the DOM route's still is the surface alone. The Shell's layers over panel
+// content (the card's layer, the comment card's host) are hidden for the capture, never unmounted, and shown after it.
+describe('a mark-up still taken under the open card', () => {
+  const TAB = 'deliverables:1';
+  const still = { mediaType: 'image/png', data: 'c3RpbGw=', width: 800, height: 500 } as const;
+  afterEach(() => {
+    resetMarkup();
+    resetMarkupSurfaces();
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  // a viewer as the deliverable viewer draws one: its body registered through the DOM route, the comment card's host in it
+  function ViewerProbe() {
+    const body = useRef<HTMLDivElement>(null);
+    useRegionMarkupSurface(body, 'Sales dashboard', true);
+    return (
+      <div ref={body} data-probe-viewer>
+        <CommentCardHost hostId="viewer" host="deliverable" mode="panel" layout="anchored" accepts={() => false} frame={{ scale: 1, offset: { x: 0, y: 0 }, key: 'v2' }} visible />
+      </div>
+    );
+  }
+
+  it('hides the card’s layer and the comment card’s host while main takes the still, keeps both mounted, and shows them after', async () => {
+    registerSlot('panelHost', () => (
+      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+        <ViewerProbe />
+      </EditorHostScopeContext.Provider>
+    ));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+    });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'deliverables', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const shown = card()!;
+    const occluders = () => [...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')];
+    const named = () => occluders().map((el) => (el.hasAttribute('data-floating-layer') ? 'card layer' : el.hasAttribute('data-card-host') ? 'comment card host' : el.tagName));
+    expect(named()).toEqual(['comment card host', 'card layer']);
+
+    const during: { visibility: string[]; card: HTMLElement | null; rect: unknown }[] = [];
+    installFakeMain((name, input) => {
+      if (name !== 'layout.captureRegion') return fail(`unexpected ${name}`);
+      during.push({ visibility: occluders().map((el) => el.style.visibility), card: document.querySelector('[data-floating-card]'), rect: input.rect }); // hidden, so no role query finds it
+      return ok({ image: still });
+    });
+    await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
+    await waitFor(() => expect(useMarkup.getState().session).not.toBeNull());
+
+    expect(during).toEqual([{ visibility: ['hidden', 'hidden'], card: shown, rect: { x: 300, y: 180, width: 800, height: 500 } }]);
+    expect(occluders().map((el) => el.style.visibility)).toEqual(['', '']);
+    expect(card()).toBe(shown);
+  });
+
+  it('shows them again when the capture fails', async () => {
+    registerSlot('panelHost', () => (
+      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+        <ViewerProbe />
+      </EditorHostScopeContext.Provider>
+    ));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+    });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'deliverables', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    window.maws = {
+      invoke: async () => {
+        throw new Error('the window went');
+      },
+      on: () => () => {},
+    } as unknown as typeof window.maws;
+    await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
+    await waitFor(() => expect(warn).toHaveBeenCalledWith('[markup] the still was not taken:', 'the window went'));
+    expect(useMarkup.getState().session).toBeNull();
+    expect([...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')].map((el) => el.style.visibility)).toEqual(['', '']);
   });
 });

@@ -44,9 +44,10 @@ export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
   insertText(text: string): void; // at the editor's caret, the one it left when not focused, else at the end (C11's insertComposerText)
-  // P3-G (§D4.3): files attached as a drop or a paste attaches them (an image to the strip, downscaled and capped);
-  // Mark-up's Add to chat. Optional: a composer that does not register it is prefilled instead.
-  attachFiles?(files: File[]): Promise<void>;
+  // P3-G (§D4.3): files attached as a drop or a paste attaches them (an image to the strip, downscaled and capped),
+  // added to the draft once it is restored; Mark-up's Add to chat and the attachment queue. Whether the composer took
+  // them: false while it is busy (a send in flight) or once it is no longer live.
+  attachFiles?(files: File[]): Promise<boolean>;
   openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
   // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts): the box as it stands, a fill taken
   // or refused (a card holds the box, the editor is read-only), a suggestion shown or refused (the box holds text, a
@@ -97,6 +98,14 @@ export interface ComposerState {
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
   chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
+  attachmentQueue: ReadonlyMap<AppSessionId, readonly QueuedAttachment[]>; // P3-G: what waits for a composer to take it
+}
+
+// P3-G (§D4.3): files and the text that goes with them (Mark-up's picture and its label), for a session's composer to add
+// to its draft.
+export interface QueuedAttachment {
+  files: readonly File[];
+  text: string;
 }
 
 // W3: the widget the model chip's menu shows (opened by the chip, the palette, a typed command or `openComposerWidget`),
@@ -120,6 +129,7 @@ const initial = (): ComposerState => ({
   resubmit: new Map(),
   models: new Map(),
   chipWidgets: new Map(),
+  attachmentQueue: new Map(),
 });
 
 export const useComposerStore = create<ComposerState>()(initial);
@@ -199,6 +209,7 @@ export function registerFocusTarget(appSessionId: AppSessionId, target: FocusTar
     return next;
   });
   if (marked) target.focusFrame();
+  if (target.attachFiles) void drainAttachments(appSessionId, target); // P3-G
   return () => {
     if (useComposerStore.getState().focusTargets.get(appSessionId) !== target) return;
     useComposerStore.setState((s) => {
@@ -207,6 +218,44 @@ export function registerFocusTarget(appSessionId: AppSessionId, target: FocusTar
       return { focusTargets };
     });
   };
+}
+
+// ---- P3-G (§D4.3): the attachment queue ---------------------------------------------------------------------------------
+
+// Mark-up's Add to chat for a session with no composer able to take it (none mounted, or the one asked went meanwhile).
+// It never replaces the draft, as a prefill would: the composer adds the files to its restored draft and inserts the text
+// at the caret, when it registers, or now when one is registered.
+export function queueComposerAttachment(appSessionId: AppSessionId, attachment: QueuedAttachment): void {
+  useComposerStore.setState((s) => ({ attachmentQueue: new Map(s.attachmentQueue).set(appSessionId, [...(s.attachmentQueue.get(appSessionId) ?? []), attachment]) }));
+  const target = useComposerStore.getState().focusTargets.get(appSessionId);
+  if (target?.attachFiles) void drainAttachments(appSessionId, target);
+}
+
+function setQueue(appSessionId: AppSessionId, queued: readonly QueuedAttachment[]): void {
+  useComposerStore.setState((s) => {
+    const attachmentQueue = new Map(s.attachmentQueue);
+    if (queued.length > 0) attachmentQueue.set(appSessionId, queued);
+    else attachmentQueue.delete(appSessionId);
+    return { attachmentQueue };
+  });
+}
+
+// The session's queue into `target`, in order. What it refuses (busy, or gone) waits, ahead of anything queued since, for
+// the next registration, or goes to the composer that took over from it meanwhile.
+async function drainAttachments(appSessionId: AppSessionId, target: FocusTarget): Promise<void> {
+  const queued = useComposerStore.getState().attachmentQueue.get(appSessionId) ?? [];
+  if (queued.length === 0) return;
+  setQueue(appSessionId, []);
+  for (const [index, attachment] of queued.entries()) {
+    if (await target.attachFiles!([...attachment.files])) {
+      target.insertText(attachment.text);
+      continue;
+    }
+    setQueue(appSessionId, [...queued.slice(index), ...(useComposerStore.getState().attachmentQueue.get(appSessionId) ?? [])]);
+    const successor = useComposerStore.getState().focusTargets.get(appSessionId);
+    if (successor && successor !== target && successor.attachFiles) void drainAttachments(appSessionId, successor);
+    return;
+  }
 }
 
 export const memoryTargetOf = (state: ComposerState, appSessionId: AppSessionId): MemoryTarget => state.memoryTargets.get(appSessionId) ?? DEFAULT_MEMORY_TARGET;

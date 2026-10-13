@@ -7,7 +7,7 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { installFakeMain, ok } from '../../test-support/code';
 import { useLayout } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
-import { coverPane, holdCover, resetCovering } from './covering';
+import { coverAcknowledged, coverPane, holdCover, resetCovering } from './covering';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const RECT = { x: 0, y: 0, width: 300, height: 200 };
@@ -47,6 +47,30 @@ describe('the window’s cover', () => {
     release(); // twice is once
     await settle();
     expect(sent()).toEqual([true, false]);
+    pane.release();
+  });
+
+  // P3-G (the M4 review's ruling 4): Mark-up's overlay waits for main's answer to the cover it asked, which main gives
+  // once the page is hidden behind its picture; with the window already covered, for the answer to that request
+  it('coverAcknowledged waits for main’s answer to the window’s cover, and is at once with nothing covered', async () => {
+    const answers: (() => void)[] = [];
+    main = installFakeMain(() => new Promise((resolve) => answers.push(() => resolve(ok()))));
+    let done = false;
+    await coverAcknowledged(); // nothing covered: nothing to wait for
+    const pane = coverPane(() => RECT);
+    const release = holdCover();
+    const acknowledged = coverAcknowledged().then(() => (done = true));
+    const again = holdCover(); // the window is covered already: the same answer is awaited
+    const second = coverAcknowledged();
+    await settle();
+    expect(sent()).toEqual([true]);
+    expect(done).toBe(false);
+    answers.shift()!();
+    await acknowledged;
+    await second;
+    expect(done).toBe(true);
+    release();
+    again();
     pane.release();
   });
 
