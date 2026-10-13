@@ -2,7 +2,7 @@
 // The scope's style follows a live system and is shared by every consumer of one (system, medium, overrides); a
 // version ref is read once and never followed; overrides land after the system; the floor needs no store.
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle } from '../host';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '../types/design_system/defaults';
 import { newDoc, stateV2, type Doc } from '../yjs';
@@ -40,9 +40,10 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     return {
       doc,
       awareness: null as never,
-      state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1 }),
+      state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false }),
       subscribe: () => () => {},
       onRestored: () => () => {},
+      holdRemote: () => {},
       close: closed,
     };
   });
@@ -71,6 +72,21 @@ function systemDoc(files: Record<string, string> = {}): Doc {
 }
 
 const styles = () => [...document.head.querySelectorAll('style[data-ds-scope-style]')] as HTMLStyleElement[];
+
+/** Holds released by the test (each once), or at its end whatever it left held, so a failed assertion leaks no style. */
+function releasedAtEnd(): (release: () => void) => () => void {
+  const held = new Set<() => void>();
+  onTestFinished(() => {
+    for (const release of held) release();
+    held.clear();
+  });
+  return (release) => {
+    held.add(release);
+    return () => {
+      if (held.delete(release)) release();
+    };
+  };
+}
 const flush = () => act(async () => {});
 
 afterEach(() => {
@@ -308,8 +324,9 @@ describe('lifetimes (fix wave 1)', () => {
     const second = systemDoc();
     const [a, b] = [liveView(first, toUrl), liveView(second, toUrl)];
     const id = scopeIdOf('page:a', 'document', undefined);
-    const releaseA = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() }));
-    const releaseB = holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() }));
+    const tracked = releasedAtEnd();
+    const releaseA = tracked(holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() })));
+    const releaseB = tracked(holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() })));
     releaseA();
     first.destroy();
     setToken(second, 'color.accent.$root', color('#123456'));
@@ -324,9 +341,10 @@ describe('lifetimes (fix wave 1)', () => {
     const second = systemDoc(); // independent replicas, nothing syncing them (one disconnected)
     const [a, b] = [liveView(first, toUrl), liveView(second, toUrl)];
     const id = scopeIdOf('page:a', 'document', undefined);
-    const releaseA = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() }));
-    const releaseA2 = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => {} })); // a second hold of one view
-    const releaseB = holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() }));
+    const tracked = releasedAtEnd();
+    const releaseA = tracked(holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() })));
+    const releaseA2 = tracked(holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => {} }))); // a second hold of one view
+    const releaseB = tracked(holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() })));
     setToken(second, 'color.accent.$root', color('#123456'));
     expect(styles()).toHaveLength(1);
     expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
@@ -352,9 +370,10 @@ describe('lifetimes (fix wave 1)', () => {
     const handle: DocumentHandle = {
       doc,
       awareness: null as never,
-      state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0 }),
+      state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, readOnly: false }),
       subscribe: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
       onRestored: () => () => {},
+      holdRemote: () => {},
       close,
     };
     const { host } = fakeHost({});
@@ -388,7 +407,7 @@ describe('lifetimes (fix wave 1)', () => {
       </DesignSystemHostContext.Provider>,
     );
     view.unmount();
-    await act(async () => arrive({ doc: systemDoc(), awareness: null as never, state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0 }), subscribe: () => () => {}, onRestored: () => () => {}, close }));
+    await act(async () => arrive({ doc: systemDoc(), awareness: null as never, state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0, readOnly: false }), subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close }));
     expect(close).toHaveBeenCalledTimes(1);
   });
 });

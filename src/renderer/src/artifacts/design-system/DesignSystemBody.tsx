@@ -10,8 +10,7 @@
 // Every edit writes through to the replica, so there is nothing unsaved to guard on close.
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
-import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
-import type { SaveState } from '@artifacts/provider/port';
+import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DesignSystemPage } from '@artifacts/design-system/page/DesignSystemPage';
 import { usePageState } from '@artifacts/design-system/page/use-system';
 import { useRegionMarkupSurface } from '../../markup/surface';
@@ -34,8 +33,8 @@ function requestCheck(key: string): void {
   useCheckRequests.setState((s) => ({ serials: { ...s.serials, [key]: (s.serials[key] ?? 0) + 1 } }));
 }
 
-/** The header's saved state from the replica's (A's `DocumentState`: `SaveState`, and `readOnly` once A's M4 adds it). */
-export function savedStateOf(state: SaveState & { readOnly?: boolean }): SavedState {
+/** The header's saved state from the replica's (A's `DocumentState`). */
+export function savedStateOf(state: DocumentState): SavedState {
   if (state.readOnly) return 'readonly';
   if (state.phase !== 'live') return 'reconnecting';
   return state.unsaved > 0 ? 'saving' : 'saved';

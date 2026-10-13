@@ -2,8 +2,7 @@
 // actions and the export, read from the tab's state) and its Mark-up surface, over a real replica.
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DocumentHandle } from '@artifacts/host';
-import type { SaveState } from '@artifacts/provider/port';
+import type { DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
 import complete from '@artifacts/design-system/fixtures/complete.tokens.json';
 import { setLaw, writeSystem } from '@artifacts/design-system/model';
@@ -18,17 +17,18 @@ const SCOPE: EditorHostScope = { surface: 'main', tabId: 'artifact:ds1' };
 function fakeHandle() {
   const doc = newDoc();
   writeSystem(doc, { 'DESIGN.md': '# Harbor\n', 'tokens.tokens.json': serializeTokens(parseTokens(complete).tokens!) }, { route: 'derived', at: 0 });
-  let state: SaveState = { phase: 'live', synced: true, unsaved: 0, revision: 1 };
-  const listeners = new Set<(state: SaveState) => void>();
+  let state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const listeners = new Set<(state: DocumentState) => void>();
   const handle: DocumentHandle = {
     doc,
     awareness: null as never,
     state: () => state,
     subscribe: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
     onRestored: () => () => {},
+    holdRemote: () => {},
     close: () => {},
   };
-  const set = (next: Partial<SaveState>) => {
+  const set = (next: Partial<DocumentState>) => {
     state = { ...state, ...next };
     for (const listener of listeners) listener(state);
   };
@@ -108,7 +108,7 @@ describe('the Design System body (X32, Mark-up)', () => {
   });
 
   it('maps the replica’s state onto the header’s', () => {
-    const base: SaveState = { phase: 'live', synced: true, unsaved: 0, revision: 1 };
+    const base: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
     expect(savedStateOf(base)).toBe('saved');
     expect(savedStateOf({ ...base, unsaved: 1 })).toBe('saving');
     expect(savedStateOf({ ...base, phase: 'handshake' })).toBe('reconnecting');
