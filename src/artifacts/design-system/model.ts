@@ -539,7 +539,7 @@ function describeUnit(id: string): string {
 }
 
 // "adopted from <system>", which the kind's guide has the agent record in the law on the adopt route (D12).
-const ADOPTED_FROM = /\badopted from ([^\n.;:]+)/i;
+const ADOPTED_FROM = /\badopted from (.+?)(?:\.(?=\s|$)|[;\n]|$)/im; // to the sentence's end: a file name's dot stays
 
 /**
  * The agent's create (M7's live run): a doc that holds no system takes the sent files whole through `writeSystem`, so it

@@ -592,6 +592,10 @@ describe('publish over a doc that holds no system yet: the agent’s create', ()
     const doc = newDoc();
     publishSystem(doc, {}, { ...FILES, 'DESIGN.md': LAW.replace('Quiet print on warm paper.', 'Adopted from the Harbor site’s CSS variables. Quiet print on warm paper.') }, false);
     expect(readOrigin(doc)).toMatchObject({ route: 'adopted', from: 'the Harbor site’s CSS variables' });
+    // the live run's wording: a bullet naming the file, whose dot does not end the sentence
+    const bullet = newDoc();
+    publishSystem(bullet, {}, { ...FILES, 'DESIGN.md': LAW.replace('Quiet print on warm paper.', 'Quiet print.\n- Adopted from the site’s CSS variables (`src/styles/variables.css`).') }, false);
+    expect(readOrigin(bullet)).toMatchObject({ route: 'adopted', from: 'the site’s CSS variables (`src/styles/variables.css`)' });
   });
 
   it('imports files in Claude’s shape, as a create does', () => {
