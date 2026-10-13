@@ -100,10 +100,11 @@ export class VersionStore {
   }
 
   // A Y kind's version of `state` (the doc's V2 state at `seq`). Answers the row's id. When the latest version already
-  // captured `seq`, an `auto` is not written again, and another kind upgrades an `auto` there in place.
-  writeState(artifactId: string, seq: number, state: Uint8Array, meta: VersionMeta): number | null {
+  // captured `seq`, an `auto` is not written again, and another kind upgrades an `auto` there in place. A doc never
+  // written gets no `auto`, unless the version is a design-system pin's target (`pinTarget`): a pin needs a row.
+  writeState(artifactId: string, seq: number, state: Uint8Array, meta: VersionMeta, options: { pinTarget?: boolean } = {}): number | null {
     const latest = this.latest(artifactId);
-    if (meta.kind === 'auto' && !latest && seq === 0) return null; // an empty doc never written: nothing moved
+    if (meta.kind === 'auto' && !latest && seq === 0 && !options.pinTarget) return null; // nothing moved
     if (latest && latest.seq === seq) {
       if (meta.kind === 'auto') return null;
       if (latest.kind === 'auto') return this.upgrade(latest.id, meta);
@@ -154,10 +155,20 @@ export class VersionStore {
     return Number(result.lastInsertRowid);
   }
 
+  // An `auto` row taking the metadata of the version written at its seq, the pin and the asset refs as they are now (a
+  // null pin clears it; omitted ones are kept).
   private upgrade(id: number, meta: VersionMeta): number {
-    this.db
-      .prepare('UPDATE artifact_versions SET kind = ?, actor = ?, at = ?, label = ?, note = ?, summary = ?, designSystemRef = COALESCE(?, designSystemRef) WHERE id = ?')
-      .run(meta.kind, meta.actor, meta.at, meta.label ?? null, meta.note ?? null, meta.summary ?? null, meta.designSystemRef ? JSON.stringify(meta.designSystemRef) : null, id);
+    const set: [string, SQLInputValue][] = [
+      ['kind', meta.kind],
+      ['actor', meta.actor],
+      ['at', meta.at],
+      ['label', meta.label ?? null],
+      ['note', meta.note ?? null],
+      ['summary', meta.summary ?? null],
+    ];
+    if (meta.designSystemRef !== undefined) set.push(['designSystemRef', meta.designSystemRef ? JSON.stringify(meta.designSystemRef) : null]);
+    if (meta.assetRefs !== undefined) set.push(['assetRefs', JSON.stringify(meta.assetRefs)]);
+    this.db.prepare(`UPDATE artifact_versions SET ${set.map(([column]) => `${column} = ?`).join(', ')} WHERE id = ?`).run(...set.map(([, value]) => value), id);
     return id;
   }
 

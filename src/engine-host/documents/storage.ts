@@ -51,6 +51,11 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return this.status === 'readOnly';
   }
 
+  // A frame's savepoint is open (the idempotency ledger records an op only inside one).
+  get frameOpen(): boolean {
+    return this.frame;
+  }
+
   private sql(text: string): StatementSync {
     let statement = this.statements.get(text);
     if (!statement) this.statements.set(text, (statement = this.db.prepare(text)));

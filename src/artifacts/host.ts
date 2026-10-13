@@ -78,19 +78,23 @@ export interface DocumentStorage {
 // What `afterUpdate` and `afterRestore` return lands in the same commit batch: thread rows for the threads mirror
 // (Decision Log 23c), and from `afterUpdate` the moves and retypes whose authorship the update's attribution row carries
 // over (Decision Log 25j; that row is written after the hook returns).
+//
+// Every hook given a Doc is also given `info.artifactId`, the host document's key (the artifact's id, or a suggestion
+// doc's `<artifactId>:suggest`), so a kind can keep per-artifact state (Decision Log 27).
 export interface KindAdapter {
   kind: ArtifactKind;
-  beforeApply?(live: Doc, incoming: Uint8Array, info: { actor: Actor; step2: boolean }): ((live: Doc) => void) | null;
-  afterUpdate?(live: Doc, info: { update: Uint8Array; actor: Actor }): void | { threads?: ThreadChange; provenance?: Carry[] };
+  beforeApply?(live: Doc, incoming: Uint8Array, info: { artifactId: string; actor: Actor; step2: boolean }): ((live: Doc) => void) | null;
+  afterUpdate?(live: Doc, info: { artifactId: string; update: Uint8Array; actor: Actor }): void | { threads?: ThreadChange; provenance?: Carry[] };
   // The turn version's summary over the results of the session's tool calls on the artifact that turn (Decision Log
   // 23f); without it, "N edits".
   summarizeTurn?(results: unknown[]): string;
   // What a restore leaves in place among the changes made since the version (`keep`: e.g. the messages posted to a
   // thread; parent Decision Log 32): `live` is the live doc, `old` a doc of the version's state, both read-only. Without
   // the hook, or answering null, a restore reverts everything since the version.
-  revertScope?(live: Doc, old: Doc): RevertScope | null;
-  // A restore's kind after-effects (orphaned threads, id repair), written in the restore's commit (Decision Log 16).
-  afterRestore?(live: Doc, restoredFrom: { versionId: number }): void | { threads?: ThreadChange };
+  revertScope?(live: Doc, old: Doc, info: { artifactId: string }): RevertScope | null;
+  // A restore's kind after-effects (orphaned threads, id repair), written in the restore's commit (Decision Log 16);
+  // `versionId` is the version restored from.
+  afterRestore?(live: Doc, info: { artifactId: string; versionId: number }): void | { threads?: ThreadChange };
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
 }
