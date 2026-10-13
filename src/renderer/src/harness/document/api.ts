@@ -18,6 +18,10 @@ export interface DocumentHarnessApi {
   hostJson(tabId?: string): unknown;
   /** The text of the top-level block `id` in a replica's editor, or null. */
   blockText(replica: Replica, id: string): string | null;
+  /** Selects `text` in the top-level block `id` of a replica's editor (M4: what Comment comments). */
+  selectText(replica: Replica, id: string, text: string): void;
+  /** The host's comment threads, oldest first: each one's id, status, quote and messages' bodies. */
+  threads(): Array<{ id: string; status: 'open' | 'resolved'; quote: string; messages: string[] }>;
   /** Focuses a replica's editor with the caret at the end of block `id`; resolves once keys sent would land there. */
   caretAtEnd(replica: Replica, id: string): Promise<void>;
   /**

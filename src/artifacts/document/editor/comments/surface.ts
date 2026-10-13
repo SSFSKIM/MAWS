@@ -3,7 +3,7 @@
 // threads rail; the card that takes the comment to an agent session is P2's (X21), which lives in the renderer, so the
 // renderer passes it in through this interface (src/artifacts/ stays portable, §4.10). Without a surface, commenting
 // is not offered (the rail still lists, resolves and reopens what others wrote).
-import type { ComponentType } from 'react';
+import type { ReactNode } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { Doc } from '../../../yjs';
 
@@ -45,8 +45,8 @@ export interface CommentOverlayProps {
 export interface DocumentComments {
   /** Called once the editor wrote a new thread and its mark: open the card for it. */
   opened(passage: CommentedPassage): void;
-  /** Drawn over the page's scroll box, filling it (P2's card host). */
-  Overlay: ComponentType<CommentOverlayProps>;
+  /** What to draw over the page's scroll box, filling it (P2's card host); called on each of the overlay's renders. */
+  overlay(props: CommentOverlayProps): ReactNode;
 }
 
 /** Who writes the editor's thread changes, and when. */

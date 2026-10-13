@@ -5,6 +5,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { Actor } from '@shared/artifacts/actor';
 import { schemaFor } from '../../schema';
 import { addTab } from '../../tabs';
 import { addThread, getThread, listThreads, reply, resolve } from '../../threads';
@@ -25,7 +26,7 @@ afterEach(() => {
   world = null;
 });
 
-const SESSION = { kind: 'session', appSessionId: 'a1111111-1111-4111-8111-111111111111' } as const;
+const SESSION = { kind: 'session', appSessionId: 'a1111111-1111-4111-8111-111111111111' } as Actor;
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
 interface Mounted {
@@ -45,7 +46,7 @@ async function mount(content: JSONContent, { surface = true } = {}): Promise<Mou
   let overlay: CommentOverlayProps | null = null;
   const comments: DocumentComments = {
     opened: (passage) => opened.push(passage),
-    Overlay: (props) => {
+    overlay: (props) => {
       overlay = props;
       return <div data-testid="overlay" />;
     },

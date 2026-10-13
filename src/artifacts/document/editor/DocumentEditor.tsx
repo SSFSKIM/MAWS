@@ -41,7 +41,7 @@ export interface DocumentEditorProps {
   renderDiagram?: ViewEnvironment['renderDiagram'];
   /** Receives the active tab's editor, and null when it goes (the harness's and the tests' reach). */
   onEditor?: (editor: Editor | null) => void;
-  /** Where a comment goes (P2's card); without it, commenting is not offered. Keep it stable: its Overlay is mounted by identity. */
+  /** Where a comment goes (P2's card); without it, commenting is not offered. */
   comments?: DocumentComments;
 }
 
@@ -250,7 +250,6 @@ function PageFrame({ editor, handle, author, comments }: { editor: Editor; handl
     };
   }, [editor, handle, author]);
 
-  const Overlay = comments?.Overlay;
   return (
     <div ref={frame} className="doc-page-frame">
       <div className="ds-doc" onScroll={comments ? moved : undefined}>
@@ -258,7 +257,7 @@ function PageFrame({ editor, handle, author, comments }: { editor: Editor; handl
           <EditorContent editor={editor} />
         </div>
       </div>
-      {Overlay && <Overlay {...reach} layoutKey={`${editor.instanceId}:${layout}`} />}
+      {comments?.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}` })}
     </div>
   );
 }

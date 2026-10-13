@@ -2,7 +2,8 @@
 // docs/doperpowers/plans/2026-10-12-p3-b-documents.md, its e2e "Proves"): two DocumentEditors over two replicas of one
 // in-memory host document, each a real PortProvider on a real MessageChannel, in the built renderer. Typing, a toolbar
 // insert of every block kind, a tab added and switched, find stepping to the second match, and the Korean composition
-// drive (S7b's 2-set model through CDP, as S7b drove it) in replica A while replica B types elsewhere. `pnpm
+// drive (S7b's 2-set model through CDP, as S7b drove it) in replica A while replica B types elsewhere; and (M4) a
+// comment's card anchored to its mark, Resolve and Reopen. `pnpm
 // e2e:document` builds the harness and runs this file; under a plain build the cases skip. One launch for the file; the
 // page's document is reset before each case.
 import { existsSync } from 'node:fs';
@@ -214,6 +215,52 @@ test.describe('the document editor', () => {
     await expect.poll(() => blockText(page, 'b', 'para0001')).toBe(expected);
     await expect.poll(() => blockText(page, 'a', 'para0003')).toBe(`The collaborator types here.${remote}`);
     await expect.poll(async () => (await json(page, 'a')) === (await json(page, 'b'))).toBe(true);
+  });
+
+  // M4: a passage commented in replica A opens P2's card on the artifact target in A's editor, pinned under the mark;
+  // replica B highlights the passage; the card's Resolve hides the highlight on both (the mark stays in the text) and
+  // the rail's Reopen brings it back. The real-coordinate drag-move and the OS pasteboard are M9's.
+  test('a commented passage opens the card under its mark, and Resolve hides the mark on both replicas', async () => {
+    const { page } = maws;
+    const QUOTE = 'river runs north';
+    await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
+    await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+
+    const card = replica(page, 'a').locator('[data-comment-card]');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
+    await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
+    await expect(card.getByRole('heading')).toHaveText('Field notes, Notes');
+    const threads = await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
+    expect(threads).toEqual([{ id: expect.any(String), status: 'open', quote: QUOTE, messages: [] }]);
+    const threadId = threads[0]!.id;
+
+    // anchored: the card's top-left corner sits under the passage's first line, 4 px below it
+    const mark = content(page, 'a').locator(`[data-thread="${threadId}"]`).first();
+    await expect(mark).toHaveText(QUOTE);
+    await expect(mark).toHaveClass(/comment-active/);
+    const line = await mark.evaluate((el) => {
+      const r = el.getClientRects()[0]!;
+      return { left: r.left, bottom: r.bottom };
+    });
+    const box = (await card.boundingBox())!;
+    expect(Math.abs(box.y - (line.bottom + 4))).toBeLessThanOrEqual(2);
+    expect(Math.abs(box.x - line.left)).toBeLessThanOrEqual(2);
+    await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
+
+    await card.getByRole('button', { name: 'Resolve' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(content(page, 'a').locator(`.comment-${threadId}`)).toHaveCount(0);
+    await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveCount(0);
+    await expect(content(page, 'b').locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE); // the mark stays in the text
+    expect((await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads()))[0]!.status).toBe('resolved');
+
+    await toolbar(page, 'b').getByRole('button', { name: /^Comments/ }).click();
+    const resolved = replica(page, 'b').getByRole('region', { name: 'Resolved (1)' });
+    await expect(resolved.getByRole('article')).toHaveAttribute('data-thread', threadId);
+    await resolved.getByRole('button', { name: 'Reopen' }).click();
+    await expect(content(page, 'a').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
+    await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
   });
 });
 

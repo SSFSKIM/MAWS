@@ -200,7 +200,8 @@ function paste(ydoc: Doc, tabId: string | null): Plugin {
         let doc = view.state.doc;
         const dragging = view.dragging;
         if (dragging?.move) {
-          const source = dragging.node ?? view.state.selection;
+          // a node drag carries its NodeSelection (prosemirror-view's Dragging; its declaration omits the field)
+          const source = (dragging as { node?: { from: number; to: number } }).node ?? view.state.selection;
           doc = view.state.tr.delete(source.from, source.to).doc;
         }
         const live = new Set(liveRanges(doc).keys());

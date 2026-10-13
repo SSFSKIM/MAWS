@@ -198,8 +198,7 @@ describe('the anchored message (X10)', () => {
 
     it('writes a lead naming the document and tab, the passage and the ids', () => {
       expect(anchorLead(comment, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review" in document art-7f3a, thread k2m9x0qa):');
-      const { artifactId: _a, threadId: _t, ...bare } = comment;
-      expect(anchorLead(bare, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review"):');
+      expect(anchorLead({ kind: comment.kind, label: comment.label, locator: comment.locator }, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review"):');
     });
 
     it('round-trips both destinations, with and without a screenshot', () => {

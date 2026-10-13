@@ -3,6 +3,10 @@
 // `MessageChannel` (P3-0's S5 "world"), so the e2e cases type, insert, find and compose in one editor while the other
 // stands for a remote collaborator. Playwright drives it through `window.__maws_document` (api.ts). No IPC: the page
 // stands alone until A's renderer `ArtifactHost` and L's registry mount the editor in the product (M8).
+//
+// M4: each editor has the renderer's comment surface (tools/document/comments.tsx), so Comment opens P2's card on the
+// artifact target in that editor's host, through the composer seam the side pane registers in the app (registered here
+// for the page); the card's parent is a stand-in session id, so nothing is sent from this page.
 import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
@@ -11,8 +15,17 @@ import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } fr
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
+import { listThreads } from '@artifacts/document/threads';
+import type { AppSessionId } from '@shared/graph/ids';
+import { openComment } from '../../side/register';
+import { registerCommentComposer } from '../../tools/code/anchor/anchor';
+import { useDocumentComments } from '../../tools/document/comments';
 import type { DocumentHarnessApi, Replica } from './api';
 import { placeCaret } from './caret';
+
+// The session a comment would go to; none exists on this page, so a card opens and composes but never sends.
+const COMMENT_SESSION = 'e0000000-0000-4000-8000-00000000d0c5' as AppSessionId;
+const TITLE = 'Field notes';
 
 declare global {
   interface Window {
@@ -84,6 +97,10 @@ export function DocumentHarness() {
     };
   }, [generation]);
 
+  useEffect(() => registerCommentComposer(openComment), []);
+  const commentsA = useDocumentComments({ artifactId: 'harness-doc', appSessionId: COMMENT_SESSION, title: TITLE });
+  const commentsB = useDocumentComments({ artifactId: 'harness-doc', appSessionId: COMMENT_SESSION, title: TITLE });
+
   const onEditorA = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, a: editor })), []);
   const onEditorB = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, b: editor })), []);
 
@@ -117,6 +134,21 @@ export function DocumentHarness() {
         });
         return text;
       },
+      selectText: (replica, id, text) => {
+        const editor = editorOf(replica);
+        let from = -1;
+        editor.state.doc.forEach((node, offset) => {
+          const at = node.attrs.id === id && node.isTextblock ? node.textContent.indexOf(text) : -1;
+          if (at >= 0) from = offset + 1 + at;
+        });
+        if (from < 0) throw new Error(`no "${text}" in block ${id}`);
+        editor.commands.setTextSelection({ from, to: from + text.length });
+        editor.view.focus();
+      },
+      threads: () =>
+        world === null
+          ? []
+          : listThreads(world.host.doc).map(({ id, status, quote, messages }) => ({ id, status, quote, messages: messages.map((message) => message.body) })),
       caretAtEnd: (replica, id) => {
         const editor = editorOf(replica);
         return placeCaret(editor, endOf(editor, id));
@@ -159,10 +191,10 @@ export function DocumentHarness() {
   return (
     <div className="grid h-full grid-cols-2 divide-x divide-border">
       <section aria-label="Replica A" data-replica="a" className="min-h-0">
-        <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} />
+        <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} comments={commentsA} />
       </section>
       <section aria-label="Replica B" data-replica="b" className="min-h-0">
-        <DocumentEditor artifactId="harness-doc" handle={world.handles.b} host={hosts.b} onEditor={onEditorB} />
+        <DocumentEditor artifactId="harness-doc" handle={world.handles.b} host={hosts.b} onEditor={onEditorB} comments={commentsB} />
       </section>
     </div>
   );
