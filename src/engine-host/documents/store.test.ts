@@ -222,6 +222,34 @@ describe('ArtifactStore: byte kinds and assets (Decision Log 2, 7)', () => {
     const id = await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'With logos' });
     expect(store.listVersions(doc.id).find((v) => v.id === id)?.assetRefs.sort()).toEqual([a.assetId, b.assetId].sort());
   });
+
+  it('answers a deduplicated upload only once the asset row it names has committed, and fails it with that commit (M3 re-review finding 1)', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Deck' }, human);
+    tick();
+    const doc = await creation;
+    const upload = () => store.uploadAsset(doc.id, new Uint8Array([1]), { name: 'a.png', mime: 'image/png' }, human);
+    const first = upload();
+    let repeatSettled = false;
+    const repeat = upload().finally(() => (repeatSettled = true));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(0);
+    expect(repeatSettled).toBe(false);
+    tick();
+    expect(await repeat).toEqual(await first);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(1);
+
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const bytes = () => store.uploadAsset(doc.id, new Uint8Array([2]), { name: 'b.png', mime: 'image/png' }, human);
+    const outcomes = Promise.allSettled([bytes(), bytes()]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect((await outcomes).map((o) => o.status)).toEqual(['rejected', 'rejected']);
+    commit.mockRestore();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(1);
+  });
 });
 
 describe('ArtifactStore: duplicate (Decision Log 23b)', () => {
@@ -358,6 +386,20 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(store.listVersions(untouched.id)).toEqual([]);
     await store.endTurn(sid('app-1'));
     expect(store.listVersions(doc.id)).toHaveLength(1);
+  });
+
+  it('writes no turn version for a session that only read an artifact or wrote no edit to it (M3 re-review finding 2)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'human content'));
+    await store.withOp('read-1', 'artifact_read', doc.id, async () => store.get(doc.id), { readOnly: true, actor: agent });
+    await store.withOp('asset-1', 'artifact_upload_asset', doc.id, (scope) => store.uploadAsset(doc.id, new Uint8Array([5]), { name: 'a.png', mime: 'image/png' }, agent, (r) => scope.record(r)), { actor: agent });
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id)).toEqual([]);
+    // A read beside a real edit is not counted as one.
+    await store.withOp('read-2', 'artifact_read', doc.id, async () => store.get(doc.id), { readOnly: true, actor: agent });
+    await store.testWrite(doc.id, 'op-1', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id).map((v) => [v.kind, v.actor, v.summary])).toEqual([['turn', agent, '1 edit']]);
   });
 
   it('pins the governing design system’s version equal to its live state, writing a system version first when it moved (Decision Log 22b, 22d)', async () => {

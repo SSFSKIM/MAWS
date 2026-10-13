@@ -137,7 +137,8 @@ export class ArtifactStore {
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
-  // Per session, the artifacts it wrote this turn: its commits and its tool calls' results (the turn version).
+  // Per session, the artifacts it touched this turn: its committed document edits (a turn version needs one) and its
+  // mutating tool calls' results (the turn version's summary).
   private readonly turns = new Map<string, Map<string, { commits: number; results: unknown[] }>>();
   private designSystemContext: ((system: Artifact) => Promise<string | null>) | null = null;
   private readonly unsubscribe: (() => void)[] = [];
@@ -486,7 +487,10 @@ export class ArtifactStore {
       const existing = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, stage.sha256) as { assetId: string; name: string } | undefined;
       if (existing) {
         const same = { assetId: existing.assetId, ref: `assets/${existing.name}` };
-        if (inFrame) await this.service.inBatch(() => inFrame(same)); // nothing to write, yet the operation completes here
+        // Nothing to write, yet the answer names a row that may still sit in the open batch (a concurrent upload of the
+        // same bytes): it waits for that batch's commit, and fails with it. The seam still runs, in a frame of its own.
+        if (inFrame) await this.service.inBatch(() => inFrame(same));
+        else await this.service.whenCommitted();
         return same;
       }
       const taken = new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
@@ -634,8 +638,9 @@ export class ArtifactStore {
 
   // ── turns, idempotency and the test writer ──
 
-  // The session's turn ended (Decision Log 23f): one `turn` version per Y-kind artifact it wrote, summarised by the
-  // kind's `summarizeTurn` over its tool calls' results (else "N edits"); its presence is cleared (23d).
+  // The session's turn ended (Decision Log 23f, 26c): one `turn` version per Y-kind artifact the session committed an
+  // edit to in the turn (a read, or a write that changed no document, makes none), summarised by the kind's
+  // `summarizeTurn` over its mutating tool calls' results (else "N edits"); its presence is cleared (23d).
   async endTurn(appSessionId: AppSessionId): Promise<void> {
     this.service.clearPresence(appSessionId);
     const wrote = this.turns.get(appSessionId);
@@ -644,7 +649,7 @@ export class ArtifactStore {
     const actor: Actor = { kind: 'session', appSessionId };
     for (const [artifactId, { commits, results }] of wrote) {
       const row = this.entity(artifactId);
-      if (!row || row.deletedAt !== null || !isDocKind(row.kind)) continue;
+      if (commits === 0 || !row || row.deletedAt !== null || !isDocKind(row.kind)) continue;
       const count = results.length > 0 ? results.length : commits;
       const summary = this.service.adapterFor(row.kind)?.summarizeTurn?.(results) ?? `${count} edit${count === 1 ? '' : 's'}`;
       const id = await this.service.inBatch(() => this.versionInFrame(row, { kind: 'turn', actor, summary }));
@@ -654,13 +659,13 @@ export class ArtifactStore {
 
   // Runs `run` once per tool-use id (Decision Log 11, 26c; ops.ts). A mutating run records its op through `scope.record`
   // inside the savepoint of the write that commits it (a store operation's `inFrame` seam, or `writeAs`'s), and fails
-  // when it never does; a `readOnly` run's op row is written after it settles. `actor` (the calling session) files the
-  // result under its turn.
+  // when it never does; a `readOnly` run's op row is written after it settles. `actor` (the calling session) files a
+  // mutating run's result under its turn (what `summarizeTurn` reads); a read-only result never counts as an edit.
   async withOp<R>(opId: string | null | undefined, tool: string, artifactId: string | null, run: (scope: OpScope) => Promise<R>, options: { actor?: Actor; readOnly?: boolean } = {}): Promise<R> {
     if (!opId) this.log(`${tool} ran without a tool-use id: no replay guarantee`);
     const outcome = await this.ops.once(opId || null, tool, artifactId, run, options.readOnly ?? false);
     const { actor } = options;
-    if (outcome.fresh && artifactId && actor?.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).results.push(outcome.result);
+    if (outcome.fresh && !options.readOnly && artifactId && actor?.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).results.push(outcome.result);
     return outcome.result;
   }
 
