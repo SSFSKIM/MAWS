@@ -58,7 +58,7 @@ const adapterOf = (options: Omit<NonNullable<Parameters<typeof documentAdapter>[
 
 /**
  * A's service in miniature: the live doc, a host replica per actor, the hooks in A's order, provenance per update. One
- * difference from A's service as built, which this child needs of A (X24; see the Fix wave 1 record of M2's report): the
+ * difference from A's service as built, which this child needs of A (X24, raised by M2's review fix wave): the
  * carries `afterUpdate` returns re-credit every row the frame writes, in order (the incoming update's, the forwarding
  * edit's and the hook's own), not only the incoming update's, since text the adapter replays or copies through a host
  * replica lands in those later rows.
