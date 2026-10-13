@@ -4,6 +4,7 @@
 // own parser exactly; markdown.ts's head lists the forms. Kept apart from markdown.ts, which owns the sentinels, ids
 // and milestones around them.
 import type { JSONContent, MarkdownToken } from '@tiptap/core';
+import { ORDERED_LIST_MARKER_PATTERN, OrderedList } from '@tiptap/extension-list';
 
 // ── attributes: `key="value"` (or single quotes), HTML-escaped ──
 const escapeAttr = (value: string, quote = '"'): string =>
@@ -108,6 +109,36 @@ function readFences(body: string, names: string): Fence[] | null {
 }
 
 type Lexer = { blockTokens(src: string): MarkdownToken[]; inlineTokens(src: string): MarkdownToken[] };
+
+// ── ordered lists ──
+const tiptapOrderedList = OrderedList.config.markdownTokenizer as { tokenize(src: string, tokens: MarkdownToken[], lexer: Lexer): MarkdownToken | undefined };
+const NUMBERED_ITEM = /^ {0,3}\d{1,9}[.)](?:[ \t]|$)/;
+const TIPTAP_ITEM = new RegExp(`^(\\s*)(${ORDERED_LIST_MARKER_PATTERN})[.)](\\s+)`);
+/**
+ * Tiptap's ordered-list tokenizer takes an item's indent, its marker and one column off each continuation line, one
+ * short of CommonMark's content column (the separator and the spaces after it), so code in an item would gain a leading
+ * space on every read. A numbered list is left to marked's own list tokenizer; for a lettered or roman one (which marked
+ * does not read) the continuation lines are moved left by the difference first, and the token keeps the source's raw.
+ */
+function orderedListToken(src: string, tokens: MarkdownToken[], lexer: Lexer): MarkdownToken | undefined {
+  if (NUMBERED_ITEM.test(src)) return undefined;
+  let column = Infinity;
+  let shift = 0;
+  const lines = src.split('\n');
+  const realigned = lines.map((line) => {
+    const item = TIPTAP_ITEM.exec(line);
+    if (item) {
+      const spaces = item[3].length > 4 ? 1 : item[3].length;
+      column = item[1].length + item[2].length + 1 + spaces;
+      shift = spaces;
+      return line;
+    }
+    return /\S/.test(line) && /^ */.exec(line)![0].length >= column ? line.slice(shift) : line;
+  });
+  const token = tiptapOrderedList.tokenize(realigned.join('\n'), tokens, lexer);
+  if (token) token.raw = lines.slice(0, (token.raw ?? '').split('\n').length).join('\n');
+  return token;
+}
 type Json = JSONContent & { attrs?: Record<string, unknown> };
 type Render = { renderChildren(nodes: JSONContent[] | JSONContent, separator?: string): string };
 type Parse = {
@@ -454,6 +485,11 @@ export const MARKDOWN: Record<string, object> = {
       const destination = /^[^\s()<>\\]*$/.test(href) ? href : `<${href.replace(/[\\<>]/g, '\\$&')}>`;
       return `[${h.renderChildren(node)}](${destination}${title == null ? '' : ` "${title.replace(/[\\"]/g, '\\$&')}"`})`;
     },
+  },
+  // A numbered list goes to marked's CommonMark list tokenizer; Tiptap's own reads letter and roman markers, its
+  // continuation lines realigned first (orderedListToken).
+  orderedList: {
+    markdownTokenizer: { ...tiptapOrderedList, tokenize: orderedListToken },
   },
   // Fenced longer than any run of backticks in the code, so the code never closes its own fence.
   codeBlock: {

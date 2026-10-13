@@ -39,6 +39,7 @@
 // P3-0's `s4/src/markdown.ts` and `s5/lib/read.mjs`.
 import type { AnyExtension, JSONContent } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { ORDERED_LIST_MARKER_PATTERN } from '@tiptap/extension-list';
 import { MarkdownManager } from '@tiptap/markdown';
 import { Marked } from 'marked';
 import { BLOCKS_TABLE, MARKDOWN, gfmTable, rawRegion } from './markdown-syntax';
@@ -95,12 +96,19 @@ const CONTAINERS_WITH_OWN_LINES = new Set(['doc', 'blockquote', 'callout']);
 const ITEMS = new Set(['listItem', 'taskItem']);
 const CELLS = new Set(['tableCell', 'tableHeader']);
 
+const LETTERED_MARKER = new RegExp(`^(\\s*(?:${ORDERED_LIST_MARKER_PATTERN}))([.)])(?=\\s)`);
 // `@tiptap/markdown` already backslash-escapes \\ ` * _ [ ] ~ in text and writes & < > as entities; what the dialect adds
 // is escaped here, through a placeholder its escaper leaves alone and `restore` turns into the backslash.
 function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: boolean; lineEnd: boolean; inCell: boolean }): string {
   let out = text.replace(/==/g, `${ESC}=${ESC}=`).replace(/\+\+/g, `${ESC}+${ESC}+`).replace(/\$\$/g, `${ESC}$${ESC}$`);
   if (inCell) out = out.replace(/\|/g, `${ESC}|`);
-  if (lineStart) out = out.replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|:::|\^)/, `$1${ESC}$2`).replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`);
+  if (lineStart) {
+    out = out
+      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|:::|\^)/, `$1${ESC}$2`)
+      .replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`)
+      // Tiptap's ordered lists also take letter and roman markers: `Dr. Smith` and `A. Lincoln` would read as items
+      .replace(LETTERED_MARKER, `$1${ESC}$2`);
+  }
   if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
   return out;
 }
@@ -313,42 +321,113 @@ function restore(markdown: string, tables: Tables): string {
 }
 
 // ── parse: the dialect into sentinels, then the parsed content's sentinels into ids ──
-function toSentinels(markdown: string, ids: string[]): string {
-  const out: string[] = [];
-  let raw: RegExp | null = null;
-  let code = false;
-  const id = (value: string) => ids.push(value) - 1;
-  for (const line of markdown.replace(/\r\n?/g, '\n').split('\n')) {
-    if (raw) {
-      if (raw.test(line)) raw = null;
-      // a code block's milestones go; its literal ones come back as written
-      out.push(raw && code ? unescapeLiteralMilestones(stripMilestones(line)) : line);
+
+/** A container a line can sit in: a block quote, or a list item whose content starts `indent` columns in. */
+type Container = { quote: true } | { indent: number };
+const QUOTE = /^ {0,3}>[ ]?/;
+const ITEM = new RegExp(`^ {0,3}(?:[-+*]|\\d{1,9}[.)]|(?:${ORDERED_LIST_MARKER_PATTERN})[.)](?=[ \\t]))(?=[ \\t]|$)`);
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/**
+ * The part of a line that continues the `open` containers (CommonMark's block structure, as far as the serializer writes
+ * it: `>` quotes and items indented by their content column; no lazy continuation). `depth` counts the containers it
+ * continues; `prefix` is what it consumed, `rest` the line inside them.
+ */
+function continuing(line: string, open: readonly Container[]): { depth: number; prefix: string; rest: string } {
+  let rest = line;
+  let depth = 0;
+  for (const container of open) {
+    if ('quote' in container) {
+      const quote = QUOTE.exec(rest);
+      if (!quote) break;
+      rest = rest.slice(quote[0].length);
+    } else if (/\S/.test(rest)) {
+      if (!rest.startsWith(' '.repeat(container.indent))) break;
+      rest = rest.slice(container.indent);
+    }
+    depth += 1;
+  }
+  return { depth, prefix: line.slice(0, line.length - rest.length), rest };
+}
+
+/** The quotes and list items a line opens at its start, pushed onto `open`; returns the line inside them. */
+function opening(rest: string, open: Container[]): string {
+  for (;;) {
+    const quote = QUOTE.exec(rest);
+    if (quote) {
+      open.push({ quote: true });
+      rest = rest.slice(quote[0].length);
       continue;
     }
-    if ((raw = rawRegion(line))) {
-      code = /^ {0,3}(`{3,}|~{3,})/.test(line);
+    const item = THEMATIC_BREAK.test(rest) ? null : ITEM.exec(rest);
+    if (!item) return rest;
+    const spaces = /^ */.exec(rest.slice(item[0].length))![0].length;
+    // the content column: the marker and one to four spaces after it; one when the item is blank or its content is code
+    const indent = item[0].length + (/^[ \t]*$/.test(rest.slice(item[0].length)) || spaces > 4 ? 1 : spaces);
+    open.push({ indent });
+    rest = rest.slice(Math.min(indent, rest.length));
+  }
+}
+
+/**
+ * The dialect's markers into sentinels, line by line. Each line is read inside the quotes and list items it continues or
+ * opens, so raw content (code, display math, a diagram's source) stays literal at any depth, a marker line names the
+ * block before it in its own container, and a `:::row` line inside a quote keeps its id for the row's parser.
+ */
+function toSentinels(markdown: string, ids: string[]): string {
+  const out: string[] = [];
+  const open: Container[] = [];
+  /** The raw region a line opened: its closing line, the containers it sits in, and whether it is code. */
+  let raw: { close: RegExp; depth: number; code: boolean } | null = null;
+  const id = (value: string) => ids.push(value) - 1;
+  for (const line of markdown.replace(/\r\n?/g, '\n').split('\n')) {
+    const { depth, ...within } = continuing(line, open);
+    let { prefix, rest } = within;
+    if (raw && depth === raw.depth) {
+      const closes = raw.close.test(rest);
+      // a code block's milestones go; its literal ones come back as written
+      out.push(!closes && raw.code ? `${prefix}${unescapeLiteralMilestones(stripMilestones(rest))}` : line);
+      if (closes) raw = null;
+      continue;
+    }
+    raw = null; // a container the region sat in ended, and the region with it
+    open.length = depth;
+    const inner = opening(rest, open);
+    const opened = open.length > depth;
+    prefix += rest.slice(0, rest.length - inner.length);
+    rest = inner;
+    const close = rawRegion(rest);
+    if (close) {
+      raw = { close, depth: open.length, code: /^ {0,3}(`{3,}|~{3,})/.test(rest) };
       out.push(line);
       continue;
     }
-    if (/^:::/.test(line)) {
+    if (/^:::/.test(rest)) {
       out.push(line); // a structure line: the `<!-- ^id -->` of a `:::row` is read by its parser
       continue;
     }
-    const plain = unescapeLiteralMilestones(stripMilestones(line));
+    const plain = unescapeLiteralMilestones(stripMilestones(rest));
     let match = MARKER_LINE.exec(plain);
+    if (match && !opened) {
+      // a block of its own, between blank lines of its container
+      const blank = prefix.replace(/[ \t]+$/, '');
+      out.push(blank, `${prefix}${sentinel(BLOCK, id(match[1]))}`, blank);
+      continue;
+    }
     if (match) {
-      out.push('', sentinel(BLOCK, id(match[1])), '');
+      // `- ^id` or `> ^id`: the id of the empty first line of the item or quote the line opens
+      out.push(`${prefix}${sentinel(LINE, id(match[1]))}`);
       continue;
     }
     match = MARKER_ROW.exec(plain);
     if (match) {
       const cells = match[1];
       const close = cells.lastIndexOf('|');
-      out.push(close > 0 ? `${cells.slice(0, close).replace(/[ \t]+$/, '')}${sentinel(ROW, id(match[2]))} ${cells.slice(close)}` : `${cells}${sentinel(ROW, id(match[2]))}`);
+      out.push(`${prefix}${close > 0 ? `${cells.slice(0, close).replace(/[ \t]+$/, '')}${sentinel(ROW, id(match[2]))} ${cells.slice(close)}` : `${cells}${sentinel(ROW, id(match[2]))}`}`);
       continue;
     }
     match = MARKER_EOL.exec(plain);
-    out.push(match ? `${match[1]}${sentinel(LINE, id(match[2]))}` : plain);
+    out.push(`${prefix}${match ? `${match[1]}${sentinel(LINE, id(match[2]))}` : plain}`);
   }
   return out.join('\n');
 }

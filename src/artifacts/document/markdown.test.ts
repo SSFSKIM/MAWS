@@ -276,6 +276,61 @@ describe('every stored state, one at a time', () => {
   });
 });
 
+// Decision Log 18: raw content (code, display math, a diagram's source) inside a quote or a list item stays literal; the
+// id and milestone preprocessing reads each line past its containers' prefixes (`> `, an item's indentation, nested).
+describe('raw content inside containers', () => {
+  const t = (text: string): JSONContent => ({ type: 'text', text });
+  const p = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
+  // id-looking, marker-looking, milestone-like and fence-like lines
+  const literal = 'one ^bb\n^cc\n<c:literal>\n</c:x>\n:::\n```';
+  const code: JSONContent = { type: 'codeBlock', attrs: { language: 'md' }, content: [t(literal)] };
+  const quote = (...content: JSONContent[]): JSONContent => ({ type: 'blockquote', content });
+  const item = (...content: JSONContent[]): JSONContent => ({ type: 'listItem', content });
+  const states: Record<string, JSONContent> = {
+    codeInQuote: quote(code),
+    codeInItem: { type: 'bulletList', content: [item(p(t('a')), code)] },
+    codeInQuoteInQuote: quote(quote(code)),
+    // Tiptap's ordered-list tokenizer cut continuation lines a column short: the code gained a leading space
+    codeInOrderedItems: { type: 'orderedList', attrs: { start: 9 }, content: [item(p(t('a')), code), item(p(t('b')), code)] },
+    codeInLetteredItems: { type: 'orderedList', attrs: { start: 1, type: 'i' }, content: [item(p(t('a')), code), item(p(t('b')), { type: 'orderedList', attrs: { start: 1, type: 'a' }, content: [item(p(t('c')), code)] })] },
+    codeInNumberedUnderLettered: { type: 'orderedList', attrs: { start: 1, type: 'A' }, content: [item(p(t('a')), { type: 'orderedList', attrs: { start: 1 }, content: [item(p(t('c')), code)] })] },
+    codeWithNumberedLines: { type: 'orderedList', attrs: { start: 1 }, content: [item(p(t('steps')), { type: 'codeBlock', attrs: { language: null }, content: [t('1. first\n  - second\n> third')] })] },
+    codeInTaskItem: { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [p(t('a')), code] }] },
+    codeInQuoteInItem: { type: 'bulletList', content: [item(p(t('a')), quote(p(t('q')), code))] },
+    codeInItemInQuote: quote({ type: 'bulletList', content: [item(p(t('a')), code)] }),
+    codeInNestedItem: { type: 'bulletList', content: [item(p(t('a')), { type: 'bulletList', content: [item(p(t('b')), code)] })] },
+    rawInQuote: quote({ type: 'diagram', attrs: { source: 'x ^bb\n^cc\n:::' } }, { type: 'mathBlock', attrs: { latex: 'y ^dd\n^ee' } }, { type: 'chart', attrs: { source: 'z ^ff\n^gg', spec: null } }),
+  };
+
+  it.each(Object.entries(states))('%s', (_name, json) => {
+    const doc = docOf([schema.nodeFromJSON(json)]);
+    for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids }))))).toEqual(stored(doc));
+  });
+
+  it('reads quoted code as written (the review’s case)', () => {
+    const [back] = md.parse('> ```md\n> one ^bb\n> ^cc\n> <\\c:literal>\n> ```\n^q1');
+    expect(back.attrs.id).toBe('q1');
+    expect(back.child(0).textContent).toBe('one ^bb\n^cc\n<c:literal>');
+  });
+
+  it('reads comment milestones away inside quoted and listed code, the code as it was', () => {
+    const commented = (): JSONContent => ({ type: 'codeBlock', attrs: { language: null }, content: [t('kept <c:x> '), { type: 'text', text: 'noted', marks: [{ type: 'comment', attrs: { threadId: 't1' } }] }] });
+    const doc = docOf([schema.nodeFromJSON(quote(quote(commented()))), schema.nodeFromJSON({ type: 'bulletList', content: [item(p(t('a')), commented())] })]);
+    const read = md.serialize(doc, { milestones: new Set(['t1']) });
+    expect(read).toContain('> > kept <\\c:x> <c:t1>noted</c:t1>');
+    expect(read).toContain('  kept <\\c:x> <c:t1>noted</c:t1>');
+    expect(stored(docOf(md.parse(read)))).toEqual(stored(doc));
+  });
+
+  it('keeps a structure-block table row’s id inside a quote', () => {
+    const table = { type: 'table', content: [{ type: 'tableRow', attrs: { id: 'rw1' }, content: [{ type: 'tableCell', content: [p(t('a')), p(t('b'))] }] }] };
+    const read = md.serialize(docOf([schema.nodeFromJSON(quote(table))]));
+    expect(read).toContain('> :::row <!-- ^rw1 -->');
+    const [back] = md.parse(read);
+    expect(back.child(0).child(0).attrs.id).toBe('rw1');
+  });
+});
+
 describe('text that reads as markup', () => {
   const tricky = [
     '2*3*4 and _under_ but snake_case',
@@ -289,6 +344,9 @@ describe('text that reads as markup', () => {
     '==not highlighted== and ++not underlined++',
     'an entity &amp; a backslash \\ here',
     'ends like a marker ^ab12',
+    'Dr. Smith signed it',
+    'A. Lincoln and iv) the fourth',
+    'I. Introduction',
     '회의는 분기마다 열리고 **디자인 리뷰**를 포함한다',
   ];
   it.each(tricky)('survives a round trip: %s', (value) => {
