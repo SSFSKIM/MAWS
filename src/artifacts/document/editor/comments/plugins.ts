@@ -10,7 +10,9 @@
 //   never attributes, since overlapping decorations merge and an attribute would keep only one), the active thread's
 //   with `comment-active` too; a resolved thread's mark stays in the text, undecorated. The mark's own span draws
 //   nothing. Decorations are kept per text node and rebuilt only in the textblocks a transaction touched, so a keystroke
-//   in a long document costs one block; a change of the threads map or of the active thread rebuilds them all.
+//   in a long document costs one block; a change of the threads map or of the active thread rebuilds them all. A click
+//   on an open thread's passage draws that thread active (where passages overlap, the innermost: the shortest at the
+//   click, the newest on a tie), and a click on text no open thread covers draws none; the click still places the caret.
 // - The paste dedupe (Outline's rule): a pasted comment mark is kept only when its thread is in this document and no
 //   live text carries it, so a cut followed by a paste moves the comment, a copy pastes plain text, and another
 //   document's mark, or an external `span[data-thread]`, never comes in. A drag-move counts the dragged range as gone,
@@ -137,7 +139,25 @@ function touchedBlocks(tr: Transaction): Array<[number, number]> {
   return out;
 }
 
-function display(ydoc: Doc): Plugin<DisplayState> {
+// The open threads drawn where a click landed: the classes of the display's decoration around its target.
+function threadsClicked(target: EventTarget | null, root: HTMLElement): string[] {
+  const span = target instanceof Element ? target.closest('.comment') : null;
+  if (!span || !root.contains(span)) return [];
+  return [...span.classList].filter((name) => name.startsWith('comment-') && name !== 'comment-active').map((name) => name.slice('comment-'.length));
+}
+
+// Of overlapping threads at `pos`, the innermost: the shortest live range around it, the newest thread on a tie.
+function innermost(doc: PMNode, pos: number, ids: string[], ydoc: Doc): string | null {
+  const ranges = liveRanges(doc);
+  const extent = (id: string) => {
+    const range = ranges.get(id)?.find(({ from, to }) => from <= pos && pos <= to);
+    return range ? range.to - range.from : Infinity;
+  };
+  const created = (id: string) => getThread(ydoc, id)?.createdAt ?? 0;
+  return [...ids].sort((a, b) => extent(a) - extent(b) || created(b) - created(a) || (a < b ? -1 : 1))[0] ?? null;
+}
+
+function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Plugin<DisplayState> {
   return new Plugin<DisplayState>({
     key: commentDisplayKey,
     state: {
@@ -158,7 +178,16 @@ function display(ydoc: Doc): Plugin<DisplayState> {
         return { active: old.active, decorations };
       },
     },
-    props: { decorations: (state) => commentDisplayKey.getState(state)?.decorations },
+    props: {
+      decorations: (state) => commentDisplayKey.getState(state)?.decorations,
+      handleClick: (view, pos, event) => {
+        const ids = threadsClicked(event.target, view.dom);
+        const threadId = ids.length === 0 ? null : innermost(view.state.doc, pos, ids, ydoc);
+        if (threadId !== activeThread(view.state)) view.dispatch(view.state.tr.setMeta(commentDisplayKey, { active: threadId } satisfies DisplayMeta).setMeta('addToHistory', false));
+        if (threadId !== null) onActivate?.(threadId);
+        return false;
+      },
+    },
     view: (view) => {
       // the threads map is outside the bound fragment: redraw after it changes (a resolve, a reopen, a new thread)
       let queued = false;
@@ -226,6 +255,8 @@ export interface CommentsOptions {
   paste: boolean;
   /** Mod-Alt-M: comment the selection (the editor's surface decides what that opens). */
   onComment: (() => boolean) | null;
+  /** A click on a passage drew its thread active (the editor shows it in the rail). */
+  onActivate: ((threadId: string) => void) | null;
 }
 
 declare module '@tiptap/core' {
@@ -239,7 +270,7 @@ declare module '@tiptap/core' {
 
 export const Comments = Extension.create<CommentsOptions>({
   name: 'comments',
-  addOptions: () => ({ doc: null, tabId: null, paste: true, onComment: null }),
+  addOptions: () => ({ doc: null, tabId: null, paste: true, onComment: null, onActivate: null }),
   addCommands() {
     return {
       setActiveThread:
@@ -256,6 +287,6 @@ export const Comments = Extension.create<CommentsOptions>({
   addProseMirrorPlugins() {
     const { doc, tabId } = this.options;
     if (!doc) return [];
-    return [display(doc), ...(this.options.paste ? [paste(doc, tabId)] : [])];
+    return [display(doc, this.options.onActivate), ...(this.options.paste ? [paste(doc, tabId)] : [])];
   },
 });

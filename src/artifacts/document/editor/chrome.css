@@ -316,6 +316,11 @@
   background: var(--bg);
   color: var(--fg-muted);
 }
+/* the editor's active thread (its card's, a shown or clicked passage's), in the passage's highlight colour */
+.doc-thread[aria-current='true'] {
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px var(--warning);
+}
 .doc-thread-quote {
   display: flex;
   flex-direction: column;

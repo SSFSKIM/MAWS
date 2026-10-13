@@ -2,8 +2,10 @@
 // document's comment threads, every tab's, oldest first: each with its quoted passage, its messages and Resolve; an
 // orphan (open, its passage gone) says so; resolved threads are listed apart, each reopenable. Showing a thread selects
 // its passage in the editor (switching to its tab). Resolve and reopen write the threads map only, never the text, and
-// sit outside undo. App chrome beside the page, so it reads the app's tokens (chrome.css). M5 adds History beside it.
-import { useState } from 'react';
+// sit outside undo. The editor's active thread (its card's, a shown one's, a clicked passage's) is the rail's selected
+// one, scrolled into view. App chrome beside the page, so it reads the app's tokens (chrome.css). M5 adds History
+// beside it.
+import { useEffect, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { Doc } from '../../../yjs';
 import { reopen, resolve, type ThreadState } from '../../threads';
@@ -17,12 +19,14 @@ interface Props {
   tabs: TabInfo[];
   /** The tab the editor shows: a thread of another tab names its tab. */
   activeTab: string | null;
+  /** The editor's active thread, selected here. */
+  activeThread: string | null;
   author: CommentAuthor;
   onShow(thread: ThreadState): void;
   onClose(): void;
 }
 
-export function ThreadsRail({ doc, tabs, activeTab, author, onShow, onClose }: Props) {
+export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, onShow, onClose }: Props) {
   const threads = useThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
   const open = threads.filter((thread) => thread.status === 'open');
@@ -33,6 +37,7 @@ export function ThreadsRail({ doc, tabs, activeTab, author, onShow, onClose }: P
       key={thread.id}
       thread={thread}
       tabTitle={tabTitle(thread)}
+      selected={thread.id === activeThread}
       onShow={() => onShow(thread)}
       onResolve={() => resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
       onReopen={() => reopen(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
@@ -61,9 +66,30 @@ export function ThreadsRail({ doc, tabs, activeTab, author, onShow, onClose }: P
   );
 }
 
-function ThreadItem({ thread, tabTitle, onShow, onResolve, onReopen }: { thread: ThreadState; tabTitle: string | null; onShow(): void; onResolve(): void; onReopen(): void }) {
+interface ItemProps {
+  thread: ThreadState;
+  tabTitle: string | null;
+  selected: boolean;
+  onShow(): void;
+  onResolve(): void;
+  onReopen(): void;
+}
+
+function ThreadItem({ thread, tabTitle, selected, onShow, onResolve, onReopen }: ItemProps) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [selected]);
   return (
-    <article className="doc-thread" data-thread={thread.id} data-status={thread.status} data-orphan={thread.orphan ? '' : undefined} aria-label={`Comment on “${thread.quote}”`}>
+    <article
+      ref={ref}
+      className="doc-thread"
+      aria-current={selected ? 'true' : undefined}
+      data-thread={thread.id}
+      data-status={thread.status}
+      data-orphan={thread.orphan ? '' : undefined}
+      aria-label={`Comment on “${thread.quote}”`}
+    >
       <button type="button" className="doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={onShow}>
         {tabTitle !== null && <span className="doc-thread-tab">{tabTitle}</span>}
         <span className="doc-thread-quote-text">{thread.quote}</span>

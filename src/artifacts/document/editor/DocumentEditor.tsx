@@ -10,7 +10,8 @@
 // Comments (M4, D9): Comment (the toolbar, Mod-Alt-M) writes the thread and the mark and hands the passage to the
 // `comments` surface, which opens P2's card for it (the renderer's; passed in so this directory stays portable) and is
 // drawn over the page with the editor's reach (locate a passage, record what was sent, discard what was not, resolve,
-// reopen). The threads rail beside the page lists every tab's threads.
+// reopen). The threads rail beside the page lists every tab's threads, the editor's active one selected; a click on a
+// highlighted passage activates its thread and opens the rail on it.
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
@@ -19,7 +20,7 @@ import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
 import { discardThread, getThread, reopen, reply, resolve } from '../threads';
-import { COMMENTS_ORIGIN, commentSelection, liveRanges } from './comments/plugins';
+import { activeThread, COMMENTS_ORIGIN, commentSelection, liveRanges } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
 import { ThreadsRail } from './comments/ThreadsRail';
 import { useOpenThreadCount } from './comments/use-threads';
@@ -57,6 +58,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [showing, setShowing] = useState<Showing | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
   const { host } = props;
   const author = useMemo<CommentAuthor>(() => ({ actor: host.identity().actor, now: () => Date.now() }), [host]);
@@ -74,6 +76,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
             toggleRail={() => setRailOpen(!railOpen)}
             showing={showing}
             onShown={() => setShowing(null)}
+            onActiveThread={setActiveThreadId}
+            onPassageClick={() => setRailOpen(true)}
             {...props}
           />
         ) : (
@@ -86,6 +90,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
             doc={doc}
             tabs={tabs}
             activeTab={active?.id ?? null}
+            activeThread={activeThreadId}
             author={author}
             onShow={(thread) => {
               if (tabs.some((tab) => tab.id === thread.tabId)) setSelected(thread.tabId);
@@ -107,15 +112,19 @@ interface TabEditorProps extends DocumentEditorProps {
   toggleRail(): void;
   showing: Showing | null;
   onShown(): void;
+  /** The editor's active thread, as it changes (the rail selects it). */
+  onActiveThread(threadId: string | null): void;
+  /** A click on a highlighted passage activated its thread. */
+  onPassageClick(): void;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, railOpen, toggleRail, showing, onShown }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, railOpen, toggleRail, showing, onShown, onActiveThread, onPassageClick }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const openCount = useOpenThreadCount(handle.doc);
   // What Comment reads when it runs (a keystroke or a click after any render), kept current after each render.
-  const latest = useRef({ comments, author, tabTitle });
+  const latest = useRef({ comments, author, tabTitle, onPassageClick });
   useLayoutEffect(() => {
-    latest.current = { comments, author, tabTitle };
+    latest.current = { comments, author, tabTitle, onPassageClick };
   });
   const commentRef = useRef<() => boolean>(() => false);
 
@@ -130,7 +139,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           hold: handle,
           onRestored: (listener) => handle.onRestored(listener),
         },
-        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current() },
+        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick() },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content' } },
@@ -157,6 +166,16 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     onEditor?.(editor);
     return () => onEditor?.(null);
   }, [editor, onEditor]);
+
+  // The active thread (a card's, a shown one's, a clicked passage's) as the rail selects it.
+  useEffect(() => {
+    const report = () => onActiveThread(activeThread(editor.state));
+    report();
+    editor.on('transaction', report);
+    return () => {
+      editor.off('transaction', report);
+    };
+  }, [editor, onActiveThread]);
 
   // Show a thread the rail asked for, once its passage is in this tab's editor (a switched tab binds a moment later).
   useEffect(() => {

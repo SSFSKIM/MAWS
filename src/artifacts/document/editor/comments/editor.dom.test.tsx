@@ -14,7 +14,7 @@ import type { DocumentHandleWithHold } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, ticks, until } from '../test-world';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
-import { covered, highlighted, select } from './test-support';
+import { covered, findPos, highlighted, select } from './test-support';
 
 let world: World | null = null;
 let handles: DocumentHandleWithHold[] = [];
@@ -194,6 +194,73 @@ describe('the threads rail', () => {
 
     act(() => fireEvent.click(within(rail()).getAllByRole('button', { name: /^Show/ })[2]!));
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');
+  });
+});
+
+// Fix wave 1 (Decision Log 25): a click on a highlighted passage activates its thread, drawn active in the text and
+// selected in the rail, which opens on it; where passages overlap the innermost (the shortest at the click) is taken;
+// a click on text no open thread covers draws none active.
+describe('a click on a passage', () => {
+  // A click as ProseMirror hands it to its plugins: at the text's position, its target the element drawn there (happy-dom
+  // has no layout, so ProseMirror's own mouse handling cannot place it).
+  function clickOn(editor: Editor, needle: string): boolean {
+    const pos = findPos(editor, needle) + 1;
+    const { node } = editor.view.domAtPos(pos);
+    const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
+    let event: MouseEvent | null = null;
+    target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    let handled = false;
+    act(() => void (handled = editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!)) ?? false));
+    return handled;
+  }
+  const active = (editor: Editor) => [...editor.view.dom.querySelectorAll('.comment-active')].map((span) => span.textContent).join('') || null;
+  const selectedInRail = () => within(rail()).queryAllByRole('article').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
+
+  it('draws the clicked passage’s thread active and opens the rail on it, selected; plain text draws none', async () => {
+    const { editor, opened } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    const [first, second] = opened.map((p) => p.threadId) as [string, string];
+    await ticks(3);
+    expect(active(editor())).toBe('Owners');
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+
+    expect(clickOn(editor(), 'quarterly'), 'the click still places the caret').toBe(false);
+    expect(active(editor())).toBe('ships quarterly');
+    await quiet();
+    expect(selectedInRail()).toEqual([first]);
+
+    clickOn(editor(), 'Owners');
+    expect(active(editor())).toBe('Owners');
+    expect(selectedInRail()).toEqual([second]);
+
+    clickOn(editor(), 'budget');
+    expect(active(editor())).toBeNull();
+    expect(selectedInRail()).toEqual([]);
+  });
+
+  it('takes the innermost of overlapping passages, and a resolved thread’s passage is no passage', async () => {
+    const { editor, handle, opened } = await mount(content());
+    act(() => void select(editor(), 'The plan ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'ships'));
+    act(() => fireEvent.click(commentButton()));
+    const [outer, inner] = opened.map((p) => p.threadId) as [string, string];
+    await ticks(3);
+    clickOn(editor(), 'plan');
+    expect(active(editor())).toBe('The plan ships quarterly');
+    clickOn(editor(), 'hips');
+    expect(active(editor())).toBe('ships');
+    expect(editor().view.dom.querySelector('.comment-active')!.classList.contains(`comment-${inner}`)).toBe(true);
+
+    act(() => void resolve(handle.doc, inner, { kind: 'human' }, 3));
+    await ticks(3);
+    clickOn(editor(), 'hips');
+    expect(active(editor())).toBe('The plan ships quarterly');
+    expect(editor().view.dom.querySelector('.comment-active')!.classList.contains(`comment-${outer}`)).toBe(true);
   });
 });
 
