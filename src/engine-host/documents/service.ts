@@ -525,7 +525,7 @@ export class DocumentService {
     let forward: ((live: Doc) => void) | null = null;
     if (adapter?.beforeApply) {
       try {
-        forward = adapter.beforeApply(hostDoc.doc, update, { actor: conn.actor, step2 });
+        forward = adapter.beforeApply(hostDoc.doc, update, { artifactId: hostDoc.id, actor: conn.actor, step2 });
       } catch (error) {
         return this.refuse(conn, `the ${adapter.kind} adapter's beforeApply threw: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -557,7 +557,7 @@ export class DocumentService {
   // update's attribution row with any authorship the hook carried, and the hook's thread rows.
   private afterUpdate(hostDoc: HostDoc, adapter: KindAdapter | undefined, actor: Actor, applied: Uint8Array | null): void {
     const after: { outcome?: ReturnType<NonNullable<KindAdapter['afterUpdate']>> } = {};
-    if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => (after.outcome = adapter.afterUpdate!(doc, { update: applied, actor })));
+    if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => (after.outcome = adapter.afterUpdate!(doc, { artifactId: hostDoc.id, update: applied, actor })));
     this.attribute(hostDoc, after.outcome?.provenance);
     if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
   }

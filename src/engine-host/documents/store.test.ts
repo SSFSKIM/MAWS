@@ -539,9 +539,11 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
   });
 
   it('lets a kind scope the revert and write its after-effects, thread rows included, in the restore’s commit', async () => {
+    const told: string[] = []; // the artifact id each restore hook was given (Decision Log 27)
     const adapter: KindAdapter = {
       kind: 'document',
-      revertScope: (live, old) => {
+      revertScope: (live, old, { artifactId }) => {
+        told.push(`revertScope ${artifactId}`);
         expect(old.get('threads').getAttr('t1')).toBeUndefined();
         const sv = stateVector(old);
         const posted = diffV1(live, sv);
@@ -552,7 +554,8 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
         ids.deletes.clients.clear();
         return { keep: ids };
       },
-      afterRestore: (doc, { versionId }) => {
+      afterRestore: (doc, { artifactId, versionId }) => {
+        told.push(`afterRestore ${artifactId}`);
         doc.get('meta').setAttr('restoredFrom', versionId);
         return { threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'q', createdAt: 1, updatedAt: 2 }] } };
       },
@@ -567,6 +570,7 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
       d.get('threads').setAttr('t1', 'a posted message');
     });
     await store.restore(doc.id, at, human);
+    expect(told).toEqual([`revertScope ${doc.id}`, `afterRestore ${doc.id}`]);
     const live = newDoc();
     applyV2(live, service.readState(doc.id).state);
     expect(live.get('root').getAttr('title')).toBe('v1');

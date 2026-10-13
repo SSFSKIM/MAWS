@@ -624,12 +624,12 @@ describe('DocumentService: kind adapters (Decision Log 18, 21)', () => {
       kind: 'document',
       beforeApply(live, incoming, info) {
         seen = { incoming, textBefore: live.get('t').toString() };
-        calls.push(`beforeApply ${info.actor.kind} step2=${info.step2}`);
+        calls.push(`beforeApply ${info.artifactId} ${info.actor.kind} step2=${info.step2}`);
         return info.step2 ? null : (doc) => doc.get('log').insert(doc.get('log').length, 'forwarded;');
       },
       afterUpdate(doc, info) {
         afterSaw = info.update;
-        calls.push(`afterUpdate ${info.actor.kind}`);
+        calls.push(`afterUpdate ${info.artifactId} ${info.actor.kind}`);
         if (doc.get('meta').getAttr('repaired') !== true) doc.get('meta').setAttr('repaired', true);
       },
     };
@@ -644,7 +644,7 @@ describe('DocumentService: kind adapters (Decision Log 18, 21)', () => {
     const commits = service.stats.commits;
     a.send({ type: 'update', update: sent });
     expect(seen).toEqual({ incoming: sent, textBefore: '' }); // the raw bytes, before they were applied
-    expect(calls).toEqual(['beforeApply session step2=false', 'afterUpdate session']);
+    expect(calls).toEqual(['beforeApply a1 session step2=false', 'afterUpdate a1 session']); // each told the doc's key (Decision Log 27)
     expect(contentIdsOf(afterSaw!).inserts.clients.has(a.doc.clientID)).toBe(true); // the applied update
     expect(watcher.received).toEqual([]); // nothing revealed before the commit
     expect(rowCount()).toBe(0);
@@ -665,7 +665,7 @@ describe('DocumentService: kind adapters (Decision Log 18, 21)', () => {
     // a step 2 tells the hook so; a restatement integrates nothing, so no afterUpdate
     calls.length = 0;
     a.send({ type: 'step2', update: diffV1(a.doc) });
-    expect(calls).toEqual(['beforeApply session step2=true']);
+    expect(calls).toEqual(['beforeApply a1 session step2=true']);
   });
 
   it('rejects the frame when beforeApply throws: nothing applied, nothing written, the doc and the others go on', () => {
