@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { EXPORT_QUEUE_MS, ExporterRegistry, runExport, startExportService, writeAtomically, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps } from './export';
+import { EXPORT_QUEUE_MS, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -33,12 +33,11 @@ const writing = (kind: Exporter['kind'], format: Exporter['format'], text: (requ
     await context.writeFile(req.path, await text(req, context));
   },
 });
-const context = (over: Partial<ExportContext> = {}): ExportContext => ({
+const sources = (over: Partial<ExportSources> = {}): ExportSources => ({
   title: 'T',
   state: async () => new Uint8Array(),
   readAsset: async () => null,
-  printToPdf: async () => new Uint8Array(),
-  writeFile: writeAtomically,
+  print: async () => new Uint8Array(),
   ...over,
 });
 
@@ -62,14 +61,14 @@ describe('runExport', () => {
     const registry = new ExporterRegistry();
     const seen: ExportRequest[] = [];
     registry.register(writing('html', 'pdf', () => '%PDF-1.7', seen));
-    expect(await runExport(registry, request({ pageSize: 'a4' }), context())).toEqual({ ok: true });
+    expect(await runExport(registry, request({ pageSize: 'a4' }), sources())).toEqual({ ok: true, revision: 4, path: request().path });
     expect(await readFile(request().path, 'utf8')).toBe('%PDF-1.7');
     expect(await readdir(join(root, ID, 'exports'))).toEqual(['4-pdf.pdf']);
     expect(seen).toEqual([request({ pageSize: 'a4' })]);
   });
 
   it('answers unavailable for a kind and format no exporter serves, naming both', async () => {
-    expect(await runExport(new ExporterRegistry(), request({ kind: 'document', format: 'docx' }), context())).toEqual({
+    expect(await runExport(new ExporterRegistry(), request({ kind: 'document', format: 'docx' }), sources())).toEqual({
       ok: false,
       unavailable: true,
       error: 'MAWS cannot export a document artifact as docx yet',
@@ -80,15 +79,76 @@ describe('runExport', () => {
     const registry = new ExporterRegistry();
     registry.register({ kind: 'html', format: 'pdf', run: async () => Promise.reject(new Error('the page did not load')) });
     registry.register({ kind: 'html', format: 'png', run: () => new Promise<void>(() => {}) });
-    expect(await runExport(registry, request(), context())).toEqual({ ok: false, error: 'the page did not load' });
-    expect(await runExport(registry, request({ format: 'png' }), context(), 20)).toEqual({ ok: false, error: 'the export did not finish within 0.02 s' });
+    expect(await runExport(registry, request(), sources())).toEqual({ ok: false, error: 'the page did not load' });
+    expect(await runExport(registry, request({ format: 'png' }), sources(), 20)).toEqual({ ok: false, error: 'the export did not finish within 0.02 s' });
     expect(await readdir(root)).toEqual([]);
+  });
+
+  // fix wave 1, the review's finding 2: the deadline cancels the export; a late write lands nowhere
+  it('cancels an export at its deadline: its printer is told, and a write it makes after the answer is refused and lands nowhere', async () => {
+    const registry = new ExporterRegistry();
+    let resume!: () => void;
+    let late: Promise<unknown> | null = null;
+    let printSignal: AbortSignal | null = null;
+    registry.register({
+      kind: 'document',
+      format: 'pdf',
+      run: async (req, ctx) => {
+        const printing = ctx.printToPdf('<p>x</p>');
+        await new Promise<void>((resolve) => (resume = resolve));
+        await printing;
+        late = ctx.writeFile(req.path, '%PDF late');
+        await late;
+      },
+    });
+    const print: ExportSources['print'] = (_html, job) => {
+      printSignal = job.signal;
+      return Promise.resolve(bytes('%PDF'));
+    };
+    const answer = await runExport(registry, request({ kind: 'document' }), sources({ print }), 20);
+    expect(answer).toEqual({ ok: false, error: 'the export did not finish within 0.02 s' });
+    expect(printSignal!.aborted).toBe(true); // the printer destroys its window on it
+    resume();
+    await until(() => late !== null);
+    await expect(late).rejects.toThrow(/cancelled/);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('puts nothing in place when the exporter fails after a write, and answers the blocked requests its printer counted', async () => {
+    const registry = new ExporterRegistry();
+    registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => {
+      await ctx.writeFile(req.path, '%PDF half');
+      throw new Error('the mapper broke');
+    } });
+    expect(await runExport(registry, request({ kind: 'document' }), sources())).toEqual({ ok: false, error: 'the mapper broke' });
+    expect(await readdir(root)).toEqual([ID]);
+    expect(await readdir(join(root, ID, 'exports'))).toEqual([]);
+    registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => ctx.writeFile(req.path, await ctx.printToPdf('<img src="https://example.com/a.png">')) });
+    const print: ExportSources['print'] = async (_html, job) => {
+      job.blocked('https://example.com/a.png');
+      job.blocked('https://example.com/b.css');
+      return bytes('%PDF');
+    };
+    expect(await runExport(registry, request({ kind: 'document' }), sources({ print }))).toEqual({ ok: true, revision: 4, path: request().path, blockedRequests: 2 });
+  });
+});
+
+describe('the PDF printer’s request filter (Decision Log 44b)', () => {
+  it('lets its own page, the artifact scheme, data:, blob: and about: through, and nothing else', () => {
+    const page = 'file:///tmp/maws-print-x/page.html';
+    for (const url of [page, 'maws-artifact://0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d/live/assets/a.png', 'data:image/png;base64,AA==', 'blob:file:///7c2a', 'about:blank']) {
+      expect(printRequestAllowed(url, page), url).toBe(true);
+    }
+    for (const url of ['http://127.0.0.1:8080/a.png', 'https://example.com/font.woff2', 'file:///etc/hosts', 'file:///tmp/maws-print-x/other.html', `${page}x`, 'maws-deliverable://x/y/1', 'ws://example.com/']) {
+      expect(printRequestAllowed(url, page), url).toBe(false);
+    }
   });
 });
 
 // A host that holds one html artifact at revisions 2 and 4 (version 9 at revision 2, with an asset) and one document
 // (live at 7, version 3 at 5).
 function fakeHost() {
+  let liveRevision = 7; // the document's live revision as `artifacts.state` reads it
   const answered: CommandInput<'maws.artifact.exported'>[] = [];
   const listeners: ((request: MawsArtifactExport) => void)[] = [];
   const asset = join(root, 'asset.png');
@@ -104,11 +164,13 @@ function fakeHost() {
       case 'artifacts.versionState':
         return answer({ bytes: bytes(`version ${(input as { versionId: number }).versionId}`) });
       case 'artifacts.state':
-        return answer({ revision: 7, bytes: bytes('live') });
-      case 'artifacts.content':
-        return (input as { path?: string }).path === 'assets/a.png'
-          ? answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset })
-          : ({ ok: false, error: { code: 'invalid_input', message: 'not found' } } as CommandResult<CommandName>);
+        return answer({ revision: liveRevision, bytes: bytes(`live@${liveRevision}`) });
+      case 'artifacts.content': {
+        const path = (input as { path?: string }).path;
+        if (path === 'assets/a.png') return answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset });
+        if (path === 'assets/down.png') return { ok: false, error: { code: 'host_unavailable', message: 'the engine host is restarting' } } as CommandResult<CommandName>;
+        return { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      }
       default:
         throw new Error(`unexpected ${name}`);
     }
@@ -116,6 +178,7 @@ function fakeHost() {
   return {
     answered,
     asset,
+    moveTo: (revision: number) => void (liveRevision = revision),
     emit: (req: MawsArtifactExport) => listeners.forEach((listener) => listener(req)),
     deps: (registry: ExporterRegistry): ExportServiceDeps => ({
       registry,
@@ -127,7 +190,7 @@ function fakeHost() {
         return () => void listeners.splice(listeners.indexOf(listener), 1);
       },
       answer: async (input) => void answered.push(input),
-      printToPdf: async (html) => bytes(`%PDF ${html}`),
+      print: async (html) => bytes(`%PDF ${html}`),
     }),
   };
 }
@@ -158,7 +221,7 @@ describe('the export service', () => {
     await until(() => host.answered.length === 2);
     expect(host.answered).toEqual(
       expect.arrayContaining([
-        { appSessionId: 'App-A', requestId: 'r1', answer: { ok: true } },
+        { appSessionId: 'App-A', requestId: 'r1', answer: { ok: true, revision: 4, path: join(root, ID, 'exports', '4-pdf.pdf') } },
         { appSessionId: 'App-A', requestId: 'r2', answer: { ok: false, unavailable: true, error: 'MAWS cannot export a document artifact as docx yet' } },
       ]),
     );
@@ -186,7 +249,7 @@ describe('the export service', () => {
     const service = startExportService(host.deps(registry));
     const live = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', pageSize: 'a4' });
     expect(live).toEqual({ path: join(root, DOC, 'exports', '7-pdf.pdf'), revision: 7 });
-    expect(JSON.parse(await readFile(live.path, 'utf8'))).toEqual({ state: 'live', asset: { bytes: [1, 2, 3], mime: 'image/png' }, missing: null, pdf: '%PDF <h1>Notes</h1>', pageSize: 'a4' });
+    expect(JSON.parse(await readFile(live.path, 'utf8'))).toEqual({ state: 'live@7', asset: { bytes: [1, 2, 3], mime: 'image/png' }, missing: null, pdf: '%PDF <h1>Notes</h1>', pageSize: 'a4' });
     const version = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', versionId: 3 });
     expect(version).toEqual({ path: join(root, DOC, 'exports', '5-pdf.pdf'), revision: 5 });
     expect(JSON.parse(await readFile(version.path, 'utf8'))).toMatchObject({ state: 'version 3', pageSize: null });
@@ -246,13 +309,34 @@ describe('the export service', () => {
   });
 });
 
-describe('writeAtomically', () => {
-  it('replaces a file whole, leaving no temporary file beside it', async () => {
-    const path = join(root, 'out', 'a.pdf');
-    await mkdir(join(root, 'out'));
-    await writeFile(path, 'old');
-    await writeAtomically(path, 'new');
-    expect(await readFile(path, 'utf8')).toBe('new');
-    expect(await readdir(join(root, 'out'))).toEqual(['a.pdf']);
+describe('the export’s snapshot and its asset reads (fix wave 1, the review’s findings 3 and 4)', () => {
+  it('exports a document that moved between the request and its turn as the revision its state was read at, naming the file by it', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    const seen: ExportRequest[] = [];
+    registry.register(writing('document', 'pdf', async (_req, ctx) => new TextDecoder().decode(await ctx.state()), seen));
+    const service = startExportService(host.deps(registry));
+    host.moveTo(8); // the request below was made at 7
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', revision: 7, path: join(root, DOC, 'exports', '7-pdf.pdf') }));
+    await until(() => host.answered.length === 1);
+    expect(host.answered[0]!.answer).toEqual({ ok: true, revision: 8, path: join(root, DOC, 'exports', '8-pdf.pdf') });
+    expect(await readFile(join(root, DOC, 'exports', '8-pdf.pdf'), 'utf8')).toBe('live@8');
+    expect(await readdir(join(root, DOC, 'exports'))).toEqual(['8-pdf.pdf']);
+    expect(seen.map((r) => r.revision)).toEqual([8]);
+    host.moveTo(9); // the library's own: admitted at 7 (artifacts.get), exported at 9
+    expect(await service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).toEqual({ path: join(root, DOC, 'exports', '9-pdf.pdf'), revision: 9 });
+    expect(await readFile(join(root, DOC, 'exports', '9-pdf.pdf'), 'utf8')).toBe('live@9');
+  });
+
+  it('answers a missing asset null, and fails the export on any other failure to read one', async () => {
+    const host = fakeHost();
+    await writeFile(host.asset, new Uint8Array([1]));
+    const registry = new ExporterRegistry();
+    let ref = 'assets/gone.png';
+    registry.register(writing('document', 'pdf', async (_req, ctx) => JSON.stringify(await ctx.readAsset(ref))));
+    const service = startExportService(host.deps(registry));
+    expect(JSON.parse(await readFile((await service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).path, 'utf8'))).toBeNull();
+    ref = 'assets/down.png';
+    await expect(service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).rejects.toMatchObject({ error: { code: 'internal', message: expect.stringContaining('the engine host is restarting') } });
   });
 });

@@ -338,7 +338,10 @@ export type ArtifactUploadAssetResult = z.infer<typeof ArtifactUploadAssetResult
 export const ListedAssetSchema = z.strictObject({ assetId: z.string(), ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().min(0), createdAt: IsoTimeSchema });
 export const ArtifactListAssetsResultSchema = z.strictObject({ status: z.literal('listed'), artifactId: z.uuid(), assets: z.array(ListedAssetSchema) });
 export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSchema>;
-export const ArtifactExportResultSchema = z.strictObject({ status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional() });
+export const ArtifactExportResultSchema = z.strictObject({
+  status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional(),
+  blockedRequests: z.number().int().positive().optional(), // remote resources the page named, which the export did not load (P3-A Decision Log 44b)
+});
 export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
 
 // A refusal an agent can act on: the `isError` text is `<tool>: <sentence> <this JSON>` (`artifactRefusalOf` reads it).

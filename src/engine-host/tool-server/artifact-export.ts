@@ -57,15 +57,21 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       }
       const answer = outcome.answer;
       if (!answer.ok) throw answer.unavailable ? unavailable(answer.error) : new ToolRefusal(`artifact_export: MAWS could not export the artifact: ${answer.error}`);
+      // the snapshot main exported (a document that moved since names a later revision), in the directory named here
+      if (dirname(answer.path) !== dirname(path)) throw new ToolRefusal(`artifact_export: MAWS wrote the export outside ${dirname(path)}`);
+      const exported = answer.path;
       if (to !== null) {
         try {
           await mkdir(dirname(to), { recursive: true });
-          await copyFile(path, to);
+          await copyFile(exported, to);
         } catch (error) {
-          throw new ToolRefusal(`artifact_export: exported to ${path}, but the copy to ${to} failed: ${messageOf(error)}`);
+          throw new ToolRefusal(`artifact_export: exported to ${exported}, but the copy to ${to} failed: ${messageOf(error)}`);
         }
       }
-      const result: ArtifactExportResult = { status: 'exported', artifactId, format: input.format, revision: target.revision, path, ...(to !== null && { copiedTo: to }) };
+      const result: ArtifactExportResult = {
+        status: 'exported', artifactId, format: input.format, revision: answer.revision, path: exported, ...(to !== null && { copiedTo: to }),
+        ...(answer.blockedRequests !== undefined && { blockedRequests: answer.blockedRequests }),
+      };
       return toolText(result);
     }),
   );

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
@@ -358,7 +358,7 @@ describe('artifact_export', () => {
     const path = join(w.userData, 'artifacts', page.artifactId as string, 'exports', `${page.revision}-pdf.pdf`);
     expect(sent).toEqual([expect.objectContaining({ artifactId: page.artifactId, kind: 'html', format: 'pdf', revision: page.revision, path, appSessionId: SELF })]);
     writeFileSync(path, '%PDF-1.7');
-    exporter.answer(sent[0]!.requestId, { ok: true });
+    exporter.answer(sent[0]!.requestId, { ok: true, revision: page.revision as number, path });
     expect(jsonOf(await pending)).toEqual({ status: 'exported', artifactId: page.artifactId, format: 'pdf', revision: page.revision, path, copiedTo: join(w.cwd, 'out', 'dash.pdf') });
     expect(readFileSync(join(w.cwd, 'out', 'dash.pdf'), 'utf8')).toBe('%PDF-1.7');
     expect(sent[0]).not.toHaveProperty('pageSize'); // omitted: the exporter's own default
@@ -367,10 +367,21 @@ describe('artifact_export', () => {
   it('hands the paper the agent chose to main (Decision Log 42)', async () => {
     jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
     const sent: ArtifactExportRequest[] = [];
-    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), queueMicrotask(() => exporter.answer(request.requestId, { ok: true }))), answerMs: 60_000 });
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
     expect(jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'a4' }, w.ctx()))).toMatchObject({ status: 'exported' });
     expect(sent).toEqual([expect.objectContaining({ format: 'pdf', pageSize: 'a4' })]);
     expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'legal' }, w.ctx())).isError).toBe(true);
+  });
+
+  // fix wave 1 (the review's finding 3, Decision Log 44b): the answer names the snapshot main exported
+  it('answers the revision and path main exported (a document that moved since), the remote requests it refused, and refuses a path outside its exports', async () => {
+    const plan = await w.store.create({ kind: 'document', title: 'Plan' }, HUMAN);
+    let answer: (request: ArtifactExportRequest) => ArtifactExportAnswer = (request) => ({ ok: true, revision: request.revision + 3, path: join(dirname(request.path), `${request.revision + 3}-pdf.pdf`), blockedRequests: 2 });
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => queueMicrotask(() => exporter.answer(request.requestId, answer(request))), answerMs: 60_000 });
+    const exported = jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: plan.id, format: 'pdf' }, w.ctx()));
+    expect(exported).toEqual({ status: 'exported', artifactId: plan.id, format: 'pdf', revision: 3, path: join(w.userData, 'artifacts', plan.id, 'exports', '3-pdf.pdf'), blockedRequests: 2 });
+    answer = (request) => ({ ok: true, revision: request.revision, path: join(w.cwd, 'elsewhere.pdf') });
+    expect(textOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: plan.id, format: 'pdf' }, w.ctx()))).toMatch(/outside/);
   });
 
   it('answers exportUnavailable for a pair main has no exporter for, and in a build without the service', async () => {

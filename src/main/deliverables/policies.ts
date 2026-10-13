@@ -184,10 +184,23 @@ function seam(env: SeamEnv, line: string): void {
   seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[deliverables] could not write the e2e seam log', error));
 }
 
+// One webContents' own request filter, consulted before the frame policies (P3-A M7 fix wave 1: the export's PDF
+// printer, Decision Log 44b): `cancel` answers whether to cancel a request that webContents makes. A session has one
+// `onBeforeRequest` listener, so a window that needs more than the frame policies registers here. Answers the removal.
+const ownFilters = new Map<number, (url: string) => boolean>();
+export function restrictRequests(webContentsId: number, cancel: (url: string) => boolean): () => void {
+  ownFilters.set(webContentsId, cancel);
+  return () => {
+    if (ownFilters.get(webContentsId) === cancel) ownFilters.delete(webContentsId);
+  };
+}
+
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
 // filter.
 export function installFramePolicies(session: Session, env: SeamEnv): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
+    if (own) return callback({ cancel: own(details.url) });
     callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin }) });
   });
   session.on('will-download', (event, item) => {

@@ -1674,7 +1674,9 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('maws.artifact.export', { ...request, path: 'relative.pdf' }).ok).toBe(false);
       expect(HOST_EVENTS).toContain('maws.artifact.export');
       expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: false, unavailable: true, error: 'no exporter' } }).ok).toBe(true);
-      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, path: '/x' } }).ok).toBe(false);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, path: '/x' } }).ok).toBe(false); // no revision
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: '/u/x/exports/8-pdf.pdf', blockedRequests: 2 } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: 'relative.pdf' } }).ok).toBe(false);
       expect(validateEventPayload('artifacts.console', { artifactId: id, revision: null, level: 'error', message: 'boom', line: 3, source: null }).ok).toBe(true);
       expect(validateEventPayload('artifacts.console', { artifactId: id, revision: 4, level: 'info', message: 'x', line: null, source: null }).ok).toBe(false);
       expect(HOST_EVENTS).not.toContain('artifacts.console');

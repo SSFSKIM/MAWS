@@ -22,6 +22,7 @@ import {
   CONSOLE_WINDOW_MS,
   guardPermissions,
   isDeliverablePermission,
+  restrictRequests,
   shouldBlockFrameNavigation,
   type FrameLike,
   shouldCancelDownload,
@@ -267,6 +268,20 @@ describe('the policies installed on a session and a window', () => {
     session.beforeRequest!({ url: 'https://example.com/', frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
     session.beforeRequest!({ url: 'https://example.com/', get frame(): never { throw new Error('Render frame was disposed') } }, ({ cancel }) => answers.push(cancel));
     expect(answers).toEqual([true, true, false, false, false]);
+  });
+
+  // fix wave 1 (Decision Log 44b): a window with a filter of its own (the export's PDF printer) is judged by it alone
+  it('asks a webContents’ own filter first, and the frame policies for every other webContents', () => {
+    const session = new FakeSession();
+    installFramePolicies(session as unknown as Session, {});
+    const answers: boolean[] = [];
+    const remove = restrictRequests(41, (url) => !url.startsWith('data:'));
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel)); // the app would let it through
+    session.beforeRequest!({ url: 'data:image/png;base64,AA==', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 7, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    remove();
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    expect(answers).toEqual([true, false, false, false]);
   });
 
   it('cancels a deliverable download and writes the seam line under MAWS_E2E', async () => {

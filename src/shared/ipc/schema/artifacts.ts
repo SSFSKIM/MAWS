@@ -204,7 +204,9 @@ export const commands = {
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
     }),
-    z.strictObject({ path: z.string(), revision: Seq }),
+    // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
+    // PDF printer refused
+    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
   ),
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

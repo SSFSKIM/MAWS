@@ -4,10 +4,19 @@
 // An `ExporterRegistry` keyed by kind and format says what can be exported: this milestone registers an `html`
 // artifact's PDF and PNG (`registerHtmlExporters`); P3-B and P3-C register their kinds' exporters from outside A
 // (`ExporterRegistry.register`, B through its `registerDocumentExporters`). An exporter runs over an `ExportRequest`
-// and the service's `ExportContext` (the artifact's title, its state at the revision, its assets, the PDF printer, an
-// atomic file writer) and writes the file where the request names: the host's path for the tool, under the store's
-// directory (`<userData>/artifacts/<id>/exports/<revision>-<format>.<ext>`) for the library. Main never opens the
+// and the service's `ExportContext` (the artifact's title, its state, its assets, the PDF printer, a file writer, a
+// cancellation signal) and writes the file the request names: under the directory the host named for the tool, under
+// the store's (`<userData>/artifacts/<id>/exports/<revision>-<format>.<ext>`) for the library. Main never opens the
 // store: what an export needs of it comes through the host's commands.
+//
+// Fix wave 1 (Decision Log 44b; the task review's findings): an export works from one snapshot, taken when it starts:
+// a document's live state and the revision it is at, read together (`artifacts.state`), name the file and answer the
+// revision, so the answer describes what was exported even when the doc moved since the request. The service owns the
+// export's end: an exporter's writes are staged and committed (renamed into place) only when it finished in time; at
+// its deadline the export is cancelled, its windows destroyed and its staged files removed, and a write it attempts
+// after that is refused. The PDF printer's window reaches only its own page, `maws-artifact:`, `data:`, `blob:` and
+// `about:`; every other request is cancelled and counted into the answer (`blockedRequests`), so an exporter learns its
+// HTML named a remote resource.
 //
 // At most EXPORT_CONCURRENCY exports run at once; each has EXPORT_GUARD_MS, and one still waiting for a slot after
 // EXPORT_QUEUE_MS is answered busy, so every answer leaves main inside the host's EXPORT_ANSWER_MS.
@@ -15,8 +24,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { BrowserWindow } from 'electron';
-import type { ArtifactKind } from '@shared/artifacts/entity';
+import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import { mimeOf } from '@shared/files/mime';
 import { ipcError } from '@shared/ipc/errors';
@@ -25,7 +35,7 @@ import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from '../deliverables/capture';
-import type { SeamEnv } from '../deliverables/policies';
+import { restrictRequests, type SeamEnv } from '../deliverables/policies';
 import { CommandFailure } from '../ipc/router';
 import type { ContentLookup } from './protocol';
 
@@ -54,14 +64,18 @@ export interface ExportRequest {
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
 export interface ExportContext {
   title: string;
-  // The artifact's V2 state: the version's when the request names one, else the live doc's (a Y kind's).
+  // A document kind's V2 state at the request's revision: the version's when the request names one, else the live
+  // doc's as the export's snapshot took it. A byte kind has none (it rejects).
   state(): Promise<Uint8Array>;
-  // An asset's bytes by its ref (`assets/<name>`); null when the artifact has no such asset.
+  // An asset's bytes by its ref (`assets/<name>`); null when the artifact has no such asset (any other failure rejects).
   readAsset(ref: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
-  // A standalone page printed in the capture partition's hidden window, JavaScript off, on its own `@page` size.
+  // A standalone page printed in the capture partition's hidden window, JavaScript off, on its own `@page` size; what it
+  // names outside its own page, `maws-artifact:`, `data:`, `blob:` and `about:` is not loaded.
   printToPdf(html: string): Promise<Uint8Array>;
-  // Writes through a temporary file renamed into place, so no reader sees half an export.
+  // Stages the file; the service puts it in place when the export finished in time, and refuses it after the deadline.
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
+  // Aborted at the export's deadline: an exporter that opens windows of its own destroys them on it.
+  signal: AbortSignal;
 }
 
 export interface Exporter {
@@ -91,34 +105,62 @@ export class ExporterRegistry {
 const unavailableMessage = (kind: ArtifactKind, format: ArtifactExportFormat) => `MAWS cannot export a ${kind} artifact as ${format} yet`;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// One export, start to finish. Never rejects: every failure is an answer with its reason.
-export async function runExport(registry: ExporterRegistry, request: ExportRequest, context: ExportContext, guardMs = EXPORT_GUARD_MS): Promise<MawsArtifactExportAnswer> {
+// What an export reads from the store and prints with, for `runExport` to put in an exporter's context.
+export interface ExportSources {
+  title: string;
+  state(): Promise<Uint8Array>;
+  readAsset(ref: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  print: PdfPrinter;
+}
+// A page printed to PDF: `signal` ends it (its window destroyed), `blocked` hears each request its filter cancelled.
+export type PdfPrinter = (html: string, job: { signal: AbortSignal; blocked(url: string): void }) => Promise<Uint8Array>;
+
+// One export, start to finish: the exporter runs with a context whose writes are staged; when it finishes within
+// `guardMs` they are put in place and the answer names the request's revision and path; otherwise (a failure, the
+// deadline) the export is cancelled and nothing it wrote, or writes later, lands. Never rejects.
+export async function runExport(registry: ExporterRegistry, request: ExportRequest, sources: ExportSources, guardMs = EXPORT_GUARD_MS): Promise<MawsArtifactExportAnswer> {
   const exporter = registry.get(request.kind, request.format);
   if (!exporter) return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+  const cancel = new AbortController();
+  const staged = new Map<string, string>(); // path → its staged temporary file
+  let blocked = 0;
+  const context: ExportContext = {
+    title: sources.title,
+    state: () => sources.state(),
+    readAsset: (ref) => sources.readAsset(ref),
+    printToPdf: (html) => sources.print(html, { signal: cancel.signal, blocked: () => void (blocked += 1) }),
+    writeFile: async (path, data) => {
+      if (cancel.signal.aborted) throw new Error('the export was cancelled; nothing more is written');
+      await mkdir(dirname(path), { recursive: true });
+      const temp = join(dirname(path), `.${randomUUID()}.tmp`);
+      await writeFile(temp, data);
+      if (cancel.signal.aborted) {
+        await rm(temp, { force: true });
+        throw new Error('the export was cancelled; nothing more is written');
+      }
+      const earlier = staged.get(path);
+      staged.set(path, temp);
+      if (earlier) await rm(earlier, { force: true });
+    },
+    signal: cancel.signal,
+  };
   let guard: ReturnType<typeof setTimeout> | undefined;
   try {
     const timedOut = new Promise<never>((_, reject) => {
       guard = setTimeout(() => reject(new Error(`the export did not finish within ${guardMs / 1000} s`)), guardMs);
     });
     await Promise.race([exporter.run(request, context), timedOut]);
-    return { ok: true };
+    cancel.abort(); // the exporter is done: anything it still writes is refused
+    if (!staged.has(request.path)) throw new Error('the exporter wrote no file');
+    for (const [path, temp] of staged) await rename(temp, path);
+    staged.clear();
+    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
   } catch (error) {
+    cancel.abort();
     return { ok: false, error: messageOf(error) };
   } finally {
     clearTimeout(guard);
-  }
-}
-
-// Writes `data` to `path` through a temporary file beside it, renamed into place.
-export async function writeAtomically(path: string, data: Uint8Array | string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = join(dirname(path), `.${randomUUID()}.tmp`);
-  try {
-    await writeFile(temp, data);
-    await rename(temp, path);
-  } catch (error) {
-    await rm(temp, { force: true }).catch(() => {});
-    throw error;
+    for (const temp of staged.values()) await rm(temp, { force: true }).catch(() => {});
   }
 }
 
@@ -128,14 +170,14 @@ export interface ExportServiceDeps {
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
   onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
   answer(input: CommandInput<'maws.artifact.exported'>): Promise<unknown>;
-  printToPdf?: (html: string) => Promise<Uint8Array>; // printHtmlToPdf in the app; a test's stand-in
+  print?: PdfPrinter; // printHtmlToPdf in the app; a test's stand-in
 }
 
 const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
   new CommandFailure(ipcError('invalid_input', message, { reason, data } satisfies ArtifactRefusal));
 
 // Main's side of the export bridge and the library's command over one queue. Answers the library's export and `stop`.
-export function startExportService({ registry, root, call, onEvent, answer, printToPdf = printHtmlToPdf }: ExportServiceDeps): {
+export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf }: ExportServiceDeps): {
   exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
   stop(): void;
 } {
@@ -147,34 +189,55 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     if (!result.ok) throw new CommandFailure(result.error);
     return result.value;
   };
-  // The context of one request, read from the host as the exporter asks.
-  const contextOf = (request: ExportRequest, title: string): ExportContext => ({
-    title,
-    state: async () =>
-      request.versionId !== undefined
-        ? (await required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId })).bytes
-        : (await required('artifacts.state', { artifactId: request.artifactId })).bytes,
-    readAsset: async (ref) => {
-      if (!ref.startsWith('assets/')) return null; // the content file is not an asset
-      const found = await call('artifacts.content', { artifactId: request.artifactId, path: ref });
-      if (!found.ok) return null;
-      return { bytes: new Uint8Array(await readFile(found.value.path)), mime: mimeOf(found.value.name) };
-    },
-    printToPdf,
-    writeFile: writeAtomically,
-  });
-  // A request run in its turn (a kind and format no exporter serves is answered at once); the title read when it
-  // starts. Never rejects.
-  const queued = async (request: ExportRequest, title?: string): Promise<MawsArtifactExportAnswer> => {
-    if (!registry.get(request.kind, request.format)) return runExport(registry, request, contextOf(request, ''));
-    return slot(async () => {
-      let named = title;
-      if (named === undefined) {
-        const found = await call('artifacts.get', { artifactId: request.artifactId });
-        if (!found.ok || !found.value.artifact) return { ok: false, error: `no artifact ${request.artifactId}` } satisfies MawsArtifactExportAnswer;
-        named = found.value.artifact.title;
+  // The export's snapshot, taken as it starts: its title, and a document's state with the revision it is at (the
+  // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
+  // request's revision is immutable, so its request stands as it was asked.
+  const snapshot = async (request: ExportRequest): Promise<{ request: ExportRequest; sources: ExportSources }> => {
+    const { artifact } = await required('artifacts.get', { artifactId: request.artifactId });
+    if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
+    let state: Uint8Array | null = null;
+    let taken = request;
+    if (isDocKind(request.kind)) {
+      if (request.versionId !== undefined) {
+        state = (await required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId })).bytes;
+      } else {
+        const live = await required('artifacts.state', { artifactId: request.artifactId });
+        state = live.bytes;
+        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format)) };
       }
-      return runExport(registry, request, contextOf(request, named));
+    }
+    return {
+      request: taken,
+      sources: {
+        title: artifact.title,
+        state: async () => {
+          if (!state) throw new Error(`a ${request.kind} artifact has no document state`);
+          return state;
+        },
+        readAsset: async (ref) => {
+          if (!ref.startsWith('assets/')) return null; // the content file is not an asset
+          const found = await call('artifacts.content', { artifactId: request.artifactId, path: ref });
+          if (!found.ok) {
+            if ((found.error.issues as ArtifactRefusal | undefined)?.reason === 'notFound') return null;
+            throw new Error(`the asset ${ref} could not be read: ${found.error.message}`);
+          }
+          return { bytes: new Uint8Array(await readFile(found.value.path)), mime: mimeOf(found.value.name) };
+        },
+        print,
+      },
+    };
+  };
+  // A request run in its turn (a kind and format no exporter serves is answered at once). Never rejects.
+  const queued = async (request: ExportRequest): Promise<MawsArtifactExportAnswer> => {
+    if (!registry.get(request.kind, request.format)) return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+    return slot(async () => {
+      let taken: Awaited<ReturnType<typeof snapshot>>;
+      try {
+        taken = await snapshot(request);
+      } catch (error) {
+        return { ok: false, error: messageOf(error) } satisfies MawsArtifactExportAnswer;
+      }
+      return runExport(registry, taken.request, taken.sources);
     }, busy);
   };
 
@@ -197,19 +260,27 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
       const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
-      const result = await queued(request, artifact.title);
+      const result = await queued(request);
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path, revision };
+      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
     },
     stop,
   };
 }
 
+// Whether the PDF printer's window may load `url`: its own page (exactly), the artifact scheme, and what never leaves
+// the process (`data:`, `blob:`, `about:`). Everything else (http, https, other files) is cancelled.
+export function printRequestAllowed(url: string, page: string): boolean {
+  return url === page || ['maws-artifact:', 'data:', 'blob:', 'about:'].some((scheme) => url.startsWith(scheme));
+}
+
 // A standalone page (an exporter's HTML: P3-B's document export) printed to PDF in a hidden window on the capture
-// partition: JavaScript off (the page needs none and loads nothing from outside), no new windows, no navigation, the
-// page loaded from a file of its own in the OS's temporary directory (Chromium caps a `data:` URL at 2 MB) and removed
-// after; `preferCSSPageSize` makes the page's `@page` rule the paper and the margins; headings become the outline.
-export async function printHtmlToPdf(html: string): Promise<Uint8Array> {
+// partition: JavaScript off (the page needs none), no new windows, no navigation, the page loaded from a file of its own
+// in the OS's temporary directory (Chromium caps a `data:` URL at 2 MB) and removed after; its requests limited to
+// `printRequestAllowed`'s, each other one cancelled and told to `blocked` (Decision Log 44b); `preferCSSPageSize` makes
+// the page's `@page` rule the paper and the margins; headings become the outline. `signal` destroys the window.
+export const printHtmlToPdf: PdfPrinter = async (html, { signal, blocked }) => {
+  if (signal.aborted) throw new Error('the export was cancelled');
   const dir = await mkdtemp(join(tmpdir(), 'maws-print-'));
   const win = new BrowserWindow({
     show: false,
@@ -217,19 +288,31 @@ export async function printHtmlToPdf(html: string): Promise<Uint8Array> {
     height: 1056,
     webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, partition: CAPTURE_PARTITION, backgroundThrottling: false, disableDialogs: true, spellcheck: false },
   });
+  const page = join(dir, 'page.html');
+  const pageUrl = pathToFileURL(page).href;
+  const unrestrict = restrictRequests(win.webContents.id, (url) => {
+    if (printRequestAllowed(url, pageUrl)) return false;
+    blocked(url);
+    return true;
+  });
+  const destroy = () => {
+    if (!win.isDestroyed()) win.destroy();
+  };
+  signal.addEventListener('abort', destroy, { once: true });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   try {
-    const page = join(dir, 'page.html');
     await writeFile(page, html, 'utf8');
-    await win.loadFile(page);
+    await win.loadURL(pageUrl);
     const pdf = await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true, generateDocumentOutline: true });
     return new Uint8Array(pdf.buffer, pdf.byteOffset, pdf.byteLength);
   } finally {
-    if (!win.isDestroyed()) win.destroy();
+    signal.removeEventListener('abort', destroy);
+    unrestrict();
+    destroy();
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-}
+};
 
 // An `html` artifact's PDF and PNG: its page at the revision, rendered in the capture window (offscreen, sandboxed, the
 // `maws-capture` partition, `backgroundThrottling: false`, no navigation and no new windows: Decision Log 17) from
@@ -237,22 +320,29 @@ export async function printHtmlToPdf(html: string): Promise<Uint8Array> {
 // page size, else the asked paper, else A4 portrait, with backgrounds; the PNG is `width` (1280) wide and `height` high,
 // or the page's whole height (at most PNG_MAX_SIDE).
 export function registerHtmlExporters(registry: ExporterRegistry, { content, env }: { content: ContentLookup; env: SeamEnv }): () => void {
-  const render = async <T>(request: ExportRequest, width: number, height: number, use: (win: BrowserWindow) => Promise<T>): Promise<T> => {
+  // The page in a capture window, destroyed when the export ends or is cancelled.
+  const render = async <T>(request: ExportRequest, signal: AbortSignal, width: number, height: number, use: (win: BrowserWindow) => Promise<T>): Promise<T> => {
     const found = await content({ artifactId: request.artifactId, revision: request.revision });
     if (!found.ok) throw new Error(`the artifact has no page at revision ${request.revision}: ${found.error.message}`);
+    if (signal.aborted) throw new Error('the export was cancelled');
     const win = openCaptureWindow(width, height, env);
+    const destroy = () => {
+      if (!win.isDestroyed()) win.destroy();
+    };
+    signal.addEventListener('abort', destroy, { once: true });
     try {
       await loadSettled(win, artifactUrl(request.artifactId, request.revision, found.value.name));
       return await use(win);
     } finally {
-      if (!win.isDestroyed()) win.destroy();
+      signal.removeEventListener('abort', destroy);
+      destroy();
     }
   };
   const pdf: Exporter = {
     kind: 'html',
     format: 'pdf',
     run: async (request, context) => {
-      const bytes = await render(request, PNG_DEFAULT_WIDTH, PNG_FIRST_HEIGHT, (win) =>
+      const bytes = await render(request, context.signal, PNG_DEFAULT_WIDTH, PNG_FIRST_HEIGHT, (win) =>
         win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: request.pageSize === 'letter' ? 'Letter' : 'A4' }),
       );
       await context.writeFile(request.path, bytes);
@@ -263,7 +353,7 @@ export function registerHtmlExporters(registry: ExporterRegistry, { content, env
     format: 'png',
     run: async (request, context) => {
       const width = request.width ?? PNG_DEFAULT_WIDTH;
-      const bytes = await render(request, width, request.height ?? PNG_FIRST_HEIGHT, async (win) => {
+      const bytes = await render(request, context.signal, width, request.height ?? PNG_FIRST_HEIGHT, async (win) => {
         if (request.height === undefined) {
           const whole = Number(await win.webContents.executeJavaScript('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'));
           const height = Math.min(PNG_MAX_SIDE, Math.max(16, Number.isFinite(whole) ? Math.ceil(whole) : PNG_FIRST_HEIGHT));

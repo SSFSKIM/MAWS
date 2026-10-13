@@ -70,8 +70,10 @@ export const MawsArtifactExportSchema = z.strictObject({
 });
 export type MawsArtifactExport = z.infer<typeof MawsArtifactExportSchema>;
 
+// `ok`: the file written, its revision and path the export's snapshot's (a document that moved since the request names
+// a later revision, in the directory the request named), and how many remote requests its PDF printer refused.
 export const MawsArtifactExportAnswerSchema = z.discriminatedUnion('ok', [
-  z.strictObject({ ok: z.literal(true) }),
+  z.strictObject({ ok: z.literal(true), revision: z.number().int().nonnegative(), path: AbsolutePathSchema, blockedRequests: z.number().int().positive().optional() }),
   z.strictObject({ ok: z.literal(false), unavailable: z.boolean().optional(), error: z.string() }),
 ]);
 export type MawsArtifactExportAnswer = z.infer<typeof MawsArtifactExportAnswerSchema>;
