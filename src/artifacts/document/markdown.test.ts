@@ -28,6 +28,24 @@ function visibleIds(json: JSONContent, parent = 'doc', top = true, out: string[]
   for (const child of json.content ?? []) visibleIds(child, json.type ?? '', json.type === 'doc', out);
   return out;
 }
+/** The doc as stored, but for what a parse cannot know: ids, and comment marks (their threads are elsewhere). */
+const stored = (node: PMNode): unknown => schema.nodeFromJSON(withoutIdsAndComments(node.toJSON())).toJSON();
+function withoutIdsAndComments(json: unknown): unknown {
+  if (Array.isArray(json)) return json.map(withoutIdsAndComments);
+  if (json == null || typeof json !== 'object') return json;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(json)) {
+    if (key === 'id') continue;
+    if (key === 'marks') {
+      const marks = (value as Array<{ type: string }>).filter((mark) => mark.type !== 'comment');
+      if (marks.length) out.marks = withoutIdsAndComments(marks);
+      continue;
+    }
+    out[key] = withoutIdsAndComments(value);
+  }
+  return out;
+}
+
 /** The JSON with every id removed and comment marks dropped (what a parse cannot know), text runs merged. */
 function shape(json: JSONContent): JSONContent {
   const attrs = json.attrs ? Object.fromEntries(Object.entries(json.attrs).filter(([key]) => key !== 'id')) : undefined;
@@ -53,7 +71,7 @@ describe('the dialect', () => {
     expect(text).toContain('3. Third ^li4\n4. Fourth ^li5\n^ol1');
     expect(text).toContain('- [ ] Open task ^ti1\n- [x] Done task ^ti2\n^tl1');
     expect(text).toContain('> A quoted line. ^qp1\n>\n> A second quoted line. ^qp2\n^q1');
-    expect(text).toContain('```ts\nconst x = 1\nconsole.log(x)\n```\n^c1');
+    expect(text).toContain('```ts\nconst x = 1\n<c:t3>console.log(x)</c:t3>\n```\n^c1');
     expect(text).toContain('---\n^hr1');
     expect(text.endsWith('The end. ^p9')).toBe(true);
   });
@@ -78,16 +96,41 @@ describe('the dialect', () => {
     expect(stripMilestones(text)).toContain('The plan ships quarterly with design review notes. Owners track the budget. ^p2');
   });
 
-  it('keeps milestones out of code blocks and writes only the threads asked for', () => {
-    expect(text).toContain('console.log(x)\n```');
+  it('writes milestones inside code too (D2 allows the mark there), and only the threads asked for', () => {
+    expect(text).toContain('const x = 1\n<c:t3>console.log(x)</c:t3>\n```');
     const some = md.serialize(fixture(), { milestones: new Set(['t2']) });
     expect(some).toContain('The plan ships quarterly with <c:t2>design review notes</c:t2>.');
-    expect(md.serialize(fixture())).not.toMatch(/<\/?c:/);
+    expect(some).toContain('const x = 1\nconsole.log(x)\n```');
+    const none = md.serialize(fixture());
+    expect(stripMilestones(none)).toBe(none);
+  });
+
+  it('writes a literal milestone in code with one more backslash, so it never reads as one', () => {
+    expect(text).toContain('`<\\c:literal>`');
+    expect(md.serialize(schema.nodes.doc.create(null, [schema.nodes.codeBlock.create(null, schema.text('<c:t1>x</c:t1> <\\c:t2>'))]), { ids: false })).toBe(
+      '```\n<\\c:t1>x<\\/c:t1> <\\\\c:t2>\n```',
+    );
+  });
+
+  it('writes what GFM cannot say in the dialect’s own forms (Decision Log 15)', () => {
+    expect(text).toContain('An <mark color="#fde68a">amber</mark> and a <mark color="#bfdbfe">blue</mark> highlight');
+    expect(text).toContain('**bold with a space&#32;**<!---->then `` a`tick ``');
+    expect(text).toContain('[a filed link](<https://example.com/a file (draft).pdf> "Say \\"draft\\"")');
+    expect(text).toContain('<img src="maws-artifact://asset/as1" alt="" asset="as1"/>');
+    expect(text).toContain('&#160;&#160;&#160; ^r2\n\n&#160; ^r3');
+    expect(text).toContain('````md\n```\n<c:chart/>\n```\n````\n^c2');
+    expect(text).toContain(':::table\n:::row <!-- ^tr20 -->\n:::header {colspan="2" colwidth="160,80" align="center"}\nQuarter\n:::\n:::\n');
+    expect(text).toContain(':::cell {rowspan="2"}\nFirst\n\nSecond\n:::\n:::cell {align="right"}\n- Listed ^li6\n:::');
+    expect(text).toContain(':::row <!-- ^tr30 -->\n:::cell\nNo header\n:::');
+    expect(text).toContain(`:::chart {spec-json='{"mark":"line","encoding":{"x":"month","y":"total"}}'}\nrevenue.csv\n:::\n^ch2`);
+    expect(text).toContain('::::diagram\ngraph LR\n:::\n  A --> B\n::::\n^dg2');
+    expect(text).toContain('$$$\na\n$$\nb\n$$$\n^mb2');
+    expect(text).toContain('Inline <math latex=""/> and <math latex="x^2&#10;+ 1"/>. ^r4');
   });
 
   it('writes no ids for an export', () => {
     const plain = md.serialize(fixture(), { ids: false });
-    expect(plain).not.toMatch(/ \^[0-9a-z]+$|^\^[0-9a-z]+$|<!--/m);
+    expect(plain).not.toMatch(/ \^[0-9a-z]+$|^\^[0-9a-z]+$|<!-- \^/m);
     expect(plain).toContain('| Name  | Value |\n| ----- | ----- |\n| alpha | 1     |');
   });
 });
@@ -102,6 +145,26 @@ describe('a parse', () => {
     const all = JSON.stringify(parsed);
     expect(all).toContain('"id":"new1"'); // a nested list's id is not shown, so it is minted
     expect(all).not.toContain('"id":null');
+  });
+
+  it('gives back every stored state of the fixture exactly, comments and unshown ids aside (Decision Log 15)', () => {
+    const original = fixture();
+    for (const milestones of [null, new Set(['t1', 't2', 't3'])]) {
+      const parsed = docOf(md.parse(md.serialize(original, { milestones }), { generateID: counter() }));
+      expect(stored(parsed)).toEqual(stored(original));
+    }
+  });
+
+  it('reads a code block’s comment milestones away and its literal ones back, the code as it was', () => {
+    const code = schema.nodes.codeBlock.create({ id: 'k1', language: 'xml' }, [
+      schema.text('<c:t1>kept</c:t1> <\\c:t2>\n'),
+      schema.text('commented', [schema.marks.comment.create({ threadId: 't9' })]),
+    ]);
+    const read = md.serialize(docOf([code]), { milestones: new Set(['t9']) });
+    expect(read).toBe('```xml\n<\\c:t1>kept<\\/c:t1> <\\\\c:t2>\n<c:t9>commented</c:t9>\n```\n^k1');
+    const [back] = md.parse(read);
+    expect(back.attrs).toEqual({ id: 'k1', language: 'xml' });
+    expect(back.textContent).toBe(code.textContent);
   });
 
   it('mints 8-character ids when no generator is given, and parses an empty string to nothing', () => {
@@ -126,6 +189,90 @@ describe('a parse', () => {
     const doc = docOf([schema.nodes.paragraph.create({ id: 'e1' }), schema.nodes.paragraph.create({ id: 'e2' }, schema.text('after'))]);
     const text = md.serialize(doc);
     expect(md.parse(text).map((block) => block.toJSON())).toEqual(doc.toJSON().content);
+  });
+});
+
+// Decision Log 15: every state the schema admits reads back as stored, one at a time, ids and comments aside. Each
+// state is a top-level block; the probe that found the dialect's gaps, kept as its regression.
+describe('every stored state, one at a time', () => {
+  const t = (text: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+  const p = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
+  const cell = (type: string, attrs: Record<string, unknown>, ...content: JSONContent[]): JSONContent => ({ type, attrs, content });
+  const states: Record<string, JSONContent> = {
+    multiParaCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('First')), p(t('Second')))] }] },
+    noHeader: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableCell', {}, p(t('a'))), cell('tableCell', {}, p(t('b')))] }] },
+    emptyCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H'))), cell('tableHeader', {}, p())] }, { type: 'tableRow', content: [cell('tableCell', {}, p()), cell('tableCell', {}, p(t('x')))] }] },
+    hardBreakCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('a'), { type: 'hardBreak' }, t('b')))] }] },
+    imgAsset: p(t('x '), { type: 'image', attrs: { src: 'maws-artifact://a/b.png', alt: 'A', assetId: 'as1' } }),
+    imgAltEmpty: p({ type: 'image', attrs: { src: 'https://e.com/a.png', alt: '', assetId: null } }),
+    imgSrcSpace: p({ type: 'image', attrs: { src: 'https://e.com/a b(1).png', alt: 'x', assetId: null } }),
+    hlColor: p(t('a '), t('hi', [{ type: 'highlight', attrs: { color: '#fde68a' } }])),
+    hlEq: p(t('a=b', [{ type: 'highlight', attrs: { color: null } }])),
+    hlAdj: p(t('one', [{ type: 'highlight', attrs: { color: '#fde68a' } }]), t('two', [{ type: 'highlight', attrs: { color: '#bfdbfe' } }])),
+    linkAdj: p(t('one', [{ type: 'link', attrs: { href: 'https://a.com', title: null } }]), t('two', [{ type: 'link', attrs: { href: 'https://b.com', title: null } }])),
+    linkTitleQuote: p(t('one', [{ type: 'link', attrs: { href: 'https://a.com/(x)', title: 'say "hi"' } }])),
+    boldTrailSpace: p(t('a '), t('bold ', [{ type: 'bold' }]), t('x')),
+    leadSpace: p(t('  lead and trail  ')),
+    doubleSpace: p(t('a  b')),
+    nbspOnly: p(t(' ')),
+    codeNoLang: { type: 'codeBlock', attrs: { language: null }, content: [t('x')] },
+    codeFence: { type: 'codeBlock', attrs: { language: 'md' }, content: [t('```\ninner\n```')] },
+    codeEmpty: { type: 'codeBlock', attrs: { language: 'ts' } },
+    diagramColon: { type: 'diagram', attrs: { source: 'a\n:::\nb' } },
+    diagramEmpty: { type: 'diagram', attrs: { source: '' } },
+    chartObj: { type: 'chart', attrs: { source: 's', spec: { mark: 'bar', n: 1 } } },
+    chartNull: { type: 'chart', attrs: { source: '', spec: null } },
+    mathDollar: { type: 'mathBlock', attrs: { latex: 'a\n$$\nb' } },
+    mathInlineNl: p({ type: 'math', attrs: { latex: 'a\nb' } }),
+    mathEmpty: p({ type: 'math', attrs: { latex: '' } }),
+    mentionNullRef: p({ type: 'mention', attrs: { kind: 'artifact', ref: null, label: '' } }),
+    dropdownNull: p({ type: 'dropdown', attrs: { options: [], value: null } }),
+    emptyCallout: { type: 'callout', attrs: { tone: 'tip' }, content: [p()] },
+    calloutList: { type: 'callout', attrs: { tone: 'danger' }, content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [p(t('x'))] }] }] },
+    headingEmpty: { type: 'heading', attrs: { level: 2 } },
+    taskNested: { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p(t('a')), { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [p(t('b'))] }] }] }] },
+    listItemTwoParas: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('a')), p(t('b'))] }] },
+    orderedType: { type: 'orderedList', attrs: { start: 1, type: 'i' }, content: [{ type: 'listItem', content: [p(t('a'))] }] },
+    quoteCode: { type: 'blockquote', content: [{ type: 'codeBlock', attrs: { language: null }, content: [t('x')] }] },
+    codeTicks: p(t('run `x` now', [{ type: 'code' }])),
+    codeEdge: p(t('a'), t(' x ', [{ type: 'code' }]), t('b')),
+    codeLead: p(t(' x', [{ type: 'code' }]), t('b')),
+    codeLiteralMs: p(t('<c:chart> and </c:x>', [{ type: 'code' }])),
+    codeBlockLiteralMs: { type: 'codeBlock', attrs: { language: 'xml' }, content: [t('<c:chart>\n</c:chart>\n<\\c:x>')] },
+    codeTrailingNl: { type: 'codeBlock', attrs: { language: null }, content: [t('a\n')] },
+    codeLtAmp: p(t('a < b && c', [{ type: 'code' }])),
+    linkTitleEmpty: p(t('one', [{ type: 'link', attrs: { href: 'https://a.com', title: '' } }])),
+    linkSpace: p(t('one', [{ type: 'link', attrs: { href: 'file name.pdf', title: null } }])),
+    boldPunct: p(t('end.', [{ type: 'bold' }]), t('x')),
+    boldPunctOpen: p(t('x'), t('.start', [{ type: 'bold' }])),
+    italicSpace: p(t('a'), t(' it ', [{ type: 'italic' }]), t('b')),
+    boldItalic: p(t('bo', [{ type: 'bold' }, { type: 'italic' }]), t('ld ', [{ type: 'bold' }]), t('x')),
+    strikeSpace: p(t('a'), t(' s ', [{ type: 'strike' }]), t('b')),
+    underlineSpace: p(t('a'), t(' u ', [{ type: 'underline' }]), t('b')),
+    hlSpace: p(t('a'), t(' h ', [{ type: 'highlight', attrs: { color: '#fde68a' } }]), t('b')),
+    hlNested: p(t('x '), t('bold', [{ type: 'highlight', attrs: { color: '#fde68a' } }, { type: 'bold' }]), t(' y', [{ type: 'highlight', attrs: { color: '#fde68a' } }])),
+    linkSpaceEdge: p(t('a'), t(' l ', [{ type: 'link', attrs: { href: 'https://a.com', title: null } }]), t('b')),
+    imgKorean: p({ type: 'image', attrs: { src: 'https://e.com/a.png', alt: '그림 설명', assetId: null } }),
+    imgNullSrc: p({ type: 'image', attrs: { src: null, alt: null, assetId: 'as2' } }),
+    tableSpans: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', { colspan: 2, colwidth: [120, 80], align: 'center' }, p(t('Wide')))] }, { type: 'tableRow', content: [cell('tableCell', { rowspan: 2 }, p(t('tall'))), cell('tableCell', {}, p(t('b')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('c')))] }] },
+    tableAlignMix: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', { align: 'right' }, p(t('A')))] }, { type: 'tableRow', content: [cell('tableCell', { align: 'left' }, p(t('b')))] }] },
+    tableRich: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H')))] }, { type: 'tableRow', content: [cell('tableCell', {}, { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('item'))] }] }, { type: 'callout', attrs: { tone: 'warn' }, content: [p(t('careful'))] }, { type: 'diagram', attrs: { source: 'x\n:::\ny' } }, { type: 'codeBlock', attrs: { language: null }, content: [t(':::\nraw')] })] }] },
+    tableEmptyCellNoBlocks: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableCell', {})] }] },
+    tableNoRows: { type: 'table', content: [] },
+    tableSpaceCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t(' padded  text ')))] }] },
+    tablePipe: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('a|b')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('c')))] }] },
+    calloutNested: { type: 'callout', attrs: { tone: 'note' }, content: [{ type: 'callout', attrs: { tone: 'warn' }, content: [p(t('inner'))] }, p(t('after'))] },
+    calloutCode: { type: 'callout', attrs: { tone: 'note' }, content: [{ type: 'codeBlock', attrs: { language: null }, content: [t(':::\n```')] }] },
+    textColonLine: p(t(':::')),
+    textEntity: p(t('&#32; and &#160; and &amp;')),
+    textSep: p(t('<!----> literal')),
+    textMarkTag: p(t('<mark color="x">no</mark> <img src="a"/> <math latex="x"/>')),
+    pendingQuote: { type: 'pending', attrs: { intent: 'He said "go" & left' } },
+  };
+
+  it.each(Object.entries(states))('%s', (_name, json) => {
+    const doc = docOf([schema.nodeFromJSON(json)]);
+    for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids }))))).toEqual(stored(doc));
   });
 });
 

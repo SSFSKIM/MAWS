@@ -90,6 +90,27 @@ describe('the read with comments (S5’s read checks)', () => {
     expect(stripMilestones(readDocument(doc).markdown.split('\n---\n')[0])).toContain('The plan ships **quarterly** with design review notes. Owners track the budget. ^p1');
   });
 
+  it('marks a comment inside code with milestones too, and names the code block in the footer', () => {
+    const doc = newDoc();
+    const tab = createDocument(doc, {
+      title: 'Code',
+      body: schema.nodeFromJSON({
+        type: 'doc',
+        content: [
+          { type: 'codeBlock', attrs: { id: 'k1', language: 'ts' }, content: [text('const total = 1\n'), text('total += 2', [comment('t5')]), text('\nexport { total }')] },
+          { type: 'codeBlock', attrs: { id: 'k2', language: 'ts' }, content: [text('total += 2', [comment('t6')])] },
+        ],
+      }),
+    });
+    const body = tabBody(doc, tab)!;
+    for (const id of ['t5', 't6']) addThread(doc, { threadId: id, tabId: tab, blockId: id === 't5' ? 'k1' : 'k2', quote: 'total += 2', anchor: anchorOfMark(body, id)!, by: owner, at: now() });
+    const { markdown } = readDocument(doc);
+    // the same quote twice: only the milestones tell the agent which passage each thread is on
+    expect(markdown).toContain('```ts\nconst total = 1\n<c:t5>total += 2</c:t5>\nexport { total }\n```\n^k1');
+    expect(markdown).toContain('```ts\n<c:t6>total += 2</c:t6>\n```\n^k2');
+    expect(markdown.split('\n---\n')[1]).toBe(['Comments: 2 open', '- c:t5 on ^k1 · "total += 2" · 0 messages', '- c:t6 on ^k2 · "total += 2" · 0 messages', ''].join('\n'));
+  });
+
   it('marks nothing of a thread once it is resolved, and the other stays marked', () => {
     const { doc } = world();
     resolve(doc, 't1', owner, now());
