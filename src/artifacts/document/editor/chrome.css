@@ -1,8 +1,9 @@
 /* The document editor's chrome (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the tab strip, the toolbar,
    menus, the find bar, find's highlights, the other replicas' cursors, and (M4) the comment highlights and the threads
-   rail. These are the app's UI around and over the
-   page, so they read the app's tokens directly (the page itself is theme.css's, in the design system's). No literal
-   colour (theme.dom.test.tsx). */
+   rail, and (M5) the version history rail, the preview's bar and its change marks, Show editors, the new-changes pill,
+   the restore banner and an agent's editing blocks. These are the app's UI around and over the page, so they read the
+   app's tokens directly (the page itself is theme.css's, in the design system's; the author colours are app tokens by
+   design, D3). No literal colour (theme.dom.test.tsx). */
 
 .doc-editor {
   display: flex;
@@ -399,4 +400,299 @@
 .doc-thread-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ── awareness (M5): the blocks an agent is editing, outlined in its colour and named ── */
+.ds-doc [data-agent-editing] {
+  position: relative;
+  outline: 2px solid var(--doc-presence);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.ds-doc [data-agent-editing]::after {
+  content: attr(data-agent-editing);
+  position: absolute;
+  top: -1.6em;
+  right: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bg-raised);
+  background: var(--doc-presence);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space);
+  pointer-events: none;
+}
+
+/* ── version history (M5): the preview's change marks, in each author's colour (--doc-author is an author colour) ── */
+.ds-doc y-del {
+  text-decoration: line-through;
+}
+.ds-doc .doc-change-ins {
+  background: color-mix(in oklab, var(--doc-author) 14%, transparent);
+  text-decoration: underline 2px var(--doc-author);
+  text-underline-offset: 3px;
+}
+.ds-doc .doc-change-del {
+  text-decoration: line-through 2px var(--doc-author);
+  opacity: 0.7;
+}
+.ds-doc .doc-change-fmt {
+  text-decoration: underline dotted 2px var(--doc-author);
+  text-underline-offset: 3px;
+}
+.ds-doc .doc-change-attrs {
+  outline: 1px dashed var(--doc-author);
+  outline-offset: 2px;
+}
+.ds-doc .doc-change-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+/* the gutter mark of a block holding a change */
+.ds-doc [data-change-block] {
+  position: relative;
+}
+.ds-doc [data-change-block]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--space) * -4);
+  width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--doc-author);
+}
+/* a block a move or a type change re-inserted: labelled in the right margin */
+.ds-doc [data-carry] {
+  position: relative;
+}
+.ds-doc [data-carry]::after {
+  content: attr(data-carry-label);
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: calc(var(--space) * 2);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* ── version history (M5): the rail, the preview's bar, the pill, the banner, Show editors ── */
+.doc-history-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  padding: var(--space) calc(var(--space) * 2);
+  border-bottom: 1px solid var(--border);
+}
+.doc-history-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.doc-history-save {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  padding: calc(var(--space) * 2);
+  border-bottom: 1px solid var(--border);
+}
+.doc-history-save input,
+.doc-history-save textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space) calc(var(--space) * 2);
+  resize: vertical;
+}
+.doc-history-save-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space);
+}
+.doc-history-status {
+  margin: 0;
+  padding: var(--space) calc(var(--space) * 3);
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+.doc-history-status[data-error] {
+  color: var(--danger);
+}
+.doc-version-day {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.doc-version-day-label {
+  margin: 0;
+  padding: var(--space) 0;
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.doc-version-run {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.doc-version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space) calc(var(--space) * 2);
+  cursor: pointer;
+}
+.doc-version:hover {
+  background: var(--bg-hover);
+}
+.doc-version[aria-pressed='true'] {
+  background: var(--bg-active);
+  border-color: var(--accent);
+}
+.doc-version-title {
+  font-weight: 600;
+}
+.doc-version-author {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+}
+.doc-author-chip {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.doc-version-summary {
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-version-fold {
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  text-align: left;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0 calc(var(--space) * 2);
+  cursor: pointer;
+}
+.doc-history-bar {
+  background: var(--bg-raised);
+}
+.doc-history-heading {
+  font-weight: 600;
+  padding: 0 var(--space);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}
+.doc-history-count {
+  padding: 0 var(--space);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.doc-history-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.doc-history-confirm p {
+  margin: 0;
+}
+.doc-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.doc-pill {
+  position: absolute;
+  top: calc(var(--space) * 2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-2xl);
+  background: var(--accent);
+  box-shadow: var(--shadow-float);
+}
+.doc-pill-open,
+.doc-pill-dismiss {
+  font: inherit;
+  color: var(--bg-raised);
+  background: transparent;
+  border: 0;
+  padding: var(--space) calc(var(--space) * 3);
+  cursor: pointer;
+}
+.doc-pill-dismiss {
+  padding-left: 0;
+}
+.doc-context-menu,
+.doc-editors {
+  position: absolute;
+  z-index: 3;
+}
+.doc-editors {
+  min-width: calc(var(--space) * 56);
+}
+.doc-editors-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  font-weight: 600;
+}
+.doc-editors-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.doc-editors-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+.doc-editors-empty {
+  margin: 0;
+  color: var(--fg-muted);
 }

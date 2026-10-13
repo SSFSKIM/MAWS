@@ -1,7 +1,7 @@
 // The formatting toolbar (D1's `Toolbar.tsx`; M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): undo and
 // redo, the block style, the marks and a link, the lists, quote and code, the Insert menu for every other block kind of
 // the schema, the table's row and column controls while the caret is in a table, a code block's language, Comment and
-// the comments rail (M4), and Find.
+// the comments rail (M4), version history (M5), and Find.
 // An inserted atom (math, a diagram, a chip, a pending section) is selected with its field focused, so the person types
 // its content next.
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -76,7 +76,13 @@ export interface CommentControls {
   toggleRail(): void;
 }
 
-export function Toolbar({ editor, artifactId, host, onFind, comments }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls }) {
+/** The toolbar's history control (M5): the version history rail, when the editor has a history to show. */
+export interface HistoryControls {
+  open: boolean;
+  toggle(): void;
+}
+
+export function Toolbar({ editor, artifactId, host, onFind, comments, history }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -287,6 +293,11 @@ export function Toolbar({ editor, artifactId, host, onFind, comments }: { editor
       <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
         Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
       </Tool>
+      {history && (
+        <Tool label="Version history" active={history.open} onClick={history.toggle}>
+          History
+        </Tool>
+      )}
       <Tool label="Find" onClick={onFind}>
         Find
       </Tool>

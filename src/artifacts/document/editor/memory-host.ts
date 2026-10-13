@@ -3,7 +3,9 @@
 // real `PortProvider` on a real `MessageChannel`, speaking A's frames (X24) as the engine host's document service does
 // as far as a replica can observe: step 1 on attach, step 2 answered, every content frame applied, acked and
 // broadcast to the other connections, awareness relayed, `restored` announced. It persists nothing and checks no gaps
-// (the service's checks are A's and are tested there). Portable: a web page has `MessageChannel` too.
+// (the service's checks are A's and are tested there). Portable: a web page has `MessageChannel` too. Each connection
+// and each host write is credited to an actor, and `onLanded` reports every applied update with its actor, which is
+// what the in-memory history (history/memory-history.ts) keeps as provenance.
 import type { Actor } from '@shared/artifacts/actor';
 import { decodeFrame, encodeFrame, type Frame } from '../../provider/frames';
 import { PortProvider, type Restored } from '../../provider/port';
@@ -14,7 +16,17 @@ import type { DocumentHandle, EditorHost } from './host-types';
 interface Connection {
   port: MessagePort;
   received: number; // content frames received, all acked at once
+  actor: Actor;
 }
+
+/** An update the host applied: its bytes (V1), whom it is credited to, and the revision it made. */
+export interface Landed {
+  update: Uint8Array;
+  actor: Actor;
+  revision: number;
+}
+
+const HUMAN: Actor = { kind: 'human' };
 
 export class MemoryDocumentHost {
   readonly doc: Doc = newDoc();
@@ -22,31 +34,46 @@ export class MemoryDocumentHost {
   private readonly connections = new Set<Connection>();
   private latestRestore: Restored | null = null;
   private readonly offUpdate: () => void;
+  private readonly landed = new Set<(row: Landed) => void>();
+  private writer: Actor = HUMAN;
 
   constructor() {
     // Whatever lands in the host doc goes to every connection but the one it came from (a host-side write, origin
     // `null`, goes to all).
     this.offUpdate = onUpdate(this.doc, (update, origin) => {
       this.revision += 1;
+      const actor = this.connections.has(origin as Connection) ? (origin as Connection).actor : this.writer;
+      for (const listener of this.landed) listener({ update, actor, revision: this.revision });
       for (const connection of this.connections) {
         if (connection !== origin) connection.port.postMessage(encodeFrame({ type: 'update', update }));
       }
     });
   }
 
-  /** A new connection: the replica's end of the channel. */
-  connect(): MessagePort {
+  /** A new connection, its updates credited to `actor`: the replica's end of the channel. */
+  connect(actor: Actor = HUMAN): MessagePort {
     const channel = new MessageChannel();
-    const connection: Connection = { port: channel.port1, received: 0 };
+    const connection: Connection = { port: channel.port1, received: 0, actor };
     this.connections.add(connection);
     connection.port.onmessage = (event: MessageEvent) => this.receive(connection, decodeFrame(event.data));
     connection.port.postMessage(encodeFrame({ type: 'step1', sv: stateVector(this.doc) }));
     return channel.port2;
   }
 
-  /** A write made on the host itself (the agent's replica stands behind this in the product). */
-  write(edit: (doc: Doc) => void): void {
-    transact(this.doc, () => edit(this.doc));
+  /** A write made on the host itself as `actor` (the agent's replica stands behind this in the product). */
+  write(edit: (doc: Doc) => void, actor: Actor = HUMAN): void {
+    this.writer = actor;
+    try {
+      transact(this.doc, () => edit(this.doc));
+    } finally {
+      this.writer = HUMAN;
+    }
+  }
+
+  /** Every update the host applies from now on, with its actor and revision; returns the unsubscribe. */
+  onLanded(listener: (row: Landed) => void): () => void {
+    this.landed.add(listener);
+    return () => this.landed.delete(listener);
   }
 
   /** A restore landed: every connection is told, and each later attach is told again after its step 2. */
@@ -88,10 +115,10 @@ export class MemoryDocumentHost {
 }
 
 /** A replica of the host's document as an editor holds it, over a fresh connection. */
-export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (line: string) => void } = {}): DocumentHandle & { provider: PortProvider } {
+export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (line: string) => void; actor?: Actor } = {}): DocumentHandle & { provider: PortProvider } {
   const doc = newDoc();
   const provider = new PortProvider(doc, { log: options.log });
-  const port = host.connect();
+  const port = host.connect(options.actor);
   provider.connect(port);
   return {
     provider,
