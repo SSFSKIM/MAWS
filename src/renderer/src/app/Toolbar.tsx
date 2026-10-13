@@ -20,6 +20,10 @@ import { useSlot } from './slots';
 import { displayTitle } from '../sessions/title';
 import { DELIVERABLES_COPY } from '../tools/deliverables/copy'; // E2
 import { useDeliverableTitle } from '../tools/deliverables/store'; // E2
+// P3-L start
+import { LIBRARY_COPY } from '../library/copy';
+import { useArtifactTitle } from '../library/store';
+// P3-L end
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
@@ -34,6 +38,7 @@ export function toolbarTitle(
   records: ReadonlyMap<AppSessionId, SessionRecord>,
   deliverableTitle: string | null = null,
   browserTitle: string | null = null, // E4a
+  artifactTitle: string | null = null, // P3-L: an `artifact` tab's row title, when the library store holds it
 ): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
@@ -54,6 +59,8 @@ export function toolbarTitle(
       return { title: 'Settings', branch: null };
     case 'artifacts': // P3-G
       return { title: 'Artifacts', branch: null };
+    case 'artifact': // P3-L
+      return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, branch: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a
@@ -76,7 +83,8 @@ export function Toolbar() {
   const unstarted = useUnstartedTitle(appSessionId ?? ('' as AppSessionId));
   const deliverableTitle = useDeliverableTitle(tab?.kind === 'deliverable' ? tab.appSessionId : null, tab?.kind === 'deliverable' ? tab.deliverableId : null); // E2
   const browserTitle = useBrowserTitle(tab?.kind === 'browser' ? tab.appSessionId : null, tab?.kind === 'browser' ? tab.browserTabId : null); // E4a
-  const titled = toolbarTitle(tab, records, deliverableTitle, browserTitle);
+  const artifactTitle = useArtifactTitle(tab?.kind === 'artifact' ? tab.artifactId : null); // P3-L
+  const titled = toolbarTitle(tab, records, deliverableTitle, browserTitle, artifactTitle);
   // An unstarted session is titled like its tab.
   const { title, branch } = appSessionId && !records.has(appSessionId) ? { title: unstarted.title, branch: null } : titled;
 

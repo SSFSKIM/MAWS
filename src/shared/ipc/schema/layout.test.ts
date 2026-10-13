@@ -186,6 +186,19 @@ describe('layout value shapes', () => {
     expect(UNPINNABLE_KINDS.has('artifacts')).toBe(true);
   });
 
+  // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact, pinnable like a file tab.
+  it('admits an artifact tab with its artifact id, pinnable, and derives its id from the artifact', () => {
+    const tab = { id: 'artifact:0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01', kind: 'artifact', artifactId: '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01', pinned: true };
+    expect(TabRefSchema.parse(tab)).toEqual(tab);
+    expect(TabRefSchema.safeParse({ ...tab, appSessionId: 'a1' }).success, 'no session: the tab is the workspace’s').toBe(false);
+    expect(TabRefSchema.safeParse({ ...tab, artifactId: undefined }).success).toBe(false);
+    expect(tabId({ kind: 'artifact', artifactId: tab.artifactId })).toBe(tab.id);
+    expect(UNPINNABLE_KINDS.has('artifact')).toBe(false);
+    // a stored main.tabs holding one reads as it is, in a pane and in the closed-tab history
+    const main = { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [{ tabs: [tab], activeTabId: tab.id }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [{ ...tab, pinned: false }] };
+    expect(StoredMainSchema.parse(main)).toEqual(main);
+  });
+
   // P3-G (§D5; the coordinator's condition, 2026-10-12): `main.tabs` keeps version 2 when a tab kind is added, so its
   // reader drops a tab of a kind it does not know (a later build's, after a downgrade) rather than failing the whole
   // value back to the default; the rest of the layout is kept, and the read warns once.

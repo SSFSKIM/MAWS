@@ -24,6 +24,9 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard); E4a: 'browser' appended (Settings › Browser, Task 3.4)
   // P3-G (§D5): the Artifacts library, a singleton like Settings; its content is the `artifactsLibrary` slot P3-L fills
   z.strictObject({ id: z.literal('artifacts'), kind: z.literal('artifacts'), pinned: z.literal(false) }),
+  // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact; the workspace's, not a session's
+  // (it follows the current tab set as the library does), pinnable like a file tab
+  z.strictObject({ id: z.string(), kind: z.literal('artifact'), artifactId: z.string(), pinned: z.boolean() }),
   // E2 start (X14): a deliverable's viewer as a main tab, one per record; restores to the record by id, and a record
   // that is gone shows the Deliverables list for the tab's session with a notice
   z.strictObject({ id: z.string(), kind: z.literal('deliverable'), appSessionId: AppSessionIdSchema, deliverableId: z.string(), pinned: z.boolean() }),
@@ -54,6 +57,8 @@ export function tabId(tab: TabTarget): string {
       return 'settings';
     case 'artifacts': // P3-G
       return 'artifacts';
+    case 'artifact': // P3-L
+      return `artifact:${tab.artifactId}`;
     // E2 start
     case 'deliverable':
       return `deliverable:${tab.appSessionId}:${tab.deliverableId}`;
