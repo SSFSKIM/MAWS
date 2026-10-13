@@ -32,7 +32,7 @@ type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.ope
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
-  'artifacts.saveVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
+  'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
@@ -138,6 +138,15 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const versionId = await storeOf().createVersion(artifactId, { kind: 'named', actor: HUMAN, label, note });
     if (versionId === null) throw new Error(`no version of ${artifactId} was written`); // only an `auto` finds nothing to write
     return { versionId };
+  });
+  serve('artifacts.nameVersion', async ({ artifactId, versionId, label, note }) => {
+    const store = storeOf();
+    await store.nameVersion(artifactId, versionId, { label, note });
+    return store.readCommitted(() => {
+      const version = store.versions.version(artifactId, versionId);
+      if (!version) throw new ArtifactStoreError('notFound', `no version ${versionId} of ${artifactId}`);
+      return { version };
+    });
   });
   serve('artifacts.restore', ({ artifactId, versionId }) => storeOf().restore(artifactId, versionId, HUMAN));
   serve('artifacts.markViewed', async ({ artifactId }) => {

@@ -64,6 +64,21 @@ export interface CreateInput {
   content?: ByteContent;
 }
 
+// One X12 record as P3-L's cutover hands it to `importArtifact` (Decision Log 35f): `content` an html version's bytes and
+// name, or a file version's path in place.
+export interface ImportInput {
+  id: string;
+  kind: 'html' | 'file';
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: Actor;
+  handle?: string;
+  projectId?: string;
+  versions: { at: number; actor: Actor; content: ByteContent }[];
+  links: { appSessionId: AppSessionId; role: ArtifactSessionLink['role']; lastAt: number }[];
+}
+
 export interface ArtifactUpdate {
   title?: string;
   spaceId?: string | null;
@@ -326,9 +341,9 @@ export class ArtifactStore {
   // the artifact has), under the same ids and names, so the copied content's references resolve. The copy's history
   // starts with an `import` version.
   //
-  // A Y kind's copy is two frames of one batch, so one commit: the entity row and the assets, then the state through
-  // the duplicator's host replica with its `import` version (the doc opens once its entity row is there, with its
-  // kind's adapter). If the second frame fails, the first still commits: an empty copy is left, as before.
+  // The copy is one savepoint (Decision Log 37c): the entity row, its link and its assets, then a Y kind's state through
+  // the duplicator's host replica (the doc takes its kind's adapter from the entity row written first) with its
+  // `import` version, or a byte kind's content write. A copy whose state fails to land leaves nothing, rows or files.
   async duplicate(artifactId: string, options: { versionId?: number; title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const source = this.requireLive(artifactId);
     const version = options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId);
@@ -337,34 +352,83 @@ export class ArtifactStore {
     const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
     const assets = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
-    let entityWritten = false;
-    const entity = this.service.inBatch(() => {
+    const entity = () => {
       this.storage.actorInBatch(actor, at);
       this.storage.db
         .prepare('INSERT INTO artifacts (id, kind, title, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
         .run(id, source.kind, options.title ?? `Copy of ${source.title}`, source.spaceId, source.projectId, actorKey(actor), at, at, source.designSystemId, source.linkedPath, isDocKind(source.kind) ? bindingVersion : null);
       if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
       this.copyAssetsInFrame(artifactId, id, assets);
-      if (content) {
-        this.writeBytesInFrame(this.entity(id)!, actor, content, { kind: 'import' });
-        inFrame?.(toArtifact(this.entity(id)!));
-      }
-      entityWritten = true;
-    });
-    if (state && entityWritten) {
-      const copy = this.entity(id)!;
-      const written = this.service.writeAs(id, actor, (doc) => applyV2(doc, state), {
-        inFrame: () => {
-          this.versionInFrame(copy, { kind: 'import', actor });
+    };
+    try {
+      if (state) {
+        await this.service.writeAs(id, actor, (doc) => applyV2(doc, state), {
+          prepare: entity,
+          inFrame: () => {
+            this.versionInFrame(this.entity(id)!, { kind: 'import', actor });
+            inFrame?.(toArtifact(this.entity(id)!));
+          },
+        });
+      } else {
+        await this.service.inBatch(() => {
+          entity();
+          this.writeBytesInFrame(this.entity(id)!, actor, content!, { kind: 'import' });
           inFrame?.(toArtifact(this.entity(id)!));
-        },
-      });
-      await Promise.all([entity, written]);
-    } else {
-      await entity;
+        });
+      }
+    } catch (error) {
+      if (!this.entity(id)) this.files.removeAll(id); // a fresh id: whatever its directory holds, no row names
+      throw error;
     }
     this.emit(id, 'created');
     return this.get(id)!;
+  }
+
+  // The import write of P3-L's cutover (Decision Log 35f, 37b): one X12 record as a byte-kind artifact under its own id,
+  // with its explicit times, creator, handle and project, its versions written in order as `import` versions at their
+  // own times by their own actors, and its session links with their roles and times; no X12 mirror (the records exist).
+  // Imported versions carry no design-system pin (Decision Log 38d). One savepoint: all of it commits or none (a version
+  // or a commit that fails takes the whole artifact back, its files with it). An id already present, deleted or not, is
+  // skipped whole (`imported: false`), so a rerun skips what landed.
+  async importArtifact(input: ImportInput): Promise<{ artifactId: string; imported: boolean }> {
+    const { id } = input;
+    if (!UUID.test(id)) throw new ArtifactStoreError('invalid', `an imported artifact's id must be a UUID, not ${JSON.stringify(id)}`);
+    if (input.kind !== 'html' && input.kind !== 'file') throw new ArtifactStoreError('invalid', `a ${String(input.kind)} artifact cannot be imported (html and file only)`);
+    if (input.versions.length === 0) throw new ArtifactStoreError('invalid', 'an imported artifact needs at least one version');
+    if (input.handle !== undefined && !ARTIFACT_ID.test(input.handle)) throw new ArtifactStoreError('invalid', `the handle ${JSON.stringify(input.handle)} is not a valid artifact handle`);
+    if (this.entity(id)) {
+      // Landed already, or landing in the open batch: the answer names that row, so it waits for the row's commit.
+      if (this.storage.batchOpen) await this.service.whenCommitted();
+      return { artifactId: id, imported: false };
+    }
+    const { handle } = input;
+    for (const link of input.links) {
+      if (handle !== undefined && link.role === 'created' && this.resolve(handle, [link.appSessionId])) {
+        throw new ArtifactStoreError('handleTaken', `session ${link.appSessionId} already has an artifact with the handle ${handle}`, { handle });
+      }
+    }
+    const latest = input.versions[input.versions.length - 1].content;
+    try {
+      await this.service.inBatch(() => {
+        this.storage.actorInBatch(input.createdBy, input.createdAt);
+        this.storage.db
+          .prepare('INSERT INTO artifacts (id, kind, title, handle, projectId, createdBy, createdAt, updatedAt, pinned, linkedPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
+          .run(id, input.kind, input.title, handle ?? null, input.projectId ?? null, actorKey(input.createdBy), input.createdAt, input.updatedAt, 'path' in latest ? latest.path : null);
+        for (const link of input.links) this.linkInFrame(id, link.appSessionId, link.role, link.lastAt);
+        const row = this.entity(id)!;
+        // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
+        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false });
+        this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(input.updatedAt, id);
+      });
+    } catch (error) {
+      // The rows went back (the savepoint, or the whole batch when its commit failed); the files the versions placed go
+      // too, unless a retry of the same id has rows again by now (open or committed): a retry writes synchronously inside
+      // one frame and reuses the seqs taken back, so the directory then holds only what that retry placed.
+      if (!this.entity(id)) this.files.removeAll(id);
+      throw error;
+    }
+    this.emit(id, 'created');
+    return { artifactId: id, imported: true };
   }
 
   // Inside a savepoint: the assets `assetIds` of one artifact copied into another, rows and files, ids, names and
@@ -480,9 +544,10 @@ export class ArtifactStore {
     return row.kind === 'html' ? { bytes: this.files.read(row.id, ref), name: ref.name } : { path: ref.path };
   }
 
-  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version).
-  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string }): { revision: number; versionId: number } {
-    const at = this.now();
+  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version, pinned to the governing design
+  // system unless `pin` is false: an imported historic version).
+  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string; at?: number; pin?: boolean }): { revision: number; versionId: number } {
+    const at = version.at ?? this.now();
     let make: (seq: number) => ContentRef;
     let staged: string | null = null;
     if (row.kind === 'html') {
@@ -505,7 +570,7 @@ export class ArtifactStore {
       const seq = this.storage.appendContentInBatch({ artifactId: row.id, actor, at, content: (s) => JSON.stringify((ref = make(s))) });
       if (staged) this.files.place(row.id, staged, ref!.path);
       staged = null;
-      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
+      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: version.pin === false ? null : this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
       this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(at, row.id);
       return { revision: seq, versionId };
     } finally {
@@ -583,6 +648,21 @@ export class ArtifactStore {
     });
     if (id !== null) this.emit(artifactId, 'updated');
     return id;
+  }
+
+  // The owner names an existing version, any kind (Decision Log 37d, 38c; §4.7: any automatic version is nameable): its
+  // label becomes this, its note this one when given (`null` clears it, omitted keeps it), its kind and the rest stay; a
+  // named `auto` version is never thinned.
+  async nameVersion(artifactId: string, versionId: number, name: { label: string; note?: string | null }, inFrame?: InFrame<ArtifactVersion>): Promise<ArtifactVersion> {
+    this.requireLive(artifactId);
+    this.requireVersion(artifactId, versionId);
+    if (name.label.trim() === '') throw new ArtifactStoreError('invalid', 'a version’s name cannot be empty');
+    await this.service.inBatch(() => {
+      this.versions.name(versionId, name.label, name.note);
+      inFrame?.(this.versions.version(artifactId, versionId)!);
+    });
+    this.emit(artifactId, 'updated');
+    return this.versions.version(artifactId, versionId)!;
   }
 
   // Inside a savepoint: a version of the artifact's current state (a byte kind's names its latest write).
@@ -767,6 +847,13 @@ export class ArtifactStore {
 
   entity(artifactId: string): EntityRow | undefined {
     return this.storage.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(artifactId) as EntityRow | undefined;
+  }
+
+  // The actor and time of the artifact's last log row (Decision Log 35c), null when it has none. Log pruning keeps each
+  // artifact's newest row, so the answer survives maintenance.
+  lastWrite(artifactId: string): { actor: Actor; at: number } | null {
+    const row = this.storage.db.prepare('SELECT actor, at FROM artifact_updates WHERE artifactId = ? ORDER BY seq DESC LIMIT 1').get(artifactId) as { actor: string; at: number } | undefined;
+    return row ? { actor: actorFromKey(row.actor), at: row.at } : null;
   }
 
   // The actor key of the artifact's last log row (who an `auto` version is credited to), the human when none.

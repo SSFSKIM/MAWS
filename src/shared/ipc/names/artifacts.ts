@@ -3,7 +3,7 @@
 // `../schema.test.ts`.
 export const commands = [
   'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete', 'artifacts.duplicate',
-  'artifacts.search', 'artifacts.versions', 'artifacts.saveVersion', 'artifacts.restore', 'artifacts.markViewed',
+  'artifacts.search', 'artifacts.versions', 'artifacts.saveVersion', 'artifacts.nameVersion', 'artifacts.restore', 'artifacts.markViewed',
   'artifacts.pruneVersions', 'artifacts.versionState', 'artifacts.attributions', 'artifacts.uploadAsset',
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
 ] as const;

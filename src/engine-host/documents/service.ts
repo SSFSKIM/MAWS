@@ -100,7 +100,7 @@ type Writer = Connection | HostReplica;
 
 interface HostDoc {
   readonly id: string;
-  readonly kind: ArtifactKind | null;
+  kind: ArtifactKind | null; // read at open; a doc opened before its entity row takes it after `prepare` (writeAs)
   readonly doc: Doc;
   readonly awareness: awarenessProtocol.Awareness;
   readonly conns: Set<Connection>;
@@ -129,10 +129,13 @@ export interface Committed {
   actors: Actor[];
 }
 
-// A host-originated write's companions inside its savepoint (Decision Log 11, 16): `afterWrite` writes through the same
-// host replica after the edit and its `afterUpdate` (a restore's `afterRestore`), its thread rows landing in the batch;
-// `inFrame` writes rows that must commit with the write or not at all (a version, an op), given the revision reached.
+// A host-originated write's companions inside its savepoint (Decision Log 11, 16): `prepare` writes rows the edit
+// stands on before it (a copy's entity row, Decision Log 37c: the doc's kind, and so its adapter, is read after it);
+// `afterWrite` writes through the same host replica after the edit and its `afterUpdate` (a restore's `afterRestore`),
+// its thread rows landing in the batch; `inFrame` writes rows that must commit with the write or not at all (a version,
+// an op), given the revision reached.
 export interface WriteOptions {
+  prepare?: () => void;
   afterWrite?: (doc: Doc) => void | { threads?: ThreadChange };
   inFrame?: (revision: number) => void;
 }
@@ -264,8 +267,12 @@ export class DocumentService {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
     const hostDoc = this.open(artifactId);
-    const adapter = this.adapterOf(hostDoc);
     const failed = this.inFrame(hostDoc, () => {
+      if (options.prepare) {
+        options.prepare();
+        hostDoc.kind ??= this.kindOf(artifactId); // a doc opened before its entity row was written (a frame that fails evicts it)
+      }
+      const adapter = this.adapterOf(hostDoc);
       const applied = this.applyOwn(hostDoc, () => this.writeThrough(hostDoc, actor, edit));
       this.afterUpdate(hostDoc, adapter, actor, applied);
       if (options.afterWrite) {
