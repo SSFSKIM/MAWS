@@ -4,7 +4,6 @@
 // as far as a replica can observe: step 1 on attach, step 2 answered, every content frame applied, acked and
 // broadcast to the other connections, awareness relayed, `restored` announced. It persists nothing and checks no gaps
 // (the service's checks are A's and are tested there). Portable: a web page has `MessageChannel` too.
-import * as awarenessProtocol from '@y/protocols/awareness';
 import type { Actor } from '@shared/artifacts/actor';
 import { decodeFrame, encodeFrame, type Frame } from '../../provider/frames';
 import { PortProvider, type Restored, type SaveState } from '../../provider/port';
@@ -137,7 +136,3 @@ export function memoryEditorHost(identity: { actor: Actor; name: string; color: 
     },
   };
 }
-
-// Awareness states other than this replica's own, for a test or the harness to read the agent's or the peer's cursor.
-export const peerStates = (awareness: awarenessProtocol.Awareness): Map<number, Record<string, unknown>> =>
-  new Map([...awareness.getStates()].filter(([clientId]) => clientId !== awareness.clientID));

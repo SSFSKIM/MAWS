@@ -45,8 +45,16 @@ test.describe('the document editor', () => {
   });
   test.beforeEach(async () => {
     pageErrors = [];
-    await maws.page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.reset());
-    await maws.page.waitForFunction(() => (window as unknown as Partial<HarnessWindow>).__maws_document?.ready() === true);
+    const before = await maws.page.evaluate(() => {
+      const api = (window as unknown as HarnessWindow).__maws_document;
+      const generation = api.generation();
+      api.reset();
+      return generation;
+    });
+    await maws.page.waitForFunction((g) => {
+      const api = (window as unknown as Partial<HarnessWindow>).__maws_document;
+      return api !== undefined && api.generation() > g && api.ready();
+    }, before);
   });
   test.afterEach(() => {
     expect(pageErrors).toEqual([]);
@@ -92,6 +100,9 @@ test.describe('the document editor', () => {
     await typing('Quoted words');
     await line();
     await press('Code block');
+    await bar.getByRole('combobox', { name: 'Code language' }).selectOption('javascript');
+    await content(page, 'a').locator('pre').click();
+    await page.keyboard.press('End');
     await typing('const answer = 42;');
     await expect.poll(() => a.locator('pre .doc-code-token').count()).toBeGreaterThan(2); // shiki's tokens
 

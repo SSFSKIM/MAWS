@@ -59,6 +59,7 @@ function endOf(editor: Editor, id: string): number {
 }
 
 export function DocumentHarness() {
+  const [generation, setGeneration] = useState(1); // a reset opens the next one
   const [world, setWorld] = useState<World | null>(null);
   const [editors, setEditors] = useState<Partial<Record<Replica, Editor | null>>>({});
   const hosts = useMemo(
@@ -80,7 +81,7 @@ export function DocumentHarness() {
       live = false;
       if (opened) closeWorld(opened);
     };
-  }, []);
+  }, [generation]);
 
   const onEditorA = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, a: editor })), []);
   const onEditorB = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, b: editor })), []);
@@ -93,14 +94,13 @@ export function DocumentHarness() {
       return editor;
     };
     const api: DocumentHarnessApi = {
-      ready: () => world !== null && !!editors.a && !!editors.b && editors.a.getText().length > 0 && editors.b.getText().length > 0,
-      reset: async () => {
+      ready: () =>
+        world !== null && !!editors.a && !!editors.b && editors.a.getText().length > 0 && editors.b.getText().length > 0,
+      generation: () => generation,
+      reset: () => {
         setEditors({});
-        const next = await openWorld();
-        setWorld((previous) => {
-          if (previous) closeWorld(previous);
-          return next;
-        });
+        setWorld(null);
+        setGeneration(generation + 1);
       },
       json: (replica) => editorOf(replica).getJSON(),
       hostJson: (tabId) => {
@@ -152,7 +152,7 @@ export function DocumentHarness() {
       if (typing) clearInterval(typing.timer);
       if (window.__maws_document === api) delete window.__maws_document;
     };
-  }, [world, editors]);
+  }, [world, editors, generation]);
 
   if (!world) return <div className="p-4 text-fg-muted">Opening the document…</div>;
   return (

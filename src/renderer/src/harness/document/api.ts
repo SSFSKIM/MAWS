@@ -8,8 +8,10 @@ export type Replica = 'a' | 'b';
 export interface DocumentHarnessApi {
   /** True once both editors are bound to their replicas. */
   ready(): boolean;
-  /** A fresh host document with the seed content, both replicas reopened. */
-  reset(): Promise<void>;
+  /** Counts the documents opened: the page's first is 1, each reset's the next. */
+  generation(): number;
+  /** Opens a fresh host document with the seed content, both replicas new; wait for the next generation's `ready()`. */
+  reset(): void;
   /** A replica's active tab as the editor shows it (ProseMirror JSON). */
   json(replica: Replica): unknown;
   /** The host's copy of a tab (the first when not named), as ProseMirror JSON. */
