@@ -25,7 +25,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
 - [x] (2026-10-13 PDT) M2 — The law, the canon, the hard-don'ts check and the Claude-shape converter. Commits 41508243..f61d8e90; fix wave 1 17b956a0..025f4b38 and fix wave 2 582c9cec (the review's findings: prototype-safe import, `.ds-doc` containment at the selector's top level, assets-only URLs decoded and normalized and on SVG paint attributes, Claude's caps and one style namespace with `ClaudeShapeError` refusals, aliases over the deduplicated namespace, notes excluded from `accent-max`); re-review clean. `src/artifacts` 232/232 after A's re-merge (6647ff9b).
 - [ ] M3 — The document model and the kind adapter.
 - [ ] M4 — The apply-and-restyle API and the Design System page.
-- [ ] M5 — The three defaults and the kind's guide and format reference (after the owner's choice). Built 6a435e9a, 3503701a (merged d166892f); fix wave 7d747b62, fd922ef1 (the canon in the dialect's shape, the law-against-canon test) re-reviewed clean; the `writeSystem` → `readFiles` round trip over every default remains (after M3).
+- [x] (2026-10-13 PDT) M5 — The three defaults and the kind's guide and format reference. Built 6a435e9a, 3503701a (merged d166892f); fix wave 7d747b62, fd922ef1 (the canon in the dialect's shape, the law-against-canon test); the round trip over every default f8ce239b; re-reviews clean.
 - [ ] M6 — Store-backed: registration, seeding, settings, defaults, the pin, deletion, the agent's routes and the `ask` input (after A lands on master).
 - [ ] M7 — Acceptance: the e2e group, the live run, the gates.
 - [ ] Whole-branch review, its fix wave, Outcomes, hand-back.
