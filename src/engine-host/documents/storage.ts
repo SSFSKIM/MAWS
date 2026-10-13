@@ -12,21 +12,16 @@ import type { DocumentStorage, StoredDoc } from '@artifacts/host';
 import { decodeMap, encodeMap, mergeMaps, PROVENANCE_STEP_MS } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import { StoreTooNewError } from './errors';
 import { openStore, type OpenedStore, type StoreStatus } from './migrations';
+
+export { StoreTooNewError };
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 export const LOG_KEEP_MS = 7 * DAY; // a log row the head covers is kept this long (Decision Log 8)
 const HOUR_TIER_AFTER_MS = HOUR; // per-update provenance rows merge into hour rows after this age (Decision Log 5)
 const DAY_TIER_AFTER_MS = 30 * DAY; // hour rows merge into day rows after this age
-
-// A write on a store a newer app wrote (Decision Log 12): the app refuses rather than corrupt it.
-export class StoreTooNewError extends Error {
-  readonly code = 'storeTooNew';
-  constructor(reason: string) {
-    super(`the artifact store is read-only: ${reason}`);
-  }
-}
 
 const floor = (t: number, step: number) => t - (((t % step) + step) % step);
 const bytes = (buffer: Buffer): Uint8Array => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
