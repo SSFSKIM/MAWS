@@ -219,6 +219,16 @@ describe('the token file: the model', () => {
     );
     expect(loop.tokens.has('a')).toBe(false);
     expect(problemsAt(loop.problems, 'a').join()).toMatch(/circular reference/);
+    // A token pointing into the loop from outside is refused as unresolvable, not as a member of it.
+    const outsider = resolveTokens(
+      parsed({
+        a: { $type: 'color', $value: { colorSpace: 'srgb', components: [{ $ref: '#/a/$value/components/1' }, { $ref: '#/a/$value/components/0' }, 0] } },
+        c: { $type: 'number', $value: { $ref: '#/a/$value/components/0' } },
+      }),
+    );
+    expect(problemsAt(outsider.problems, 'a').join()).toMatch(/circular reference/);
+    expect(problemsAt(outsider.problems, 'c').join()).toMatch(/cannot be resolved/);
+    expect(problemsAt(outsider.problems, 'c').join()).not.toMatch(/circular/);
     // Across tokens: b points into a, whose component points back into b.
     const across = resolveTokens(
       parsed({

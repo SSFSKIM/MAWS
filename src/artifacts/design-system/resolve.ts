@@ -4,7 +4,7 @@
 // every member named. The result holds only the tokens that resolved; `problems` names the rest.
 import { comparePaths, splitPath } from './roles';
 import type { GroupProps, Token, TokenProblem, TokenSet } from './tokens';
-import { aliasPath, FAIL, isAlias, normalizeValue, pointerSegments, type RefHandler, type ResolvedValueOf, type TokenType } from './values';
+import { aliasPath, FAIL, isAlias, isPointer, normalizeValue, pointerSegments, type RefHandler, type ResolvedValueOf, type TokenType } from './values';
 
 export type ResolvedToken = {
   [T in TokenType]: {
@@ -121,6 +121,7 @@ export function resolveTokens(set: TokenSet, broken: ReadonlySet<string> = new S
   const failed = new Set<string>();
   const cyclic = new Set<string>();
   const stack: string[] = [];
+  const locations: { pointer: string; owner: string }[] = []; // the pointers being resolved, outermost first
 
   const resolve = (path: string): ResolvedToken | typeof FAIL => {
     const done = resolved.get(path);
@@ -172,7 +173,7 @@ export function resolveTokens(set: TokenSet, broken: ReadonlySet<string> = new S
       if (result === FAIL) problem(`${at}: ${shown} cannot be resolved: ${target} has problems`);
       return result;
     };
-    return {
+    const handlerFor: Handler = {
       mode: 'resolve',
       problem,
       reach,
@@ -186,25 +187,88 @@ export function resolveTokens(set: TokenSet, broken: ReadonlySet<string> = new S
         }
         return target.value;
       },
+      // A pointer is resolved at the location it names, in the written value: a token may point into its own value
+      // (components[1] at components[0]), and only a loop of locations is a cycle (the format's §7.3, §6.7.4).
       pointer(pointer, at) {
         const segments = pointerSegments(pointer)!;
         const valueAt = segments.indexOf('$value');
-        const tokenPath = (valueAt < 0 ? segments : segments.slice(0, valueAt)).join('.');
-        const target = reach(tokenPath, at, JSON.stringify(pointer));
-        if (target === FAIL) return FAIL;
-        let node: unknown = target.value;
-        for (const segment of valueAt < 0 ? [] : segments.slice(valueAt + 1)) {
-          if (Array.isArray(node) && /^\d+$/.test(segment)) node = node[Number(segment)];
-          else if (typeof node === 'object' && node !== null && !Array.isArray(node) && Object.hasOwn(node, segment)) node = (node as Record<string, unknown>)[segment];
-          else node = undefined;
-          if (node === undefined) {
-            problem(`${at}: the pointer ${JSON.stringify(pointer)} reaches nothing`);
-            return FAIL;
-          }
+        if (valueAt < 0) {
+          const whole = reach(segments.join('.'), at, JSON.stringify(pointer));
+          return whole === FAIL ? FAIL : whole.value;
         }
-        return node;
+        const tokenPath = segments.slice(0, valueAt).join('.');
+        const owner = entries.get(tokenPath);
+        if (!owner) return reach(tokenPath, at, JSON.stringify(pointer)); // names the missing target, returns FAIL
+        if (locations.some((location) => location.pointer === pointer)) {
+          const loop = locations.slice(locations.findIndex((location) => location.pointer === pointer));
+          const message = `circular reference: ${[...loop.map((location) => location.pointer), pointer].join(' → ')}`;
+          for (const member of new Set(loop.map((location) => location.owner))) {
+            if (cyclic.has(member)) continue;
+            cyclic.add(member);
+            problems.push({ path: member, message });
+          }
+          return FAIL;
+        }
+        locations.push({ pointer, owner: tokenPath });
+        const before = problems.length;
+        const refuse = (): typeof FAIL => {
+          // A token outside the loop (or behind a deeper failure) still says why its pointer did not resolve.
+          if (!problems.slice(before).some((p) => p.path === path)) problem(`${at}: the pointer ${JSON.stringify(pointer)} cannot be resolved`);
+          return FAIL;
+        };
+        try {
+          // Walk the written value, stepping through the references met on the way, then resolve what is reached.
+          let node: unknown = owner.token.$value;
+          for (const segment of segments.slice(valueAt + 1)) {
+            node = deref(node, at);
+            if (node === FAIL) return refuse();
+            if (Array.isArray(node) && /^\d+$/.test(segment)) node = node[Number(segment)];
+            else if (typeof node === 'object' && node !== null && !Array.isArray(node) && Object.hasOwn(node, segment)) node = (node as Record<string, unknown>)[segment];
+            else node = undefined;
+            if (node === undefined) {
+              problem(`${at}: the pointer ${JSON.stringify(pointer)} reaches nothing`);
+              return FAIL;
+            }
+          }
+          const value = deepDeref(node, at);
+          return value === FAIL ? refuse() : value;
+        } finally {
+          locations.pop();
+        }
       },
     };
+    // A reference in a written value, replaced by what it names (an alias by its token's resolved value).
+    function deref(node: unknown, at: string): unknown {
+      if (isAlias(node)) {
+        const target = reach(aliasPath(node), at, node);
+        return target === FAIL ? FAIL : target.value;
+      }
+      return isPointer(node) ? handlerFor.pointer(node.$ref, at) : node;
+    }
+    function deepDeref(node: unknown, at: string): unknown {
+      const value = deref(node, at);
+      if (value === FAIL) return FAIL;
+      if (Array.isArray(value)) {
+        const out: unknown[] = [];
+        for (const item of value) {
+          const resolvedItem = deepDeref(item, at);
+          if (resolvedItem === FAIL) return FAIL;
+          out.push(resolvedItem);
+        }
+        return out;
+      }
+      if (typeof value === 'object' && value !== null) {
+        const out: Record<string, unknown> = {};
+        for (const [key, item] of Object.entries(value)) {
+          const resolvedItem = deepDeref(item, at);
+          if (resolvedItem === FAIL) return FAIL;
+          out[key] = resolvedItem;
+        }
+        return out;
+      }
+      return value;
+    }
+    return handlerFor;
   };
 
   const order = [...entries.keys()].sort(comparePaths);
