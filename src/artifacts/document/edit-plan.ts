@@ -255,6 +255,13 @@ const occurrences = (text: string, quote: string): number => {
   return n;
 };
 
+/** A quote's longer words, for the near candidates a `notFound` refusal lists. */
+const wordsOf = (quote: string): string[] =>
+  quote
+    .replace(/[*_`~[\]()#>+-]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length > 3);
+
 const LIST_ITEMS = new Set(['listItem', 'taskItem']);
 
 class Planner {
@@ -571,7 +578,9 @@ class Planner {
     const quote = stripMilestones(op.old);
     const replacement = stripMilestones(op.new);
     if (!quote) this.invalid('old is empty');
-    const pool: Array<{ key: string; tabId: string }> = op.block != null ? [this.located(op.block)] : this.index.tabIds().flatMap((tabId) => this.order(tabId).map((key) => ({ key, tabId })));
+    const scope = op.block != null ? this.located(op.block) : null;
+    if (scope && scope.path.length > 0) return this.replaceTextNested(op, scope, quote, replacement);
+    const pool: Array<{ key: string; tabId: string }> = scope ? [scope] : this.index.tabIds().flatMap((tabId) => this.order(tabId).map((key) => ({ key, tabId })));
     const live = pool.filter(({ key }) => this.current(key) !== null);
     const markdownOf = (key: string): string => {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
@@ -595,10 +604,7 @@ class Planner {
     const total = hits.reduce((sum, hit) => sum + hit.n, 0);
     const idOf = (key: string) => (key.startsWith('\u0000') ? '?' : key);
     if (total === 0) {
-      const words = quote
-        .replace(/[*_`~[\]()#>+-]/g, ' ')
-        .split(/\s+/)
-        .filter((word) => word.length > 3);
+      const words = wordsOf(quote);
       const near = live
         .filter(({ key }) => words.some((word) => textOf(key).includes(word)))
         .slice(0, 10)
@@ -619,6 +625,42 @@ class Planner {
     }
     const targets = hits.map((hit) => idOf(hit.key));
     return { line: `replaced ${total} occurrence(s) in ${targets.map((id) => `^${id}`).join(', ')}`, target: targets.join(','), newIds: [] };
+  }
+
+  /**
+   * `replace_text` whose `block` names a nested node (a list item, a cell, a paragraph in a quote): the quote is matched
+   * in that node's own markdown and only that node is rebuilt, its ancestors re-checked up to the top-level block
+   * (Decision Log 35). A node that cannot stand as a top-level block is serialised inside one-child copies of the
+   * ancestors it needs (a list item in its list, a cell in its row and table), which the parsed replacement must keep.
+   */
+  private replaceTextNested(op: Extract<Op, { op: 'replace_text' }>, located: Located, quote: string, replacement: string): OpResult {
+    const id = op.block!;
+    const chain = [this.current(located.key)!];
+    for (const i of located.path) chain.push(chain[chain.length - 1].child(i));
+    const node = chain[chain.length - 1];
+    const wrappers: NodeType[] = [];
+    let standalone = node;
+    for (let k = chain.length - 2; k >= 0 && !this.schema.topNodeType.contentMatch.matchType(standalone.type); k--) {
+      standalone = chain[k].type.create(chain[k].attrs, [standalone], chain[k].marks);
+      wrappers.unshift(chain[k].type);
+    }
+    const markdown = this.md.block(standalone);
+    const total = occurrences(markdown, quote);
+    const text = node.textBetween(0, node.content.size, '\n');
+    if (total === 0) {
+      const near = wordsOf(quote).some((word) => text.includes(word)) ? [{ id, text }] : [];
+      refuse({ reason: 'notFound', opIndex: this.opIndex, target: op.old, candidates: near }, `op ${this.opIndex}: "${op.old}" not found in ^${id}`);
+    }
+    if (total > 1 && !op.all) {
+      refuse({ reason: 'notUnique', opIndex: this.opIndex, candidates: [{ id, text, matches: total }] }, `op ${this.opIndex}: "${op.old}" matches ${total} times in ^${id}; quote more context or pass all`);
+    }
+    const blocks = this.parse(op.all ? markdown.split(quote).join(replacement) : markdown.replace(quote, () => replacement));
+    let parsed: PMNode | null = blocks.length === 1 ? blocks[0] : null;
+    for (const type of wrappers) parsed = parsed?.type === type && parsed.childCount === 1 ? parsed.child(0) : null;
+    if (!parsed) return this.invalid(`the replacement changes the structure of ^${id} (use replace_block)`);
+    const next = parsed;
+    this.rebuild(located, (old) => [this.patch(old, next)]);
+    return { line: `replaced ${total} occurrence(s) in ^${id}`, target: id, newIds: [] };
   }
 
   /** S4's move rule: never re-insert a block holding a human caret; re-insert what it jumps over, or refuse to retry. */

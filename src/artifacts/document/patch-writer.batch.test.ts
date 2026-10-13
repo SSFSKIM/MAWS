@@ -322,3 +322,42 @@ describe('several ops on one block in one batch', () => {
     expect(marksOf(doc, 'k1')).toBe('회의는 월요일에 열린다 🍕 다같이.');
   });
 });
+
+describe('replace_text scoped to a nested block', () => {
+  it('searches only the named list item and rewrites only it', () => {
+    const doc = seedDoc();
+    const sibling = slots(nodeOf(doc, 'lp2'));
+    const res = applyEdit(doc, [{ op: 'replace_text', block: 'li1', old: 'item', new: 'entry' }]);
+    expect(textOf(doc, 'li1')).toBe('first entry');
+    expect(marksOf(doc, 'li2')).toBe('second item with |bold[bold]');
+    expect(slots(nodeOf(doc, 'lp2'))).toEqual(sibling);
+    expect(res.results[0].target).toBe('li1');
+  });
+
+  it('refuses a quote found only in a sibling of the named block', () => {
+    const doc = seedDoc();
+    const before = stateV2(doc);
+    expect(refusal(() => applyEdit(doc, [{ op: 'replace_text', block: 'li1', old: 'second item', new: 'changed sibling' }]))).toMatchObject({ reason: 'notFound' });
+    expect(stateV2(doc)).toEqual(before);
+  });
+
+  it('a table cell and a nested paragraph are scopes of their own', () => {
+    const doc = seedDoc();
+    applyEdit(doc, [
+      { op: 'replace_text', block: 'td2a', old: 'beta', new: 'gamma' },
+      { op: 'replace_text', block: 'lp2', old: 'item', new: 'line' },
+    ]);
+    expect(textOf(doc, 'td2a')).toBe('gamma');
+    expect(textOf(doc, 'td1a')).toBe('alpha');
+    expect(marksOf(doc, 'li2')).toBe('second line with |bold[bold]');
+    expect(refusal(() => applyEdit(doc, [{ op: 'replace_text', block: 'td1a', old: 'gamma', new: 'x' }]))).toMatchObject({ reason: 'notFound' });
+  });
+
+  it('counts uniqueness inside the named block only', () => {
+    const doc = seedDoc();
+    expect(refusal(() => applyEdit(doc, [{ op: 'replace_text', block: 'l1', old: 'item', new: 'entry' }]))).toMatchObject({ reason: 'notUnique' });
+    applyEdit(doc, [{ op: 'replace_text', block: 'li2', old: 'item', new: 'entry' }]);
+    expect(textOf(doc, 'li1')).toBe('first item');
+    expect(marksOf(doc, 'li2')).toBe('second entry with |bold[bold]');
+  });
+});
