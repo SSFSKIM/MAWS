@@ -17,8 +17,15 @@
 // view's bounds are its box) and under it the card's strip (`CommentCardHost`, layout `docked`), mounted while the pane
 // holds or claims the view and registered as the tab's dock while it holds it (`comment/dock.ts`). An open card grows
 // the strip and the page's element shrinks by as much: the view is never under the card and no cover is raised.
+//
+// P3-G (§D3, M2): the floating session card's column. In the panel, while the card is up, a spacer at the pane's left
+// (`data-browser-reserved-column`, beside the column above) leaves the card its column: the page's element excludes it,
+// so the view lies beside the card, live, and the existing reports carry every change of the column's width. The spacer
+// is registered as the card's column while the pane holds the view. Closed to its pill, the card asks for a band under
+// the page instead, where the pill sits. A main tab reserves nothing (the main region is at 0 px while floating).
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
+import { COLUMN_PAGE_MIN, PILL_BAND, useCardRoom, useFloatingCard } from '../../shell/floating';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import type { OpenCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
@@ -131,12 +138,27 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
     target?.focus({ preventScroll: true });
   };
 
+  // P3-G: the floating card's room, while this pane shows the page in the panel (another pane holding the view leaves a
+  // DOM page here, which the card floats over as it does over any tool)
+  const room = useCardRoom();
+  const leaves = surface === 'panel' && mode !== 'elsewhere';
+  const column = leaves ? room.column : null;
+  const reserving = column !== null && mode === 'owner';
+  const spacer = useRef<HTMLDivElement>(null);
+  useEffect(() => (reserving && spacer.current ? useFloatingCard.getState().reserveColumn(spacer.current) : undefined), [reserving]);
+
   return (
-    <div data-browser-column="" className="flex h-full w-full flex-col">
-      <div ref={element} data-browser-pane="" className={PAGE}>
-        {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+    <div className="flex h-full w-full">
+      {column !== null && (
+        <div ref={spacer} aria-hidden data-browser-reserved-column="" className="shrink-0" style={{ width: column, maxWidth: `calc(100% - ${COLUMN_PAGE_MIN}px)` }} />
+      )}
+      <div data-browser-column="" className="flex h-full min-w-0 flex-1 flex-col">
+        <div ref={element} data-browser-pane="" className={PAGE}>
+          {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+        </div>
+        {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
+        {leaves && room.pill && <div aria-hidden data-browser-pill-band="" className="shrink-0 border-t border-border bg-bg-raised" style={{ height: PILL_BAND }} />}
       </div>
-      {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
     </div>
   );
 }

@@ -204,4 +204,47 @@ describe('the floating card in the Shell', () => {
     act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 540, clientY: 470 }));
     expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: width + 40, h: height + 30 } });
   });
+
+  // M2 (§D3): a pane over a native view (the browser's) reserves a column; the card lies on the column's rect, full
+  // height, and is resized by its right edge only. The live width goes to the store the pane reads (the page moves with
+  // the drag); on release the column's measured width (what the page's floor left it) is written for the panel tab.
+  it('over a reserved column the card lies on the column’s rect and resizes from its right edge only', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    let columnWidth = 430;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute('data-probe-column')
+        ? { left: 300, top: 220, width: columnWidth, height: 560 }
+        : this.hasAttribute('data-floating-layer')
+          ? { left: 300, top: 180, width: 1000, height: 700 }
+          : { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+    });
+    const column = document.body.appendChild(document.createElement('div'));
+    column.setAttribute('data-probe-column', '');
+    let release = () => {};
+    act(() => void (release = useFloatingCard.getState().reserveColumn(column)));
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const shown = card()!;
+    expect([shown.style.left, shown.style.top, shown.style.width, shown.style.height]).toEqual(['0px', '40px', '430px', '560px']);
+    expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].map((handle) => handle.dataset.cardResize)).toEqual(['right']);
+
+    const edge = shown.querySelector<HTMLElement>('[data-card-resize="right"]')!;
+    act(() => void fireEvent.pointerDown(edge, { pointerId: 1, button: 0, clientX: 730, clientY: 500 }));
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    expect(useFloatingCard.getState().columnDrag).toBe(490);
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 500, clientY: 400 }));
+    expect(useFloatingCard.getState().columnDrag, 'no narrower than the card’s minimum').toBe(360);
+    act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    expect(useLayout.getState().regions.floatingCard).toEqual({});
+    columnWidth = 470; // the page's 280 px floor held the column narrower than the drag
+    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 790, clientY: 400 }));
+    expect(useFloatingCard.getState().columnDrag).toBeNull();
+    expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: 470, h: 420 } }); // the height kept for a floating card
+
+    act(() => release());
+    expect([card()!.style.left, card()!.style.bottom]).toEqual(['16px', '16px']);
+    column.remove();
+  });
 });

@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { browserTab, T1 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
+import { mainShowing } from '../../test-support/panel';
 import { openCard, useCommentCard } from '../../side/card/store';
 import { dockOf } from './comment/dock';
 import { BROWSER_COPY } from './copy';
@@ -288,5 +290,99 @@ describe('the comment card’s dock', () => {
     fireEvent.keyDown(field, { key: 'Escape' });
     expect(useCommentCard.getState().open).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Address' }));
+  });
+});
+
+// P3-G (§D3, M2): with the floating card up over a Browser tab in the panel, the pane reserves a left column for it: a
+// spacer beside the page's column, outside the element the placement measures (so the view's bounds exclude it), and
+// registered as the card's column while the pane holds the view. Closed to its pill, the pane leaves a band under the
+// page instead (the native view is drawn over the DOM, so a pill under the page could be neither seen nor clicked).
+describe('the floating card’s column', () => {
+  const BROWSER_TAB = 'browser:1';
+  const float = (over: Partial<{ closed: boolean }> = {}) =>
+    act(() => {
+      useLayout.setState({
+        main: mainShowing(A),
+        regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, floating: true } },
+        panelBySession: new Map([[A, { tabs: [{ id: BROWSER_TAB, toolId: 'browser', pinned: false }], activeTabId: BROWSER_TAB }]]),
+      });
+      useFloatingCard.setState({ closed: false, columnDrag: null, ...over });
+    });
+  const spacer = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-reserved-column]');
+  const band = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-pill-band]');
+  beforeEach(() => useFloatingCard.setState({ closed: false, column: null, columnDrag: null }));
+
+  it('reserves a 420 px column beside the page, outside the measured element, the page keeping at least 280 px; registered while it holds the view', async () => {
+    float();
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    const column = spacer(container)!;
+    expect(column).not.toBeNull();
+    const page = container.querySelector<HTMLElement>('[data-browser-pane]')!;
+    expect(page.contains(column) || column.contains(page), 'the placement measures the page alone').toBe(false);
+    expect(column.nextElementSibling!.matches('[data-browser-column]')).toBe(true);
+    expect([column.style.width, column.style.maxWidth]).toEqual(['420px', 'calc(100% - 280px)']);
+    expect(places()[0]!.rect).toEqual({ x: 10, y: 21, width: 300, height: 199 }); // the page's box, as before
+    expect(useFloatingCard.getState().column?.element).toBe(column);
+  });
+
+  it('takes the stored width of the panel tab under the card, and the live width while the column’s edge is dragged', async () => {
+    float();
+    act(() => useLayout.getState().setFloatingCardSize(BROWSER_TAB, { w: 512, h: 400 }));
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    expect(spacer(container)!.style.width).toBe('512px');
+    act(() => useFloatingCard.getState().setColumnDrag(600));
+    expect(spacer(container)!.style.width).toBe('600px');
+    act(() => useFloatingCard.getState().setColumnDrag(null));
+    expect(spacer(container)!.style.width).toBe('512px');
+  });
+
+  it('reserves nothing on a main tab, while docked, or with the panel collapsed', async () => {
+    float();
+    const main = render(<BrowserPane tab={tab()} surface="main" />);
+    await frames();
+    expect(spacer(main.container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+    main.unmount();
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    act(() => useLayout.getState().setPanel({ floating: false }));
+    expect(spacer(container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+    float();
+    expect(spacer(container)).not.toBeNull();
+    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    expect(spacer(container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+  });
+
+  it('releases the column when another pane takes the view, and on unmount', async () => {
+    float();
+    const { container, rerender, unmount } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    expect(useFloatingCard.getState().column).not.toBeNull();
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" />);
+    expect(spacer(container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+    rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" />); // the other let go: this one claims back
+    expect(useFloatingCard.getState().column?.element).toBe(spacer(container));
+    unmount();
+    expect(useFloatingCard.getState().column).toBeNull();
+  });
+
+  it('closed to its pill, the column goes and a band under the page holds the pill', async () => {
+    float({ closed: true });
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    expect(spacer(container)).toBeNull();
+    expect(useFloatingCard.getState().column).toBeNull();
+    const strip = band(container)!;
+    expect(strip.style.height).toBe('60px'); // the 28 px pill and its 16 px margins
+    expect(strip.parentElement!.matches('[data-browser-column]')).toBe(true);
+    expect(strip.previousElementSibling!.matches('[data-card-dock]'), 'under the page and its comment strip').toBe(true);
+    act(() => useFloatingCard.getState().setClosed(false));
+    expect(band(container)).toBeNull();
+    expect(spacer(container)).not.toBeNull();
   });
 });

@@ -1,8 +1,9 @@
 // The floating session card's state (P3-G execution document, §D1; X30). `regions.panel.floating` (persisted) puts the
 // panel in the main column's place and the shown session in the card; what is transient lives here: whether the card is
 // closed to its pill (a moment's choice, never restored: a launch with `floating` shows the card open; reset whenever
-// `floating` changes) and the browser pane's column reservation (§D3, M2). The transitions the action table, the
-// header's Float button, the divider and the card run are here too, so every path marks focus the same way (§D1.2).
+// `floating` changes), the browser pane's column reservation and the column's width while its edge is dragged (§D3, M2).
+// The transitions the action table, the header's Float button, the divider and the card run are here too, so every path
+// marks focus the same way (§D1.2).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize, LayoutRegions } from '@shared/ipc/schema/layout';
@@ -18,15 +19,21 @@ export interface ColumnReservation {
 export interface FloatingCardState {
   closed: boolean; // the card closed to its pill
   column: ColumnReservation | null;
+  // The column's width while the card's right edge is dragged (the pane's spacer follows it, so the page moves with the
+  // drag); null otherwise. `regions` is written once, on release.
+  columnDrag: number | null;
   setClosed(closed: boolean): void;
   // The latest reservation wins; its release clears only itself.
   reserveColumn(element: HTMLElement): () => void;
+  setColumnDrag(width: number | null): void;
 }
 
 export const useFloatingCard = create<FloatingCardState>()((set, get) => ({
   closed: false,
   column: null,
+  columnDrag: null,
   setClosed: (closed) => set({ closed }),
+  setColumnDrag: (columnDrag) => set({ columnDrag }),
   reserveColumn(element) {
     const reservation: ColumnReservation = { element };
     set({ column: reservation });
@@ -69,6 +76,28 @@ export function placeCard(stored: FloatingCardSize | undefined, bounds: { width:
   const fit = (value: number, min: number, max: number) => Math.round(Math.max(Math.min(min, max), Math.min(value, max)));
   const base = stored ?? { w: CARD_DEFAULT.w, h: Math.min(bounds.height * CARD_DEFAULT.heightShare, CARD_DEFAULT.h) };
   return { w: fit(base.w, CARD_MIN.w, bounds.width - 2 * CARD_MARGIN), h: fit(base.h, CARD_MIN.h, bounds.height - 2 * CARD_MARGIN) };
+}
+
+// ---- the room a native-view pane leaves the card (§D3) -----------------------------------------------------------------
+
+// A page in the panel is a native view, drawn over the DOM: the card cannot float over it. The pane showing one leaves
+// the card a column at its left instead (the page live beside it), and the pill a band under the page.
+export const COLUMN_PAGE_MIN = 280; // the page keeps at least this much beside the column
+export const PILL_BAND = 28 + 2 * CARD_MARGIN; // the pill's 28 px and its margins
+
+export interface CardRoom {
+  column: number | null; // the column's width (before the page's floor), while the card is open
+  pill: boolean; // the card is closed to its pill
+}
+
+// What the card asks of the panel's pane under it now: the column's width is the live drag's, else the stored width of
+// the panel tab under the card, else the card's default.
+export function useCardRoom(): CardRoom {
+  const up = useLayout((s) => cardSession(s) !== null);
+  const stored = useLayout((s) => s.regions.floatingCard[cardSizeKey(s)]?.w);
+  const closed = useFloatingCard((s) => s.closed);
+  const drag = useFloatingCard((s) => s.columnDrag);
+  return { column: up && !closed ? (drag ?? stored ?? CARD_DEFAULT.w) : null, pill: up && closed };
 }
 
 // ---- transitions (§D1.2) ----------------------------------------------------------------------------------------------
