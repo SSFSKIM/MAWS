@@ -20,6 +20,8 @@
 //                 or widths, one alignment per column); otherwise `:::table`, `:::row <!-- ^id -->`, and
 //                 `:::header {colspan="2" rowspan="1" colwidth="120,80" align="center"}` or `:::cell {…}` around each
 //                 cell's markdown, each closed by `:::`
+//   lists         numbered `1. ` (one space); lettered or roman `a.  `, `IV.  ` with two to four spaces (one space is
+//                 text: `Dr. Smith`, Decision Log 19)
 //   images        `![alt](src)` when the address and alt are plain and there is no asset; otherwise
 //                 `<img src="…" alt="…" asset="…"/>` (an absent attribute is null)
 //   highlight     `==text==`; with a colour `<mark color="#fde68a">text</mark>`
@@ -39,10 +41,9 @@
 // P3-0's `s4/src/markdown.ts` and `s5/lib/read.mjs`.
 import type { AnyExtension, JSONContent } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { ORDERED_LIST_MARKER_PATTERN } from '@tiptap/extension-list';
 import { MarkdownManager } from '@tiptap/markdown';
 import { Marked } from 'marked';
-import { BLOCKS_TABLE, MARKDOWN, gfmTable, rawRegion } from './markdown-syntax';
+import { BLOCKS_TABLE, MARKDOWN, gfmTable, letteredItem, rawRegion } from './markdown-syntax';
 import { BLOCK_TYPES, extensions, nanoid8, schemaFor } from './schema';
 
 export interface SerializeOptions {
@@ -96,7 +97,7 @@ const CONTAINERS_WITH_OWN_LINES = new Set(['doc', 'blockquote', 'callout']);
 const ITEMS = new Set(['listItem', 'taskItem']);
 const CELLS = new Set(['tableCell', 'tableHeader']);
 
-const LETTERED_MARKER = new RegExp(`^(\\s*(?:${ORDERED_LIST_MARKER_PATTERN}))([.)])(?=\\s)`);
+const LETTERED_MARKER = /^(\s*[a-zA-Z]+)([.)])(?= {2})/;
 // `@tiptap/markdown` already backslash-escapes \\ ` * _ [ ] ~ in text and writes & < > as entities; what the dialect adds
 // is escaped here, through a placeholder its escaper leaves alone and `restore` turns into the backslash.
 function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: boolean; lineEnd: boolean; inCell: boolean }): string {
@@ -106,7 +107,7 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
     out = out
       .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|:::|\^)/, `$1${ESC}$2`)
       .replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`)
-      // Tiptap's ordered lists also take letter and roman markers: `Dr. Smith` and `A. Lincoln` would read as items
+      // a letter or roman marker with two spaces after it would read as an item (Decision Log 19)
       .replace(LETTERED_MARKER, `$1${ESC}$2`);
   }
   if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
@@ -325,7 +326,7 @@ function restore(markdown: string, tables: Tables): string {
 /** A container a line can sit in: a block quote, or a list item whose content starts `indent` columns in. */
 type Container = { quote: true } | { indent: number };
 const QUOTE = /^ {0,3}>[ ]?/;
-const ITEM = new RegExp(`^ {0,3}(?:[-+*]|\\d{1,9}[.)]|(?:${ORDERED_LIST_MARKER_PATTERN})[.)](?=[ \\t]))(?=[ \\t]|$)`);
+const ITEM = /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/;
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 
 /**
@@ -357,6 +358,12 @@ function opening(rest: string, open: Container[]): string {
     if (quote) {
       open.push({ quote: true });
       rest = rest.slice(quote[0].length);
+      continue;
+    }
+    const lettered = letteredItem(rest);
+    if (lettered) {
+      open.push({ indent: lettered.column });
+      rest = rest.slice(lettered.column);
       continue;
     }
     const item = THEMATIC_BREAK.test(rest) ? null : ITEM.exec(rest);

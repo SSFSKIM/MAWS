@@ -302,6 +302,7 @@ describe('raw content inside containers', () => {
     codeInLetteredItems: { type: 'orderedList', attrs: { start: 1, type: 'i' }, content: [item(p(t('a')), code), item(p(t('b')), { type: 'orderedList', attrs: { start: 1, type: 'a' }, content: [item(p(t('c')), code)] })] },
     codeInNumberedUnderLettered: { type: 'orderedList', attrs: { start: 1, type: 'A' }, content: [item(p(t('a')), { type: 'orderedList', attrs: { start: 1 }, content: [item(p(t('c')), code)] })] },
     codeWithNumberedLines: { type: 'orderedList', attrs: { start: 1 }, content: [item(p(t('steps')), { type: 'codeBlock', attrs: { language: null }, content: [t('1. first\n  - second\n> third')] })] },
+    codeWithItemLinesInLettered: { type: 'orderedList', attrs: { start: 1, type: 'a' }, content: [item(p(t('steps')), { type: 'codeBlock', attrs: { language: null }, content: [t('1. first\nb.  second\n  ii.  third\nc) x')] }), item(p(t('next')))] },
     codeInTaskItem: { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [p(t('a')), code] }] },
     codeInQuoteInItem: { type: 'bulletList', content: [item(p(t('a')), quote(p(t('q')), code))] },
     codeInItemInQuote: quote({ type: 'bulletList', content: [item(p(t('a')), code)] }),
@@ -338,6 +339,61 @@ describe('raw content inside containers', () => {
   });
 });
 
+// Decision Log 19: a letter or roman marker opens a list item only when two or more spaces follow it (Pandoc's rule,
+// generalised); with one space the line is text. Numbered markers keep CommonMark's one space.
+describe('lettered and roman lists', () => {
+  const t = (text: string): JSONContent => ({ type: 'text', text });
+  const p = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
+  const list = (type: string, start: number, ...texts: Array<string | JSONContent[]>): JSONContent => ({
+    type: 'orderedList',
+    attrs: { start, type },
+    content: texts.map((text) => ({ type: 'listItem', content: typeof text === 'string' ? [p(t(text))] : text })),
+  });
+
+  it.each(['Dr. Smith said so.', 'A. Lincoln wrote it.', 'I. Introduction', 'iv) the fourth', 'No. 5 is next.\nSt. Louis too.'])(
+    'reads the agent’s `%s` as a paragraph',
+    (markdown) => {
+      const blocks = md.parse(markdown);
+      expect(blocks.map((block) => block.type.name)).toEqual(['paragraph']);
+      expect(blocks[0].textContent).toBe(markdown);
+    },
+  );
+
+  it('reads a marker followed by two spaces as an item', () => {
+    const [block] = md.parse('a.  one\nb.  two\n\nIV)  four');
+    expect(block.toJSON()).toMatchObject({ type: 'orderedList', attrs: { start: 1, type: 'a' } });
+    expect(block.childCount).toBe(2);
+    expect(md.parse('IV)  four')[0].toJSON()).toMatchObject({ type: 'orderedList', attrs: { start: 4, type: 'I' } });
+    expect(md.parse('a.  one\nI.  two').map((list) => list.attrs.type)).toEqual(['a', 'I']); // another style, another list
+    expect(md.parse('vv.  not roman').map((block) => block.type.name)).toEqual(['orderedList']); // two letters: lettered
+    expect(md.parse('iiii.  neither').map((block) => block.type.name)).toEqual(['paragraph']);
+  });
+
+  it('writes two spaces after a letter or roman marker and one after a number', () => {
+    const doc = docOf([schema.nodeFromJSON(list('a', 1, 'one', 'two')), schema.nodeFromJSON(list('I', 4, 'four')), schema.nodeFromJSON({ type: 'orderedList', attrs: { start: 2 }, content: [{ type: 'listItem', content: [p(t('two'))] }] })]);
+    expect(md.serialize(doc, { ids: false })).toBe('a.  one\nb.  two\n\nIV.  four\n\n2. two');
+  });
+
+  const lists: Record<string, JSONContent> = {
+    alpha: list('a', 1, 'one', 'two', 'three'),
+    alphaUpperFromC: list('A', 3, 'three', 'four'),
+    alphaFromI: list('a', 9, 'nine', 'ten'),
+    alphaFromV: list('a', 22, 'twenty-two'),
+    alphaPastZ: list('a', 26, 'z', 'aa', 'ab'),
+    roman: list('i', 1, 'one', 'two', 'three', 'four'),
+    romanUpperFromIV: list('I', 4, 'four', 'five'),
+    romanAlone: list('i', 1, 'one'),
+    nested: list('a', 1, [p(t('outer')), list('i', 1, 'inner one', 'inner two')], 'second'),
+    numberedInLettered: list('A', 1, [p(t('outer')), { type: 'orderedList', attrs: { start: 1, type: null }, content: [{ type: 'listItem', content: [p(t('n'))] }] }]),
+    letteredInNumbered: { type: 'orderedList', attrs: { start: 1, type: null }, content: [{ type: 'listItem', content: [p(t('n')), list('a', 1, 'x', 'y')] }] },
+    multiParagraph: list('a', 1, [p(t('first')), p(t('second'))], 'next'),
+  };
+  it.each(Object.entries(lists))('reads the serializer’s %s back as the same list', (_name, json) => {
+    const doc = docOf([schema.nodeFromJSON(json)]);
+    for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids }))))).toEqual(stored(doc));
+  });
+});
+
 describe('text that reads as markup', () => {
   const tricky = [
     '2*3*4 and _under_ but snake_case',
@@ -354,6 +410,8 @@ describe('text that reads as markup', () => {
     'Dr. Smith signed it',
     'A. Lincoln and iv) the fourth',
     'I. Introduction',
+    'A.  Lincoln, two spaces after',
+    'iv)  spaced',
     '회의는 분기마다 열리고 **디자인 리뷰**를 포함한다',
   ];
   it.each(tricky)('survives a round trip: %s', (value) => {

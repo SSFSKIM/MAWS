@@ -3,8 +3,8 @@
 // state plain GFM would lose, layered on the schema module's extensions by markdown.ts. Each form is read back by its
 // own parser exactly; markdown.ts's head lists the forms. Kept apart from markdown.ts, which owns the sentinels, ids
 // and milestones around them.
-import type { JSONContent, MarkdownToken } from '@tiptap/core';
-import { ORDERED_LIST_MARKER_PATTERN, OrderedList } from '@tiptap/extension-list';
+import { renderNestedMarkdownContent, type JSONContent, type MarkdownToken } from '@tiptap/core';
+import { detectMarkerType, getListMarker, markerToStart } from '@tiptap/extension-list';
 import { withoutControls } from './schema';
 
 // ── attributes: `key="value"` (or single quotes), HTML-escaped ──
@@ -111,35 +111,110 @@ function readFences(body: string, names: string): Fence[] | null {
 
 type Lexer = { blockTokens(src: string): MarkdownToken[]; inlineTokens(src: string): MarkdownToken[] };
 
-// ── ordered lists ──
-const tiptapOrderedList = OrderedList.config.markdownTokenizer as { tokenize(src: string, tokens: MarkdownToken[], lexer: Lexer): MarkdownToken | undefined };
-const NUMBERED_ITEM = /^ {0,3}\d{1,9}[.)](?:[ \t]|$)/;
-const TIPTAP_ITEM = new RegExp(`^(\\s*)(${ORDERED_LIST_MARKER_PATTERN})[.)](\\s+)`);
-/**
- * Tiptap's ordered-list tokenizer takes an item's indent, its marker and one column off each continuation line, one
- * short of CommonMark's content column (the separator and the spaces after it), so code in an item would gain a leading
- * space on every read. A numbered list is left to marked's own list tokenizer; for a lettered or roman one (which marked
- * does not read) the continuation lines are moved left by the difference first, and the token keeps the source's raw.
- */
-function orderedListToken(src: string, tokens: MarkdownToken[], lexer: Lexer): MarkdownToken | undefined {
-  if (NUMBERED_ITEM.test(src)) return undefined;
-  let column = Infinity;
-  let shift = 0;
-  const lines = src.split('\n');
-  const realigned = lines.map((line) => {
-    const item = TIPTAP_ITEM.exec(line);
-    if (item) {
-      const spaces = item[3].length > 4 ? 1 : item[3].length;
-      column = item[1].length + item[2].length + 1 + spaces;
-      shift = spaces;
-      return line;
-    }
-    return /\S/.test(line) && /^ */.exec(line)![0].length >= column ? line.slice(shift) : line;
-  });
-  const token = tiptapOrderedList.tokenize(realigned.join('\n'), tokens, lexer);
-  if (token) token.raw = lines.slice(0, (token.raw ?? '').split('\n').length).join('\n');
-  return token;
+// ── ordered lists (Decision Log 19) ──
+// A numbered list is marked's own (CommonMark: one space after the marker). A letter or roman marker opens an item only
+// when two to four spaces follow it (Pandoc's rule, generalised), so `Dr. Smith` and `A. Lincoln` stay text; the
+// serializer writes two. Tiptap's ordered-list tokenizer is not used: it took one space, cut continuation lines a column
+// short (code gained a space per read) and read any line that looked like an item, code lines included, as one.
+const LETTERED_TYPES = new Set(['a', 'A', 'i', 'I']);
+const LETTERED = /^( {0,3})([a-zA-Z]+)([.)])( {2,4})(?=\S)/;
+const isRoman = (marker: string): boolean => ['i', 'I'].includes(detectMarkerType(marker) ?? '');
+
+/** A letter or roman item's marker and separator at the start of a line, and the column its content starts at. */
+export function letteredItem(line: string): { marker: string; separator: string; column: number } | null {
+  const match = LETTERED.exec(line);
+  if (!match || !(/^(?:[a-z]{1,2}|[A-Z]{1,2})$/.test(match[2]) || isRoman(match[2]))) return null;
+  return { marker: match[2], separator: match[3], column: match[0].length };
 }
+/** Where in `src` (after a newline) a lettered item starts, so one interrupts the paragraph of the item it nests in. */
+const letteredStart = (src: string): number => {
+  for (const candidate of src.matchAll(/\n( {0,3}[a-zA-Z]+[.)] {2,4}\S)/g)) if (letteredItem(candidate[1])) return candidate.index + 1;
+  return -1;
+};
+/** One list's items share a separator and a case; another starts a new list. */
+const sameList = (first: { marker: string; separator: string }, next: { marker: string; separator: string }): boolean =>
+  next.separator === first.separator && (next.marker === next.marker.toUpperCase()) === (first.marker === first.marker.toUpperCase());
+
+/** 1 for `a`, 26 for `z`, 27 for `aa` (Tiptap's numbering). */
+const alphaValue = (marker: string): number => {
+  const [first, second] = [...marker.toLowerCase()].map((char) => char.charCodeAt(0) - 96);
+  return second == null ? first : first * 26 + second;
+};
+/**
+ * A list's type and start from its first marker, and its second when the first reads both ways (`c` is the third
+ * letter and roman 100): a second marker that is the next letter makes it a lettered list. Alone, a single letter is a
+ * letter but `i`, and a longer valid roman numeral is roman.
+ */
+function listStyle(first: string, second: string | undefined): { type: string; start: number } {
+  const upper = first === first.toUpperCase();
+  const alpha = /^[a-z]{1,2}$/i.test(first);
+  let roman = isRoman(first);
+  if (alpha && roman) roman = second != null ? second.toLowerCase() !== getListMarker('a', alphaValue(first), '') : first.length > 1 || /^i$/i.test(first);
+  if (roman) return { type: upper ? 'I' : 'i', start: markerToStart(first) };
+  return { type: upper ? 'A' : 'a', start: alphaValue(first) };
+}
+
+const INTERRUPTS = /^ {0,3}(?:[-+*][ \t]|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|\$\$|:::)/;
+
+/**
+ * A lettered or roman list: its items' content is every following line indented to the item's column (blank lines
+ * between), and an unindented line continues a paragraph the item ends in, never code.
+ */
+function letteredListToken(src: string, lexer: Lexer): MarkdownToken | undefined {
+  const lines = src.split('\n');
+  const items: Array<{ marker: string; separator: string; lines: string[] }> = [];
+  let column = 0;
+  let raw: RegExp | null = null; // a code fence or other raw region open in the current item
+  let blank = false;
+  let end = 0;
+  for (const [at, line] of lines.entries()) {
+    const current = items[items.length - 1];
+    if (current && !/\S/.test(line)) {
+      current.lines.push('');
+      blank = true;
+      continue;
+    }
+    if (current && /^ */.exec(line)![0].length >= column) {
+      const content = line.slice(column);
+      if (raw) {
+        if (raw.test(content)) raw = null;
+      } else raw = rawRegion(content);
+      current.lines.push(content);
+      [blank, end] = [false, at + 1];
+      continue;
+    }
+    const item = letteredItem(line);
+    if (item && (!current || sameList(items[0], item))) {
+      items.push({ marker: item.marker, separator: item.separator, lines: [line.slice(item.column)] });
+      column = item.column;
+      raw = rawRegion(line.slice(item.column));
+      [blank, end] = [false, at + 1];
+      continue;
+    }
+    if (!current || item || blank || raw || INTERRUPTS.test(line)) break;
+    current.lines.push(line); // a lazy continuation of the item's paragraph
+    end = at + 1;
+  }
+  if (items.length === 0) return undefined;
+  const { type, start } = listStyle(items[0].marker, items[1]?.marker);
+  return {
+    type: 'list',
+    raw: lines.slice(0, end).join('\n'),
+    ordered: true,
+    start,
+    typeMarker: type,
+    items: items.map((item) => ({ type: 'list_item', raw: item.lines.join('\n'), tokens: lexer.blockTokens(item.lines.join('\n').replace(/\n+$/, '')) })),
+  };
+}
+
+/** The serializer's marker: a number and one space, or a letter or roman numeral and two (Decision Log 19). */
+type ItemContext = { parentType?: string; index?: number; meta?: { parentAttrs?: Record<string, unknown> } };
+const itemMarker = (context: ItemContext): string => {
+  if (context.parentType !== 'orderedList') return '- ';
+  const attrs = context.meta?.parentAttrs ?? {};
+  const type = attrs.type as string | null | undefined;
+  return getListMarker(type, Number(attrs.start ?? 1) - 1 + (context.index ?? 0), LETTERED_TYPES.has(type ?? '') ? '.  ' : '. ');
+};
 type Json = JSONContent & { attrs?: Record<string, unknown> };
 type Render = { renderChildren(nodes: JSONContent[] | JSONContent, separator?: string): string };
 type Parse = {
@@ -488,10 +563,18 @@ export const MARKDOWN: Record<string, object> = {
       return `[${h.renderChildren(node)}](${destination}${title == null ? '' : ` "${title.replace(/[\\"]/g, '\\$&')}"`})`;
     },
   },
-  // A numbered list goes to marked's CommonMark list tokenizer; Tiptap's own reads letter and roman markers, its
-  // continuation lines realigned first (orderedListToken).
+  // A numbered list is marked's; a lettered or roman one this tokenizer's (Decision Log 19).
   orderedList: {
-    markdownTokenizer: { ...tiptapOrderedList, tokenize: orderedListToken },
+    markdownTokenizer: {
+      name: 'orderedList',
+      level: 'block',
+      start: letteredStart,
+      tokenize: (src: string, _tokens: MarkdownToken[], lexer: Lexer) => letteredListToken(src, lexer),
+    },
+  },
+  listItem: {
+    renderMarkdown: (node: Json, h: Parameters<typeof renderNestedMarkdownContent>[1], ctx?: ItemContext) =>
+      renderNestedMarkdownContent(node, h, itemMarker, ctx, { alignNestedToPrefix: ctx?.parentType === 'orderedList' }),
   },
   // Fenced longer than any run of backticks in the code, so the code never closes its own fence.
   codeBlock: {
