@@ -77,6 +77,12 @@ export const FloatIcon = () => (
     <rect x="4" y="8" width="5" height="3.5" rx="0.75" />
   </Icon>
 );
+// P3-G: Mark-up's pen (the header's Mark up and the overlay's Pen tool).
+export const PenIcon = () => (
+  <Icon>
+    <path d="M3 13l1-3.5L10.5 3l2.5 2.5L6.5 12zM9.5 4l2.5 2.5" />
+  </Icon>
+);
 export const ChevronDownIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
     <path d="m4 6 4 4 4-4" />

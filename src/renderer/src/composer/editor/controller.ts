@@ -49,6 +49,7 @@ export interface EditorHandle {
   clear(): void;
   removeAttachment(id: string): void;
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
+  attachFiles(files: File[]): Promise<void>; // P3-G (§D4.3): as a drop of the files at the caret (Mark-up's Add to chat)
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -603,6 +604,7 @@ export class EditorController {
           }
         }
       },
+      attachFiles: (files) => this.addFiles(files), // P3-G
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

@@ -6,6 +6,7 @@
 import { BannerHost } from './BannerHost';
 import { MainArea } from '../main/MainArea';
 import { OverviewLayer } from '../overview/OverviewPanel';
+import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
 import { CommandPalette } from '../palette/CommandPalette';
 import { PanelRegion } from '../panel/PanelRegion';
 import { Sidebar } from '../sidebar/Sidebar';
@@ -42,6 +43,7 @@ export function Shell() {
       </section>
       <ToastHost />
       <PanelRegion />
+      <MarkupLayer />
       <CommandPalette />
     </div>
   );

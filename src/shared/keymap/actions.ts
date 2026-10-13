@@ -81,6 +81,8 @@ export const ACTIONS = {
   // full transcript while the owner channel's lane is on, as the pane header's toggle does; unbound by default
   'transcript.toggleReport': { title: 'Toggle report and transcript', chord: null,         sink: 'renderer', menu: null, scope: 'app' },
   // P2-C end
+  // P3-G (§D4.4): Mark up over the selected panel tab's surface, as the panel header's button does; unbound by default
+  'markup.start':            { title: 'Mark up',                  chord: null,           sink: 'renderer', menu: null, scope: 'app' },
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

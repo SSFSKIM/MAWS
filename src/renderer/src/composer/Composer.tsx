@@ -217,6 +217,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           else handle.current?.focus();
         },
         insertText: (text) => handle.current?.insertText(text),
+        attachFiles: async (files) => handle.current?.attachFiles(files), // P3-G: Mark-up's Add to chat
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {

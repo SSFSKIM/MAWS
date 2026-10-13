@@ -87,6 +87,13 @@ export const shownSession = (main: LayoutMain = layout().main): AppSessionId | n
 const selectionOf = (appSessionId: AppSessionId | null): string | null =>
   appSessionId === null ? layout().panelActiveNoSession : (layout().panelBySession.get(appSessionId)?.activeTabId ?? null);
 
+// P3-G (§D4.4): the panel tab the region shows over its body: the shown session's selection, else the transient pin
+// selection (PanelRegion's own rule), for a caller outside React (Mark-up's start and its tab-switch ending).
+export const selectedPanelTabId = (state: LayoutState = layout()): string | null => {
+  const shown = shownSession(state.main);
+  return shown === null ? state.panelActiveNoSession : (state.panelBySession.get(shown)?.activeTabId ?? null);
+};
+
 // C5's own test for which sessions keep a layout list (`ipc/events.ts`, the predicate handed to `hydrate`).
 const known = (appSessionId: AppSessionId): boolean =>
   useSessions.getState().records.has(appSessionId) || (currentTabRetention()?.retains(appSessionId) ?? false);

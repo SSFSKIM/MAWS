@@ -5,13 +5,15 @@
 // `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
 import { DropdownMenu } from 'radix-ui';
-import { Fragment, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
-import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
+import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, PenIcon, RestoreIcon } from '../app/IconButton';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { SAVED_COPY, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration } from './editor-host';
-import { isRestoredLog, useTabLabel } from './host';
+import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
+import { useMarkupSurface } from '../markup/surface'; // P3-G
+import { SAVED_COPY, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
+import { isRestoredLog, shownSession, useTabLabel } from './host';
 
 export const HEADER_COPY = {
   overview: 'Session overview',
@@ -33,9 +35,10 @@ export interface EditorHeaderProps {
   suffix?: string | null; // a tool's setTitle suffix, with the plain title
   registration: EditorHostRegistration | null;
   controls?: ReactNode; // the region's own controls, which never collapse
+  markup?: ReactNode; // P3-G (§D2.2, §D4.4): Mark up, after the actions and before Export, when the tab has a surface
 }
 
-export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls }: EditorHeaderProps) {
+export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls, markup }: EditorHeaderProps) {
   const row = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(row);
   const unresolved = registration?.unresolved ?? 0;
@@ -49,7 +52,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const overflow = narrow ? listed : listed.slice(SHOWN_ACTIONS);
   const folded = narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
-  const hasEditorControls = listed.length > 0 || exports.length > 0;
+  const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);
 
   return (
     <div ref={row} data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -87,6 +90,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
           <ActionButton key={action.id} action={action} />
         ))}
         {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} />}
+        {markup}
         {!narrow && exports.length > 0 && <ExportMenu exports={exports} />}
         {hasEditorControls && controls && <span aria-hidden className="mx-1 h-4 w-px bg-border" />}
         {controls}
@@ -124,8 +128,22 @@ export function PanelHeader({ tabs, activeTabId }: { tabs: readonly PanelTabRef[
 
 function ToolHeader({ tab, controls }: { tab: PanelTabRef; controls: ReactNode }) {
   const { tool, title, suffix } = useTabLabel(tab);
-  const registration = useEditorHostRegistration({ surface: 'panel', tabId: tab.id });
-  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} />;
+  const scope = useMemo(() => ({ surface: 'panel', tabId: tab.id }) as const, [tab.id]);
+  const registration = useEditorHostRegistration(scope);
+  const surface = useMarkupSurface(scope);
+  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} markup={surface && <MarkupButton scope={scope} />} />;
+}
+
+// P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; disabled with no shown session
+// (nothing to attach the picture to).
+function MarkupButton({ scope }: { scope: EditorHostScope }) {
+  const shown = useLayout((s) => shownSession(s.main));
+  const active = useMarkup((s) => s.session?.scope.surface === scope.surface && s.session.scope.tabId === scope.tabId);
+  return (
+    <IconButton label={shown === null ? MARKUP_COPY.noSession : MARKUP_COPY.markUp} action="markup.start" pressed={active} disabled={shown === null} onClick={() => void startMarkup(scope)}>
+      <PenIcon />
+    </IconButton>
+  );
 }
 
 function RegionControls() {

@@ -6,6 +6,7 @@ import * as z from 'zod';
 import { AgentIdSchema, AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
 import { ACTION_IDS } from '../../keymap/actions';
 import type { CommandSpec } from './common';
+import { CaptureAnswerSchema, CaptureRectSchema } from '../../markup/image'; // P3-G
 // E4a start
 import { BrowserTabIdSchema } from '../../browser/tab';
 // E4a end
@@ -281,6 +282,14 @@ const e5Commands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // E5 end
 
+// P3-G start (§D4.1): Mark-up's still of a region the renderer draws (an iframe included, which the compositor paints):
+// the sender window's own page captured at the rect, under the comment crop's caps; `image: null` when nothing of the
+// rect is inside the window or the capture failed.
+const p3gCommands = {
+  'layout.captureRegion': { input: z.strictObject({ rect: CaptureRectSchema }), output: CaptureAnswerSchema, owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P3-G end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -293,6 +302,7 @@ export const commands = {
   ...c11Commands, // C11
   ...c12Commands, // C12
   ...e5Commands, // E5
+  ...p3gCommands, // P3-G
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

@@ -13,6 +13,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { togglePanelFloat } from '../shell/floating'; // P3-G
+import { startMarkup } from '../markup/session'; // P3-G
 import { panelInMain } from './regions';
 import { registerSessionAction } from './session-actions';
 
@@ -29,6 +30,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     ),
     // P3-G (§D1.2): the floating state; the store's `setPanel` keeps it exclusive with maximized and collapsed.
     registerAction('panel.float', togglePanelFloat),
+    registerAction('markup.start', () => void startMarkup()), // P3-G (§D4.4)
     registerAction('theme.light', () => useSettings.getState().setTheme('light')),
     registerAction('theme.dark', () => useSettings.getState().setTheme('dark')),
     registerAction('theme.system', () => useSettings.getState().setTheme('system')),

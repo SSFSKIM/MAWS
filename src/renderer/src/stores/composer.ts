@@ -44,6 +44,9 @@ export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
   insertText(text: string): void; // at the editor's caret, the one it left when not focused, else at the end (C11's insertComposerText)
+  // P3-G (§D4.3): files attached as a drop or a paste attaches them (an image to the strip, downscaled and capped);
+  // Mark-up's Add to chat. Optional: a composer that does not register it is prefilled instead.
+  attachFiles?(files: File[]): Promise<void>;
   openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
   // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts): the box as it stands, a fill taken
   // or refused (a card holds the box, the editor is read-only), a suggestion shown or refused (the box holds text, a

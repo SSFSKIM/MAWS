@@ -6,7 +6,10 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetMarkup } from '../markup/session';
+import { registerMarkupSurface } from '../markup/surface';
 import { registerSlot, resetSlots } from '../app/slots';
 import { queryClient } from '../ipc/query';
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
@@ -262,6 +265,35 @@ describe('the panel header', () => {
     width = 360; // at 360 px and wider, the actions and Export are inline again
     resize(header(), { width: 344, height: 40 });
     expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Export', ...controls]);
+  });
+
+  // P3-G (§D2.2, §D4.4, M4): Mark up shows for a tab whose body registered a mark-up surface, after the actions and
+  // before the region's controls, and starts a session over that surface
+  it('shows Mark up for a tab with a mark-up surface and starts mark-up over it; a tab without one shows none', async () => {
+    const element = document.createElement('div');
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300, x: 0, y: 0, right: 400, bottom: 300, toJSON: () => ({}) } as DOMRect);
+    const begin = vi.fn(async () => null);
+    offs.push(resetMarkup);
+    offs.push(
+      registerPanelTool(
+        probeTool('page', {
+          title: 'Page',
+          render: function PageBody() {
+            const scope = useEditorHostScope();
+            useEffect(() => (scope ? registerMarkupSurface(scope, { element: () => element, label: () => 'Page', begin, end: () => {} }) : undefined), [scope]);
+            return <p>page body</p>;
+          },
+        }).tool,
+      ),
+    );
+    offs.push(registerPanelTool(probeTool('plain', { title: 'Plain' }).tool));
+    mount();
+    add('page');
+    expect(buttons()).toEqual(['Mark up', 'Float session over panel', 'Maximize right panel', 'Hide right panel']);
+    await userEvent.click(within(header()).getByRole('button', { name: 'Mark up' }));
+    expect(begin).toHaveBeenCalledTimes(1);
+    add('plain');
+    expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Hide right panel']);
   });
 
   it('closing an inactive editor tab asks its guard: switched away, the registration still vetoes', async () => {

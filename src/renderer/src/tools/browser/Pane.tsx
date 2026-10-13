@@ -34,6 +34,7 @@ import { place } from './actions';
 import { BROWSER_COPY } from './copy';
 import { registerDock } from './comment/dock';
 import { coverPane } from './covering';
+import { useBrowserMarkupSurface } from './markup'; // P3-G
 import { CrashPage, ViewFailedPage } from './pages/CrashPage';
 import { EmptyState, SuspendedPage } from './pages/EmptyState';
 import { ErrorPage } from './pages/ErrorPage';
@@ -138,6 +139,9 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
     const target = toggle && !toggle.disabled ? toggle : view?.querySelector<HTMLElement>('[data-address-box] input');
     target?.focus({ preventScroll: true });
   };
+
+  // P3-G (§D4.1): Mark-up over the page, while this pane holds the view in a panel tab
+  useBrowserMarkupSurface(tab, element, mode === 'owner');
 
   // P3-G: the floating card's column, while this pane shows the page in the panel (another pane holding the view leaves
   // a DOM page here, which the card floats over as it does over any tool)

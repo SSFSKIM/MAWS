@@ -190,6 +190,7 @@ describe('layout value shapes', () => {
       'layout.quitWaitAnswer': 'main', // C12: its banner's Quit now and Cancel
       'layout.unsavedFiles': 'main', // E5: a window's dirty file tabs, for the quit question
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
+      'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
     });
   });
 

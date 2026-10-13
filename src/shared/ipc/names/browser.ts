@@ -16,6 +16,7 @@ export const commands = [
   'browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons',
   'browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle',
   // cua #90 end
+  'browser.view.capture', // P3-G
 ] as const;
 
 export const events = [

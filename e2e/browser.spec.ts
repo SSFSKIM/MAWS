@@ -579,6 +579,87 @@ test('P3-G acceptance 6: over a Browser tab the floating card is a live column a
   });
 });
 
+// ---- P3-G: Mark-up over a Browser tab (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M4) ---------------------------
+
+test('P3-G acceptance 11: Mark up freezes the page to a still under the overlay; Pen, Box, Arrow and Text leave marks; Add to chat attaches one PNG and the label, the page untouched; Escape attaches nothing; the view is live after either', async () => {
+  await browserScene(['P3-G: mark-up'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const B = s.server.url('/b.html');
+    await address(panel, B);
+    const t = await tabAt(s, id, B);
+    const pane = paneIn(panel);
+    await expectOnPane(s, t, pane, 'panel');
+    const page = await pageAt(s, B);
+    await expect(page.locator('#opener')).toHaveText('false');
+    const dom = () => page.evaluate(() => document.documentElement.outerHTML);
+    const before = await dom();
+
+    const markUp = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Mark up' });
+    const layer = s.page.getByRole('region', { name: 'Mark-up' });
+    const marks = layer.locator('[data-markup-canvas] > *');
+    const strip = s.pane.getByRole('list', { name: 'attachments' });
+    const message = s.pane.getByRole('textbox', { name: 'Message', exact: true });
+    const box = async (locator: Locator) => (await locator.boundingBox())!;
+    const drag = async (from: [number, number], to: [number, number]) => {
+      const l = await box(layer);
+      await s.page.mouse.move(l.x + from[0], l.y + from[1]);
+      await s.page.mouse.down();
+      for (let k = 1; k <= 4; k++) await s.page.mouse.move(l.x + from[0] + ((to[0] - from[0]) * k) / 4, l.y + from[1] + ((to[1] - from[1]) * k) / 4);
+      await s.page.mouse.up();
+    };
+
+    // Mark up: the still over the page's box, the page held covered beneath it (frozen, never changed)
+    await markUp.click();
+    await expect(layer).toBeVisible();
+    await expect(layer.locator('img')).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+    const [l, p] = [await box(layer), await box(pane)];
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(l[key] - p[key]), `the layer's ${key} on the page's`).toBeLessThanOrEqual(1);
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(true);
+    await expect(markUp).toHaveAttribute('aria-pressed', 'true');
+
+    // Pen (the default), Box, Arrow, Text in another ink
+    await drag([40, 40], [120, 70]);
+    await layer.getByRole('radio', { name: 'Box' }).click();
+    await drag([60, 100], [180, 160]);
+    await layer.getByRole('radio', { name: 'Arrow' }).click();
+    await layer.getByRole('radio', { name: 'Blue' }).click();
+    await drag([200, 60], [140, 120]);
+    await layer.getByRole('radio', { name: 'Text' }).click();
+    await s.page.mouse.click(l.x + 60, l.y + 190);
+    await layer.getByRole('textbox', { name: 'Mark-up text' }).fill('this one');
+    await s.page.keyboard.press('Enter');
+    await expect(marks).toHaveCount(4);
+    await expect(layer.locator('text')).toHaveText('this one');
+    await expect(layer.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+    // Add to chat: one image in the composer's strip, the page's label in the draft, the overlay gone, the page live
+    await layer.getByRole('button', { name: 'Add to chat' }).click();
+    await expect(layer).toHaveCount(0);
+    await expect(strip.getByRole('listitem')).toHaveCount(1);
+    await expect(strip.getByText('mark-up.png')).toBeVisible();
+    await expect(strip.locator('img')).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+    await expect(message).toContainText(`Mark-up of "Page B" — ${B}`);
+    await expect(message).toBeFocused();
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+    await expectOnPane(s, t, pane, 'panel');
+    expect(await dom(), 'the page’s DOM is unchanged').toBe(before);
+
+    // Escape: everything discarded, nothing attached, the page live again
+    await markUp.click();
+    await expect(layer).toBeVisible();
+    await drag([40, 40], [140, 90]);
+    await expect(marks).toHaveCount(1);
+    await s.page.keyboard.press('Escape');
+    await expect(layer).toHaveCount(0);
+    await expect(strip.getByRole('listitem')).toHaveCount(1);
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+    await expectOnPane(s, t, pane, 'panel');
+    expect(await dom()).toBe(before);
+  });
+});
+
 // ---- (6) G4: persistence ------------------------------------------------------------------------------------------
 
 test('a relaunch restores the tabs suspended: both chips muted, the selected one offering its last URL, nothing loaded until Open', async () => {
