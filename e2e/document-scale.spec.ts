@@ -324,13 +324,13 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const rail = page.locator(`[data-artifact-tab="${id}"]`).getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     for (let k = 1; k <= 3; k++) {
-      await armHistory(page, id, 'enter');
+      await armHistory(page, id, 'enter', large.stats.topBlocks - 20);
       await rail.getByRole('button', { name: /^Version Seeded/ }).click();
       const enter = await historyResult(page);
       await armHistory(page, id, 'leave');
       await page.getByRole('toolbar', { name: 'Version preview' }).getByRole('button', { name: 'Back to document' }).click();
       const leave = await historyResult(page);
-      rows.add(`7 enter ${k}`, `history preview enter (press → the bar’s change count drawn, the extra render included → frame after), preview ${k}`, enter.toPostPaintMs, 'ms', 1000, '≤ 1,000 ms');
+      rows.add(`7 enter ${k}`, `history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview ${k}`, enter.toPostPaintMs, 'ms', 1000, '≤ 1,000 ms');
       rows.add(`7 leave ${k}`, `history preview leave, preview ${k}`, leave.toPostPaintMs, 'ms', 500, '≤ 500 ms');
     }
     const memory = await processMemory(app);

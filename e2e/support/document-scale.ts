@@ -243,7 +243,8 @@ export async function readAll(seam: PerfSeam, agent: Agent, artifactId: string):
 // ---- page-side measurement (S7b's editor page, on the product editor) ---------------------------------------------
 
 /** The editor of `artifactId` in the page's main area (Tiptap's `dom.editor`), its handle and provider. */
-export const EDITOR_SELECTOR = (artifactId: string) => `[data-artifact-tab="${artifactId}"] .ds-doc .ProseMirror`;
+// the live editor (M9 fix wave: a version is drawn by a preview editor of its own beside it)
+export const EDITOR_SELECTOR = (artifactId: string) => `[data-artifact-tab="${artifactId}"] .ds-doc .ProseMirror[data-editor="live"]`;
 
 export interface KeyRecord {
   tIn: number; // the keydown's timeStamp (page clock)
@@ -515,28 +516,34 @@ export async function openResult(page: Page): Promise<{ toPaintMs: number; toPos
 }
 
 /**
- * Arms the page to time a history preview's enter (`mode: 'enter'`: the editor in history mode, the bar's change count
- * drawn — which waits for the preview's extra background render of every tab, Decision Log 30 — and the frame after)
- * or leave (`'leave'`: the live binding back and the frame after), from the pointer press.
+ * Arms the page to time a history preview's enter (`mode: 'enter'`: the preview's own editor bound to the version and
+ * drawn — at least `minBlocks` blocks — and the bar's change count drawn, which waits for the preview's extra
+ * background render of every tab, Decision Log 30, then the frame after) or leave (`'leave'`: the preview editor gone,
+ * the bar gone and the live editor shown again, then the frame after), from the pointer press.
  */
-export async function armHistory(page: Page, artifactId: string, mode: 'enter' | 'leave'): Promise<void> {
+export async function armHistory(page: Page, artifactId: string, mode: 'enter' | 'leave', minBlocks = 1): Promise<void> {
   await page.evaluate(
-    ([selector, which]) => {
-      const w = window as unknown as { __hist: { t0?: number; raf?: number; post?: number; mutated?: boolean } };
-      const state: { t0?: number; raf?: number; post?: number; mutated?: boolean; done?: boolean } = {};
+    ([scopeSelector, which, min]) => {
+      const w = window as unknown as { __hist: { t0?: number; raf?: number; post?: number } };
+      const state: { t0?: number; raf?: number; post?: number; done?: boolean } = {};
       w.__hist = state;
-      const dom = document.querySelector(selector) as (HTMLElement & { editor?: { storage: { collaboration?: { history: unknown } } } }) | null;
-      if (!dom?.editor) throw new Error(`no editor at ${selector}`);
-      const editor = dom.editor;
+      const scope = document.querySelector(scopeSelector);
+      if (!scope) throw new Error(`no ${scopeSelector}`);
+      type Pm = HTMLElement & { editor?: { storage: { collaboration?: { history: unknown } } } };
+      const preview = () => scope.querySelector<Pm>('.ProseMirror[data-editor="preview"]');
+      const live = () => scope.querySelector<Pm>('.ProseMirror[data-editor="live"]');
       const press = (event: Event) => {
         if (state.t0 === undefined) state.t0 = event.timeStamp;
       };
       document.addEventListener('pointerdown', press, true);
       const bar = () => document.querySelector('[role="toolbar"][aria-label="Version preview"]');
       const ready = () => {
-        const inHistory = editor.storage.collaboration?.history != null;
-        if (which === 'enter') return inHistory && state.mutated === true && /\d+ changes?/.test(bar()?.textContent ?? '');
-        return !inHistory && state.mutated === true && bar() === null;
+        if (which === 'enter') {
+          const shown = preview();
+          return !!shown && shown.editor?.storage.collaboration?.history != null && shown.childElementCount >= min && /\d+ changes?/.test(bar()?.textContent ?? '');
+        }
+        const back = live();
+        return preview() === null && bar() === null && !!back && back.closest('[hidden]') === null;
       };
       const check = () => {
         if (state.t0 === undefined || state.done) return;
@@ -551,13 +558,10 @@ export async function armHistory(page: Page, artifactId: string, mode: 'enter' |
           channel.port2.postMessage(null);
         });
       };
-      const observer = new MutationObserver((records) => {
-        if (state.t0 !== undefined && records.some((r) => dom.contains(r.target) || r.target === dom)) state.mutated = true;
-        check();
-      });
+      const observer = new MutationObserver(check);
       observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
     },
-    [EDITOR_SELECTOR(artifactId), mode] as const,
+    [`[data-artifact-tab="${artifactId}"]`, mode, minBlocks] as const,
   );
 }
 export async function historyResult(page: Page): Promise<{ toPaintMs: number; toPostPaintMs: number }> {
