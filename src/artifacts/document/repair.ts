@@ -5,7 +5,7 @@
 // split, a paste or a writer that copied an id) keeps the id on a moved block's copy, else on the earlier node, and
 // re-ids the rest. Text is never deleted but in a losing copy whose edits were carried. Scoped to the nodes an update inserted or re-id'd (all of them after a
 // restore); planned first, then written, so a hook never throws after a partial write of its own.
-import type { Doc, Node } from '../yjs';
+import type { Carry as AttributionCarry, Doc, Node } from '../yjs';
 import { YNode } from '../yjs/document';
 import { DocIndex } from './block-index';
 import type { CarryRegistry } from './carries';
@@ -72,8 +72,11 @@ export function planRepair(doc: Doc, candidates: Iterable<Node>, registry: Carry
 
 export const repairNeeded = (plan: RepairPlan): boolean => plan.missing.length > 0 || plan.keepLater.length > 0 || plan.reid.length > 0;
 
-/** Writes a repair plan (inside the caller's transaction). Returns one line per repair, for the log. */
-export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry, generateID: () => string): string[] {
+/**
+ * Writes a repair plan (inside the caller's transaction). Returns one line per repair, for the log, and the runs it
+ * copied from a losing copy into the kept one as carries, so the attribution keeps their author (D8b).
+ */
+export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry, generateID: () => string): { lines: string[]; carries: AttributionCarry[] } {
   const index = DocIndex.of(doc);
   const used = new Set<string>();
   const mint = (): string => {
@@ -83,6 +86,7 @@ export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry,
     return id;
   };
   const lines: string[] = [];
+  const carries: AttributionCarry[] = [];
   for (const node of plan.missing) {
     const id = mint();
     node.setAttr('id', id);
@@ -90,7 +94,7 @@ export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry,
   }
   for (const { winner, losers } of plan.keepLater) {
     for (const loser of losers) {
-      const carried = carryCopyEdits(doc, registry, loser, winner);
+      const carried = carryCopyEdits(doc, registry, loser, winner, carries);
       const parent = loser.parent as Node;
       parent.delete(parent.toArray().indexOf(loser), 1);
       lines.push(`repair: ^${String(winner.getAttr('id'))} duplicated by concurrent moves → kept the later copy${carried ? `, carried ${carried} edit(s) into it` : ''}`);
@@ -102,15 +106,16 @@ export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry,
     node.setAttr('id', id);
     lines.push(`repair: ^${was} duplicated (${node.name}) → the later one re-id'd ^${id}`);
   }
-  return lines;
+  return { lines, carries };
 }
 
 /**
  * Before a losing copy is tombstoned: every character in it that is not one it was created with (an edit made in it
  * after the move) is inserted into the winner after the winner's counterpart of its left neighbour, and creation
- * characters deleted in the loser are deleted from the winner. Returns the number of runs carried.
+ * characters deleted in the loser are deleted from the winner. Each inserted run is added to `copied` as a carry of the
+ * loser's characters. Returns the number of runs carried.
  */
-function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: Node): number {
+function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: Node, copied: AttributionCarry[]): number {
   const recL = registry.copy(itemOf(loser));
   const recW = registry.copy(itemOf(winner));
   if (!recL || !recW) return 0;
@@ -132,6 +137,7 @@ function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: 
       anchor.node.insert(at, pending, formatAt(anchor.node, at, isCommentKey));
       const slots = deepSlotIds(anchor.node).slice(at, at + pending.length);
       pendingSlots.forEach((slot, k) => registry.noteForward(slot, slots[k]));
+      copied.push({ kind: 'move', from: pendingSlots, to: slots });
       anchor = { node: anchor.node, index: anchor.index + pending.length };
       runs++;
       pending = '';

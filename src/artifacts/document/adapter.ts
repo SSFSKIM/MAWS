@@ -23,7 +23,7 @@
 // lands as that actor's update. Every hook reads the carry registry of the doc's own artifact (`artifactOf`, D8).
 import type { Actor } from '@shared/artifacts/actor';
 import type { KindAdapter, RevertScope, ThreadChange, ThreadRow } from '../host';
-import { contentIdsOf, type ContentIds, type Doc, type Node } from '../yjs';
+import { contentIdsOf, type Carry as AttributionCarry, type ContentIds, type Doc, type Node } from '../yjs';
 import { ContentString, ContentType, Item, YNode, createContentIds, createIdSet, decodeUpdate, findIndexSS } from '../yjs/document';
 import { DocIndex, type TopBlock } from './block-index';
 import { CarryRegistry } from './carries';
@@ -118,7 +118,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
   };
   const registryOf = (doc: Doc): CarryRegistry => registryFor(artifactOf(doc));
   // What a forwarding edit learnt for the `afterUpdate` that follows it on the same replica (A calls both in one frame).
-  const stash = new WeakMap<Doc, Carry[]>();
+  const stash = new WeakMap<Doc, AttributionCarry[]>();
 
   /** The blocks an update touched, the nodes it inserted, and the threads it changed. */
   function scan(doc: Doc, ids: ContentIds): { tops: Set<TopBlock>; inserted: Set<Node>; threads: Set<string> } {
@@ -234,18 +234,22 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
     return late.inserts.length || late.deletes.length ? late : null;
   }
 
-  /** Inserts `text` where the forwards say its left (or right) neighbour, or its textblock, lives now. */
-  function replay(registry: CarryRegistry, doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): boolean {
+  /**
+   * Inserts `text` where the forwards say its left (or right) neighbour, or its textblock, lives now; answers the slots
+   * it wrote (null when it found no place), which the caller reports as a carry of `slots` so the copied characters
+   * keep their author.
+   */
+  function replay(registry: CarryRegistry, doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): Slot[] | null {
     const after = left && registry.resolve(left);
     const before = !after && right ? registry.resolve(right) : null;
     const into = !after && !before && block ? registry.resolveBlock(block) : null;
     const at = after ? locateSlot(doc, after) : before ? locateSlot(doc, before) : into ? { node: nodeAt(doc, into)!, index: -1 } : null;
-    if (!at || !at.node) return false;
+    if (!at || !at.node) return null;
     const index = after ? at.index + 1 : before ? at.index : 0;
     at.node.insert(index, text, formatAt(at.node, index, isCommentKey));
     const now = deepSlotIds(at.node).slice(index, index + text.length);
     slots.forEach((slot, k) => registry.noteForward(slot, now[k]));
-    return true;
+    return now;
   }
 
   function forwardEdit(live: Doc, incoming: Uint8Array, step2: boolean): ((doc: Doc) => void) | null {
@@ -264,10 +268,14 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
     // re-insert of a block an earlier carry moved (a stale replica moving the old copy again).
     const own = new Set([...performing.flatMap((carry) => carry.from.map(slotKey)), ...moved.flatMap((drag) => drag.sourceSlots.map(slotKey)), ...registry.carriedOf(new Set(inserted.keys()))]);
     return (doc) => {
+      // what this edit writes through the actor's replica that someone else typed: reported as carries, so the
+      // attribution keeps each run's author and time rather than crediting the actor (D8b; parent Decision Log 34)
+      const copied: AttributionCarry[] = [];
+      const copy = (kind: AttributionCarry['kind'], from: Slot[], to: Slot[] | null) => to && copied.push({ kind, from, to });
       // the carries this update performs are live from here on; their own deletions are not edits to replay
       for (const carry of performing) registry.activate(carry);
       for (const { carry, inserts, deletes } of late) {
-        for (const run of inserts) replay(registry, doc, run.text, run.slots, run.after, run.before, run.block);
+        for (const run of inserts) copy(carry.kind, run.slots, replay(registry, doc, run.text, run.slots, run.after, run.before, run.block));
         for (const slot of deletes) {
           const k = carry.from.findIndex((from) => slotKey(from) === slotKey(slot));
           const at = k >= 0 ? locateSlot(doc, carry.to[k] as Slot) : null;
@@ -280,7 +288,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
         if (live && !live.deleted) continue; // it landed in a live block
         const text = item.content.str;
         const slots = Array.from({ length: text.length }, (_, k): Slot => [item.id.client, item.id.clock + k]); // UTF-16 units, as Yjs clocks count
-        replay(registry, doc, text, slots, item.origin && asSlot(item.origin), item.rightOrigin && asSlot(item.rightOrigin), isIdLike(item.parent) ? asSlot(item.parent) : null);
+        copy('move', slots, replay(registry, doc, text, slots, item.origin && asSlot(item.origin), item.rightOrigin && asSlot(item.rightOrigin), isIdLike(item.parent) ? asSlot(item.parent) : null));
       }
       if (!step2) {
         ds.forEach((range, client) => {
@@ -295,7 +303,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
       }
       // a drag or retype is a carry of its own from here on: its copy is recorded and the old copy's characters and
       // textblocks forward into it, so an edit still in flight into the old copy lands in the new one
-      const carries: Carry[] = [];
+      const carries: AttributionCarry[] = [...copied];
       for (const drag of moved) {
         const node = nodeAt(doc, drag.node);
         if (!node) continue;
@@ -320,19 +328,19 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
     };
   }
 
-  function afterUpdate(doc: Doc, update: Uint8Array): { threads?: ThreadChange; provenance?: Carry[] } | void {
+  function afterUpdate(doc: Doc, update: Uint8Array): { threads?: ThreadChange; provenance?: AttributionCarry[] } | void {
     const registry = registryOf(doc);
     const ids = contentIdsOf(update);
-    const provenance = registry.performedBy(ids.inserts);
-    for (const carry of provenance) {
+    const performed = registry.performedBy(ids.inserts);
+    for (const carry of performed) {
       registry.activate(carry);
       registry.reported(carry);
     }
-    provenance.push(...(stash.get(doc) ?? []));
+    const provenance: AttributionCarry[] = [...performed, ...(stash.get(doc) ?? [])];
     stash.delete(doc);
     const { tops, inserted, threads } = scan(doc, ids);
     const plan = planRepair(doc, inserted, registry, (node) => !!node._item && ids.inserts.has(node._item.id.client, node._item.id.clock));
-    if (repairNeeded(plan)) applyRepair(doc, plan, registry, generateID);
+    if (repairNeeded(plan)) provenance.push(...applyRepair(doc, plan, registry, generateID).carries);
     if (tops.size > 0) {
       const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
       const byTab = (tabId: string) => live.filter((top) => top.tabId === tabId).map((top) => top.node);

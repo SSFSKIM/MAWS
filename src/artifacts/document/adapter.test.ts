@@ -17,6 +17,7 @@ import {
   carryAttribution,
   contentIdsOf,
   diffV1,
+  idAt,
   insertedBy,
   mergeMaps,
   newDoc,
@@ -55,7 +56,13 @@ const adapterOf = (options: Omit<NonNullable<Parameters<typeof documentAdapter>[
     },
   });
 
-/** A's service in miniature: the live doc, a host replica per actor, the hooks in A's order, provenance per update. */
+/**
+ * A's service in miniature: the live doc, a host replica per actor, the hooks in A's order, provenance per update. One
+ * difference from A's service as built, which this child needs of A (X24; see the Fix wave 1 record of M2's report): the
+ * carries `afterUpdate` returns re-credit every row the frame writes, in order (the incoming update's, the forwarding
+ * edit's and the hook's own), not only the incoming update's, since text the adapter replays or copies through a host
+ * replica lands in those later rows.
+ */
 class Host {
   readonly live: Doc;
   readonly replicas = new Map<string, Doc>();
@@ -74,19 +81,19 @@ class Host {
       for (const doc of this.replicas.values()) if (doc !== origin) applyV1(doc, update, MIRROR);
       const actor = this.writers.get(origin) ?? human;
       const entry = { update, map: attributionMap(contentIdsOf(update), { insertActor: actorKey(actor), deleteActor: actorKey(actor), at: now() }) };
-      if (this.deferring && !this.pending) this.pending = entry; // the frame's own update waits for afterUpdate
+      if (this.deferring) this.pending.push(entry.map); // the frame's rows wait for afterUpdate's carries
       else this.maps.push(entry.map);
     });
     applyV1(this.live, diffV1(seed)); // the seed, credited to the human
   }
 
-  private pending: { update: Uint8Array; map: ContentMap } | null = null;
+  private pending: ContentMap[] = [];
   private deferring = false;
   private attribute(carries?: AttributionCarry[]): void {
-    if (!this.pending) return;
-    const prior = this.maps.length ? mergeMaps(this.maps) : this.pending.map;
-    this.maps.push(carries?.length ? carryAttribution(this.pending.map, prior, carries) : this.pending.map);
-    this.pending = null;
+    for (const map of this.pending.splice(0)) {
+      const prior = this.maps.length ? mergeMaps(this.maps) : map;
+      this.maps.push(carries?.length ? carryAttribution(map, prior, carries) : map);
+    }
   }
 
   replicaOf(actor: Actor): Doc {
@@ -166,6 +173,12 @@ function agentBatch(host: Host, adapter: DocumentAdapter, doc: Doc, actor: Actor
   adapter.registerCarries(host.artifactId, applied.carries);
   return { applied, outcome: host.send(doc, actor) };
 }
+/** The distinct authors the host's provenance credits for a block's characters. */
+const authors = (host: Host, id: string): string[] => {
+  const node = nodeOf(host.live, id);
+  const map = host.provenance();
+  return [...new Set([...Array(node.length).keys()].map((k) => insertedBy(map, idAt(node, k)!)?.actor ?? '?'))];
+};
 const withoutForwarding = (adapter: DocumentAdapter): KindAdapter => ({ ...adapter, kind: 'document', beforeApply: undefined, afterUpdate: adapter.afterUpdate, revertScope: adapter.revertScope });
 
 describe('forwarding (S4 moves A)', () => {
@@ -406,6 +419,37 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
     const first = p3._start!.id;
     expect(insertedBy(map, first)?.actor).toBe('human');
     expect(carriedBy(map, first)).toBe('move');
+  });
+
+  it('text a person typed into the old copy before the move’s update keeps its author once carried into the moved copy', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer();
+    const applied = applyEdit(agent, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    adapter.registerCarries(ARTIFACT, applied.carries);
+    typeAt(person, 'p3', 0, 'Late: '); // reaches the host before the move
+    host.send(person, human);
+    const { outcome } = { outcome: host.send(agent, agent1) };
+    expect(textOf(host.live, 'p3')).toBe('Late: A plain paragraph the human types into. Words to keep.');
+    expect(authors(host, 'p3')).toEqual(['human']);
+    expect(carriedBy(host.provenance(), idAt(nodeOf(host.live, 'p3'), 0)!)).toBe('move');
+    expect(outcome?.provenance?.length).toBeGreaterThan(1); // the writer's carry and the run copied with it
+  });
+
+  it('the edits the id repair carries from a losing copy keep their author', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const a1 = host.peer();
+    const a2 = host.peer(); // stale: it moves p3 without having seen a1's move
+    const person = host.peer();
+    agentBatch(host, adapter, a1, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    host.pull(person);
+    typeAt(person, 'p3', 0, 'Edited: '); // into a1's copy, which the repair then drops for a2's
+    host.send(person, human);
+    agentBatch(host, adapter, a2, agent2, [{ op: 'move', id: 'p3', after: 'h1' }]);
+    expect(textOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. Words to keep.');
+    expect(authors(host, 'p3')).toEqual(['human']);
   });
 
   it('ids a block that arrives without one, and re-ids a duplicate a replica wrote', () => {
