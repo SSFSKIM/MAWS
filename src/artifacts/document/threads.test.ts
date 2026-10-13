@@ -13,17 +13,20 @@ import { addTab, createDocument, tabBody } from './tabs';
 import {
   addThread,
   anchorOfMark,
+  discardThread,
   getThread,
   listThreads,
   liveThreadIds,
   locate,
   markExtents,
+  observeThreads,
   refreshAnchors,
   reopen,
   reply,
   resolve,
   stripMarklessComments,
   threadStates,
+  threadStatus,
 } from './threads';
 import type { Actor } from '@shared/artifacts/actor';
 
@@ -328,5 +331,44 @@ describe('the markless-comment strip', () => {
     expect(JSON.stringify(ynodeToPmnode(body, schema).toJSON())).not.toContain('ghost');
     expect(covered(body)).toEqual({ t1: 'ships quarterly with design review', t2: 'design review notes', t3: 'keeps going' });
     expect(stripMarklessComments(doc)).toEqual([]);
+  });
+});
+
+// M4: what the editor reads and writes besides S5's operations: a thread's status alone (the display plugin's per-mark
+// read), a change of the threads map (its redraw), and a comment withdrawn before anything was said in it (the card
+// dismissed unsent): the thread and its mark go in one transaction, and a thread with messages is never discarded.
+describe('the editor’s reads and the discard (M4)', () => {
+  it('reads a thread’s status alone, null for none', () => {
+    const { doc } = seeded();
+    resolve(doc, 't2', owner, now());
+    expect([threadStatus(doc, 't1'), threadStatus(doc, 't2'), threadStatus(doc, 'nope')]).toEqual(['open', 'resolved', null]);
+  });
+
+  it('tells an observer of every change to the threads map, nested ones included, until it stops', () => {
+    const { doc } = seeded();
+    let seen = 0;
+    const stop = observeThreads(doc, () => (seen += 1));
+    resolve(doc, 't1', owner, now());
+    reply(doc, 't2', { id: 'm', by: agent, at: now(), body: 'ok' });
+    expect(seen).toBe(2);
+    stop();
+    reopen(doc, 't1', owner, now());
+    expect(seen).toBe(2);
+  });
+
+  it('discards a thread with no messages and its marks in one update; one with messages stays', () => {
+    const { doc, tab, body } = seeded();
+    addThread(doc, { threadId: 't4', tabId: tab, blockId: 'p3', quote: 'Third', anchor: anchorOfMark(body, 't3')!, by: owner, at: now() });
+    blockY(body, 'p3').format(0, 5, { 'comment--t4stand1': { threadId: 't4' } }); // a stand-in key: the strip reads the mark's value
+    expect(covered(body).t4).toBe('Third');
+    let updates = 0;
+    const off = onUpdate(doc, () => (updates += 1));
+    expect(discardThread(doc, 't4')).toBe(true);
+    off();
+    expect(updates).toBe(1);
+    expect(getThread(doc, 't4')).toBeNull();
+    expect(covered(body)).toEqual({ t1: 'ships quarterly with design review', t2: 'design review notes', t3: 'keeps going' });
+    expect(discardThread(doc, 't1')).toBe(false);
+    expect(getThread(doc, 't1')).not.toBeNull();
   });
 });

@@ -89,6 +89,20 @@ function readThread(node: Node, id: string): Thread {
   };
 }
 
+/** A thread's status alone (the editor's display reads it per live mark), or null when there is no such thread. */
+export const threadStatus = (doc: Doc, id: string): ThreadStatus | null => {
+  const node = threadNode(doc, id);
+  return node ? ((node.getAttr('status') as ThreadStatus | undefined) ?? 'open') : null;
+};
+
+/** Calls `listener` after every transaction that changed the threads map or a thread in it; returns the unsubscribe. */
+export function observeThreads(doc: Doc, listener: () => void): () => void {
+  const root = threadsRoot(doc);
+  const observer = () => listener();
+  root.observeDeep(observer);
+  return () => root.unobserveDeep(observer);
+}
+
 export const getThread = (doc: Doc, id: string): Thread | null => {
   const node = threadNode(doc, id);
   return node ? readThread(node, id) : null;
@@ -395,4 +409,22 @@ export function stripMarklessComments(doc: Doc, origin?: unknown, blocks?: (tabI
   }
   if (strays.length > 0) transact(doc, () => strays.forEach(({ node, index, length, key }) => node.format(index, length, { [key]: null })), origin);
   return [...new Set(strays.map((stray) => stray.id))];
+}
+
+/**
+ * Withdraws a comment nothing was said in yet (M4: its card dismissed unsent): the thread and every mark carrying it, in
+ * one transaction, so no replica sees a mark without its thread. A thread with a message is never discarded (false).
+ */
+export function discardThread(doc: Doc, threadId: string, origin?: unknown): boolean {
+  const node = threadNode(doc, threadId);
+  if (!node || node.length > 0) return false;
+  transact(
+    doc,
+    () => {
+      threadsRoot(doc).deleteAttr(threadId);
+      stripMarklessComments(doc, origin);
+    },
+    origin,
+  );
+  return true;
 }

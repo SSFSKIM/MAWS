@@ -10,6 +10,7 @@ export {
   redoCommand,
   rejectChanges,
   relativePositionsToResolvedPositions,
+  resolvedPositionsToRelativePositions, // M4: a new comment's anchor from the editor's selection
   syncPlugin,
   undoCommand,
   yattr2markname,

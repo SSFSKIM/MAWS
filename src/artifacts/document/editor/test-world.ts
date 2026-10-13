@@ -1,7 +1,7 @@
 // The editor suites' world (happy-dom): an in-memory host holding one document and bare Tiptap editors bound to its
 // replicas through the `collaboration` extension, as DocumentEditor binds them (M3 of
 // docs/doperpowers/plans/2026-10-12-p3-b-documents.md). Test support only; the harness page builds its own.
-import { Editor, type JSONContent } from '@tiptap/core';
+import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import { Collaboration } from '../collab';
 import { coreExtensionOptions } from '../ids';
 import { extensions, schemaFor } from '../schema';
@@ -34,14 +34,15 @@ export interface Replica {
 export class World {
   readonly host = new MemoryDocumentHost();
   private readonly replicas: Replica[] = [];
+  private readonly bareHandles: DocumentHandleWithHold[] = [];
   private n = 0;
 
   constructor(content: JSONContent) {
     this.host.write((d) => createDocument(d, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON(content) }));
   }
 
-  /** A replica with an editor bound to the tab, once its content has rendered. */
-  async replica(name: string): Promise<Replica> {
+  /** A replica with an editor bound to a tab, once its content has rendered; `extra` adds extensions over its handle. */
+  async replica(name: string, extra: (handle: DocumentHandleWithHold) => Extensions = () => [], tabId = TAB): Promise<Replica> {
     const handle = openMemoryHandle(this.host, { log: () => {} });
     await whenSynced(handle);
     const element = document.createElement('div');
@@ -51,7 +52,8 @@ export class World {
       coreExtensionOptions,
       extensions: [
         ...extensions({ generateID: () => `${name}${++this.n}` }),
-        Collaboration.configure({ ytype: tabBody(handle.doc, TAB)!, awareness: handle.awareness, user: { name, color: 'var(--author-1)' }, hold: handle, onRestored: (l) => handle.onRestored(l) }),
+        Collaboration.configure({ ytype: tabBody(handle.doc, tabId)!, awareness: handle.awareness, user: { name, color: 'var(--author-1)' }, hold: handle, onRestored: (l) => handle.onRestored(l) }),
+        ...extra(handle),
       ],
     });
     const replica = { handle, editor };
@@ -60,7 +62,16 @@ export class World {
     return replica;
   }
 
+  /** A replica with no editor (the agent's stands behind the host in the product). */
+  async bare(): Promise<DocumentHandleWithHold> {
+    const handle = openMemoryHandle(this.host, { log: () => {} });
+    await whenSynced(handle);
+    this.bareHandles.push(handle);
+    return handle;
+  }
+
   destroy(): void {
+    for (const handle of this.bareHandles) handle.close();
     for (const { handle, editor } of this.replicas) {
       editor.destroy();
       handle.close();
