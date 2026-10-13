@@ -33,4 +33,10 @@ export interface DocumentHarnessApi {
   startRemoteTyping(id: string, text: string, everyMs: number): void;
   /** Stops it; resolves with the characters typed. */
   stopRemoteTyping(): string;
+  /** M5: the agent session ("Fix the build") appends `text` to the top-level block `id`, written on the host. */
+  agentAppend(id: string, text: string): void;
+  /** M5: records a version of the host document as it is now, by the owner or the agent; its id. */
+  version(kind: 'auto' | 'turn' | 'named', by: 'owner' | 'agent', fields?: { label?: string; note?: string; summary?: string }): number;
+  /** M5: the version ids "Make a copy" was asked for, in order. */
+  copies(): number[];
 }

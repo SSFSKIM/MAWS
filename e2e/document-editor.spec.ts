@@ -3,7 +3,7 @@
 // in-memory host document, each a real PortProvider on a real MessageChannel, in the built renderer. Typing, a toolbar
 // insert of every block kind, a tab added and switched, find stepping to the second match, and the Korean composition
 // drive (S7b's 2-set model through CDP, as S7b drove it) in replica A while replica B types elsewhere; and (M4) a
-// comment's card anchored to its mark, Resolve and Reopen. `pnpm
+// comment's card anchored to its mark, Resolve and Reopen; and (M5) version history: a preview, a copy, a restore. `pnpm
 // e2e:document` builds the harness and runs this file; under a plain build the cases skip. One launch for the file; the
 // page's document is reset before each case.
 import { existsSync } from 'node:fs';
@@ -291,6 +291,46 @@ test.describe('the document editor', () => {
     await content(page, 'b').getByText('The collaborator types here.').click();
     await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);
     await expect(item).not.toHaveAttribute('aria-current', 'true');
+  });
+
+  // M5: version history in replica A. An agent session's turn is previewed in place, read-only, in the agent's author
+  // colour with its change counted and reached by ↓; the owner then restores the draft before it: history is left, the
+  // banner names the version, and both replicas show the restored text. Make a copy asks for the version shown.
+  test('version history: an agent’s turn previewed in its colour, a copy made, the earlier draft restored', async () => {
+    const { page } = maws;
+    const ADDED = ' The agent added this.';
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('named', 'owner', { label: 'Clean draft' }));
+    await page.evaluate((text) => (window as unknown as HarnessWindow).__maws_document.agentAppend('para0002', text), ADDED);
+    await expect.poll(() => blockText(page, 'a', 'para0002')).toBe(`The river runs north; the river is cold.${ADDED}`);
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.version('turn', 'agent', { summary: 'Added a sentence' }));
+
+    await toolbar(page, 'a').getByRole('button', { name: 'Version history' }).click();
+    const rail = replica(page, 'a').getByRole('complementary', { name: 'Version history' });
+    const today = rail.getByRole('region', { name: 'Today' });
+    await today.getByRole('button', { name: /Added a sentence/ }).click();
+    const bar = replica(page, 'a').getByRole('toolbar', { name: 'Version preview' });
+    await expect(bar.getByText('1 change', { exact: true })).toBeVisible();
+    const inserted = content(page, 'a').locator('.doc-change-ins');
+    await expect(inserted).toHaveText(ADDED);
+    await expect(inserted).toHaveAttribute('style', /--doc-author: var\(--author-\d\)/);
+    expect(await inserted.evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain('underline');
+    await expect(content(page, 'a')).toHaveAttribute('contenteditable', 'false');
+    await bar.getByRole('button', { name: 'Next change' }).click();
+    await expect(content(page, 'a').locator('.doc-change-current')).toHaveText(ADDED);
+    await expect(content(page, 'b')).toHaveAttribute('contenteditable', 'true'); // the other replica stays live
+
+    await rail.getByRole('button', { name: /^Version Clean draft/ }).click();
+    await expect(bar.getByText(/^Clean draft/)).toBeVisible();
+    await bar.getByRole('button', { name: 'Make a copy' }).click();
+    await expect(rail.getByText('A copy of this version was made.')).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies())).toHaveLength(1);
+    await bar.getByRole('button', { name: 'Restore this version' }).click();
+    await replica(page, 'a').getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore', exact: true }).click();
+    await expect(replica(page, 'a').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
+    await expect(content(page, 'a')).toHaveAttribute('contenteditable', 'true');
+    await expect.poll(() => blockText(page, 'a', 'para0002')).toBe('The river runs north; the river is cold.');
+    await expect.poll(() => blockText(page, 'b', 'para0002')).toBe('The river runs north; the river is cold.');
+    await expect(replica(page, 'b').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
   });
 });
 

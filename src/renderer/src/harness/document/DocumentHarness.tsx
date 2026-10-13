@@ -4,6 +4,9 @@
 // stands for a remote collaborator. Playwright drives it through `window.__maws_document` (api.ts). No IPC: the page
 // stands alone until A's renderer `ArtifactHost` and L's registry mount the editor in the product (M8).
 //
+// M5: one in-memory version history over the host document (history/memory-history.ts) is both editors' history api,
+// and the page can write as an agent session and record versions, so the e2e drives the rail, the preview and restore.
+//
 // M4: each editor has the renderer's comment surface (tools/document/comments.tsx), so Comment opens P2's card on the
 // artifact target in that editor's host, through the composer seam the side pane registers in the app (registered here
 // for the page); the card's parent is a stand-in session id, so nothing is sent from this page.
@@ -11,7 +14,10 @@ import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
 import type { DocumentHandle } from '@artifacts/document/editor/host-types';
+import { YNode } from '@artifacts/yjs/document';
+import { MemoryHistory } from '@artifacts/document/editor/history/memory-history';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
+import type { Actor } from '@shared/artifacts/actor';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
@@ -26,6 +32,10 @@ import { placeCaret } from './caret';
 // The session a comment would go to; none exists on this page, so a card opens and composes but never sends.
 const COMMENT_SESSION = 'e0000000-0000-4000-8000-00000000d0c5' as AppSessionId;
 const TITLE = 'Field notes';
+// The agent session the page writes as, and its title on author chips.
+const AGENT_SESSION = 'e0000000-0000-4000-8000-00000000a6e7' as AppSessionId;
+const AGENT: Actor = { kind: 'session', appSessionId: AGENT_SESSION };
+const OWNER: Actor = { kind: 'human' };
 
 declare global {
   interface Window {
@@ -46,20 +56,23 @@ const SEED = {
 
 interface World {
   host: MemoryDocumentHost;
+  history: MemoryHistory;
   handles: Record<Replica, DocumentHandle>;
 }
 
 async function openWorld(): Promise<World> {
   const host = new MemoryDocumentHost();
+  const history = new MemoryHistory(host, { sessionTitles: { [AGENT_SESSION]: 'Fix the build' } });
   host.write((doc) => createDocument(doc, { title: 'Notes', id: 'tab00001', body: schemaFor().nodeFromJSON(SEED) }));
   const handles = { a: openMemoryHandle(host), b: openMemoryHandle(host) };
   await Promise.all([whenSynced(handles.a), whenSynced(handles.b)]);
-  return { host, handles };
+  return { host, history, handles };
 }
 
 function closeWorld(world: World): void {
   world.handles.a.close();
   world.handles.b.close();
+  world.history.destroy();
   world.host.destroy();
 }
 
@@ -172,6 +185,20 @@ export function DocumentHarness() {
         };
         typing = state;
       },
+      agentAppend: (id, text) => {
+        if (!world) throw new Error('no document');
+        world.host.write((doc) => {
+          const body = tabBody(doc, listTabs(doc)[0].id)!;
+          const block = body.toArray().find((node) => node instanceof YNode && node.getAttr('id') === id) as YNode | undefined;
+          if (!block) throw new Error(`no block ${id}`);
+          block.insert(block.toArray().reduce<number>((n, part) => n + (typeof part === 'string' ? part.length : 1), 0), text);
+        }, AGENT);
+      },
+      version: (kind, by, fields = {}) => {
+        if (!world) throw new Error('no document');
+        return world.history.version(kind, by === 'agent' ? AGENT : OWNER, fields).id;
+      },
+      copies: () => (world ? [...world.history.copies] : []),
       stopRemoteTyping: () => {
         if (!typing) return '';
         clearInterval(typing.timer);
@@ -191,10 +218,10 @@ export function DocumentHarness() {
   return (
     <div className="grid h-full grid-cols-2 divide-x divide-border">
       <section aria-label="Replica A" data-replica="a" className="min-h-0">
-        <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} comments={commentsA} />
+        <DocumentEditor artifactId="harness-doc" handle={world.handles.a} host={hosts.a} onEditor={onEditorA} comments={commentsA} history={world.history} />
       </section>
       <section aria-label="Replica B" data-replica="b" className="min-h-0">
-        <DocumentEditor artifactId="harness-doc" handle={world.handles.b} host={hosts.b} onEditor={onEditorB} comments={commentsB} />
+        <DocumentEditor artifactId="harness-doc" handle={world.handles.b} host={hosts.b} onEditor={onEditorB} comments={commentsB} history={world.history} />
       </section>
     </div>
   );
