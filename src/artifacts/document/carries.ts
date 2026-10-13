@@ -88,8 +88,7 @@ export class CarryRegistry {
     if (entry) entry.reported = true;
   }
 
-  /** A copy of a block made outside the writer (a human drag the adapter detected). */
-  addCopy(node: Slot, blockId: string, base: Map<string, Slot>): void {
+  private addCopy(node: Slot, blockId: string, base: Map<string, Slot>): void {
     this.copies.set(slotKey(node), { blockId, arrival: ++this.arrivals, base });
   }
 

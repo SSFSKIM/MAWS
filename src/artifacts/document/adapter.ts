@@ -7,7 +7,8 @@
 //       carry re-inserted is replayed into the new copy, and, only for an incremental update, each deletion (a step 2
 //       restates its sender's whole delete set, the move's own deletion included). The update that performs a carry
 //       also brings along the edits that reached the old copy before it (a keystroke racing the agent's update over
-//       the port). A delete and an insert of one block id in one update is a move (a human drag), recorded as a copy.
+//       the port). A delete and an insert of one block id in one update is a move (a human drag) or a retype, installed
+//       as a carry like the writer's (its copy, its character and textblock forwards).
 //   afterUpdate(replica, {update})  returns the carries the update performed as `provenance` (A re-credits each moved
 //       or retyped character to its author before writing the update's attribution row), repairs the ids the update
 //       inserted (repair.ts), strips comment marks whose thread is absent and refreshes the anchors of the threads
@@ -66,6 +67,7 @@ interface Drag {
   blockId: string;
   source: Slot;
   sourceSlots: Slot[];
+  sourceBlocks: Slot[]; // the source's textblocks, paired in order with the copy's for the block forwards
   node: Slot;
   name: string; // the source node's type: a re-insert as another type is a retype
 }
@@ -190,7 +192,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
       const node = item.content.type as Node;
       const id: unknown = node.getAttr('id');
       const now = typeof id === 'string' ? inserted.get(id) : undefined;
-      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), node: now, name: node.name });
+      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), sourceBlocks: textblocksY(node).map(itemOf), node: now, name: node.name });
     });
     return out;
   }
@@ -291,14 +293,28 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
           }
         });
       }
+      // a drag or retype is a carry of its own from here on: its copy is recorded and the old copy's characters and
+      // textblocks forward into it, so an edit still in flight into the old copy lands in the new one
       const carries: Carry[] = [];
       for (const drag of moved) {
         const node = nodeAt(doc, drag.node);
         if (!node) continue;
         const now = deepSlotIds(node);
         if (now.length !== drag.sourceSlots.length) continue;
-        registry.addCopy(drag.node, drag.blockId, new Map(now.map((slot, k) => [slotKey(slot), drag.sourceSlots[k]])));
-        carries.push({ kind: node.name === drag.name ? 'move' : 'retype', blockId: drag.blockId, from: drag.sourceSlots, to: now, source: drag.source, node: drag.node });
+        const blocks = textblocksY(node).map(itemOf);
+        const carry: Carry = {
+          kind: node.name === drag.name ? 'move' : 'retype',
+          blockId: drag.blockId,
+          from: drag.sourceSlots,
+          to: now,
+          source: drag.source,
+          node: drag.node,
+          blocks: drag.sourceBlocks.slice(0, blocks.length).map((old, k): [Slot, Slot] => [old, blocks[k]]),
+        };
+        registry.register([carry]);
+        registry.activate(carry);
+        registry.reported(carry);
+        carries.push(carry);
       }
       if (carries.length) stash.set(doc, carries);
     };

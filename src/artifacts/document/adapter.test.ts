@@ -506,6 +506,27 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
     expect(order(host.live).filter((id) => id === 'p3')).toHaveLength(1);
     expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
   });
+
+  it('a human drag installs forwarding: keystrokes and a deletion in flight into the original land in the dragged copy', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const typist = host.peer(); // has not seen the drag
+    const dragger = host.peer();
+    const p3 = DocIndex.of(dragger).pm(DocIndex.of(dragger).find('p3')!.top);
+    transact(dragger, () => {
+      body(dragger).delete(order(dragger).indexOf('p3'), 1);
+      body(dragger).insert(order(dragger).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+    });
+    host.send(dragger, human);
+    typeAt(typist, 'p3', 'end', ' late');
+    host.send(typist, human);
+    const at = textOf(typist, 'p3').indexOf('plain ');
+    transact(typist, () => nodeOf(typist, 'p3').delete(at, 'plain '.length));
+    host.send(typist, human);
+    expect(textOf(host.live, 'p3')).toBe('A paragraph the human types into. Words to keep. late');
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('p4') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+  });
 });
 
 describe('restore (revertScope, afterRestore)', () => {
