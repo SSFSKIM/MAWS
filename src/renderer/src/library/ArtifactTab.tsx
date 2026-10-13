@@ -3,14 +3,16 @@
 // tab's X32 scope, under which the editor registers its own header. The tab's ref names the artifact alone; its kind,
 // title and facts are its row in main's index (`library.get`), watched while the tab is open. While the index has no
 // row for it, the host's (`artifacts.get`) says whether the index has not caught up yet (an artifact created a moment
-// ago, an index that is unavailable), and the tab shows it from the host's row, or whether it is gone.
+// ago, an index that is unavailable), and the tab shows it from the host's row, or whether it is gone. A host that
+// cannot answer (a timeout, a restart) is no word at all: the tab keeps what it showed, its editor and guards included,
+// with a quiet Retry; only a confirmed absence shows the gone notice and gives the editor's state back.
 //
 // The state lives as long as the tab shows the artifact (the registry's hold, disposed when the tab leaves the main area),
 // not as long as the body is mounted, so the editor's closeGuard and actions read it while the tab is inactive (X32's
 // lifetime rule). When the tab cannot show an editor (the artifact is gone, or its kind has no editor yet) the state is
 // given back and the notice registers a header of its own, which replaces the editor's quietly (its body has unmounted),
 // so no stale closeGuard holds the tab.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
@@ -18,10 +20,11 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { formatAgo } from '../app/date-format';
 import { useNow } from '../app/use-now';
-import { holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, type RegisteredArtifactEditor } from '../artifacts/registry';
+import { heldArtifactEditorState, holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, type RegisteredArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { registerReplaceVerdict } from '../keymap/actions-runtime';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../panel/editor-host';
+import { useHosts } from '../stores/hosts';
 import type { ReplaceVerdict } from '../stores/layout';
 import { markArtifactViewed } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
@@ -35,58 +38,80 @@ const viewed = new WeakSet<object>();
 export function ArtifactTab({ tab }: { tab: ArtifactTabRef }) {
   const scope = useMemo<EditorHostScope>(() => ({ surface: 'main', tabId: tab.id }), [tab.id]);
   const read = useLibraryRow(tab.artifactId);
-  const fromHost = useHostRow(tab.artifactId, read);
-  const artifact = read.value ?? (read.value === null ? fromHost : undefined);
-  const editor = useArtifactEditor(artifact?.kind ?? null);
+  const host = useHostAnswer(tab.artifactId, read);
+  const indexless = read.value === null;
+  const artifact = read.value ?? (indexless && host.answer?.status === 'present' ? host.answer.row : undefined);
+  // What the tab showed until now, kept while the artifact cannot be confirmed (the host unreachable, or still asked).
+  const held = heldArtifactEditorState(scope);
+  const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
   if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
-  if (artifact === null) return <Gone scope={scope} />;
-  if (read.status === 'error') {
+  if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
+  // Unconfirmed: the index has no row (or its read failed) and the host has not said the artifact is gone.
+  const problem = indexless && host.answer?.status === 'refused' ? LIBRARY_COPY.hostUnreachable(host.answer.error) : read.status === 'error' ? LIBRARY_COPY.readFailed(read.error ?? '') : null;
+  const retry = () => {
+    refreshLibrary();
+    host.retry();
+  };
+  const notice = problem !== null && (
+    <>
+      <p className="m-0">{problem}</p>
+      <button type="button" onClick={retry} className={TEXT_BUTTON}>
+        {LIBRARY_COPY.retry}
+      </button>
+    </>
+  );
+  if (held && editor && held.editor === editor) {
     return (
-      <Quiet>
-        <p className="m-0">{LIBRARY_COPY.readFailed(read.error ?? '')}</p>
-        <button type="button" onClick={() => refreshLibrary()} className={TEXT_BUTTON}>
-          {LIBRARY_COPY.retry}
-        </button>
-      </Quiet>
+      <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope}>
+        {notice && <div role="status" className="flex shrink-0 items-center gap-3 border-b border-border bg-bg-raised px-3 py-1.5 text-ui-sm text-fg-muted">{notice}</div>}
+      </MountedEditor>
     );
   }
-  return (
-    <Quiet>
-      <p className="m-0">{LIBRARY_COPY.reading}</p>
-    </Quiet>
-  );
+  return <Quiet>{notice || <p className="m-0">{LIBRARY_COPY.reading}</p>}</Quiet>;
 }
 
-// While main's index answers no row: the host's row (null when it has none either; undefined until it answers), asked
-// again at each settled read of the index that still has none, the last answer standing meanwhile.
-function useHostRow(artifactId: string, read: LibraryRead<LibraryRow | null>): ArtifactRow | null | undefined {
-  const [answer, setAnswer] = useState<{ artifactId: string; row: ArtifactRow | null } | null>(null);
+type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' } | { status: 'refused'; error: string };
+
+// While main's index answers no row, the host's word on the artifact: present (the index has not caught up: just
+// created, or the index unavailable), absent (confirmed gone), or refused (a timeout, a restarting host: no word at
+// all). Asked again at each settled read of the index that still has none, at Retry, and when the engine host is
+// ready again; the last answer stands meanwhile.
+function useHostAnswer(artifactId: string, read: LibraryRead<LibraryRow | null>): { answer: HostAnswer | undefined; retry(): void } {
+  const [answer, setAnswer] = useState<{ artifactId: string; answer: HostAnswer } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const hostReady = useHosts((s) => (s.hosts.engine?.state === 'ready' ? s.hosts.engine.revision : null));
   const settledAbsent = read.value === null && read.status === 'ready' ? read : null;
   useEffect(() => {
     if (settledAbsent === null) return;
     let live = true;
     void ipc.invoke('artifacts.get', { artifactId }).then((result) => {
-      if (live) setAnswer({ artifactId, row: result.ok ? result.value.artifact : null });
+      if (!live) return;
+      const next: HostAnswer = !result.ok ? { status: 'refused', error: result.error.message } : result.value.artifact ? { status: 'present', row: result.value.artifact } : { status: 'absent' };
+      setAnswer({ artifactId, answer: next });
     });
     return () => {
       live = false;
     };
-  }, [artifactId, settledAbsent]);
-  return answer?.artifactId === artifactId ? answer.row : undefined;
+  }, [artifactId, settledAbsent, attempt, hostReady]);
+  return { answer: answer?.artifactId === artifactId ? answer.answer : undefined, retry: () => setAttempt((n) => n + 1) };
 }
 
-function MountedEditor({ artifactId, kind, editor, scope }: { artifactId: string; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope }) {
+function MountedEditor({ artifactId, kind, editor, scope, children }: { artifactId: string; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope; children?: ReactNode }) {
   const hold = holdArtifactEditorState(scope, artifactId, kind, editor);
-  useEffect(() => {
+  // Decision Log 15: the owner's view, recorded at the editor's first word that the content is on screen, once per showing.
+  const onShown = useCallback(() => {
     if (viewed.has(hold)) return;
     viewed.add(hold);
     void markArtifactViewed(hold.artifactId);
   }, [hold]);
   const Main = editor.Main;
   return (
-    <div data-artifact-tab={artifactId} className="h-full">
-      <Main artifactId={artifactId} state={hold.state} scope={scope} />
+    <div data-artifact-tab={artifactId} className="flex h-full flex-col">
+      {children}
+      <div className="relative min-h-0 flex-1">
+        <Main artifactId={artifactId} state={hold.state} scope={scope} onShown={onShown} />
+      </div>
     </div>
   );
 }

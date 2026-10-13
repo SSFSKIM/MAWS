@@ -3,6 +3,7 @@
 // closeGuard holding a close; the state made once per tab and disposed when the tab closes; `markViewed` once per open;
 // the row's title as the tab's label; a gone artifact's notice and a kind with no editor yet.
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -50,7 +51,7 @@ function row(over: Partial<LibraryRow> = {}): LibraryRow {
 // What main answers for the artifact: the index's row (null once gone, or before the index has it) and the host's
 // (`artifacts.get`, asked when the index has none); `markViewed` recorded.
 let current: LibraryRow | null;
-let onHost: ArtifactRow | null;
+let onHost: ArtifactRow | null | 'refused';
 const hostRow = (over: Partial<ArtifactRow> = {}): ArtifactRow => {
   const { lastEditor: _e, lastEditedAt: _t, sessions: _s, ...entity } = row();
   void [_e, _t, _s];
@@ -75,7 +76,7 @@ beforeEach(() => {
   onHost = null;
   main = installFakeMain((name) => {
     if (name === 'library.get') return ok({ row: current });
-    if (name === 'artifacts.get') return ok({ artifact: onHost });
+    if (name === 'artifacts.get') return onHost === 'refused' ? { ok: false, error: { code: 'host_unavailable', message: 'the engine host is restarting' } } : ok({ artifact: onHost });
     if (name === 'artifacts.markViewed') return ok();
     if (name === 'attention.request') return ok({ event: null });
     return new Promise(() => {});
@@ -96,8 +97,9 @@ type TestState = { allowClose: boolean; artifactId: string; surface: string };
 function testEditor() {
   const createState = vi.fn(({ artifactId, surface }: { artifactId: string; surface: string }): TestState => ({ allowClose: false, artifactId, surface }));
   const dispose = vi.fn();
-  function Main({ artifactId, state, scope }: ArtifactEditorProps<TestState>) {
+  function Main({ artifactId, state, scope, onShown }: ArtifactEditorProps<TestState>) {
     useEditorHost(scope, { title: `Editing ${artifactId.slice(-1)}`, saved: 'saved', closeGuard: async () => state.allowClose });
+    useEffect(() => onShown(), [onShown]); // its content is on screen at mount
     return <p>main editor for {state.artifactId} in {scope.surface}:{scope.tabId}</p>;
   }
   const Panel = () => <p>panel editor</p>;
@@ -228,6 +230,68 @@ describe('an artifact in a main tab', () => {
     expect(editor.createState, 'one showing: the hold is the same').toHaveBeenCalledTimes(1);
     expect(editor.dispose).not.toHaveBeenCalled();
     expect(main.callsOf('artifacts.markViewed')).toHaveLength(1);
+  });
+
+  it('a view is recorded when the editor says its content is first on screen, once per showing, not while it loads', async () => {
+    let shown: () => void = () => {};
+    registerArtifactEditor('document', {
+      Panel: function Loading({ onShown }: ArtifactEditorProps) {
+        shown = onShown;
+        return <p>loading</p>;
+      },
+    });
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    await screen.findByText('loading');
+    await act(async () => {});
+    expect(main.callsOf('artifacts.markViewed'), 'still loading: no view').toEqual([]);
+    await act(async () => {
+      shown();
+      shown();
+    });
+    expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: A }]);
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
+    act(() => openArtifactTab(A));
+    await screen.findByText('loading');
+    await act(async () => shown());
+    expect(main.callsOf('artifacts.markViewed'), 'the same showing').toHaveLength(1);
+  });
+
+  it('a host that cannot answer is not a deletion: the editor, its state and its guard stay, with a quiet Retry; a confirmed absence then shows Gone', async () => {
+    const editor = testEditor();
+    registerArtifactEditor('document', editor);
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    await screen.findByText(/main editor for/);
+    current = null;
+    onHost = 'refused';
+    await changed();
+    expect(await screen.findByText('Couldn’t confirm this artifact with its host: the engine host is restarting')).toBeTruthy();
+    expect(screen.getByText(/main editor for/), 'still mounted').toBeTruthy();
+    expect(editor.dispose).not.toHaveBeenCalled();
+    expect(headerTitle()).toBe('Editing 1');
+    await act(() => requestCloseTab(`artifact:${A}`));
+    expect(tabOpen(), 'its closeGuard still holds the tab').toBe(true);
+
+    onHost = null;
+    await act(async () => screen.getByRole('button', { name: 'Try again' }).click());
+    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(editor.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('with no editor shown yet, a refused host read says so quietly and the next change asks again', async () => {
+    const editor = testEditor();
+    registerArtifactEditor('document', editor);
+    current = null;
+    onHost = 'refused';
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    expect(await screen.findByText('Couldn’t confirm this artifact with its host: the engine host is restarting')).toBeTruthy();
+    expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
+    expect(editor.createState).not.toHaveBeenCalled();
+    onHost = hostRow();
+    await changed();
+    expect(await screen.findByText(/main editor for/)).toBeTruthy();
   });
 
   it('a failed first read says why and reads again on Try again', async () => {

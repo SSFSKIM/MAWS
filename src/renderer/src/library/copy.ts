@@ -27,6 +27,7 @@ export const LIBRARY_COPY = {
   reading: 'Opening…',
   readFailed: (message: string) => `Couldn’t read this artifact: ${message}`,
   retry: 'Try again',
+  hostUnreachable: (message: string) => `Couldn’t confirm this artifact with its host: ${message}`,
   goneTitle: 'Artifact not found',
   gone: 'This artifact was deleted, or it is not in the library.',
   noEditor: (kind: ArtifactKind) => `No editor for ${KIND_PLURALS[kind]} yet`,

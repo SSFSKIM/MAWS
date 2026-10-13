@@ -1,8 +1,9 @@
 // The editor mount registry (docs/doperpowers/plans/2026-10-12-p3-l-library.md, Decision Log 7; the P3 interface ledger
 // §7; parent Decision Log 39): which component edits each artifact kind, wherever an artifact is shown. B, C, D and E
 // register their kind's editor here; the panel's Artifacts tool (its record view) and the `artifact` main tab mount the
-// kind's `Panel` or `Main` with the artifact, the state the editor keeps for that tab, and the tab's X32 scope, under
-// which the editor registers its own header (`useEditorHost`).
+// kind's `Panel` or `Main` with the artifact, the state the editor keeps for that tab, the tab's X32 scope, under
+// which the editor registers its own header (`useEditorHost`), and `onShown`, which the editor calls once the
+// artifact's content is on screen so the surface records the owner's view.
 //
 // X32's lifetime rule (the ledger's §5): an editor's `closeGuard` and actions outlive its mounted body, so they must read
 // state the tab owns, never a body's component state. `createState` makes that state when a surface starts showing an
@@ -21,6 +22,9 @@ export interface ArtifactEditorProps<S = unknown> {
   artifactId: string;
   state: S; // what the editor's createState made for this tab (undefined without one)
   scope: EditorHostScope; // the tab the editor registers its X32 header under
+  // The editor calls it when the artifact's content is first on screen (loaded, not while it loads); idempotent. The
+  // surface records the owner's view (`artifacts.markViewed`) once per showing on the first call (Decision Log 15).
+  onShown(): void;
 }
 
 export interface ArtifactEditorTarget {
@@ -97,6 +101,10 @@ export function holdArtifactEditorState<S>(scope: EditorHostScope, artifactId: s
   holds.set(key, hold as ArtifactEditorHold);
   return hold;
 }
+
+// What the scope holds now, if anything: a surface that cannot confirm the artifact for a moment (its host unreachable)
+// keeps showing the editor it was showing from this.
+export const heldArtifactEditorState = (scope: EditorHostScope): ArtifactEditorHold | null => holds.get(keyOf(scope)) ?? null;
 
 // The surface stopped showing an artifact in this scope (the panel went Back or its tab went, a main tab shows a notice).
 export function releaseArtifactEditorState(scope: EditorHostScope): void {
