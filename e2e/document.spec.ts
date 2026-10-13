@@ -245,5 +245,14 @@ test('the exporters write Markdown, HTML, DOCX and a paged PDF in main; the Expo
   expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter
   const a4 = await exportTo('pdf', 'plan-a4.pdf', 'a4');
   expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4
+
+  // a page far past a `data:` URL's 2 MB (a document's images are inlined) prints all the same
+  const long = `<!doctype html><html><head><meta charset="utf-8"><style>@page { size: 8.5in 11in; margin: 1in; }</style></head><body>${'<p>The launch waits for the review of every line in this long appendix.</p>'.repeat(40_000)}</body></html>`;
+  expect(long.length).toBeGreaterThan(3_000_000);
+  const bigPath = join(scratch, 'long.pdf');
+  await launch!.app.evaluate(async (_electron, [html, path]) => (globalThis as unknown as { __maws_document_export: { print(h: string, p: string): Promise<void> } }).__maws_document_export.print(html, path), [long, bigPath] as const);
+  const big = readFileSync(bigPath);
+  expect(big.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  expect(pdfPages(big).pages).toBeGreaterThan(100);
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
