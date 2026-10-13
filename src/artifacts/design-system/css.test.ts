@@ -4,7 +4,7 @@ import { generateTokensCss } from './css';
 import complete from './fixtures/complete.tokens.json';
 import { edited } from './fixtures/edit';
 import lenient from './fixtures/lenient.tokens.json';
-import { cssNamesOf, parseTokens, ROLES, type TokenSet } from './tokens';
+import { cssNamesOf, parseTokens, ROLES, validateTokenFile, type TokenSet } from './tokens';
 
 const set = (input: unknown): TokenSet => {
   const result = parseTokens(input);
@@ -34,6 +34,7 @@ const props = (css: string, scope: string) => new Map(rules(css).get(scope));
 
 const LEDGER_NAMES = ROLES.flatMap((role) => cssNamesOf(role.path, role.type));
 const TYPE_ROLES = ['title', 'subtitle', 'h1', 'h2', 'h3', 'body', 'caption', 'quote'];
+const PAGE_NAMES = ['--ds-page-width', '--ds-page-height', '--ds-page-margin'];
 
 describe('tokens.css (Acceptance 2)', () => {
   it('defines exactly the ledger’s names plus the extra tokens as --ds-<path>, on the default :root scope', () => {
@@ -41,7 +42,7 @@ describe('tokens.css (Acceptance 2)', () => {
     const names = [...props(css, ':root').keys()];
     const extras = ['--ds-color-highlight', '--ds-line-focus', '--ds-line-hairline', '--ds-line-ramp', '--ds-motion-ease', '--ds-motion-enter',
       '--ds-motion-fast', '--ds-space-0', '--ds-type-label-size', '--ds-type-label-line', '--ds-type-label-weight'];
-    expect(names).toEqual([...LEDGER_NAMES, ...extras]);
+    expect(names).toEqual([...LEDGER_NAMES, ...extras, ...PAGE_NAMES]);
   });
 
   it('writes each value in CSS, with aliases resolved', () => {
@@ -161,5 +162,35 @@ describe('tokens.css (Acceptance 2)', () => {
     expect(p.has('--ds-motion-fast')).toBe(false);
     expect(p.has('--ds-motion-enter')).toBe(false);
     expect(p.get('--ds-color-bg')).toBe('#faf9f6');
+  });
+});
+
+describe('the page size (Decision Log 15; X28’s page-size names)', () => {
+  const page = (extension: unknown) => set(edited(complete, ['$extensions/dev.maws.page', extension]));
+
+  it('writes US Letter with a 1in margin when the system names no page, in the document medium', () => {
+    const p = props(generateTokensCss(set(complete)), ':root');
+    expect([p.get('--ds-page-width'), p.get('--ds-page-height'), p.get('--ds-page-margin')]).toEqual(['8.5in', '11in', '1in']);
+  });
+
+  it('writes A4 and the system’s margin, a dimension or an alias, resolved', () => {
+    const a4 = props(generateTokensCss(page({ size: 'a4', margin: { value: 72, unit: 'px' } })), ':root');
+    expect([a4.get('--ds-page-width'), a4.get('--ds-page-height'), a4.get('--ds-page-margin')]).toEqual(['210mm', '297mm', '72px']);
+    const aliased = props(generateTokensCss(page({ size: 'letter', margin: '{space.8}' })), ':root');
+    expect([aliased.get('--ds-page-width'), aliased.get('--ds-page-margin')]).toEqual(['8.5in', '4rem']);
+  });
+
+  it('writes no page in a deck scope', () => {
+    const deck = props(generateTokensCss(page({ size: 'a4' }), { medium: 'deck' }), ':root');
+    for (const name of PAGE_NAMES) expect(deck.has(name)).toBe(false);
+  });
+
+  it('keeps the page names the page’s: a token that would write one is refused by validation and never written', () => {
+    const file = edited(complete, ['page', { $type: 'dimension', width: { $value: { value: 3, unit: 'px' } } }]);
+    expect(validateTokenFile(file).problems).toEqual([{ path: 'page.width', message: expect.stringContaining('--ds-page-width') }]);
+    const doc = props(generateTokensCss(parseTokens(file).tokens!), ':root');
+    expect(doc.get('--ds-page-width')).toBe('8.5in');
+    const deck = props(generateTokensCss(parseTokens(file).tokens!, { medium: 'deck' }), ':root');
+    expect(deck.has('--ds-page-width')).toBe(false);
   });
 });

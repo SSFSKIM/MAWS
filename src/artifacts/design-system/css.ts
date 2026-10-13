@@ -1,10 +1,11 @@
 // `tokens.css` (D3): one stylesheet per (system, scope, medium) with the `--ds-*` custom properties on the scope, the eight
-// `.ds-type-<role>` classes inside it, and the Hangul word-break rule on them. Values are written resolved (an alias
+// `.ds-type-<role>` classes inside it, and the Hangul word-break rule on them. A document scope also carries the page
+// size of `$extensions["dev.maws.page"]` (Decision Log 15). Values are written resolved (an alias
 // writes its target's value), except where a class reads a property: there a reference stays a `var()`, so an override
 // of `--ds-font-display` restyles every class drawn in it. Total: a token that does not resolve is left out (the
 // validation names it).
 import { colorToCss, round4 } from './color';
-import { CSS_KEY, DECK_KEY, type WordBreak } from './extensions';
+import { CSS_KEY, DECK_KEY, PAGE_CSS_NAMES, PAGE_KEY, type PageSize, type WordBreak } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken, type ResolvedTokens } from './resolve';
 import { byIdentity, cssNamesOf, TYPE_ROLES } from './roles';
 import type { TokenSet } from './tokens';
@@ -106,19 +107,49 @@ function writtenComposite(token: ResolvedToken, resolved: ResolvedTokens): Recor
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+const PAGE_SIZE_CSS: Record<PageSize, [width: string, height: string]> = { letter: ['8.5in', '11in'], a4: ['210mm', '297mm'] };
+
+/** The document's page from the root's `dev.maws.page`: Letter and a 1in margin unless the system says otherwise. */
+function pageDeclarations(tokens: TokenSet, resolved: ResolvedTokens): [string, string][] {
+  const page = tokens.groups.get('')?.$extensions?.[PAGE_KEY] as { size?: PageSize; margin?: unknown } | undefined;
+  const [width, height] = PAGE_SIZE_CSS[page?.size ?? 'letter'] ?? PAGE_SIZE_CSS.letter;
+  const margin = page?.margin === undefined ? null : resolveValueAgainst(resolved, 'dimension', page.margin, 'margin').value;
+  return [
+    [PAGE_CSS_NAMES[0], width],
+    [PAGE_CSS_NAMES[1], height],
+    [PAGE_CSS_NAMES[2], margin ? measure(margin) : '1in'],
+  ];
+}
+
+/**
+ * The custom properties of a system at the medium's scale, in order: each name's value and the token path that wrote it
+ * (`''` for the page's). On a collision the first (a role) wins, and the page's names are never a token's.
+ */
+function properties(tokens: TokenSet, medium: Medium, resolved: ResolvedTokens): Map<string, { value: string; path: string }> {
+  const written = new Map<string, { value: string; path: string }>();
+  const reserved = new Set<string>(PAGE_CSS_NAMES);
+  for (const token of resolved.tokens.values()) {
+    for (const [name, value] of declarations(token, medium, resolved)) {
+      if (written.has(name) || reserved.has(name)) continue;
+      written.set(name, { value, path: token.path });
+    }
+  }
+  if (medium === 'document') for (const [name, value] of pageDeclarations(tokens, resolved)) written.set(name, { value, path: '' });
+  return written;
+}
+
+/** Every `--ds-*` property a system sets at the medium's scale, with its value: what a scope reads (`resolveDsVars`). */
+export function tokenProperties(tokens: TokenSet, medium: Medium = 'document'): Map<string, string> {
+  return new Map([...properties(tokens, medium, resolveTokens(tokens))].map(([name, { value }]) => [name, value]));
+}
+
 /** The stylesheet for `tokens` inside `scope`, at the medium's type scale. Byte-stable for equal input. */
 export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = {}): string {
   const { scope = ':root', medium = 'document' } = options;
   const resolved = resolveTokens(tokens);
-  const written = new Map<string, string>(); // name → the path that wrote it; on a collision the first (a role) wins
-  const lines: string[] = [];
-  for (const token of resolved.tokens.values()) {
-    for (const [name, value] of declarations(token, medium, resolved)) {
-      if (written.has(name)) continue;
-      written.set(name, token.path);
-      lines.push(`  ${name}: ${value};`);
-    }
-  }
+  const props = properties(tokens, medium, resolved);
+  const written = new Map([...props].map(([name, { path }]) => [name, path]));
+  const lines = [...props].map(([name, { value }]) => `  ${name}: ${value};`);
   const out = ['/* tokens.css, generated from tokens.tokens.json: edits here are not kept */', `${scope} {`, ...lines, '}'];
 
   // A class reads the custom property a reference names, when that token wrote it; otherwise the value itself.

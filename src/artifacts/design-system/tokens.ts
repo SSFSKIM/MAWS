@@ -3,7 +3,7 @@
 // group), `serializeTokens` writes it back in canonical form (a fixed point after one pass), `validateTokenFile` runs
 // the whole check (structure, values, references, the roles, the CSS names, the limits) and names every problem by its
 // path. Resolution (aliases, `$ref` pointers, `$extends`, `$type` inheritance) is `resolve.ts`'s.
-import { DECK_KEY, OFFICE_KEY, PAGE_KEY, readExtensions } from './extensions';
+import { DECK_KEY, OFFICE_KEY, PAGE_CSS_NAMES, PAGE_KEY, readExtensions } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedTokens } from './resolve';
 import { byIdentity, comparePaths, cssNamesOf, ROLES, splitPath } from './roles';
 import { aliasPath, FAIL, isAlias, isPointer, isTokenType, KEEP, normalizeValue, pointerAsAlias, pointerSegments, type RefHandler, type TokenType } from './values';
@@ -345,6 +345,7 @@ export function serializeTokens(set: TokenSet): string {
 
 export const LIMITS = { tokens: 512, tokensPerGroup: 64 } as const;
 
+
 /** Every role present, at its type. A role whose path already has a problem is not reported again as missing. */
 export function validateRoles(resolved: ResolvedTokens, set: TokenSet, reported: ReadonlySet<string> = new Set()): TokenProblem[] {
   const problems: TokenProblem[] = [];
@@ -382,7 +383,7 @@ export function validateTokenFile(input: unknown): { ok: boolean; tokens: TokenS
   problems.push(...resolved.problems);
   problems.push(...validateRoles(resolved, set, new Set(problems.map((p) => p.path))));
 
-  const written = new Map<string, string>();
+  const written = new Map<string, string>(PAGE_CSS_NAMES.map((name) => [name, `the page size ($extensions["${PAGE_KEY}"])`]));
   for (const token of resolved.tokens.values()) {
     for (const name of cssNamesOf(token.path, token.type)) {
       const owner = written.get(name);

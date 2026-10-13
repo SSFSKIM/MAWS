@@ -13,6 +13,8 @@ export const CSS_KEY = 'dev.maws.css';
 export const PAGE_KEY = 'dev.maws.page';
 export const PAGE_SIZES = ['letter', 'a4'] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
+/** The page size's CSS names (X28; Decision Log 15): `tokens.css` writes them from `dev.maws.page`, never from a token. */
+export const PAGE_CSS_NAMES = ['--ds-page-width', '--ds-page-height', '--ds-page-margin'] as const;
 
 export const OFFICE_SLOTS = ['dk1', 'lt1', 'dk2', 'lt2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink'] as const;
 export type OfficeSlot = (typeof OFFICE_SLOTS)[number];
