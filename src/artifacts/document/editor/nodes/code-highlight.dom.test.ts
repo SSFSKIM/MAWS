@@ -74,4 +74,14 @@ describe('the code highlighter across edits', () => {
     e.view.dispatch(e.state.tr.delete(c1, to));
     expect(highlight(e).find()).toEqual([]);
   });
+
+  // M9's review: a code block turned into a paragraph keeps none of its token decorations.
+  it('drops a block’s decorations when it stops being a code block', async () => {
+    const e = make();
+    await until(() => within(e, 'c1').length > 1, 'c1 highlighted');
+    const { from, to } = posOf(e, 'c1');
+    e.view.dispatch(e.state.tr.setBlockType(from + 1, to - 1, e.schema.nodes.paragraph, { id: 'c1' }));
+    expect(e.state.doc.nodeAt(posOf(e, 'c1').from)?.type.name).toBe('paragraph');
+    expect(within(e, 'c1')).toEqual([]);
+  });
 });

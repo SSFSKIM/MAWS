@@ -52,16 +52,18 @@ function redecorate(tr: Transaction, previous: DecorationSet, onReady: () => voi
   const ranges = touchedRanges(tr);
   if (ranges === null) return decorate(doc, onReady); // too many steps to map (a rebind): every block afresh
   let set = previous.map(tr.mapping, doc);
+  // every textblock touched loses its decorations (one that stopped being a code block keeps none), and the code blocks
+  // among them are highlighted afresh
   const blocks = new Map<number, PMNode>();
   for (const [from, to] of ranges) {
     doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'codeBlock') blocks.set(pos, node);
-      return node.type.name !== 'codeBlock' && !node.isTextblock && !node.isLeaf;
+      if (node.isTextblock) blocks.set(pos, node);
+      return !node.isTextblock && !node.isLeaf;
     });
   }
   for (const [pos, node] of blocks) {
     set = set.remove(set.find(pos, pos + node.nodeSize));
-    set = set.add(doc, blockDecorations(node, pos, onReady));
+    if (node.type.name === 'codeBlock') set = set.add(doc, blockDecorations(node, pos, onReady));
   }
   return set;
 }
