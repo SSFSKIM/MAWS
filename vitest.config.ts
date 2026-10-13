@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
 import { createRequire } from 'node:module';
 // C8c end
 
-const alias = { '@shared': resolve(__dirname, 'src/shared') };
+const alias = { '@shared': resolve(__dirname, 'src/shared'), '@artifacts': resolve(__dirname, 'src/artifacts') }; // P3-A: @artifacts
 // C8c start: `lowlight` aliased to a grammar-less build (ruled 2026-09-29, the C8c document's M1 fold (2)): the diff
 // view's core would otherwise ship every highlight.js grammar, unused since Review highlights through shiki. The shim
 // takes lowlight's engine through `lowlight-engine`, its `lib/index.js`, which the package's exports do not name.
@@ -33,6 +33,7 @@ const TIMING_NODE_TESTS = [
   'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service
   'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
+  'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
 
@@ -84,6 +85,10 @@ export default defineConfig({
       },
       { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
+      // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
+      // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'] } },
+      // P3-A end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
       {

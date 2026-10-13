@@ -15,3 +15,14 @@ allowBuilds:
 overrides:
   highlight.js: 11.11.2
 # C8c end
+# P3-A start: Yjs v14 pinned exactly (docs/doperpowers/plans/2026-10-12-p3-co-work.md, Decision Log 25 and 28): one
+# `@y/y` and one `lib0` for the whole tree, so the binding module, `@y/protocols` and `@y/prosemirror` share one struct
+# store and one encoder (a second `@y/y` trips v14's duplicate-import guard and breaks `instanceof` across copies), and
+# one `prosemirror-model`, the version S6 ran with Tiptap 3.31.3 and `@y/prosemirror` 2.0.0-15 (a second copy breaks
+# the Tiptap binding). test/artifacts/single-copies.test.ts holds the tree to one copy of each. A re-pin edits these
+# lines, package.json's four pins and `src/artifacts/yjs/` together. Drop an override only when Yjs leaves prerelease
+# and the tree resolves one copy without it (the test says so).
+  '@y/y': 14.0.0-rc.28
+  lib0: 1.0.0-rc.36
+  prosemirror-model: 1.25.12
+# P3-A end
