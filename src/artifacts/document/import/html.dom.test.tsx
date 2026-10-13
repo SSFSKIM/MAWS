@@ -2,6 +2,7 @@
 // schema, on a sanitised inert document (scripts, styles and handlers gone, addresses `https:` and `maws-artifact:`
 // only for what loads), in the renderer as paste is. Equivalent Markdown and HTML read to the same content, and the
 // HTML and Markdown exports of the every-kind fixture read back to it.
+import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
 import { describe, expect, it } from 'vitest';
 import corpus from '../../../../test/fixtures/document/corpus.md?raw';
 import page from '../../../../test/fixtures/document/page.html?raw';
@@ -10,6 +11,7 @@ import { exportHtml } from '../export/html';
 import { exportMarkdown } from '../export/markdown';
 import { importHtml } from './html';
 import { importMarkdown } from './markdown';
+import { schemaFor } from '../schema';
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
@@ -122,4 +124,37 @@ describe('importHtml', () => {
     const ordinary = await importHtml('<div>\n  <p>\n    A   B\n  </p>\n  <ul>\n    <li>  Item  </li>\n  </ul>\n</div>');
     expect(ordinary.content.content.map((block) => block.textContent)).toEqual(['A B', 'Item']);
   });
+
+  // fix wave 2: the marker governs whitespace inside its region; it never selects what is imported
+  describe('a whitespace region', () => {
+    const texts = async (html: string) => (await importHtml(html)).content.content.map((block) => [block.type.name, block.textContent]);
+
+    it('keeps the content before and after a marked article', async () => {
+      expect(await texts('<p>  Before   it </p><article data-whitespace="preserve"><p>  kept  </p></article><p> After  it </p>')).toEqual([
+        ['paragraph', 'Before it'],
+        ['paragraph', '  kept  '],
+        ['paragraph', 'After it'],
+      ]);
+    });
+
+    it('imports every marked article, each keeping its whitespace', async () => {
+      expect(await texts('<article data-whitespace="preserve"><p> one  </p></article>\n  <article data-whitespace="preserve"><h2>  two</h2><ul>\n  <li><p>three\n</p></li>\n</ul></article>')).toEqual([
+        ['paragraph', ' one  '],
+        ['heading', '  two'],
+        ['bulletList', 'three\n'],
+      ]);
+    });
+
+    it('matches tag rules without a parse context, which no tag rule of the schema asks for', () => {
+      expect(PMDOMParser.fromSchema(schemaFor()).rules.filter((rule) => 'tag' in rule && rule.context)).toEqual([]);
+    });
+
+    it('keeps the paragraph around an inline marker, and the marked spaces', async () => {
+      expect(await texts('<p>Plain   text <span data-whitespace="preserve">  two  spaces</span> and   more.</p><p>Next</p>')).toEqual([
+        ['paragraph', 'Plain text   two  spaces and more.'],
+        ['paragraph', 'Next'],
+      ]);
+    });
+  });
 });
+

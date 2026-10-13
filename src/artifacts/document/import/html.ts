@@ -74,6 +74,28 @@ async function sanitize(root: DocumentFragment, uploadAsset: UploadAsset | undef
   for (const box of root.querySelectorAll('input')) box.remove();
 }
 
+// A MAWS export marks the region whose text's whitespace is content (`data-whitespace="preserve"`, export/html.ts);
+// anywhere else a page's whitespace is layout and is normalised. The whole fragment is parsed once; the marker only
+// changes how whitespace inside it is read: a textblock (paragraph, heading, code) inside a marked region keeps its
+// text exactly (ProseMirror's `preserveWhitespace: 'full'` on that block's rule), and the region itself reads as
+// `white-space: pre-wrap`, which ProseMirror honours for spaces in its subtree. So whitespace between blocks stays
+// layout even inside a region, and a marker on an inline element keeps its spaces while the paragraph around it is
+// parsed as usual (newlines there read as ProseMirror reads them under pre-wrap).
+const PRESERVE = '[data-whitespace="preserve"]';
+function parseKeepingMarkedWhitespace(content: DocumentFragment): PMNode {
+  const schema = schemaFor();
+  const parser = PMDOMParser.fromSchema(schema);
+  for (const region of content.querySelectorAll<HTMLElement>(PRESERVE)) region.style.whiteSpace = 'pre-wrap';
+  return parser.parse(content, {
+    ruleFromNode: (dom) => {
+      if (!(dom instanceof Element) || dom.closest(PRESERVE) === null) return null;
+      // no tag rule of the schema has a `context` (html.dom.test.tsx pins it), so matching needs no parse context
+      const rule = parser.matchTag(dom, undefined as never);
+      return rule?.node && schema.nodes[rule.node]?.isTextblock ? { ...rule, preserveWhitespace: 'full' } : null;
+    },
+  });
+}
+
 const ID_TYPES = new Set<string>(BLOCK_TYPES);
 function freshIds(node: PMNode, generateID: () => string): unknown {
   const json = node.toJSON() as { type: string; attrs?: Record<string, unknown>; content?: unknown[] };
@@ -93,9 +115,7 @@ export async function importHtml(html: string, { generateID = nanoid8, uploadAss
   const template = document.createElement('template');
   template.innerHTML = html;
   await sanitize(template.content, uploadAsset);
-  // a MAWS export marks its text's whitespace as content; any other page's whitespace is layout and is normalised
-  const exported = template.content.querySelector('[data-whitespace="preserve"]');
-  const parsed = exported ? PMDOMParser.fromSchema(schema).parse(exported, { preserveWhitespace: 'full' }) : PMDOMParser.fromSchema(schema).parse(template.content);
+  const parsed = parseKeepingMarkedWhitespace(template.content);
   const body = schema.nodeFromJSON(freshIds(parsed.childCount ? parsed : schema.node('doc', null, [schema.node('paragraph')]), generateID));
   body.check();
   return body;
