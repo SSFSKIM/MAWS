@@ -197,11 +197,12 @@ async function turnEnd(s: Live, ended: number, what: string): Promise<string> {
 }
 
 // The `maws` calls of the session so far, with their answers (null while unanswered).
-function calls(s: Live): { name: string; args: Record<string, unknown>; result: McpResult | null; at: string | null }[] {
+function calls(s: Live): { name: string; args: Record<string, unknown>; result: McpResult | null; at: string | null; requestedAt: string | null }[] {
   const rows = s.rows();
   return mcpCalls(rows).map((call) => {
     const answer = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string; response?: { request_id?: string } }).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === call.requestId);
-    return { name: call.name, args: call.args, result: mcpResultOf(rows, call.requestId), at: (answer as { at?: string } | undefined)?.at ?? null };
+    const request = rows.find((r) => r.direction === 'in' && (r.frame as { type?: string; request_id?: string }).type === 'control_request' && (r.frame as { request_id: string }).request_id === call.requestId);
+    return { name: call.name, args: call.args, result: mcpResultOf(rows, call.requestId), at: (answer as { at?: string } | undefined)?.at ?? null, requestedAt: (request as { at?: string } | undefined)?.at ?? null };
   });
 }
 const json = (result: McpResult) => JSON.parse(resultText(result)) as Record<string, unknown>;
@@ -217,6 +218,35 @@ async function blocks(editor: Locator): Promise<Record<string, string>> {
       for (const cursor of Array.from(copy.querySelectorAll('.ProseMirror-yjs-cursor'))) cursor.remove();
       out[el.getAttribute('data-id')!] = (copy.textContent ?? '').replace(/⁠/g, '');
     }
+    return out;
+  });
+}
+
+// Every block of the editor by id, structurally: its type, its attributes but the id, and for a textblock its inline
+// content with each run's marks (an untargeted block whose type, attributes or formatting moved shows here, not only one
+// whose text did).
+async function structure(editor: Locator): Promise<Record<string, string>> {
+  return editor.evaluate((root) => {
+    interface PMNode {
+      type: { name: string };
+      attrs: Record<string, unknown>;
+      isTextblock: boolean;
+      forEach(fn: (child: PMNode) => void): void;
+      isText: boolean;
+      text?: string;
+      marks: Array<{ type: { name: string }; attrs: Record<string, unknown> }>;
+    }
+    const doc = (root as HTMLElement & { editor: { state: { doc: { descendants(fn: (node: PMNode) => void): void } } } }).editor.state.doc;
+    const out: Record<string, string> = {};
+    doc.descendants((node) => {
+      const id = node.attrs.id;
+      if (typeof id !== 'string') return;
+      const { id: _id, ...attrs } = node.attrs;
+      void _id;
+      const inline: unknown[] = [];
+      if (node.isTextblock) node.forEach((child) => inline.push([child.isText ? child.text : child.type.name, child.marks.map((mark) => [mark.type.name, mark.attrs])]));
+      out[id] = JSON.stringify([node.type.name, attrs, inline]);
+    });
     return out;
   });
 }
@@ -276,7 +306,7 @@ async function imeStep(cdp: CDPSession, step: Step, steps: Step[]): Promise<void
 }
 
 // What the editor drew of other replicas while recording: each agent-editing outline (its block and its label) and each
-// remote cursor's label, with the time first seen (ms since the page's time origin).
+// remote cursor's label, with the time first seen (epoch ms, the journal's clock).
 async function watchPresence(editor: Locator): Promise<void> {
   await editor.evaluate((root) => {
     const seen: { kind: 'editing' | 'cursor'; block: string; name: string; at: number }[] = [];
@@ -284,11 +314,11 @@ async function watchPresence(editor: Locator): Promise<void> {
     const record = () => {
       for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-agent-editing]'))) {
         const entry = { kind: 'editing' as const, block: el.getAttribute('data-id') ?? '', name: el.getAttribute('data-agent-editing') ?? '' };
-        if (!seen.some((s) => s.kind === entry.kind && s.block === entry.block && s.name === entry.name)) seen.push({ ...entry, at: performance.now() });
+        if (!seen.some((s) => s.kind === entry.kind && s.block === entry.block && s.name === entry.name)) seen.push({ ...entry, at: performance.timeOrigin + performance.now() });
       }
       for (const el of Array.from(root.querySelectorAll<HTMLElement>('.ProseMirror-yjs-cursor'))) {
         const entry = { kind: 'cursor' as const, block: el.closest('[data-id]')?.getAttribute('data-id') ?? '', name: el.textContent?.replace(/⁠/g, '') ?? '' };
-        if (!seen.some((s) => s.kind === entry.kind && s.block === entry.block && s.name === entry.name)) seen.push({ ...entry, at: performance.now() });
+        if (!seen.some((s) => s.kind === entry.kind && s.block === entry.block && s.name === entry.name)) seen.push({ ...entry, at: performance.timeOrigin + performance.now() });
       }
     };
     new MutationObserver(record).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-agent-editing', 'class'] });
@@ -414,6 +444,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     await expect(editor).toBeVisible({ timeout: 15_000 });
     await expect(editor.locator('[data-id="p3"]')).toHaveText('Nothing is known yet; the review is pending.', { timeout: 15_000 });
     const beforeBatch = await blocks(editor);
+    const beforeShape = await structure(editor);
     note(`the editor's blocks before the batch: ${JSON.stringify(beforeBatch)}`);
 
     // 2: the batch, while the owner composes Korean at the end of p2
@@ -446,7 +477,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const reply2 = await turnEnd(s, ended2, 'the batch turn');
     const batch = batchCall()!;
     expect(batch.result!.isError, resultText(batch.result!)).toBeUndefined();
-    const edited = json(batch.result!) as { revision: number; results: { line: string; newIds?: string[] }[] };
+    const edited = json(batch.result!) as { revision: number; results: { line: string; target: string; newIds?: string[] }[] };
     const editsInTurn2 = calls(s).filter((c) => c.name === 'artifact_edit').length - editsBefore;
     note(`turn 2: the batch call ${JSON.stringify(batch.args)} answered at ${batch.at} → revision ${edited.revision}, results ${JSON.stringify(edited.results)}; artifact_edit calls in the turn: ${editsInTurn2}; reply ${JSON.stringify(reply2)}`);
     note(`G2: composing began ${typingStarted} (after the read's answer), the batch's answer is journaled at ${batch.at}, composing ended ${typingEnded} after ${words} words: ${JSON.stringify(typed)}`);
@@ -458,6 +489,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     // the human's text exact; only the targeted blocks changed
     await expect.poll(async () => (await blocks(editor)).p2, { timeout: 15_000 }).toBe(`The owner writes here.${typed}`);
     const afterBatch = await blocks(editor);
+    const afterShape = await structure(editor);
     const newIds = edited.results.flatMap((r) => r.newIds ?? []);
     // inside the set cell's row, ids may be re-minted with the cell's content (cells carry no agent-facing id); the row is
     // judged by its own text
@@ -471,6 +503,15 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     expect(afterBatch.p1).toBe('The launch moves to the following Tuesday. The team meets on Monday.');
     // a table's text is its cells', a row's its own cells': both change with the cell, nothing else may
     expect(changed.filter((k) => !['p1', 'p2', 'tb1', 'r2'].includes(k)), 'nothing but the targets changed').toEqual([]);
+    const reshaped = Object.keys(beforeShape).filter((k) => outside(k) && k in afterShape && afterShape[k] !== beforeShape[k]);
+    note(`G3b: blocks whose type, attributes or inline marks changed: ${JSON.stringify(reshaped.map((k) => [k, beforeShape[k], afterShape[k]]))}`);
+    expect(reshaped.filter((k) => !['p1', 'p2'].includes(k)), 'no untargeted block changed its type, attributes or formatting').toEqual([]);
+    // every target as asked: the cell (2, 1) holds 250, the section is a level-3 heading and its paragraph
+    const cellTarget = edited.results[2]!.target;
+    expect(afterBatch[cellTarget], 'the set cell').toBe('250');
+    expect(JSON.parse(afterShape[newIds[0]!]!)[0]).toBe('heading');
+    expect(JSON.parse(afterShape[newIds[0]!]!)[1]).toMatchObject({ level: 3 });
+    expect(JSON.parse(afterShape[newIds[1]!]!)[0]).toBe('paragraph');
     expect(afterBatch.r2).toBe(beforeBatch.r2!.replace('200', '250'));
     expect(afterBatch.tb1).toBe(beforeBatch.tb1!.replace('200', '250'));
     expect(new Set(added)).toEqual(new Set(newIds.filter(outside)));
@@ -483,17 +524,27 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     // the agent's cursor and its editing blocks, drawn while the batch ran
     const drawn = await presence(page);
     note(`G4: drawn while the batch ran: ${JSON.stringify(drawn)}`);
-    const outlines = drawn.filter((d) => d.kind === 'editing');
-    expect(outlines.map((d) => d.block), 'the agent’s editing outline on its targets').toEqual(expect.arrayContaining(['p1']));
-    expect(outlines.every((d) => d.name !== '' && d.name !== 'You')).toBe(true);
-    expect(drawn.filter((d) => d.kind === 'cursor' && d.name === outlines[0]!.name).length, 'the agent’s cursor').toBeGreaterThan(0);
+    // within the batch: from its request to its answer, and the 1.5 s the outline stays after (D11), with 0.5 s for the
+    // frame to reach the page
+    const from = Date.parse(batch.requestedAt!);
+    const to = Date.parse(batch.at!) + 2_000;
+    const inBatch = drawn.filter((d) => d.at >= from && d.at <= to);
+    const outlines = inBatch.filter((d) => d.kind === 'editing');
+    const agentName = outlines[0]?.name ?? '';
+    expect(agentName, 'the agent’s outline names it').not.toBe('');
+    expect(agentName).not.toBe('You');
+    expect(outlines.every((d) => d.name === agentName)).toBe(true);
+    expect(outlines.map((d) => d.block), 'the agent’s editing outline on every target: the sentence, the cell, the inserted section').toEqual(expect.arrayContaining(['p1', cellTarget, ...newIds]));
+    expect(inBatch.filter((d) => d.kind === 'cursor' && d.name === agentName).length, 'the agent’s cursor, while the batch ran').toBeGreaterThan(0);
 
     // provenance through Show editors
     const agentEditors = await showEditors(page, editor, 'p1', 'following Tuesday');
     const humanEditors = await showEditors(page, editor, 'p2', WORDS[0]!);
     note(`G5: Show editors over "following Tuesday" in p1: ${JSON.stringify(agentEditors)}; over "${WORDS[0]}" in p2: ${JSON.stringify(humanEditors)}`);
-    expect(agentEditors, 'one editor of the agent’s words, not the human').toHaveLength(1);
-    expect(agentEditors[0]).not.toMatch(/^You · /);
+    const sessionTitle = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.appId === id)?.title.text ?? '';
+    note(`G5b: the session's displayed title ${JSON.stringify(sessionTitle)}`);
+    expect(agentEditors, 'one editor of the agent’s words').toHaveLength(1);
+    expect(agentEditors[0], 'the agent’s words credited to the session, by its displayed title').toMatch(new RegExp(`^${sessionTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} · `));
     expect(humanEditors, 'one editor of the human’s words: the human').toHaveLength(1);
     expect(humanEditors[0]).toMatch(/^You · /);
 
@@ -502,7 +553,9 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.type(' again');
     await expect.poll(async () => (await blocks(editor)).p1).toBe('The launch moves to the following Tuesday. The team meets on Monday again.');
-    await expect(panel.locator('[data-editor-header] [data-header-saved]')).toHaveText('All changes saved', { timeout: 15_000 });
+    // the owner's edit acknowledged by the host before the agent is asked (the replica's own count, not the header's word)
+    const unsaved = () => editor.evaluate((el) => (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { state(): { unsaved: number } } } }> } } }).editor?.extensionManager.extensions.find((x) => x.name === 'collaboration')?.options.hold?.state().unsaved ?? -1);
+    await expect.poll(unsaved, { timeout: 15_000 }).toBe(0);
     const beforeStale = await blocks(editor);
     const editsBeforeStale = calls(s).filter((c) => c.name === 'artifact_edit').length;
     const ended3 = await ask(s, PROMPTS.stale);
