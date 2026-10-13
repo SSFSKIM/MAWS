@@ -13,7 +13,8 @@
 // a name to `MAWS_TOOL_NAMES`, its schemas, its `MAWS_TOOLS` entry and its refusals, each in a block of its own.
 // P3-D (D13 of docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md; ledger X25) gives `ask` a sixth modality,
 // `design_system` with its `allowCreate`, answered `{designSystemId, name?}` or `{create: true}`. E1's ask schemas are
-// declared before A's blocks and read at module load, so its lines sit in them, each marked `P3-D`.
+// declared before A's blocks and read at module load, so its lines sit in them, each marked `P3-D`; so does the export
+// format `claude` (D12: a design system as a zip of Claude's design-system files), in A's list of formats.
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
@@ -213,7 +214,7 @@ export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
 export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
 export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
-export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html'] as const;
+export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html', 'claude' /* P3-D: a design system in Claude's shape */] as const;
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 // The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
 export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
@@ -226,7 +227,7 @@ export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 // How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
 // own guard and queue keep its answer inside it.
 export const EXPORT_ANSWER_MS = 60_000;
-const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html' };
+const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html', claude: 'zip' /* P3-D */ };
 // An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike).
 export const artifactExportName = (revision: number, format: ArtifactExportFormat): string => `${revision}-${format}.${EXPORT_EXTENSIONS[format]}`;
 // P3-A (M6) end
