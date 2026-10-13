@@ -1040,13 +1040,13 @@ async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
   }, ms);
 }
 
-// A pointer drag of `element` from its centre by `dx` px (the divider: pointer capture, as a person drags it).
-async function dragBy(page: Page, element: Locator, dx: number): Promise<void> {
+// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it).
+async function dragBy(page: Page, element: Locator, dx: number, dy = 0): Promise<void> {
   const box = (await element.boundingBox())!;
   const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x + dx, y, { steps: 8 });
+  await page.mouse.move(x + dx, y + dy, { steps: 8 });
   await page.mouse.up();
 }
 
@@ -1087,6 +1087,8 @@ test.describe('the floating session card (P3-G)', () => {
       });
 
       await test.step('acceptance 2: ⌥⌘B and the Float button dock a floating panel and float a docked one', async () => {
+        // The menu item by id: Playwright's synthetic Meta+Alt+B reaches the page, never the macOS menu's key equivalent
+        // (tried here at M1's review: the card stayed up), as shell.spec.ts notes for every menu chord
         await menu(app, 'panel.float');
         await expect(card).toHaveCount(0);
         await expect(main).not.toHaveAttribute('inert', '');
@@ -1128,6 +1130,20 @@ test.describe('the floating session card (P3-G)', () => {
         await panel.getByRole('button', { name: 'Add a tool' }).click();
         await page.getByRole('menuitem', { name: 'Deliverables' }).click();
         await expect(panel.locator('[data-deliverables-list]')).toBeVisible();
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
+        // top, so the strip above it and its controls stay clear
+        const handle = card.locator('[data-card-resize="top-right"]');
+        const from = (await handle.boundingBox())!;
+        await dragBy(page, handle, 2000, 1 - from.y);
+        const [strip, body, box] = [
+          (await panel.getByRole('tablist', { name: 'Panel tools' }).boundingBox())!,
+          (await panel.locator('#panel-host-body').boundingBox())!,
+          (await card.boundingBox())!,
+        ];
+        expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
+        expect(box.y, 'the card below the strip').toBeGreaterThan(strip.y + strip.height);
+        await panel.getByRole('button', { name: 'Add a tool' }).click({ trial: true }); // nothing covers it
         expect(await near()).toEqual({ left: 17, bottom: 16 });
       });
 

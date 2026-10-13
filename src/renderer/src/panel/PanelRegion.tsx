@@ -5,6 +5,7 @@
 // it renders is C8's. P3-G (§D1): the fourth state, floating: the divider dragged past the panel's maximum, ⌥⌘B or the
 // Float button floats it (the panel stands in the main column as maximized does and hands its host `maximized`, X5 as
 // amended) and the floating card draws the shown session over the panel body.
+import { useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
@@ -17,7 +18,6 @@ import { FloatingCardLayer } from '../shell/FloatingCard'; // P3-G
 import { floatPanel } from '../shell/floating'; // P3-G
 
 export const PANEL_REGION_ID = 'region-panel';
-const HEADER_HEIGHT_PX = 40; // the bar's `h-10`; the floating card never covers it
 
 export function PanelRegion() {
   const { collapsed, maximized, floating } = useLayout((s) => s.regions.panel);
@@ -26,6 +26,7 @@ export function PanelRegion() {
   const max = useLayout((s) => regionWidths(s.regions, windowWidth).panelMax);
   const persisted = useLayout((s) => s.regions.panel.width);
   const setPanel = useLayout((s) => s.setPanel);
+  const body = useRef<HTMLDivElement>(null); // P3-G: the floating card's layer starts at the host's tool body
 
   return (
     <section
@@ -76,11 +77,11 @@ export function PanelRegion() {
             <PanelIcon />
           </IconButton>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={body} className="min-h-0 flex-1 overflow-auto">
           <Host maximized={maximized || floating} />
         </div>
       </div>
-      {floating && !collapsed && <FloatingCardLayer top={HEADER_HEIGHT_PX} />}
+      {floating && !collapsed && <FloatingCardLayer body={body} />}
     </section>
   );
 }

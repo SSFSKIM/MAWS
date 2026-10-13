@@ -33,16 +33,40 @@ function useSize(ref: RefObject<HTMLElement | null>): Bounds | null {
   return size;
 }
 
-// The layer over the panel body (`top` is the header's height): the card, or the pill, for the session the card draws;
-// nothing when no session is shown (§D1.4).
-export function FloatingCardLayer({ top }: { top: number }) {
+// Where the layer starts: the top of the panel host's tool body (its tabpanel, under the region's header and the host's
+// tool strip, whatever their heights), else of `body` itself (a host with no tabpanel), in px from the top of the
+// layer's containing block (the panel region). Measured, so the card never covers the header or the strip (§D1.4).
+function useBodyTop(layer: RefObject<HTMLElement | null>, body: RefObject<HTMLElement | null>): number | null {
+  const [top, setTop] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = layer.current;
+    const wrapper = body.current;
+    const frame = element?.parentElement;
+    if (!element || !wrapper || !frame) return;
+    const target = () => wrapper.querySelector<HTMLElement>('[role="tabpanel"]') ?? wrapper;
+    const measure = () => setTop(Math.round(target().getBoundingClientRect().top - frame.getBoundingClientRect().top - frame.clientTop));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    // A header or strip changing height resizes the body under it.
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrapper);
+    observer.observe(target());
+    return () => observer.disconnect();
+  }, [layer, body]);
+  return top;
+}
+
+// The layer over the panel host's tool body (`body`: the region's element holding the host): the card, or the pill,
+// for the session the card draws; nothing when no session is shown (§D1.4).
+export function FloatingCardLayer({ body }: { body: RefObject<HTMLElement | null> }) {
   const session = useLayout(cardSession);
   const closed = useFloatingCard((s) => s.closed);
   const area = useRef<HTMLDivElement>(null);
+  const top = useBodyTop(area, body);
   const bounds = useSize(area);
   return (
-    <div ref={area} data-floating-layer className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top }}>
-      {session !== null && bounds && (closed ? <Pill appSessionId={session} /> : <Card key={session} appSessionId={session} bounds={bounds} />)}
+    <div ref={area} data-floating-layer className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top: top ?? 0 }}>
+      {session !== null && top !== null && bounds && (closed ? <Pill appSessionId={session} /> : <Card key={session} appSessionId={session} bounds={bounds} />)}
     </div>
   );
 }
@@ -101,7 +125,9 @@ function Card({ appSessionId, bounds }: { appSessionId: AppSessionId; bounds: Bo
           </span>
         </IconButton>
       </div>
-      <div className="min-h-0 flex-1">
+      {/* A pane-focus boundary as a main pane is (`data-pane`): a docked request that arrives while the card's composer
+          has the keyboard takes it (DockedCardFrame), and the transcript's pointer finds the card's own frame. */}
+      <div data-pane="card" className="min-h-0 flex-1">
         <SessionPane appSessionId={appSessionId} paneIndex={paneIndex} />
       </div>
       <div

@@ -2,7 +2,7 @@
 // registers a focus target as C7's composer does, so "one composer per session" is the composer store's own count.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -11,6 +11,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
+import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -75,10 +76,9 @@ describe('the floating card in the Shell', () => {
     expect(useComposerStore.getState().focusTargets.size).toBe(1);
     expect(region('main').querySelector('[data-session-in-card]')).not.toBeNull();
     expect(focused).toEqual([A]);
-    // The card sits 16 px from the panel body's left and bottom edges, below the 40 px header
+    // The card sits 16 px from the panel body's left and bottom edges (its top: the anchoring case below)
     expect(shown.style.left).toBe('16px');
     expect(shown.style.bottom).toBe('16px');
-    expect((shown.parentElement as HTMLElement).style.top).toBe('40px');
     expect(shown.closest('[role="dialog"]')).toBeNull();
     expect(shown.closest('#root, [data-region="panel"]')).toBe(region('panel'));
   });
@@ -132,6 +132,58 @@ describe('the floating card in the Shell', () => {
     act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
     expect(useLayout.getState().regions.panel).toMatchObject({ floating: true, width: 380 });
     expect(card()).not.toBeNull();
+  });
+
+  // M1 review: the card never covers the header or the tool strip (§D1.4). The layer starts where the host's tool body
+  // does (its tabpanel, under whatever strip or header sits above it), measured, not at a fixed offset.
+  it('anchors the layer at the top of the host’s tool body, so a card at its largest leaves the strip clear', () => {
+    registerSlot('panelHost', () => (
+      <div>
+        <div role="tablist" aria-label="Panel tools" />
+        <div role="tabpanel" data-probe-body />
+      </div>
+    ));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.hasAttribute('data-probe-body') ? 176 : this.dataset.region === 'panel' ? 100 : 0; // 40 px header + 36 px strip
+      return { top, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const layer = document.querySelector<HTMLElement>('[data-floating-layer]')!;
+    expect(layer.style.top).toBe('76px');
+    // At its largest the card is the layer less its margins: its top edge stays 16 px under the body's top
+    const corner = card()!.querySelector<HTMLElement>('[data-card-resize="top"]')!;
+    act(() => void fireEvent.pointerDown(corner, { pointerId: 1, button: 0, clientX: 500, clientY: 500 }));
+    act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 500, clientY: -2000 }));
+    expect(card()!.style.height).toBe('668px'); // 700 - 2 × 16
+  });
+
+  // M1 review: the card's session surface is a pane-focus boundary as the main pane is, so a request arriving while the
+  // card's composer holds the keyboard takes it (DockedCardFrame reads the nearest `[data-pane]`), and Enter answers it.
+  it('a docked request arriving while the card’s composer has focus takes the keyboard', () => {
+    let arrive = () => {};
+    function RequestProbe({ appSessionId }: { appSessionId: AppSessionId; paneIndex: 0 | 1 }) {
+      const [pending, setPending] = useState(false);
+      useEffect(() => void (arrive = () => setPending(true)), []);
+      return (
+        <div>
+          <input aria-label="Message" hidden={pending} />
+          {pending && (
+            <DockedCardFrame appSessionId={appSessionId} title="Permission" onAccept={() => {}} onDecline={() => {}}>
+              A request
+            </DockedCardFrame>
+          )}
+        </div>
+      );
+    }
+    registerSlot('composer', RequestProbe);
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    within(card()!).getByRole('textbox', { name: 'Message' }).focus();
+    act(() => arrive());
+    expect(document.activeElement).toBe(within(card()!).getByRole('group', { name: 'Permission' }));
   });
 
   it('resizes from the top and right edges and writes the size once, on release, for the panel tab under it', () => {
