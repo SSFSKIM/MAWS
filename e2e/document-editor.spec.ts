@@ -262,6 +262,36 @@ test.describe('the document editor', () => {
     await expect(content(page, 'a').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
     await expect(content(page, 'b').locator(`.comment-${threadId}`)).toHaveText(QUOTE);
   });
+
+  // M4's fix wave: in replica B a click on the passage A commented draws its thread active and opens B's rail on it,
+  // selected; a reply typed there lands in the thread (the host's and A's rail); a click on plain text draws none.
+  test('a click on a highlighted passage selects its thread in the rail, which takes a reply', async () => {
+    const { page } = maws;
+    const QUOTE = 'river runs north';
+    await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
+    await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+    const threadId = (await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads()))[0]!.id;
+    const passage = content(page, 'b').locator(`.comment-${threadId}`);
+    await expect(passage).toHaveText(QUOTE);
+    await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);
+
+    await passage.click();
+    await expect(content(page, 'b').locator(`.comment-active.comment-${threadId}`)).toHaveText(QUOTE);
+    const rail = replica(page, 'b').getByRole('complementary', { name: 'Comments' });
+    const item = rail.locator(`article[data-thread="${threadId}"]`);
+    await expect(item).toHaveAttribute('aria-current', 'true');
+
+    await item.getByRole('textbox', { name: 'Reply' }).fill('Which river?');
+    await item.getByRole('textbox', { name: 'Reply' }).press('Enter');
+    await expect(item.getByRole('listitem')).toHaveText(['YouWhich river?']);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads()))[0]!.messages).toEqual(['Which river?']);
+    await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
+    await expect(replica(page, 'a').locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouWhich river?']);
+
+    await content(page, 'b').getByText('The collaborator types here.').click();
+    await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);
+    await expect(item).not.toHaveAttribute('aria-current', 'true');
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).
