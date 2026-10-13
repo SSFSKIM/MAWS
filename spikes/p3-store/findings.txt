@@ -1002,3 +1002,197 @@ recorded and sent to P3-A. S4 reconciles A5 with its own mark rule. The question
    not tested)? Recommended: the refresh at the host's per-update hook beside the id repair, all extents in one walk.
 4. Markers in the agent's `new` text: ignored (as run) or honoured as "keep this comment on these words"? Recommended:
    ignored for now.
+
+## S4 — The patch writer against human typing and Korean IME
+
+**Verdict: the patch writer works on v14 as §4.4 describes, and Korean composition survives the agent's edits only with
+four additions:** (1) the composition hold, the provider holding and the binding driving it (Decision Log 33's split);
+(2) a move rule that never re-inserts the block holding a live caret; (3) the caret following its block's id; (4) the
+host forwarding edits that land in re-inserted blocks. With them, Korean typing with the agent's ops arriving
+mid-composition passes 68/68 runs in hidden Electron; without the hold v14 passes 36/54. v13 fails the same way (32/54
+without the hold) and is worse with it (46/54, including a v13-only failure that reorders syllables), so the failure is
+not v14's and S1's v14 verdict is strengthened.
+
+Everything is reproduced by `zsh spikes/p3-store/s4/run-all.sh` (Node tests, the build, the gated benchmark and five
+gated Electron runs; outputs `s4/out/`; the four large IME trace JSONs gzipped by the executor, their `.txt` summaries
+plain). Dependencies: S1's exact pins in `s4/package.json`. Executor re-runs: `node spikes/p3-store/s4/test/writer.ts`
+41/41, `test/moves.ts` 12/12; `s4/out/ime.txt` read back, 68/68 including the forced-cap run. Paths below are under
+`spikes/p3-store/s4/`.
+
+### 1. The patch writer and the atomic batch (verified, `test/writer.ts`, 41/41)
+Code: `src/patch-writer.ts` (`PatchWriter.apply`, `run`, `replaceText`, `patchNode`, `patchInline`, `patchChildren`,
+`retype`, `move`, `reinsert`, `strict`), the word diff `src/inline-diff.ts` `diffCells`, markdown with `^id` markers
+`src/markdown.ts` `DocMarkdown`, the host `src/host.ts` `DocHost.edit`.
+- `replace_text`: an exact, unique string edit to the block's markdown, then a patch of the block; not unique →
+  `not_unique` with candidate blocks and match counts; not found → `not_found` listing blocks sharing its words; `all`
+  works and keeps list item ids.
+- `replace_block`, same type: attributes set one by one (a heading level change is one `setAttr`, 48 B), text changed as
+  one lib0 delta of retain/delete/insert with explicit formats; containers (lists, tables, quotes) align children by type
+  and text and patch recursively, so ids survive.
+- Type change (paragraph → heading, list item, code block): re-inserted under the old id (a v14 node's name is
+  immutable), the text diffed against the old text, and marks the agent's markdown cannot express re-mapped onto it; a
+  comment the new type does not allow (code block) is reported orphaned.
+- `insert` after or before mints ids for every block written, nested ones included; `delete` reports orphaned threads;
+  `move` re-inserts with id and marks and returns a `carry` (old item ids → new); `set_cell` patches the cell's children
+  keeping the cell's and its paragraph's ids.
+- The batch: all or none (Yjs cannot roll a transaction back, so the batch is dry-run on a throwaway clone with a fresh
+  clientID, then run for real in one transaction: one update, one revision; a failing op returns its index and the
+  replica's state vector is unchanged); strict validation (`strict()` uses `createChecked` at every level and compares
+  inline counts, because `ynodeToPmnode(…).check()` silently accepted a list item replaced by a heading); a conflict
+  rejects the batch naming the block, the revision that changed it and its current text; human typing elsewhere never
+  conflicts; a repeated tool-use id replays the stored result, writes nothing, keeps the revision; the result carries the
+  new revision, one line per op, new ids and orphaned threads.
+
+### 2. Against a human in the same block, in real Chromium (verified)
+Setup: the app's Electron 44.4.5, one hidden window (`show:false`, userData under `/tmp/p3-s4/electron`, dock hidden), a
+real Tiptap 3.31.3 editor on S1's `collab.mjs` (unchanged) and S4's schema, the editor replica linked to the host doc over
+a real `MessageChannel` carrying y-protocols sync, awareness and acks (`src/port-link.ts`); the host and the agent replica
+(`DocHost`) in the page.
+The IME drive (`electron/main.ts` `doStep`, `electron/hangul.ts` `keystrokes`): CDP `Input.dispatchKeyEvent` rawKeyDown
+keyCode 229 with the jamo as `key` before each step and keyUp after; `Input.imeSetComposition({text, selectionStart,
+selectionEnd})` per step; `Input.insertText(syllable)` to commit (it yields the capture's exact shape: a repeated
+compositionupdate with the same data, insertCompositionText, compositionend, the next compositionstart); spaces a plain
+keyDown with text. Typed: " 안녕하세요 한글 입력" (jamo through syllables, commit-and-restart, the final consonant
+migrating, 핫+ㅔ → 하 + 세); a variant with Backspace inside a composition. Op timing: at compositionstart, between
+updates, right before the commit; at 40 ms pace with 20 ms settle and at 0 ms (the capture's 0.3 ms restart). Ops:
+`replace_text` earlier in the paragraph (another text node) and just before the caret (the same text node),
+`replace_block` of the next block, `insert` before the block, `move` of the composing block (with awareness and blind),
+awareness only (the agent's caret and `editing: {blocks}` moving inside the composing paragraph at every step), a forced
+5.6 s stall. Checks per run: composed text exact; DOM text = editor state = Y; editor, host and agent converge; no
+duplicate ids; one compositionend per commit with the same data; no page errors; the hold's frame accounting.
+
+| Run | Result | Output |
+|---|---|---|
+| v14: the split hold (provider holds, binding drives, 5 s cap) + span move + caret follows id + host forwarding | **68/68** | `out/ime.txt` |
+| v14, no hold | 36/54 | `out/ime-nohold.txt` |
+| v14, hold but no caret-follows-id, the re-insert move | 3/6 | `out/ime-nofollow.txt` |
+| v13 (yjs 13 + y-tiptap 3.0.9), no hold | 32/54 | `out/ime-v13-nohold.txt` |
+| v13, the same hold | 46/54 | `out/ime-v13.txt` |
+
+Failure modes and causes:
+1. Doubled or lost jamo when a remote change touches the composing text node (both versions): "안녕하셍세요", "세요요",
+   "ㅎ한글", "입입력". The browser ends the composition early (the next `insertText` arrives with `isComposing=false` and
+   no compositionend), so the syllable in progress stays committed and is typed again. An edit in a different text node
+   of the same paragraph is harmless (6/6 without the hold).
+2. A move of other blocks around the composing block breaks the composition though Y never touches it (both versions):
+   ProseMirror's view diff (`ViewTreeUpdater.findNodeMatch`) matches the moved siblings by content and destroys and
+   rebuilds the composing block's DOM.
+3. A re-insert of the composing block sends the following keystrokes into the neighbouring block (ProseMirror maps a caret
+   in a deleted node to the deletion point: text landed in a list's first item or a table's first cell); keystrokes in
+   flight land in the tombstone and vanish at the host.
+4. v13 only, with the hold: a held update applied between syllables moves the just-committed syllable to the end of the
+   paragraph ("안녕하세 한글 입력요", 3 of 6 runs at 40 ms in the "earlier in the paragraph" case). Source: y-tiptap
+   rebuilds the whole document and restores the selection from relative positions (`y-tiptap.js` 753–805); v14 maps
+   deltas to steps.
+5. Harness flake, fixed: the first key right after focus was occasionally dropped; a 60 ms wait fixed it.
+
+The fixes: the provider holds (`src/port-link.ts` `linkOverPort`, replica end, `hold`/`release`): while held it buffers
+inbound sync frames (type 0) in arrival order and never drops one; awareness (1) and ack (100) frames pass; a cap timer
+releases after 5,000 ms. The binding drives (`src/composition-hold.ts` `CompositionHold`): hold on compositionstart,
+release once `view.composing` is false (checked after compositionend, after non-composing input and on view update). The
+span move (`PatchWriter.move`): if awareness shows a human caret in the block, the blocks it jumps over are re-inserted
+instead (the same order); carets on both sides → rejected with "retry"; live blocks from `src/host.ts` `liveBlocks`.
+Caret follows id (`src/caret-follows-id.ts` `CaretFollowsId`). Edit forwarding at the host (`DocHost.receive`,
+`forward`).
+The hold, over the 68 v14 runs: 226 sync frames arrived and 226 were applied, 0 out of order, none left buffered, 54
+held; 1,305 acks and 834 awareness frames arrived during holds; 288 agent awareness pings landed while composing and
+held, the agent's caret rendered in the composing paragraph, and no composition ended early (12 runs). The longest hold
+was 447 ms; **the cap never fired** outside the forced runs. Forced cap: a composition held open 5.6 s released at
+5,001 to 5,002 ms mid-composition; the buffered same-node edit applied under the open composition and reproduced failure
+1 once ("…안녕하세요 ㅎ한글 입력"); other syllables, convergence and ids intact. An earlier variant with the hold inside
+the binding alone gave 53/54 (the one failure the harness flake; `out/ime-binding-predicate-hold.txt`).
+
+### 3. Marks (verified, `test/writer.ts` marks section and `test/s5-cases.ts` 6/6)
+Overlapping comments t1 "quick brown" and t2 "brown fox" with bold "lazy" and a link "dog" keep their marks on unchanged
+words after a rewrite; the agent's markdown governs its own marks (removing `**` or `[]` unbolds or unlinks) while
+comments stay; a word replaced inside overlapping comments stays covered by both; in-place rewording keeps the comment
+("scheduled for Friday" → "planned for Monday" stays on t3); deleting all of a comment's words orphans it (reported,
+derived, the stored quote kept); marks survive a type change and a move in one batch. **Reconciled with S5's rule (A5,
+Decision Log 31), which S4's writer now implements:** hunks separated only by whitespace merge; a comment is inherited
+when it covers both neighbours or covered every replaced word; explicit nulls on insert; the mark is `comment {threadId}`
+only (`src/schema.ts` `Comment`); the writer never writes the threads map. S5's five agent cases including both no-merge
+contrasts reproduce S5's covers exactly. S5's rule wins because S4's earlier one orphaned an in-place rewording whose
+neighbours lacked the comment (against §2 item 3) and could extend a comment over words that replaced uncommented text.
+Kept as a superset: on unchanged words the marks markdown can express (bold, italic, strike, underline `++x++`, code,
+link; found by probing serialize → parse against the schema) follow the agent's markdown; every other mark is kept.
+
+### 4. Concurrent moves and the id repair (verified, `test/moves.ts`, 12/12; `DocHost.repair`, `carryCopyEdits`, `receive`/`forward`)
+In-flight keystrokes during a move are lost without forwarding ("…keep. ㅎ" for "…keep. 한글") and land in the moved
+block with it: the human's edits integrate into the tombstoned block and are garbage-collected on arrival, and the host's
+own log holds them only as GC structs, so the host reads the incoming update's bytes before applying them; deletions are
+forwarded only from incremental updates (a sync step 2 restates the whole delete set, including the move's own deletion
+of the old copy). Two replicas moving the same block concurrently produce a duplicate ^p3; the repair keeps the later
+insertion (by host arrival) and tombstones the other; without the carry rule the human's edit in the losing copy is lost,
+with it the edit survives in the kept copy, marks intact, ids unique. An edit into the original after both moves is
+forwarded into the kept copy exactly once. Concurrent splits carrying the id (^p4 three times): the earliest keeps the
+id and the later ones are re-id'd, never deleting text (the tail text is duplicated, S1's pitfall 11). Caveat: the host
+flushes in-process agent replicas before every batch, so two agents' moves serialize; P3's realistic sources are a human
+drag racing an agent move, or two windows; P4's are remote writers.
+
+### 5. Numbers (verified, `test/numbers.ts` gated, 40 runs per kind; 320 blocks, 14,271 characters, V2 state 84,913 B)
+
+| Op | `edit` p50 / p95 ms | Update V2 B |
+|---|---|---|
+| replace_text | 27.5 / 45.1 | 64 |
+| replace_block, same type, 2 hunks | 27.8 / 52.1 | 70 |
+| replace_block, type change | 27.4 / 36.5 | 195 |
+| insert (2 blocks) | 28.0 / 34.9 | 265 |
+| delete | 28.3 / 49.3 | 25 |
+| move | 30.6 / 42.3 | 220 |
+| set_cell | 29.8 / 44.0 | 52 |
+| a batch of 5 | 45.6 / 77.8 | 359 |
+
+Where the time goes (`probe/cost.ts`): strict whole-document validation 10.9 ms, run twice (dry run and real); the
+dry-run clone 5 ms; validating only touched parents would make a batch cost proportional to its change. Attribution after
+a word-level batch: the agent's ContentMap from the batch's update alone, rendered through v14's DiffRenderer, covers only
+the changed words (+leaps −jumps, +Monday −Friday, +before −after, +42 −2: 19 characters inserted, 17 deleted; 120 B).
+A type change or a move covers the whole block in the raw map (92 and 54 characters); after applying the writer's carry,
+0 characters remain the agent's.
+
+### Pitfalls
+- `ynodeToPmnode(…).check()` drops what the schema refuses instead of throwing: validate strictly.
+- v14 `insert`/`applyDelta` is explicit (every active key not given becomes null); still pass explicit nulls (A5).
+- Applying an update containing your own clientID changes your clientID (`Transaction.js:310`): never reuse the replica's
+  clientID for the dry-run clone.
+- Edits into a tombstoned parent are garbage-collected on arrival; forwarding must read the incoming bytes.
+- A sync step 2 carries the sender's whole delete set.
+- ProseMirror's view diff may rebuild a block Y left untouched; ProseMirror maps a caret out of a deleted block into the
+  next one.
+- A type change or move is invisible in a carry-corrected diff (the text carried, the node new): history needs the
+  carry's kind to mark retyped and moved blocks (a note for S3's renderer and P3-B).
+
+### Copy
+P3-B: `src/patch-writer.ts`, `src/inline-diff.ts`, `src/markdown.ts`; `src/composition-hold.ts` (the binding half of the
+hold); `src/caret-follows-id.ts`; `src/schema.ts` (the frozen comment mark, `attributedNodes`). P3-A: the provider half of
+the hold in `src/port-link.ts` (`hold`, `release`, the cap, awareness and ack pass-through), to fold into S2's provider;
+`src/host.ts` (`changedAt`/`structAt` target index, `edit` with validation, idempotency and carries, `receive`/`forward`,
+`repair`/`carryCopyEdits`); `src/hub.ts` (S1's hub with the receive hook).
+
+### §4.4 amendments proposed
+1. `replace_text` validates by its quote (exact and unique in the current text), not by its block's revision: under §4.4
+   as written, human typing elsewhere in the paragraph rejected an intact quote (verified both ways).
+2. `set_cell` also validates the table's row structure ((row, col) addressing goes wrong when rows are added; verified);
+   `insert` and `move` anchors need only exist.
+3. Move rule: never re-insert a block holding a live human caret; re-insert the span it jumps over, or reject if carets
+   are on both sides.
+4. Edit forwarding at the host: edits landing in a block re-inserted by a move or type change are replayed onto the live
+   copy; the host reads each incoming update before applying it and forwards deletions only from incremental updates.
+5. Concurrent-move duplicates: keep the later insertion, after carrying the loser's post-creation edits into it; other
+   duplicates: the earliest keeps the id, the rest are re-id'd, never deleted.
+6. Atomicity: dry-run on a clone, then apply; validate strictly against the renderer's schema.
+7. Provenance applies the writer's carries (re-inserted characters keep their author); history marks retyped and moved
+   blocks.
+8. §8 "Human and agent in one block" gains the composition hold (provider holds, binding drives, 5 s cap; Decision Log
+   33) and caret-follows-id as binding requirements for P3-B.
+
+### Questions for the architect (S4)
+1. The 5 s cap reproduces doubled jamo once when it fires. Recommended: keep 5 s (never fired in normal typing; longest
+   hold 447 ms); consider having the binding defer the flush to the next compositionend instead of flushing under an
+   open composition, and log cap firings.
+2. The hold delays all remote frames, including edits to other blocks, until a gap between syllables (up to about
+   450 ms). Recommended: accept for P3; P4 could hold only frames touching the composing block.
+3. Human drags carry ids but no writer carry, so the host cannot tell them from a split duplicate. Recommended: detect
+   moves structurally per update (an update deleting and inserting a node with the same id is a move), so keep-later
+   applies to drag-versus-move.
+4. Whole-document validation twice per batch costs about 22 ms at 320 blocks. Recommended: P3-B validates touched
+   parents only; S7 measures at 200 pages.
