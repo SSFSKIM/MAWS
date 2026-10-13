@@ -95,6 +95,9 @@ export interface KindAdapter {
   // A restore's kind after-effects (orphaned threads, id repair), written in the restore's commit (Decision Log 16);
   // `versionId` is the version restored from.
   afterRestore?(live: Doc, info: { artifactId: string; versionId: number }): void | { threads?: ThreadChange };
+  // A new document's first content (Decision Log 44c, parent 48), written by the host when the creator gives none, in
+  // the create's commit and credited to the creator, so two replicas never each seed a first tab of their own.
+  initial?(doc: Doc, info: { title: string }): void;
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
 }

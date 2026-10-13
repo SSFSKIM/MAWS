@@ -162,6 +162,7 @@ export class ArtifactStore {
   private readonly changeListeners = new Set<(change: ArtifactChanged) => void>();
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
+  private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
   // Per session, the artifacts it touched this turn: its committed document edits (a turn version needs one) and its
   // mutating tool calls' results (the turn version's summary).
@@ -287,14 +288,19 @@ export class ArtifactStore {
   }
 
   // The human's create or an agent's (`actor`; a session is linked `created`). Byte kinds take their first content and
-  // write it as an `import` version; Y kinds start empty, or with `initial` written in the entity's savepoint.
+  // write it as an `import` version; Y kinds start with `initial` written in the entity's savepoint, else with their
+  // kind adapter's seed (`KindAdapter.initial`, Decision Log 44c), else empty. One `created` announces it: the first
+  // content's commit is not also announced as an update.
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     this.checkCreate(input, actor);
     const id = randomUUID();
     const at = this.now();
+    const adapter = isDocKind(input.kind) ? this.service.adapterFor(input.kind) : undefined;
+    const first = input.initial ?? (adapter?.initial ? (doc: Doc) => adapter.initial!(doc, { title: input.title }) : undefined);
     try {
-      if (input.initial) {
-        await this.service.writeAs(id, actor, input.initial, { prepare: () => this.insertInFrame(id, input, actor, at), inFrame: () => inFrame?.(toArtifact(this.entity(id)!)) });
+      if (first) {
+        this.creating.add(id);
+        await this.service.writeAs(id, actor, first, { prepare: () => this.insertInFrame(id, input, actor, at), inFrame: () => inFrame?.(toArtifact(this.entity(id)!)) }).finally(() => this.creating.delete(id));
       } else {
         await this.service.inBatch(() => {
           this.insertInFrame(id, input, actor, at);
@@ -1029,7 +1035,7 @@ export class ArtifactStore {
     const row = this.entity(artifactId);
     if (!row || !isDocKind(row.kind)) return; // a suggestion doc's key, or no entity row
     for (const actor of actors) if (actor.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).commits += 1;
-    this.feed(row, revision);
+    if (!this.creating.has(artifactId)) this.feed(row, revision);
     const timers = this.schedule.get(artifactId) ?? {};
     this.schedule.set(artifactId, timers);
     const fire = (which: 'idle' | 'every') => () => {

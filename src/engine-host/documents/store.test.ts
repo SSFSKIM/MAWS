@@ -125,6 +125,32 @@ describe('ArtifactStore: entities, spaces and links', () => {
     expect(store.listSpaces()).toEqual([space]);
   });
 
+  it('seeds a kind’s first content through its adapter’s initial hook in the create’s commit, announcing one created (Decision Log 44c)', async () => {
+    const seeded: { title: string }[] = [];
+    reopen([{ kind: 'document', initial: (doc, info) => (seeded.push(info), doc.get('root').insert(0, `# ${info.title}`)) }]);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, agent);
+    expect(seeded).toEqual([{ title: 'Plan' }]);
+    expect(rootText(doc.id)).toBe('# Plan');
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ?', doc.id)).toEqual([{ actor: 'session:app-1' }]); // one row, the creator's
+    await new Promise((resolve) => setTimeout(resolve, 300)); // past the change feed's coalescing window
+    expect(changes.filter((c) => c.artifactId === doc.id).map((c) => c.change)).toEqual(['created']);
+    // a caller's own first content wins over the seed; a kind without the hook starts empty
+    const given = await store.create({ kind: 'document', title: 'Given', initial: (d) => d.get('root').insert(0, 'mine') }, human);
+    expect(rootText(given.id)).toBe('mine');
+    expect(seeded).toHaveLength(1);
+    const deck = await store.create({ kind: 'presentation', title: 'Deck' }, human);
+    expect(store.revision(deck.id)).toBe(0);
+  });
+
+  it('takes back a create whose seed throws: no entity, no row', async () => {
+    reopen([{ kind: 'document', initial: () => { throw new Error('the seed broke'); } }]);
+    await expect(store.create({ kind: 'document', title: 'Plan' }, human)).rejects.toThrow(/the seed broke/);
+    expect(store.list()).toEqual([]);
+    expect(committed('SELECT seq FROM artifact_updates')).toEqual([]);
+  });
+
   it('resolves a handle over the asking session’s lineage only, and refuses a handle the creating session already holds', async () => {
     const mine = await store.create({ kind: 'html', title: 'A', handle: 'report', content: { bytes: html('a') } }, agent);
     const theirs = await store.create({ kind: 'html', title: 'B', handle: 'report', content: { bytes: html('b') } }, other);
