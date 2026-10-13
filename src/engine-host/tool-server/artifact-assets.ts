@@ -27,6 +27,7 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
           async (op) => {
             const answer = (asset: { assetId: string; ref: string }): ArtifactUploadAssetResult => ({ status: 'uploaded', artifactId, ...asset, name: asset.ref.slice('assets/'.length), size: bytes.length });
             const linked = store.link(artifactId, ctx.appSessionId, 'edited');
+            linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
             const uploaded = await store.uploadAsset(artifactId, bytes, { name, mime: mimeOf(name) }, actor, (asset) => op.record(answer(asset)));
             await linked;
             return answer(uploaded);

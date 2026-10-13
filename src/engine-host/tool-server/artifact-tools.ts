@@ -150,8 +150,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
             // a Y kind's first files: written through the session's host replica in the batch that holds the entity row
             const { artifact } = made;
             const writing = files && artifact ? store.service.writeAs(artifact.id, actor, (doc) => void publisherOf(store, kind)(doc, {}, files, false), { inFrame: (revision) => complete(artifact, revision) }) : null;
-            await creating;
-            await writing;
+            await Promise.all([creating, writing]); // one batch: a failure of either is the call's
             return made.answer!;
           },
           { actor },

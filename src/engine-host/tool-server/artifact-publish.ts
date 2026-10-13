@@ -85,6 +85,7 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, mirror:
           status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision, changed: revision === live.revision ? [] : [PAGE], kept: [], removed: [],
         });
         const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
+        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
         let result: ArtifactPublishResult;
         if (sha256 === live.ref.sha256) {
           result = answer(live.revision); // the page as it is: nothing to write but the op
@@ -133,6 +134,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         const baseFiles = withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc));
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
         const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
+        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
         await store.service.writeAs(
           artifact.id,
           actor,
