@@ -1172,10 +1172,11 @@ test.describe('the panel header and X32 (P3-G)', () => {
     const invoked = () => panel.page.evaluate(() => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.invoked());
     const setEditor = (patch: Parameters<PanelHarnessApi['editor']['set']>[0]) =>
       panel.page.evaluate((patch) => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.set(patch), patch);
+    let stub = '';
 
     await test.step('the summary, then a tool that registers nothing, keep their titles and the region’s controls', async () => {
       await expect(title).toHaveText('Session overview');
-      await panel.call('addTool', 'harness-stub');
+      stub = await panel.call('addTool', 'harness-stub');
       await expect(title).toHaveText('Stub');
       for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeVisible();
     });
@@ -1207,12 +1208,22 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(title).toHaveText('Q3 brief');
     });
 
-    await test.step('the header at the panel’s narrowest: the left side truncates, the right side stays whole', async () => {
+    await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
+      await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
       await panel.call('setWidth', 280); // restored from maximized too
-      await expect(header.getByRole('button', { name: 'Hide right panel' })).toBeInViewport();
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      await expect(title).toBeVisible();
+      expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
+      for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);
       const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
       expect(overflow, 'nothing spills past the header').toBeLessThanOrEqual(0);
+      await header.getByRole('button', { name: 'More actions' }).click();
+      await expect(panel.page.getByRole('menuitem')).toHaveText(['Version history', 'Open in tab', 'Comments', 'PDF', 'Word document']);
+      await panel.page.getByRole('menuitem', { name: 'Word document' }).click();
+      expect((await invoked()).at(-1)).toBe('export:docx');
       await panel.call('setWidth', 380);
+      await expect(header.getByRole('button', { name: 'Export' })).toBeVisible();
+      await setEditor({ unresolved: 3 });
     });
 
     await test.step('acceptance 9: a closeGuard answering false keeps the tab open', async () => {
@@ -1221,6 +1232,12 @@ test.describe('the panel header and X32 (P3-G)', () => {
       expect(await panel.call('closeTab', editor), 'the guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
       await expect(title).toHaveText('Q3 brief');
+      // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
+      await panel.tab(stub).click();
+      await expect(title).toHaveText('Stub');
+      expect(await panel.call('closeTab', editor), 'the inactive tab’s guard vetoes').toBe(false);
+      expect(await panel.ids()).toContain(editor);
+      await panel.tab(editor).click();
       await setEditor({ allowClose: true });
       await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
       await expect.poll(() => panel.ids()).not.toContain(editor);

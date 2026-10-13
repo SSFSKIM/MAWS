@@ -19,7 +19,7 @@ export interface PanelHarnessStubProbe {
 // P3-G (M3): the `harness-editor` tool's X32 registration, as `editor.set` changes it, and what the header invoked
 // (`history`, `open-in-tab`, `comments`, `export:pdf`, `export:docx`, in call order).
 export interface PanelHarnessEditorView {
-  registered: boolean; // false: the body renders without registering, so the header shows the tool's plain title
+  registered: boolean; // false: the body withdraws its registration (a null scope), so the header shows the tool's plain title
   saved: 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'readonly' | null;
   unresolved: number;
   allowClose: boolean; // the registration's closeGuard answer

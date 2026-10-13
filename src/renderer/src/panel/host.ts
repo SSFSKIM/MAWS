@@ -132,7 +132,7 @@ function disposeInstance(tabId: string): void {
   } catch (error) {
     console.error(`[panel] ${instance.tool.id} dispose failed`, error);
   }
-  clearEditorHost({ surface: 'panel', tabId }); // P3-G: a registration made outside React goes with its instance
+  clearEditorHost({ surface: 'panel', tabId }); // P3-G: the tab's X32 registration lives until its instance goes
   usePanelHost.setState((s) => {
     const titles = { ...s.titles };
     const focus = { ...s.focus };

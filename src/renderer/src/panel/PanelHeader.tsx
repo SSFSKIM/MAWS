@@ -1,11 +1,11 @@
 // The pane header (the P3-G execution document §D2.2, after Claude Desktop's frame-artifact header): one 40 px row with
 // what the open tab is on the left (its icon, an editor's breadcrumb and title, its saved state and open-comment count)
-// and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu), then
-// the region's own controls. `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with
-// Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
+// and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu; under a
+// 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
+// `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
 import { DropdownMenu } from 'radix-ui';
-import { Fragment, type ComponentType, type ReactNode } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
 import { runAction } from '../keymap/actions-runtime';
@@ -22,6 +22,9 @@ export const HEADER_COPY = {
 
 // Claude's narrow-layout rule, applied at every width: past three, an editor's actions go into "More actions".
 const SHOWN_ACTIONS = 3;
+// Under this header width every action and export folds into "More actions" (the controller's ruling on M3): at a 280 px
+// panel three actions and Export had left the title no room at all.
+export const NARROW_HEADER_PX = 360;
 const COMMENTS_ACTION = 'comments';
 
 export interface EditorHeaderProps {
@@ -33,6 +36,8 @@ export interface EditorHeaderProps {
 }
 
 export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls }: EditorHeaderProps) {
+  const row = useRef<HTMLDivElement>(null);
+  const narrow = useNarrow(row);
   const unresolved = registration?.unresolved ?? 0;
   const actions = registration?.actions ?? [];
   // While the count shows, it is the comments action's button, so the action is not drawn twice.
@@ -40,13 +45,14 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const listed = comments ? actions.filter((a) => a !== comments) : actions;
   const exports = registration?.exports ?? [];
   const breadcrumb = registration?.breadcrumb ?? [];
-  const shown = listed.slice(0, SHOWN_ACTIONS);
-  const overflow = listed.slice(SHOWN_ACTIONS);
+  const shown = narrow ? [] : listed.slice(0, SHOWN_ACTIONS);
+  const overflow = narrow ? listed : listed.slice(SHOWN_ACTIONS);
+  const folded = narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0;
 
   return (
-    <div data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+    <div ref={row} data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
       {/* Narrowing gives up the breadcrumb first (as one run, so its separators go with it), then the saved state, then
           the title: the breadcrumb and the saved state grow from nothing into the room the title leaves (the saved state
           first), up to their own width, so the title truncates only once both are gone. The count stays whole; what
@@ -80,13 +86,32 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
         {shown.map((action) => (
           <ActionButton key={action.id} action={action} />
         ))}
-        {overflow.length > 0 && <MoreMenu actions={overflow} />}
-        {exports.length > 0 && <ExportMenu exports={exports} />}
+        {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} />}
+        {!narrow && exports.length > 0 && <ExportMenu exports={exports} />}
         {hasEditorControls && controls && <span aria-hidden className="mx-1 h-4 w-px bg-border" />}
         {controls}
       </div>
     </div>
   );
+}
+
+// Whether the row is narrower than NARROW_HEADER_PX, followed through its resizes; a row not laid out (0 px) is not.
+function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => {
+      const width = element.offsetWidth;
+      setNarrow(width > 0 && width < NARROW_HEADER_PX);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return narrow;
 }
 
 // The panel's header over its selected tab (the summary when none): the tab's registration under its panel scope, else
@@ -169,19 +194,40 @@ function ActionButton({ action }: { action: EditorHostAction }) {
 const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-function MoreMenu({ actions }: { actions: readonly EditorHostAction[] }) {
+// The overflow: the actions past the inline ones, and under a narrow header every action and the exports (under their
+// own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
+// room so the labels align.
+function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[] }) {
+  const checks = actions.some((action) => action.pressed !== undefined);
   return (
     <HeaderMenu label={HEADER_COPY.more} icon={<MoreIcon />}>
       {actions.map((action) =>
         action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
+            {checks && <span aria-hidden className="size-3.5 shrink-0" />}
             {action.label}
           </DropdownMenu.Item>
         ) : (
           <DropdownMenu.CheckboxItem key={action.id} checked={action.pressed} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
+            <span data-menu-check className="inline-flex size-3.5 shrink-0 items-center justify-center text-accent">
+              <DropdownMenu.ItemIndicator>
+                <CheckIcon />
+              </DropdownMenu.ItemIndicator>
+            </span>
             {action.label}
           </DropdownMenu.CheckboxItem>
         ),
+      )}
+      {exports.length > 0 && (
+        <DropdownMenu.Group>
+          {actions.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
+          <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">{HEADER_COPY.export}</DropdownMenu.Label>
+          {exports.map((entry) => (
+            <DropdownMenu.Item key={entry.id} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM}>
+              {entry.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
       )}
     </HeaderMenu>
   );
@@ -223,6 +269,11 @@ const CommentIcon = ({ className }: { className?: string }) => (
 const ExportIcon = () => (
   <Icon>
     <path d="M5.5 6.5h-2v7h9v-7h-2M8 10V2.5M5.5 5 8 2.5 10.5 5" />
+  </Icon>
+);
+const CheckIcon = () => (
+  <Icon className="size-3.5">
+    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
   </Icon>
 );
 const MoreIcon = () => (

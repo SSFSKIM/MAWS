@@ -1,5 +1,5 @@
 // P3-G (§D2.3, X32): the editor host registrations: one per scope, a replaced registration's handle a no-op, the hook's
-// mount, update and unmount, the scope from context, and the close guard as both close paths ask it.
+// mount and update, its registration kept through an unmount (it lives as long as its tab), the scope from context, and the close guard as both close paths ask it.
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -93,14 +93,32 @@ describe('useEditorHost and useEditorHostScope', () => {
     </EditorHostScopeContext.Provider>
   );
 
-  it('registers on mount under the context’s scope, follows each render’s fields (a dropped field goes), disposes on unmount', () => {
+  it('registers on mount under the context’s scope and follows each render’s fields (a dropped field goes)', () => {
     const view = render(inScope(PANEL, { title: 'Brief', saved: 'saving', unresolved: 3 }));
     expect(editorHostOf(PANEL)).toMatchObject({ title: 'Brief', saved: 'saving', unresolved: 3 });
     view.rerender(inScope(PANEL, { title: 'Brief', saved: 'saved' }));
     expect(editorHostOf(PANEL)).toMatchObject({ title: 'Brief', saved: 'saved' });
     expect(editorHostOf(PANEL)?.unresolved).toBeUndefined();
-    view.unmount();
-    expect(editorHostOf(PANEL)).toBeNull();
+  });
+
+  it('keeps the registration through an unmount (it lives as long as its tab); a remount replaces it without a warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const guard = async () => false;
+    const first = render(inScope(PANEL, { title: 'Brief', closeGuard: guard }));
+    first.unmount(); // a tab switch: only the active body is mounted
+    expect(editorHostOf(PANEL)?.title).toBe('Brief');
+    expect(await askEditorHostClose(PANEL), 'an inactive tab’s guard still vetoes').toBe(false);
+    render(inScope(PANEL, { title: 'Brief, again' }));
+    expect(editorHostOf(PANEL)?.title).toBe('Brief, again');
+    expect(editorHostOf(PANEL)?.closeGuard).toBeUndefined();
+    expect(warn, 'the tab’s own body remounting is not a second editor').not.toHaveBeenCalled();
+  });
+
+  it('warns when a second registration replaces one whose body is still mounted', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(inScope(PANEL, { title: 'Mounted' }));
+    registerEditorHost(PANEL, { title: 'Intruder' });
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('moves its registration when the scope changes, and registers nothing outside a scope', () => {

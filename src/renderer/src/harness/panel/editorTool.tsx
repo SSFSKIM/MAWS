@@ -42,14 +42,16 @@ function EditorBody() {
   return (
     <div data-testid="editor-body" className="p-3 text-ui text-fg">
       Editor body
-      {current.registered && <Registration saved={current.saved} unresolved={current.unresolved} />}
+      <Registration registered={current.registered} saved={current.saved} unresolved={current.unresolved} />
     </div>
   );
 }
 
-function Registration({ saved, unresolved }: { saved: SavedState | null; unresolved: number }) {
+// Unregistering withdraws through a null scope: a registration outlives its body's unmount (it lives as long as its tab).
+function Registration({ registered, saved, unresolved }: { registered: boolean; saved: SavedState | null; unresolved: number }) {
   const log = (what: string) => () => void invoked.push(what);
-  useEditorHost(useEditorHostScope(), {
+  const scope = useEditorHostScope();
+  useEditorHost(registered ? scope : null, {
     title: 'Q3 brief',
     breadcrumb: ['Docs', 'Planning'],
     saved,

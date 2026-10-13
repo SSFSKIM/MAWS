@@ -1,15 +1,17 @@
 // P3-G (§D2.2, M3): the panel's header over C8a's host in C5's region: the strip's label for a tool that registers
 // nothing (its `setTitle` suffix included), "Session overview" on the summary, and an editor's X32 registration drawn
 // as the breadcrumb, the saved state, the open-comment count, its actions (three, then "More actions"), its Export menu,
-// beside the region's own controls.
+// beside the region's own controls, all of them folded into "More actions" under a 360 px header; an inactive tab's
+// registration still vetoes its close.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerSlot, resetSlots } from '../app/slots';
 import { queryClient } from '../ipc/query';
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
-import { registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
+import { installResizeObserver } from '../test-support/resize';
+import { editorHostOf, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
 import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
@@ -23,6 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   resetSlots();
   offs.splice(0).forEach((off) => off());
 });
@@ -131,11 +134,11 @@ describe('the panel header', () => {
     act(() => panelHost.selectTab(id)); // a focus request re-renders the body, with its new fields
     expect(header().textContent).toContain('All changes saved');
 
-    act(() => panelHost.showSummary()); // the body unmounts: its registration goes
-    act(() => panelHost.selectTab(id));
-    expect(header().textContent).toContain('All changes saved'); // and comes back with it
-    act(() => panelHost.showSummary());
+    act(() => panelHost.showSummary()); // the body unmounts; its registration stays with the tab
     expect(title().textContent).toBe('Session overview');
+    expect(editorHostOf({ surface: 'panel', tabId: id })?.saved).toBe('saved');
+    act(() => panelHost.selectTab(id));
+    expect(header().textContent).toContain('All changes saved'); // and the remounted body's registration replaces it
   });
 
   it('returns to the tool’s plain title when the registration is disposed', () => {
@@ -208,5 +211,76 @@ describe('the panel header', () => {
     ]);
     await user.click(items[0]);
     expect(calls).toEqual(['a4']);
+  });
+
+  it('marks a pressed action in "More actions" with a visible check, and an unpressed one without', async () => {
+    const user = userEvent.setup();
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    const action = (n: number, pressed?: boolean): EditorHostAction => ({ id: `a${n}`, label: `Action ${n}`, onSelect: () => {}, pressed });
+    act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1), action(2), action(3), action(4, true), action(5, false)] }));
+    await user.click(within(header()).getByRole('button', { name: 'More actions' }));
+    const [on, off] = within(await screen.findByRole('menu')).getAllByRole('menuitemcheckbox');
+    expect([on.getAttribute('aria-checked'), off.getAttribute('aria-checked')]).toEqual(['true', 'false']);
+    expect(on.querySelector('[data-menu-check] svg'), 'the checked item draws its check').not.toBeNull();
+    expect(off.querySelector('[data-menu-check] svg'), 'the unchecked item draws none').toBeNull();
+    expect(off.querySelector('[data-menu-check]'), 'but keeps the check’s room, so the labels align').not.toBeNull();
+  });
+
+  it('under a 360 px header, folds every editor action and export into "More actions" so the title keeps the room', async () => {
+    const user = userEvent.setup();
+    const { resize } = installResizeObserver();
+    let width = 0;
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-editor-header') ? width : 0;
+    });
+    const calls: string[] = [];
+    const action = (n: number): EditorHostAction => ({ id: `a${n}`, label: `Action ${n}`, icon: () => <svg />, onSelect: () => calls.push(`a${n}`) });
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    act(() =>
+      void registerEditorHost(
+        { surface: 'panel', tabId: id },
+        { title: 'Q3 brief', saved: 'saved', actions: [action(1), action(2), action(3)], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('export:pdf') }] },
+      ),
+    );
+    const controls = ['Float session over panel', 'Maximize right panel', 'Hide right panel'];
+
+    width = 280; // the panel's narrowest
+    resize(header(), { width: 264, height: 40 });
+    expect(buttons()).toEqual(['More actions', ...controls]);
+    expect(title().textContent).toBe('Q3 brief');
+    await user.click(within(header()).getByRole('button', { name: 'More actions' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Action 1', 'Action 2', 'Action 3', 'PDF']);
+    expect(within(menu).getByText('Export'), 'the exports under their own heading').toBeTruthy();
+    await user.click(within(menu).getByRole('menuitem', { name: 'PDF' }));
+    expect(calls).toEqual(['export:pdf']);
+
+    width = 360; // at 360 px and wider, the actions and Export are inline again
+    resize(header(), { width: 344, height: 40 });
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Export', ...controls]);
+  });
+
+  it('closing an inactive editor tab asks its guard: switched away, the registration still vetoes', async () => {
+    let allow = false;
+    const { tool, probe } = editorTool('editor', () => ({ title: 'Q3 brief', closeGuard: async () => allow }));
+    offs.push(registerPanelTool(tool));
+    offs.push(registerPanelTool(probeTool('other').tool));
+    mount();
+    const editor = add('editor');
+    add('other'); // the editor's body unmounts
+    expect(screen.queryByText('editor body')).toBeNull();
+    let closed: boolean | undefined;
+    await act(async () => void (closed = await panelHost.closeTab(editor)));
+    expect(closed, 'the inactive tab’s guard vetoes').toBe(false);
+    expect(probe.beforeClose, 'the veto stops before the tool is asked').toEqual([]);
+    expect(screen.getByRole('tab', { name: 'Editor' }), 'the tab stays').toBeTruthy();
+    allow = true;
+    await act(async () => void (closed = await panelHost.closeTab(editor)));
+    expect(closed).toBe(true);
+    expect(editorHostOf({ surface: 'panel', tabId: editor }), 'the disposed instance takes its registration').toBeNull();
   });
 });
