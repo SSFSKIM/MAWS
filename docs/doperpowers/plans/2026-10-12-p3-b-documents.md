@@ -11,7 +11,7 @@ The document kind of the co-work layer: one schema module that every writer and 
 - [x] (2026-10-13 04:20Z) Residue grilled against the parent, the ledger, the findings and the code; this document written.
 - [x] (2026-10-13 08:10Z) M1 — The schema module and the document model (Node): f8c5de0e..45d18a0a after c18f7cb9, 40bd4ea1, 292d4c27, eaf44719; three fix waves (0b1d6763..1c85059b, f4d9c2be..a54621c6, d2f68026); review clean (one Minor logged: the singleton lettered/roman ambiguity).
 - [x] (2026-10-13 09:55Z) M2 — The patch writer and the document kind adapter (Node): 18c32f51..31850344 after the A merge 7cd825f1 (two executors: the second finished the bench and gates and fixed the repair's keeper, 50d0465e); one fix wave (fd5afe0d..8b81a772, five Important findings); review clean at the M2 boundary, two dependencies on A open and recorded (Decision Log 21: `info.artifactId` on the hooks, the frame-wide per-row attribution), both M7 gates.
-- [ ] M3 — The editor core: binding, blocks, theme, find (DOM).
+- [x] (2026-10-13 12:40Z) M3 — The editor core: binding, blocks, theme, find (DOM): 64377929..e62f1ef7; two fix waves (ef1c2faa..b7ee0d0a: the page reads app tokens only as `--ds-*` fallbacks, the diagram render generation, upload errors, `Selection.near`, Unicode find; a14abea3..3fcafc1d: the astral find step, the harness's focus race fixed by `placeCaret`); review clean; `e2e:document` 5/5; the code theme keyed to the system's ground and the StrictMode UndoManager guard are M8's, `editable` from history state M5's (Decision Log 22).
 - [ ] M4 — Comments: marks, threads, the card's artifact target, the routes.
 - [ ] M5 — Version history and awareness in the editor.
 - [ ] M6 — Import and export: the pure converters.
