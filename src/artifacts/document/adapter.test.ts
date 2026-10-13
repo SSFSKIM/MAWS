@@ -44,17 +44,7 @@ const agent2 = { kind: 'session', appSessionId: 'session-2' } as Actor;
 const MIRROR = Symbol('mirror');
 const PULL = Symbol('pull');
 const ARTIFACT = 'art-1';
-/** Which artifact each doc the hooks receive belongs to (a host's live doc and its replicas), as M7's host resolves it. */
-const owners = new WeakMap<Doc, string>();
-const adapterOf = (options: Omit<NonNullable<Parameters<typeof documentAdapter>[0]>, 'artifactOf'> = {}): DocumentAdapter =>
-  documentAdapter({
-    ...options,
-    artifactOf: (doc) => {
-      const id = owners.get(doc);
-      if (id === undefined) throw new Error('a doc of no artifact reached the adapter');
-      return id;
-    },
-  });
+const adapterOf = (options: Parameters<typeof documentAdapter>[0] = {}): DocumentAdapter => documentAdapter(options);
 
 /**
  * A's service in miniature: the live doc, a host replica per actor, the hooks in A's order, provenance per update. One
@@ -76,7 +66,6 @@ class Host {
     readonly artifactId = ARTIFACT,
   ) {
     this.live = newDoc();
-    owners.set(this.live, artifactId);
     onUpdate(this.live, (update, origin) => {
       for (const doc of this.replicas.values()) if (doc !== origin) applyV1(doc, update, MIRROR);
       const actor = this.writers.get(origin) ?? human;
@@ -102,7 +91,6 @@ class Host {
     if (!doc) {
       doc = newDoc();
       applyV1(doc, diffV1(this.live), MIRROR);
-      owners.set(doc, this.artifactId);
       const mine = doc;
       this.writers.set(mine, actor);
       onUpdate(mine, (update, origin) => {
@@ -605,7 +593,6 @@ describe('restore (revertScope, afterRestore)', () => {
   it('afterRestore writes every thread’s mirror row and repairs ids', () => {
     const adapter = adapterOf({ generateID: sequence('z') });
     const doc = seedDoc();
-    owners.set(doc, ARTIFACT);
     transact(doc, () => body(doc).insert(0, [pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'dup' }] }))]));
     const box: { outcome?: ReturnType<NonNullable<KindAdapter['afterRestore']>> } = {};
     transact(doc, () => (box.outcome = adapter.afterRestore!(doc, { artifactId: ARTIFACT, versionId: 3 })));

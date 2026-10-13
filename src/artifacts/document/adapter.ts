@@ -20,7 +20,8 @@
 //   afterRestore(replica)  a full pass: ids, markless comments, anchors, and every thread's mirror row.
 //
 // The forwarding edit and `afterUpdate` write into the actor's host replica (never the live doc), which A's service
-// lands as that actor's update. Every hook reads the carry registry of the doc's own artifact (`artifactOf`, D8).
+// lands as that actor's update. Every hook reads the carry registry of the doc's own artifact, which A's service names
+// on every call (`info.artifactId`: the artifact's id, or its suggestion doc's key; D8, Decision Log 21).
 import type { Actor } from '@shared/artifacts/actor';
 import type { KindAdapter, RevertScope, ThreadChange, ThreadRow } from '../host';
 import { contentIdsOf, type Carry as AttributionCarry, type ContentIds, type Doc, type Node } from '../yjs';
@@ -43,12 +44,6 @@ export interface DocumentAdapter extends KindAdapter {
 }
 
 export interface DocumentAdapterOptions {
-  /**
-   * The artifact a doc the hooks receive belongs to: the live doc (`beforeApply`) and every per-actor host replica
-   * (`afterUpdate`, the forwarding edit, `afterRestore`). The carry registry is per artifact (D8), since two artifacts
-   * copied from one version share their item ids. M7 supplies it (A's hooks pass no artifact id).
-   */
-  artifactOf: (doc: Doc) => string;
   generateID?: () => string;
 }
 
@@ -109,14 +104,13 @@ const threadRow = (thread: Thread): ThreadRow => ({
   ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
 });
 
-export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAdapterOptions): DocumentAdapter {
+export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions = {}): DocumentAdapter {
   const registries = new Map<string, CarryRegistry>();
   const registryFor = (artifactId: string): CarryRegistry => {
     let registry = registries.get(artifactId);
     if (!registry) registries.set(artifactId, (registry = new CarryRegistry()));
     return registry;
   };
-  const registryOf = (doc: Doc): CarryRegistry => registryFor(artifactOf(doc));
   // What a forwarding edit learnt for the `afterUpdate` that follows it on the same replica (A calls both in one frame).
   const stash = new WeakMap<Doc, AttributionCarry[]>();
 
@@ -252,8 +246,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
     return now;
   }
 
-  function forwardEdit(live: Doc, incoming: Uint8Array, step2: boolean): ((doc: Doc) => void) | null {
-    const registry = registryOf(live);
+  function forwardEdit(registry: CarryRegistry, live: Doc, incoming: Uint8Array, step2: boolean): ((doc: Doc) => void) | null {
     const ids = contentIdsOf(incoming);
     if (registry.empty && ids.deletes.isEmpty()) return null;
     const performing = registry.performedBy(ids.inserts);
@@ -328,8 +321,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
     };
   }
 
-  function afterUpdate(doc: Doc, update: Uint8Array): { threads?: ThreadChange; provenance?: AttributionCarry[] } | void {
-    const registry = registryOf(doc);
+  function afterUpdate(registry: CarryRegistry, doc: Doc, update: Uint8Array): { threads?: ThreadChange; provenance?: AttributionCarry[] } | void {
     const ids = contentIdsOf(update);
     const performed = registry.performedBy(ids.inserts);
     for (const carry of performed) {
@@ -367,11 +359,11 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
       }
       return total;
     },
-    beforeApply: (live, incoming, { step2 }) => forwardEdit(live, incoming, step2),
-    afterUpdate: (doc, { update }) => afterUpdate(doc, update),
+    beforeApply: (live, incoming, { artifactId, step2 }) => forwardEdit(registryFor(artifactId), live, incoming, step2),
+    afterUpdate: (doc, { artifactId, update }) => afterUpdate(registryFor(artifactId), doc, update),
     revertScope: (live, old) => revertScope(live, old),
-    afterRestore(doc) {
-      const registry = registryOf(doc);
+    afterRestore(doc, { artifactId }) {
+      const registry = registryFor(artifactId);
       const plan = planRepair(doc, allBlocks(doc), registry, () => false);
       if (repairNeeded(plan)) applyRepair(doc, plan, registry, generateID);
       stripMarklessComments(doc);
