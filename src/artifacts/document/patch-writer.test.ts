@@ -31,6 +31,23 @@ describe('the ops (S4 1)', () => {
     expect(marksOf(doc, 'p1')).toBe('The |quick [c:t1]|brown[c:t1,c:t2]| fox[c:t2]| jumps over the |lazy[bold]| |dog[link]|. It has three short sentences.');
   });
 
+  // M9 (the scale gate's Korean case): the person's text is theirs whatever the markdown round trip makes of it. A
+  // paragraph the person is typing in ends in a space between two words; an agent's quoted edit elsewhere in the
+  // paragraph must not take it (the markdown drops a block's trailing and doubled whitespace).
+  it('replace_text keeps whitespace the markdown does not carry: a trailing space, a doubled one, a leading one', () => {
+    const doc = seedDoc({ type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'a1' }, content: [{ type: 'text', text: 'Anchor alpha0 here. 안녕하세요 입력 ' }] },
+      { type: 'paragraph', attrs: { id: 'a2' }, content: [{ type: 'text', text: ' Lead  and double alpha0.' }] },
+      { type: 'bulletList', attrs: { id: 'l1' }, content: [{ type: 'listItem', attrs: { id: 'li1' }, content: [{ type: 'paragraph', attrs: { id: 'lp1' }, content: [{ type: 'text', text: 'An item alpha0 typed ' }] }] }] },
+    ] }, {});
+    applyEdit(doc, [{ op: 'replace_text', block: 'a1', old: 'alpha0', new: 'alpha1' }]);
+    expect(textOf(doc, 'a1')).toBe('Anchor alpha1 here. 안녕하세요 입력 ');
+    applyEdit(doc, [{ op: 'replace_text', block: 'a2', old: 'alpha0', new: 'alpha1' }]);
+    expect(textOf(doc, 'a2')).toBe(' Lead  and double alpha1.');
+    applyEdit(doc, [{ op: 'replace_text', block: 'lp1', old: 'alpha0', new: 'alpha1' }]);
+    expect(textOf(doc, 'lp1')).toBe('An item alpha1 typed ');
+  });
+
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {
     const doc = seedDoc();
     const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', old: 'The ', new: 'A ' }]));

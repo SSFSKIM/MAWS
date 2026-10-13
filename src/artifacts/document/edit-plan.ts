@@ -56,6 +56,40 @@ export function textblocksOf(node: PMNode): PMNode[] {
   return out;
 }
 
+// M9 (the scale gate's Korean case): the markdown a quoted edit goes through drops whitespace a person's text may hold
+// (a block's trailing space between two words they are typing, a leading or doubled one), and patching the block to the
+// parsed result would delete it. Text whose whitespace the markdown might not carry is tested first (cheap); then
+// `base`, the block's own markdown parsed unchanged, says what the round trip loses, and each lost run of whitespace is
+// put back into `neu` where `neu` still agrees with `base` (a run inside the agent's rewritten words is the agent's).
+const UNWRITTEN_WHITESPACE = /^\s|\s$|\s\s|[^\S ]/;
+
+function keepUnwrittenWhitespace(old: PMNode, base: PMNode | undefined, neu: PMNode): PMNode {
+  if (!base || !old.isTextblock || !neu.isTextblock || base.type !== neu.type) return neu;
+  const oldCells = pmCells(old);
+  const baseCells = pmCells(base);
+  const lost: Array<{ at: number; cells: PMCell[] }> = []; // `cells` stood before base cell `at`
+  for (const hunk of diffCells(baseCells, oldCells, { mergeWhitespace: false })) {
+    const added = oldCells.slice(hunk.nFrom, hunk.nTo);
+    if (hunk.to === hunk.from && added.length > 0 && added.every((cell) => !cell.node && /\s/.test(cell.ch))) lost.push({ at: hunk.from, cells: added });
+  }
+  if (lost.length === 0) return neu;
+  const cells = pmCells(neu);
+  const toNeu = equalMap(baseCells.length, diffCells(baseCells, cells, { mergeWhitespace: false }));
+  const where = (at: number): number | undefined => {
+    if (at < baseCells.length && toNeu[at] !== undefined) return toNeu[at];
+    if (at === 0) return baseCells.length === 0 ? 0 : undefined;
+    const before = toNeu[at - 1];
+    return before === undefined ? undefined : before + 1;
+  };
+  for (const { at, cells: run } of [...lost].reverse()) {
+    const index = where(at);
+    if (index !== undefined) cells.splice(index, 0, ...run);
+  }
+  const node = neu.type.createChecked(neu.attrs, inlineOf(cells, cells.map((cell) => cell.marks)), neu.marks);
+  node.check();
+  return node;
+}
+
 /** The cells of several textblocks joined by a newline cell (a type change diffs them as one text). */
 export const joinedCells = (textblocks: readonly PMNode[]): PMCell[] => textblocks.flatMap((tb, k) => (k < textblocks.length - 1 ? [...pmCells(tb), SEPARATOR] : pmCells(tb)));
 
@@ -395,6 +429,12 @@ class Planner {
     return id;
   }
 
+  /** `neu`, parsed from `old`'s markdown with a quote replaced, with the whitespace of `old` the markdown does not carry. */
+  private keptWhitespace(old: PMNode, markdown: string, neu: PMNode, unwrap: (parsed: PMNode | undefined) => PMNode | undefined = (parsed) => parsed): PMNode {
+    if (!old.isTextblock || !UNWRITTEN_WHITESPACE.test(old.textContent)) return neu;
+    return keepUnwrittenWhitespace(old, unwrap(this.parse(markdown)[0]), neu);
+  }
+
   private parse(markdown: string): PMNode[] {
     try {
       return this.md.parse(stripMilestones(markdown), { generateID: this.generateID });
@@ -628,7 +668,8 @@ class Planner {
       const next = op.all ? hit.markdown.split(quote).join(replacement) : hit.markdown.replace(quote, () => replacement);
       const blocks = this.parse(next);
       if (blocks.length !== 1) this.invalid(`the replacement turns ^${idOf(hit.key)} into ${blocks.length} blocks (use replace_block)`);
-      this.setTop(hit.key, hit.tabId, this.patch(this.current(hit.key)!, blocks[0]));
+      const current = this.current(hit.key)!;
+      this.setTop(hit.key, hit.tabId, this.patch(current, this.keptWhitespace(current, hit.markdown, blocks[0])));
     }
     const targets = hits.map((hit) => idOf(hit.key));
     return { line: `replaced ${total} occurrence(s) in ${targets.map((id) => `^${id}`).join(', ')}`, target: targets.join(','), newIds: [] };
@@ -664,7 +705,12 @@ class Planner {
     let parsed: PMNode | null = blocks.length === 1 ? blocks[0] : null;
     for (const type of wrappers) parsed = parsed?.type === type && parsed.childCount === 1 ? parsed.child(0) : null;
     if (!parsed) return this.invalid(`the replacement changes the structure of ^${id} (use replace_block)`);
-    const next = parsed;
+    const unwrap = (block: PMNode | undefined): PMNode | undefined => {
+      let inner = block;
+      for (const type of wrappers) inner = inner?.type === type && inner.childCount === 1 ? inner.child(0) : undefined;
+      return inner;
+    };
+    const next = this.keptWhitespace(node, markdown, parsed, unwrap);
     this.rebuild(located, (old) => [this.patch(old, next)]);
     return { line: `replaced ${total} occurrence(s) in ^${id}`, target: id, newIds: [] };
   }
