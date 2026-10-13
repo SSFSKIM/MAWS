@@ -291,7 +291,9 @@ Proposed persisted shape: `artifact_attributions {artifactId, fromSeq, toSeq, ki
 one `update` row per log row in the same commit; compaction merges the folded seq range into one `merged` row
 (compacting at version boundaries makes each merged row exactly one version's changes, so "which version or turn"
 stays answerable); thinning re-buckets merged rows and may merge adjacent ones; rows are never deleted while a retained
-version needs them.
+version needs them. Reconciled with S3's ruling (Decision Log 29, 30): times are floored to the minute at write, so
+`bucketMs` is 60,000 from the first row and thinning only merges adjacent rows (the spike's minute re-bucketing at
+thinning becomes a no-op).
 
 ### 4. The port provider and the acknowledgement (verified; unchanged from v13 but for imports)
 `s2/v14/provider/port.ts` (`PortProvider`) has no Electron, Node or window import; it takes any `PortLike`
@@ -409,12 +411,12 @@ the id-repair hook, restore per S3, idle unload, clientID bound to its actor at 
 (`SOCKET_PROTOCOL = 2`); `doc-channels.ts` (takes any `{attach}`) split between the host's detached path and
 `src/main/hosts/`. The harness (`spikes/p3-store/electron/*`) is not for copying.
 
-### Questions (S2; the architect's answers of 2026-10-12, Decision Log 26, in brackets)
+### Questions (S2; the architect's answers of 2026-10-12, Decision Log 26 and 30, in brackets)
 1. V1 on the wire (1.45× V2 on v14, 1.34× on v13) until S7 says otherwise [accepted]. 2. fullfsync on [accepted].
 3. Provenance granularity: resolved by ContentMaps with minute thinning; per-update rows until a version boundary, then
 merged [S3's ruling floors to the minute at write]. 4. clientId bound to its actor at first sight [accepted]. 5. One
 reopen path in main for restart, reset, eviction and socket end [accepted]. 6. First sync on v14 is about 10 to 20 %
-slower cold (5 MB: 444–487 ms against 390–424) with a lower host heap: S7 rechecks at scale [open].
+slower cold (5 MB: 444–487 ms against 390–424) with a lower host heap: S7 rechecks at scale [open until S7b answers].
 Not tested: power loss; a detached-mode kill and reopen; E10's real `SocketPort`; the Tiptap binding over the port (S7b).
 
 ## S6 — The slide model
