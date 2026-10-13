@@ -206,7 +206,7 @@ describe('a document tab’s state', () => {
     const w = world();
     const state = w.open();
     await ready(state);
-    const release = state.holdForSend();
+    const release = state.hold();
     state.dispose();
     expect(w.handles[0].closed).toBeUndefined();
     release();
@@ -224,7 +224,7 @@ describe('a document tab’s state', () => {
     const handle = w.handles[0] as DocumentHandle & { provider: PortProvider; closed?: boolean };
     addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     await until(() => handle.state().unsaved === 0, 'the thread acknowledged');
-    const release = state.holdForSend();
+    const release = state.hold();
     state.dispose();
     w.memory.dropConnections();
     await until(() => handle.state().phase === 'off', 'the port to go');

@@ -49,7 +49,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
 
   // Comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered.
   const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdForSend: state.holdForSend });
+  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);

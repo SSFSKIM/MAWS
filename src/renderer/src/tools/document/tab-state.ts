@@ -4,8 +4,9 @@
 // and keeps the replica (`ArtifactHost.open`), follows its saved state and its open threads, reads the artifact's row
 // (the title, the suggestions setting, and the owner's last view as it stood before this showing, which the history
 // rail's "See N new changes" compares against: the surface records this view once the editor is on screen), holds
-// the rail the header toggles, an export's progress, and the comment sends in flight: the replica stays open until
-// they settle, since a send that lands records its message in the document's thread (Decision Log 27).
+// the rail the header toggles, an export's progress, and what still writes into the replica (the comment overlay
+// through its draft's withdrawal, a send in flight that records its message, Decision Log 27): the replica closes
+// only once nothing holds it and the host has acknowledged every edit.
 //
 // A replica never initialises its document: the host writes a new document's first tab (kinds/document.ts in the
 // engine host; fix wave 1), and the editor shows "Loading…" until that tab has arrived, then binds it.
@@ -70,7 +71,7 @@ export class DocumentTabState {
   private readonly stops: Array<() => void> = [];
   private rowRead = false;
   private viewedBefore: number | null = null;
-  private sending = 0;
+  private holders = 0; // what still writes into the replica (`hold`)
   private disposed = false;
   private handleClosed = false;
   private closing = false; // disposed, waiting for the host to acknowledge what the replica holds
@@ -231,20 +232,23 @@ export class DocumentTabState {
     return saved || this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
   };
 
-  /** A comment's send set out: the replica stays open until the returned release (once) says it settled. */
-  holdForSend = (): (() => void) => {
-    this.sending += 1;
+  /**
+   * Something will still write into the replica (the comment overlay while mounted and through its draft's withdrawal,
+   * a send in flight): it stays open until the returned release (once), and then until the host acknowledged.
+   */
+  hold = (): (() => void) => {
+    this.holders += 1;
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.sending -= 1;
-      if (this.disposed && this.sending === 0) this.closeHandle();
+      this.holders -= 1;
+      if (this.disposed && this.holders === 0) this.closeHandle();
     };
   };
 
   /**
-   * The tab stopped showing the document (L's `dispose`): the replica closes once no send needs it and the host has
+   * The tab stopped showing the document (L's `dispose`): the replica closes once nothing holds it and the host has
    * acknowledged every edit it holds (a late send's recorded message, a withdrawn draft, the owner's last keystrokes);
    * until then it stays open and reconnects by itself, as an open tab's does.
    */
@@ -255,7 +259,7 @@ export class DocumentTabState {
     this.rowTimer = null;
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
-    if (this.sending === 0) this.closeHandle();
+    if (this.holders === 0) this.closeHandle();
   }
 
   private closeHandle(): void {
