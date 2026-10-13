@@ -10,8 +10,9 @@
 //
 // Durability (Decision Log 26). An update's log row, its provenance row and its new clientID bindings join a batch that
 // commits once per event-loop turn (group commit); every frame that reveals the row (the broadcast, a step 2, the ack,
-// a `writeAs` answer, `onCommitted`) waits in the outbox until that commit returns. A commit failure drops the open docs
-// unsent and closes their connections; the replicas' next step 2 re-sends what the store lacks.
+// a `writeAs` answer, `onCommitted`) waits in the outbox until that commit returns. A lost batch (a commit failure, or
+// SQLite rolling the whole transaction back under a frame) drops the open docs unsent and closes their connections; the
+// replicas' next step 2 re-sends what the store lacks.
 //
 // Untrusted bytes. A frame that does not decode, a host-only frame, an update that fails the binding module's check, a
 // new struct under a clientID bound to another actor (Decision Log 6), or anything that throws closes that connection;
@@ -425,7 +426,15 @@ export class DocumentService {
       return null;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.storage.abortFrame();
+      try {
+        this.storage.abortFrame();
+      } catch (abortError) {
+        // The savepoint is gone: SQLite rolled back the whole batch (SQLITE_FULL, I/O), every earlier frame's rows with
+        // it. The batch failed as a commit fails.
+        const why = `the frame's rows could not be taken back (${abortError instanceof Error ? abortError.message : String(abortError)}) after ${reason}`;
+        this.batchFailed(why);
+        return why;
+      }
       if (dirtyBefore === undefined) this.dirty.delete(hostDoc.id);
       else this.dirty.set(hostDoc.id, dirtyBefore);
       this.evict(hostDoc, reason);
@@ -507,7 +516,7 @@ export class DocumentService {
     try {
       this.storage.commit();
     } catch (error) {
-      return this.commitFailed(error);
+      return this.batchFailed(`commit failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (this.dirty.size > 0) this.stats.commits += 1;
     const committed = [...this.dirty];
@@ -556,9 +565,10 @@ export class DocumentService {
     }
   }
 
-  // The live docs may hold content the store does not: drop them, unsent, and close their connections.
-  private commitFailed(error: unknown): void {
-    this.log(`commit failed, dropping the open docs: ${error instanceof Error ? error.message : String(error)}`);
+  // The open batch is lost (its commit failed, or SQLite rolled it back under a frame): the live docs may hold content
+  // the store does not, so drop them all, unsent, and close their connections; the storage forgets the batch.
+  private batchFailed(reason: string): void {
+    this.log(`${reason}; dropping the open docs`);
     try {
       this.storage.rollback();
     } catch {

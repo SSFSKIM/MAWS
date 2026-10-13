@@ -294,6 +294,56 @@ describe('DocumentService: untrusted frames', () => {
     commit.mockRestore();
     expect(rowCount()).toBe(0);
   });
+
+  it('treats a frame whose savepoint cannot be rolled back (SQLITE_FULL took the whole batch) as a failed commit', async () => {
+    make();
+    const a = raw('a1', human);
+    const watcher1 = raw('a1', human);
+    const b = raw('a2', human);
+    const watcher2 = raw('a2', human);
+    a.edit((doc) => doc.get('t').insert(0, 'base'));
+    b.edit((doc) => doc.get('t').insert(0, 'other'));
+    tick();
+    for (const end of [a, watcher1, b, watcher2]) end.take();
+    expect(rowCount()).toBe(2);
+
+    // An earlier row of another document in the same batch, its answer waiting for the commit.
+    const pending = service.writeAs('a2', agent, (doc) => doc.get('t').insert(5, ' uncommitted'));
+    let settled: string | null = null;
+    pending.then(
+      () => (settled = 'resolved'),
+      () => (settled = 'rejected'),
+    );
+    // The file cannot grow past its current pages: the next large row fails with SQLITE_FULL, which rolls back the
+    // whole transaction, so the frame's savepoint is gone when the service tries to roll back to it.
+    const { page_count } = storage.db.prepare('PRAGMA page_count').get() as { page_count: number };
+    storage.db.exec(`PRAGMA max_page_count = ${page_count}`);
+    a.edit((doc) => doc.get('t').insert(4, 'x'.repeat(128_000)));
+
+    expect(logs.join('\n')).toMatch(/no such savepoint/);
+    for (const end of [a, watcher1, b, watcher2]) expect(end.closed).toBe(true);
+    expect(service.loaded('a1')).toBeNull();
+    expect(service.loaded('a2')).toBeNull();
+    expect(storage.db.isTransaction).toBe(false);
+    tick();
+    expect(turns).toEqual([]);
+    for (const end of [a, watcher1, b, watcher2]) expect(end.received).toEqual([]); // nothing broadcast, nothing acked
+    await Promise.resolve();
+    expect(settled).toBe('rejected');
+    expect(rowCount()).toBe(2);
+
+    // A reattach reloads the committed state, and the store takes writes again.
+    storage.db.exec('PRAGMA max_page_count = 1073741823');
+    const c = raw('a1', human);
+    const d = raw('a2', human);
+    expect(service.loaded('a1')?.get('t').toString()).toBe('base');
+    expect(service.loaded('a2')?.get('t').toString()).toBe('other');
+    c.edit((doc) => doc.get('t').insert(0, '> '));
+    tick();
+    expect(rowCount()).toBe(3);
+    expect(c.received.some((frame) => frame.type === 'ack')).toBe(true);
+    expect(c.closed || d.closed).toBe(false);
+  });
 });
 
 describe('DocumentService: authorship and provenance', () => {
