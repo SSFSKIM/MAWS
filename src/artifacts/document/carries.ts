@@ -7,15 +7,14 @@
 //   - `forwardBlock`: the same for a textblock, for an edit that arrives naming only its parent;
 //   - `copies`: the node a move or retype made, with its arrival order and its characters' origins, so the id repair
 //     keeps the later of two copies of one block and carries the other's edits into it.
-// The hooks never learn an artifact id (A's `KindAdapter`), and item ids are unique per replica's clientID, so lookups
-// are by slot across artifacts; the artifact id scopes `forget`. A carry is pruned once its copy is gone (deleted, and
-// not itself the source of a later carry).
+// One registry per artifact (D8): two artifacts copied from one version share their item ids, so a forward keyed by slot
+// is only meaningful within its artifact; the adapter keeps a registry per artifact id and drops it with the artifact.
+// A carry is pruned once its copy is gone (deleted, and not itself the source of a later carry).
 import type { Doc } from '../yjs';
 import type { Carry, Slot } from './edit-ops';
 import { hasSlot, itemAt, parseSlot, slotKey } from './structs';
 
 interface Entry {
-  artifactId: string;
   carry: Carry;
   active: boolean;
   reported: boolean;
@@ -39,8 +38,8 @@ export class CarryRegistry {
   private readonly extra = new Map<string, Slot>();
   private arrivals = 0;
 
-  register(artifactId: string, carries: readonly Carry[]): void {
-    for (const carry of carries) this.entries.push({ artifactId, carry, active: false, reported: false });
+  register(carries: readonly Carry[]): void {
+    for (const carry of carries) this.entries.push({ carry, active: false, reported: false });
   }
 
   get empty(): boolean {
@@ -118,7 +117,7 @@ export class CarryRegistry {
     this.extra.set(slotKey(from), to);
   }
 
-  /** Drops the carries (and replayed forwards) whose copy `doc` shows deleted; other artifacts' are left alone. */
+  /** Drops the carries (and replayed forwards) whose copy `doc` (a replica of this registry's artifact) shows deleted. */
   prune(doc: Doc): void {
     const deleted = (slot: Slot) => hasSlot(doc, slot) && !(itemAt(doc, slot) && !itemAt(doc, slot)!.deleted);
     const sources = new Set(this.entries.map((entry) => entry.carry.source).filter((slot): slot is Slot => slot !== undefined).map(slotKey));
@@ -135,15 +134,5 @@ export class CarryRegistry {
     });
     for (const key of this.copies.keys()) if (!this.entries.some((entry) => entry.carry.node && slotKey(entry.carry.node) === key) && deleted(parseSlot(key))) this.copies.delete(key);
     for (const [key, to] of this.extra) if (deleted(to)) this.extra.delete(key);
-  }
-
-  /** Forgets an artifact's carries (the document closed for good, or the artifact deleted). */
-  forget(artifactId: string): void {
-    for (const entry of this.entries.filter((candidate) => candidate.artifactId === artifactId)) {
-      entry.carry.from.forEach((from) => this.forward.delete(slotKey(from)));
-      for (const [old] of entry.carry.blocks ?? []) this.forwardBlock.delete(slotKey(old));
-      if (entry.carry.node) this.copies.delete(slotKey(entry.carry.node));
-    }
-    this.entries = this.entries.filter((entry) => entry.artifactId !== artifactId);
   }
 }

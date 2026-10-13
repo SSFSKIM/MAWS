@@ -43,6 +43,17 @@ const agent2 = { kind: 'session', appSessionId: 'session-2' } as Actor;
 const MIRROR = Symbol('mirror');
 const PULL = Symbol('pull');
 const ARTIFACT = 'art-1';
+/** Which artifact each doc the hooks receive belongs to (a host's live doc and its replicas), as M7's host resolves it. */
+const owners = new WeakMap<Doc, string>();
+const adapterOf = (options: Omit<NonNullable<Parameters<typeof documentAdapter>[0]>, 'artifactOf'> = {}): DocumentAdapter =>
+  documentAdapter({
+    ...options,
+    artifactOf: (doc) => {
+      const id = owners.get(doc);
+      if (id === undefined) throw new Error('a doc of no artifact reached the adapter');
+      return id;
+    },
+  });
 
 /** A's service in miniature: the live doc, a host replica per actor, the hooks in A's order, provenance per update. */
 class Host {
@@ -55,8 +66,10 @@ class Host {
   constructor(
     seed: Doc,
     readonly adapter: KindAdapter,
+    readonly artifactId = ARTIFACT,
   ) {
     this.live = newDoc();
+    owners.set(this.live, artifactId);
     onUpdate(this.live, (update, origin) => {
       for (const doc of this.replicas.values()) if (doc !== origin) applyV1(doc, update, MIRROR);
       const actor = this.writers.get(origin) ?? human;
@@ -82,6 +95,7 @@ class Host {
     if (!doc) {
       doc = newDoc();
       applyV1(doc, diffV1(this.live), MIRROR);
+      owners.set(doc, this.artifactId);
       const mine = doc;
       this.writers.set(mine, actor);
       onUpdate(mine, (update, origin) => {
@@ -149,7 +163,7 @@ const compose = (doc: Doc, id: string, from: number, len: number, text: string) 
 /** The agent's batch on its replica, its carries registered, its update sent. */
 function agentBatch(host: Host, adapter: DocumentAdapter, doc: Doc, actor: Actor, ops: Parameters<typeof applyEdit>[1]) {
   const applied = applyEdit(doc, ops);
-  adapter.registerCarries(ARTIFACT, applied.carries);
+  adapter.registerCarries(host.artifactId, applied.carries);
   return { applied, outcome: host.send(doc, actor) };
 }
 const withoutForwarding = (adapter: DocumentAdapter): KindAdapter => ({ ...adapter, kind: 'document', beforeApply: undefined, afterUpdate: adapter.afterUpdate, revertScope: adapter.revertScope });
@@ -157,7 +171,7 @@ const withoutForwarding = (adapter: DocumentAdapter): KindAdapter => ({ ...adapt
 describe('forwarding (S4 moves A)', () => {
   for (const forwarding of [true, false]) {
     it(forwarding ? 'keystrokes in flight while their block moved land in the moved block' : 'without forwarding the in-flight keystrokes are lost (shown)', () => {
-      const adapter = documentAdapter();
+      const adapter = adapterOf();
       const host = new Host(seedDoc(), forwarding ? adapter : withoutForwarding(adapter));
       const agent = host.peer();
       const person = host.peer();
@@ -185,7 +199,7 @@ describe('forwarding (S4 moves A)', () => {
   }
 
   it('an incremental deletion into the original after the move is replayed into the moved copy', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const person = host.peer();
@@ -200,7 +214,7 @@ describe('forwarding (S4 moves A)', () => {
   });
 
   it('replays nothing from a sync step 2: a reconnecting replica that saw the move does not delete the moved text', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const person = host.peer();
@@ -214,7 +228,7 @@ describe('forwarding (S4 moves A)', () => {
   });
 
   it('an edit that reached the original block before the move’s update is carried into the moved copy', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const person = host.peer();
@@ -231,7 +245,7 @@ describe('forwarding (S4 moves A)', () => {
     expect(dupes(ids(host.live))).toEqual([]);
   });
   it('a keystroke that raced the agent’s rewrite into another type is carried over, and the words the agent replaced stay replaced', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const person = host.peer();
@@ -249,7 +263,7 @@ describe('forwarding (S4 moves A)', () => {
   });
 
   it('a human retype (the editor re-inserting a block under its id as another type) keeps the characters’ authors, marked retyped', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const person = host.peer();
     const index = DocIndex.of(person);
@@ -269,7 +283,7 @@ describe('forwarding (S4 moves A)', () => {
 describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
   for (const registered of [true, false]) {
     it(registered ? 'keeps the later copy after carrying the other copy’s edits into it' : 'a copy whose carries were never registered is re-id’d, never deleted: no text is lost', () => {
-      const adapter = documentAdapter({ generateID: sequence('r') });
+      const adapter = adapterOf({ generateID: sequence('r') });
       const host = new Host(seedDoc(), adapter);
       const a1 = host.peer();
       const a2 = host.peer(); // stale: it moves p3 without having seen a1's move
@@ -297,7 +311,7 @@ describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
   }
 
   it('an edit into the original after two concurrent moves is forwarded into the kept copy, once', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const a1 = host.peer();
     const a2 = host.peer();
@@ -314,7 +328,7 @@ describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
   });
 
   it('a third copy re-id’d beside a moved block: the move’s copy keeps the id, so a later concurrent move still keeps one copy', () => {
-    const adapter = documentAdapter({ generateID: sequence('r') });
+    const adapter = adapterOf({ generateID: sequence('r') });
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer(); // stale for the person's drag
     const person = host.peer();
@@ -340,7 +354,7 @@ describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
   });
 
   it('concurrent splits that carry one id: the earliest keeps it, the later ones are re-id’d, no text deleted', () => {
-    const adapter = documentAdapter({ generateID: sequence('r') });
+    const adapter = adapterOf({ generateID: sequence('r') });
     const host = new Host(seedDoc(), adapter);
     const split = (doc: Doc, at: number) => {
       const root = body(doc);
@@ -367,7 +381,7 @@ describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
 
 describe('afterUpdate: provenance, repair, comments and the threads mirror', () => {
   it('returns the carries the update performed, so a move credits no character to the mover', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const { outcome } = agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
@@ -381,7 +395,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 
   it('ids a block that arrives without one, and re-ids a duplicate a replica wrote', () => {
-    const adapter = documentAdapter({ generateID: sequence('x') });
+    const adapter = adapterOf({ generateID: sequence('x') });
     const host = new Host(seedDoc(), adapter);
     const peer = host.peer();
     transact(peer, () => {
@@ -394,7 +408,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 
   it('strips a comment mark whose thread is absent, and leaves one whose thread exists', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const peer = host.peer();
     transact(peer, () => nodeOf(peer, 'p4').format(0, 7, { 'comment--stray': { threadId: 'ghost' } }));
@@ -405,7 +419,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 
   it('refreshes an anchor that drifted (a type change re-creates the commented text)', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     const stale = JSON.stringify(getThread(host.live, 't3')?.anchor);
@@ -415,7 +429,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 
   it('returns the threads mirror rows of the threads an update changed', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const peer = host.peer();
     resolve(peer, 't1', human, 1_760_000_500_000);
@@ -429,7 +443,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 
   it('prunes a carry once its moved copy is gone', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer();
     agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
@@ -439,8 +453,27 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
     expect(adapter.stats().carries).toBe(0);
   });
 
+  it('keeps each artifact’s carries apart: two artifacts copied from one version, a move in the second leaves the first’s forwards', () => {
+    const adapter = adapterOf();
+    const version = seedDoc();
+    const first = new Host(version, adapter, 'art-a');
+    const second = new Host(version, adapter, 'art-b'); // a duplicate: the same item ids as the first
+    const stale = first.peer(); // a person on the first artifact who has not seen its move
+    agentBatch(first, adapter, first.peer(), agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    agentBatch(second, adapter, second.peer(), agent2, [{ op: 'move', id: 'p3', after: 'h1' }]);
+    typeAt(stale, 'p3', 0, 'A only: ');
+    first.send(stale, human);
+    expect(textOf(first.live, 'p3')).toBe('A only: A plain paragraph the human types into. Words to keep.');
+    expect(textOf(second.live, 'p3')).toBe('A plain paragraph the human types into. Words to keep.');
+    adapter.forgetArtifact('art-b');
+    typeAt(stale, 'p3', 'end', ' Still.');
+    first.send(stale, human);
+    expect(textOf(first.live, 'p3')).toBe('A only: A plain paragraph the human types into. Words to keep. Still.');
+    expect(dupes(ids(first.live))).toEqual([]);
+  });
+
   it('a human drag (a delete and an insert of one id in one update) counts as a move: a later concurrent move keeps one copy', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const agent = host.peer(); // stale for the drag
     const person = host.peer();
@@ -463,7 +496,7 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
 
 describe('restore (revertScope, afterRestore)', () => {
   it('reverts text, marks and a thread’s status, and keeps a thread created after the version and a reply posted after it', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     const live = seedDoc();
     const version = stateV2(live);
     resolve(live, 't1', human, now());
@@ -491,8 +524,9 @@ describe('restore (revertScope, afterRestore)', () => {
   });
 
   it('afterRestore writes every thread’s mirror row and repairs ids', () => {
-    const adapter = documentAdapter({ generateID: sequence('z') });
+    const adapter = adapterOf({ generateID: sequence('z') });
     const doc = seedDoc();
+    owners.set(doc, ARTIFACT);
     transact(doc, () => body(doc).insert(0, [pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'dup' }] }))]));
     const box: { outcome?: ReturnType<NonNullable<KindAdapter['afterRestore']>> } = {};
     transact(doc, () => (box.outcome = adapter.afterRestore!(doc, { versionId: 3 })));
@@ -501,7 +535,7 @@ describe('restore (revertScope, afterRestore)', () => {
   });
 
   it('summarizes a turn as the batches’ result lines', () => {
-    const adapter = documentAdapter();
+    const adapter = adapterOf();
     expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }, { line: 'deleted ^p2' }] }, { results: [{ line: 'moved ^p3 after ^c1' }] }])).toBe('replaced ^p1\ndeleted ^p2\nmoved ^p3 after ^c1');
     expect(adapter.summarizeTurn!([{ ok: true }, {}])).toBe('2 edits');
   });

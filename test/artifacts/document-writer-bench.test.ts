@@ -37,7 +37,7 @@ describe('the patch writer at 200 pages', () => {
     applyV2(live, state);
     const replica = newDoc();
     applyV2(replica, state);
-    const adapter = documentAdapter();
+    const adapter = documentAdapter({ artifactOf: () => 'bench' });
     const actor = { kind: 'session', appSessionId: 'bench' } as Actor;
 
     let t0 = performance.now();

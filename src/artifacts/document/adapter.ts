@@ -19,7 +19,7 @@
 //   afterRestore(replica)  a full pass: ids, markless comments, anchors, and every thread's mirror row.
 //
 // The forwarding edit and `afterUpdate` write into the actor's host replica (never the live doc), which A's service
-// lands as that actor's update.
+// lands as that actor's update. Every hook reads the carry registry of the doc's own artifact (`artifactOf`, D8).
 import type { Actor } from '@shared/artifacts/actor';
 import type { KindAdapter, RevertScope, ThreadChange, ThreadRow } from '../host';
 import { contentIdsOf, type ContentIds, type Doc, type Node } from '../yjs';
@@ -37,7 +37,18 @@ export interface DocumentAdapter extends KindAdapter {
   registerCarries(artifactId: string, carries: readonly Carry[]): void;
   /** Drops an artifact's carries (its document closed for good, or the artifact deleted). */
   forgetArtifact(artifactId: string): void;
+  /** The carries held across artifacts, and how many of them still wait for the update performing them. */
   stats(): { carries: number; pending: number };
+}
+
+export interface DocumentAdapterOptions {
+  /**
+   * The artifact a doc the hooks receive belongs to: the live doc (`beforeApply`) and every per-actor host replica
+   * (`afterUpdate`, the forwarding edit, `afterRestore`). The carry registry is per artifact (D8), since two artifacts
+   * copied from one version share their item ids. M7 supplies it (A's hooks pass no artifact id).
+   */
+  artifactOf: (doc: Doc) => string;
+  generateID?: () => string;
 }
 
 interface DecodedItem {
@@ -96,8 +107,14 @@ const threadRow = (thread: Thread): ThreadRow => ({
   ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
 });
 
-export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => string } = {}): DocumentAdapter {
-  const registry = new CarryRegistry();
+export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAdapterOptions): DocumentAdapter {
+  const registries = new Map<string, CarryRegistry>();
+  const registryFor = (artifactId: string): CarryRegistry => {
+    let registry = registries.get(artifactId);
+    if (!registry) registries.set(artifactId, (registry = new CarryRegistry()));
+    return registry;
+  };
+  const registryOf = (doc: Doc): CarryRegistry => registryFor(artifactOf(doc));
   // What a forwarding edit learnt for the `afterUpdate` that follows it on the same replica (A calls both in one frame).
   const stash = new WeakMap<Doc, Carry[]>();
 
@@ -216,7 +233,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
   }
 
   /** Inserts `text` where the forwards say its left (or right) neighbour, or its textblock, lives now. */
-  function replay(doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): boolean {
+  function replay(registry: CarryRegistry, doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): boolean {
     const after = left && registry.resolve(left);
     const before = !after && right ? registry.resolve(right) : null;
     const into = !after && !before && block ? registry.resolveBlock(block) : null;
@@ -230,6 +247,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
   }
 
   function forwardEdit(live: Doc, incoming: Uint8Array, step2: boolean): ((doc: Doc) => void) | null {
+    const registry = registryOf(live);
     const ids = contentIdsOf(incoming);
     if (registry.empty && ids.deletes.isEmpty()) return null;
     const performing = registry.performedBy(ids.inserts);
@@ -247,7 +265,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
       // the carries this update performs are live from here on; their own deletions are not edits to replay
       for (const carry of performing) registry.activate(carry);
       for (const { carry, inserts, deletes } of late) {
-        for (const run of inserts) replay(doc, run.text, run.slots, run.after, run.before, run.block);
+        for (const run of inserts) replay(registry, doc, run.text, run.slots, run.after, run.before, run.block);
         for (const slot of deletes) {
           const k = carry.from.findIndex((from) => slotKey(from) === slotKey(slot));
           const at = k >= 0 ? locateSlot(doc, carry.to[k] as Slot) : null;
@@ -260,7 +278,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
         if (live && !live.deleted) continue; // it landed in a live block
         const text = item.content.str;
         const slots = [...text].map((_, k): Slot => [item.id.client, item.id.clock + k]);
-        replay(doc, text, slots, item.origin && asSlot(item.origin), item.rightOrigin && asSlot(item.rightOrigin), isIdLike(item.parent) ? asSlot(item.parent) : null);
+        replay(registry, doc, text, slots, item.origin && asSlot(item.origin), item.rightOrigin && asSlot(item.rightOrigin), isIdLike(item.parent) ? asSlot(item.parent) : null);
       }
       if (!step2) {
         ds.forEach((range, client) => {
@@ -287,6 +305,7 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
   }
 
   function afterUpdate(doc: Doc, update: Uint8Array): { threads?: ThreadChange; provenance?: Carry[] } | void {
+    const registry = registryOf(doc);
     const ids = contentIdsOf(update);
     const provenance = registry.performedBy(ids.inserts);
     for (const carry of provenance) {
@@ -313,13 +332,22 @@ export function documentAdapter({ generateID = nanoid8 }: { generateID?: () => s
 
   return {
     kind: 'document',
-    registerCarries: (artifactId, carries) => registry.register(artifactId, carries),
-    forgetArtifact: (artifactId) => registry.forget(artifactId),
-    stats: () => registry.stats(),
+    registerCarries: (artifactId, carries) => registryFor(artifactId).register(carries),
+    forgetArtifact: (artifactId) => void registries.delete(artifactId),
+    stats: () => {
+      const total = { carries: 0, pending: 0 };
+      for (const registry of registries.values()) {
+        const { carries, pending } = registry.stats();
+        total.carries += carries;
+        total.pending += pending;
+      }
+      return total;
+    },
     beforeApply: (live, incoming, { step2 }) => forwardEdit(live, incoming, step2),
     afterUpdate: (doc, { update }) => afterUpdate(doc, update),
     revertScope: (live, old) => revertScope(live, old),
     afterRestore(doc) {
+      const registry = registryOf(doc);
       const plan = planRepair(doc, allBlocks(doc), registry, () => false);
       if (repairNeeded(plan)) applyRepair(doc, plan, registry, generateID);
       stripMarklessComments(doc);
