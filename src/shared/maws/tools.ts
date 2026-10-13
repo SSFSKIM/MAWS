@@ -177,8 +177,8 @@ export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSche
 // P3-A (M6) start
 export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema });
 // P3-B's document read fields (ledger X25, the architect 2026-10-13): a tab, a block id to start from, how many blocks,
-// and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. Defined here
-// until B's `document-tools.ts` lands, which re-points this export at its own at the re-merge.
+// and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. A owns them
+// here, and B's `document-tools.ts` imports this export (it keeps no copy of its own; Decision Log 44d).
 export const DOCUMENT_READ_FIELDS = {
   tab: z.string().min(1).max(64).optional(),
   from: z.string().min(1).max(64).optional(), // a block id
