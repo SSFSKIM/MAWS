@@ -197,6 +197,57 @@ describe('the threads rail', () => {
   });
 });
 
+// Fix wave 1 (Decision Log 25): an open thread in the rail takes a reply, posted to the thread as the person (the
+// surface's identity) outside the editor's undo, listed with every author's messages; a resolved thread offers Reopen.
+describe('a reply in the rail', () => {
+  const messages = (item: HTMLElement) => within(item).queryAllByRole('listitem').map((message) => message.textContent);
+
+  it('posts the person’s reply to the thread, outside undo, listed after the agent’s message', async () => {
+    const { editor, handle, opened } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const id = opened[0]!.threadId;
+    reply(handle.doc, id, { id: 'r1', by: SESSION, at: 2, body: 'Changed to monthly.' });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const item = within(rail()).getByRole('article');
+    expect(messages(item)).toEqual(['ClaudeChanged to monthly.']);
+
+    const field = within(item).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    const send = within(item).getByRole('button', { name: 'Reply' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    act(() => fireEvent.change(field, { target: { value: '  ' } }));
+    expect(send.disabled).toBe(true);
+    act(() => fireEvent.change(field, { target: { value: 'Thanks, monthly works.' } }));
+    act(() => fireEvent.keyDown(field, { key: 'Enter' }));
+    expect(getThread(handle.doc, id)!.messages.at(-1)).toMatchObject({ by: { kind: 'human' }, body: 'Thanks, monthly works.' });
+    expect(field.value).toBe('');
+    await quiet();
+    expect(messages(within(rail()).getByRole('article'))).toEqual(['ClaudeChanged to monthly.', 'YouThanks, monthly works.']);
+    expect(editor().storage.collaboration.undoManager?.canUndo()).toBe(false);
+    await until(() => (getThread(world!.host.doc, id)?.messages.length ?? 0) === 2, 'the host to hold the reply');
+
+    act(() => fireEvent.change(field, { target: { value: 'One more' } }));
+    act(() => fireEvent.keyDown(field, { key: 'Enter', shiftKey: true }));
+    act(() => fireEvent.keyDown(field, { key: 'Enter', isComposing: true }));
+    expect(getThread(handle.doc, id)!.messages).toHaveLength(2);
+    act(() => fireEvent.click(send));
+    expect(getThread(handle.doc, id)!.messages.at(-1)!.body).toBe('One more');
+  });
+
+  it('is not offered on a resolved thread', async () => {
+    const { editor, handle, opened } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void resolve(handle.doc, opened[0]!.threadId, { kind: 'human' }, 3));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const item = within(rail()).getByRole('article');
+    expect(within(item).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    expect(within(item).getByRole('button', { name: 'Reopen' })).toBeTruthy();
+  });
+});
+
 // Fix wave 1 (Decision Log 25): a click on a highlighted passage activates its thread, drawn active in the text and
 // selected in the rail, which opens on it; where passages overlap the innermost (the shortest at the click) is taken;
 // a click on text no open thread covers draws none active.

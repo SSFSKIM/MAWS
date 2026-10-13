@@ -377,6 +377,25 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.doc-thread-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space);
+}
+.doc-thread-reply-field {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(var(--space) * 30);
+  field-sizing: content;
+  resize: none;
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space) calc(var(--space) * 2);
+}
 .doc-thread-actions {
   display: flex;
   justify-content: flex-end;
