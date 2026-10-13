@@ -117,6 +117,14 @@ export interface DesignSystemDefaults {
   spaces: Record<string, string>;
 }
 
+// Which design system governs an artifact (Decision Log 42; ledger X23, X28): P3-D's chain (own system, Space default,
+// owner default, the house system; deleted or non-live ids skipped), synchronous over the store's committed state so it
+// is safe inside a version's frame. `{builtin: 'maws'}`: no store system governs and the bundled floor renders. `target`
+// is the artifact's row (or, for an artifact not yet created, where it will be placed).
+export interface DesignSystemChain {
+  governing(target: { designSystemId?: string | null; spaceId?: string | null }): { id: string } | { builtin: 'maws' };
+}
+
 interface EntityRow {
   id: string;
   kind: ArtifactKind;
@@ -159,6 +167,8 @@ export class ArtifactStore {
   // mutating tool calls' results (the turn version's summary).
   private readonly turns = new Map<string, Map<string, { commits: number; results: unknown[] }>>();
   private designSystemContext: ((system: Artifact) => Promise<string | null>) | null = null;
+  // A's own chain until P3-D registers its (the last registration wins)
+  private designSystemChain: DesignSystemChain = { governing: (target) => this.ownGoverning(target) };
   private readonly unsubscribe: (() => void)[] = [];
   private closed = false;
 
@@ -745,19 +755,33 @@ export class ArtifactStore {
   // it equal to its live state, writing an `auto` version of the system first when it moved since its last one.
   private pinInFrame(row: EntityRow): DesignSystemRef | null {
     if (row.kind === 'design_system') return null;
-    const systemId = this.governingSystem(row);
-    const system = systemId ? this.entity(systemId) : undefined;
-    if (!system || system.deletedAt !== null || system.kind !== 'design_system') return null;
+    const system = this.governingSystem(row);
+    if (!system) return null; // the bundled floor governs: nothing of the store's to pin
     const revision = this.service.revision(system.id);
     if (this.versions.latest(system.id)?.seq !== revision) this.versionInFrame(system, { kind: 'auto', actor: this.lastWriter(system.id) }, { pinTarget: true });
     return { id: system.id, versionSeq: this.versions.latest(system.id)!.seq };
   }
 
-  // The artifact's governing design system (Decision Log 22d): its own, else its Space's default, else the owner's.
-  governingSystem(row: Pick<EntityRow, 'designSystemId' | 'spaceId'>): string | null {
-    if (row.designSystemId) return row.designSystemId;
+  // The live design system governing `target` as the registered chain names it (Decision Log 42), or null when the
+  // bundled floor governs (`{builtin}`) or the chain named something that is not a live design system.
+  private governingSystem(target: { designSystemId?: string | null; spaceId?: string | null }): EntityRow | null {
+    const governing = this.designSystemChain.governing(target);
+    if (!('id' in governing)) return null;
+    const system = this.entity(governing.id);
+    return system && system.deletedAt === null && system.kind === 'design_system' ? system : null;
+  }
+
+  // A's chain, answering until P3-D registers its own (Decision Log 22d): the artifact's own system, else its Space's
+  // default, else the owner's, when that one is a live design system; else the bundled floor.
+  private ownGoverning(target: { designSystemId?: string | null; spaceId?: string | null }): { id: string } | { builtin: 'maws' } {
     const defaults = this.defaults();
-    return (row.spaceId ? defaults.spaces[row.spaceId] : undefined) ?? defaults.owner ?? null;
+    const id = target.designSystemId || (target.spaceId ? defaults.spaces[target.spaceId] : undefined) || defaults.owner;
+    const system = id ? this.entity(id) : undefined;
+    return system && system.deletedAt === null && system.kind === 'design_system' ? { id: system.id } : { builtin: 'maws' };
+  }
+
+  registerDesignSystemChain(chain: DesignSystemChain): void {
+    this.designSystemChain = chain;
   }
 
   // The owner looked at the artifact (Decision Log 16): an `auto` version first when the doc moved since its last
@@ -898,8 +922,8 @@ export class ArtifactStore {
   async designSystemContextFor(target: string | { designSystemId?: string | null; spaceId?: string | null }): Promise<string | null> {
     const system = await this.readCommitted(() => {
       const placement = typeof target === 'string' ? this.entity(target) : { designSystemId: target.designSystemId ?? null, spaceId: target.spaceId ?? null };
-      const systemId = placement ? this.governingSystem(placement) : null;
-      return systemId ? this.get(systemId) : null;
+      const governing = placement ? this.governingSystem(placement) : null;
+      return governing ? toArtifact(governing) : null;
     });
     if (!system || !this.designSystemContext) return null;
     const lost = this.service.stats.lostBatches;

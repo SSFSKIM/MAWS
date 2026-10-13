@@ -132,6 +132,25 @@ describe('artifact_create', () => {
     expect(rows('SELECT seq FROM artifact_updates')).toEqual([]);
   });
 
+  it('attaches what the registered chain names to a document, presentation or design create, and sets no designSystemId (Decision Log 42)', async () => {
+    const system = await w.store.create({ kind: 'design_system', title: 'House' }, HUMAN);
+    w.store.registerDesignSystemContext(async (s) => `LAW:${s.title}`);
+    const targets: unknown[] = [];
+    let answer: { id: string } | { builtin: 'maws' } = { id: system.id };
+    w.store.registerDesignSystemChain({
+      governing: (target) => {
+        targets.push(target);
+        return answer;
+      },
+    });
+    const deck = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck' })));
+    expect(deck.designSystem).toBe('LAW:House');
+    expect(w.store.get(deck.artifactId)!.designSystemId).toBeUndefined(); // governed by reference: the chain decides later
+    expect(targets[0]).toEqual({ designSystemId: null, spaceId: null }); // a new artifact: no system or Space of its own
+    answer = { builtin: 'maws' };
+    expect(ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'document', title: 'Doc' }))).designSystem).toBeUndefined();
+  });
+
   it('reads the governing design system behind the read barrier: no answer reveals a batch still open', async () => {
     const system = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
     w.store.registerDesignSystemContext(async (s) => `LAW:${s.title}`);
@@ -232,6 +251,22 @@ describe('artifact_describe_type', () => {
       expect(ArtifactDescribeTypeResultSchema.parse(jsonOf(await artifactDescribeTypeTool().call({ kind }, w.ctx())))).toEqual({ status: 'described', kind, ...KIND_GUIDES[kind] });
     }
     expect((await artifactDescribeTypeTool().call({ kind: 'spreadsheet' }, w.ctx())).isError).toBe(true);
+  });
+
+  it('attaches the governing design system’s guide for a document, presentation or design, as the chain names it (Decision Log 42)', async () => {
+    const system = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    w.store.registerDesignSystemContext(async (s) => `LAW:${s.title}`);
+    const describe = async (kind: string) => jsonOf(await artifactDescribeTypeTool(w.deps()).call({ kind }, w.ctx()));
+    expect((await describe('document')).designSystem).toBeUndefined(); // A's chain before registration: no default set, nothing governs
+    await w.store.setDefaults({ owner: system.id, spaces: {} });
+    expect(ArtifactDescribeTypeResultSchema.parse(await describe('design'))).toEqual({ status: 'described', kind: 'design', ...KIND_GUIDES.design, designSystem: 'LAW:Brand' });
+    expect((await describe('html')).designSystem).toBeUndefined(); // only the kinds a design system styles
+
+    let answer: { id: string } | { builtin: 'maws' } = { builtin: 'maws' };
+    w.store.registerDesignSystemChain({ governing: () => answer });
+    expect((await describe('presentation')).designSystem).toBeUndefined(); // the bundled floor: nothing attached, no guide made up
+    answer = { id: system.id };
+    expect((await describe('presentation')).designSystem).toBe('LAW:Brand');
   });
 });
 

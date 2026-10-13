@@ -566,6 +566,38 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(await store.designSystemContextFor(doc.id)).toBe('guide of House style');
   });
 
+  it('asks a registered design-system chain which system governs: {id} pins and answers that system, {builtin} pins nothing (Decision Log 42)', async () => {
+    const house = await store.create({ kind: 'design_system', title: 'House' }, human);
+    const own = await store.create({ kind: 'design_system', title: 'Own' }, human);
+    await write(house.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# house'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: own.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.registerDesignSystemContext(async (s) => `guide of ${s.title}`);
+    // before any registration A's chain answers: the artifact's own system
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of Own');
+
+    const asked: unknown[] = [];
+    let answer: { id: string } | { builtin: 'maws' } = { id: house.id };
+    store.registerDesignSystemChain({ governing: () => ({ id: 'never-used' }) });
+    store.registerDesignSystemChain({
+      governing: (target) => {
+        asked.push(target);
+        return answer;
+      },
+    }); // the last registration wins
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[0].designSystemRef).toEqual({ id: house.id, versionSeq: store.revision(house.id) });
+    expect(asked[0]).toMatchObject({ id: doc.id, designSystemId: own.id, spaceId: null }); // handed the artifact's row
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of House');
+    expect(await store.designSystemContextFor({})).toBe('guide of House');
+
+    answer = { builtin: 'maws' };
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b'));
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[1].designSystemRef).toBeUndefined(); // the bundled floor renders: no pin
+    expect(await store.designSystemContextFor(doc.id)).toBeNull(); // nothing attached, no guide made up
+  });
+
   it('pins a design system never written by writing and keeping its empty state as a version at seq 0 (M3 review finding 2)', async () => {
     const system = await store.create({ kind: 'design_system', title: 'Empty style' }, human);
     const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);

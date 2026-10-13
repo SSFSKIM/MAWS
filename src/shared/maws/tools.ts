@@ -292,7 +292,10 @@ export const ArtifactScreenshotResultSchema = z.strictObject({
 });
 export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSchema>;
 // P3-A (M6) start
-export const ArtifactDescribeTypeResultSchema = z.strictObject({ status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string() });
+export const ArtifactDescribeTypeResultSchema = z.strictObject({
+  status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string(),
+  designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
+});
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
 export type VersionSummary = z.infer<typeof VersionSummarySchema>;
@@ -385,7 +388,7 @@ export const MAWS_TOOLS = {
   artifact_describe_type: {
     title: 'Describe artifact kind',
     description:
-      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file.",
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
