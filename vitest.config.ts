@@ -34,7 +34,8 @@ const TIMING_NODE_TESTS = [
   'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
-  'test/artifacts/one-schema.test.ts', // P3-B: the same, for the one-schema rule
+  'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
+  'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
 // P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md).
