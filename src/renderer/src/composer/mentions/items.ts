@@ -42,6 +42,7 @@ const MAWS_PALETTE: Partial<Record<ActionId, { name: string; title: string; desc
   'sidebar.toggle': { name: 'sidebar', title: 'Toggle sidebar', description: 'Show or hide the sidebar' },
   'panel.toggle': { name: 'panel', title: 'Toggle right panel', description: 'Show or hide the right panel' },
   'panel.maximize': { name: 'maximize-panel', title: 'Maximize right panel', description: 'Give the right panel the whole window' },
+  'panel.float': { name: 'float-session', title: 'Float session over panel', description: 'Give the right panel the whole window and float the session over it' }, // P3-G
   'theme.light': { name: 'light', title: 'Appearance: Light', description: 'Use the light theme' },
   'theme.dark': { name: 'dark', title: 'Appearance: Dark', description: 'Use the dark theme' },
   'theme.system': { name: 'system-theme', title: 'Appearance: System', description: "Follow the system's appearance" },

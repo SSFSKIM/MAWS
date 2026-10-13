@@ -116,7 +116,7 @@ describe('shell frame', () => {
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     expect(document.activeElement).toBe(dialog);
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    expect(useLayout.getState().regions.panel).toEqual({ width: 444, collapsed: false, maximized: false });
+    expect(useLayout.getState().regions.panel).toEqual({ width: 444, collapsed: false, maximized: false, floating: false });
     await user.click(toggle);
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     expect(toggle.getAttribute('aria-pressed')).toBe('false');

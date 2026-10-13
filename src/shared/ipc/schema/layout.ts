@@ -77,31 +77,54 @@ export const ProjectKeySchema = z.union([ProjectIdSchema, z.literal('other')]);
 // The floating Overview's rect, in px from the top left of the main area under the top bar (null: the default place).
 export const OverviewRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() });
 export type OverviewRect = z.infer<typeof OverviewRectSchema>;
-const PanelRegionSchema = z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() });
-export const LayoutRegionsSchema = z.strictObject({ version: z.literal(3),                                       // key `regions`
-  sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']), expandedProjects: z.array(ProjectKeySchema) }),
+// P3-G (X30; the P3-G execution document, §D1.1): version 4 adds the panel's fourth state, `floating` (the panel takes
+// the main column's place as maximized does and the floating card draws the shown session), and the card's size per
+// panel tab it sits over (`floatingCard`: keyed by the panel tab's id, or 'summary' for the resting summary). Every
+// writer goes through the layout store's `setPanel`, which keeps `floating` and `maximized` exclusive and both false
+// while collapsed.
+const PanelRegionSchema = z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean(), floating: z.boolean() });
+const PanelRegionV3Schema = z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() }); // versions 1 to 3
+export const FloatingCardSizeSchema = z.strictObject({ w: z.number().int(), h: z.number().int() });
+export type FloatingCardSize = z.infer<typeof FloatingCardSizeSchema>;
+const SidebarRegionSchema = z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']), expandedProjects: z.array(ProjectKeySchema) });
+export const LayoutRegionsSchema = z.strictObject({ version: z.literal(4),                                       // key `regions`
+  sidebar: SidebarRegionSchema,
   panel:   PanelRegionSchema,
-  overview: OverviewRectSchema.nullable() });
+  overview: OverviewRectSchema.nullable(),
+  floatingCard: z.record(z.string(), FloatingCardSizeSchema) });
 export type LayoutRegions = z.infer<typeof LayoutRegionsSchema>;
+const RegionsV3Schema = z.strictObject({ version: z.literal(3),
+  sidebar: SidebarRegionSchema,
+  panel:   PanelRegionV3Schema,
+  overview: OverviewRectSchema.nullable() });
 const RegionsV2Schema = z.strictObject({ version: z.literal(2),
   sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']), openProject: ProjectKeySchema.nullable() }),
-  panel:   PanelRegionSchema,
+  panel:   PanelRegionV3Schema,
   overview: OverviewRectSchema.nullable() });
 const RegionsV1Schema = z.strictObject({ version: z.literal(1),
   sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']),
                             collapsedProjects: z.array(ProjectIdSchema), collapsedSections: z.array(z.enum(['pinned', 'other'])) }),
-  panel:   PanelRegionSchema });
+  panel:   PanelRegionV3Schema });
 // What hydration reads from `regions`: the current shape, or an earlier version migrated (its widths, toggles, sort and
-// Overview rect kept; version 2's open page expanded, version 1's tree collapsed).
+// Overview rect kept; version 2's open page expanded, version 1's tree collapsed; P3-G: not floating, no card sizes).
+const docked = (panel: z.infer<typeof PanelRegionV3Schema>): LayoutRegions['panel'] => ({ ...panel, floating: false });
 export const StoredRegionsSchema = z.union([
   LayoutRegionsSchema,
+  RegionsV3Schema.transform(({ sidebar, panel, overview }): LayoutRegions => ({ version: 4, sidebar, panel: docked(panel), overview, floatingCard: {} })),
   RegionsV2Schema.transform(({ sidebar: { width, collapsed, sort, openProject }, panel, overview }): LayoutRegions => ({
-    version: 3,
+    version: 4,
     sidebar: { width, collapsed, sort, expandedProjects: openProject === null ? [] : [openProject] },
-    panel,
+    panel: docked(panel),
     overview,
+    floatingCard: {},
   })),
-  RegionsV1Schema.transform(({ sidebar: { width, collapsed, sort }, panel }): LayoutRegions => ({ version: 3, sidebar: { width, collapsed, sort, expandedProjects: [] }, panel, overview: null })),
+  RegionsV1Schema.transform(({ sidebar: { width, collapsed, sort }, panel }): LayoutRegions => ({
+    version: 4,
+    sidebar: { width, collapsed, sort, expandedProjects: [] },
+    panel: docked(panel),
+    overview: null,
+    floatingCard: {},
+  })),
 ]);
 // W12 (§5.2 as amended 2026-10-01, I3): a tab set per project. `sets` holds one pane layout per project with open tabs
 // ('none': the tabs of sessions without a project, a New chat's before its project is chosen, and those of no session
@@ -157,10 +180,11 @@ export const EMPTY_TAB_SET: TabSet = { panes: [{ tabs: [], activeTabId: '' }], f
 // Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
   regions: {
-    version: 3,
+    version: 4,
     sidebar: { width: 300, collapsed: false, sort: 'priority', expandedProjects: [] },
-    panel: { width: 380, collapsed: false, maximized: false },
+    panel: { width: 380, collapsed: false, maximized: false, floating: false },
     overview: null,
+    floatingCard: {},
   },
   main: { version: 2, current: NO_PROJECT, sets: { [NO_PROJECT]: EMPTY_TAB_SET }, closedTabs: [] },
   panelPinned: [],

@@ -1026,3 +1026,120 @@ test.describe('the product host over a scenario derived from C5’s records', ()
     });
   });
 });
+
+// ---- P3-G: the floating session card (the P3-G execution document, M1; acceptance 1 to 5 and 7) ----------------------------
+
+const USAGE = 'Usage reset countdown'; // nine-sessions.json: its turn ends at 8 s on the scenario clock
+const USAGE_ID = 'app-59505fdc';
+
+async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
+  await app.evaluate((_electron, ms) => {
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    if (!scenario) throw new Error('no scenario clock');
+    scenario.advanceTo(ms);
+  }, ms);
+}
+
+// A pointer drag of `element` from its centre by `dx` px (the divider: pointer capture, as a person drags it).
+async function dragBy(page: Page, element: Locator, dx: number): Promise<void> {
+  const box = (await element.boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 8 });
+  await page.mouse.up();
+}
+
+test.describe('the floating session card (P3-G)', () => {
+  test('the divider, ⌥⌘B, the Float button, Close, the pill and Dock; one composer; over a DOM tool', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const main = page.locator('[data-region="main"]');
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const pill = panel.getByRole('button', { name: 'Show session card' });
+      const composers = page.locator(`section[data-composer="${USAGE_ID}"]`);
+      const divider = panel.getByRole('separator', { name: 'Resize right panel' });
+      const mainWidth = () => main.evaluate((el) => el.getBoundingClientRect().width);
+
+      await (await sidebarRow(page, USAGE)).click();
+      await expect(main.getByRole('textbox', { name: 'Message' })).toBeVisible();
+
+      await test.step('acceptance 1: 39 px past the maximum leaves the panel at its maximum; 40 px floats it', async () => {
+        const max = Number(await divider.getAttribute('aria-valuemax'));
+        const width = Number(await divider.getAttribute('aria-valuenow'));
+        await dragBy(page, divider, -(max - width) - 39);
+        await expect(divider).toHaveAttribute('aria-valuenow', String(max));
+        await expect(card).toHaveCount(0);
+        await dragBy(page, divider, -40);
+        await expect(card).toBeVisible();
+        await expect(card.getByRole('heading', { name: USAGE })).toBeVisible();
+        await expect(card.locator('[data-transcript-scroller]')).toBeVisible();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeVisible();
+        await expect(main).toHaveAttribute('inert', '');
+        expect(await mainWidth(), 'the main region at 0 px').toBe(0);
+        await expect(divider, 'no divider while floating').toHaveCount(0);
+      });
+
+      await test.step('acceptance 5: the card is the session’s one composer, and it has the keyboard', async () => {
+        await expect(composers).toHaveCount(1);
+        await expect(card.locator(`section[data-composer="${USAGE_ID}"]`)).toHaveCount(1);
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      });
+
+      await test.step('acceptance 2: ⌥⌘B and the Float button dock a floating panel and float a docked one', async () => {
+        await menu(app, 'panel.float');
+        await expect(card).toHaveCount(0);
+        await expect(main).not.toHaveAttribute('inert', '');
+        await menu(app, 'panel.float');
+        await expect(card).toBeVisible();
+        await panel.getByRole('button', { name: 'Dock session', pressed: true }).click(); // the header's Float, pressed
+        await expect(card).toHaveCount(0);
+        await panel.getByRole('button', { name: 'Float session over panel' }).click();
+        await expect(card).toBeVisible();
+      });
+
+      await test.step('acceptance 3 and 2: Close leaves the pill; ⌥⌘B and a click reopen the card; a turn ending behind the pill marks it', async () => {
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(card).toHaveCount(0);
+        await expect(pill).toHaveText(USAGE);
+        await expect(composers, 'no composer behind the pill').toHaveCount(0);
+        await menu(app, 'panel.float');
+        await expect(card).toBeVisible();
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(0);
+        await advanceTo(app, 8000);
+        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(1);
+        await pill.click();
+        await expect(card).toBeVisible();
+        await expect(pill).toHaveCount(0);
+      });
+
+      await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s left and bottom edges', async () => {
+        await panel.getByRole('button', { name: 'Add a tool' }).click();
+        await page.getByRole('menuitem', { name: 'Session info' }).click();
+        await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
+        await expect(card).toBeVisible();
+        const near = async () => {
+          const [region, box] = [(await panel.boundingBox())!, (await card.boundingBox())!];
+          return { left: Math.round(box.x - region.x), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+        };
+        // The region's 1 px left border sits outside the body the card is placed in
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        await panel.getByRole('button', { name: 'Add a tool' }).click();
+        await page.getByRole('menuitem', { name: 'Deliverables' }).click();
+        await expect(panel.locator('[data-deliverables-list]')).toBeVisible();
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+      });
+
+      await test.step('acceptance 4: Dock restores the column at its width, and the main pane’s composer has the keyboard', async () => {
+        await card.getByRole('button', { name: 'Dock session' }).click();
+        await expect(card).toHaveCount(0);
+        await expect(main).not.toHaveAttribute('inert', '');
+        await expect(divider).toHaveAttribute('aria-valuenow', (await divider.getAttribute('aria-valuemax'))!);
+        await expect(main.getByRole('textbox', { name: 'Message' })).toBeFocused();
+        await expect(composers).toHaveCount(1);
+      });
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+});

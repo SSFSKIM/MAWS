@@ -4,7 +4,8 @@
 // tab with no record yet (an unstarted session) is reported once its record arrives. E3: a side thread the Side pane
 // draws is visible too while the panel is open on its parent, maximized or not (the pane publishes it only while its
 // tab is selected), or the thread's unread mark would never clear. P2-E1: so is the thread a comment card draws while
-// its host is on screen (the card publishes it only then).
+// its host is on screen (the card publishes it only then). P3-G (§D1.3): a floating panel covers the main region as a
+// maximized one does, and the floating card draws the shown session on screen while it is open (not as its pill).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -16,6 +17,8 @@ import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
 import { useCommentCard } from '../side/card/store'; // P2-E1
+import { panelInMain } from '../app/regions'; // P3-G
+import { openCardSession, useFloatingCard } from '../shell/floating'; // P3-G
 
 export function visibleSessions(
   main: LayoutMain,
@@ -26,7 +29,7 @@ export function visibleSessions(
 ): Set<AppSessionId> {
   const visible = new Set<AppSessionId>();
   if (!windowActive) return visible;
-  if (!(regions.panel.maximized && !regions.panel.collapsed)) {
+  if (!panelInMain(regions)) {
     for (const pane of currentSet(main).panes) { // W12: the strips show the current set
       const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
       if (tab?.kind === 'session' && records.has(tab.appSessionId)) visible.add(tab.appSessionId);
@@ -44,6 +47,10 @@ export function visibleSessions(
   const card = useCommentCard.getState().shownThread;
   if (card !== null && records.has(card.child)) visible.add(card.child);
   // P2-E1 end
+  // P3-G start: the session the open floating card draws
+  const floating = openCardSession({ main, regions });
+  if (floating !== null && records.has(floating)) visible.add(floating);
+  // P3-G end
   return visible;
 }
 
@@ -69,6 +76,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
   const offSessions = stores.sessions.subscribe((state, before) => state.records !== before.records && update());
   const offSide = stores.side.subscribe((state, before) => state.panes !== before.panes && update()); // E3
   const offCard = useCommentCard.subscribe((state, before) => state.shownThread !== before.shownThread && update()); // P2-E1
+  const offFloating = useFloatingCard.subscribe((state, before) => state.closed !== before.closed && update()); // P3-G
   window.addEventListener('focus', update);
   window.addEventListener('blur', update);
   document.addEventListener('visibilitychange', update);
@@ -78,6 +86,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     offSessions();
     offSide(); // E3
     offCard(); // P2-E1
+    offFloating(); // P3-G
     window.removeEventListener('focus', update);
     window.removeEventListener('blur', update);
     document.removeEventListener('visibilitychange', update);

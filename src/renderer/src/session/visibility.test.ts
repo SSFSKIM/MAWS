@@ -8,6 +8,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { connectVisibility } from './visibility';
 import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
 import { hideCardThread, showCardThread, useCommentCard } from '../side/card/store'; // P2-E1
+import { closeCard, openCard, useFloatingCard } from '../shell/floating'; // P3-G
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -34,6 +35,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   useSidePane.setState({ panes: new Map() }); // E3
   useCommentCard.setState({ open: null, shownThread: null }); // P2-E1
+  useFloatingCard.setState({ closed: false }); // P3-G
 });
 
 describe('session visibility', () => {
@@ -86,6 +88,25 @@ describe('session visibility', () => {
     useLayout.getState().openSession(A);
     useLayout.getState().setPanel({ maximized: true });
     expect(sent().at(-1)).toEqual({ appSessionId: A, visible: false });
+  });
+
+  // P3-G (§D1.3): the floating panel covers the main area as a maximized one does; the open card draws the shown session
+  // on screen, the pill does not (so a turn ending behind it marks it unread).
+  it('counts the floating card’s session while the card is open, not as a pill, and the main pane again once collapsed', () => {
+    useLayout.getState().openSession(A);
+    useLayout.getState().openSession(B, { split: true });
+    expect(sent()).toEqual([
+      { appSessionId: A, visible: true },
+      { appSessionId: B, visible: true },
+    ]);
+    useLayout.getState().setPanel({ floating: true }); // B's pane is focused: the card draws B
+    expect(sent().slice(2)).toEqual([{ appSessionId: A, visible: false }]);
+    closeCard();
+    expect(sent().slice(3)).toEqual([{ appSessionId: B, visible: false }]);
+    openCard();
+    expect(sent().slice(4)).toEqual([{ appSessionId: B, visible: true }]);
+    useLayout.getState().setPanel({ collapsed: true }); // floating ends; both panes show again
+    expect(sent().slice(5)).toEqual([{ appSessionId: A, visible: true }]);
   });
 
   it('reports an unstarted session only once its record arrives', () => {

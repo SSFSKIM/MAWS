@@ -10,6 +10,7 @@ import { useChordHint } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { SessionPane } from '../session/SessionPane';
+import { cardSession } from '../shell/floating'; // P3-G
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
@@ -69,7 +70,7 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
   switch (tab.kind) {
     case 'session':
-      return <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
+      return <SessionTab tab={tab} paneIndex={paneIndex} />;
     case 'agent':
       return <AgentTab tab={tab} paneIndex={paneIndex} />;
     case 'file':
@@ -89,6 +90,14 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
     case 'browser': // E4a
       return <BrowserTab tab={tab} />;
   }
+}
+
+// P3-G (§D1.4): while the panel floats, the floating card is the only mount of the session it draws (one composer per
+// session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
+// pill too, so closing and reopening the card does not remount the pane behind it.
+function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
+  const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
+  return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
 }
 
 const TEXT_BUTTON =

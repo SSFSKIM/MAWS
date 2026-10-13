@@ -70,6 +70,13 @@ export const RestoreIcon = () => (
     <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" />
   </Icon>
 );
+// P3-G: the floating session card, a card at the frame's bottom left.
+export const FloatIcon = () => (
+  <Icon>
+    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+    <rect x="4" y="8" width="5" height="3.5" rx="0.75" />
+  </Icon>
+);
 export const ChevronDownIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
     <path d="m4 6 4 4 4-4" />

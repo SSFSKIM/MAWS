@@ -28,20 +28,34 @@ describe('layout value shapes', () => {
   });
 
   // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value
-  // keeps its sizes, sort and Overview rect.
-  it('reads a version-1 or version-2 regions value as version 3', () => {
+  // keeps its sizes, sort and Overview rect. P3-G (§D1.1): version 4 adds the floating state and the card's sizes; every
+  // earlier version reads as version 4, not floating and with no card sizes.
+  it('reads a version-1, version-2 or version-3 regions value as version 4', () => {
     const v1 = {
       version: 1,
       sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
-      panel: { width: 320, collapsed: false, maximized: false },
+      panel: { width: 320, collapsed: false, maximized: true },
     };
-    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 3, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel: v1.panel, overview: null });
+    const panel = { ...v1.panel, floating: false };
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 4, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel, overview: null, floatingCard: {} });
     const v2 = { version: 2, sidebar: { width: 260, collapsed: false, sort: 'priority', openProject: 'other' }, panel: v1.panel, overview: { x: 40, y: 12, width: 880, height: 640 } };
-    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 3, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel: v1.panel, overview: v2.overview });
+    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 4, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel, overview: v2.overview, floatingCard: {} });
     expect(StoredRegionsSchema.parse({ ...v2, sidebar: { ...v2.sidebar, openProject: null } }).sidebar.expandedProjects).toEqual([]);
-    const v3 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-a', 'other'] } };
-    expect(StoredRegionsSchema.parse(v3)).toEqual(v3);
+    const v3 = { version: 3, sidebar: { width: 280, collapsed: false, sort: 'recency', expandedProjects: ['proj-a', 'other'] }, panel: { width: 500, collapsed: true, maximized: false }, overview: v2.overview };
+    expect(StoredRegionsSchema.parse(v3)).toEqual({ ...v3, version: 4, panel: { ...v3.panel, floating: false }, floatingCard: {} });
     expect(StoredRegionsSchema.safeParse({ ...v3, sidebar: { ...v3.sidebar, openProject: null } }).success).toBe(false);
+    // An older shape never carries the newer fields
+    expect(StoredRegionsSchema.safeParse({ ...v3, panel: { ...v3.panel, floating: true } }).success).toBe(false);
+    expect(StoredRegionsSchema.safeParse({ ...v3, floatingCard: {} }).success).toBe(false);
+  });
+
+  it('reads version 4 as it is: the floating state and the card sizes per panel tab', () => {
+    const v4 = { ...LAYOUT_DEFAULTS.regions, panel: { width: 420, collapsed: false, maximized: false, floating: true }, floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 500, h: 600 } } };
+    expect(StoredRegionsSchema.parse(v4)).toEqual(v4);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, panel: { ...v4.panel, floating: undefined } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420.5, h: 380 } } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420, h: 380, x: 0 } } }).success).toBe(false);
+    expect(LAYOUT_DEFAULTS.regions).toMatchObject({ version: 4, panel: { floating: false }, floatingCard: {} });
   });
 
   it('accepts the key grammar and nothing else', () => {

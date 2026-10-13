@@ -2,20 +2,25 @@
 // edge), collapse and maximize, a header strip with the region's own controls, and the `panelHost` slot below it. The
 // host is handed the session the focused pane shows and that session's effective panel tabs (the global pins first,
 // D-10); its changes are split back by pin into `panel.pinned` and `panel.<appSessionId>`. What a panel tab is and how
-// it renders is C8's.
+// it renders is C8's. P3-G (§D1): the fourth state, floating: the divider dragged past the panel's maximum, ⌥⌘B or the
+// Float button floats it (the panel stands in the main column as maximized does and hands its host `maximized`, X5 as
+// amended) and the floating card draws the shown session over the panel body.
 import type { AppSessionId } from '@shared/graph/ids';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
-import { IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
+import { FloatIcon, IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
 import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS, regionWidths, useWindowWidth } from '../app/regions';
 import { Resizer } from '../app/Resizer';
 import { useSlot } from '../app/slots';
+import { FloatingCardLayer } from '../shell/FloatingCard'; // P3-G
+import { floatPanel } from '../shell/floating'; // P3-G
 
 export const PANEL_REGION_ID = 'region-panel';
+const HEADER_HEIGHT_PX = 40; // the bar's `h-10`; the floating card never covers it
 
 export function PanelRegion() {
-  const { collapsed, maximized } = useLayout((s) => s.regions.panel);
+  const { collapsed, maximized, floating } = useLayout((s) => s.regions.panel);
   const windowWidth = useWindowWidth();
   const width = useLayout((s) => regionWidths(s.regions, windowWidth).panel);
   const max = useLayout((s) => regionWidths(s.regions, windowWidth).panelMax);
@@ -30,7 +35,7 @@ export function PanelRegion() {
       inert={collapsed}
       className={`relative col-start-3 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-l border-border'}`}
     >
-      {!collapsed && !maximized && (
+      {!collapsed && !maximized && !floating && (
         <Resizer
           label="Resize right panel"
           controls={PANEL_REGION_ID}
@@ -43,12 +48,22 @@ export function PanelRegion() {
           restoreValue={persisted}
           onChange={(next) => setPanel({ width: next })}
           onCollapse={(restore) => setPanel({ collapsed: true, width: restore })}
+          expandThreshold={COLLAPSE_THRESHOLD_PX}
+          onExpand={(restore) => floatPanel({ width: restore })}
           className="absolute inset-y-0 -left-0.75"
         />
       )}
       {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-border px-2">
+          <IconButton
+            label={floating ? 'Dock session' : 'Float session over panel'}
+            action="panel.float"
+            pressed={floating}
+            onClick={() => runAction('panel.float')}
+          >
+            <FloatIcon />
+          </IconButton>
           <IconButton
             label={maximized ? 'Restore right panel' : 'Maximize right panel'}
             action="panel.maximize"
@@ -62,9 +77,10 @@ export function PanelRegion() {
           </IconButton>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <Host maximized={maximized} />
+          <Host maximized={maximized || floating} />
         </div>
       </div>
+      {floating && !collapsed && <FloatingCardLayer top={HEADER_HEIGHT_PX} />}
     </section>
   );
 }
