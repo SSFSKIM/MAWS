@@ -31,4 +31,6 @@ export interface HistoryApi {
   sessionTitle?(appSessionId: string): string | undefined;
   /** New versions exist (an automatic or turn version, another window's save or restore): the list re-reads. */
   onVersions?(listener: () => void): () => void;
+  /** Where the rail logs a failure it shows (the surface's log). */
+  log?(line: string): void;
 }

@@ -1,15 +1,18 @@
 // The preview's bar (D10 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; §4.7 of the parent), in place of the
-// formatting toolbar while the editor shows a version: what is shown, its tab, Show changes (on by default), "N changes"
-// with ↑ ↓, Restore this version (confirmed first), Make a copy, and Back to document.
+// formatting toolbar while the editor shows a version: what is shown, its tab (with the tabs a comparison added,
+// renamed or deleted marked as such, a deleted one still shown), Show changes (on by default), "N changes" with ↑ ↓,
+// Restore this version (confirmed first), Make a copy, and Back to document.
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
 import { useState, type ReactNode } from 'react';
+import type { DiffTab } from '../../history';
 import type { HistoryController, Preview } from './controller';
 import { changesOf, stepChange } from './paint';
 
 export function HistoryBar({ editor, preview, controller, onBack }: { editor: Editor; preview: Preview; controller: HistoryController; onBack(): void }) {
   const [confirming, setConfirming] = useState(false);
   const count = useEditorState({ editor, selector: ({ editor: e }) => (e ? changesOf(e.state).changes.length : 0) });
+  const shownTab = preview.tabs.find((tab) => tab.id === preview.tabId);
   return (
     <>
       <div className="doc-toolbar doc-history-bar" role="toolbar" aria-label="Version preview">
@@ -18,11 +21,12 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
           <select className="doc-toolbar-select" aria-label="Tab" value={preview.tabId ?? ''} onChange={(event) => controller.setTab(event.target.value)}>
             {preview.tabs.map((tab) => (
               <option key={tab.id} value={tab.id}>
-                {tab.title || 'Untitled tab'}
+                {tabLabel(tab, preview.showChanges)}
               </option>
             ))}
           </select>
         )}
+        {shownTab?.change === 'removed' && <span className="doc-history-tab-note">This tab was deleted.</span>}
         <span className="doc-toolbar-separator" />
         <label className="doc-history-filter">
           <input type="checkbox" checked={preview.showChanges} onChange={(event) => controller.setShowChanges(event.target.checked)} />
@@ -77,6 +81,16 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
       )}
     </>
   );
+}
+
+// A deleted tab is always named so (its content is what Restore would bring back); a new or renamed one while changes show.
+function tabLabel(tab: DiffTab, showChanges: boolean): string {
+  const title = tab.title || 'Untitled tab';
+  if (tab.change === 'removed') return `${title} (deleted)`;
+  if (!showChanges) return title;
+  if (tab.change === 'added') return `${title} (new)`;
+  if (tab.change === 'renamed') return `${title} (renamed from ${tab.previousTitle || 'Untitled tab'})`;
+  return title;
 }
 
 function Button({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick(): void; children: ReactNode }) {

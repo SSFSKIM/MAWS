@@ -11,7 +11,7 @@ import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
-import { createDocument, tabBody } from '../../tabs';
+import { addTab, createDocument, deleteTab, tabBody } from '../../tabs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
@@ -373,3 +373,47 @@ describe('the owner’s actions', () => {
     for (const text of rows) expect(text).toMatch(/\d{1,2}:\d{2}\s?[AP]M/);
   });
 });
+
+// M5's fix wave 1: what the review found missing, through the rail.
+describe('a deleted tab and a failed count', () => {
+  it('lists a tab the agent deleted in the preview’s tabs, and shows its text as deleted', async () => {
+    await setup(async ({ host: h, history: hist }) => {
+      h.write((doc) => addTab(doc, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'x1' }, content: [{ type: 'text', text: 'Raw numbers live here.' }] }] }) }));
+      hist.version('named', HUMAN, { label: 'Two tabs' });
+      h.write((doc) => deleteTab(doc, 'tab2'), AGENT);
+      hist.version('turn', AGENT, { summary: 'Deleted the appendix' });
+    });
+    await openHistory();
+    click(row('.*Deleted the appendix'));
+    await previewing();
+    const tabs = within(bar()).getByRole('combobox', { name: 'Tab' });
+    expect([...tabs.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['Main', 'Appendix (deleted)']);
+    act(() => void fireEvent.change(tabs, { target: { value: 'tab2' } }));
+    await until(() => document.querySelector('.ProseMirror y-del')?.textContent === 'Raw numbers live here.', 'the deleted tab’s text, struck');
+    expect(within(bar()).getByText('This tab was deleted.')).toBeTruthy();
+    expect(document.querySelector<HTMLElement>('.ProseMirror .doc-change-del')?.style.getPropertyValue('--doc-author')).toBe(`var(${actorDisplay(AGENT).color})`);
+  });
+
+  it('offers the new changes uncounted when counting fails, and counts again when asked', async () => {
+    const t = { value: Date.now() - 60 * 60_000 };
+    let failing = 1;
+    await setup(
+      async ({ history: hist, agentWrites }) => {
+        hist.version('auto', HUMAN);
+        await hist.markViewed();
+        t.value += 10 * 60_000;
+        await agentWrites(agentAppends(' The agent was here.'));
+        hist.version('turn', AGENT, { summary: 'One addition' });
+        const versionState = hist.versionState.bind(hist);
+        hist.versionState = (id) => (failing-- > 0 ? Promise.reject(new Error('the host is unavailable')) : versionState(id));
+      },
+      { now: () => t.value },
+    );
+    await until(() => screen.queryByRole('button', { name: 'Count the new changes again' }) !== null, 'the retry');
+    expect(screen.getByRole('button', { name: 'See new changes' })).toBeTruthy();
+    click(screen.getByRole('button', { name: 'Count the new changes again' }));
+    await until(() => screen.queryByRole('button', { name: 'See 1 new change' }) !== null, 'the counted pill');
+    expect(screen.queryByRole('button', { name: 'Count the new changes again' })).toBeNull();
+  });
+});
+

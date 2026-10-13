@@ -10,9 +10,9 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import { decodeMap, stateV2, type Carry, type ContentMap } from '../../../yjs';
 import type { DocumentHandle } from '../../../host';
 import type { VersionView } from '../../collab';
-import { carriedBlocks, changeList, openDiff, renderDiff, showEditors, type Diff } from '../../history';
+import { carriedBlocks, countChanges, diffBody, diffTabs, openDiff, showEditors, type Diff, type DiffTab } from '../../history';
 import { dsOverrides, type TokenOverrides } from '../../meta';
-import { listTabs, tabBody, type TabInfo } from '../../tabs';
+import { tabBody } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { HistoryApi } from './api';
 import { authorOf, formatWhen, newChangesBase, versionTitle } from './model';
@@ -22,8 +22,8 @@ export type PreviewTarget = { kind: 'version'; versionId: number } | { kind: 'co
 export interface Preview {
   target: PreviewTarget;
   title: string;
-  /** The tabs of the state shown (a tab deleted since is among them, one created since is not). */
-  tabs: TabInfo[];
+  /** The tabs of the comparison: the state shown's, then any the earlier state had that it deleted (`change`). */
+  tabs: DiffTab[];
   tabId: string | null;
   showChanges: boolean;
   /** What the editor binds: the shown tab's fragment, drawn through the diff while Show changes is on. */
@@ -39,6 +39,8 @@ export interface Pill {
   since: ArtifactVersion | null;
   /** The changes since, once counted. */
   count: number | null;
+  /** Why counting failed (the pill then offers to count again; `refresh` does too). */
+  failed: string | null;
 }
 
 export interface ShownEditor {
@@ -122,7 +124,7 @@ export class HistoryController {
       this.set({ versions });
       const base = newChangesBase(versions, lastViewedAt);
       if (base) {
-        this.set({ pill: { since: base.since, count: null } });
+        this.set({ pill: { since: base.since, count: null, failed: null } });
         void this.count(base.since);
       }
       await this.api.markViewed();
@@ -136,12 +138,20 @@ export class HistoryController {
     this.liveTab = tabId;
   }
 
+  /** Reads the list again, and counts the new changes again if counting them failed. */
   async refresh(): Promise<void> {
     try {
       this.set({ versions: await this.api.versions() });
     } catch (error) {
       this.set({ error: message(error) });
     }
+    if (this.snapshot.pill?.failed != null) await this.recount();
+  }
+
+  /** Counts the changes since the last view again (the pill's retry after a failed count). */
+  async recount(): Promise<void> {
+    const pill = this.snapshot.pill;
+    if (pill) await this.count(pill.since);
   }
 
   /** A row clicked: preview it against the version before it; with `extend` (shift-click), compare it with the selected one. */
@@ -190,7 +200,7 @@ export class HistoryController {
   applied(view: VersionView | null): void {
     for (const diff of this.diffs) {
       if (diff === this.loaded?.diff) continue;
-      const shown = view !== null && (view.renderer === diff.renderer || view.ytype.doc === diff.nextDoc);
+      const shown = view !== null && (view.renderer === diff.renderer || view.ytype.doc === diff.nextDoc || view.ytype.doc === diff.prevDoc);
       if (shown) continue;
       diff.destroy();
       this.diffs.delete(diff);
@@ -281,7 +291,7 @@ export class HistoryController {
       const provenance = decodeMap(attributions);
       const diff = openDiff({ prevState, nextState, attributions: provenance });
       this.diffs.add(diff);
-      const tabs = listTabs(diff.nextDoc);
+      const tabs = diffTabs(diff);
       const tabId = tabs.some((tab) => tab.id === this.liveTab) ? this.liveTab : (tabs[0]?.id ?? null);
       const preview: Preview = {
         target,
@@ -303,27 +313,40 @@ export class HistoryController {
 
   // Publishes a preview with the view of its tab and Show changes setting (`fresh`: its moved and retyped blocks too).
   private show(loaded: Loaded, preview: Preview, fresh = false): void {
-    const ytype = preview.tabId ? tabBody(loaded.diff.nextDoc, preview.tabId) : undefined;
+    const { diff } = loaded;
+    // a removed tab: drawn as deleted through the diff, or as it was when Show changes is off
+    const ytype = !preview.tabId ? undefined : preview.showChanges ? diffBody(diff, preview.tabId) : (tabBody(diff.nextDoc, preview.tabId) ?? tabBody(diff.prevDoc, preview.tabId));
     const carried = !fresh && preview.tabId === loaded.preview.tabId ? preview.carried : ytype ? carriedBlocks(ytype, loaded.attributions) : new Map<string, Carry['kind']>();
     const next: Preview = { ...preview, carried, view: ytype ? { ytype, renderer: preview.showChanges ? loaded.diff.renderer : null } : null };
     loaded.preview = next;
     this.set({ preview: next, loading: false });
   }
 
-  // Counts the changes since the last view, over every tab, headless.
+  // Counts the changes since the last view over the whole document (removed and renamed tabs too), headless. A failure
+  // is kept on the pill and in `error`, and logged; `recount` and `refresh` try again.
   private async count(since: ArtifactVersion | null): Promise<void> {
+    const current = () => {
+      const pill = this.snapshot.pill;
+      return pill && pill.since === since ? pill : null;
+    };
     try {
       const [prevState, attributions] = await Promise.all([since ? this.api.versionState(since.id) : Promise.resolve(null), this.api.attributions(since?.seq ?? 0, LIVE)]);
       const diff = openDiff({ prevState, nextState: stateV2(this.handle.doc), attributions: decodeMap(attributions) });
+      let count: number;
       try {
-        const count = listTabs(diff.nextDoc).reduce((n, tab) => n + changeList(renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer)).length, 0);
-        const pill = this.snapshot.pill;
-        if (pill && pill.since === since) this.set({ pill: count > 0 ? { ...pill, count } : null });
+        count = countChanges(diff);
       } finally {
         diff.destroy();
       }
-    } catch {
-      // the pill stays without a count
+      const pill = current();
+      if (!pill) return;
+      const recovered = pill.failed !== null;
+      this.set({ pill: count > 0 ? { ...pill, count, failed: null } : null, ...(recovered ? { error: null } : {}) });
+    } catch (error) {
+      const pill = current();
+      if (!pill) return;
+      this.api.log?.(`history: counting the changes since the last view failed: ${message(error)}`);
+      this.set({ pill: { ...pill, count: null, failed: message(error) }, error: `Could not count the new changes: ${message(error)}` });
     }
   }
 

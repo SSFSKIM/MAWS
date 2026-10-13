@@ -653,6 +653,7 @@
   box-shadow: var(--shadow-float);
 }
 .doc-pill-open,
+.doc-pill-retry,
 .doc-pill-dismiss {
   font: inherit;
   color: var(--bg-raised);
@@ -661,8 +662,14 @@
   padding: var(--space) calc(var(--space) * 3);
   cursor: pointer;
 }
+.doc-pill-retry,
 .doc-pill-dismiss {
   padding-left: 0;
+}
+.doc-history-tab-note {
+  padding: 0 var(--space);
+  color: var(--danger);
+  white-space: nowrap;
 }
 .doc-context-menu,
 .doc-editors {

@@ -366,6 +366,11 @@ function PageFrame({ editor, handle, author, comments, tabId, preview, history, 
           <button type="button" className="doc-pill-open" onClick={onNewChanges}>
             {pill.count === null ? 'See new changes' : `See ${pill.count} new ${pill.count === 1 ? 'change' : 'changes'}`}
           </button>
+          {pill.failed !== null && (
+            <button type="button" className="doc-pill-retry" aria-label="Count the new changes again" title={`Counting failed: ${pill.failed}`} onClick={() => void history?.recount()}>
+              ↻
+            </button>
+          )}
           <button type="button" className="doc-pill-dismiss" aria-label="Dismiss new changes" onClick={() => history?.dismissPill()}>
             ×
           </button>
