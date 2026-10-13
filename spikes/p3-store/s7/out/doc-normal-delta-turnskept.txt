@@ -1,0 +1,8 @@
+# S7a doc-normal-delta-turnskept started 2026-10-13T03:09:20.792Z load 14.6 14.6 17.4 node v22.23.2
+month 1: {"live":1040979,"file":3756032,"versions":319,"log":{"rows":15090,"bytes":312507},"prov":{"rows":3196,"bytes":248882},"load":66.7,"preview":458.5,"restore":303.2}
+month 2: {"live":1220756,"file":6070272,"versions":605,"log":{"rows":15100,"bytes":332199},"prov":{"rows":3227,"bytes":374385},"load":82.2,"preview":597.8,"restore":385.7}
+month 3: {"live":1294214,"file":6660096,"versions":842,"log":{"rows":15093,"bytes":331385},"prov":{"rows":219,"bytes":356536},"load":91.8,"preview":689.5,"restore":364.9}
+month 4: {"live":1428031,"file":8036352,"versions":1127,"log":{"rows":15090,"bytes":320299},"prov":{"rows":3260,"bytes":624354},"load":117.1,"preview":969.9,"restore":863.5}
+month 5: {"live":1537501,"file":10633216,"versions":1396,"log":{"rows":15096,"bytes":346252},"prov":{"rows":3282,"bytes":768419},"load":135.5,"preview":976.1,"restore":872.7}
+month 6: {"live":1544511,"file":11436032,"versions":1647,"log":{"rows":15093,"bytes":338227},"prov":{"rows":3290,"bytes":900832},"load":132.5,"preview":1141,"restore":763.1}
+done in 101s; updates 395571; counts {"keystrokes":393000,"turns":1572,"batches":0,"comments":131,"named":26,"images":20,"restores":4}; maintenance {"median":42.2,"max":83.4,"steps":{"thin":10.3,"compactLog":7.8,"bucketProvenance":62.4,"gcRefs":6.5,"checkpoint":22}}

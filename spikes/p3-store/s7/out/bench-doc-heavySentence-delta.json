@@ -1,0 +1,50 @@
+{
+ "tag": "doc-heavySentence-delta",
+ "loadavgStart": [
+  17.3056640625,
+  14.955078125,
+  15.0400390625
+ ],
+ "runs": 5,
+ "load": {
+  "ms": 133.7,
+  "p90": 201.5,
+  "tailRows": 466
+ },
+ "versions": 246,
+ "target": {
+  "at": "2026-07-06T17:06:33.531Z",
+  "kind": "named",
+  "enc": "delta"
+ },
+ "provenanceRowsInWindow": 10324,
+ "preview": {
+  "totalMs": 1604.8,
+  "p90": 1895.1,
+  "changes": 65,
+  "steps": {
+   "state": 64.8,
+   "encodeLive": 19.7,
+   "attributions": 708.8,
+   "openDiff": 425.6,
+   "render": 270.8
+  }
+ },
+ "showEditors": {
+  "mergeAllProvenanceMs": 1022.9,
+  "perSelectionMedianMs": 12.1,
+  "perSelectionMaxMs": 13.3,
+  "liveToPmMs": 66.3
+ },
+ "restore": {
+  "ms": 416.4,
+  "p90": 566.1,
+  "bytes": 1035065
+ },
+ "versionList": 0.2,
+ "loadavgEnd": [
+  20.71728515625,
+  15.9140625,
+  15.38037109375
+ ]
+}

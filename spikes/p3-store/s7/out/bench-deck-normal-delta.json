@@ -1,0 +1,45 @@
+{
+ "tag": "deck-normal-delta",
+ "loadavgStart": [
+  18.29345703125,
+  14.99267578125,
+  15.0537109375
+ ],
+ "runs": 9,
+ "load": {
+  "ms": 50.9,
+  "p90": 107.9,
+  "tailRows": 215
+ },
+ "versions": 114,
+ "target": {
+  "at": "2026-07-03T17:11:45.156Z",
+  "kind": "turn",
+  "enc": "delta"
+ },
+ "provenanceRowsInWindow": 488,
+ "preview": {
+  "totalMs": 187.4,
+  "p90": 224.4,
+  "slidesInDelta": 135,
+  "steps": {
+   "state": 23.7,
+   "encodeLive": 7.8,
+   "attributions": 25.9
+  }
+ },
+ "showEditors": {
+  "mergeAllProvenanceMs": 44.5
+ },
+ "restore": {
+  "ms": 113.4,
+  "p90": 123.5,
+  "bytes": 133404
+ },
+ "versionList": 0.1,
+ "loadavgEnd": [
+  18.91015625,
+  15.17529296875,
+  15.11767578125
+ ]
+}

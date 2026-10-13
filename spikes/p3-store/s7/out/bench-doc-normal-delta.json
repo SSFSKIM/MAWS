@@ -1,0 +1,50 @@
+{
+ "tag": "doc-normal-delta",
+ "loadavgStart": [
+  16.68359375,
+  14.22216796875,
+  14.79052734375
+ ],
+ "runs": 9,
+ "load": {
+  "ms": 177,
+  "p90": 244.8,
+  "tailRows": 477
+ },
+ "versions": 129,
+ "target": {
+  "at": "2026-07-03T18:35:04.785Z",
+  "kind": "turn",
+  "enc": "delta"
+ },
+ "provenanceRowsInWindow": 3225,
+ "preview": {
+  "totalMs": 1127.7,
+  "p90": 1644.7,
+  "changes": 9527,
+  "steps": {
+   "state": 60.7,
+   "encodeLive": 22.6,
+   "attributions": 105.8,
+   "openDiff": 512.3,
+   "render": 412.6
+  }
+ },
+ "showEditors": {
+  "mergeAllProvenanceMs": 210.3,
+  "perSelectionMedianMs": 20.6,
+  "perSelectionMaxMs": 23.7,
+  "liveToPmMs": 108.1
+ },
+ "restore": {
+  "ms": 737.2,
+  "p90": 960.8,
+  "bytes": 700723
+ },
+ "versionList": 0.1,
+ "loadavgEnd": [
+  18.29345703125,
+  14.99267578125,
+  15.0537109375
+ ]
+}

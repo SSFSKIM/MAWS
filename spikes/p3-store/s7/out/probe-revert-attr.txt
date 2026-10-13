@@ -1,0 +1,4 @@
+S3 revertUpdate, changed 1x since the version: heading level 2 (want 2), task checked false (want false)
+S3 revertUpdate, changed 2x since the version: heading level 1 (want 2), task checked false (want false)
+revertUpdateFixed, changed 1x since the version: heading level 2 (want 2), task checked false (want false)
+revertUpdateFixed, changed 2x since the version: heading level 2 (want 2), task checked false (want false)

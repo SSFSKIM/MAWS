@@ -1,0 +1,8 @@
+# S7a deck-heavy-delta started 2026-10-13T03:15:39.161Z load 9.0 11.8 15.0 node v22.23.2
+month 1: {"slides":79,"live":228218,"file":2945024,"versions":148,"log":{"rows":5921,"bytes":448505},"prov":{"rows":1416,"bytes":266978},"load":34.4,"preview":234.1,"restore":66.6,"vc":"8/8","se":"11/11"}
+month 2: {"slides":79,"live":258110,"file":4481024,"versions":152,"log":{"rows":6180,"bytes":386945},"prov":{"rows":1473,"bytes":428354},"load":32.2,"preview":219.8,"restore":66.3,"vc":"7/7"}
+month 3: {"slides":82,"live":266904,"file":5410816,"versions":120,"log":{"rows":5866,"bytes":359859},"prov":{"rows":243,"bytes":461946},"load":33.9,"preview":251.2,"restore":75.1,"vc":"8/8","se":"6/6"}
+month 4: {"slides":94,"live":332074,"file":7499776,"versions":201,"log":{"rows":6145,"bytes":433890},"prov":{"rows":1555,"bytes":728584},"load":33.8,"preview":339.4,"restore":99.2,"vc":"6/6"}
+month 5: {"slides":102,"live":363321,"file":9367552,"versions":214,"log":{"rows":6080,"bytes":430321},"prov":{"rows":1516,"bytes":877949},"load":60.8,"preview":413.8,"restore":159.4,"vc":"7/7"}
+month 6: {"slides":88,"live":337623,"file":10764288,"versions":232,"log":{"rows":6044,"bytes":435715},"prov":{"rows":1471,"bytes":1017541},"load":39.5,"preview":422,"restore":140.9,"vc":"7/7","se":"6/6"}
+done in 190s; updates 157987; counts {"turns":3930,"sessions":393,"comments":262,"named":79,"restores":13}; maintenance {"median":33,"max":934.7,"steps":{"thin":870.7,"compactLog":4.8,"bucketProvenance":52.4,"gcRefs":6.6,"checkpoint":11.7}}

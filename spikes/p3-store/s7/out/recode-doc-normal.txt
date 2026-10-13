@@ -1,0 +1,1 @@
+{"tag":"doc-normal-delta","rows":129,"storedMB":5.74,"keyframesMB":3.27,"regcDeltasKeepKeyframesMB":5.55,"regcOneKeyframeMB":3.24,"zstdStoredMB":2.28,"liveStateMB":1.47,"ms":3205}

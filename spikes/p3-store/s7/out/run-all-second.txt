@@ -1,0 +1,36 @@
+== --kind doc --profile normal --encoding delta (load 13.3)
+month 1: {"live":1040979,"file":3534848,"versions":82,"log":{"rows":15090,"bytes":312507},"prov":{"rows":3196,"bytes":248882},"load":72.2,"preview":558.2,"restore":380,"se":"8/8"}
+month 2: {"live":1220756,"file":5545984,"versions":94,"log":{"rows":15100,"bytes":332199},"prov":{"rows":3227,"bytes":374385},"load":106.7,"preview":671,"restore":519.3}
+month 3: {"live":1294214,"file":5816320,"versions":86,"log":{"rows":15093,"bytes":331385},"prov":{"rows":219,"bytes":356536},"load":92.5,"preview":820.6,"restore":485,"se":"11/11"}
+month 4: {"live":1428031,"file":6885376,"versions":112,"log":{"rows":15090,"bytes":320299},"prov":{"rows":3260,"bytes":624354},"load":134.3,"preview":1219.7,"restore":893}
+month 5: {"live":1537501,"file":9150464,"versions":120,"log":{"rows":15096,"bytes":346252},"prov":{"rows":3282,"bytes":768415},"load":137.1,"preview":1030,"restore":573.6}
+month 6: {"live":1544520,"file":9641984,"versions":129,"log":{"rows":15093,"bytes":338227},"prov":{"rows":3290,"bytes":900817},"load":132.6,"preview":1078,"restore":779.1,"se":"9/9"}
+done in 113s; updates 395571; counts {"keystrokes":393000,"turns":1572,"batches":0,"comments":131,"named":26,"images":20,"restores":4}; maintenance {"median":40.8,"max":259.1,"steps":{"thin":215.8,"compactLog":6.9,"bucketProvenance":56.2,"gcRefs":3.2,"checkpoint":16}}
+== exit 0 in 113s
+== --kind deck --profile normal --encoding delta (load 11.5)
+month 1: {"slides":97,"live":251070,"file":892928,"versions":64,"log":{"rows":1541,"bytes":79193},"prov":{"rows":420,"bytes":58711},"load":27.9,"preview":91.4,"restore":45.3,"vc":"8/8","se":"11/11"}
+month 2: {"slides":92,"live":249318,"file":1310720,"versions":77,"log":{"rows":1531,"bytes":85181},"prov":{"rows":462,"bytes":94682},"load":28,"preview":101,"restore":59.8,"vc":"7/7"}
+month 3: {"slides":79,"live":237692,"file":1355776,"versions":68,"log":{"rows":1587,"bytes":72148},"prov":{"rows":171,"bytes":99066},"load":33.4,"preview":111.7,"restore":63.8,"vc":"8/8","se":"11/11"}
+month 4: {"slides":80,"live":249323,"file":1564672,"versions":89,"log":{"rows":1514,"bytes":71799},"prov":{"rows":498,"bytes":158584},"load":36.9,"preview":160.3,"restore":97.5,"vc":"6/6"}
+month 5: {"slides":85,"live":273452,"file":2002944,"versions":107,"log":{"rows":1548,"bytes":74047},"prov":{"rows":544,"bytes":193885},"load":42.8,"preview":237.2,"restore":105.1,"vc":"7/7"}
+month 6: {"slides":91,"live":304054,"file":2203648,"versions":114,"log":{"rows":1611,"bytes":85575},"prov":{"rows":553,"bytes":225943},"load":40.9,"preview":188.1,"restore":103.2,"vc":"7/7","se":"11/11"}
+done in 43s; updates 40957; counts {"turns":1048,"sessions":131,"comments":71,"named":26,"restores":4}; maintenance {"median":9.1,"max":63.2,"steps":{"thin":54,"compactLog":1.8,"bucketProvenance":16.4,"gcRefs":0.6,"checkpoint":2.9}}
+== exit 0 in 43s
+== --kind deck --profile heavy --encoding delta (load 9.0)
+month 1: {"slides":79,"live":228218,"file":2945024,"versions":148,"log":{"rows":5921,"bytes":448505},"prov":{"rows":1416,"bytes":266978},"load":34.4,"preview":234.1,"restore":66.6,"vc":"8/8","se":"11/11"}
+month 2: {"slides":79,"live":258110,"file":4481024,"versions":152,"log":{"rows":6180,"bytes":386945},"prov":{"rows":1473,"bytes":428354},"load":32.2,"preview":219.8,"restore":66.3,"vc":"7/7"}
+month 3: {"slides":82,"live":266904,"file":5410816,"versions":120,"log":{"rows":5866,"bytes":359859},"prov":{"rows":243,"bytes":461946},"load":33.9,"preview":251.2,"restore":75.1,"vc":"8/8","se":"6/6"}
+month 4: {"slides":94,"live":332074,"file":7499776,"versions":201,"log":{"rows":6145,"bytes":433890},"prov":{"rows":1555,"bytes":728584},"load":33.8,"preview":339.4,"restore":99.2,"vc":"6/6"}
+month 5: {"slides":102,"live":363321,"file":9367552,"versions":214,"log":{"rows":6080,"bytes":430321},"prov":{"rows":1516,"bytes":877949},"load":60.8,"preview":413.8,"restore":159.4,"vc":"7/7"}
+month 6: {"slides":88,"live":337623,"file":10764288,"versions":232,"log":{"rows":6044,"bytes":435715},"prov":{"rows":1471,"bytes":1017541},"load":39.5,"preview":422,"restore":140.9,"vc":"7/7","se":"6/6"}
+done in 190s; updates 157987; counts {"turns":3930,"sessions":393,"comments":262,"named":79,"restores":13}; maintenance {"median":33,"max":934.7,"steps":{"thin":870.7,"compactLog":4.8,"bucketProvenance":52.4,"gcRefs":6.6,"checkpoint":11.7}}
+== exit 0 in 191s
+== --kind doc --profile heavySentence --encoding delta (load 13.5)
+month 1: {"live":1095090,"file":12877824,"versions":152,"log":{"rows":50429,"bytes":1715757},"prov":{"rows":10286,"bytes":885575},"load":69.1,"preview":811.1,"restore":169,"se":"8/8"}
+month 2: {"live":1396614,"file":21458944,"versions":178,"log":{"rows":50427,"bytes":1556925},"prov":{"rows":10314,"bytes":1334301},"load":89.3,"preview":982.5,"restore":352.1}
+month 3: {"live":1426478,"file":26546176,"versions":122,"log":{"rows":50428,"bytes":1627314},"prov":{"rows":246,"bytes":1288835},"load":92.5,"preview":875.2,"restore":221.8,"se":"9/9"}
+month 4: {"live":1456402,"file":36102144,"versions":205,"log":{"rows":50425,"bytes":1869686},"prov":{"rows":10366,"bytes":2205877},"load":106.2,"preview":1710.4,"restore":304.3}
+month 5: {"live":1406092,"file":43978752,"versions":229,"log":{"rows":50437,"bytes":1962604},"prov":{"rows":10387,"bytes":2645803},"load":111.3,"preview":1549.9,"restore":1198.1}
+month 6: {"live":1488474,"file":51773440,"versions":246,"log":{"rows":50410,"bytes":1919798},"prov":{"rows":10389,"bytes":3056796},"load":154.7,"preview":1656.7,"restore":651.6,"se":"8/8"}
+done in 315s; updates 1321122; counts {"keystrokes":1310000,"turns":5240,"batches":0,"comments":524,"named":79,"images":81,"restores":13}; maintenance {"median":141.9,"max":625.2,"steps":{"thin":484.9,"compactLog":15.1,"bucketProvenance":305.2,"gcRefs":11.7,"checkpoint":200.1}}
+== exit 0 in 316s
