@@ -14,6 +14,7 @@ import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { togglePanelFloat } from '../shell/floating'; // P3-G
 import { startMarkup } from '../markup/session'; // P3-G
+import { openArtifacts } from '../main/artifacts'; // P3-G
 import { panelInMain } from './regions';
 import { registerSessionAction } from './session-actions';
 
@@ -66,7 +67,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
-    registerAction('artifacts.open', () => layout().openTab({ kind: 'artifacts' })), // P3-G (§D5): a singleton, so a second open activates it
+    registerAction('artifacts.open', openArtifacts), // P3-G (§D5): a singleton, so a second open activates it
     registerAction('palette.open', togglePalette),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),

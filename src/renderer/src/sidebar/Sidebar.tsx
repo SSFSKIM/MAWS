@@ -17,6 +17,7 @@ import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
+import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, nestLineage, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey, type SessionTreeRow } from './derive';
@@ -361,7 +362,7 @@ function ArtifactsRow() {
     <button
       type="button"
       aria-current={current ? 'page' : undefined}
-      onClick={() => useLayout.getState().openTab({ kind: 'artifacts' })}
+      onClick={openArtifacts}
       className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 ${current ? 'bg-bg-active' : ''}`}
     >
       <ArtifactsIcon className="size-[13px]" />
