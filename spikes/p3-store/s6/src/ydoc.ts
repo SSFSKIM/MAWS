@@ -1,28 +1,32 @@
-// The Yjs seam: the only module that imports yjs. Everything else speaks the model's terms (slides, elements, keys,
-// text blocks, change records). A v14 port rewrites this file; see the findings for what it touches.
+// The Yjs seam on v14 (@y/y 14.0.0-rc.28): the only module that imports @y/y. Everything else speaks the model's terms
+// (slides, elements, keys, text blocks, change records). Same exported API as the v13 seam (ydoc-v13.ts).
 //
-// Layout of one deck's Y.Doc:
-//   deck:   Y.Map  — deck.json's keys but `order` (JSON values), `sections` and `faces` as Y.Map key → JSON
-//   slides: Y.Map  id → Y.Map {
-//             order: fractional key, 'style:<prop>': string, 'attr:<name>': string, held?: {source, reasons},
-//             notes: Y.Text,
-//             elements: Y.Map id → Y.Map { tag, parent, order | z, 'style:*', 'attr:*', raw?: string,
-//                                          text?: Y.XmlFragment (y-prosemirror shape: <p>|<li> blocks of Y.XmlText + <br>) } }
+// v14 has one type, Y.Node: a name, attributes (a map: plain values or nested nodes) and children (text with formats and
+// nodes, inline in one sequence). Layout of one deck's Y.Doc:
+//   deck:   root node — deck.json's keys but `order` as JSON attributes; `sections`, `faces` nested nodes, key → JSON
+//   slides: root node — attribute id → <slide> {
+//             order, 'style:<prop>', 'attr:<name>', held?: {source, reasons}   (attributes)
+//             notes: <notes> node (plain text children),
+//             elements: <elements> node, attribute id → <el> { tag, parent, order | z, 'style:*', 'attr:*', raw?,
+//                       text?: <doc> node: <p>|<li> blocks of text (marks as formats {b:{}}, {a:{href}}, …) and <br> nodes
+//                       — @y/prosemirror 2's node shape, so a Tiptap text box binds to it } }
 
-import * as Y from 'yjs'
+import * as Y from '@y/y'
 import diff from 'fast-diff'
 import { type Inline, type Marks, type TextBlock, MARK_ORDER } from './ir.ts'
 
+export const SEAM = 'v14 @y/y 14.0.0-rc.28'
 export type Doc = Y.Doc
 export type Json = string | number | boolean | null | Json[] | { [k: string]: Json }
 export type Scalars = Record<string, Json>
+type N = Y.Node
 
 export function newDoc(clientID?: number): Doc {
   const d = new Y.Doc({ gc: true })
   if (clientID !== undefined) d.clientID = clientID
   return d
 }
-export function transact(doc: Doc, fn: () => void, origin?: unknown): void { doc.transact(fn, origin) }
+export function transact(doc: Doc, fn: () => void, origin?: unknown): void { doc.transact(() => fn(), origin) }
 export const encodeStateV1 = (doc: Doc): Uint8Array => Y.encodeStateAsUpdate(doc)
 export const encodeStateV2 = (doc: Doc): Uint8Array => Y.encodeStateAsUpdateV2(doc)
 export const stateVector = (doc: Doc): Uint8Array => Y.encodeStateVector(doc)
@@ -40,181 +44,63 @@ export function pull(to: Doc, from: Doc, origin?: unknown): number {
   const u = Y.encodeStateAsUpdate(from, Y.encodeStateVector(to)); Y.applyUpdate(to, u, origin); return u.length
 }
 
-const slidesMap = (doc: Doc) => doc.getMap<Y.Map<unknown>>('slides')
-const deckMap = (doc: Doc) => doc.getMap<unknown>('deck')
-function slide(doc: Doc, id: string): Y.Map<unknown> {
-  const s = slidesMap(doc).get(id); if (!s) throw new Error(`no slide ${id}`); return s
+const slidesNode = (doc: Doc): N => doc.get('slides')
+const deckNode = (doc: Doc): N => doc.get('deck')
+function slide(doc: Doc, id: string): N {
+  const s = slidesNode(doc).getAttr(id) as N | undefined; if (!s) throw new Error(`no slide ${id}`); return s
 }
-const elementsOf = (doc: Doc, slideId: string) => slide(doc, slideId).get('elements') as Y.Map<Y.Map<unknown>>
-function element(doc: Doc, slideId: string, id: string): Y.Map<unknown> {
-  const e = elementsOf(doc, slideId).get(id); if (!e) throw new Error(`no element ${slideId}/${id}`); return e
+const elementsOf = (doc: Doc, slideId: string): N => slide(doc, slideId).getAttr('elements') as N
+function element(doc: Doc, slideId: string, id: string): N {
+  const e = elementsOf(doc, slideId).getAttr(id) as N | undefined; if (!e) throw new Error(`no element ${slideId}/${id}`); return e
 }
-function scalarsOf(m: Y.Map<unknown>): Scalars {
+function scalarsOf(n: N): Scalars {
   const out: Scalars = {}
-  for (const [k, v] of m.entries()) if (!(v instanceof Y.AbstractType)) out[k] = v as Json
+  for (const [k, v] of n.attrEntries() as Iterable<[string, unknown]>) if (!(v instanceof Y.Node)) out[k] = v as Json
   return out
 }
+const attrKeys = (n: N): string[] => [...(n.attrKeys() as Iterable<string>)]
 
 // ---------------------------------------------------------------- deck
 
-export function deckScalars(doc: Doc): Scalars { return scalarsOf(deckMap(doc)) }
-export function setDeckKey(doc: Doc, key: string, v: Json): void { deckMap(doc).set(key, v) }
-export function deleteDeckKey(doc: Doc, key: string): void { deckMap(doc).delete(key) }
-function deckSub(doc: Doc, name: string, create: boolean): Y.Map<Json> | undefined {
-  let m = deckMap(doc).get(name) as Y.Map<Json> | undefined
-  if (!m && create) { m = new Y.Map<Json>(); deckMap(doc).set(name, m) }
+export function deckScalars(doc: Doc): Scalars { return scalarsOf(deckNode(doc)) }
+export function setDeckKey(doc: Doc, key: string, v: Json): void { deckNode(doc).setAttr(key, v as never) }
+export function deleteDeckKey(doc: Doc, key: string): void { deckNode(doc).deleteAttr(key) }
+function deckSub(doc: Doc, name: string, create: boolean): N | undefined {
+  let m = deckNode(doc).getAttr(name) as N | undefined
+  if (!m && create) { m = new Y.Node(name); deckNode(doc).setAttr(name, m as never) }
   return m
 }
 export function deckEntries(doc: Doc, name: 'sections' | 'faces'): Record<string, Json> | undefined {
-  const m = deckSub(doc, name, false); return m ? Object.fromEntries(m.entries()) : undefined
+  const m = deckSub(doc, name, false); return m ? scalarsOf(m) : undefined
 }
-export function setDeckEntry(doc: Doc, name: 'sections' | 'faces', key: string, v: Json): void { deckSub(doc, name, true)!.set(key, v) }
-export function deleteDeckEntry(doc: Doc, name: 'sections' | 'faces', key: string): void { deckSub(doc, name, false)?.delete(key) }
-export function deleteDeckSub(doc: Doc, name: 'sections' | 'faces'): void { deckMap(doc).delete(name) }
+export function setDeckEntry(doc: Doc, name: 'sections' | 'faces', key: string, v: Json): void { deckSub(doc, name, true)!.setAttr(key, v as never) }
+export function deleteDeckEntry(doc: Doc, name: 'sections' | 'faces', key: string): void { deckSub(doc, name, false)?.deleteAttr(key) }
+export function deleteDeckSub(doc: Doc, name: 'sections' | 'faces'): void { deckNode(doc).deleteAttr(name) }
 
 // ---------------------------------------------------------------- slides
 
-export function slideIds(doc: Doc): string[] { return [...slidesMap(doc).keys()] }
-export function hasSlide(doc: Doc, id: string): boolean { return slidesMap(doc).has(id) }
+export function slideIds(doc: Doc): string[] { return attrKeys(slidesNode(doc)) }
+export function hasSlide(doc: Doc, id: string): boolean { return slidesNode(doc).hasAttr(id) }
 export function createSlide(doc: Doc, id: string, scalars: Scalars, notes: string): void {
-  const s = new Y.Map<unknown>()
-  slidesMap(doc).set(id, s)
-  for (const [k, v] of Object.entries(scalars)) s.set(k, v)
-  const t = new Y.Text(); s.set('notes', t); if (notes) t.insert(0, notes)
-  s.set('elements', new Y.Map())
+  const s = new Y.Node('slide')
+  slidesNode(doc).setAttr(id, s as never)
+  for (const [k, v] of Object.entries(scalars)) s.setAttr(k, v as never)
+  const t = new Y.Node('notes'); s.setAttr('notes', t as never); if (notes) t.insert(0, notes)
+  s.setAttr('elements', new Y.Node('elements') as never)
 }
-export function deleteSlide(doc: Doc, id: string): void { slidesMap(doc).delete(id) }
+export function deleteSlide(doc: Doc, id: string): void { slidesNode(doc).deleteAttr(id) }
 export function slideScalars(doc: Doc, id: string): Scalars { return scalarsOf(slide(doc, id)) }
-export function setSlideKey(doc: Doc, id: string, key: string, v: Json): void { slide(doc, id).set(key, v) }
-export function deleteSlideKey(doc: Doc, id: string, key: string): void { slide(doc, id).delete(key) }
-export function readNotes(doc: Doc, id: string): string { return (slide(doc, id).get('notes') as Y.Text).toString() }
+export function setSlideKey(doc: Doc, id: string, key: string, v: Json): void { slide(doc, id).setAttr(key, v as never) }
+export function deleteSlideKey(doc: Doc, id: string, key: string): void { slide(doc, id).deleteAttr(key) }
+
+type Op = { type: string; insert?: string | { name: string }[]; format?: Record<string, unknown> | null }
+const opsOf = (n: N): Op[] => (n.toDelta().toJSON() as { children?: Op[] }).children ?? []
+function plainOf(n: N): string { return opsOf(n).map((o) => (typeof o.insert === 'string' ? o.insert : '')).join('') }
+export function readNotes(doc: Doc, id: string): string { return plainOf(slide(doc, id).getAttr('notes') as N) }
 /** Notes change as a character diff, so a concurrent edit to other words survives. */
-export function patchNotes(doc: Doc, id: string, next: string): boolean { return patchPlain(slide(doc, id).get('notes') as Y.Text, next) }
-
-// ---------------------------------------------------------------- elements
-
-export function elementIds(doc: Doc, slideId: string): string[] { return [...elementsOf(doc, slideId).keys()] }
-export function hasElement(doc: Doc, slideId: string, id: string): boolean { return hasSlide(doc, slideId) && elementsOf(doc, slideId).has(id) }
-export function elementScalars(doc: Doc, slideId: string, id: string): Scalars { return scalarsOf(element(doc, slideId, id)) }
-export function allElementScalars(doc: Doc, slideId: string): Map<string, Scalars> {
-  const out = new Map<string, Scalars>()
-  for (const [id, m] of elementsOf(doc, slideId).entries()) out.set(id, scalarsOf(m))
-  return out
-}
-export function createElement(doc: Doc, slideId: string, id: string, scalars: Scalars, text?: TextBlock[]): void {
-  const m = new Y.Map<unknown>()
-  elementsOf(doc, slideId).set(id, m)
-  for (const [k, v] of Object.entries(scalars)) m.set(k, v)
-  if (text) writeText(doc, slideId, id, text)
-}
-export function deleteElement(doc: Doc, slideId: string, id: string): void { elementsOf(doc, slideId).delete(id) }
-export function setElementKey(doc: Doc, slideId: string, id: string, key: string, v: Json): void { element(doc, slideId, id).set(key, v) }
-export function deleteElementKey(doc: Doc, slideId: string, id: string, key: string): void { element(doc, slideId, id).delete(key) }
-
-// ---------------------------------------------------------------- text (a nested Y.XmlFragment per text element)
-
-export function hasText(doc: Doc, slideId: string, id: string): boolean { return element(doc, slideId, id).get('text') instanceof Y.XmlFragment }
-export function removeText(doc: Doc, slideId: string, id: string): void { element(doc, slideId, id).delete('text') }
-
-function marksOf(attrs: Record<string, unknown> | undefined): Marks {
-  const m: Marks = {}
-  if (attrs) for (const k of MARK_ORDER) if (attrs[k] != null) (m as Record<string, unknown>)[k] = attrs[k]
-  return m
-}
-const markKey = (m: Marks) => JSON.stringify(m)
-
-function readBlock(el: Y.XmlElement): TextBlock {
-  const inline: Inline[] = []
-  for (const c of el.toArray()) {
-    if (c instanceof Y.XmlText) {
-      for (const op of c.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
-        if (typeof op.insert !== 'string') continue
-        const marks = marksOf(op.attributes)
-        const last = inline[inline.length - 1]
-        if (last && 'text' in last && markKey(last.marks) === markKey(marks)) last.text += op.insert
-        else inline.push({ text: op.insert, marks })
-      }
-    } else if (c instanceof Y.XmlElement && c.nodeName === 'br') inline.push({ br: true })
-  }
-  return { type: el.nodeName === 'li' ? 'li' : 'p', inline }
-}
-export function readText(doc: Doc, slideId: string, id: string): TextBlock[] {
-  const f = element(doc, slideId, id).get('text')
-  if (!(f instanceof Y.XmlFragment)) return []
-  return f.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement).map(readBlock)
-}
-
-/** Insert runs into an integrated XmlText at `at`. An explicit attribute object, so nothing is inherited from the left. */
-function insertRuns(t: Y.XmlText, at: number, runs: { text: string; marks: Marks }[]): number {
-  for (const r of runs) { if (!r.text) continue; t.insert(at, r.text, { ...r.marks }); at += r.text.length }
-  return at
-}
-function segments(inline: Inline[]): { text: string; marks: Marks }[][] {
-  const segs: { text: string; marks: Marks }[][] = [[]]
-  for (const r of inline) { if ('br' in r) segs.push([]); else segs[segs.length - 1].push(r) }
-  return segs
-}
-function fillBlock(el: Y.XmlElement, block: TextBlock): void {
-  segments(block.inline).forEach((seg, i) => {
-    if (i > 0) el.push([new Y.XmlElement('br')])
-    if (seg.some((r) => r.text)) { const t = new Y.XmlText(); el.push([t]); insertRuns(t, 0, seg) }
-  })
-}
-function newBlock(f: Y.XmlFragment, at: number, block: TextBlock): void {
-  const el = new Y.XmlElement(block.type); f.insert(at, [el]); fillBlock(el, block)
-}
-export function writeText(doc: Doc, slideId: string, id: string, blocks: TextBlock[]): void {
-  const f = new Y.XmlFragment(); element(doc, slideId, id).set('text', f)
-  blocks.forEach((b, i) => newBlock(f, i, b))
-}
-
-/** Per-character marks of a run list, for the diff. */
-function explode(runs: { text: string; marks: Marks }[]): { s: string; m: string[] } {
-  let s = ''; const m: string[] = []
-  for (const r of runs) { s += r.text; for (let i = 0; i < r.text.length; i++) m.push(markKey(r.marks)) }
-  return { s, m }
-}
-
-/**
- * Patch one XmlText from its current runs to `next` with the fewest operations: fast-diff over the characters for
- * inserts and deletes, then `format` over retained characters whose marks changed. Concurrent edits elsewhere in the
- * same text survive (character-level CRDT merge).
- */
-function patchXmlText(t: Y.XmlText, next: { text: string; marks: Marks }[]): number {
-  const cur = explode((t.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[])
-    .filter((o) => typeof o.insert === 'string').map((o) => ({ text: o.insert as string, marks: marksOf(o.attributes) })))
-  const nx = explode(next)
-  if (cur.s === nx.s && cur.m.join('\u0000') === nx.m.join('\u0000')) return 0
-  let ops = 0, at = 0, oi = 0, ni = 0
-  for (const [op, s] of diff(cur.s, nx.s)) {
-    if (op === diff.DELETE) { t.delete(at, s.length); oi += s.length; ops++; continue }
-    if (op === diff.INSERT) {
-      const runs: { text: string; marks: Marks }[] = []
-      for (let k = 0; k < s.length; k++) {
-        const mk = nx.m[ni + k]; const last = runs[runs.length - 1]
-        if (last && markKey(last.marks) === mk) last.text += s[k]; else runs.push({ text: s[k], marks: JSON.parse(mk) })
-      }
-      at = insertRuns(t, at, runs); ni += s.length; ops += runs.length; continue
-    }
-    // retained: re-format runs whose marks differ
-    let k = 0
-    while (k < s.length) {
-      const om = cur.m[oi + k], nm = nx.m[ni + k]
-      if (om === nm) { k++; continue }
-      let j = k + 1
-      while (j < s.length && cur.m[oi + j] === om && nx.m[ni + j] === nm) j++
-      const o = JSON.parse(om) as Record<string, unknown>, n = JSON.parse(nm) as Record<string, unknown>
-      const delta: Record<string, unknown> = {}
-      for (const name of MARK_ORDER) if (JSON.stringify(o[name]) !== JSON.stringify(n[name])) delta[name] = n[name] ?? null
-      t.format(at + k, j - k, delta); ops++
-      k = j
-    }
-    at += s.length; oi += s.length; ni += s.length
-  }
-  return ops
-}
-function patchPlain(t: Y.Text, next: string): boolean {
-  const cur = t.toString(); if (cur === next) return false
+export function patchNotes(doc: Doc, id: string, next: string): boolean {
+  const t = slide(doc, id).getAttr('notes') as N
+  const cur = plainOf(t); if (cur === next) return false
   let at = 0
   for (const [op, s] of diff(cur, next)) {
     if (op === diff.DELETE) t.delete(at, s.length)
@@ -223,32 +109,135 @@ function patchPlain(t: Y.Text, next: string): boolean {
   return true
 }
 
-/** The block's slots: one entry per <br>-separated segment, its XmlText or null when the segment is empty. */
-function slots(el: Y.XmlElement): (Y.XmlText | null)[] | null {
-  const out: (Y.XmlText | null)[] = [null]
-  for (const c of el.toArray()) {
-    if (c instanceof Y.XmlText) { if (out[out.length - 1]) return null; out[out.length - 1] = c }
-    else if (c instanceof Y.XmlElement && c.nodeName === 'br') out.push(null)
-    else return null
-  }
+// ---------------------------------------------------------------- elements
+
+export function elementIds(doc: Doc, slideId: string): string[] { return attrKeys(elementsOf(doc, slideId)) }
+export function hasElement(doc: Doc, slideId: string, id: string): boolean { return hasSlide(doc, slideId) && elementsOf(doc, slideId).hasAttr(id) }
+export function elementScalars(doc: Doc, slideId: string, id: string): Scalars { return scalarsOf(element(doc, slideId, id)) }
+export function allElementScalars(doc: Doc, slideId: string): Map<string, Scalars> {
+  const out = new Map<string, Scalars>()
+  for (const [id, n] of elementsOf(doc, slideId).attrEntries() as Iterable<[string, N]>) out.set(id, scalarsOf(n))
   return out
 }
+export function createElement(doc: Doc, slideId: string, id: string, scalars: Scalars, text?: TextBlock[]): void {
+  const n = new Y.Node('el')
+  elementsOf(doc, slideId).setAttr(id, n as never)
+  for (const [k, v] of Object.entries(scalars)) n.setAttr(k, v as never)
+  if (text) writeText(doc, slideId, id, text)
+}
+export function deleteElement(doc: Doc, slideId: string, id: string): void { elementsOf(doc, slideId).deleteAttr(id) }
+export function setElementKey(doc: Doc, slideId: string, id: string, key: string, v: Json): void { element(doc, slideId, id).setAttr(key, v as never) }
+export function deleteElementKey(doc: Doc, slideId: string, id: string, key: string): void { element(doc, slideId, id).deleteAttr(key) }
 
-function slotIndex(el: Y.XmlElement, k: number): number {
-  if (k === 0) return 0
-  const arr = el.toArray(); let brs = 0
-  for (let j = 0; j < arr.length; j++) if (arr[j] instanceof Y.XmlElement && ++brs === k) return j + 1
-  return arr.length
+// ---------------------------------------------------------------- text (a nested <doc> node per text element)
+
+export function hasText(doc: Doc, slideId: string, id: string): boolean { return element(doc, slideId, id).getAttr('text') instanceof Y.Node }
+export function removeText(doc: Doc, slideId: string, id: string): void { element(doc, slideId, id).deleteAttr('text') }
+
+function marksOf(format: Record<string, unknown> | null | undefined): Marks {
+  const m: Marks = {}
+  if (format) for (const k of MARK_ORDER) if (format[k] != null) (m as Record<string, unknown>)[k] = format[k]
+  return m
+}
+const markKey = (m: Marks) => JSON.stringify(m)
+const BR = ' ' // a <br> node is one position in the block's sequence; in the diff string it is this character
+const BR_KEY = '<br>'
+
+function readBlock(n: N): TextBlock {
+  const inline: Inline[] = []
+  for (const op of opsOf(n)) {
+    if (typeof op.insert === 'string') {
+      const marks = marksOf(op.format)
+      const last = inline[inline.length - 1]
+      if (last && 'text' in last && markKey(last.marks) === markKey(marks)) last.text += op.insert
+      else inline.push({ text: op.insert, marks })
+    } else if (Array.isArray(op.insert)) for (const node of op.insert) if (node.name === 'br') inline.push({ br: true })
+  }
+  return { type: n.name === 'li' ? 'li' : 'p', inline }
+}
+const blocksOf = (f: N): N[] => f.toArray().filter((c): c is N => c instanceof Y.Node)
+export function readText(doc: Doc, slideId: string, id: string): TextBlock[] {
+  const f = element(doc, slideId, id).getAttr('text')
+  return f instanceof Y.Node ? blocksOf(f).map(readBlock) : []
+}
+
+/** Insert inline content at `at` with explicit formats (nothing inherited from the left). Returns the new position. */
+function insertInline(b: N, at: number, inline: Inline[]): number {
+  for (const r of inline) {
+    if ('br' in r) { b.insert(at, [new Y.Node('br')]); at++; continue }
+    if (!r.text) continue
+    b.insert(at, r.text, explicit(r.marks)); at += r.text.length
+  }
+  return at
+}
+function explicit(m: Marks): Record<string, unknown> {
+  const f: Record<string, unknown> = {}
+  for (const k of MARK_ORDER) f[k] = (m as Record<string, unknown>)[k] ?? null
+  return f
+}
+function newBlock(f: N, at: number, block: TextBlock): void {
+  const b = new Y.Node(block.type); f.insert(at, [b]); insertInline(b, 0, block.inline)
+}
+export function writeText(doc: Doc, slideId: string, id: string, blocks: TextBlock[]): void {
+  const f = new Y.Node('doc'); element(doc, slideId, id).setAttr('text', f as never)
+  blocks.forEach((b, i) => newBlock(f, i, b))
+}
+
+/** The block as one string (a <br> is BR) and one mark key per position. */
+function explode(inline: Inline[]): { s: string; m: string[] } {
+  let s = ''; const m: string[] = []
+  for (const r of inline) {
+    if ('br' in r) { s += BR; m.push(BR_KEY); continue }
+    s += r.text; for (let i = 0; i < r.text.length; i++) m.push(markKey(r.marks))
+  }
+  return { s, m }
 }
 
 /**
- * Patch a text element's fragment to `blocks`: unchanged blocks untouched; equal prefix and suffix kept; a block whose
- * <br> shape is unchanged patched character by character; anything else replaced block-wise. Returns ops written.
+ * Patch one block to `next` with the fewest operations: fast-diff over the block's positions (text and <br> alike, so a
+ * changed line break is a character-level edit on v14), then `format` over retained text whose marks changed.
+ */
+function patchBlock(b: N, next: Inline[]): number {
+  const cur = explode(readBlock(b).inline), nx = explode(next)
+  if (cur.s === nx.s && cur.m.join('\u0000') === nx.m.join('\u0000')) return 0
+  let ops = 0, at = 0, oi = 0, ni = 0
+  for (const [op, s] of diff(cur.s, nx.s)) {
+    if (op === diff.DELETE) { b.delete(at, s.length); oi += s.length; ops++; continue }
+    if (op === diff.INSERT) {
+      const runs: Inline[] = []
+      for (let k = 0; k < s.length; k++) {
+        const mk = nx.m[ni + k]
+        if (mk === BR_KEY) { runs.push({ br: true }); continue }
+        const last = runs[runs.length - 1]
+        if (last && 'text' in last && markKey(last.marks) === mk) last.text += s[k]; else runs.push({ text: s[k], marks: JSON.parse(mk) })
+      }
+      at = insertInline(b, at, runs); ni += s.length; ops += runs.length; continue
+    }
+    let k = 0
+    while (k < s.length) {
+      const om = cur.m[oi + k], nm = nx.m[ni + k]
+      if (om === nm || om === BR_KEY) { k++; continue }
+      let j = k + 1
+      while (j < s.length && cur.m[oi + j] === om && nx.m[ni + j] === nm) j++
+      const o = JSON.parse(om) as Record<string, unknown>, n = JSON.parse(nm) as Record<string, unknown>
+      const delta: Record<string, unknown> = {}
+      for (const name of MARK_ORDER) if (JSON.stringify(o[name]) !== JSON.stringify(n[name])) delta[name] = n[name] ?? null
+      b.format(at + k, j - k, delta); ops++
+      k = j
+    }
+    at += s.length; oi += s.length; ni += s.length
+  }
+  return ops
+}
+
+/**
+ * Patch a text element's <doc> to `blocks`: unchanged blocks untouched; equal prefix and suffix kept; a block of the
+ * same kind patched character by character (line breaks included); a different count replaced block-wise.
  */
 export function patchText(doc: Doc, slideId: string, id: string, blocks: TextBlock[]): number {
-  const f = element(doc, slideId, id).get('text')
-  if (!(f instanceof Y.XmlFragment)) { writeText(doc, slideId, id, blocks); return 1 }
-  const els = f.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
+  const f = element(doc, slideId, id).getAttr('text')
+  if (!(f instanceof Y.Node)) { writeText(doc, slideId, id, blocks); return 1 }
+  const els = blocksOf(f)
   const cur = els.map(readBlock)
   const same = (a: TextBlock, b: TextBlock) => JSON.stringify(a) === JSON.stringify(b)
   let pre = 0
@@ -256,21 +245,11 @@ export function patchText(doc: Doc, slideId: string, id: string, blocks: TextBlo
   let suf = 0
   while (suf < cur.length - pre && suf < blocks.length - pre && same(cur[cur.length - 1 - suf], blocks[blocks.length - 1 - suf])) suf++
   const curMid = els.slice(pre, els.length - suf), nextMid = blocks.slice(pre, blocks.length - suf)
-  let ops = 0
   if (curMid.length === nextMid.length) {
-    curMid.forEach((el, i) => {
-      const nb = nextMid[i]; const sl = slots(el); const segs = segments(nb.inline)
-      if (el.nodeName === nb.type && sl && sl.length === segs.length) {
-        sl.forEach((t, k) => {
-          if (t) ops += patchXmlText(t, segs[k])
-          else if (segs[k].some((r) => r.text)) {
-            // an empty segment gains text: a new XmlText right after the k-th <br> (or at the start)
-            const nt = new Y.XmlText(); el.insert(slotIndex(el, k), [nt]); insertRuns(nt, 0, segs[k]); ops++
-          }
-        })
-      } else {
-        const at = pre + i; f.delete(at, 1); newBlock(f, at, nb); ops++
-      }
+    let ops = 0
+    curMid.forEach((b, i) => {
+      if (b.name === nextMid[i].type) ops += patchBlock(b, nextMid[i].inline)
+      else { const at = pre + i; f.delete(at, 1); newBlock(f, at, nextMid[i]); ops++ }
     })
     return ops
   }
@@ -288,33 +267,28 @@ export type Change =
   | { kind: 'element'; id: string; keys: string[] }
   | { kind: 'text'; id: string }
 
-/** Deep changes of one slide as model-level records (what changed, never how Yjs represents it). */
+type AttrOp = { type: 'insert' | 'delete' | 'modify'; value?: { attrs?: Record<string, AttrOp> } }
+
+/** Deep changes of one slide as model-level records, read from v14's deep delta (one event per transaction). */
 export function observeSlide(doc: Doc, slideId: string, cb: (changes: Change[], origin: unknown, local: boolean) => void): () => void {
   const s = slide(doc, slideId)
-  const h = (events: Y.YEvent<Y.AbstractType<unknown>>[], tx: Y.Transaction) => {
+  const h = (ev: Y.YEvent<never>, tx: Y.Transaction) => {
+    const attrs = (ev.deltaDeep.toJSON() as { attrs?: Record<string, AttrOp> }).attrs ?? {}
     const out: Change[] = []
-    for (const ev of events) {
-      const path = ev.path as (string | number)[]
-      if (path.length === 0) {
-        const keys = [...ev.changes.keys.keys()].filter((k) => k !== 'notes' && k !== 'elements') as string[]
-        if (keys.length) out.push({ kind: 'slide', keys })
-      } else if (path[0] === 'notes') out.push({ kind: 'notes' })
-      else if (path[0] === 'elements' && path.length === 1) {
-        for (const [id, ch] of (ev as Y.YMapEvent<unknown>).changes.keys) {
-          if (ch.action !== 'add') out.push({ kind: 'removed', id })
-          if (ch.action !== 'delete') out.push({ kind: 'added', id })
-        }
-      } else if (path[0] === 'elements') {
-        const id = String(path[1])
-        if (path.length === 2) {
-          const keys = [...ev.changes.keys.keys()] as string[]
-          if (keys.includes('text')) out.push({ kind: 'text', id })
-          const rest = keys.filter((k) => k !== 'text'); if (rest.length) out.push({ kind: 'element', id, keys: rest })
-        } else out.push({ kind: 'text', id })
+    const slideKeys = Object.keys(attrs).filter((k) => k !== 'notes' && k !== 'elements')
+    if (slideKeys.length) out.push({ kind: 'slide', keys: slideKeys })
+    if (attrs.notes) out.push({ kind: 'notes' })
+    for (const [id, op] of Object.entries(attrs.elements?.value?.attrs ?? {})) {
+      if (op.type === 'delete') out.push({ kind: 'removed', id })
+      else if (op.type === 'insert') out.push({ kind: 'removed', id }, { kind: 'added', id })
+      else {
+        const keys = Object.keys(op.value?.attrs ?? {})
+        if (keys.includes('text')) out.push({ kind: 'text', id })
+        const rest = keys.filter((k) => k !== 'text'); if (rest.length) out.push({ kind: 'element', id, keys: rest })
       }
     }
     if (out.length) cb(out, tx.origin, tx.local)
   }
-  s.observeDeep(h)
-  return () => s.unobserveDeep(h)
+  s.observeDeep(h as never)
+  return () => s.unobserveDeep(h as never)
 }

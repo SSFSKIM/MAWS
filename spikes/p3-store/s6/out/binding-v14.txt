@@ -1,0 +1,13 @@
+[binding-v14] seam loaded: v14 @y/y 14.0.0-rc.28
+PASS  @y/prosemirror 2 reads the model's <doc> for <p> into a valid slide-text document  {"type":"doc","content":[{"type":"p","content":[{"type":"text","text":"Plain "},{"type":"text","marks":[{"type":"b"}],"text":"bold "},{"type":"text","marks":[{"type":"b"},{"type":"i"}],"text":"both"},{"type":"text","text":" "},{"type":"text","marks":[{"type":"a","attrs":{"href":"https://x.dev"}}],"text":"link"},{"type":"br"},{"type":"text","marks":[{"type":"span","attrs":{"color":"#cc0000"}}],"text":"red"},{"type":"text","text":" "},{"type":"text","marks":[{"type":"u"}],"text":"u"}]}]}
+PASS  … and what pmnodeToDelta writes, the model reads back identically (<p>)  [{"type":"p","inline":[{"text":"Plain ","marks":{}},{"text":"bold ","marks":{"b":{}}},{"text":"both","marks":{"b":{},"i":{}}},{"text":" ","marks":{}},{"text":"link","marks":{"a":{"href":"https://x.dev"}}},{"br":true},{"text":"red","marks":{"span":{"color":"#cc0000"}}},{"text":" ","marks":{}},{"text":"u","marks":{"u":{}}}]}]
+PASS  @y/prosemirror 2 reads the model's <doc> for <ul> into a valid slide-text document  {"type":"doc","content":[{"type":"li","content":[{"type":"text","text":"one"}]},{"type":"li","content":[{"type":"text","marks":[{"type":"b"}],"text":"two"},{"type":"text","text":" three"}]}]}
+PASS  … and what pmnodeToDelta writes, the model reads back identically (<ul>)  [{"type":"li","inline":[{"text":"one","marks":{}}]},{"type":"li","inline":[{"text":"two","marks":{"b":{}}},{"text":" three","marks":{}}]}]
+PASS  the bound editor holds exactly the document @y/prosemirror reads from the model  "<p>Plain <b>bold <i>both</i></b> <a href=\"https://x.dev\">link</a><br><span style=\"color: #cc0000;\">red</span> <u>u</u></p>"
+PASS  binding wrote nothing to the model on bind (no normalization update)  0
+PASS  a Tiptap edit on replica B reaches replica A through the model's reader  {"text":"Very Plain ","marks":{}}
+PASS  … with the marks and the <br> intact  [{"type":"p","inline":[{"text":"Very Plain ","marks":{}},{"text":"bold ","marks":{"b":{}}},{"text":"both","marks":{"b":{},"i":{}}},{"text":" ","marks":{}},{"text":"link","marks":{"a":{"href":"https://x.dev"}}},{"br":true},{"text":"red","marks":{"span":{"color":"#cc0000"}}},{"text":" ","marks":{}},{"text":"u","marks":{"u":{}}}]}]
+PASS  a model patch on A (agent publish) reaches B's editor  "<p>Very Plain <b>bold</b></p>"
+PASS  the binding stored marks under their plain names (no name--<hash> keys, no y-attributed-*)  "{\"type\":\"delta\",\"name\":\"p\",\"children\":[{\"type\":\"insert\",\"insert\":\"Very Plain \"},{\"type\":\"insert\",\"insert\":\"bold\",\"format\":{\"b\":{}}}]}"
+
+10/10 checks passed

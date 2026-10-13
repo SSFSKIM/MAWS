@@ -5,7 +5,7 @@ import { claudeExamples } from '../fixtures/claude-examples.ts'
 import { deckFiles, readFlat, resolveAnchor, setStyle, slideOrder } from '../src/model.ts'
 import { publish } from '../src/publish.ts'
 import * as Y from '../src/ydoc.ts'
-import { Report } from './lib.ts'
+import { Report, YJS } from './lib.ts'
 
 const r = new Report('publish')
 const H = Y.newDoc(1), U = Y.newDoc(2), A = Y.newDoc(3)
@@ -91,6 +91,18 @@ const merged2 = Y.readText(H, 'kpis', labelId)
 r.check('text: agent\'s word change + bold merges with the human\'s concurrent typing in the same box',
   JSON.stringify(merged2) === JSON.stringify([{ type: 'p', inline: [{ text: 'much ', marks: {} }, { text: 'faster', marks: { b: {} } }, { text: ' ramp (YoY)', marks: {} }] }]), merged2)
 r.num('update bytes, text publish ("much " inserted + bold on a word) (V1, V2)', { v1: t.v1, v2: t.v2, writes: t.res.writes })
+
+// a line break added by the agent while the human types elsewhere in the same box: v14 keeps <br> in the text's own
+// sequence (a character-level edit); v13 keeps text in XmlText nodes split around <br> elements (the block is replaced)
+files = agentRead()
+const kpis2 = files['project/slides/kpis.html']
+Y.transact(U, () => Y.patchText(U, 'kpis', labelId, [{ type: 'p', inline: [{ text: 'much ', marks: {} }, { text: 'faster', marks: { b: {} } }, { text: ' ramp (YoY) now', marks: {} }] }]), 'human'); live()
+agentPublish({ 'project/slides/kpis.html': kpis2.replace('</b> ramp (YoY)<', '</b><br>ramp (YoY)<') }, 'pub8b')
+const brText = JSON.stringify(Y.readText(H, 'kpis', labelId)[0].inline)
+const kept = brText.includes('now') && brText.includes('"br":true')
+r.log(`line break vs concurrent typing in the same box (${YJS === '13' ? 'v13' : 'v14'}): ${brText}`)
+r.check(YJS === '13' ? 'v13: the agent\'s added <br> replaces the block, the human\'s concurrent " now" is lost (recorded limitation)' : 'v14: the agent\'s added <br> and the human\'s concurrent " now" both survive',
+  YJS === '13' ? !brText.includes('now') && brText.includes('"br":true') : kept, brText)
 
 // --- order: a z-order change and a flow re-order in the file write 1 key each
 files = agentRead()

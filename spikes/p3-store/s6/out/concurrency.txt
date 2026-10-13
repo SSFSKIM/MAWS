@@ -1,7 +1,8 @@
+[concurrency] seam loaded: v13 yjs 13.6.33
 PASS  concurrent move (both set left/top): converged in 200/200
-PASS  concurrent move (both set left/top): outcome  {"A whole":103,"B whole":97}
+PASS  concurrent move (both set left/top): outcome  {"A whole":117,"B whole":83}
 PASS  concurrent move, left and top in separate transactions: converged in 200/200
-PASS  concurrent move, left and top in separate transactions: outcome  {"A whole":105,"B whole":95}
+PASS  concurrent move, left and top in separate transactions: outcome  {"A whole":100,"B whole":100}
 PASS  concurrent move + restyle of one element: converged in 200/200
 PASS  concurrent move + restyle of one element: outcome  {"both":200}
 PASS  concurrent z-order (A: e1 to front, B: e2 to front): converged in 200/200
@@ -24,7 +25,7 @@ PASS  concurrent cycle (A: g1 into g2, B: g2 into g1): converged in 200/200
 PASS  concurrent cycle (A: g1 into g2, B: g2 into g1): outcome  {"both rendered true|g1 at section true|repair 1|g2 in g1 true":200}
 PASS  agent publish (text + colour) vs human move of the same element: converged in 200/200
 PASS  agent publish (text + colour) vs human move of the same element: outcome  {"merged":200}
-PASS  contrast: the same re-order as XmlFragment delete+insert duplicates the slide (200/200)
+PASS  contrast: the same re-order as child delete+insert duplicates the slide (200/200)
 PASS  object anchor {slideId, elementId} resolves to the same element after move + z-order + slide re-order + regroup + republish  {"live":true,"tag":"p","parent":"g2"}
 
 28/28 checks passed

@@ -118,6 +118,11 @@
       ]
     },
     {
+      "name": "v13: the agent's added <br> replaces the block, the human's concurrent \" now\" is lost (recorded limitation)",
+      "pass": true,
+      "detail": "[{\"text\":\"much \",\"marks\":{}},{\"text\":\"faster\",\"marks\":{\"b\":{}}},{\"br\":true},{\"text\":\"ramp (YoY)\",\"marks\":{}}]"
+    },
+    {
       "name": "flow re-order of two siblings: 1 key written",
       "pass": true,
       "detail": 1

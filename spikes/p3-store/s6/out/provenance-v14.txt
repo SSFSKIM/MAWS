@@ -1,0 +1,29 @@
+[provenance-v14] seam loaded: v14 @y/y 14.0.0-rc.28
+log window: 2:human 41B, 3:session:B 204B, 4:human 21B
+NUM   attributed deck diff: ms, encoded ContentMap bytes = {"ms":4.1,"contentMapBytes":160}
+  plan.elements.title.style:font-size = "80px"  [insert=session:B insertAt=19:03]
+  plan.elements.card.text#text "clear "  [insert=session:B insertAt=19:03]
+  plan.elements.note = <node>  [insert=session:B insertAt=19:03]
+  plan.elements.note.tag = "p"  [insert=session:B insertAt=19:03]
+  plan.elements.note.parent = ""  [insert=session:B insertAt=19:03]
+  plan.elements.note.style:position = "absolute"  [insert=session:B insertAt=19:03]
+  plan.elements.note.style:right = "128px"  [insert=session:B insertAt=19:03]
+  plan.elements.note.style:top = "64px"  [insert=session:B insertAt=19:03]
+  plan.elements.note.style:font-size = "24px"  [insert=session:B insertAt=19:03]
+  plan.elements.note.text = <node>  [insert=session:B insertAt=19:03]
+  plan.elements.note.text#text "<node>"  [insert=session:B insertAt=19:03]
+  plan.elements.note.text#text "Draft"  [insert=session:B insertAt=19:03]
+  plan.elements.note.z = "a2"  [insert=session:B insertAt=19:03]
+  plan.elements.pic = <node>  [delete=human deleteAt=19:04]
+  plan.elements.foot.style:left = "200px"  [insert=human insertAt=19:02]
+  plan.elements.foot.style:bottom = "80px"  [insert=human insertAt=19:02]
+raw attributed delta (first 1500 chars): {"type":"delta","attrs":{"plan":{"type":"insert","value":{"type":"delta","name":"slide","attrs":{"style:background":{"type":"insert","value":"#fbfbf8"},"style:color":{"type":"insert","value":"#1a1a1a"},"style:font-family":{"type":"insert","value":"Georgia, serif"},"style:padding":{"type":"insert","value":"128px 128px 160px"},"style:display":{"type":"insert","value":"flex"},"style:flex-direction":{"type":"insert","value":"column"},"style:justify-content":{"type":"insert","value":"space-between"},"style:gap":{"type":"insert","value":"48px"},"attr:data-transition":{"type":"insert","value":"fade"},"order":{"type":"insert","value":"a0"},"notes":{"type":"insert","value":{"type":"delta","name":"notes","children":[{"type":"insert","insert":"Say hi."}]}},"elements":{"type":"insert","value":{"type":"delta","name":"elements","attrs":{"title":{"type":"insert","value":{"type":"delta","name":"el","attrs":{"tag":{"type":"insert","value":"h2"},"parent":{"type":"insert","value":""},"order":{"type":"insert","value":"a0"},"style:font-family":{"type":"insert","value":"'Source Serif 4', Georgia, serif"},"style:font-size":{"type":"insert","value":"80px","attribution":{"insert":["session:B"],"insertAt":1791831780000}},"style:font-weight":{"type":"insert","value":"400"},"style:line-height":{"type":"insert","value":"1.1"},"text":{"type":"insert","value":{"type":"delta","name":"doc","children":[{"type":"insert","insert":[{"type":"delta","name":"p","children":[{"type":"insert","insert":"Changes"}]}]}]}
+PASS  the human's move: foot.style:left and style:bottom attributed to the human with a time  ["foot.style:left = \"200px\"  [insert=human insertAt=19:02]","foot.style:bottom = \"80px\"  [insert=human insertAt=19:02]"]
+PASS  the agent's restyle: title.style:font-size attributed to session:B  ["title.style:font-size = \"80px\"  [insert=session:B insertAt=19:03]"]
+PASS  the agent's text edit in card: attributed inside the text delta  ["card.text#text \"clear \"  [insert=session:B insertAt=19:03]"]
+PASS  the agent's new element note: an insert attributed to session:B  ["note = <node>  [insert=session:B insertAt=19:03]","note.tag = \"p\"  [insert=session:B insertAt=19:03]","note.parent = \"\"  [insert=session:B insertAt=19:03]","note.style:position = \"absolute\"  [insert=session:B insertAt=19:03]","note.style:right = \"128px\"  [insert=session:B insertAt=19:03]","note.style:top = \"64px\"  [insert=session:B insertAt=19:03]","note.style:font-size = \"24px\"  [insert=session:B insertAt=19:03]","note.text = <node>  [insert=session:B insertAt=19:03]","note.text#text \"<node>\"  [insert=session:B insertAt=19:03]","note.text#text \"Draft\"  [insert=session:B insertAt=19:03]","note.z = \"a2\"  [insert=session:B insertAt=19:03]"]
+PASS  the human's deletion of pic: a delete attributed to the human  ["pic = <node>  [delete=human deleteAt=19:04]"]
+PASS  untouched elements and the slide's own keys carry no attribution  []
+PASS  the attributed elements are exactly the ones the window changed (per-element provenance, no noise)  "card,foot,note,pic,title"
+
+7/7 checks passed

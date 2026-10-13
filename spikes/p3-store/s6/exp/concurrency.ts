@@ -1,11 +1,12 @@
 // S6 item 4: concurrency on two replicas. Every scenario: a common base, concurrent operations on A and B, a sync in
 // both directions, then convergence (both replicas serialize to the same deck files) and the scenario's outcome. Each
 // scenario repeats over many random client-id pairs, since Yjs breaks concurrent ties by client id.
-import * as YJS from 'yjs' // only for the XmlFragment contrast below; the model goes through src/ydoc.ts
+import * as YJS from 'yjs' // only for the v13 XmlFragment contrast below; the model goes through src/ydoc.ts
+import * as Y14 from '@y/y' // only for the v14 child-list contrast below
 import { deckFiles, deleteElementTree, moveInto, moveSlide, readFlat, readSlide, repair, resolveAnchor, setStyle, slideOrder, zOrder } from '../src/model.ts'
 import { publish } from '../src/publish.ts'
 import * as Y from '../src/ydoc.ts'
-import { Report } from './lib.ts'
+import { Report, YJS as VERSION } from './lib.ts'
 
 const r = new Report('concurrency')
 const TRIALS = 200
@@ -168,20 +169,32 @@ run('agent publish (text + colour) vs human move of the same element', (a, b) =>
   return e.style.left === '900px' && e.style.color === '#2b7a78' && JSON.stringify(e.text).includes('One, rewritten') ? 'merged' : 'lost'
 }, (o) => o.merged === TRIALS)
 
-// contrast: the same concurrent re-order as delete + insert in a Y.XmlFragment duplicates (research §6, Spike 4)
+// contrast: the same concurrent re-order as delete + insert of a child (v13: Y.XmlFragment, research §6 Spike 4;
+// v14: a Y.Node's children — v14 has no move op either) duplicates the slide
 {
   let dup = 0
   for (let i = 0; i < TRIALS; i++) {
-    const d0 = new YJS.Doc(); const f0 = d0.getXmlFragment('slides')
-    f0.insert(0, ['s1', 's2', 's3', 's4'].map((id) => { const e = new YJS.XmlElement('section'); e.setAttribute('id', id); return e }))
-    const [a, b] = [new YJS.Doc(), new YJS.Doc()]
-    YJS.applyUpdate(a, YJS.encodeStateAsUpdate(d0)); YJS.applyUpdate(b, YJS.encodeStateAsUpdate(d0))
-    const mv = (d: YJS.Doc, to: number) => { const f = d.getXmlFragment('slides'); const c = (f.get(2) as YJS.XmlElement).clone(); d.transact(() => { f.delete(2, 1); f.insert(to, [c]) }) }
-    mv(a, 0); mv(b, 3)
-    YJS.applyUpdate(a, YJS.encodeStateAsUpdate(b)); YJS.applyUpdate(b, YJS.encodeStateAsUpdate(a))
-    if (a.getXmlFragment('slides').length !== 4) dup++
+    if (VERSION === '13') {
+      const d0 = new YJS.Doc(); const f0 = d0.getXmlFragment('slides')
+      f0.insert(0, ['s1', 's2', 's3', 's4'].map((id) => { const e = new YJS.XmlElement('section'); e.setAttribute('id', id); return e }))
+      const [a, b] = [new YJS.Doc(), new YJS.Doc()]
+      YJS.applyUpdate(a, YJS.encodeStateAsUpdate(d0)); YJS.applyUpdate(b, YJS.encodeStateAsUpdate(d0))
+      const mv = (d: YJS.Doc, to: number) => { const f = d.getXmlFragment('slides'); const c = (f.get(2) as YJS.XmlElement).clone(); d.transact(() => { f.delete(2, 1); f.insert(to, [c]) }) }
+      mv(a, 0); mv(b, 3)
+      YJS.applyUpdate(a, YJS.encodeStateAsUpdate(b)); YJS.applyUpdate(b, YJS.encodeStateAsUpdate(a))
+      if (a.getXmlFragment('slides').length !== 4) dup++
+    } else {
+      const d0 = new Y14.Doc(); const f0 = d0.get('slides')
+      d0.transact(() => f0.insert(0, ['s1', 's2', 's3', 's4'].map((id) => { const e = new Y14.Node('section'); e.setAttr('id', id); return e })))
+      const [a, b] = [new Y14.Doc(), new Y14.Doc()]
+      Y14.applyUpdate(a, Y14.encodeStateAsUpdate(d0)); Y14.applyUpdate(b, Y14.encodeStateAsUpdate(d0))
+      const mv = (d: Y14.Doc, to: number) => { const f = d.get('slides'); const c = (f.get(2) as Y14.Node).clone(); d.transact(() => { f.delete(2, 1); f.insert(to, [c]) }) }
+      mv(a, 0); mv(b, 3)
+      Y14.applyUpdate(a, Y14.encodeStateAsUpdate(b)); Y14.applyUpdate(b, Y14.encodeStateAsUpdate(a))
+      if (a.get('slides').length !== 4) dup++
+    }
   }
-  r.check(`contrast: the same re-order as XmlFragment delete+insert duplicates the slide (${dup}/${TRIALS})`, dup === TRIALS)
+  r.check(`contrast: the same re-order as child delete+insert duplicates the slide (${dup}/${TRIALS})`, dup === TRIALS)
 }
 
 // anchors: one id stays one element through everything above that does not delete it

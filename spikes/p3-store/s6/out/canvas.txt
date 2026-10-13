@@ -1,3 +1,4 @@
+[canvas] seam loaded: v13 yjs 13.6.33
 PASS  both replicas render the same DOM
 PASS  pinned-under backdrop rendered first with data-layer=under; the section isolates
 PASS  drag "backdrop" on R1 (3 pointer moves): R2's patched DOM equals a fresh render of its model

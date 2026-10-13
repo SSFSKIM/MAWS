@@ -2,8 +2,9 @@
 // the model writes into a valid document of the slide-text schema (Claude's inline set, no wider), and what
 // y-prosemirror writes, the model reads back identically. Then a live binding: ySyncPlugin on one replica's fragment,
 // an edit typed through ProseMirror, the other replica reads it.
-import { Schema, type NodeSpec } from '@tiptap/pm/model'
-import { EditorState } from '@tiptap/pm/state'
+// the shared package's @tiptap/pm (the prosemirror copy its y-prosemirror 1.3.7 uses); s6's own @tiptap/pm serves the v14 stack
+import { Schema, type NodeSpec } from '../../node_modules/@tiptap/pm/dist/model/index.js'
+import { EditorState } from '../../node_modules/@tiptap/pm/dist/state/index.js'
 import * as YJS from 'yjs'
 import { prosemirrorJSONToYXmlFragment, yXmlFragmentToProseMirrorRootNode, ySyncPlugin, ySyncPluginKey } from 'y-prosemirror'
 import { Window } from 'happy-dom'
@@ -12,6 +13,7 @@ import { readFlat } from '../src/model.ts'
 import * as Y from '../src/ydoc.ts'
 import { Report } from './lib.ts'
 
+if (process.env.S6_YJS !== '13') throw new Error('exp/binding.ts is the v13 check: run it with --import ./exp/use-v13.mjs (v14: exp/binding-v14.ts)')
 const r = new Report('binding')
 /** The slide-text schema: a text box's lines are `p` (h1-h3/p/th/td) or `li` (ul/ol) blocks; inline: text, br; marks a, span, b, i, u. */
 const slideText = (block: 'p' | 'li') => new Schema({
@@ -32,7 +34,7 @@ const doc = Y.newDoc(1)
 publish(doc, { 'project/slides/s.html': `<section id="s">
 <p id="t">Plain <b>bold <i>both</i></b> <a href="https://x.dev">link</a><br><span style="color:#c00">red</span> <u>u</u></p>
 <ul id="l"><li>one</li><li><b>two</b> three</li></ul></section>` })
-const elMap = (d: YJS.Doc, id: string) => ((d.getMap('slides').get('s') as YJS.Map<unknown>).get('elements') as YJS.Map<YJS.Map<unknown>>).get(id)!
+const elMap = (doc_: unknown, id: string) => (((doc_ as YJS.Doc).getMap('slides').get('s') as YJS.Map<unknown>).get('elements') as YJS.Map<YJS.Map<unknown>>).get(id)!
 const frag = (id: string) => elMap(doc, id).get('text') as YJS.XmlFragment
 
 for (const [id, block] of [['t', 'p'], ['l', 'li']] as const) {
@@ -53,7 +55,7 @@ for (const [id, block] of [['t', 'p'], ['l', 'li']] as const) {
 // a live binding: ProseMirror with ySyncPlugin on replica B's fragment types a word; replica A reads it
 {
   const win = new Window(); Object.assign(globalThis, { window: win, document: win.document })
-  const { EditorView } = await import('@tiptap/pm/view')
+  const { EditorView } = await import('../../node_modules/@tiptap/pm/dist/view/index.js')
   const B = Y.newDoc(3); Y.pull(B, doc)
   const fragB = elMap(B, 't').get('text') as YJS.XmlFragment
   const schema = slideText('p')

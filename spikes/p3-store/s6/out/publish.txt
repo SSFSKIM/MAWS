@@ -1,3 +1,4 @@
+[publish] seam loaded: v13 yjs 13.6.33
 PASS  first publish lands as ONE update  {"res":{"ok":true,"diagnostics":{"project/slides/kpis.html":[{"severity":"note","where":"div","message":"comment dropped"}]},"held":{},"writes":11},"updates":1,"v1":4573,"v2":3742}
 PASS  deck.json: unknown keys kept, order applied
 PASS  no-op republish of the files just read: 0 writes, no update emitted  {"res":{"ok":true,"diagnostics":{},"held":{},"writes":0},"updates":0,"v1":0,"v2":0}
@@ -11,6 +12,8 @@ PASS  removed element: its id is gone from the model, anchor orphaned  1
 PASS  re-added with the same id: the same element (the anchor resolves again)  2
 PASS  text: agent's word change + bold merges with the human's concurrent typing in the same box  [{"type":"p","inline":[{"text":"much ","marks":{}},{"text":"faster","marks":{"b":{}}},{"text":" ramp (YoY)","marks":{}}]}]
 NUM   update bytes, text publish ("much " inserted + bold on a word) (V1, V2) = {"v1":42,"v2":44,"writes":2}
+line break vs concurrent typing in the same box (v13): [{"text":"much ","marks":{}},{"text":"faster","marks":{"b":{}}},{"br":true},{"text":"ramp (YoY)","marks":{}}]
+PASS  v13: the agent's added <br> replaces the block, the human's concurrent " now" is lost (recorded limitation)  "[{\"text\":\"much \",\"marks\":{}},{\"text\":\"faster\",\"marks\":{\"b\":{}}},{\"br\":true},{\"text\":\"ramp (YoY)\",\"marks\":{}}]"
 PASS  flow re-order of two siblings: 1 key written  1
 PASS  pinned element moved from under to over the flow layer: 1 key written  1
 PASS  a structurally invalid file is held (slideHeld with reasons), not trimmed; read returns it verbatim  {"map":["unknown or misplaced tag <iframe>"]}
@@ -19,4 +22,4 @@ PASS  a publish with one invalid entry is refused whole; the replica is unchange
 PASS  deck.json order change: 1 slide key written  1
 PASS  slide removal (file null + order) in one transaction  1
 
-18/18 checks passed
+19/19 checks passed
