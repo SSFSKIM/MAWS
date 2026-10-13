@@ -2,8 +2,8 @@
 // `s4/src/host.ts` `repair` and `carryCopyEdits`): every block keeps a unique id. A block without one gets one; a
 // duplicate made by two concurrent moves (or a move racing a drag, or a retype) keeps the later copy, by host arrival,
 // after carrying into it the edits made in the other copy, which is then tombstoned; any other duplicate (a concurrent
-// split, a writer that copied an id) keeps the id on the earlier node and re-ids the rest. Text is never deleted but
-// in a losing copy whose edits were carried. Scoped to the nodes an update inserted or re-id'd (all of them after a
+// split, a paste or a writer that copied an id) keeps the id on a moved block's copy, else on the earlier node, and
+// re-ids the rest. Text is never deleted but in a losing copy whose edits were carried. Scoped to the nodes an update inserted or re-id'd (all of them after a
 // restore); planned first, then written, so a hook never throws after a partial write of its own.
 import type { Doc, Node } from '../yjs';
 import { YNode } from '../yjs/document';
@@ -62,7 +62,8 @@ export function planRepair(doc: Doc, candidates: Iterable<Node>, registry: Carry
     }
     const rest = group.filter((node) => !losers.includes(node));
     if (rest.length > 1) {
-      const keeper = rest.find((node) => !insertedNow(node)) ?? rest[0];
+      // a moved block's copy keeps its id (the carries and a later concurrent move find it by it), else the earlier node
+      const keeper = rest.find((node) => registry.copy(itemOf(node))) ?? rest.find((node) => !insertedNow(node)) ?? rest[0];
       plan.reid.push(...rest.filter((node) => node !== keeper));
     }
   }

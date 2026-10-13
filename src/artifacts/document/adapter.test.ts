@@ -184,6 +184,21 @@ describe('forwarding (S4 moves A)', () => {
     });
   }
 
+  it('an incremental deletion into the original after the move is replayed into the moved copy', () => {
+    const adapter = documentAdapter();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer();
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    const at = textOf(person, 'p3').indexOf(' the human');
+    transact(person, () => nodeOf(person, 'p3').delete(at, ' the human'.length)); // the person has not seen the move
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'p3')).toBe('A plain paragraph types into. Words to keep.');
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+
   it('replays nothing from a sync step 2: a reconnecting replica that saw the move does not delete the moved text', () => {
     const adapter = documentAdapter();
     const host = new Host(seedDoc(), adapter);
@@ -296,6 +311,32 @@ describe('concurrent moves and the id repair (S4 moves B, C, D)', () => {
     expect(textOf(host.live, 'p3')).toBe('A very plain paragraph the human types into. Words to keep.');
     expect(dupes(ids(host.live))).toEqual([]);
     expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
+  });
+
+  it('a third copy re-id’d beside a moved block: the move’s copy keeps the id, so a later concurrent move still keeps one copy', () => {
+    const adapter = documentAdapter({ generateID: sequence('r') });
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer(); // stale for the person's drag
+    const person = host.peer();
+    const index = DocIndex.of(person);
+    const p3 = index.pm(index.find('p3')!.top);
+    transact(person, () => {
+      body(person).insert(0, [pmnodeToDelta(p3)]); // a paste that kept the id
+      body(person).delete(order(person).lastIndexOf('p3'), 1); // and a drag of the original after p4, one update
+      body(person).insert(order(person).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+    });
+    host.send(person, human);
+    let after = order(host.live);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(after.indexOf('p3')).toBe(after.indexOf('p4') + 1); // the dragged block kept its id
+    expect(after[0]).toMatch(/^r\d+$/); // the paste re-id'd, its text kept
+    const moved = applyEdit(agent, [{ op: 'move', id: 'p3', after: 'h1' }]);
+    adapter.registerCarries(ARTIFACT, moved.carries);
+    host.send(agent, agent1);
+    after = order(host.live);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(after.indexOf('p3')).toBe(after.indexOf('h1') + 1); // the later move's copy kept
+    expect(after.filter((id) => textOf(host.live, id) === 'A plain paragraph the human types into. Words to keep.')).toHaveLength(2);
   });
 
   it('concurrent splits that carry one id: the earliest keeps it, the later ones are re-id’d, no text deleted', () => {
