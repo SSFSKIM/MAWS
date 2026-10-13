@@ -131,7 +131,7 @@ export function substituteVars(cssText: string, lookup: (name: string) => string
 }
 
 /** The local `resolveDsVars`: D's semantics over `LocalTokens`, which hold the document medium's values only. */
-export function resolveDsVarsLocal(cssText: string, tokens: LocalTokens, _medium: Medium = 'document', overrides: TokenOverrides = {}): string {
+export function resolveDsVarsLocal(cssText: string, tokens: LocalTokens, _medium?: Medium, overrides: TokenOverrides = {}): string {
   const values = { ...(tokens.properties as Record<string, string>), ...(overrides as Record<string, string>) };
   return substituteVars(cssText, (name) => (Object.hasOwn(values, name) ? values[name] : undefined), 'take');
 }
