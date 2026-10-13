@@ -1,6 +1,7 @@
 // A zip archive of in-memory files, for the `claude` export of a design system (one file to hand over, as A's export
-// service writes one per export). PKZIP 2.0 entries, no ZIP64 (an export is far below 4 GB): each file deflated when
-// that is smaller, stored otherwise (fonts and images are compressed already), names flagged UTF-8, in the order given.
+// service writes one per export). PKZIP 2.0 entries, no ZIP64 (an export is far below 4 GB), names flagged UTF-8, in the
+// order given: text deflated when that is smaller, bytes stored (an asset is a font or an image, compressed already, and
+// deflating megabytes of it would hold main's thread for nothing).
 import { crc32, deflateRawSync } from 'node:zlib';
 
 const LOCAL = 0x04034b50;
@@ -27,9 +28,9 @@ export function zipFiles(files: Readonly<Record<string, string | Uint8Array>>, a
   for (const [path, content] of Object.entries(files)) {
     const name = Buffer.from(path, 'utf8');
     const data = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
-    const deflated = deflateRawSync(data);
-    const method = deflated.byteLength < data.byteLength ? 8 : 0;
-    const stored = method === 8 ? deflated : data;
+    const deflated = typeof content === 'string' ? deflateRawSync(data) : null;
+    const method = deflated && deflated.byteLength < data.byteLength ? 8 : 0;
+    const stored = method === 8 ? deflated! : data;
     const crc = crc32(data);
 
     const local = Buffer.alloc(30);

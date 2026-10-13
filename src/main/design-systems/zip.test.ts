@@ -1,5 +1,5 @@
-// The zip writer the `claude` export packs Claude's files with: a standard archive (deflated where that is smaller,
-// stored otherwise; UTF-8 names), read back here entry by entry and, where the system has it, by the system's `unzip`.
+// The zip writer the `claude` export packs Claude's files with: a standard archive (text deflated where that is smaller,
+// bytes stored; UTF-8 names), read back here entry by entry and, where the system has it, by the system's `unzip`.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,10 +15,10 @@ describe('zipFiles', () => {
   const files = {
     'tokens.json': `${JSON.stringify({ name: 'Harbor', color: { tokens: Array.from({ length: 40 }, (_, i) => ({ name: `c${i}`, value: '#123456' })) } }, null, 2)}\n`,
     'README.md': '# Harbor — 항구\n',
-    'fonts/face.woff2': new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3]),
+    'fonts/face.woff2': new Uint8Array([0x77, 0x4f, 0x46, 0x32, ...new Array<number>(64).fill(0)]), // would deflate: stored all the same
   };
 
-  it('writes every file under its path, deflating text that shrinks and storing what does not, with each crc', () => {
+  it('writes every file under its path, deflating text that shrinks and storing bytes, with each crc', () => {
     const entries = readZip(zipFiles(files));
     expect(entries.map((e) => e.name)).toEqual(['tokens.json', 'README.md', 'fonts/face.woff2']);
     for (const entry of entries) {
