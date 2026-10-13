@@ -599,6 +599,13 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
       - *The chain.* A builds one registration point in its M7: `ArtifactStore.registerDesignSystemChain(chain)`. A's pin and A's tools both read through it, and until then the pin stays as A's store chain has it, with no house link and no fall-through for a deleted system. D's signatures went to the architect for X23 and X28.
       - *L's `e2e:library`.* It fails on the three seeded rows, and L makes its cases independent of seeding on its own branch. D changes nothing in L's files.
       - *The face alias.* It is correct as built (A's Decision Log 40d): assets are content-addressed, so different bytes under a used name get a new ref.
+27. 2026-10-13 (M6b's decisions, folded from its report; the names are proposed to the architect).
+    - **The answer.** `{designSystemId, name?}` or `{create: true}`. The optional `name` lets the steer line and the answered capsule show the system's name rather than its id. It is additive to X25's shape.
+    - **`tools.ts`.** The ask schemas are E1's and are read before A's blocks, so the modality's lines are edited in place, each marked P3-D, instead of appended in a fence. This departs from the letter of §7's append rule and is reported to the architect.
+    - **The sheet's swatches** are bg, bg-raised, text, text-muted and accent. They are drawn from the resolved values `useDesignSystem` gives, not from a full `DesignSystemScope`. A scope would also load a system's faces (3.5 MB for `official`), which the CSP blocks until A's M7 (entry 23). `DesignSystemView` gains an optional `origin`, additive to X28.
+    - **Seeding.** Each default is created with its files in one transaction, through A's create with `initial(doc)`. Assets cannot join that transaction, so a seeding record in the store's meta (`designSystems.seeding`, written through A's `storage.setMeta`) makes seeding resumable. An interrupted run finishes the remaining defaults at the next start, and a failed asset upload is logged and retried at the next start.
+    - **The e2e case** replays a journal derived from E1's recorded blocking ask, with only the questions and answers rewritten.
+    - **Residue.** A system the owner picks and that is deleted before Submit is still sent by id. The agent's next call is refused, naming the missing system, so this goes to the tech-debt tracker.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
