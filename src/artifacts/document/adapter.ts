@@ -277,7 +277,7 @@ export function documentAdapter({ artifactOf, generateID = nanoid8 }: DocumentAd
         const live = itemAt(doc, asSlot(item.id));
         if (live && !live.deleted) continue; // it landed in a live block
         const text = item.content.str;
-        const slots = [...text].map((_, k): Slot => [item.id.client, item.id.clock + k]);
+        const slots = Array.from({ length: text.length }, (_, k): Slot => [item.id.client, item.id.clock + k]); // UTF-16 units, as Yjs clocks count
         replay(registry, doc, text, slots, item.origin && asSlot(item.origin), item.rightOrigin && asSlot(item.rightOrigin), isIdLike(item.parent) ? asSlot(item.parent) : null);
       }
       if (!step2) {

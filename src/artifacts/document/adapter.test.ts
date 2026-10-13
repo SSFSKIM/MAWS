@@ -213,6 +213,20 @@ describe('forwarding (S4 moves A)', () => {
     expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
   });
 
+  it('text after a surrogate pair typed into the original after the move follows into the moved copy, and so does its deletion', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer();
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    typeAt(person, 'p3', 'end', '🍕x'); // the person has not seen the move
+    host.send(person, human);
+    expect(textOf(host.live, 'p3')).toBe('A plain paragraph the human types into. Words to keep.🍕x');
+    transact(person, () => nodeOf(person, 'p3').delete(nodeOf(person, 'p3').length - 1, 1));
+    host.send(person, human);
+    expect(textOf(host.live, 'p3')).toBe('A plain paragraph the human types into. Words to keep.🍕');
+  });
+
   it('replays nothing from a sync step 2: a reconnecting replica that saw the move does not delete the moved text', () => {
     const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
