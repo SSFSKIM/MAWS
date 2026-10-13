@@ -82,4 +82,5 @@ Times are the recording commits' times (PDT).
 - 2026-10-12 20:55: S7a recorded (X24: delta versions with `artifact_head`, `enc` and zstd bytes, the provenance tiers, `revertUpdateFixed`).
 - 2026-10-12 21:05: A confirmed zstd inside Electron 44.4.5's Node 24.21.0 (`node:zlib` `zstdCompressSync`, a 100 kB round-trip) and folded Decision Log 36 (its 31fbdc22); M1's fix wave 2 complete (ee663d48), under re-review.
 - 2026-10-12 21:20: S7b recorded and P3-0 landed (bcad5030): X24 gains the awareness destroy, the 60 s idle unload and the heap check; S7's bounds are B's and C's gate.
+- 2026-10-12 21:45: the `Y.undoContentIds` gap filed upstream as yjs/yjs#814 (the owner's ruling, Decision Log 38); A's regression tests cite it.
 - 2026-10-12 19:55: A's `afterUpdate` and `revertScope {keepConversations?}` hooks recorded; host repairs credited to the triggering actor, no system actor.
