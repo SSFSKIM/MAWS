@@ -217,6 +217,206 @@ suggestions" (put to the owner). Pitfalls 1 and 8 go into P3-A's brief.
 4. Vendor `@y/prosemirror` at a pinned commit? Recommended only if upstream has not fixed the partial-accept gap before
    P3-B lands.
 
+## S2 — The host document service, the port and the detached channel
+
+**Verdict: the topology holds on Yjs v14** (`@y/y` 14.0.0-rc.28, `@y/protocols` 1.0.6-rc.1, lib0 1.0.0-rc.36, exact pins,
+one copy each in every bundle, verified), in real Electron 44.4.5, v13 kept for comparison: a utility-process host owning
+a `node:sqlite` store serves two hidden renderer replicas over one `MessageChannelMain` per document plus an in-process
+agent replica; acknowledged edits survive a SIGKILL; a detached host keeps taking an agent's edits with main gone and a
+later main relays a renderer over a binary channel on the same socket. Nothing failed on v14 alone. The §4.2 changes
+below were accepted by the architect (spec Decision Log 26; ledger X13, X24).
+
+§4.2 changes:
+1. An `ack` frame (MAWS type 100, `[durableFrames, revision]`) and commit-before-reveal: no frame revealing an update
+   leaves the host before its row commits; commits are grouped per event-loop turn.
+2. `PRAGMA fullfsync=ON`: on macOS `synchronous=FULL` alone does not flush the drive cache (SQLite docs, source).
+3. Untrusted updates are pre-checked (gaps, missing origins or parents, unknown deletes refused); a doc left with pending
+   state or a skip hole is evicted and reloaded.
+4. Provider handshake: after connecting, a replica sends only step 1 and awareness until it has answered the host's
+   step 1 (else its own edits arrive as a gap).
+5. Provenance is v14's native attribution, stored as encoded ContentMaps beside the log (shape below).
+6. Log rows in V1 (the wire format), versions as V2 states; the live revision is the global log `seq` (rising, sparse per
+   document, never reused after compaction).
+
+Reproduce (from the repository root; `<Electron>` = `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`;
+every Electron run through waitload20 and with-slot): build v14 `S2_YJS=14 node spikes/p3-store/electron/build.mjs`
+(to `/tmp/p3-s2/build/electron-v14`; one harness source with the `s2/src` modules redirected to their `s2/v14`
+siblings), v13 `node spikes/p3-store/electron/build.mjs`; seeds: bundle `s2/check/seed-v14.ts` (v13: `seed.ts`) with
+esbuild and run it with `ELECTRON_RUN_AS_NODE=1` for 1 MB and 5 MB; scenarios `S2_OUT_DIR=spikes/p3-store/s2/out
+S2_BASE=/tmp/p3-s2/<run> <Electron> /tmp/p3-s2/build/electron-v14/main.cjs --scenario=sync|latency|kill|fuzz`
+(`S2_FULLFSYNC=1`, `S2_KILL_FLOOD=1`); detached `S2_BUILD=/tmp/p3-s2/build/electron-v14
+S2_AGENT=ddoc:sess-detached:120:150 zsh spikes/p3-store/electron/run-detached.sh`; Node checks: bundle
+`s2/check/{service-check-v14,socket-check-v14,v14-probe,v14-gap-probe,v14-attr-bench}.ts` and run each under
+`ELECTRON_RUN_AS_NODE=1`. Outputs in `s2/out/` (`-v14` suffix; v13 files unsuffixed). Executor re-check: `kill-v14.json`
+(0 acked lost, all in store, converged) and `v14-gap-probe.txt` read back, figures as below.
+
+### 1. The document service (verified)
+`DocumentService` (`s2/v14/host/document-service.ts`) over `SqliteDocumentStorage` (`s2/v14/host/storage.ts`): WAL,
+`synchronous=FULL`, fullfsync switchable; tables `updates (seq, docId, actor, at, bytes)`, `versions` (V2, gc on),
+`attributions` and `actors`. `integrated()` appends the row and its attribution into a lazily opened batch; broadcasts,
+step-2 replies and acks wait in the outbox until `flush()` commits; `commitFailed()` drops the live docs and closes their
+connections, so no replica learns of content the store lacks. A restart from the store equals the live doc.
+
+### 2. What v14 changes for the host (verified, `out/v14-probe.json`, `out/v14-gap-probe.txt`)
+- A same-client gap is no longer parked (v13) but integrated behind a `Skip` placeholder (`store.skips`): the content is
+  visible, the `update` event carries it, the state vector stops at the hole, and a newcomer's step 2 copies the hole.
+  Unchecked, the host would log and broadcast a document with a hole.
+- A missing origin or parent and unknown deletes are still parked silently (`pendingStructs`/`pendingDs`, no `update`
+  event), and `encodeStateAsUpdate` appends the parked bytes to every step 2, so each newcomer inherits them.
+- `checkV1` (`s2/v14/yjs.ts`) mirrors v14's `getMissing`, treating ids inside a skip as missing, and refuses gaps;
+  `hasPending` (pending structs, pending deletes, non-empty skips) makes the service evict. Of 2,000 mutated valid updates
+  applied unchecked, 1,482 threw, 374 left parked state or a hole, 144 applied cleanly; `checkV1` refused every non-clean
+  one (`checkPassedButParked` 0).
+- Client ids are 53-bit, not u32 (SQLite INTEGER and varuints hold them; nothing may pack one into 32 bits). One node type
+  (`Y.Node`) holds text and children together. The provider changed only in its imports (`@y/y`,
+  `@y/protocols/awareness`); the service only in its seam and the attribution write.
+
+### 3. Provenance as ContentMaps (verified)
+Write: per integrated update, `attributionOf` (`s2/v14/yjs.ts`) → `Y.createContentIdsFromUpdate(v1)` →
+`Y.createContentMapFromContentIds(ids, [insert = actor, insertAt = at], [delete = actor, deleteAt = at])`, encoded and
+stored as one `update` row in `attributions` in the same commit as its log row. Compaction (`compact`): one transaction
+inserts the version, deletes the folded update rows and merges their attribution rows (`Y.mergeContentMaps`) into one
+`merged` row with exact times. Thinning (`thin`): `bucketAttribution` floors times to the minute so a run of one actor's
+keystrokes coalesces into one range. Read: every row of a doc merged into one ContentMap, cached until the next append
+(what DiffRenderer and AttributionsRenderer take).
+
+| Test | Before | After |
+|---|---|---|
+| Node check (`out/service-check-v14.json`), who wrote it | agent text `session:s1`, human text `human`, a deletion `human` | unchanged after compaction (103 rows folded to 0) and restart |
+| Node check, thinning to the minute | 379 B, 20 human insert ranges | 139 B, 2 ranges, answers unchanged |
+| Electron (`out/latency-fullfsync-v14.json`, 906 keystroke rows) | 46,083 B of update rows | compaction 9,733 B; thinning 51 B (1 range); "who wrote" still `human` |
+| Bench (`out/v14-attr-bench.json`, 2,040 updates) | 15 µs and 53 B per update | merge 24.7 ms → 33 KB; minute buckets 7.9 ms → 479 B |
+
+Proposed persisted shape: `artifact_attributions {artifactId, fromSeq, toSeq, kind: update | merged, bucketMs, bytes}`:
+one `update` row per log row in the same commit; compaction merges the folded seq range into one `merged` row
+(compacting at version boundaries makes each merged row exactly one version's changes, so "which version or turn"
+stays answerable); thinning re-buckets merged rows and may merge adjacent ones; rows are never deleted while a retained
+version needs them.
+
+### 4. The port provider and the acknowledgement (verified; unchanged from v13 but for imports)
+`s2/v14/provider/port.ts` (`PortProvider`) has no Electron, Node or window import; it takes any `PortLike`
+(`postMessage`, `addEventListener('message'|'close')`, `start`, `close`) and ran on a DOM `MessagePort` in sandboxed,
+context-isolated renderers (handed over by the preload with `window.postMessage(…, [port])`) and on a Node
+`MessagePort` for the agent. Frames (`s2/src/frames.ts`, Yjs-free): y-protocols `0` sync and `1` awareness, MAWS `100`
+ack; exact-size `Uint8Array`s. The host counts content frames per connection and after the commit sends one ack per
+connection per flush ("your first N content frames are durable; the doc is at revision R"); the provider drops acked
+local updates; updates made while not live are "carried" and go out inside the step 2 answering the host's step 1
+(computed from the host's state vector: exactly what the host lacks); `state = {phase: off | handshake | live, synced,
+unsaved, revision}` maps onto X32's `saved | saving | unsaved | reconnecting`. Node check: 20 offline edits and 5 typed
+during the handshake reached the host with 0 rejections. Replicas: two hidden windows (`show:false`,
+`backgroundThrottling:false`) and one `AgentReplica` (`s2/v14/host/agent-replica.ts`: a Node `MessageChannel` plus the
+same provider, actor `{kind: 'session', appSessionId}`; `whenSaved()` resolves on the ack, which a tool call waits for);
+rows carry the right actor; awareness crosses and is removed on close.
+
+### 5. Numbers, v14 against v13 (verified)
+First sync (cold: open → renderer synced with the host loading from SQLite; 3 trials; `out/sync*.json`; seeds of the
+same algorithm, V2 states 1.00 and 5.01 MB):
+
+| | v13 | v14 |
+|---|---|---|
+| 1 MB: cold / host load / warm | 95–135 / 44–68 / 46–58 ms | 119–159 / 48–90 / 47–68 ms |
+| 1 MB: host heap / RSS | 25–28 / 135–139 MB | 18–25 / 139–144 MB |
+| 5 MB: cold / host load / warm | 390–424 / 167–190 / 222–230 ms | 444–487 / 209–222 / 224–261 ms |
+| 5 MB: host heap / RSS | 80 / 289–295 MB | 60–62 / 250–268 MB |
+| The doc on the wire (V1), 1 MB / 5 MB | 1.35 / 6.7 MB | 1.45 / 7.26 MB |
+
+Keystroke to durable ack on the 1 MB doc, 300 keystrokes per run, p50 / p95 / max ms ("visible in B" within about 2 ms
+of the ack in every run):
+
+| Run | v13 | v14 |
+|---|---|---|
+| fsync, human pace (60–180 ms) | 1.2 / 2.7 / 5.3 | 0.9 / 2.2 / 13.8 |
+| fsync, every 10 ms | 0.5 / 1.4 / 4.1 | 0.8 / 1.8 / 7.6 |
+| fsync, flood of 300 in one task | 5.9 / 7.9 / 8.1 | 6.7 / 10.6 / 11.2 |
+| fullfsync, human pace* | 5.6 / 8.5 / 23.4 | 5.6 / 7.7 / 15.4 |
+| fullfsync, every 10 ms* | 6.3 / 9.2 / 16.6 | 5.0 / 6.7 / 10.9 |
+| fullfsync, flood* | 15.6 / 18.6 / 20.1 | 20.3 / 23.1 / 23.3 |
+| Commit per batch, fullfsync* | 5.2 / 7.1 / 18.8 | 4.7 / 6.3 / 13.1 |
+| Over the detached socket through main's relay | 1.1 / 2.9 / 17.5 | 1.1 / 3.5 / 11.6 |
+
+\* Back-to-back reruns under the same load (`out/latency-fullfsync-rerun*.json`); the first v14 fullfsync run read
+7.0 / 17.9 / 48.9 under a load average of 39 from other agents (disk contention, not v14). Attribution costs 15 µs per
+update. Compaction of 906 rows: v13 17 ms, v14 25 to 34 ms; reload afterwards about 28 ms (v13) and 70 to 75 ms (v14).
+
+### 6. Failure (verified)
+Host SIGKILLed at 2.5 s of 7 s of typing on two replicas, re-forked 1.5 s later, new ports sent (`main.ts` `scenarioKill`;
+`out/kill*.json`):
+
+| Run | Replica | Keystrokes | Acked before kill / lost | Typed while down | In store at end / lost |
+|---|---|---|---|---|---|
+| v13 | A | 266 | 94 / 0 | 66 | 266 / 0 |
+| v13 | B | 170 | 61 / 0 | 43 | 170 / 0 |
+| v14 | A | 263 | 96 / 0 | 65 | 263 / 0 |
+| v14 | B | 167 | 60 / 0 | 42 | 167 / 0 |
+
+All converged with equal state vectors; the renderer's port fired `close` at the kill (+0 to 1 ms), so the provider shows
+"reconnecting" by itself; reopened ports re-synced in about 50 ms. A 300-keystroke flood in flight at the kill with
+fullfsync: v13 9 acked (0 lost), 291 in flight of which 17 durable but unacked, all 300 in store at the end; v14 11
+acked (0 lost), 289 in flight, all 300 in store; both converged. Crash durability only; power loss not tested.
+Malformed frames: in Electron 120 renderer ports sending garbage, 120 of 120 rejected on both, host alive, converged
+(`out/fuzz*.json`); in Node 500 mutated updates, v13 accepted 28 to 30 and v14 32, all well-formed (applied as different
+valid text); the v14 gap-behind-a-skip is refused; neither generation was left with pending state, a hole or an
+eviction. Main absent (`out/detached-*-v14.json`; v13 `out/detached-*.json` and a 69.8 s run `detached-*-run1.json`): the
+host spawned as E10 does (Electron as Node, `detached:true`, own socket and token under `/tmp`), main exits, the agent
+writes 22 rows in 3.2 s, the agent keeps writing live after a new main connects, the renderer syncs over the relay in
+69 ms, `who` answers `session:sess-detached` and `human` correctly, 121 agent and 152 human rows, converged.
+
+### 7. The detached binary channel (verified as far as §6 needs; v13 and v14)
+Framing (`s2/src/socket/framing.ts`, `encodeDocFrame`, `splitRecords`): from socket protocol 2, after the JSON-line
+hello and welcome, a JSON line (starts `{`, ends 0x0A; `JSON.stringify` escapes control characters, so a line never
+holds 0x00) or a doc frame `0x00 | u32 BE length | u32 BE channel | payload` (one y-protocols frame), told apart by the
+first byte; a protocol-1 peer is refused before it sees a frame. `out/socket-check*.json`: 2,000 interleaved records
+including 0x00/0x0A-filled payloads and a 7 MB frame, fed in random 1 B to 64 KB slices, all back in order at exact size
+(4 ms). Multiplexing (`s2/src/socket/doc-channels.ts`): main allocates the channel and sends `documents.open {docId,
+channel, actor}` (frames may follow at once), `documents.close {channel}`, the event `documents.closed {channel,
+reason}`; unknown channels dropped; main names the actor; `HostDocChannels` turns a channel into a `HostPort` and
+`MainDocRelay` moves bytes unparsed. Backpressure: past `DOC_HIGH_WATER` (8 MB queued) the host resets the channel
+(`reason: reset`) and the provider re-syncs on a new port (verified in Node: one reset after 257 frames to a stalled
+reader; main's reopen after a reset not run in Electron). One socket, not two: one token, one replacement rule, E11's
+draining close, ordering between `documents.open` and its frames; head-of-line blocking of JSON lines behind a large
+step 2 is bounded by the reset.
+X13 amendment (accepted, ledger X13): socket protocol 2 carries JSON lines exactly as protocol 1 plus doc frames
+`0x00 | u32 BE length | u32 BE channel | payload` (payload ≤ 64 MB, one X24 frame); hello, welcome, refuse and exit stay
+JSON lines under the stable-fields promise and an old supervisor is refused on `protocol` and replaced through refuse →
+exit; `SocketPort` gains `postFrame(channel, bytes)` and `onFrame`; `splitLines` becomes a record splitter keeping
+`stop`/`rest()`; `documents.open`/`documents.close` requests and `documents.closed {channel, reason: host | reset}` in
+X24's namespace; main allocates channels, names the actor, relays bytes unparsed at exact size; the host resets past
+`DOC_HIGH_WATER`; a `channel` is u32 and a Yjs clientId never travels in a frame header; in utility mode the ports go to
+the host as transfers on C1's host `MessagePort`, no channels.
+
+### Pitfalls
+- Yjs (both versions) accepts bad updates silently: v13 parks gaps, v14 integrates them behind a skip hole; both park
+  missing origins and parents and unknown deletes and re-send them in every step 2. The pre-check and the eviction net
+  are required.
+- The provider can create its own gap if it sends edits before answering the host's step 1.
+- macOS durability needs fullfsync (the app's index uses `NORMAL`; the store must not).
+- Yjs emits `update` before `updateV2` in the same cleanup: do not pair the listeners (source); log V1.
+- A `Buffer.subarray` from a socket ships its whole pool over structured clone: copy to exact size; an `ArrayBuffer` from a
+  renderer arrives as a non-`Uint8Array` and is rejected (both verified).
+- Hidden windows need `backgroundThrottling:false` (source). Every editor open mints a new clientID (source).
+- v14 clientIds are 53-bit.
+
+### Copy (P3-A, v14)
+`s2/v14/yjs.ts` → `src/engine-host/documents/yjs.ts` (the seam: pre-check, safety net, attribution helpers);
+`s2/v14/provider/port.ts` → `src/artifacts/provider/port.ts` (X32 state mapping; destroy awareness only if it created
+it); `s2/src/frames.ts` → `src/artifacts/provider/frames.ts`; `s2/v14/host/storage.ts` → `src/engine-host/documents/
+storage.ts` with `DocumentStorage` in `src/artifacts/host.ts` (`artifact_*` table names, a schema version per X15, X29's
+version row, fullfsync on, `<userData>/artifacts/store.sqlite`, §4.3's idempotency table, no harness reads, the
+attribution cache cleared on rollback); `s2/v14/host/document-service.ts`, `s2/v14/host/agent-replica.ts` and
+`s2/src/host/ports.ts` → `src/engine-host/documents/` (emit `artifact.changed` after commit, the auto-version policy,
+the id-repair hook, restore per S3, idle unload, clientID bound to its actor at first sight; tool calls answer after
+`whenSaved()`); `s2/src/socket/framing.ts` into `src/shared/host/socket-protocol.ts`/`socket-port.ts`
+(`SOCKET_PROTOCOL = 2`); `doc-channels.ts` (takes any `{attach}`) split between the host's detached path and
+`src/main/hosts/`. The harness (`spikes/p3-store/electron/*`) is not for copying.
+
+### Questions (S2; the architect's answers of 2026-10-12, Decision Log 26, in brackets)
+1. V1 on the wire (1.45× V2 on v14, 1.34× on v13) until S7 says otherwise [accepted]. 2. fullfsync on [accepted].
+3. Provenance granularity: resolved by ContentMaps with minute thinning; per-update rows until a version boundary, then
+merged [S3's ruling floors to the minute at write]. 4. clientId bound to its actor at first sight [accepted]. 5. One
+reopen path in main for restart, reset, eviction and socket end [accepted]. 6. First sync on v14 is about 10 to 20 %
+slower cold (5 MB: 444–487 ms against 390–424) with a lower host heap: S7 rechecks at scale [open].
+Not tested: power loss; a detached-mode kill and reopen; E10's real `SocketPort`; the Tiptap binding over the port (S7b).
+
 ## S6 — The slide model
 
 **Verdict: proven on Yjs v14 (S1's exact pins), v13 kept for comparison; nothing fails on v14 alone.** Every check passes
