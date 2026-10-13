@@ -137,7 +137,7 @@ describe('layout store actions', () => {
     const before = store.getState();
     store.getState().setOverviewOpen(true);
     expect(store.getState().overviewOpen).toBe(true);
-    expect(store.getState().regions).toEqual({ ...before.regions, panel: { width: 444, collapsed, maximized: false } });
+    expect(store.getState().regions).toEqual({ ...before.regions, panel: { width: 444, collapsed, maximized: false, floating: false } });
     expect(store.getState().main).toBe(before.main);
   });
 
@@ -149,6 +149,77 @@ describe('layout store actions', () => {
     store.getState().setOverviewOpen(false);
     expect(store.getState().overviewOpen).toBe(false);
     expect(store.getState().regions).toBe(before);
+  });
+
+  // P3-G (§D1.1): `floating` and `maximized` are never both true, and neither holds while collapsed; every patch keeps it.
+  describe('the panel’s invariants under every setPanel patch', () => {
+    type Panel = typeof LAYOUT_DEFAULTS.regions.panel;
+    const states: Record<string, Panel> = {
+      docked: { ...LAYOUT_DEFAULTS.regions.panel },
+      maximized: { ...LAYOUT_DEFAULTS.regions.panel, maximized: true },
+      collapsed: { ...LAYOUT_DEFAULTS.regions.panel, collapsed: true },
+      floating: { ...LAYOUT_DEFAULTS.regions.panel, floating: true },
+    };
+    const patches: Partial<Panel>[] = [
+      { floating: true }, { floating: false }, { maximized: true }, { maximized: false }, { collapsed: true }, { collapsed: false },
+      { floating: true, width: 500 }, { maximized: true, collapsed: false }, { collapsed: true, maximized: false }, { width: 444 },
+    ];
+    const cases = Object.entries(states).flatMap(([name, panel]) => patches.map((patch) => [name, patch, panel] as const));
+    it.each(cases)('from %s, %j', (_name, patch, panel) => {
+      const store = createLayoutStore();
+      store.setState({ regions: { ...LAYOUT_DEFAULTS.regions, panel } });
+      store.getState().setPanel(patch);
+      const after = store.getState().regions.panel;
+      expect(after.floating && after.maximized, 'floating and maximized exclusive').toBe(false);
+      expect(after.collapsed && (after.floating || after.maximized), 'neither while collapsed').toBe(false);
+      // The patch's own true field is what holds; a width is kept as given
+      if (patch.collapsed === true) expect(after.collapsed).toBe(true);
+      else if (patch.floating === true) expect(after).toMatchObject({ floating: true, collapsed: false });
+      else if (patch.maximized === true) expect(after).toMatchObject({ maximized: true, collapsed: false });
+      expect(after.width).toBe(patch.width ?? panel.width);
+    });
+  });
+
+  it('revealMain clears maximized and floating and keeps everything else; a docked panel is left as it is', () => {
+    const store = createLayoutStore();
+    for (const panel of [{ maximized: true }, { floating: true }]) {
+      store.getState().setPanel({ ...panel, width: 444 });
+      store.getState().revealMain();
+      expect(store.getState().regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, width: 444 });
+    }
+    const before = store.getState().regions;
+    store.getState().revealMain();
+    expect(store.getState().regions).toBe(before);
+  });
+
+  it('opening the Overview docks a floating panel', () => {
+    const store = createLayoutStore();
+    store.getState().setPanel({ floating: true, width: 500 });
+    store.getState().setOverviewOpen(true);
+    expect(store.getState().regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, width: 500 });
+  });
+
+  // §D1.5: the card's size is kept per panel tab; entries of tabs in no panel list go at the next write, at most 64 stay.
+  it('writes the floating card’s size per panel tab, dropping tabs in no list and the oldest past 64', () => {
+    const store = createLayoutStore();
+    const tab = (id: string, pinned = false) => ({ id, toolId: 'files', pinned });
+    store.setState({ panelPinned: [tab('pin', true)], panelBySession: new Map([[A, { tabs: [tab('t1'), tab('t2')], activeTabId: 't1' }]]) });
+    store.getState().setFloatingCardSize('t1', { w: 400, h: 300 });
+    store.getState().setFloatingCardSize('summary', { w: 420, h: 380 });
+    expect(store.getState().regions.floatingCard).toEqual({ t1: { w: 400, h: 300 }, summary: { w: 420, h: 380 } });
+    // t1 closes: its entry goes at the next write; a rewrite of a key moves it to the newest place
+    store.setState({ panelBySession: new Map([[A, { tabs: [tab('t2')], activeTabId: 't2' }]]) });
+    store.getState().setFloatingCardSize('pin', { w: 500, h: 400 });
+    store.getState().setFloatingCardSize('summary', { w: 360, h: 240 });
+    expect(Object.entries(store.getState().regions.floatingCard)).toEqual([['pin', { w: 500, h: 400 }], ['summary', { w: 360, h: 240 }]]);
+    // At most 64: the oldest go first
+    const many = Array.from({ length: 70 }, (_, i) => tab(`m${i}`));
+    store.setState({ panelBySession: new Map([[A, { tabs: many, activeTabId: null }]]) });
+    for (const t of many) store.getState().setFloatingCardSize(t.id, { w: 400, h: 300 });
+    const keys = Object.keys(store.getState().regions.floatingCard);
+    expect(keys).toHaveLength(64);
+    expect(keys[0]).toBe('m6');
+    expect(keys.at(-1)).toBe('m69');
   });
 
   // W5: the floating Overview's rect persists with the regions; whether it is open does not (the app opens on the tabs).
@@ -500,7 +571,7 @@ describe('region changes before hydration', () => {
     const hydrating = store.getState().hydrate(fake.client, () => true);
     store.getState().setOverviewOpen(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const saved = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true } };
+    const saved = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true, floating: false } };
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
     await hydrating;
     const restored = { ...saved, panel: { ...saved.panel, maximized: false } };

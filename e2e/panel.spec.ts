@@ -1026,3 +1026,267 @@ test.describe('the product host over a scenario derived from C5’s records', ()
     });
   });
 });
+
+// ---- P3-G: the floating session card (the P3-G execution document, M1; acceptance 1 to 5 and 7) ----------------------------
+
+const USAGE = 'Usage reset countdown'; // nine-sessions.json: its turn ends at 8 s on the scenario clock
+const USAGE_ID = 'app-59505fdc';
+
+async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
+  await app.evaluate((_electron, ms) => {
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    if (!scenario) throw new Error('no scenario clock');
+    scenario.advanceTo(ms);
+  }, ms);
+}
+
+// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it).
+async function dragBy(page: Page, element: Locator, dx: number, dy = 0): Promise<void> {
+  const box = (await element.boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 8 });
+  await page.mouse.up();
+}
+
+test.describe('the floating session card (P3-G)', () => {
+  test('the divider, ⌥⌘B, the Float button, Close, the pill and Dock; one composer; over a DOM tool', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const main = page.locator('[data-region="main"]');
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const pill = panel.getByRole('button', { name: 'Show session card' });
+      const composers = page.locator(`section[data-composer="${USAGE_ID}"]`);
+      const divider = panel.getByRole('separator', { name: 'Resize right panel' });
+      const mainWidth = () => main.evaluate((el) => el.getBoundingClientRect().width);
+
+      await (await sidebarRow(page, USAGE)).click();
+      await expect(main.getByRole('textbox', { name: 'Message' })).toBeVisible();
+
+      await test.step('acceptance 1: 39 px past the maximum leaves the panel at its maximum; 40 px floats it', async () => {
+        const max = Number(await divider.getAttribute('aria-valuemax'));
+        const width = Number(await divider.getAttribute('aria-valuenow'));
+        await dragBy(page, divider, -(max - width) - 39);
+        await expect(divider).toHaveAttribute('aria-valuenow', String(max));
+        await expect(card).toHaveCount(0);
+        await dragBy(page, divider, -40);
+        await expect(card).toBeVisible();
+        await expect(card.getByRole('heading', { name: USAGE })).toBeVisible();
+        await expect(card.locator('[data-transcript-scroller]')).toBeVisible();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeVisible();
+        await expect(main).toHaveAttribute('inert', '');
+        expect(await mainWidth(), 'the main region at 0 px').toBe(0);
+        await expect(divider, 'no divider while floating').toHaveCount(0);
+      });
+
+      await test.step('acceptance 5: the card is the session’s one composer, and it has the keyboard', async () => {
+        await expect(composers).toHaveCount(1);
+        await expect(card.locator(`section[data-composer="${USAGE_ID}"]`)).toHaveCount(1);
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      });
+
+      await test.step('acceptance 2: ⌥⌘B and the Float button dock a floating panel and float a docked one', async () => {
+        // The menu item by id: Playwright's synthetic Meta+Alt+B reaches the page, never the macOS menu's key equivalent
+        // (tried here at M1's review: the card stayed up), as shell.spec.ts notes for every menu chord
+        await menu(app, 'panel.float');
+        await expect(card).toHaveCount(0);
+        await expect(main).not.toHaveAttribute('inert', '');
+        await menu(app, 'panel.float');
+        await expect(card).toBeVisible();
+        await panel.getByRole('button', { name: 'Dock session', pressed: true }).click(); // the header's Float, pressed
+        await expect(card).toHaveCount(0);
+        await panel.getByRole('button', { name: 'Float session over panel' }).click();
+        await expect(card).toBeVisible();
+      });
+
+      await test.step('acceptance 3 and 2: Close leaves the pill; ⌥⌘B and a click reopen the card; a turn ending behind the pill marks it', async () => {
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(card).toHaveCount(0);
+        await expect(pill).toHaveText(USAGE);
+        await expect(composers, 'no composer behind the pill').toHaveCount(0);
+        await menu(app, 'panel.float');
+        await expect(card).toBeVisible();
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(0);
+        await advanceTo(app, 8000);
+        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(1);
+        await pill.click();
+        await expect(card).toBeVisible();
+        await expect(pill).toHaveCount(0);
+      });
+
+      await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s left and bottom edges', async () => {
+        await panel.getByRole('button', { name: 'Add a tool' }).click();
+        await page.getByRole('menuitem', { name: 'Session info' }).click();
+        await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
+        await expect(card).toBeVisible();
+        const near = async () => {
+          const [region, box] = [(await panel.boundingBox())!, (await card.boundingBox())!];
+          return { left: Math.round(box.x - region.x), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+        };
+        // The region's 1 px left border sits outside the body the card is placed in
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        await panel.getByRole('button', { name: 'Add a tool' }).click();
+        await page.getByRole('menuitem', { name: 'Deliverables' }).click();
+        await expect(panel.locator('[data-deliverables-list]')).toBeVisible();
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+        // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
+        // top, so the strip above it and its controls stay clear
+        const handle = card.locator('[data-card-resize="top-right"]');
+        const from = (await handle.boundingBox())!;
+        await dragBy(page, handle, 2000, 1 - from.y);
+        const [strip, body, box] = [
+          (await panel.getByRole('tablist', { name: 'Panel tools' }).boundingBox())!,
+          (await panel.locator('#panel-host-body').boundingBox())!,
+          (await card.boundingBox())!,
+        ];
+        expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
+        expect(box.y, 'the card below the strip').toBeGreaterThan(strip.y + strip.height);
+        await panel.getByRole('button', { name: 'Add a tool' }).click({ trial: true }); // nothing covers it
+        expect(await near()).toEqual({ left: 17, bottom: 16 });
+      });
+
+      await test.step('acceptance 4: Dock restores the column at its width, and the main pane’s composer has the keyboard', async () => {
+        await card.getByRole('button', { name: 'Dock session' }).click();
+        await expect(card).toHaveCount(0);
+        await expect(main).not.toHaveAttribute('inert', '');
+        await expect(divider).toHaveAttribute('aria-valuenow', (await divider.getAttribute('aria-valuemax'))!);
+        await expect(main.getByRole('textbox', { name: 'Message' })).toBeFocused();
+        await expect(composers).toHaveCount(1);
+      });
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+
+  // The whole-branch review: at its minimum size a docked request and the composer are taller than the card. The card's
+  // body scrolls (a person's wheel, not a programmatic scroll, which would also move the clipping frame), so every
+  // control of the request and the composer can be brought into the card's visible rect; the header stays in place.
+  test('at its minimum size the card’s body scrolls to a docked request’s controls and the composer', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const body = card.locator('[data-pane="card"]');
+      const request = card.getByRole('group', { name: 'Approval needed' });
+
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click(); // its permission is pending in nine-sessions.json
+      await menu(app, 'panel.float');
+      await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
+      const handle = card.locator('[data-card-resize="top-right"]');
+      await dragBy(page, handle, -2000, 2000);
+      const frame = (await card.boundingBox())!;
+      expect([Math.round(frame.width), Math.round(frame.height)], 'the card at its minimum').toEqual([360, 240]);
+
+      const box = (await body.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 2000);
+      // Each control's centre is inside the body's rect and is what a click there would reach.
+      const reachable = (selector: string) =>
+        card.evaluate((cardElement, selector) => {
+          const view = cardElement.querySelector('[data-pane="card"]')!.getBoundingClientRect();
+          return Array.from(cardElement.querySelectorAll<HTMLElement>(selector))
+            .filter((element) => element.getClientRects().length > 0)
+            .map((element) => {
+              const r = element.getBoundingClientRect();
+              const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+              const inside = x > view.left && x < view.right && y > view.top && y < view.bottom;
+              return `${element.getAttribute('aria-label') ?? element.textContent?.trim()}: ${inside && element.contains(document.elementFromPoint(x, y))}`;
+            });
+        }, selector);
+      await expect.poll(() => reachable('[data-docked-frame] button')).not.toContainEqual(expect.stringMatching(/: false$/));
+      expect(await reachable('[data-docked-frame] button'), 'the request has buttons').not.toEqual([]);
+      const composer = await card.locator('section[data-composer]').boundingBox();
+      expect(composer!.y + composer!.height, 'the composer’s bottom inside the card').toBeLessThanOrEqual(box.y + box.height + 1);
+      expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
+      await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+});
+
+// ---- P3-G: the panel header and the editor host contract (the P3-G execution document, M3; acceptance 9 and 10) ---------
+
+test.describe('the panel header and X32 (P3-G)', () => {
+  test.use({ mawsEnv: HARNESS_ENV });
+
+  test('the header shows a tool’s title, and an editor’s registration with its handlers, updates, disposal and closeGuard', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const header = panel.region.locator('[data-editor-header]');
+    const title = header.locator('[data-header-title]');
+    const invoked = () => panel.page.evaluate(() => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.invoked());
+    const setEditor = (patch: Parameters<PanelHarnessApi['editor']['set']>[0]) =>
+      panel.page.evaluate((patch) => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.set(patch), patch);
+    let stub = '';
+
+    await test.step('the summary, then a tool that registers nothing, keep their titles and the region’s controls', async () => {
+      await expect(title).toHaveText('Session overview');
+      stub = await panel.call('addTool', 'harness-stub');
+      await expect(title).toHaveText('Stub');
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeVisible();
+    });
+
+    const editor = await panel.call('addTool', 'harness-editor');
+    await test.step('acceptance 9: the registration’s breadcrumb, saved state, count, actions and Export, each invoking its handler', async () => {
+      await panel.call('maximize', true); // room for the whole left side
+      await expect(title).toHaveText('Q3 brief');
+      await expect(header.locator('[data-header-breadcrumb]')).toHaveText('Docs/Planning/');
+      await expect(header.locator('[data-header-breadcrumb]')).toBeVisible();
+      await expect(header.getByText('Saving…')).toBeVisible();
+      await header.getByRole('button', { name: '3 open comments' }).click();
+      await header.getByRole('button', { name: 'Version history' }).click();
+      await header.getByRole('button', { name: 'Open in tab' }).click();
+      await header.getByRole('button', { name: 'Export' }).click();
+      await expect(panel.page.getByRole('menuitem')).toHaveText(['PDF', 'Word document']);
+      await panel.page.getByRole('menuitem', { name: 'PDF' }).click();
+      expect(await invoked()).toEqual(['comments', 'history', 'open-in-tab', 'export:pdf']);
+    });
+
+    await test.step('acceptance 9: an update to saved shows "All changes saved"; disposal returns the plain title', async () => {
+      await setEditor({ saved: 'saved' });
+      await expect(header.getByText('All changes saved')).toBeVisible();
+      await setEditor({ registered: false });
+      await expect(title).toHaveText('Editor');
+      await expect(header.getByText('All changes saved')).toHaveCount(0);
+      await expect(header.getByRole('button', { name: 'Export' })).toHaveCount(0);
+      await setEditor({ registered: true });
+      await expect(title).toHaveText('Q3 brief');
+    });
+
+    await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
+      await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
+      await panel.call('setWidth', 280); // restored from maximized too
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      await expect(title).toBeVisible();
+      expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
+      for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);
+      const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(overflow, 'nothing spills past the header').toBeLessThanOrEqual(0);
+      await header.getByRole('button', { name: 'More actions' }).click();
+      await expect(panel.page.getByRole('menuitem')).toHaveText(['Version history', 'Open in tab', 'Comments', 'PDF', 'Word document']);
+      await panel.page.getByRole('menuitem', { name: 'Word document' }).click();
+      expect((await invoked()).at(-1)).toBe('export:docx');
+      await panel.call('setWidth', 380);
+      await expect(header.getByRole('button', { name: 'Export' })).toBeVisible();
+      await setEditor({ unresolved: 3 });
+    });
+
+    await test.step('acceptance 9: a closeGuard answering false keeps the tab open', async () => {
+      await setEditor({ allowClose: false });
+      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      expect(await panel.call('closeTab', editor), 'the guard vetoes').toBe(false);
+      expect(await panel.ids()).toContain(editor);
+      await expect(title).toHaveText('Q3 brief');
+      // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
+      await panel.tab(stub).click();
+      await expect(title).toHaveText('Stub');
+      expect(await panel.call('closeTab', editor), 'the inactive tab’s guard vetoes').toBe(false);
+      expect(await panel.ids()).toContain(editor);
+      await panel.tab(editor).click();
+      await setEditor({ allowClose: true });
+      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      await expect.poll(() => panel.ids()).not.toContain(editor);
+      await expect(title).toHaveText('Stub');
+    });
+    panel.expectQuietConsole();
+  });
+});

@@ -15,7 +15,8 @@ import type { Navigator } from './navigation';
 import type { Downloads } from './downloads';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
-import type { ViewManager } from './view';
+import { shown, type ViewManager } from './view';
+import { captureTabView } from './capture'; // P3-G
 // cua #90 start
 import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
 import type { Favicons } from './favicon';
@@ -101,6 +102,15 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   register('browser.view.cover', ({ covered }, { sender }) => {
     views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error));
   });
+  // P3-G (§D4.1): Mark-up's still of the page, for the window the tab is placed in only (capture.ts)
+  register(
+    'browser.view.capture',
+    knownTabs(({ tabId }, { sender }) => {
+      const entry = store.require(tabId);
+      const contents = entry.view?.webContents ?? null;
+      return captureTabView({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, windowOf(sender));
+    }),
+  );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
   register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
   // cua #90 start: the bookmarks bar (bookmarks/bar.ts): a chip's click, a native menu on the sender's window, the icons

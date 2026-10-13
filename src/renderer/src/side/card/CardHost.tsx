@@ -107,7 +107,8 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     );
   }
   return (
-    <div ref={ref} data-card-host={host} className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+    // P3-G (§D4.1): the anchored card floats over the viewer's body, so a mark-up still of that body is taken without it
+    <div ref={ref} data-card-host={host} data-markup-occluder className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} frame={frame} visible={visible} onDismiss={() => dismiss(card.serial)} />}
     </div>
   );

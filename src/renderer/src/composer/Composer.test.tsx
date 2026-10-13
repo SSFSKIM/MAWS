@@ -15,7 +15,12 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { insertComposerText, isStarting, prefillComposer, requestChipWidget, resetComposerStore, useComposerStore } from '../stores/composer';
+import { insertComposerText, isStarting, prefillComposer, queueComposerAttachment, requestChipWidget, resetComposerStore, useComposerStore } from '../stores/composer';
+import type { Draft } from '@shared/ipc/schema/session'; // P3-G
+import { addMarkupToChat, MARKUP_COPY, resetMarkup, startMarkup, useMarkup } from '../markup/session'; // P3-G
+import { registerMarkupSurface, resetMarkupSurfaces } from '../markup/surface'; // P3-G
+import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
+import { mainShowing } from '../test-support/panel'; // P3-G
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
@@ -1349,3 +1354,164 @@ describe('dictation into the focused pane’s composer', () => {
   });
 });
 // E9 end
+
+// P3-G (§D4.3, the M4 review's rulings): Mark-up's composite reaches the session's draft additively. With no composer
+// mounted it waits in the composer store's queue, which the next composer of the session drains into its restored draft;
+// a composer that is busy (a send in flight) refuses it, and the mark-up session stays open with its drawing.
+describe('P3-G: a mark-up attached to the session’s draft', () => {
+  const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const LABEL = 'Mark-up of "Page A" — http://127.0.0.1/a.html ';
+  const shot = { id: 'a1', kind: 'image', name: 'shot.png', mediaType: 'image/png', bytes: 3, data: 'YWJj', persisted: true };
+  const markupPng = () => new File([PNG], 'mark-up.png', { type: 'image/png' });
+  const stripNames = () => within(within(composerOf(0)).getByRole('list', { name: 'attachments' })).getAllByRole('listitem').map((item) => within(item).getByRole('button').getAttribute('aria-label')!.replace('Remove ', ''));
+  let stored: Draft | null;
+  let sendAnswer: ((value: unknown) => void) | null;
+
+  beforeEach(() => {
+    // happy-dom decodes no images: the controller's downscale gets a 4 × 4 bitmap and re-encodes it as the same bytes
+    vi.stubGlobal('createImageBitmap', async () => ({ width: 4, height: 4, close: () => {} }));
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return { drawImage: () => {} };
+        }
+        async convertToBlob(options?: { type?: string }) {
+          return new Blob([PNG], { type: options?.type ?? 'image/png' });
+        }
+      },
+    );
+    stored = { doc: { ...docOf([paragraph(textNode('keep this thought'))]), attrs: { attachments: [shot] } }, attachments: [], updatedAt: '2026-10-13T00:00:00.000Z' };
+    sendAnswer = null;
+    const base = fake.client;
+    window.maws = {
+      ...base,
+      pathForFile: () => '',
+      invoke: (async (name: string, input: { draft?: Draft | null }) => {
+        if (name === 'session.drafts.get') return { ok: true, value: stored };
+        if (name === 'session.drafts.set') {
+          stored = input.draft ?? null;
+          return { ok: true, value: undefined };
+        }
+        if (name === 'session.send' && sendAnswer === null) return new Promise((resolve) => (sendAnswer = resolve as (value: unknown) => void));
+        return base.invoke(name as never, input as never);
+      }) as MawsBridge['invoke'],
+    } as MawsBridge;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetMarkup();
+    resetMarkupSurfaces();
+  });
+
+  it('a draft of text and an image kept across an unmount takes the queued mark-up beside it when the composer mounts again', async () => {
+    live(A);
+    const first = mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('keep this thought'));
+    expect(stripNames()).toEqual(['shot.png']);
+    first.unmount();
+
+    queueComposerAttachment(A, { files: [markupPng()], text: LABEL });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(stripNames()).toEqual(['shot.png', 'mark-up.png']));
+    expect(editorOf().editor.getText()).toBe(`keep this thought ${LABEL}`); // a space between, the draft's text kept
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+  });
+
+  it('a composer with a send in flight refuses Add to chat: the session stays with its drawing and the toast says so; once the send settles it takes it', async () => {
+    live(A);
+    useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: 'browser:1', toolId: 'browser', pinned: false }], activeTabId: 'browser:1' }]]) });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('keep this thought'));
+    await key(editorOf(), { key: 'Enter' }); // the send stays in flight: the editor is busy
+    await waitFor(() => expect(sendAnswer).not.toBeNull());
+
+    const element = document.body.appendChild(document.createElement('div'));
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300, x: 0, y: 0, right: 400, bottom: 300, toJSON: () => ({}) } as DOMRect);
+    const end = vi.fn();
+    registerMarkupSurface(
+      { surface: 'panel', tabId: 'browser:1' },
+      { element: () => element, label: () => '"Page A" — http://127.0.0.1/a.html', begin: async () => ({ mediaType: 'image/png', data: 'iVBORw==', width: 400, height: 300 }), end },
+    );
+    await act(() => startMarkup());
+    const session = useMarkup.getState().session;
+    expect(session).not.toBeNull();
+    const picture = async () => new Blob([PNG], { type: 'image/png' });
+
+    await act(() => addMarkupToChat([], picture));
+    expect(useMarkup.getState().session).toBe(session);
+    expect(end).not.toHaveBeenCalled();
+    expect(useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => n.text)).toEqual([MARKUP_COPY.composerBusy]);
+    expect(MARKUP_COPY.composerBusy).toBe('The composer is busy — try again in a moment');
+    expect(stripNames()).toEqual(['shot.png']);
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+
+    await act(async () => sendAnswer!({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q-1' } }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    await act(() => addMarkupToChat([], picture));
+    expect(useMarkup.getState().session).toBeNull();
+    expect(end).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(stripNames()).toEqual(['mark-up.png']));
+    expect(editorOf().editor.getText()).toBe(LABEL);
+  });
+
+  // The re-review's case: submit, close the card, Add to chat (queued), reopen the card before the send settles. The
+  // reopened composer joins the flight and refuses the queued picture; once the flight settles it takes it, with nothing
+  // unmounted or queued since.
+  it('a queued mark-up a composer refused while its send was in flight is taken once the send settles', async () => {
+    live(A);
+    const first = mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('keep this thought'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(sendAnswer).not.toBeNull());
+    first.unmount();
+
+    queueComposerAttachment(A, { files: [markupPng()], text: LABEL });
+    mount([{ index: 0, id: A }]); // joins the flight: busy
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20))); // its registration's drain was refused
+    expect(editorOf().getAttribute('contenteditable')).toBe('false'); // busy
+    expect(stripNames()).toEqual(['shot.png']);
+    expect(useComposerStore.getState().attachmentQueue.get(A)).toHaveLength(1);
+
+    await act(async () => sendAnswer!({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q-1' } }));
+    await waitFor(() => expect(stripNames()).toEqual(['mark-up.png']));
+    expect(editorOf().editor.getText()).toBe(LABEL);
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+  });
+
+  // §D4.2: Escape discards everything, including a picture the composer is still converting when it is pressed.
+  it('Escape while the composer is still converting the picture attaches nothing: no image, no label, nothing queued', async () => {
+    let decode: (() => void) | null = null;
+    vi.stubGlobal('createImageBitmap', () => new Promise((resolve) => (decode = () => resolve({ width: 4, height: 4, close: () => {} }))));
+    live(A);
+    useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: 'browser:1', toolId: 'browser', pinned: false }], activeTabId: 'browser:1' }]]) });
+    mount([{ index: 0, id: A }], <MarkupLayer />);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('keep this thought'));
+
+    const element = document.body.appendChild(document.createElement('div'));
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300, x: 0, y: 0, right: 400, bottom: 300, toJSON: () => ({}) } as DOMRect);
+    const end = vi.fn();
+    registerMarkupSurface(
+      { surface: 'panel', tabId: 'browser:1' },
+      { element: () => element, label: () => '"Page A" — http://127.0.0.1/a.html', begin: async () => ({ mediaType: 'image/png', data: 'iVBORw==', width: 400, height: 300 }), end },
+    );
+    await act(() => startMarkup());
+    expect(screen.getByRole('region', { name: 'Mark-up' })).toBeTruthy();
+
+    const adding = addMarkupToChat([], async () => new Blob([PNG], { type: 'image/png' }));
+    await waitFor(() => expect(decode).not.toBeNull()); // the composer is converting the picture
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    expect(useMarkup.getState().session).toBeNull();
+    expect(end).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      decode!();
+      await adding;
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(stripNames()).toEqual(['shot.png']);
+    expect(editorOf().editor.getText()).toBe('keep this thought');
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+    expect(useNotices.getState().notices.filter((n) => n.kind === 'toast')).toEqual([]);
+  });
+});

@@ -6,7 +6,8 @@
 // resizer on a region's right (or bottom) edge, -1 for one on its left (or top) edge. A drag-collapse hands back the
 // value the drag started from, so the region reopens at the size it had rather than at the minimum; a region shown
 // narrower than its persisted size (clamped to the window) passes that size as `restoreValue`, so the clamp is never
-// written back.
+// written back. P3-G (§D1.6): `expandThreshold` is the mirror on the maximum's side: a drag that reaches that far past
+// the maximum ends there and calls `onExpand` with the same restore value (the panel floats); the keyboard never does.
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
 export const RESIZER_STEP = 8;
@@ -25,6 +26,8 @@ export interface ResizerProps {
   onChange(value: number): void;
   restoreValue?: number; // what a drag-collapse hands back; `value` when not given
   onCollapse?(restore: number): void; // `restore`: the value the drag started from, for reopening at that size
+  expandThreshold?: number | null; // P3-G
+  onExpand?(restore: number): void; // P3-G: as `onCollapse`, past the maximum
   className?: string;
 }
 
@@ -43,6 +46,8 @@ export function Resizer({
   restoreValue,
   onChange,
   onCollapse,
+  expandThreshold = null,
+  onExpand,
   className = '',
 }: ResizerProps) {
   const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
@@ -99,6 +104,11 @@ export function Resizer({
         if (collapseThreshold !== null && onCollapse && raw <= min - collapseThreshold) {
           end(event);
           onCollapse(current.restore);
+          return;
+        }
+        if (expandThreshold !== null && onExpand && raw >= max + expandThreshold) {
+          end(event);
+          onExpand(current.restore);
           return;
         }
         set(raw);

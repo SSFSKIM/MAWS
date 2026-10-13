@@ -216,7 +216,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           if (frame) frame.focus();
           else handle.current?.focus();
         },
-        insertText: (text) => handle.current?.insertText(text),
+        insertText: (text, options) => handle.current?.insertText(text, options),
+        attachFiles: async (files, options) => (await handle.current?.attachFiles(files, options)) ?? false, // P3-G: Mark-up's Add to chat; registering drains the store's attachment queue
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {

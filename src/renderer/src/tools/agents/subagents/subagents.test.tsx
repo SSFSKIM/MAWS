@@ -98,6 +98,7 @@ function Mounted({ state, appSessionId = A, visible = true }: { state: Subagents
   const engine = useSessions((s) => (appSessionId ? (s.engine.get(appSessionId) ?? null) : null));
   const ctx: PanelToolContext = {
     appSessionId, session, status: engine, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
+    editorHost: { surface: 'panel', tabId: 'subagents:test' },
   };
   const Body = subagentsTool.render;
   return <Body state={state} ctx={ctx} />;

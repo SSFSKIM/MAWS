@@ -245,7 +245,7 @@ describe('the body', () => {
   function Body({ handle, appSessionId }: { handle: TasksHandle; appSessionId: AppSessionId | null }) {
     const session = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
     const engine = useSessions((s) => (appSessionId === null ? null : (s.engine.get(appSessionId) ?? null)));
-    const ctx: PanelToolContext = { appSessionId, session, status: engine, pinned: true, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: () => '' };
+    const ctx: PanelToolContext = { appSessionId, session, status: engine, pinned: true, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: () => '', editorHost: { surface: 'panel', tabId: 'tasks:body' } };
     const Render = tasksTool().render;
     return (
       <QueryClientProvider client={queryClient}>

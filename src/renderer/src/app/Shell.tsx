@@ -6,11 +6,12 @@
 import { BannerHost } from './BannerHost';
 import { MainArea } from '../main/MainArea';
 import { OverviewLayer } from '../overview/OverviewPanel';
+import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
 import { CommandPalette } from '../palette/CommandPalette';
 import { PanelRegion } from '../panel/PanelRegion';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
-import { COLLAPSE_THRESHOLD_PX, gridColumns, regionWidths, SIDEBAR_BOUNDS, useWindowWidth } from './regions';
+import { COLLAPSE_THRESHOLD_PX, gridColumns, panelInMain, regionWidths, SIDEBAR_BOUNDS, useWindowWidth } from './regions';
 import { Resizer } from './Resizer';
 import { ToastHost } from './ToastHost';
 import { Toolbar } from './Toolbar';
@@ -21,7 +22,7 @@ export const MAIN_REGION_ID = 'region-main';
 export function Shell() {
   const windowWidth = useWindowWidth();
   const columns = useLayout((s) => gridColumns(s.regions, windowWidth));
-  const mainHidden = useLayout((s) => s.regions.panel.maximized && !s.regions.panel.collapsed);
+  const mainHidden = useLayout((s) => panelInMain(s.regions)); // maximized or floating (P3-G)
 
   return (
     <div className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg [&>[data-region=panel]]:row-start-3" style={{ gridTemplateColumns: columns }}>
@@ -42,6 +43,7 @@ export function Shell() {
       </section>
       <ToastHost />
       <PanelRegion />
+      <MarkupLayer />
       <CommandPalette />
     </div>
   );

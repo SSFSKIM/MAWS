@@ -5,13 +5,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Resizer } from './Resizer';
 
 // A region whose width the resizer drives, as the shell does with the layout store.
-function Harness({ grow = 1, initial = 300 }: { grow?: 1 | -1; initial?: number }) {
+// P3-G: with `expand`, the region also floats (the panel's `onExpand`) when dragged past its maximum.
+function Harness({ grow = 1, initial = 300, expand = false }: { grow?: 1 | -1; initial?: number; expand?: boolean }) {
   const [width, setWidth] = useState(initial);
   const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   return (
     <div>
-      <output data-testid="state">{collapsed ? `collapsed at ${width}` : width}</output>
-      {!collapsed && (
+      <output data-testid="state">{collapsed ? `collapsed at ${width}` : expanded ? `expanded at ${width}` : width}</output>
+      {!collapsed && !expanded && (
         <Resizer
           label="Resize sidebar"
           controls="region-sidebar"
@@ -25,6 +27,11 @@ function Harness({ grow = 1, initial = 300 }: { grow?: 1 | -1; initial?: number 
           onCollapse={(restore) => {
             setWidth(restore);
             setCollapsed(true);
+          }}
+          expandThreshold={expand ? 40 : null}
+          onExpand={(restore) => {
+            setWidth(restore);
+            setExpanded(true);
           }}
         />
       )}
@@ -128,5 +135,33 @@ describe('resizer', () => {
     render(<Harness initial={360} />);
     drag(360, 250, 160, 120); // raw width 120: 80 px under the 200 minimum
     expect(state()).toBe('collapsed at 360');
+  });
+
+  // P3-G (§D1.6): the mirror of the collapse, on the maximum's side.
+  it('a drag reaching exactly 40 px past the maximum expands and hands back the width it started from; 39 px does not', () => {
+    render(<Harness initial={360} expand />);
+    drag(360, 400, 480, 519); // raw width 519: 39 px over the 480 maximum
+    expect(state()).toBe('480');
+    release(519);
+    expect(state()).toBe('480');
+    drag(480, 500, 520); // raw width 520: 40 px over
+    expect(state()).toBe('expanded at 480');
+  });
+
+  it('expands from the drag’s start for a region on the right, and never without a threshold', () => {
+    render(<Harness grow={-1} initial={360} expand />);
+    drag(1000, 900, 840); // raw width 520
+    expect(state()).toBe('expanded at 360');
+    cleanup();
+    render(<Harness initial={360} />);
+    drag(360, 900);
+    expect(state()).toBe('480');
+  });
+
+  it('the keyboard never expands', async () => {
+    const user = await focused({ expand: true });
+    for (let i = 0; i < 20; i++) await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.keyboard('{End}');
+    expect(state()).toBe('480');
   });
 });

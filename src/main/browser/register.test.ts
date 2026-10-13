@@ -76,7 +76,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select',
       'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload',
       'browser.history.suggest',
-      'browser.profiles.list', 'browser.view.place', 'browser.view.cover',
+      'browser.profiles.list', 'browser.view.place', 'browser.view.cover', 'browser.view.capture', // P3-G
       'browser.control.handBack',
       'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons', // cua #90
     ]);
@@ -248,6 +248,18 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(views.place).toHaveBeenCalledWith(place, sender);
     expect(handlers.get('browser.view.cover')!({ covered: true }, { sender })).toBeUndefined();
     expect(views.cover).toHaveBeenCalledWith(true, sender);
+  });
+
+  // P3-G (§D4.1): the still is the placed window's alone (capture.ts holds the caps and the null answers)
+  it('browser.view.capture captures a tab placed in the sender’s window and refuses any other', async () => {
+    const { call, store, windowOf, window } = setup();
+    const { tab } = call('browser.tabs.open', { appSessionId: A, url: null, select: false }) as { tab: { tabId: string } };
+    expect(failure(() => call('browser.view.capture', { tabId: 'b_ffffffffffff' }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    await expect(call('browser.view.capture', { tabId: tab.tabId }) as Promise<unknown>).rejects.toMatchObject({ error: { code: 'invalid_input' } }); // not placed
+    store.require(tab.tabId).placement = { paneId: 'p', surface: 'panel', window, rect: { x: 0, y: 0, width: 10, height: 10 } } as never;
+    expect(await (call('browser.view.capture', { tabId: tab.tabId }) as Promise<unknown>)).toEqual({ image: null }); // placed, but no page on show
+    windowOf.mockReturnValueOnce({ id: 4 });
+    await expect(call('browser.view.capture', { tabId: tab.tabId }) as Promise<unknown>).rejects.toMatchObject({ error: { code: 'invalid_input' } });
   });
 
   it('browser.view.place for an unknown tab answers invalid_input', () => {

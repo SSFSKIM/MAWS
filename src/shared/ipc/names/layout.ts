@@ -6,6 +6,7 @@ export const commands = [
   'layout.saveTextFile', 'layout.captureChords',
   'layout.quitWait', 'layout.quitWaitAnswer', // C12
   'layout.unsavedFiles', 'layout.saveAllDone', // E5
+  'layout.captureRegion', // P3-G
 ] as const;
 
 export const events = [
