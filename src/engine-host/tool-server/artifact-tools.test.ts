@@ -361,6 +361,16 @@ describe('artifact_export', () => {
     exporter.answer(sent[0]!.requestId, { ok: true });
     expect(jsonOf(await pending)).toEqual({ status: 'exported', artifactId: page.artifactId, format: 'pdf', revision: page.revision, path, copiedTo: join(w.cwd, 'out', 'dash.pdf') });
     expect(readFileSync(join(w.cwd, 'out', 'dash.pdf'), 'utf8')).toBe('%PDF-1.7');
+    expect(sent[0]).not.toHaveProperty('pageSize'); // omitted: the exporter's own default
+  });
+
+  it('hands the paper the agent chose to main (Decision Log 42)', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const sent: ArtifactExportRequest[] = [];
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), queueMicrotask(() => exporter.answer(request.requestId, { ok: true }))), answerMs: 60_000 });
+    expect(jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'a4' }, w.ctx()))).toMatchObject({ status: 'exported' });
+    expect(sent).toEqual([expect.objectContaining({ format: 'pdf', pageSize: 'a4' })]);
+    expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'legal' }, w.ctx())).isError).toBe(true);
   });
 
   it('answers exportUnavailable for a pair main has no exporter for, and in a build without the service', async () => {

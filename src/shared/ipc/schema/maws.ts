@@ -8,7 +8,7 @@ import * as z from 'zod';
 import { AppSessionIdSchema, RequestIdSchema } from '../../graph/ids';
 import { PendingAskSchema } from '../../maws/ask';
 import { PaneSchema } from '../../maws/panes';
-import { ARTIFACT_EXPORT_FORMATS, AskAnswerSchema, ShowPaneOpenedSchema } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, AskAnswerSchema, ShowPaneOpenedSchema } from '../../maws/tools';
 import { ArtifactKindSchema } from '../../artifacts/entity'; // P3-A M7
 import type { CommandSpec } from './common';
 import { BrowserTabIdSchema } from '../../browser/tab'; // E13
@@ -66,6 +66,7 @@ export const MawsArtifactExportSchema = z.strictObject({
   revision: z.number().int().nonnegative(), // the live revision, or the version's
   versionId: z.number().int().positive().optional(),
   path: AbsolutePathSchema, // where main writes the file
+  pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(), // omitted: the exporter's own default (Decision Log 42)
 });
 export type MawsArtifactExport = z.infer<typeof MawsArtifactExportSchema>;
 

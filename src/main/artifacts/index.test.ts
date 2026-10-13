@@ -63,8 +63,8 @@ describe('startArtifacts', () => {
     expect(sessions.partitions).toContain('maws-capture');
     expect(register.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(['artifacts.open', 'artifacts.export']));
     expect(onEvent).toHaveBeenCalledWith('maws.artifact.export', expect.any(Function));
-    expect(started.exporters.get('html', 'pdf')).toBeTypeOf('function');
-    expect(started.exporters.get('html', 'png')).toBeTypeOf('function');
+    expect(started.exporters.get('html', 'pdf')).toMatchObject({ kind: 'html', format: 'pdf' });
+    expect(started.exporters.get('html', 'png')).toMatchObject({ kind: 'html', format: 'png' });
     expect(started.exporters.get('document', 'pdf')).toBeUndefined();
     started.stop();
     expect(started.exporters.get('html', 'pdf')).toBeUndefined();

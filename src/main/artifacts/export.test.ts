@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { EXPORT_QUEUE_MS, ExporterRegistry, runExport, startExportService, type ExportJob, type ExportServiceDeps } from './export';
+import { EXPORT_QUEUE_MS, ExporterRegistry, runExport, startExportService, writeAtomically, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -23,15 +23,32 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const job = (over: Partial<ExportJob> = {}): ExportJob => ({ artifactId: ID, kind: 'html', format: 'pdf', revision: 4, ...over });
+const request = (over: Partial<ExportRequest> = {}): ExportRequest => ({ artifactId: ID, kind: 'html', format: 'pdf', revision: 4, path: join(root, ID, 'exports', '4-pdf.pdf'), ...over });
+// An exporter that writes `text` through the context, recording what it was asked.
+const writing = (kind: Exporter['kind'], format: Exporter['format'], text: (request: ExportRequest, context: ExportContext) => Promise<string> | string, seen: ExportRequest[] = []): Exporter => ({
+  kind,
+  format,
+  run: async (req, context) => {
+    seen.push(req);
+    await context.writeFile(req.path, await text(req, context));
+  },
+});
+const context = (over: Partial<ExportContext> = {}): ExportContext => ({
+  title: 'T',
+  state: async () => new Uint8Array(),
+  readAsset: async () => null,
+  printToPdf: async () => new Uint8Array(),
+  writeFile: writeAtomically,
+  ...over,
+});
 
-describe('the exporter registry (X31)', () => {
+describe('the exporter registry (X31): registered from outside A by kind and format', () => {
   it('finds an exporter by kind and format, the last registration winning, and forgets one when its registration is undone', () => {
     const registry = new ExporterRegistry();
-    const first = async () => bytes('1');
-    const second = async () => bytes('2');
-    registry.register('presentation', 'pptx', first);
-    const undo = registry.register('presentation', 'pptx', second);
+    const first = writing('presentation', 'pptx', () => '1');
+    const second = writing('presentation', 'pptx', () => '2');
+    registry.register(first);
+    const undo = registry.register(second);
     expect(registry.get('presentation', 'pptx')).toBe(second);
     expect(registry.get('presentation', 'pdf')).toBeUndefined();
     expect(registry.get('document', 'pptx')).toBeUndefined();
@@ -41,22 +58,18 @@ describe('the exporter registry (X31)', () => {
 });
 
 describe('runExport', () => {
-  it('writes the exporter’s bytes to the path, creating its directory, and leaves no temporary file', async () => {
+  it('runs the exporter, whose write lands whole at the path (its directory created) with no temporary file left', async () => {
     const registry = new ExporterRegistry();
-    const seen: ExportJob[] = [];
-    registry.register('html', 'pdf', async (j) => {
-      seen.push(j);
-      return bytes('%PDF-1.7');
-    });
-    const path = join(root, ID, 'exports', '4-pdf.pdf');
-    expect(await runExport(registry, job(), path)).toEqual({ ok: true });
-    expect(await readFile(path, 'utf8')).toBe('%PDF-1.7');
+    const seen: ExportRequest[] = [];
+    registry.register(writing('html', 'pdf', () => '%PDF-1.7', seen));
+    expect(await runExport(registry, request({ pageSize: 'a4' }), context())).toEqual({ ok: true });
+    expect(await readFile(request().path, 'utf8')).toBe('%PDF-1.7');
     expect(await readdir(join(root, ID, 'exports'))).toEqual(['4-pdf.pdf']);
-    expect(seen).toEqual([job()]);
+    expect(seen).toEqual([request({ pageSize: 'a4' })]);
   });
 
   it('answers unavailable for a kind and format no exporter serves, naming both', async () => {
-    expect(await runExport(new ExporterRegistry(), job({ kind: 'document', format: 'docx' }), join(root, 'x.docx'))).toEqual({
+    expect(await runExport(new ExporterRegistry(), request({ kind: 'document', format: 'docx' }), context())).toEqual({
       ok: false,
       unavailable: true,
       error: 'MAWS cannot export a document artifact as docx yet',
@@ -65,47 +78,60 @@ describe('runExport', () => {
 
   it('answers an exporter’s failure and its timeout as errors, writing nothing', async () => {
     const registry = new ExporterRegistry();
-    registry.register('html', 'pdf', async () => {
-      throw new Error('the page did not load');
-    });
-    registry.register('html', 'png', () => new Promise<Uint8Array>(() => {}));
-    expect(await runExport(registry, job(), join(root, 'a.pdf'))).toEqual({ ok: false, error: 'the page did not load' });
-    expect(await runExport(registry, job({ format: 'png' }), join(root, 'a.png'), 20)).toEqual({ ok: false, error: 'the export did not finish within 0.02 s' });
+    registry.register({ kind: 'html', format: 'pdf', run: async () => Promise.reject(new Error('the page did not load')) });
+    registry.register({ kind: 'html', format: 'png', run: () => new Promise<void>(() => {}) });
+    expect(await runExport(registry, request(), context())).toEqual({ ok: false, error: 'the page did not load' });
+    expect(await runExport(registry, request({ format: 'png' }), context(), 20)).toEqual({ ok: false, error: 'the export did not finish within 0.02 s' });
     expect(await readdir(root)).toEqual([]);
   });
 });
 
-// A host that holds one html artifact at revisions 2 and 4 (version 9 at revision 2) and one document.
+// A host that holds one html artifact at revisions 2 and 4 (version 9 at revision 2, with an asset) and one document
+// (live at 7, version 3 at 5).
 function fakeHost() {
-  const calls: { name: CommandName; input: unknown }[] = [];
   const answered: CommandInput<'maws.artifact.exported'>[] = [];
   const listeners: ((request: MawsArtifactExport) => void)[] = [];
+  const asset = join(root, 'asset.png');
   const call = async (name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
-    calls.push({ name, input });
     const { artifactId } = input as { artifactId: string };
-    const row = artifactId === ID ? { id: ID, kind: 'html', revision: 4 } : artifactId === DOC ? { id: DOC, kind: 'document', revision: 7 } : null;
-    if (name === 'artifacts.get') return { ok: true, value: { artifact: row } } as CommandResult<CommandName>;
-    if (name === 'artifacts.versions') return { ok: true, value: { versions: row ? [{ id: 9, seq: 2 }] : [] } } as CommandResult<CommandName>;
-    throw new Error(`unexpected ${name}`);
+    const row = artifactId === ID ? { id: ID, kind: 'html', title: 'Report', revision: 4 } : artifactId === DOC ? { id: DOC, kind: 'document', title: 'Notes', revision: 7 } : null;
+    const answer = (value: unknown) => ({ ok: true, value }) as CommandResult<CommandName>;
+    switch (name) {
+      case 'artifacts.get':
+        return answer({ artifact: row });
+      case 'artifacts.versions':
+        return answer({ versions: artifactId === ID ? [{ id: 9, seq: 2 }] : [{ id: 3, seq: 5 }] });
+      case 'artifacts.versionState':
+        return answer({ bytes: bytes(`version ${(input as { versionId: number }).versionId}`) });
+      case 'artifacts.state':
+        return answer({ revision: 7, bytes: bytes('live') });
+      case 'artifacts.content':
+        return (input as { path?: string }).path === 'assets/a.png'
+          ? answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset })
+          : ({ ok: false, error: { code: 'invalid_input', message: 'not found' } } as CommandResult<CommandName>);
+      default:
+        throw new Error(`unexpected ${name}`);
+    }
   };
   return {
-    calls,
     answered,
-    emit: (request: MawsArtifactExport) => listeners.forEach((listener) => listener(request)),
-    deps: (registry: ExporterRegistry) => ({
+    asset,
+    emit: (req: MawsArtifactExport) => listeners.forEach((listener) => listener(req)),
+    deps: (registry: ExporterRegistry): ExportServiceDeps => ({
       registry,
       root,
       call: call as ExportServiceDeps['call'],
-      onEvent: (name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void) => {
+      onEvent: (name, listener) => {
         expect(name).toBe('maws.artifact.export');
         listeners.push(listener);
         return () => void listeners.splice(listeners.indexOf(listener), 1);
       },
-      answer: async (input: CommandInput<'maws.artifact.exported'>) => void answered.push(input),
+      answer: async (input) => void answered.push(input),
+      printToPdf: async (html) => bytes(`%PDF ${html}`),
     }),
   };
 }
-const request = (over: Partial<MawsArtifactExport> = {}): MawsArtifactExport => ({
+const hostRequest = (over: Partial<MawsArtifactExport> = {}): MawsArtifactExport => ({
   appSessionId: 'App-A' as AppSessionId,
   requestId: 'r1' as RequestId,
   artifactId: ID,
@@ -121,13 +147,14 @@ const until = async (test: () => boolean) => {
 };
 
 describe('the export service', () => {
-  it('answers the host’s export request through maws.artifact.exported, the file written where the host named', async () => {
+  it('answers the host’s export request through maws.artifact.exported, the file written where the host named, its page size handed on', async () => {
     const host = fakeHost();
     const registry = new ExporterRegistry();
-    registry.register('html', 'pdf', async (j) => bytes(`%PDF ${j.revision}`));
+    const seen: ExportRequest[] = [];
+    registry.register(writing('html', 'pdf', (req, ctx) => `%PDF ${ctx.title} ${req.revision}`, seen));
     const service = startExportService(host.deps(registry));
-    host.emit(request());
-    host.emit(request({ requestId: 'r2' as RequestId, kind: 'document', format: 'docx', revision: 7, artifactId: DOC, path: join(root, DOC, 'exports', '7-docx.docx') }));
+    host.emit(hostRequest({ pageSize: 'letter' }));
+    host.emit(hostRequest({ requestId: 'r2' as RequestId, kind: 'document', format: 'docx', revision: 7, artifactId: DOC, path: join(root, DOC, 'exports', '7-docx.docx') }));
     await until(() => host.answered.length === 2);
     expect(host.answered).toEqual(
       expect.arrayContaining([
@@ -135,11 +162,34 @@ describe('the export service', () => {
         { appSessionId: 'App-A', requestId: 'r2', answer: { ok: false, unavailable: true, error: 'MAWS cannot export a document artifact as docx yet' } },
       ]),
     );
-    expect(await readFile(join(root, ID, 'exports', '4-pdf.pdf'), 'utf8')).toBe('%PDF 4');
+    expect(await readFile(join(root, ID, 'exports', '4-pdf.pdf'), 'utf8')).toBe('%PDF Report 4');
+    expect(seen).toEqual([{ artifactId: ID, kind: 'html', format: 'pdf', revision: 4, path: join(root, ID, 'exports', '4-pdf.pdf'), pageSize: 'letter' }]);
     service.stop();
-    host.emit(request({ requestId: 'r3' as RequestId }));
+    host.emit(hostRequest({ requestId: 'r3' as RequestId }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(host.answered).toHaveLength(2); // stopped: no longer listening
+  });
+
+  it('gives an exporter the artifact’s title, its state (the version’s, else the live doc’s), its assets and the PDF printer', async () => {
+    const host = fakeHost();
+    await writeFile(host.asset, new Uint8Array([1, 2, 3]));
+    const registry = new ExporterRegistry();
+    registry.register(
+      writing('document', 'pdf', async (req, ctx) => {
+        const state = new TextDecoder().decode(await ctx.state());
+        const asset = await ctx.readAsset('assets/a.png');
+        const missing = await ctx.readAsset('assets/none.png');
+        const pdf = new TextDecoder().decode(await ctx.printToPdf(`<h1>${ctx.title}</h1>`));
+        return JSON.stringify({ state, asset: asset && { bytes: [...asset.bytes], mime: asset.mime }, missing, pdf, pageSize: req.pageSize ?? null });
+      }),
+    );
+    const service = startExportService(host.deps(registry));
+    const live = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', pageSize: 'a4' });
+    expect(live).toEqual({ path: join(root, DOC, 'exports', '7-pdf.pdf'), revision: 7 });
+    expect(JSON.parse(await readFile(live.path, 'utf8'))).toEqual({ state: 'live', asset: { bytes: [1, 2, 3], mime: 'image/png' }, missing: null, pdf: '%PDF <h1>Notes</h1>', pageSize: 'a4' });
+    const version = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', versionId: 3 });
+    expect(version).toEqual({ path: join(root, DOC, 'exports', '5-pdf.pdf'), revision: 5 });
+    expect(JSON.parse(await readFile(version.path, 'utf8'))).toMatchObject({ state: 'version 3', pageSize: null });
   });
 
   it('runs at most two exports at once and answers one that waited EXPORT_QUEUE_MS for a slot as busy', async () => {
@@ -149,15 +199,17 @@ describe('the export service', () => {
     let running = 0;
     let peak = 0;
     const releases: (() => void)[] = [];
-    registry.register('html', 'pdf', async () => {
-      running++;
-      peak = Math.max(peak, running);
-      await new Promise<void>((resolve) => releases.push(resolve));
-      running--;
-      return bytes('%PDF');
-    });
+    registry.register(
+      writing('html', 'pdf', async () => {
+        running++;
+        peak = Math.max(peak, running);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        running--;
+        return '%PDF';
+      }),
+    );
     startExportService(host.deps(registry));
-    for (const id of ['r1', 'r2', 'r3']) host.emit(request({ requestId: id as RequestId }));
+    for (const id of ['r1', 'r2', 'r3']) host.emit(hostRequest({ requestId: id as RequestId }));
     await vi.advanceTimersByTimeAsync(EXPORT_QUEUE_MS + 1);
     expect(peak).toBe(2);
     expect(host.answered).toEqual([{ appSessionId: 'App-A', requestId: 'r3', answer: { ok: false, error: `MAWS was busy with other exports for ${EXPORT_QUEUE_MS / 1000} s; try again` } }]);
@@ -170,15 +222,12 @@ describe('the export service', () => {
   it('serves the library’s artifacts.export: the live revision or a version’s, a PNG’s size handed on, the path under the store', async () => {
     const host = fakeHost();
     const registry = new ExporterRegistry();
-    const jobs: ExportJob[] = [];
-    registry.register('html', 'png', async (j) => {
-      jobs.push(j);
-      return bytes('PNG');
-    });
-    registry.register('html', 'pdf', async () => bytes('%PDF'));
+    const seen: ExportRequest[] = [];
+    registry.register(writing('html', 'png', () => 'PNG', seen));
+    registry.register(writing('html', 'pdf', () => '%PDF'));
     const service = startExportService(host.deps(registry));
     expect(await service.exportForLibrary({ artifactId: ID, format: 'png', width: 640, height: 480 })).toEqual({ path: join(root, ID, 'exports', '4-png.png'), revision: 4 });
-    expect(jobs).toEqual([{ artifactId: ID, kind: 'html', format: 'png', revision: 4, width: 640, height: 480 }]);
+    expect(seen).toEqual([{ artifactId: ID, kind: 'html', format: 'png', revision: 4, path: join(root, ID, 'exports', '4-png.png'), width: 640, height: 480 }]);
     expect(await service.exportForLibrary({ artifactId: ID, format: 'pdf', versionId: 9 })).toEqual({ path: join(root, ID, 'exports', '2-pdf.pdf'), revision: 2 });
     expect(await readFile(join(root, ID, 'exports', '2-pdf.pdf'), 'utf8')).toBe('%PDF');
   });
@@ -194,5 +243,16 @@ describe('the export service', () => {
       message: 'MAWS cannot export a document artifact as docx yet',
       issues: { reason: 'exportUnavailable', data: { kind: 'document', format: 'docx' } },
     });
+  });
+});
+
+describe('writeAtomically', () => {
+  it('replaces a file whole, leaving no temporary file beside it', async () => {
+    const path = join(root, 'out', 'a.pdf');
+    await mkdir(join(root, 'out'));
+    await writeFile(path, 'old');
+    await writeAtomically(path, 'new');
+    expect(await readFile(path, 'utf8')).toBe('new');
+    expect(await readdir(join(root, 'out'))).toEqual(['a.pdf']);
   });
 });

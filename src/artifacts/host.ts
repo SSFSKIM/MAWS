@@ -122,7 +122,7 @@ export interface DocumentHandle {
 export interface ArtifactHost {
   open(artifactId: string): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   assetUrl(artifactId: string, ref: string): string;
-  export(artifactId: string, format: string, version?: number): Promise<{ path: string }>;
+  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4' }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
   attributions(artifactId: string, fromSeq: number, toSeq: number): Promise<Uint8Array>; // a merged ContentMap (23a)
   uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }): Promise<{ assetId: string; ref: string }>; // 25l

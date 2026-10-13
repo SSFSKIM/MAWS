@@ -12,7 +12,7 @@ import * as z from 'zod';
 import { ArtifactKindSchema, ArtifactSchema } from '../../artifacts/entity';
 import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
-import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_MAX_BYTES } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
 import { DELIVERABLE_CONSOLE_MESSAGE_MAX } from './deliverables';
 import type { CommandSpec } from './common';
@@ -177,6 +177,9 @@ export const commands = {
     z.strictObject({ artifactId: Id, revision: Seq.optional(), path: z.string().min(1).max(1_000).optional() }),
     z.strictObject({ revision: Seq, kind: ArtifactKindSchema, name: z.string(), size: z.number().int().nonnegative(), sha256: z.string(), path: z.string() }),
   ),
+  // A document kind's live V2 state and the revision it is at (M7: an exporter's state when no version is named).
+  // Main-only.
+  'artifacts.state': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, bytes: Bytes })),
   // The store's health (Decision Log 12, 24h): `recovered` when a broken file was moved aside this run.
   'artifacts.status': host(z.void(), z.strictObject({ status: z.enum(ARTIFACT_STORE_STATUSES), reason: z.string().nullable() })),
   // The schema-agnostic test writer (M3), idempotent by `opId`, as the session named (an agent) or the human; refused
@@ -189,14 +192,15 @@ export const commands = {
   // with this `channel`, and the host attaches the other end with the human as actor. Refused for a byte kind (`invalid`).
   'artifacts.open': main(z.strictObject({ artifactId: Id }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
   // The library's Export (X31; M7): main's export service writes the artifact's live revision, or a version's, as
-  // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. A PNG is
-  // `width` CSS px wide (1280 when omitted) and `height` high (the page's whole height when omitted). A kind and format
-  // no exporter serves is refused `exportUnavailable {kind, format}`.
+  // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
+  // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the
+  // page's whole height when omitted). A kind and format no exporter serves is refused `exportUnavailable {kind, format}`.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,
       format: z.enum(ARTIFACT_EXPORT_FORMATS),
       versionId: z.number().int().positive().optional(),
+      pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
     }),

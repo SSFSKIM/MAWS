@@ -10,7 +10,7 @@ import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import type { MessagePortMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortProvider, type PortLike } from '@artifacts/provider/port';
-import { newDoc } from '@artifacts/yjs';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import { HostCommandError, type DocPortHandler, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { commands, type CommandName, type CommandOutput, type EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
@@ -203,6 +203,14 @@ describe('the artifacts and spaces surface (M4)', () => {
     const doc = (await call('artifacts.create', { kind: 'document', title: 'Doc' })).artifact;
     const image = await call('artifacts.uploadAsset', { artifactId: doc.id, name: 'chart.png', mime: 'image/png', bytes: new Uint8Array([4]) });
     expect(await call('artifacts.content', { artifactId: doc.id, path: image.ref })).toMatchObject({ kind: 'document', name: 'chart.png', size: 1 });
+    // M7: a document's live state for an exporter; a byte kind has none
+    await documents!.service.writeAs(doc.id, { kind: 'human' }, (d) => d.get('root').insert(0, 'exported'));
+    const live = await call('artifacts.state', { artifactId: doc.id });
+    expect(live.revision).toBe(documents!.store.revision(doc.id));
+    const replica = newDoc();
+    applyV2(replica, live.bytes);
+    expect(replica.get('root').toString()).toBe('exported');
+    expect(await refusal('artifacts.state', { artifactId: page.id })).toMatchObject({ issues: { reason: 'invalid' } });
     const file = join(dir, 'report.txt');
     writeFileSync(file, 'report');
     const linked = (await call('artifacts.create', { kind: 'file', title: 'Report', content: { path: file } })).artifact;

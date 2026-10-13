@@ -23,7 +23,7 @@ import { openDocument } from './open';
 import { serveArtifacts, type ContentLookup } from './protocol';
 
 export { registerStoreSchemes } from './protocol';
-export type { Exporter, ExporterRegistry, ExportJob } from './export';
+export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
 
 export interface ArtifactsDeps {
   hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'snapshot' | 'onState' | 'onStreaming' | 'onEvent'>;

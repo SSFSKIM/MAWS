@@ -210,7 +210,13 @@ export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSc
 export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
 export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html'] as const;
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
-export const ArtifactExportInputSchema = z.strictObject({ artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional() });
+// The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
+export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
+export type ArtifactExportPageSize = (typeof ARTIFACT_EXPORT_PAGE_SIZES)[number];
+export const ArtifactExportInputSchema = z.strictObject({
+  artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional(),
+  pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+});
 export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 // How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
 // own guard and queue keep its answer inside it.
@@ -428,7 +434,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too. Needs the MAWS app open.',
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default. Needs the MAWS app open.',
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

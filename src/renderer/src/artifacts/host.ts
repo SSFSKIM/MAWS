@@ -215,8 +215,10 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     assetUrl: (artifactId, ref) => artifactUrl(artifactId, 'live', ref),
     // Main's export service (M7, X31): the file's path under the store's directory. A format the IPC does not know, or a
     // kind and format no exporter serves, rejects (`exportUnavailable` for the latter).
-    export: async (artifactId, format, version) => {
-      const { path } = await call('artifacts.export', { artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }) });
+    export: async (artifactId, format, version, options) => {
+      const { path } = await call('artifacts.export', {
+        artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }),
+      });
       return { path };
     },
     versionState: async (artifactId, version) => (await call('artifacts.versionState', typeof version === 'number' ? { artifactId, versionId: version } : { artifactId, seq: version.seq })).bytes,
