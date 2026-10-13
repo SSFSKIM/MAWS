@@ -157,3 +157,24 @@ describe('overrides reach Office (Decision Log 25; B’s `dsOverrides`)', () => 
     expect(one(one(doc, 'majorFont'), 'latin').getAttribute('typeface')).toBe('Georgia'); // the extension's face stays
   });
 });
+
+// M6 fix wave 1, I2 (the review's probe): a slot's or a role's reference chain is resolved through the overrides, so a
+// slot aliasing a token that aliases an overridden one follows the override; a literal slot still stays.
+describe('overrides follow a reference chain into Office', () => {
+  it('a slot aliasing an alias of the overridden token follows it, through aliases and $ref pointers', () => {
+    const file = edited(complete, ['color/link', { $type: 'color', $value: '{color.accent.$root}' }], ['color/visited', { $type: 'color', $value: { $ref: '#/color/link/$value' } }], ['$extensions/dev.maws.office/theme/accent1', '{color.link}'], ['$extensions/dev.maws.office/theme/accent2', { $ref: '#/color/visited/$value' }]);
+    const theme = officeTheme(set(file), { '--ds-color-accent': '#123456' });
+    expect(theme.colors.accent1).toBe('123456');
+    expect(theme.colors.accent2).toBe('123456');
+    expect(theme.colors.dk2).toBe('2C2B28'); // a literal slot
+    // an override nearer in the chain wins over one further along
+    expect(officeTheme(set(file), { '--ds-color-accent': '#123456', '--ds-color-link': '#abcdef' }).colors.accent1).toBe('ABCDEF');
+  });
+
+  it('a role that aliases an overridden token follows it, for colours and faces', () => {
+    const file = withoutOffice(complete, ['color/status/info/$value', '{color.accent.$root}'], ['font/brand', { $type: 'fontFamily', $value: 'Avenir' }], ['font/display/$value', '{font.brand}']);
+    const theme = officeTheme(set(file), { '--ds-color-accent': '#123456', '--ds-font-brand': '"Source Serif 4", serif' });
+    expect(theme.colors.accent2).toBe('123456'); // info, an alias of the accent
+    expect(theme.fonts.major.latin).toBe('Source Serif 4');
+  });
+});

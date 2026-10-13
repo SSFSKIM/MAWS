@@ -66,18 +66,35 @@ function themeOverrides(overrides: TokenOverrides | undefined): { colors: Map<st
   return { colors, fonts };
 }
 
-/** The `--ds-*` name of the token a slot's value refers to (an alias or a pointer to one), else null (a literal). */
-function referencedName(raw: unknown): string | null {
+/** The token path a value refers to (an alias, or a `$ref` pointer to a token's value), else null (a literal). */
+function referencedPath(raw: unknown): string | null {
   const alias = isAlias(raw) ? raw : isPointer(raw) ? pointerAsAlias(raw.$ref) : null;
-  return alias === null ? null : (cssNamesOf(aliasPath(alias), 'color')[0] ?? null);
+  return alias === null ? null : aliasPath(alias);
+}
+
+/**
+ * The override met first along a reference chain (M6 fix wave 1, I2): the token at `path` if its `--ds-*` name is
+ * overridden, else the token its value refers to, and so on until a literal value. The tokens are validated free of
+ * cycles; the bound only keeps a malformed set from looping.
+ */
+function chainOverride<T>(tokens: TokenSet, path: string, type: 'color' | 'fontFamily', overrides: ReadonlyMap<string, T>): T | undefined {
+  let current: string | null = path;
+  for (let step = 0; current !== null && step < 64; step++) {
+    const name = cssNamesOf(current, type)[0];
+    const found = name === undefined ? undefined : overrides.get(name);
+    if (found !== undefined) return found;
+    current = referencedPath(byIdentity(tokens.tokens, current)?.$value);
+  }
+  return undefined;
 }
 
 /**
  * The resolved Office theme of a token set. Throws when a slot needs a role the set does not resolve.
  *
  * `overrides` (Decision Log 25): before mapping, an override replaces its role's value when it reads as a colour or a
- * font stack, so the slots derived from that role and any `dev.maws.office` slot aliasing it follow, while a slot the
- * system wrote as a literal stays. A face the extension names stays too. An override that is neither is ignored here.
+ * font stack, so the slots derived from that role and any `dev.maws.office` slot referring to it follow, along the
+ * whole reference chain (a slot aliasing a token that aliases the role follows too), while a slot the system wrote as
+ * a literal stays. A face the extension names stays too. An override that is neither is ignored here.
  */
 export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): OfficeTheme {
   const resolved = resolveTokens(tokens);
@@ -85,7 +102,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
   const over = themeOverrides(overrides);
 
   const role = (path: string): ColorValue => {
-    const overridden = over.colors.get(cssNamesOf(path, 'color')[0]!);
+    const overridden = chainOverride(tokens, path, 'color', over.colors);
     if (overridden) return overridden;
     const token = byIdentity(resolved.tokens, path);
     if (token?.type !== 'color') throw new Error(`officeTheme: the role ${path} does not resolve to a colour`);
@@ -108,8 +125,8 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
   const slot = (name: OfficeSlot): ColorValue => {
     const raw = extension.theme?.[name];
     if (raw === undefined) return role(DERIVED[name]);
-    const referenced = referencedName(raw);
-    const overridden = referenced === null ? undefined : over.colors.get(referenced);
+    const referenced = referencedPath(raw);
+    const overridden = referenced === null ? undefined : chainOverride(tokens, referenced, 'color', over.colors);
     if (overridden) return overridden;
     const { value, problems } = resolveValueAgainst(resolved, 'color', raw, `${OFFICE_KEY}.theme.${name}`);
     if (!value) throw new Error(`officeTheme: ${problems.join('; ')}`);
@@ -124,7 +141,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
   const faces = (which: 'major' | 'minor', rolePath: string): OfficeFonts => {
     const given = extension.fonts?.[which] ?? {};
     let latin = given.latin;
-    const overridden = over.fonts.get(cssNamesOf(rolePath, 'fontFamily')[0]!);
+    const overridden = chainOverride(tokens, rolePath, 'fontFamily', over.fonts);
     if (latin === undefined && overridden) latin = officeFace(overridden);
     if (latin === undefined) {
       const token = byIdentity(resolved.tokens, rolePath);
