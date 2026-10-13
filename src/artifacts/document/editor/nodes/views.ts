@@ -58,17 +58,17 @@ export function formatDate(iso: unknown): string {
 
 function diagramView(env: ViewEnvironment): NodeViewRenderer {
   return (props) => {
-    let drawn = 0; // the latest draw; an older one that answers late is dropped
+    let drawn = 0; // the latest draw, an empty source's included; an older one that answers late is dropped
     return atomView({
       inline: false,
       field: { attr: 'source', label: 'Diagram source', kind: 'textarea' },
       draw(into, node) {
+        drawn += 1;
+        const mine = drawn;
         const source = String(node.attrs.source ?? '');
         const pre = element('pre', 'doc-diagram-source', source || 'Diagram');
         into.append(pre);
         if (!source) return;
-        drawn += 1;
-        const mine = drawn;
         env.renderDiagram(source, into).then(
           (svg) => {
             if (mine !== drawn || !into.isConnected) return;
