@@ -1,0 +1,22 @@
+PASS  first publish lands as ONE update  {"res":{"ok":true,"diagnostics":{"project/slides/kpis.html":[{"severity":"note","where":"div","message":"comment dropped"}]},"held":{},"writes":11},"updates":1,"v1":4573,"v2":3742}
+PASS  deck.json: unknown keys kept, order applied
+PASS  no-op republish of the files just read: 0 writes, no update emitted  {"res":{"ok":true,"diagnostics":{},"held":{},"writes":0},"updates":0,"v1":0,"v2":0}
+PASS  republish equal by meaning (reordered declarations, uppercase hex, other whitespace, compact JSON): 0 writes  {"res":{"ok":true,"diagnostics":{},"held":{},"writes":0},"updates":0,"v1":0,"v2":0}
+PASS  one-property change: exactly 1 write  1
+NUM   update bytes, one-property publish (V1, V2) = {"v1":21,"v2":33}
+PASS  agent republish over a concurrent human restyle: the agent's moved properties land, the human's colour stays  {"position":"absolute","left":"200px","bottom":"80px","font-size":"24px","color":"#c0392b"}
+PASS  … and the agent wrote only the 2 properties it changed  2
+PASS  contrast: the same file diffed against the LIVE doc (no base) clobbers the human's colour
+PASS  removed element: its id is gone from the model, anchor orphaned  1
+PASS  re-added with the same id: the same element (the anchor resolves again)  2
+PASS  text: agent's word change + bold merges with the human's concurrent typing in the same box  [{"type":"p","inline":[{"text":"much ","marks":{}},{"text":"faster","marks":{"b":{}}},{"text":" ramp (YoY)","marks":{}}]}]
+NUM   update bytes, text publish ("much " inserted + bold on a word) (V1, V2) = {"v1":42,"v2":44,"writes":2}
+PASS  flow re-order of two siblings: 1 key written  1
+PASS  pinned element moved from under to over the flow layer: 1 key written  1
+PASS  a structurally invalid file is held (slideHeld with reasons), not trimmed; read returns it verbatim  {"map":["unknown or misplaced tag <iframe>"]}
+PASS  republishing a valid file clears the hold
+PASS  a publish with one invalid entry is refused whole; the replica is unchanged  "project/../x.html: not a deck file path (project/deck.json or project/slides/<id>.html)"
+PASS  deck.json order change: 1 slide key written  1
+PASS  slide removal (file null + order) in one transaction  1
+
+18/18 checks passed

@@ -1,0 +1,20 @@
+PASS  both replicas render the same DOM
+PASS  pinned-under backdrop rendered first with data-layer=under; the section isolates
+PASS  drag "backdrop" on R1 (3 pointer moves): R2's patched DOM equals a fresh render of its model
+PASS  drag "backdrop" on R1 (3 pointer moves): R2's DOM mutations minimal  {"mutations":6,"byKind":["attributes:style@backdrop","attributes:style@backdrop","attributes:style@backdrop","attributes:style@backdrop","attributes:style@backdrop","attributes:style@backdrop"],"canvasWrites":{"style":6}}
+PASS  R2 follows the drag: backdrop at left:100px, top:60px  {"left":"100px","top":"60px"}
+PASS  bring "backdrop" to front on R1: R2's patched DOM equals a fresh render of its model
+PASS  bring "backdrop" to front on R1: R2's DOM mutations minimal  {"mutations":3,"byKind":["attributes:data-layer@backdrop","childList@SECTION","childList@SECTION"],"canvasWrites":{"place":1}}
+PASS  R2: backdrop is now the last child, no longer under
+PASS  send "backdrop" to back on R1: R2's patched DOM equals a fresh render of its model
+PASS  send "backdrop" to back on R1: R2's DOM mutations minimal  {"mutations":3,"byKind":["attributes:data-layer@backdrop","childList@SECTION","childList@SECTION"],"canvasWrites":{"place":1}}
+PASS  R2: backdrop first again, under the flow layer
+PASS  text edit in "head" on R1: R2's patched DOM equals a fresh render of its model
+PASS  text edit in "head" on R1: R2's DOM mutations minimal  {"mutations":4,"byKind":["childList@head","childList@head","childList@head","childList@I"],"canvasWrites":{"text":1}}
+PASS  R2 shows the new text  "Changes <i>ahead</i>"
+PASS  agent publish: add a pinned note, restyle the heading, remove the image: R2's patched DOM equals a fresh render of its model
+PASS  agent publish: add a pinned note, restyle the heading, remove the image: R2's DOM mutations minimal  {"mutations":3,"byKind":["childList@e1-82rw","attributes:style@head","childList@SECTION"],"canvasWrites":{"style":1,"place":1,"create":1,"remove":1}}
+PASS  R1 and R2 both show the agent's change
+PASS  R1 and R2 DOMs identical after everything
+
+18/18 checks passed

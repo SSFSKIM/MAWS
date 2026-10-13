@@ -1,0 +1,30 @@
+{
+  "failed": 0,
+  "results": {
+    "framing: every record back in order, exact-size frames": {
+      "ok": true,
+      "detail": {
+        "records": 2000,
+        "bytes": 7602839,
+        "ms": 4
+      }
+    },
+    "backpressure: the stalled channel is reset, the doc goes on": {
+      "ok": true,
+      "detail": {
+        "updatesBeforeReset": 260,
+        "framesOut": 257,
+        "events": [
+          {
+            "name": "documents.closed",
+            "input": {
+              "channel": 1,
+              "reason": "reset"
+            }
+          }
+        ],
+        "agentRevision": 260
+      }
+    }
+  }
+}

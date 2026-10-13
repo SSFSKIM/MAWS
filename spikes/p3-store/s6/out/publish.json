@@ -1,0 +1,170 @@
+{
+  "checks": [
+    {
+      "name": "first publish lands as ONE update",
+      "pass": true,
+      "detail": {
+        "res": {
+          "ok": true,
+          "diagnostics": {
+            "project/slides/kpis.html": [
+              {
+                "severity": "note",
+                "where": "div",
+                "message": "comment dropped"
+              }
+            ]
+          },
+          "held": {},
+          "writes": 11
+        },
+        "updates": 1,
+        "v1": 4573,
+        "v2": 3742
+      }
+    },
+    {
+      "name": "deck.json: unknown keys kept, order applied",
+      "pass": true
+    },
+    {
+      "name": "no-op republish of the files just read: 0 writes, no update emitted",
+      "pass": true,
+      "detail": {
+        "res": {
+          "ok": true,
+          "diagnostics": {},
+          "held": {},
+          "writes": 0
+        },
+        "updates": 0,
+        "v1": 0,
+        "v2": 0
+      }
+    },
+    {
+      "name": "republish equal by meaning (reordered declarations, uppercase hex, other whitespace, compact JSON): 0 writes",
+      "pass": true,
+      "detail": {
+        "res": {
+          "ok": true,
+          "diagnostics": {},
+          "held": {},
+          "writes": 0
+        },
+        "updates": 0,
+        "v1": 0,
+        "v2": 0
+      }
+    },
+    {
+      "name": "one-property change: exactly 1 write",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "agent republish over a concurrent human restyle: the agent's moved properties land, the human's colour stays",
+      "pass": true,
+      "detail": {
+        "position": "absolute",
+        "left": "200px",
+        "bottom": "80px",
+        "font-size": "24px",
+        "color": "#c0392b"
+      }
+    },
+    {
+      "name": "… and the agent wrote only the 2 properties it changed",
+      "pass": true,
+      "detail": 2
+    },
+    {
+      "name": "contrast: the same file diffed against the LIVE doc (no base) clobbers the human's colour",
+      "pass": true
+    },
+    {
+      "name": "removed element: its id is gone from the model, anchor orphaned",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "re-added with the same id: the same element (the anchor resolves again)",
+      "pass": true,
+      "detail": 2
+    },
+    {
+      "name": "text: agent's word change + bold merges with the human's concurrent typing in the same box",
+      "pass": true,
+      "detail": [
+        {
+          "type": "p",
+          "inline": [
+            {
+              "text": "much ",
+              "marks": {}
+            },
+            {
+              "text": "faster",
+              "marks": {
+                "b": {}
+              }
+            },
+            {
+              "text": " ramp (YoY)",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "flow re-order of two siblings: 1 key written",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "pinned element moved from under to over the flow layer: 1 key written",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "a structurally invalid file is held (slideHeld with reasons), not trimmed; read returns it verbatim",
+      "pass": true,
+      "detail": {
+        "map": [
+          "unknown or misplaced tag <iframe>"
+        ]
+      }
+    },
+    {
+      "name": "republishing a valid file clears the hold",
+      "pass": true
+    },
+    {
+      "name": "a publish with one invalid entry is refused whole; the replica is unchanged",
+      "pass": true,
+      "detail": "project/../x.html: not a deck file path (project/deck.json or project/slides/<id>.html)"
+    },
+    {
+      "name": "deck.json order change: 1 slide key written",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "slide removal (file null + order) in one transaction",
+      "pass": true,
+      "detail": 1
+    }
+  ],
+  "numbers": {
+    "update bytes, one-property publish (V1, V2)": {
+      "v1": 21,
+      "v2": 33
+    },
+    "update bytes, text publish (\"much \" inserted + bold on a word) (V1, V2)": {
+      "v1": 42,
+      "v2": 44,
+      "writes": 2
+    }
+  }
+}

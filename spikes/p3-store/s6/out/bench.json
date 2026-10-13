@@ -1,0 +1,49 @@
+{
+  "checks": [
+    {
+      "name": "the generated deck is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "… and the deck still reads back canonical after all writes",
+      "pass": true,
+      "detail": 0
+    }
+  ],
+  "numbers": {
+    "deck: slides, source bytes": {
+      "slides": 100,
+      "bytes": 120583
+    },
+    "deck: elements (incl. rows and cells)": 1273,
+    "parse 100 slide files (parse5 + loader), ms median of 7": 13.8,
+    "serialize 100 slides (canonical), ms median of 7": 2.62,
+    "import: publish the whole deck into an empty doc (one transaction), ms median of 7": 56.18,
+    "Y.Doc state size: V2 bytes, V1 bytes, ratio V2/source": {
+      "v2": 208396,
+      "v1": 269276,
+      "v2OverSource": 1.73
+    },
+    "load: apply the V2 state into a fresh doc (a replica's first sync), ms median of 7": 9.97,
+    "encode the V2 state, ms median of 7": 2.51,
+    "read: the whole deck back to files (artifact_read), ms median of 7": 6.83,
+    "no-op republish of all 101 files (diff 100 slides, 0 writes), ms median of 7": 22.85,
+    "update: move (style:left + style:top, one transaction)": {
+      "v1": 35,
+      "v2": 43,
+      "updates": 1
+    },
+    "update: a second move of the same element": {
+      "v1": 38,
+      "v2": 45,
+      "updates": 1
+    },
+    "update: a text edit (one character typed into a paragraph)": {
+      "v1": 16,
+      "v2": 26,
+      "updates": 1
+    },
+    "publish one slide with one property changed on the 100-slide doc: ms median of 7 (first run writes, rest are no-ops)": 0.43,
+    "Y.Doc V2 state after the edits": 208441
+  }
+}
