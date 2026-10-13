@@ -99,7 +99,14 @@ export default defineConfig({
       // imports, `?raw` included, outside `css.include`).
       {
         resolve: { alias },
-        test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] } },
+        // fix wave 1 of M4: the setup drops KaTeX's quirks-mode warning, happy-dom having no `document.compatMode`
+        test: {
+          name: 'artifacts-dom',
+          environment: 'happy-dom',
+          include: [ARTIFACTS_DOM_TESTS],
+          setupFiles: ['test/support/artifacts-dom-setup.ts'],
+          css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] },
+        },
       },
       // P3-B end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
