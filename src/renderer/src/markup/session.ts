@@ -49,6 +49,7 @@ let starting = false;
 let serial = 0;
 let unwatch: (() => void) | null = null;
 let focusBefore: HTMLElement | null = null;
+let discarded = new AbortController(); // aborts when the session ends: a delivery still pending lands nothing
 
 const panelScope = (): EditorHostScope | null => {
   const tabId = selectedPanelTabId();
@@ -82,6 +83,7 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
     return;
   }
   focusBefore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  discarded = new AbortController();
   useMarkup.setState({ session: { id: ++serial, scope, surface, still, label: surface.label(), size: { width: box.width, height: box.height } } });
   watch(scope, surface);
 }
@@ -111,6 +113,7 @@ function finish(restoreFocus: boolean): MarkupSession | null {
   if (session === null) return null;
   unwatch?.();
   unwatch = null;
+  discarded.abort();
   useMarkup.setState({ session: null });
   session.surface.end();
   const before = focusBefore;
@@ -140,37 +143,43 @@ export async function addMarkupToChat(marks: readonly Mark[], render: typeof com
   }
   if (useMarkup.getState().session !== session) return; // discarded meanwhile
   const target = shownSession();
-  if (target !== null && !(await deliver(target, picture, session.label))) {
+  const delivered = target === null ? 'delivered' : await deliver(target, picture, session.label, discarded.signal);
+  if (delivered === 'discarded') return; // Escape, Cancel or another ending while the composer was asked: nothing landed
+  if (delivered === 'refused') {
     toast({ level: 'warning', text: MARKUP_COPY.composerBusy, actions: [], dismissible: true });
     return;
   }
   if (useMarkup.getState().session === session) finish(false);
 }
 
-// Whether the picture was delivered: to the session's mounted composer, which adds it to its draft and takes the label at
-// the caret, or (none mounted, or it went while it was asked) to the composer store's queue, which the session's next
-// composer drains. False only when a composer still mounted refused it (a send in flight).
-async function deliver(appSessionId: AppSessionId, picture: Blob, label: string): Promise<boolean> {
+// The picture to the session's mounted composer, which adds it to its draft and takes the label at the caret, or (none
+// mounted, or it went while it was asked) to the composer store's queue, which the session's next composer drains.
+// `refused`: a composer still mounted would not take it (a send in flight). `discarded`: the session ended while the
+// composer was asked; `signal` told the composer to stop, so nothing was attached, and nothing is inserted or queued.
+async function deliver(appSessionId: AppSessionId, picture: Blob, label: string, signal: AbortSignal): Promise<'delivered' | 'refused' | 'discarded'> {
   const name = picture.type === 'image/jpeg' ? 'mark-up.jpg' : 'mark-up.png';
   const file = new File([picture], name, { type: picture.type });
   const text = MARKUP_COPY.draft(label);
   const composer = useComposerStore.getState().focusTargets.get(appSessionId);
   if (composer?.attachFiles) {
-    if (await composer.attachFiles([file])) {
+    const taken = await composer.attachFiles([file], { signal });
+    if (signal.aborted) return 'discarded'; // a composer answers false once aborted: it added nothing
+    if (taken) {
       composer.insertText(text, { separated: true }); // a space first after a word, never joined to it
       composer.focusEditor();
-      return true;
+      return 'delivered';
     }
-    if (useComposerStore.getState().focusTargets.get(appSessionId) === composer) return false;
+    if (useComposerStore.getState().focusTargets.get(appSessionId) === composer) return 'refused';
   }
   queueComposerAttachment(appSessionId, { files: [file], text });
-  return true;
+  return 'delivered';
 }
 
 // Tests.
 export function resetMarkup(): void {
   unwatch?.();
   unwatch = null;
+  discarded.abort();
   starting = false;
   focusBefore = null;
   useMarkup.setState({ session: null });

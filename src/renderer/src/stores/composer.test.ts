@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, IDLE_RESUBMIT, inlineEditOf, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, queueComposerAttachment, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setInlineEdit, setInlineText, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, drainComposerAttachments, IDLE_RESUBMIT, inlineEditOf, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, queueComposerAttachment, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setInlineEdit, setInlineText, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -140,6 +140,45 @@ describe('queueComposerAttachment', () => {
     await settle();
     expect(log).toEqual(['took late.png', 'text late ']);
     expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+  });
+
+  it('drains one at a time per session: an item queued while an earlier one is still attaching lands after the rest, in order', async () => {
+    queueComposerAttachment(A, { files: [file('one.png')], text: 'one ' });
+    queueComposerAttachment(A, { files: [file('two.png')], text: 'two ' });
+    const log: string[] = [];
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    registerFocusTarget(A, {
+      ...target(() => true, log),
+      attachFiles: async (files: File[]) => {
+        if (files[0].name === 'one.png') await held; // item 1's conversion is still running
+        log.push(`took ${files.map((f) => f.name).join(',')}`);
+        return true;
+      },
+    });
+    await settle();
+    queueComposerAttachment(A, { files: [file('three.png')], text: 'three ' });
+    await settle();
+    expect(log).toEqual([]);
+    release();
+    await settle();
+    expect(log).toEqual(['took one.png', 'text one ', 'took two.png', 'text two ', 'took three.png', 'text three ']);
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+  });
+
+  it('drains again when asked (the composer accepting files again), into the composer registered then', async () => {
+    queueComposerAttachment(A, { files: [file('one.png')], text: 'one ' });
+    const log: string[] = [];
+    let busy = true;
+    registerFocusTarget(A, target(() => !busy, log));
+    await settle();
+    expect(log).toEqual(['refused one.png']);
+    busy = false;
+    drainComposerAttachments(A);
+    await settle();
+    expect(log).toEqual(['refused one.png', 'took one.png', 'text one ']);
+    expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
+    drainComposerAttachments(B); // nothing queued, nothing registered: nothing happens
   });
 
   it('is left alone by a focus target that cannot attach files', async () => {

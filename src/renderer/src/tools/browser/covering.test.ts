@@ -50,8 +50,9 @@ describe('the window’s cover', () => {
     pane.release();
   });
 
-  // P3-G (the M4 review's ruling 4): Mark-up's overlay waits for main's answer to the cover it asked, which main gives
-  // once the page is hidden behind its picture; with the window already covered, for the answer to that request
+  // P3-G (the M4 review's ruling 4): acknowledgement ordering. Mark-up's overlay waits for main's answer to the cover it
+  // asked, which says only that main received the request: main answers at once and hides the page after (E4a's
+  // contract). With the window already covered, it waits for the answer to that request.
   it('coverAcknowledged waits for main’s answer to the window’s cover, and is at once with nothing covered', async () => {
     const answers: (() => void)[] = [];
     main = installFakeMain(() => new Promise((resolve) => answers.push(() => resolve(ok()))));

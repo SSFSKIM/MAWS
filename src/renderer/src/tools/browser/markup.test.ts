@@ -41,7 +41,8 @@ describe('browserMarkupSurface', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  // the M4 review's ruling 4: the overlay draws only once main has the page hidden behind its picture
+  // the M4 review's ruling 4, acknowledgement ordering: the still is answered only after main acknowledged the cover
+  // request (main answers on receipt and hides the page after, E4a's contract; this orders, it does not wait for the hide)
   it('answers the still only once main acknowledged the cover', async () => {
     const { client: c } = client({ ok: true, value: { image: still } });
     let answered = false;

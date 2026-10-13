@@ -11,7 +11,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
-import { memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type Prefill } from '../../stores/composer';
+import { drainComposerAttachments, memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type AttachOptions, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
@@ -56,8 +56,9 @@ export interface EditorHandle {
   removeAttachment(id: string): void;
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
   // P3-G (§D4.3): as a drop of the files at the caret, once the stored draft is restored (Mark-up's Add to chat, the
-  // composer store's attachment queue); whether the editor took them (false while busy, or once unmounted)
-  attachFiles(files: File[]): Promise<boolean>;
+  // composer store's attachment queue); whether the editor took them (false while busy, once unmounted, or once the
+  // options' `signal` aborted, nothing added then)
+  attachFiles(files: File[], options?: AttachOptions): Promise<boolean>;
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -414,6 +415,7 @@ export class EditorController {
       void this.refreshHistory();
     }
     this.takePrefill();
+    drainComposerAttachments(this.inputs.appSessionId); // P3-G: what the queue held while this composer was busy, after a prefill (it adds to the document)
   }
 
   // Replaces the document; with a caret, also takes focus there at once (Tiptap's own focus waits a frame, and a key
@@ -499,12 +501,18 @@ export class EditorController {
     if (this.editor) this.setAttachments([...attachmentsOf(this.editor.getJSON()), attachment]);
   }
 
-  // False when the editor stopped taking attachments meanwhile (a submission, an unmount); a refused or unreadable image
-  // is warned about and counts as taken.
-  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number): Promise<boolean> {
+  // Whether attachments started at `epoch` may still land: the editor live and not busy, no submission or unmount since,
+  // and the asker's `signal` (P3-G: Mark-up discarded meanwhile) not aborted.
+  private taking(epoch: number, signal?: AbortSignal): boolean {
+    return this.live && !this.busy && this.attachmentEpoch === epoch && !signal?.aborted;
+  }
+
+  // False when the editor stopped taking attachments meanwhile (a submission, an unmount, the asker's cancel); a refused
+  // or unreadable image is warned about and counts as taken.
+  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number, signal?: AbortSignal): Promise<boolean> {
     try {
       const out = await downscaleImage(blob, mediaType);
-      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return false;
+      if (!this.taking(epoch, signal)) return false;
       const refusal = imageRefusal(name, out.bytes);
       if (refusal) warn(refusal);
       else this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
@@ -516,17 +524,18 @@ export class EditorController {
 
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
   // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip. Whether
-  // every file was taken: false when the editor was busy or unmounted, or became so before the last one landed.
-  async addFiles(files: File[], at?: number): Promise<boolean> {
-    if (this.busy || !this.live) return false;
+  // every file was taken: false when the editor was busy or unmounted, or became so before the last one landed, or when
+  // `signal` aborted first (P3-G).
+  async addFiles(files: File[], at?: number, signal?: AbortSignal): Promise<boolean> {
     const epoch = this.attachmentEpoch;
-    const taking = () => this.live && !this.busy && this.attachmentEpoch === epoch;
+    const taking = () => this.taking(epoch, signal);
+    if (!taking()) return false;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
     for (const file of files) {
       if (!taking()) return false;
       const action = classifyFile(file, this.client.pathForFile(file));
       if (action.kind === 'image') {
-        if (!(await this.attachImage(file.name, file, file.type, epoch))) return false;
+        if (!(await this.attachImage(file.name, file, file.type, epoch, signal))) return false;
       } else if (action.kind === 'pdf') {
         const data = await fileBase64(file);
         if (!taking()) return false;
@@ -543,13 +552,13 @@ export class EditorController {
 
   // P3-G (§D4.3): files from outside the editor (Mark-up's Add to chat, the attachment queue) wait for the stored draft
   // to be restored, so they join it: the restoration fills only an editor still empty, and would otherwise be skipped
-  // (and the draft written over). A remount meanwhile is waited for in its turn.
-  private async attachFromOutside(files: File[]): Promise<boolean> {
+  // (and the draft written over). A remount meanwhile is waited for in its turn. An aborted `signal` adds nothing.
+  private async attachFromOutside(files: File[], signal?: AbortSignal): Promise<boolean> {
     for (;;) {
       const lifetime = this.lifetime;
       await this.restoring;
-      if (!this.live) return false;
-      if (this.lifetime === lifetime) return this.addFiles(files);
+      if (!this.live || signal?.aborted) return false;
+      if (this.lifetime === lifetime) return this.addFiles(files, undefined, signal);
     }
   }
 
@@ -637,7 +646,7 @@ export class EditorController {
           }
         }
       },
-      attachFiles: (files) => this.attachFromOutside(files), // P3-G
+      attachFiles: (files, options) => this.attachFromOutside(files, options?.signal), // P3-G
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

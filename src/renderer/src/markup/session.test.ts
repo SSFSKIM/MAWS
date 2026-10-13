@@ -214,6 +214,44 @@ describe('addMarkupToChat', () => {
     expect(useMarkup.getState().session).toBeNull();
   });
 
+  // §D4.2: Escape discards everything, also while the composer is still taking the picture. The pending attach is told
+  // to stop (its signal aborts, and a composer then answers false), and nothing late lands: no label, no focus, no
+  // queued item, no busy toast, whether the composer is still there or went meanwhile.
+  it.each([
+    ['still mounted', false],
+    ['gone meanwhile', true],
+  ])('Escape while the composer is attaching cancels it: nothing attached, inserted, focused, queued or toasted (composer %s)', async (_, goes) => {
+    const s = surface();
+    registerMarkupSurface(scope, s);
+    let signal: AbortSignal | undefined;
+    let answer: (taken: boolean) => void = () => {};
+    const focusEditor = vi.fn();
+    const insertText = vi.fn();
+    const off = registerFocusTarget(A, {
+      focusEditor,
+      focusFrame: vi.fn(),
+      insertText,
+      attachFiles: (_files, options) => {
+        signal = options?.signal;
+        return new Promise<boolean>((resolve) => (answer = resolve));
+      },
+    });
+    await startMarkup();
+    const adding = addMarkupToChat(marks, async () => png);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    endMarkup();
+    expect(signal!.aborted).toBe(true);
+    expect(s.end).toHaveBeenCalledTimes(1);
+    if (goes) off();
+    answer(!signal!.aborted);
+    await adding;
+    expect(insertText).not.toHaveBeenCalled();
+    expect(focusEditor).not.toHaveBeenCalled();
+    expect(queued()).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(s.end).toHaveBeenCalledTimes(1);
+  });
+
   it('names a JPEG fallback mark-up.jpg', async () => {
     registerMarkupSurface(scope, surface());
     await startMarkup();
