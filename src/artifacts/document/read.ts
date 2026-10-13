@@ -6,7 +6,6 @@
 // The read goes through the doc's block index (block-index.ts), the one the patch writer plans with, so the blocks it
 // renders are converted once and stay warm for the agent's next batch on the same replica (Decision Log 20).
 import type { Doc, Node } from '../yjs';
-import { YNode } from '../yjs/document';
 import { DocIndex, type TopBlock } from './block-index';
 import { docMarkdown } from './markdown';
 import { listTabs, tabBody } from './tabs';

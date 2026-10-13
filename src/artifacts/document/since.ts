@@ -2,7 +2,7 @@
 // Claude Docs' `sinceRev`): the top-level blocks whose text or attributes the changes since then touched, found from the
 // changes' item ids (the host's provenance between the two revisions) resolved to the blocks that hold them, and the
 // block ids that existed then and exist nowhere now. Pure: the host's tool supplies the ids and the earlier id set.
-import type { Doc } from '../yjs';
+import type { Doc, Node } from '../yjs';
 import { ContentType, Item, YNode, findIndexSS } from '../yjs/document';
 import { DocIndex, type TopBlock } from './block-index';
 
@@ -28,7 +28,7 @@ export function touchedBlocks(doc: Doc, ...ranges: IdRanges[]): Set<TopBlock> {
   const index = DocIndex.of(doc);
   const touched = new Set<TopBlock>();
   const note = (item: Item): void => {
-    const own = item.content instanceof ContentType ? index.topOf(item.content.type as never) : null;
+    const own = item.content instanceof ContentType ? index.topOf(item.content.type as Node) : null;
     const top = own ?? (item.parent instanceof YNode ? index.topOf(item.parent) : null);
     if (top) touched.add(top);
   };
