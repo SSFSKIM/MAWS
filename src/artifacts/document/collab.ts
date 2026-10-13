@@ -44,6 +44,8 @@ export interface CollaborationOptions {
   hold: Holdable | null;
   /** Subscribes to restores this replica did not make (`DocumentHandle.onRestored`); returns the unsubscribe. */
   onRestored: ((listener: () => void) => () => void) | null;
+  /** How the other replicas' cursors are drawn (the editor's, reading each replica's own state; editor/awareness.ts). */
+  cursors: Pick<NonNullable<Parameters<typeof yCursorPlugin>[1]>, 'cursorBuilder' | 'selectionBuilder'> | null;
 }
 
 interface CollaborationStorage {
@@ -79,7 +81,7 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
   name: 'collaboration', // Tiptap's name: UniqueID takes its collaborative path (no ids written at create) for it
   priority: 1000,
 
-  addOptions: () => ({ ytype: null, awareness: null, user: null, hold: null, onRestored: null }),
+  addOptions: () => ({ ytype: null, awareness: null, user: null, hold: null, onRestored: null, cursors: null }),
   addStorage: () => ({ undoManager: null, history: null, offRestored: null }),
 
   addCommands() {
@@ -140,7 +142,7 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
   },
 
   addProseMirrorPlugins() {
-    const { ytype, awareness, user, hold } = this.options;
+    const { ytype, awareness, user, hold, cursors } = this.options;
     if (!ytype) return [];
     // An empty tracked set: the undo plugin adds the sync plugin, so only this binding's own changes are undoable.
     const undoManager = new UndoManager(ytype, { trackedOrigins: new Set() });
@@ -167,7 +169,7 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
       bind,
       readOnlyHistory,
       yUndoPlugin(undoManager),
-      ...(awareness ? [yCursorPlugin(awareness)] : []),
+      ...(awareness ? [yCursorPlugin(awareness, cursors ?? {})] : []),
       ...(hold ? [compositionHold(hold)] : []),
       caretFollowsId(),
     ];

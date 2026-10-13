@@ -1,12 +1,15 @@
 // The editor's extension list (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the schema module's list
 // with the node views attached by name (`extend` adds a view and leaves the node's spec, hence the schema and every
 // storage key, as the module built it; nodes.dom.test.tsx compares the fingerprints), then the binding, the comment
-// plugins (M4), find, code highlighting and the table cells' fill. Every editor of the document kind builds from here.
+// plugins (M4), find, code highlighting and the table cells' fill, and (M5) the other replicas' presence and the
+// history preview's paint. Every editor of the document kind builds from here.
 import type { AnyExtension, Extensions } from '@tiptap/core';
 import { Collaboration, type CollaborationOptions } from '../collab';
+import { Presence, cursorBuilders } from './awareness';
 import { extensions } from '../schema';
 import { Comments, type CommentsOptions } from './comments/plugins';
 import { Find } from './find-plugin';
+import { HistoryPaint } from './history/paint';
 import { CodeHighlight } from './nodes/code-highlight';
 import { renderMermaid } from './nodes/mermaid';
 import { TableCellFill } from './nodes/table';
@@ -32,5 +35,7 @@ export function editorExtensions({
     const view = views[extension.name];
     return view ? (extension as unknown as { extend(config: object): AnyExtension }).extend({ addNodeView: () => view }) : extension;
   });
-  return [...withViews, ...(collaboration ? [Collaboration.configure(collaboration)] : []), ...(comments ? [Comments.configure(comments)] : []), Find, CodeHighlight, TableCellFill];
+  const awareness = collaboration?.awareness ?? null;
+  const live = collaboration ? [Collaboration.configure({ ...(awareness ? { cursors: cursorBuilders(awareness) } : {}), ...collaboration }), Presence.configure({ awareness })] : [];
+  return [...withViews, ...live, ...(comments ? [Comments.configure(comments)] : []), Find, CodeHighlight, TableCellFill, HistoryPaint];
 }
