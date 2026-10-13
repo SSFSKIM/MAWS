@@ -9,7 +9,7 @@
 // revision, versions, bytes) is read through `store.readCommitted`: the reads share the batch's connection, so the
 // answer waits for any batch open at the read to commit and fails with it (Decision Log 33). A refusal the store
 // names is a `HostCommandError` whose `issues` is an `ArtifactRefusal` (schema/artifacts.ts); a store that failed to
-// open answers `unavailable`.
+// open answers `unavailable`; a refusal waits for the batch its validation read the same way (`writeCommitted`).
 import { join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
@@ -68,11 +68,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   const e2eOnly = (name: string) => {
     if (!e2e) throw new HostCommandError(ipcError('internal', `${name} answers only when the engine host runs under MAWS_E2E=1`));
   };
-  // A handler whose store refusals reach the caller typed.
+  // A handler whose store refusals reach the caller typed, each released only after the batch its validation may have
+  // read (`store.writeCommitted`; a read's own refusal already waits in `readCommitted`).
   const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       try {
-        return await handler(input);
+        const run = async () => handler(input);
+        return await (documents ? documents.store.writeCommitted(run) : run());
       } catch (error) {
         throw typed(error);
       }

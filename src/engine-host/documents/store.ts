@@ -195,6 +195,28 @@ export class ArtifactStore {
     return answer.value;
   }
 
+  // A write whose refusal is store state too (Decision Log 33): the validation that refused it (a row gone, a design
+  // system still governing one) read the batch's connection, so it may have seen an open batch's rows. `run` starts
+  // now; a refusal it ends with (an `ArtifactStoreError`) waits for the batch open when its synchronous part returned
+  // — where the store's writes validate — and that batch's failure replaces it. Success answers at once: an answer that
+  // carries store state is re-read through `readCommitted`.
+  async writeCommitted<T>(run: () => Promise<T>): Promise<T> {
+    let running: Promise<T>;
+    try {
+      running = run();
+    } catch (error) {
+      running = Promise.reject(error);
+    }
+    const barrier = this.storage.batchOpen ? this.service.whenCommitted() : null;
+    barrier?.catch(() => {}); // awaited only for a refusal; a write that fails with its batch reports that itself
+    try {
+      return await running;
+    } catch (error) {
+      if (error instanceof ArtifactStoreError && barrier) await barrier;
+      throw error;
+    }
+  }
+
   // ── artifacts ──
 
   get(artifactId: string, options: { includeDeleted?: boolean } = {}): Artifact | null {

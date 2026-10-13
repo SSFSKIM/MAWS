@@ -896,6 +896,54 @@ describe('ArtifactStore: reads released after the batch they saw (Decision Log 3
   });
 });
 
+describe('ArtifactStore: write refusals released after the batch they saw (Decision Log 33)', () => {
+  it('holds a refusal a write read from an open batch until that batch commits', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const deleting = store.delete(doc.id);
+    let settled = false;
+    const renaming = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' })).catch((error: unknown) => ((settled = true), error));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(settled).toBe(false); // the delete it saw is not durable yet
+    tick();
+    await deleting;
+    expect(await renaming).toMatchObject({ code: 'notFound' });
+    const next = store.writeCommitted(() => store.create({ kind: 'document', title: 'Next' }, human)); // a write that succeeds
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await next).toMatchObject({ title: 'Next' });
+  });
+
+  it('replaces a write’s refusal with the failure of the batch it read, rather than reveal rolled-back rows', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'design_system', title: 'House' }, human);
+    const target = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const [system, doc] = await Promise.all([creation, target]);
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const deleting = store.delete(doc.id);
+    const governing = store.create({ kind: 'document', title: 'Governed', designSystemId: system.id }, human);
+    const renaming = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' }));
+    const dropping = store.writeCommitted(() => store.delete(system.id));
+    const outcomes = Promise.allSettled([deleting, governing, renaming, dropping]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    const settled = await outcomes;
+    expect(settled.map((o) => o.status)).toEqual(['rejected', 'rejected', 'rejected', 'rejected']);
+    for (const outcome of settled.slice(2)) expect((outcome as PromiseRejectedResult).reason).not.toBeInstanceOf(ArtifactStoreError);
+    commit.mockRestore();
+    expect(store.get(doc.id)?.title).toBe('Plan');
+    const renamed = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' }));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await renamed).toMatchObject({ title: 'Plan B' });
+  });
+});
+
 describe('ArtifactStore: refusals', () => {
   it('refuses wrong content per kind and unknown targets with typed errors', async () => {
     await expect(store.create({ kind: 'html', title: 'x' }, human)).rejects.toBeInstanceOf(ArtifactStoreError);

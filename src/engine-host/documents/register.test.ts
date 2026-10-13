@@ -294,6 +294,42 @@ describe('answers released after the batch they read (Decision Log 33)', () => {
   });
 });
 
+describe('write refusals released after the batch they read (Decision Log 33)', () => {
+  it('answers a rename of an artifact whose delete is in the open batch with that batch’s failure, not notFound', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    const commit = vi.spyOn(documents!.storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const deleting = call('artifacts.delete', { artifactId: plan.id });
+    const renaming = call('artifacts.update', { artifactId: plan.id, title: 'Plan B' });
+    const [deleted, renamed] = await Promise.allSettled([deleting, renaming]);
+    expect(deleted.status).toBe('rejected');
+    expect(renamed.status).toBe('rejected');
+    expect((renamed as PromiseRejectedResult).reason).not.toBeInstanceOf(HostCommandError); // the runtime's `internal`
+    expect(durable('SELECT COUNT(*) AS n FROM artifacts WHERE id = ? AND deletedAt IS NULL', plan.id)).toBe(1);
+    commit.mockRestore();
+    expect((await call('artifacts.update', { artifactId: plan.id, title: 'Plan B' })).artifact.title).toBe('Plan B');
+  });
+
+  it('answers a design system’s delete refused for a governed artifact still in the open batch only once it commits, and fails with it', async () => {
+    const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
+    const commit = vi.spyOn(documents!.storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const governing = call('artifacts.create', { kind: 'document', title: 'Governed', designSystemId: system.id });
+    const dropping = call('artifacts.delete', { artifactId: system.id });
+    const [governed, dropped] = await Promise.allSettled([governing, dropping]);
+    expect(governed.status).toBe('rejected');
+    expect(dropped.status).toBe('rejected');
+    expect((dropped as PromiseRejectedResult).reason).not.toBeInstanceOf(HostCommandError);
+    commit.mockRestore();
+    const again = call('artifacts.create', { kind: 'document', title: 'Governed', designSystemId: system.id });
+    expect(await refusal('artifacts.delete', { artifactId: system.id })).toMatchObject({ issues: { reason: 'designSystemInUse' } });
+    expect(durable('SELECT COUNT(*) AS n FROM artifacts WHERE designSystemId = ?', system.id)).toBe(1); // released after the commit
+    await again;
+  });
+});
+
 describe('document ports from main (Decision Log 13)', () => {
   it('attaches a document kind’s port with main’s actor: a provider on the other end syncs, writes and is acked', async () => {
     register({ MAWS_E2E: '1' });

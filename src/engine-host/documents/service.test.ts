@@ -887,6 +887,7 @@ describe('DocumentService: what the hooks return (Decision Log 23c, 25j)', () =>
     const humanAt = now - (now % MIN);
     now += 7 * MIN;
     const a = raw('a1', agent);
+    applyV1(a.doc, diffV1(h.doc, stateVector(a.doc))); // the agent has the human's text, so its "X" lands before it
     a.edit((doc) => doc.get('t').insert(0, 'X'));
     tick();
 
