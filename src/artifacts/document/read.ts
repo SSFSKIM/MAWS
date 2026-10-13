@@ -1,12 +1,14 @@
 // The agent's read of a document (D7 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; §4.3, §4.4; S5's read
 // format): one tab as the dialect of markdown.ts, ranged by a top-level block id and a count, open comments written as
 // `<c:ID>…</c:ID>` milestones, and a footer naming the open threads and orphans of the range. The host's tool (M7)
-// adds the live revision, captures the session's base and answers `sinceRevision` from its provenance.
+// adds the live revision, captures the session's base and answers `sinceRevision` from its provenance (since.ts).
+//
+// The read goes through the doc's block index (block-index.ts), the one the patch writer plans with, so the blocks it
+// renders are converted once and stay warm for the agent's next batch on the same replica (Decision Log 20).
 import type { Doc, Node } from '../yjs';
 import { YNode } from '../yjs/document';
-import { ynodeToPmnode } from '../yjs/prosemirror';
+import { DocIndex, type TopBlock } from './block-index';
 import { docMarkdown } from './markdown';
-import { schemaFor } from './schema';
 import { listTabs, tabBody } from './tabs';
 import { liveThreadIds, locate, markExtents, threadStates, type ThreadState } from './threads';
 
@@ -20,6 +22,8 @@ export interface ReadOptions {
   from?: string;
   /** How many top-level blocks, 1 to 1,000; 200 when absent. */
   count?: number;
+  /** Shows only these blocks of the range (a `sinceRevision` read: the blocks that changed). */
+  only?: ReadonlySet<TopBlock>;
 }
 
 export interface DocumentRead {
@@ -28,6 +32,8 @@ export interface DocumentRead {
   /** The tab read. */
   tab: string;
   markdown: string;
+  /** The ids of the top-level blocks the markdown shows, in order (a block without an id is left out). */
+  shown: string[];
   /** The first top-level block after the range (where the next read starts), or null at the end of the tab. */
   next: string | null;
 }
@@ -43,8 +49,6 @@ export class ReadError extends Error {
   }
 }
 
-const blocksOf = (body: Node): Node[] => body.toArray().filter((child): child is Node => child instanceof YNode);
-const contains = (node: Node, id: string): boolean => node.getAttr('id') === id || blocksOf(node).some((child) => contains(child, id));
 
 // The blocks whose ids the dialect shows (markdown.ts): textblocks in the doc, a quote or a callout; items; rows.
 const TEXTBLOCKS = new Set(['paragraph', 'heading']);
@@ -65,27 +69,32 @@ const quoted = (thread: ThreadState): string => JSON.stringify(thread.quote);
 const messages = (thread: ThreadState): string => `${thread.messages.length} message${thread.messages.length === 1 ? '' : 's'}`;
 
 /** The tab's top-level blocks `from` (inclusive) for `count` as the agent's markdown, with the comments footer. */
-export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT }: ReadOptions = {}): DocumentRead {
+export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT, only }: ReadOptions = {}): DocumentRead {
   if (!Number.isInteger(count) || count < 1 || count > MAX_COUNT) throw new ReadError('invalid', `count ${count} (1 to ${MAX_COUNT})`);
+  const index = DocIndex.of(doc);
   const tabs = listTabs(doc);
   const tabId = tab ?? tabs[0]?.id;
   const body = tabId == null ? undefined : tabBody(doc, tabId);
   if (tabId == null || !body) throw new ReadError('notFound', tab ?? 'tab');
-  const blocks = blocksOf(body);
-  const start = from == null ? 0 : blocks.findIndex((block) => contains(block, from));
+  const blocks = index.tops(tabId);
+  let start = 0;
+  if (from != null) {
+    const found = index.find(from);
+    start = found && found.top.tabId === tabId ? index.position(found.top) : -1;
+  }
   if (start < 0) throw new ReadError('notFound', from!);
   const range = blocks.slice(start, start + count);
   const whole = range.length === blocks.length;
+  const shown = only ? range.filter((top) => only.has(top)) : range;
 
   const states = threadStates(doc, liveThreadIds(doc));
   const extents = markExtents(body);
   const show = new Set(states.filter((thread) => thread.status === 'open').map((thread) => thread.id));
   const md = docMarkdown();
-  const schema = schemaFor();
-  const text = range.map((block) => md.block(ynodeToPmnode(block, schema), { milestones: show })).join('\n\n');
+  const text = shown.map((top) => md.block(index.pm(top), { milestones: show })).join('\n\n');
 
-  // The footer: this tab's open threads that are live in the range or orphaned near it.
-  const inRange = new Set(range.map((block) => block.getAttr('id')));
+  // The footer: this tab's open threads that are live in what is shown or orphaned near it.
+  const inRange = new Set<Node>(shown.map((top) => top.node));
   const topOf = (node: Node): Node => {
     let top = node;
     while (top.parent && top.parent !== body) top = top.parent;
@@ -98,13 +107,13 @@ export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT }: Rea
   for (const thread of open) {
     const extent = extents.get(thread.id);
     if (extent) {
-      if (!inRange.has(topOf(extent.first.node).getAttr('id'))) outside += 1;
+      if (!inRange.has(topOf(extent.first.node))) outside += 1;
       else lines.push(`- c:${thread.id} on ^${shownBlock(extent.first.node, body) ?? '?'} · ${quoted(thread)} · ${messages(thread)}`);
       continue;
     }
     const near = locate(doc, thread).blockId;
-    const nearTop = near == null ? undefined : blocks.find((block) => contains(block, near));
-    if (!whole && (!nearTop || !inRange.has(nearTop.getAttr('id')))) outside += 1;
+    const nearTop = near == null ? undefined : index.find(near)?.top;
+    if ((!whole || only) && (!nearTop || !inRange.has(nearTop.node))) outside += 1;
     else lines.push(`- c:${thread.id} orphaned, near ^${near ?? '?'} · ${quoted(thread)} · ${messages(thread)}`);
   }
   let footer = '';
@@ -116,9 +125,10 @@ export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT }: Rea
 
   return {
     kind: 'document',
-    tabs: tabs.map((entry) => ({ id: entry.id, title: entry.title, blocks: blocksOf(tabBody(doc, entry.id)!).length })),
+    tabs: tabs.map((entry) => ({ id: entry.id, title: entry.title, blocks: index.tops(entry.id).length })),
     tab: tabId,
     markdown: `${text}${footer}\n`,
-    next: (blocks[start + count]?.getAttr('id') as string | undefined) ?? null,
+    shown: shown.flatMap((top) => (top.id === null ? [] : [top.id])),
+    next: blocks[start + count]?.id ?? null,
   };
 }

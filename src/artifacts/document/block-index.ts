@@ -159,6 +159,24 @@ export class DocIndex {
     return top.textCache;
   }
 
+  /**
+   * Builds what the writer's first batch reads of every top-level block, in every tab (its ProseMirror node and its
+   * search text), until `stop()` answers true; true once every block is warm. Called in slices after a read, so the
+   * read pays the cold cost once without holding the host's loop (Decision Log 20); a block a later transaction
+   * changes is rebuilt lazily as ever.
+   */
+  warm(stop: () => boolean = () => false): boolean {
+    this.refresh();
+    for (const tab of this.tabs) {
+      for (const top of tab.tops ?? []) {
+        if (top.textCache !== null) continue;
+        if (stop()) return false;
+        this.text(top);
+      }
+    }
+    return true;
+  }
+
   /** The comment threads whose mark the block's text carries (read from Yjs, no ProseMirror conversion). */
   threads(top: TopBlock): ReadonlySet<string> {
     this.refresh();
