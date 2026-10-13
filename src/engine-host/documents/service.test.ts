@@ -6,11 +6,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { applyV1, applyV2, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc } from '@artifacts/yjs';
+import { applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
-import { DocumentService, type ServiceOptions } from './service';
+import { DocumentService, type Committed, type ServiceOptions } from './service';
 import { SqliteDocumentStorage, StoreTooNewError } from './storage';
 
 // The real check, made skippable once: the pending-state case needs an update the check would refuse to get through.
@@ -162,20 +162,22 @@ describe('DocumentService: replicas, durability and reload', () => {
     expect(a.take().map((frame) => frame.type)).toEqual(['step2', 'restored']);
   });
 
-  it('reports each commit through onCommitted with the artifact’s revision', () => {
+  it('reports each commit through onCommitted with the artifact’s revision and who wrote its rows', () => {
     make();
-    const seen: { artifactId: string; revision: number }[] = [];
+    const seen: Committed[] = [];
     service.onCommitted((change) => seen.push(change));
     const a = raw('a1', human);
     const b = raw('a2', human);
+    const c = raw('a2', agent);
     a.edit((doc) => doc.get('t').insert(0, 'x'));
     a.edit((doc) => doc.get('t').insert(1, 'y'));
     b.edit((doc) => doc.get('t').insert(0, 'z'));
+    c.edit((doc) => doc.get('u').insert(0, 'w'));
     expect(seen).toEqual([]);
     tick();
     expect(seen).toEqual([
-      { artifactId: 'a1', revision: service.revision('a1') },
-      { artifactId: 'a2', revision: service.revision('a2') },
+      { artifactId: 'a1', revision: service.revision('a1'), actors: [human] },
+      { artifactId: 'a2', revision: service.revision('a2'), actors: [human, agent] },
     ]);
   });
 
@@ -470,6 +472,22 @@ describe('DocumentService: host-originated writes', () => {
     expect(reader.doc.get('t').toString()).toBe('kept');
     expect(rowCount()).toBe(1);
   });
+
+  it('leaves a taken-back write’s actor out of the commit’s writers (M3 review finding 3)', async () => {
+    make();
+    const seen: Committed[] = [];
+    service.onCommitted((change) => seen.push(change));
+    const kept = service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'kept'));
+    await expect(
+      service.writeAs('a1', agent, (doc) => {
+        doc.get('t').insert(0, 'lost');
+        throw new Error('invalid edit');
+      }),
+    ).rejects.toThrow(/invalid edit/);
+    tick();
+    await kept;
+    expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
+  });
 });
 
 describe('DocumentService on a newer app’s store', () => {
@@ -550,6 +568,50 @@ describe('DocumentService: agent replicas (Decision Log 9)', () => {
     service.closeSession(sid('app-1'));
     expect(r.closed).toBe(true);
     expect(service.replica(sid('app-1'), 'a1')).not.toBe(r);
+  });
+
+  it('ships an edit as one update, and sends nothing of an edit that throws, re-syncing a fresh replica from the host (Decision Log 25i)', async () => {
+    make({}, true);
+    const r = service.replica(sid('app-1'), 'a1');
+    await r.whenSynced();
+    const frames = service.stats.contentFramesIn;
+    r.edit((doc) => {
+      doc.get('t').insert(0, 'one ');
+      doc.get('t').insert(4, 'two');
+      doc.get('meta').setAttr('k', 1);
+    });
+    await r.whenSaved();
+    expect(service.stats.contentFramesIn).toBe(frames + 1);
+    expect(() =>
+      r.edit((doc) => {
+        doc.get('t').insert(0, 'half ');
+        throw new Error('invalid op');
+      }),
+    ).toThrow('invalid op');
+    await r.whenSynced();
+    expect(r.doc.get('t').toString()).toBe('one two');
+    expect(service.loaded('a1')?.get('t').toString()).toBe('one two');
+    r.edit((doc) => doc.get('t').insert(7, '!'));
+    await r.whenSaved();
+    expect(service.loaded('a1')?.get('t').toString()).toBe('one two!');
+    expect(rowCount()).toBe(2);
+  });
+
+  it('relays the agent’s presence to other replicas and clears it at the turn’s end and when the replica closes (Decision Log 23d)', async () => {
+    make({}, true);
+    const r = service.replica(sid('app-1'), 'a1');
+    const watcher = service.replica(sid('app-2'), 'a1');
+    await Promise.all([r.whenSynced(), watcher.whenSynced()]);
+    const presenceOf = () => watcher.provider.awareness.getStates().get(r.doc.clientID) ?? null;
+    r.setPresence({ editing: { blocks: ['b1'] }, name: 'Fix the build', color: '--author-3' });
+    await until(() => presenceOf() !== null);
+    expect(presenceOf()).toEqual({ editing: { blocks: ['b1'] }, name: 'Fix the build', color: '--author-3' });
+    service.clearPresence(sid('app-1'));
+    await until(() => presenceOf() === null);
+    r.setPresence({ name: 'Fix the build', color: '--author-3' });
+    await until(() => presenceOf() !== null);
+    service.closeSession(sid('app-1'));
+    await until(() => presenceOf() === null);
   });
 });
 
@@ -657,6 +719,119 @@ describe('DocumentService: kind adapters (Decision Log 18, 21)', () => {
     const live = service.loaded('a1')!;
     expect(live.get('t').toString()).toBe('fine ');
     expect(live.get('notes').toString()).toBe('kept');
+  });
+});
+
+describe('DocumentService: what the hooks return (Decision Log 23c, 25j)', () => {
+  const thread = (threadId: string, status: 'open' | 'resolved') => ({ threadId, status, quote: 'q', createdAt: 1, updatedAt: 2 });
+
+  it('writes afterUpdate’s thread rows in the update’s commit, and carries a move’s authorship into the update’s attribution row', () => {
+    let pending: { from: [number, number][]; to: [number, number][] } | null = null; // the move the next update makes
+    let moved: { from: [number, number][]; to: [number, number][] } | null = null;
+    const adapter: KindAdapter = {
+      kind: 'document',
+      afterUpdate(doc, info) {
+        const ids = contentIdsOf(info.update);
+        if (moved || ids.deletes.isEmpty()) return { threads: { upsert: [thread('t1', 'open')] } };
+        // the update deleted "ab" and re-inserted it: report the move (the test knows the ids)
+        moved = pending!;
+        return { threads: { upsert: [thread('t1', 'resolved')], remove: ['t0'] }, provenance: [{ kind: 'move', ...moved }] };
+      },
+    };
+    make({ adapters: [adapter], kindOf: () => 'document' });
+    storage.writeThreads('a1', { upsert: [thread('t0', 'open')] });
+    storage.commit();
+    const a = raw('a1', agent);
+    const h = raw('a1', human);
+    tick();
+    a.edit((doc) => doc.get('t').insert(0, 'ab'));
+    tick();
+    expect(committed('SELECT threadId, status FROM artifact_threads ORDER BY threadId')).toEqual([
+      { threadId: 't0', status: 'open' },
+      { threadId: 't1', status: 'open' },
+    ]);
+    applyV1(h.doc, diffV1(service.loaded('a1')!));
+    const text = h.doc.get('t');
+    const from: [number, number][] = [0, 1].map((i) => [idAt(text, i)!.client, idAt(text, i)!.clock]);
+    h.doc.transact(() => {
+      text.delete(0, 2);
+      text.insert(0, 'x');
+      text.insert(1, 'ab');
+    });
+    pending = { from, to: [1, 2].map((i) => [idAt(text, i)!.client, idAt(text, i)!.clock]) };
+    const commits = service.stats.commits;
+    h.send({ type: 'update', update: diffV1(h.doc, stateVector(service.loaded('a1')!)) });
+    tick();
+    expect(service.stats.commits).toBe(commits + 1);
+    expect(committed('SELECT threadId, status FROM artifact_threads ORDER BY threadId')).toEqual([{ threadId: 't1', status: 'resolved' }]);
+    const map = mergeMaps((committed('SELECT bytes FROM artifact_attributions ORDER BY fromSeq') as { bytes: Uint8Array }[]).map((row) => decodeMap(row.bytes)));
+    const [b1, b2] = pending.to.map(([client, clock]) => ({ client, clock }));
+    expect(insertedBy(map, b1)?.actor).toBe('session:app-1'); // the mover is credited with no characters
+    expect(carriedBy(map, b2)).toBe('move');
+    expect(insertedBy(map, idAt(text, 0)!)?.actor).toBe('human');
+    expect(insertedBy(service.provenance('a1'), b1)?.actor).toBe('session:app-1'); // the cache agrees
+  });
+
+  it('runs writeAs’s afterWrite and inFrame inside the write’s savepoint: one commit, and a throw takes the write back', async () => {
+    make({}, true);
+    const revision = await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'restored'), {
+      afterWrite: (doc) => {
+        doc.get('meta').setAttr('orphans', 1);
+        return { threads: { upsert: [thread('t1', 'open')] } };
+      },
+      inFrame: (at) => storage.db.prepare("INSERT INTO meta (key, value) VALUES ('seen', ?)").run(String(at)),
+    });
+    expect(committed("SELECT value FROM meta WHERE key = 'seen'")).toEqual([{ value: String(revision) }]);
+    expect(committed('SELECT actor FROM artifact_updates ORDER BY seq')).toEqual([{ actor: 'human' }, { actor: 'human' }]);
+    expect(committed('SELECT threadId FROM artifact_threads')).toEqual([{ threadId: 't1' }]);
+    await expect(
+      service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'lost'), {
+        inFrame: () => {
+          throw new Error('the version could not be written');
+        },
+      }),
+    ).rejects.toThrow(/version could not be written/);
+    expect(rowCount()).toBe(2);
+    expect(service.readState('a1').revision).toBe(revision);
+  });
+
+  it('commits rows written through inBatch with the turn’s batch, answers after the commit, and takes them back on a throw', async () => {
+    make();
+    const answer = service.inBatch(() => {
+      storage.db.prepare("INSERT INTO meta (key, value) VALUES ('k', 'v')").run();
+      return 'done';
+    });
+    let settled = false;
+    void answer.then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(committed('SELECT value FROM meta')).toEqual([]);
+    tick();
+    expect(await answer).toBe('done');
+    expect(committed('SELECT value FROM meta')).toEqual([{ value: 'v' }]);
+    await expect(
+      service.inBatch(() => {
+        storage.db.prepare("INSERT INTO meta (key, value) VALUES ('k2', 'v')").run();
+        throw new Error('no');
+      }),
+    ).rejects.toThrow('no');
+    tick();
+    expect(committed('SELECT key FROM meta')).toEqual([{ key: 'k' }]);
+  });
+
+  it('reads a doc’s state without opening it, and rewrites a requested head after the next commit', async () => {
+    make({}, true);
+    const revision = await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'hello'));
+    await until(() => service.loaded('a1') === null);
+    const { revision: at, state } = service.readState('a1');
+    expect(at).toBe(revision);
+    expect(service.loaded('a1')).toBeNull();
+    const doc = newDoc();
+    applyV2(doc, state);
+    expect(doc.get('t').toString()).toBe('hello');
+    service.requestHead('a1');
+    await until(() => committed('SELECT seq FROM artifact_head').length === 1);
+    expect(committed('SELECT seq FROM artifact_head')).toEqual([{ seq: revision }]);
   });
 });
 
