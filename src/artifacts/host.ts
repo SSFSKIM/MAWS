@@ -95,6 +95,9 @@ export interface KindAdapter {
   // A restore's kind after-effects (orphaned threads, id repair), written in the restore's commit (Decision Log 16);
   // `versionId` is the version restored from.
   afterRestore?(live: Doc, info: { artifactId: string; versionId: number }): void | { threads?: ThreadChange };
+  // A new document's first content (Decision Log 44c, parent 48), written by the host when the creator gives none, in
+  // the create's commit and credited to the creator, so two replicas never each seed a first tab of their own.
+  initial?(doc: Doc, info: { title: string }): void;
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
 }
@@ -122,7 +125,7 @@ export interface DocumentHandle {
 export interface ArtifactHost {
   open(artifactId: string): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   assetUrl(artifactId: string, ref: string): string;
-  export(artifactId: string, format: string, version?: number): Promise<{ path: string }>;
+  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4' }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
   attributions(artifactId: string, fromSeq: number, toSeq: number): Promise<Uint8Array>; // a merged ContentMap (23a)
   uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }): Promise<{ assetId: string; ref: string }>; // 25l

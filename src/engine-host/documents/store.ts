@@ -105,7 +105,8 @@ export interface Asset {
 export type TestOp =
   | { op: 'setAttr'; key: string; value: unknown; root?: string }
   | { op: 'insertText'; index: number; text: string; root?: string }
-  | { op: 'deleteText'; index: number; length: number; root?: string };
+  | { op: 'deleteText'; index: number; length: number; root?: string }
+  | { op: 'page'; text: string }; // M7 fix wave 1: an html page's new content, its only op
 
 // A store write's recording seam (Decision Log 26c): run inside the savepoint of the write that completes the operation,
 // with what it produced, so whatever it writes (an op row, `OpScope.record`) commits with the write or not at all. Every
@@ -115,6 +116,14 @@ export type InFrame<T> = (result: T) => void;
 export interface DesignSystemDefaults {
   owner: string | null;
   spaces: Record<string, string>;
+}
+
+// Which design system governs an artifact (Decision Log 42; ledger X23, X28): P3-D's chain (own system, Space default,
+// owner default, the house system; deleted or non-live ids skipped), synchronous over the store's committed state so it
+// is safe inside a version's frame. `{builtin: 'maws'}`: no store system governs and the bundled floor renders. `target`
+// is the artifact's row (or, for an artifact not yet created, where it will be placed).
+export interface DesignSystemChain {
+  governing(target: { designSystemId?: string | null; spaceId?: string | null }): { id: string } | { builtin: 'maws' };
 }
 
 interface EntityRow {
@@ -154,11 +163,14 @@ export class ArtifactStore {
   private readonly changeListeners = new Set<(change: ArtifactChanged) => void>();
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
+  private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
   // Per session, the artifacts it touched this turn: its committed document edits (a turn version needs one) and its
   // mutating tool calls' results (the turn version's summary).
   private readonly turns = new Map<string, Map<string, { commits: number; results: unknown[] }>>();
   private designSystemContext: ((system: Artifact) => Promise<string | null>) | null = null;
+  // A's own chain until P3-D registers its (the last registration wins)
+  private designSystemChain: DesignSystemChain = { governing: (target) => this.ownGoverning(target) };
   private readonly unsubscribe: (() => void)[] = [];
   private closed = false;
 
@@ -277,14 +289,19 @@ export class ArtifactStore {
   }
 
   // The human's create or an agent's (`actor`; a session is linked `created`). Byte kinds take their first content and
-  // write it as an `import` version; Y kinds start empty, or with `initial` written in the entity's savepoint.
+  // write it as an `import` version; Y kinds start with `initial` written in the entity's savepoint, else with their
+  // kind adapter's seed (`KindAdapter.initial`, Decision Log 44c), else empty. One `created` announces it: the first
+  // content's commit is not also announced as an update.
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     this.checkCreate(input, actor);
     const id = randomUUID();
     const at = this.now();
+    const adapter = isDocKind(input.kind) ? this.service.adapterFor(input.kind) : undefined;
+    const first = input.initial ?? (adapter?.initial ? (doc: Doc) => adapter.initial!(doc, { title: input.title }) : undefined);
     try {
-      if (input.initial) {
-        await this.service.writeAs(id, actor, input.initial, { prepare: () => this.insertInFrame(id, input, actor, at), inFrame: () => inFrame?.(toArtifact(this.entity(id)!)) });
+      if (first) {
+        this.creating.add(id);
+        await this.service.writeAs(id, actor, first, { prepare: () => this.insertInFrame(id, input, actor, at), inFrame: () => inFrame?.(toArtifact(this.entity(id)!)) }).finally(() => this.creating.delete(id));
       } else {
         await this.service.inBatch(() => {
           this.insertInFrame(id, input, actor, at);
@@ -745,19 +762,33 @@ export class ArtifactStore {
   // it equal to its live state, writing an `auto` version of the system first when it moved since its last one.
   private pinInFrame(row: EntityRow): DesignSystemRef | null {
     if (row.kind === 'design_system') return null;
-    const systemId = this.governingSystem(row);
-    const system = systemId ? this.entity(systemId) : undefined;
-    if (!system || system.deletedAt !== null || system.kind !== 'design_system') return null;
+    const system = this.governingSystem(row);
+    if (!system) return null; // the bundled floor governs: nothing of the store's to pin
     const revision = this.service.revision(system.id);
     if (this.versions.latest(system.id)?.seq !== revision) this.versionInFrame(system, { kind: 'auto', actor: this.lastWriter(system.id) }, { pinTarget: true });
     return { id: system.id, versionSeq: this.versions.latest(system.id)!.seq };
   }
 
-  // The artifact's governing design system (Decision Log 22d): its own, else its Space's default, else the owner's.
-  governingSystem(row: Pick<EntityRow, 'designSystemId' | 'spaceId'>): string | null {
-    if (row.designSystemId) return row.designSystemId;
+  // The live design system governing `target` as the registered chain names it (Decision Log 42), or null when the
+  // bundled floor governs (`{builtin}`) or the chain named something that is not a live design system.
+  private governingSystem(target: { designSystemId?: string | null; spaceId?: string | null }): EntityRow | null {
+    const governing = this.designSystemChain.governing(target);
+    if (!('id' in governing)) return null;
+    const system = this.entity(governing.id);
+    return system && system.deletedAt === null && system.kind === 'design_system' ? system : null;
+  }
+
+  // A's chain, answering until P3-D registers its own (Decision Log 22d): the artifact's own system, else its Space's
+  // default, else the owner's, when that one is a live design system; else the bundled floor.
+  private ownGoverning(target: { designSystemId?: string | null; spaceId?: string | null }): { id: string } | { builtin: 'maws' } {
     const defaults = this.defaults();
-    return (row.spaceId ? defaults.spaces[row.spaceId] : undefined) ?? defaults.owner ?? null;
+    const id = target.designSystemId || (target.spaceId ? defaults.spaces[target.spaceId] : undefined) || defaults.owner;
+    const system = id ? this.entity(id) : undefined;
+    return system && system.deletedAt === null && system.kind === 'design_system' ? { id: system.id } : { builtin: 'maws' };
+  }
+
+  registerDesignSystemChain(chain: DesignSystemChain): void {
+    this.designSystemChain = chain;
   }
 
   // The owner looked at the artifact (Decision Log 16): an `auto` version first when the doc moved since its last
@@ -860,7 +891,22 @@ export class ArtifactStore {
   // `actor` as one write, idempotent by `opId`.
   async testWrite(artifactId: string, opId: string, ops: TestOp[], actor: Actor): Promise<{ revision: number }> {
     const row = this.requireLive(artifactId);
+    const pages = ops.filter((op): op is Extract<TestOp, { op: 'page' }> => op.op === 'page');
+    if (row.kind === 'html') {
+      if (pages.length !== ops.length) throw new ArtifactStoreError('invalid', 'an html page takes only page ops');
+      return this.withOp(
+        opId,
+        'testWrite',
+        artifactId,
+        async (scope) => {
+          const { revision } = await this.writeContent(artifactId, { bytes: new TextEncoder().encode(pages.at(-1)!.text), name: this.contentRef(artifactId).ref.name }, actor, {}, (at) => scope.record({ revision: at.revision }));
+          return { revision };
+        },
+        { actor },
+      );
+    }
     if (!isDocKind(row.kind)) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact is not a document`);
+    if (pages.length > 0) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact takes no page op`);
     return this.withOp(
       opId,
       'testWrite',
@@ -898,8 +944,8 @@ export class ArtifactStore {
   async designSystemContextFor(target: string | { designSystemId?: string | null; spaceId?: string | null }): Promise<string | null> {
     const system = await this.readCommitted(() => {
       const placement = typeof target === 'string' ? this.entity(target) : { designSystemId: target.designSystemId ?? null, spaceId: target.spaceId ?? null };
-      const systemId = placement ? this.governingSystem(placement) : null;
-      return systemId ? this.get(systemId) : null;
+      const governing = placement ? this.governingSystem(placement) : null;
+      return governing ? toArtifact(governing) : null;
     });
     if (!system || !this.designSystemContext) return null;
     const lost = this.service.stats.lostBatches;
@@ -1005,7 +1051,7 @@ export class ArtifactStore {
     const row = this.entity(artifactId);
     if (!row || !isDocKind(row.kind)) return; // a suggestion doc's key, or no entity row
     for (const actor of actors) if (actor.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).commits += 1;
-    this.feed(row, revision);
+    if (!this.creating.has(artifactId)) this.feed(row, revision);
     const timers = this.schedule.get(artifactId) ?? {};
     this.schedule.set(artifactId, timers);
     const fire = (which: 'idle' | 'every') => () => {
@@ -1111,10 +1157,11 @@ function uniqueName(name: string, taken: Set<string>): string {
 
 function applyTestOps(doc: Doc, ops: TestOp[]): void {
   for (const op of ops) {
+    if (op.op === 'page') continue; // a page's, refused before
     const node = doc.get(op.root ?? 'root');
     if (op.op === 'setAttr') node.setAttr(op.key, op.value);
     else if (op.op === 'insertText') node.insert(op.index, op.text);
-    else node.delete(op.index, op.length);
+    else if (op.op === 'deleteText') node.delete(op.index, op.length);
   }
 }
 

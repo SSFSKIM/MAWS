@@ -12,20 +12,27 @@
 //
 // Console attribution (Design §8, Decision Log 9) lives here too: a message an app window's deliverable frame logged,
 // read by the frame's URL, becomes the main-owned event `deliverables.console`, cut and rate-bounded.
+//
+// P3-A M7 (Decision Log 35e): one implementation for both of the app's store schemes. A "deliverable frame" below is a
+// frame of either: `maws-deliverable:` or `maws-artifact:`; each scheme's frames, and every frame beneath one, get the
+// same request and download filters, navigation guard and permission denials, and an artifact frame's console becomes
+// `artifacts.console`. P3-L's cutover deletes the deliverable scheme from this list.
 import { appendFile } from 'node:fs/promises';
 import type { Session, WebContents } from 'electron';
+import { ARTIFACT_SCHEME, parseArtifactUrl } from '@shared/artifacts/scheme';
+import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import { DELIVERABLE_CONSOLE_MESSAGE_MAX, type DeliverableConsole } from '@shared/ipc/schema/deliverables';
 import { DELIVERABLE_SCHEME, parseDeliverableUrl } from '@shared/maws/deliverable';
 
-const PREFIX = `${DELIVERABLE_SCHEME}://`;
-const isDeliverable = (url: string | null | undefined): boolean => typeof url === 'string' && url.startsWith(PREFIX);
+const PREFIXES = [`${DELIVERABLE_SCHEME}://`, `${ARTIFACT_SCHEME}://`];
+const isDeliverable = (url: string | null | undefined): boolean => typeof url === 'string' && PREFIXES.some((prefix) => url.startsWith(prefix));
 
 // Chromium's built-in PDF viewer (Electron's internal extension, a fixed id): the PDF frame asks it for its bundled
 // files (`pdf_embedder.css`, measured in the trial), and the viewer's own page loads `chrome://resources/` scripts.
 // These are files inside Electron, never the network. Its Save writes a `blob:` of its own origin.
 const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 const PDF_VIEWER_BLOB = `blob:${PDF_VIEWER}`;
-const ALLOWED_BENEATH = [PREFIX, PDF_VIEWER, 'chrome://resources/'];
+const ALLOWED_BENEATH = [...PREFIXES, PDF_VIEWER, 'chrome://resources/'];
 const allowedBeneath = (url: string) => ALLOWED_BENEATH.some((prefix) => url.startsWith(prefix));
 
 // ---- the decisions --------------------------------------------------------------------------------------------------
@@ -52,13 +59,42 @@ export function beneathDeliverable(frame: FrameLike | null | undefined): boolean
   }
 }
 
+// The artifact a frame shows (fix wave 1, Decision Log 44a): read from the nearest frame at or above it served by either
+// store scheme, its artifact id; null when that frame is a deliverable's; undefined when no store frame lies above it
+// (the app's own frames). Throws when a frame can no longer be read.
+export function shownArtifact(frame: FrameLike | null | undefined): string | null | undefined {
+  let current = frame ?? null;
+  for (let depth = 0; current && depth < MAX_DEPTH; depth++, current = current.parent) {
+    const url = current.url;
+    if (url.startsWith(ARTIFACT_PREFIX)) return artifactIdOf(url);
+    if (isDeliverable(url)) return null;
+  }
+  return undefined;
+}
+const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://`;
+// The artifact a `maws-artifact:` URL names (its host, as Chromium lowercases it), whatever its path.
+const artifactIdOf = (url: string): string => url.slice(ARTIFACT_PREFIX.length).split(/[/?#]/, 1)[0]!.toLowerCase();
+
+// Whether a request or navigation to `url`, made from within store frames showing `shown`, reaches an artifact other
+// than the one shown: an artifact frame reaches its own artifact (any revision, its assets) and nothing of another's,
+// and a deliverable frame no artifact at all (X12's frame rule, Decision Log 44a). The app's own frames (`shown`
+// undefined) reach every artifact.
+function crossesArtifacts(url: string, shown: string | null | undefined): boolean {
+  if (!url.startsWith(ARTIFACT_PREFIX) || shown === undefined) return false;
+  return shown !== artifactIdOf(url);
+}
+
 // A request whose frame is (or lies beneath) a deliverable frame, or whose initiator is the scheme (an unsandboxed frame
 // reports it; a sandboxed one reports the opaque "null"), for anything outside the scheme, the PDF viewer's files and
 // `chrome://resources/`: http, https, ws, wss and file alike. `data:` and `blob:` never reach `webRequest`. Unlike the
 // navigation guard, a frame that can no longer be read counts as not beneath one here (only an initiator in the scheme
 // still cancels): safe because every scheme answer that can run script carries a CSP without network sources
-// (`protocol.ts`), so the frame's own policy refuses what this filter lets by.
-export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string }): boolean {
+// (`protocol.ts`), so the frame's own policy refuses what this filter lets by. Fix wave 1 (Decision Log 44a): also a
+// request from within an artifact frame (`shown`, `shownArtifact` of its frame) for another artifact, unless the app
+// made it (an initiator that is neither opaque nor a store frame's origin: the app pointing its frame elsewhere).
+export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string; shown?: string | null }): boolean {
+  const fromApp = details.initiatorOrigin !== undefined && details.initiatorOrigin !== 'null' && !isDeliverable(details.initiatorOrigin);
+  if (!fromApp && crossesArtifacts(details.url, details.shown)) return true;
   if (allowedBeneath(details.url)) return false;
   return details.beneath === true || isDeliverable(details.initiatorOrigin);
 }
@@ -66,7 +102,10 @@ export function shouldCancelRequest(details: { url: string; beneath: boolean | n
 // A subframe navigation of a frame that is (or lies beneath) a deliverable frame, or asked by one, to anything outside
 // the same three. The app never points a deliverable frame elsewhere (a version switch stays in the scheme; React
 // removes the frame rather than navigating it away). A frame that can no longer be read counts as beneath one.
-export function shouldBlockFrameNavigation(details: { url: string; frameBeneath: boolean | null; initiatorBeneath: boolean | null }): boolean {
+// Fix wave 1 (Decision Log 44a): a navigation an artifact frame asks for (`initiatorShows`, `shownArtifact` of the
+// initiator) to another artifact is prevented too; the app's own (initiator outside every store frame) is not.
+export function shouldBlockFrameNavigation(details: { url: string; frameBeneath: boolean | null; initiatorBeneath: boolean | null; initiatorShows?: string | null }): boolean {
+  if (crossesArtifacts(details.url, details.initiatorShows)) return true;
   if (allowedBeneath(details.url)) return false;
   return details.frameBeneath !== false || details.initiatorBeneath === true;
 }
@@ -92,47 +131,59 @@ export function isDeliverablePermission(origins: readonly (string | null | undef
   return origins.some(isDeliverable);
 }
 
-// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
-// their schema's bound); null for anything else.
-export function consoleMessageOf(details: {
-  frame: { url: string } | null;
-  level: string;
-  message: string;
-  lineNumber: number;
-  sourceId: string;
-}): DeliverableConsole | null {
-  if (details.level !== 'error' && details.level !== 'warning') return null;
+type ConsoleDetails = { frame: { url: string } | null; level: string; message: string; lineNumber: number; sourceId: string };
+
+// A console message's level, text, line and source as both events carry them (cut to their schemas' bound), and the
+// frame's URL; null for a level neither carries or a frame that can no longer be read.
+type ConsoleFields = Pick<DeliverableConsole, 'level' | 'message' | 'line' | 'source'>;
+function consoleParts(details: ConsoleDetails): { url: string; fields: ConsoleFields } | null {
+  const level = details.level;
+  if (level !== 'error' && level !== 'warning') return null;
   let url: string | null;
   try {
     url = details.frame?.url ?? null;
   } catch {
     url = null;
   }
-  const target = url === null ? null : parseDeliverableUrl(url);
-  if (!target) return null;
+  if (url === null) return null;
   return {
-    appSessionId: target.appSessionId,
-    deliverableId: target.id,
-    version: target.version,
-    level: details.level,
-    message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
-    line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
-    source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
+    url,
+    fields: {
+      level,
+      message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
+      line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
+      source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
+    },
   };
 }
 
-// The console's rate bound: at most CONSOLE_BURST messages per (appSessionId, deliverableId, version) in any
-// CONSOLE_WINDOW_MS window; the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
+// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
+// their schema's bound); null for anything else.
+export function consoleMessageOf(details: ConsoleDetails): DeliverableConsole | null {
+  const parts = consoleParts(details);
+  const target = parts && parseDeliverableUrl(parts.url);
+  return target ? { appSessionId: target.appSessionId, deliverableId: target.id, version: target.version, ...parts!.fields } : null;
+}
+
+// A console message of an artifact frame (`maws-artifact:`), as `artifacts.console` carries it; null for anything else.
+export function artifactConsoleMessageOf(details: ConsoleDetails): ArtifactConsole | null {
+  const parts = consoleParts(details);
+  const target = parts && parseArtifactUrl(parts.url);
+  return target ? { artifactId: target.artifactId, revision: target.revision === 'live' ? null : target.revision, ...parts!.fields } : null;
+}
+
+// The console's rate bound: at most CONSOLE_BURST messages per (appSessionId, deliverableId, version), or per
+// (artifactId, revision), in any CONSOLE_WINDOW_MS window; the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
 // a page logging in a loop costs at most one buffer's worth of IPC every ten seconds.
 export const CONSOLE_BURST = 50;
 export const CONSOLE_WINDOW_MS = 10_000;
 const CONSOLE_KEYS_PRUNE_AT = 256;
 
-export function consoleLimiter(now: () => number = Date.now): (message: DeliverableConsole) => boolean {
+export function consoleLimiter(now: () => number = Date.now): (message: DeliverableConsole | ArtifactConsole) => boolean {
   const windows = new Map<string, { start: number; count: number }>();
   return (message) => {
     const at = now();
-    const key = `${message.appSessionId}/${message.deliverableId}/${message.version}`;
+    const key = 'artifactId' in message ? `artifact/${message.artifactId}/${message.revision ?? 'live'}` : `${message.appSessionId}/${message.deliverableId}/${message.version}`;
     let window = windows.get(key);
     if (!window || at - window.start >= CONSOLE_WINDOW_MS) {
       if (windows.size >= CONSOLE_KEYS_PRUNE_AT) for (const [k, w] of windows) if (at - w.start >= CONSOLE_WINDOW_MS) windows.delete(k);
@@ -145,6 +196,16 @@ export function consoleLimiter(now: () => number = Date.now): (message: Delivera
 }
 
 // ---- installing them ------------------------------------------------------------------------------------------------
+
+// `shownArtifact` of a frame read from an Electron event; `unreadable` answers for a frame that can no longer be read
+// (by default undefined: the frame's own CSP holds).
+function shownRead(read: () => FrameLike | null | undefined, unreadable: () => string | null | undefined = () => undefined): string | null | undefined {
+  try {
+    return shownArtifact(read());
+  } catch {
+    return unreadable();
+  }
+}
 
 // `beneathDeliverable` of a frame read from an Electron event, whose getter itself throws for a disposed frame.
 function beneathRead(read: () => FrameLike | null | undefined): boolean | null {
@@ -165,11 +226,24 @@ function seam(env: SeamEnv, line: string): void {
   seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[deliverables] could not write the e2e seam log', error));
 }
 
+// One webContents' own request filter, consulted before the frame policies (P3-A M7 fix wave 1: the export's PDF
+// printer, Decision Log 44b): `cancel` answers whether to cancel a request that webContents makes. A session has one
+// `onBeforeRequest` listener, so a window that needs more than the frame policies registers here. Answers the removal.
+const ownFilters = new Map<number, (url: string) => boolean>();
+export function restrictRequests(webContentsId: number, cancel: (url: string) => boolean): () => void {
+  ownFilters.set(webContentsId, cancel);
+  return () => {
+    if (ownFilters.get(webContentsId) === cancel) ownFilters.delete(webContentsId);
+  };
+}
+
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
 // filter.
 export function installFramePolicies(session: Session, env: SeamEnv): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin }) });
+    const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
+    if (own) return callback({ cancel: own(details.url) });
+    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame) }) });
   });
   session.on('will-download', (event, item) => {
     if (!shouldCancelDownload({ url: item.getURL(), urlChain: item.getURLChain() })) return;
@@ -207,18 +281,30 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
   contents.on('will-frame-navigate', (event) => {
     const frameBeneath = beneathRead(() => event.frame);
     const initiatorBeneath = beneathRead(() => event.initiator);
-    if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath })) return;
+    // an initiator that can no longer be read is judged by the frame it navigates (Decision Log 44a)
+    const initiatorShows = shownRead(() => event.initiator, () => shownRead(() => event.frame));
+    if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath, initiatorShows })) return;
     event.preventDefault();
     seam(env, `blocked-navigation ${event.url}`);
   });
 }
 
 // An app window's deliverable frames' errors and warnings, as `deliverables.console` (the capture window's go into the
-// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per deliverable version per window of time.
-export function attributeConsole(contents: WebContents, emit: (name: 'deliverables.console', payload: DeliverableConsole) => unknown, now?: () => number): void {
+// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per deliverable version per window of time; an
+// artifact frame's as `artifacts.console`, bounded the same way per artifact revision.
+type ConsoleEmit = {
+  (name: 'deliverables.console', payload: DeliverableConsole): unknown;
+  (name: 'artifacts.console', payload: ArtifactConsole): unknown;
+};
+export function attributeConsole(contents: WebContents, emit: ConsoleEmit, now?: () => number): void {
   const admit = consoleLimiter(now);
   contents.on('console-message', (event) => {
-    const message = consoleMessageOf(event);
-    if (message && admit(message)) emit('deliverables.console', message);
+    const deliverable = consoleMessageOf(event);
+    if (deliverable) {
+      if (admit(deliverable)) emit('deliverables.console', deliverable);
+      return;
+    }
+    const artifact = artifactConsoleMessageOf(event);
+    if (artifact && admit(artifact)) emit('artifacts.console', artifact);
   });
 }

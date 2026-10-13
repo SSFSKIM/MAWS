@@ -473,6 +473,42 @@ describe('DocumentService: host-originated writes', () => {
     expect(rowCount()).toBe(1);
   });
 
+  it('reads on the actor’s host replica (readAs, Decision Log 41b): no frame, no row, and the write after it uses that replica', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'hello'));
+    const rows = rowCount();
+    const appended = service.stats.rowsAppended;
+    let seen: Doc | null = null;
+    const text = service.readAs('a1', agent, (doc) => {
+      seen = doc;
+      return doc.get('t').toString();
+    });
+    expect(text).toBe('hello');
+    expect(service.stats.rowsAppended).toBe(appended); // nothing written, nothing queued
+    await service.whenCommitted();
+    expect(rowCount()).toBe(rows);
+    // the replica the read warmed is the one the actor's next write goes through
+    await service.writeAs('a1', agent, (doc) => {
+      expect(doc).toBe(seen);
+      doc.get('t').insert(5, '!');
+    });
+    expect(service.readAs('a1', agent, (doc) => doc.get('t').toString())).toBe('hello!');
+  });
+
+  it('refuses a readAs that edits: nothing reaches the live doc, and the actor’s next write starts from the live state', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'hello'));
+    const appended = service.stats.rowsAppended;
+    expect(() => service.readAs('a1', agent, (doc) => doc.get('t').insert(0, 'sneaked '))).toThrow(/read-only/);
+    expect(service.stats.rowsAppended).toBe(appended);
+    expect(service.readAs('a1', agent, (doc) => doc.get('t').toString())).toBe('hello'); // a fresh replica, from the live doc
+    await service.writeAs('a1', agent, (doc) => doc.get('t').insert(5, '!'));
+    expect(service.readAs('a1', agent, (doc) => doc.get('t').toString())).toBe('hello!');
+    const reader = service.replica(sid('app-9'), 'a1');
+    await reader.whenSynced();
+    expect(reader.doc.get('t').toString()).toBe('hello!');
+  });
+
   it('leaves a taken-back write’s actor out of the commit’s writers (M3 review finding 3)', async () => {
     make();
     const seen: Committed[] = [];

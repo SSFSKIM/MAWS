@@ -27,14 +27,14 @@ import { fromMessagePortMain } from './ports';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 
-type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open'> | keyof typeof SpaceCommands;
+type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export'> | keyof typeof SpaceCommands;
 
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
-  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
+  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
@@ -178,15 +178,24 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.content', ({ artifactId, revision, path }) => {
     const store = storeOf();
     return store.readCommitted(() => {
-      required(store, artifactId);
+      const { kind } = required(store, artifactId);
       if (path !== undefined && path.startsWith('assets/')) {
         const asset = store.listAssets(artifactId).find((candidate) => candidate.ref === path);
         if (!asset) throw new ArtifactStoreError('notFound', `no asset ${path} in ${artifactId}`);
-        return { revision: store.revision(artifactId), name: asset.name, size: asset.size, sha256: asset.sha256, path: join(store.files.dirOf(artifactId), ArtifactFiles.assetPath(asset.sha256)) };
+        return { revision: store.revision(artifactId), kind, name: asset.name, size: asset.size, sha256: asset.sha256, path: join(store.files.dirOf(artifactId), ArtifactFiles.assetPath(asset.sha256)) };
       }
       const content = store.contentRef(artifactId, revision);
       if (path !== undefined && path !== content.ref.name) throw new ArtifactStoreError('notFound', `no file ${path} in ${artifactId} at revision ${content.revision}`);
-      return { revision: content.revision, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+      return { revision: content.revision, kind, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+    });
+  });
+  serve('artifacts.state', ({ artifactId }) => {
+    const store = storeOf();
+    return store.readCommitted(() => {
+      const { kind } = required(store, artifactId);
+      if (!isDocKind(kind)) throw new ArtifactStoreError('invalid', `a ${kind} artifact has no document state`);
+      const { revision, state } = store.service.readState(artifactId);
+      return { revision, bytes: state };
     });
   });
   serve('artifacts.status', () => {

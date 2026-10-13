@@ -221,6 +221,7 @@ export const HOST_EVENTS = [
   'deliverables.changed',
   'maws.pane.show',
   'maws.artifact.capture',
+  'maws.artifact.export', // P3-A M7: `artifact_export` asks main's export service
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
   'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
 ] as const satisfies readonly EventName[];

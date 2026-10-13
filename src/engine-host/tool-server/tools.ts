@@ -34,7 +34,7 @@ export function mawsTools(deps: {
     sendFileTool(artifacts), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
     artifactCreateTool(artifacts), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
     // P3-A (M6)
-    artifactDescribeTypeTool(), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
+    artifactDescribeTypeTool(artifacts), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
     artifactExportTool({ ...artifacts, exporter: deps.exporter }),
   ];
 }
