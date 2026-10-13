@@ -33,6 +33,11 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
   - Gates: `src/artifacts/design-system` 228/228; the covering projects 362/362; typecheck and lint clean; `e2e:design-systems` 2/2; `e2e:settings` 10/10; A's artifacts-store spec 2/2. The full suite at e62438a8 passed 12729 with one failure, the E10 bundle guard, fixed in 09c599a3 and re-run green (engine-host and artifacts, 2224/2224).
 - [x] (2026-10-13 PDT) M6b — The `ask` input (D13) and seeding in one transaction per default, on A's ticked 355bde01 (merged 6f12c26e). Commits 9106ae51..c0b5327e (Decision Log 27). Review approved first time. Gates: typecheck and lint clean; the full unit suite 12815 passed (one new test's colour literal fixed and re-run green); `e2e:design-systems` 3/3; A's `e2e:tools` 8/8.
 - [ ] M7 — Acceptance: the e2e group, the live run, the gates. Part 1 now, part 2 at A's M7 tick (Decision Log 28).
+  - [x] (2026-10-13 PDT) Part 1: commits 3c3e52ff..af63e2e3, fix wave 29f46d40..94685b80 (Decision Log 29); re-review approved.
+    - At af63e2e3: typecheck and lint clean; full unit suite 12833 passed and 1 skipped (at f80a3be6); `e2e:design-systems` 4/4, `e2e:settings` 10/10, `e2e:panel` 26/26, `e2e:library` 2/2, `e2e:artifacts` 2/2.
+    - The live run for Acceptance 15 passed on its second attempt (US$0.0189 in total; A-15 unchanged).
+    - At 94685b80: `src/artifacts/design-system` and the renderer design-system tests 242/242; typecheck and lint clean; `e2e:design-systems` 4/4.
+  - [ ] Part 2, at A's M7 tick.
 - [ ] Whole-branch review, its fix wave, Outcomes, hand-back.
 
 ## Terms
