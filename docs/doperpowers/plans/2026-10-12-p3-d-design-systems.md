@@ -31,7 +31,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
   - Fix wave 2, 57d9819f: Office chains walk the resolved tokens with no hop cap.
   - Re-review approved.
   - Gates: `src/artifacts/design-system` 228/228; the covering projects 362/362; typecheck and lint clean; `e2e:design-systems` 2/2; `e2e:settings` 10/10; A's artifacts-store spec 2/2. The full suite at e62438a8 passed 12729 with one failure, the E10 bundle guard, fixed in 09c599a3 and re-run green (engine-host and artifacts, 2224/2224).
-- [ ] M6b — The `ask` input (D13), after A's M6 tools tick (Decision Log 25).
+- [x] (2026-10-13 PDT) M6b — The `ask` input (D13) and seeding in one transaction per default, on A's ticked 355bde01 (merged 6f12c26e). Commits 9106ae51..c0b5327e (Decision Log 27). Review approved first time. Gates: typecheck and lint clean; the full unit suite 12815 passed (one new test's colour literal fixed and re-run green); `e2e:design-systems` 3/3; A's `e2e:tools` 8/8.
 - [ ] M7 — Acceptance: the e2e group, the live run, the gates.
 - [ ] Whole-branch review, its fix wave, Outcomes, hand-back.
 
