@@ -2,8 +2,10 @@
 // view gives (the "Make something new" cards, each group's heading and rows, a note) drawn through the shell's
 // virtualiser, so a library of thousands mounts only what is on screen. The rows share one tab stop: the arrows move the
 // keyboard between rows (Home and End to the ends), scrolling the next one into view first; Enter opens the row's
-// artifact; Shift+F10 opens the row's menu (the context-menu key opens it at the row by itself).
-import { useVirtualizer } from '@tanstack/react-virtual';
+// artifact; Shift+F10 opens the row's menu (the context-menu key opens it at the row by itself). The stop is always a
+// mounted row: the one the keyboard last held while it is mounted, else the first row in view; and a row holding the
+// keyboard (or its menu) stays mounted while the list scrolls away from it, so focus is never dropped by the scroll.
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { openArtifactTab } from './actions';
@@ -66,6 +68,24 @@ function Note({ text, retry, tone = 'quiet' }: { text: string; retry?: () => voi
 export function Rows({ lines }: { lines: Line[] }) {
   const scroller = useRef<HTMLDivElement>(null);
   const getItemKey = useCallback((index: number) => lines[index].key, [lines]);
+
+  // the rows in order, and where each is among the lines
+  const rowLines = useMemo(() => lines.flatMap((line, index) => (line.kind === 'row' ? [{ id: line.row.id, index }] : [])), [lines]);
+  const [current, setCurrent] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null); // the row the keyboard is in (the row or one of its controls)
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [focusNext, setFocusNext] = useState<string | null>(null);
+
+  // the lines kept mounted out of range: the focused row and the row whose menu is open
+  const kept = useMemo(() => rowLines.filter((r) => r.id === focused || r.id === menuFor).map((r) => r.index), [rowLines, focused, menuFor]);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const base = defaultRangeExtractor(range);
+      const extra = kept.filter((index) => !base.includes(index));
+      return extra.length === 0 ? base : [...base, ...extra].sort((a, b) => a - b);
+    },
+    [kept],
+  );
   // eslint-disable-next-line react-hooks/incompatible-library -- the virtualiser's functions are read in render by design
   const virtualizer = useVirtualizer({
     count: lines.length,
@@ -75,17 +95,17 @@ export function Rows({ lines }: { lines: Line[] }) {
     overscan: 6,
     paddingStart: 12,
     paddingEnd: 32,
+    rangeExtractor,
   });
 
-  // the rows in order, and where each is among the lines
-  const rowLines = useMemo(() => lines.flatMap((line, index) => (line.kind === 'row' ? [{ id: line.row.id, index }] : [])), [lines]);
-  const [current, setCurrent] = useState<string | null>(null);
-  const stop = current !== null && rowLines.some((r) => r.id === current) ? current : (rowLines[0]?.id ?? null);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [focusNext, setFocusNext] = useState<string | null>(null);
-
-  // the row the keyboard moved to, focused once it is mounted (the virtualiser scrolled it into view)
+  // the tab stop: the row the keyboard last held while it is mounted, else the first mounted row in view
   const items = virtualizer.getVirtualItems();
+  const mountedRows = items.filter((item) => lines[item.index]?.kind === 'row');
+  const lineId = (index: number) => (lines[index] as Extract<Line, { kind: 'row' }>).row.id;
+  const top = virtualizer.scrollOffset ?? 0;
+  const firstInView = mountedRows.find((item) => item.end > top) ?? mountedRows[0];
+  const stop = current !== null && mountedRows.some((item) => lineId(item.index) === current) ? current : firstInView ? lineId(firstInView.index) : (rowLines[0]?.id ?? null);
+  // the row the keyboard moved to, focused once it is mounted (the virtualiser scrolled it into view)
   useEffect(() => {
     if (focusNext === null) return;
     const element = scroller.current?.querySelector<HTMLElement>(`[data-artifact-row="${CSS.escape(focusNext)}"]`);
@@ -126,6 +146,7 @@ export function Rows({ lines }: { lines: Line[] }) {
             menuOpen={menuFor === line.row.id}
             onMenuOpen={(open) => setMenuFor(open ? line.row.id : null)}
             onFocus={() => setCurrent(line.row.id)}
+            onFocusWithin={(within) => setFocused((f) => (within ? line.row.id : f === line.row.id ? null : f))}
             onKeyDown={onRowKeyDown(line.row)}
           />
         );

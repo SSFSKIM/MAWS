@@ -102,17 +102,17 @@ function LibraryDialogs() {
     case undefined:
       return null;
     case 'rename':
-      return <RenameSheet key={open.artifact.id} artifact={open.artifact} />;
+      return <RenameSheet key={open.artifact.id} dialog={open} />;
     case 'delete':
-      return <DeleteSheet key={open.artifact.id} artifact={open.artifact} />;
+      return <DeleteSheet key={open.artifact.id} dialog={open} />;
     case 'inUse':
-      return <InUseSheet key={open.artifact.id} artifact={open.artifact} artifactIds={open.artifactIds} />;
+      return <InUseSheet key={open.artifact.id} dialog={open} />;
     case 'newSpace':
-      return <NewSpaceSheet key={open.moveArtifact?.id ?? ''} moveArtifact={open.moveArtifact} />;
+      return <NewSpaceSheet key={open.moveArtifact?.id ?? ''} dialog={open} />;
     case 'renameSpace':
-      return <RenameSpaceSheet key={open.space.id} space={open.space} />;
+      return <RenameSpaceSheet key={open.space.id} dialog={open} />;
     case 'deleteSpace':
-      return <DeleteSpaceSheet key={open.space.id} space={open.space} />;
+      return <DeleteSpaceSheet key={open.space.id} dialog={open} />;
   }
 }
 

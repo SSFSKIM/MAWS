@@ -11,7 +11,7 @@ import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, QUIET } from '../sessions/ui';
 import { createSpace, deleteSpace, linkSpaceDirectory, moveArtifactToSpace, renameSpace } from './actions';
 import { DIALOG_COPY as D, SPACE_COPY } from './copy';
-import { closeLibraryDialog, openLibraryDialog, toastFailure, type ArtifactRef } from './dialogs';
+import { closeLibraryDialog, openLibraryDialog, toastFailure, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
 import { showSpace } from './view';
@@ -84,7 +84,9 @@ export function SpaceMenu({ space, narrowed = false }: { space: LibrarySpace; na
 // ---- the sheets ----------------------------------------------------------------------------------------------------------
 
 // New Space; from "Move to Space › New Space…", the artifact moves into it once it exists.
-export function NewSpaceSheet({ moveArtifact }: { moveArtifact?: ArtifactRef }) {
+export function NewSpaceSheet({ dialog }: SheetOf<'newSpace'>) {
+  const { moveArtifact } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [name, setName] = useState('');
   const [dir, setDir] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,10 +103,10 @@ export function NewSpaceSheet({ moveArtifact }: { moveArtifact?: ArtifactRef }) 
       const moved = await moveArtifactToSpace(moveArtifact.id, made.value.id);
       if (!moved.ok) toastFailure(moved.error.message);
     }
-    closeLibraryDialog();
+    close();
   };
   return (
-    <Sheet title={D.newSpaceTitle} onClose={closeLibraryDialog}>
+    <Sheet title={D.newSpaceTitle} onClose={close}>
       <SheetForm canSubmit={!busy && trimmed.length > 0} onSubmit={() => void submit()} submitLabel={moveArtifact ? D.createAndMove(moveArtifact.title) : D.create} submitClass={PRIMARY}>
         <input aria-label={D.nameField} placeholder={D.nameField} autoFocus value={name} maxLength={SPACE_NAME_MAX} onChange={(e) => setName(e.target.value)} className={FIELD} />
         <p className="m-0 flex min-w-0 items-center gap-2 text-ui-sm text-fg-muted">
@@ -133,7 +135,9 @@ export function NewSpaceSheet({ moveArtifact }: { moveArtifact?: ArtifactRef }) 
   );
 }
 
-export function RenameSpaceSheet({ space }: { space: LibrarySpace }) {
+export function RenameSpaceSheet({ dialog }: SheetOf<'renameSpace'>) {
+  const { space } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [name, setName] = useState(space.name);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -142,11 +146,11 @@ export function RenameSpaceSheet({ space }: { space: LibrarySpace }) {
     setBusy(true);
     const result = await renameSpace(space.id, trimmed);
     setBusy(false);
-    if (result.ok) closeLibraryDialog();
+    if (result.ok) close();
     else setError(result.error.message);
   };
   return (
-    <Sheet title={D.renameSpaceTitle} onClose={closeLibraryDialog}>
+    <Sheet title={D.renameSpaceTitle} onClose={close}>
       <SheetForm canSubmit={!busy && trimmed.length > 0 && trimmed !== space.name} onSubmit={() => void submit()} submitLabel={D.rename} submitClass={PRIMARY}>
         <input aria-label={D.nameField} autoFocus value={name} maxLength={SPACE_NAME_MAX} onChange={(e) => setName(e.target.value)} onFocus={(e) => e.currentTarget.select()} className={FIELD} />
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
@@ -155,18 +159,20 @@ export function RenameSpaceSheet({ space }: { space: LibrarySpace }) {
   );
 }
 
-export function DeleteSpaceSheet({ space }: { space: LibrarySpace }) {
+export function DeleteSpaceSheet({ dialog }: SheetOf<'deleteSpace'>) {
+  const { space } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
     const result = await deleteSpace(space.id);
     setBusy(false);
-    if (result.ok) closeLibraryDialog();
+    if (result.ok) close();
     else setError(result.error.message);
   };
   return (
-    <Sheet title={D.deleteSpaceTitle(space.name)} onClose={closeLibraryDialog}>
+    <Sheet title={D.deleteSpaceTitle(space.name)} onClose={close}>
       <SheetForm focusSubmit canSubmit={!busy} onSubmit={() => void submit()} submitLabel={D.delete} submitClass={DANGER}>
         <p className="m-0 text-fg-muted">
           {D.deleteSpaceBody(space.count)}

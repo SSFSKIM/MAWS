@@ -12,7 +12,7 @@ import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { deleteArtifact, duplicateArtifact, moveArtifactToSpace, openArtifactTab, renameArtifact, setArtifactPinned } from './actions';
 import { DIALOG_COPY as D, ROW_COPY as R } from './copy';
-import { closeLibraryDialog, openLibraryDialog, toastFailure, type ArtifactRef } from './dialogs';
+import { closeLibraryDialog, openLibraryDialog, replaceLibraryDialog, toastFailure, type ArtifactRef, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
 import { useLibrarySpaces } from './store';
@@ -127,7 +127,9 @@ export function RowContextMenu({ row, children }: { row: LibraryRow; children: R
 
 // ---- the artifact's sheets ---------------------------------------------------------------------------------------------
 
-export function RenameSheet({ artifact }: { artifact: ArtifactRef }) {
+export function RenameSheet({ dialog }: SheetOf<'rename'>) {
+  const { artifact } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [title, setTitle] = useState(artifact.title);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,11 +138,11 @@ export function RenameSheet({ artifact }: { artifact: ArtifactRef }) {
     setBusy(true);
     const result = await renameArtifact(artifact.id, trimmed);
     setBusy(false);
-    if (result.ok) closeLibraryDialog();
+    if (result.ok) close();
     else setError(result.error.message);
   };
   return (
-    <Sheet title={D.renameTitle} onClose={closeLibraryDialog}>
+    <Sheet title={D.renameTitle} onClose={close}>
       <SheetForm canSubmit={!busy && trimmed.length > 0 && trimmed !== artifact.title} onSubmit={() => void submit()} submitLabel={D.rename} submitClass={PRIMARY}>
         <input aria-label={D.titleField} autoFocus value={title} maxLength={1_000} onChange={(e) => setTitle(e.target.value)} onFocus={(e) => e.currentTarget.select()} className={FIELD} />
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
@@ -149,22 +151,24 @@ export function RenameSheet({ artifact }: { artifact: ArtifactRef }) {
   );
 }
 
-export function DeleteSheet({ artifact }: { artifact: ArtifactRef }) {
+export function DeleteSheet({ dialog }: SheetOf<'delete'>) {
+  const { artifact } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
     const result = await deleteArtifact(artifact.id);
     setBusy(false);
-    if (result.ok) return closeLibraryDialog();
+    if (result.ok) return close();
     if (result.refusal?.reason === 'designSystemInUse') {
       const ids = result.refusal.data.artifactIds;
-      return openLibraryDialog({ kind: 'inUse', artifact, artifactIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [] });
+      return replaceLibraryDialog(dialog, { kind: 'inUse', artifact, artifactIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [] });
     }
     setError(result.error.message);
   };
   return (
-    <Sheet title={D.deleteTitle(artifact.title)} onClose={closeLibraryDialog}>
+    <Sheet title={D.deleteTitle(artifact.title)} onClose={close}>
       <SheetForm focusSubmit canSubmit={!busy} onSubmit={() => void submit()} submitLabel={D.delete} submitClass={DANGER}>
         <p className="m-0 text-fg-muted">{D.deleteBody}</p>
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
@@ -174,7 +178,9 @@ export function DeleteSheet({ artifact }: { artifact: ArtifactRef }) {
 }
 
 // The artifacts a design system still styles, by title (main's index), each a way to open it.
-export function InUseSheet({ artifact, artifactIds }: { artifact: ArtifactRef; artifactIds: string[] }) {
+export function InUseSheet({ dialog }: SheetOf<'inUse'>) {
+  const { artifact, artifactIds } = dialog;
+  const close = () => closeLibraryDialog(dialog);
   const [titles, setTitles] = useState<Map<string, string> | null>(null);
   useEffect(() => {
     let live = true;
@@ -187,7 +193,7 @@ export function InUseSheet({ artifact, artifactIds }: { artifact: ArtifactRef; a
     };
   }, [artifactIds]);
   return (
-    <Sheet title={D.inUseTitle} onClose={closeLibraryDialog}>
+    <Sheet title={D.inUseTitle} onClose={close}>
       <div className="flex flex-col gap-3">
         <p className="m-0 text-fg-muted">{D.inUseBody(artifact.title)}</p>
         {titles === null ? (
@@ -199,7 +205,7 @@ export function InUseSheet({ artifact, artifactIds }: { artifact: ArtifactRef; a
                 <button
                   type="button"
                   onClick={() => {
-                    closeLibraryDialog();
+                    close();
                     openArtifactTab(artifactId);
                   }}
                   className="w-full truncate rounded-sm px-2 py-1 text-left text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
@@ -211,7 +217,7 @@ export function InUseSheet({ artifact, artifactIds }: { artifact: ArtifactRef; a
           </ul>
         )}
         <div className="flex justify-end">
-          <button type="button" autoFocus onClick={closeLibraryDialog} className={SECONDARY}>
+          <button type="button" autoFocus onClick={close} className={SECONDARY}>
             {D.close}
           </button>
         </div>

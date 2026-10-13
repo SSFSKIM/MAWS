@@ -66,7 +66,11 @@ export function spaceGroups(rows: readonly LibraryRow[], spaces: readonly Librar
   const loose: LibraryRow[] = [];
   for (const row of rows) {
     if (!row.space) loose.push(row);
-    else bySpace.set(row.space.id, [...(bySpace.get(row.space.id) ?? []), row]);
+    else {
+      const rows = bySpace.get(row.space.id);
+      if (rows) rows.push(row);
+      else bySpace.set(row.space.id, [row]);
+    }
   }
   const groups: RowGroup[] = [...known.values()]
     .sort(byName)

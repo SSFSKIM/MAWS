@@ -28,7 +28,8 @@ export interface RowProps {
   stop: boolean; // the list's one tab stop
   menuOpen: boolean;
   onMenuOpen(open: boolean): void;
-  onFocus(): void;
+  onFocus(): void; // the row itself took the keyboard
+  onFocusWithin(within: boolean): void; // the keyboard entered the row (itself or a control of its), or left it
   onKeyDown(event: KeyboardEvent<HTMLElement>): void;
 }
 
@@ -71,7 +72,7 @@ const Dot = () => (
   </span>
 );
 
-export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onKeyDown }: RowProps) {
+export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, onKeyDown }: RowProps) {
   const now = useNow();
   const editor = row.lastEditor;
   const editorTitle = editor.kind === 'session' ? row.sessions.find((s) => s.appSessionId === editor.appSessionId)?.title : undefined;
@@ -84,7 +85,13 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onKeyDown }: Row
         tabIndex={tabIndex}
         data-artifact-row={row.id}
         data-kind={row.kind}
-        onFocus={(event) => event.target === event.currentTarget && onFocus()}
+        onFocus={(event) => {
+          onFocusWithin(true);
+          if (event.target === event.currentTarget) onFocus();
+        }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onFocusWithin(false);
+        }}
         onKeyDown={onKeyDown}
         onClick={(event) => {
           if (onControl(event)) return;

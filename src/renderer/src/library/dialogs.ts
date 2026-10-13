@@ -21,7 +21,12 @@ export type LibraryDialog =
 export const useLibraryDialog = create<{ open: LibraryDialog | null }>()(() => ({ open: null }));
 
 export const openLibraryDialog = (dialog: LibraryDialog): void => useLibraryDialog.setState({ open: dialog });
-export const closeLibraryDialog = (): void => useLibraryDialog.setState({ open: null });
+
+// A sheet settles only itself: its answer may arrive after the owner dismissed it and opened another, which stays. Each
+// sheet is given the dialog it was opened as, and closes or replaces only that one.
+export const closeLibraryDialog = (dialog: LibraryDialog): void => useLibraryDialog.setState((s) => (s.open === dialog ? { open: null } : s));
+export const replaceLibraryDialog = (dialog: LibraryDialog, next: LibraryDialog): void => useLibraryDialog.setState((s) => (s.open === dialog ? { open: next } : s));
+export type SheetOf<K extends LibraryDialog['kind']> = { dialog: Extract<LibraryDialog, { kind: K }> };
 
 // A write the store refused, said where the owner is (the list itself changes only when main's index has the write).
 export const toastFailure = (message: string): void => void toast({ level: 'warning', text: message, actions: [], dismissible: true });

@@ -15,7 +15,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
-import { installFakeMain, ok } from '../test-support/code';
+import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { useLibraryDialog } from './dialogs';
 import { Library } from './Library';
@@ -26,7 +26,9 @@ const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12,
 const WORK = id(0xa1);
 const HOME = id(0xa2);
 const S = (n: number) => `app-s${n}` as AppSessionId;
-const NOW = Date.now();
+// One local time for the fixtures and the component's clock (useNow reads Date.now), so the date groups never depend
+// on when the suite runs.
+const NOW = new Date(2026, 9, 13, 12, 0).getTime(); // a local noon
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
 
@@ -81,19 +83,25 @@ const libraryCalls = () => main.callsOf('library.list').map((c) => (c as { filte
 const article = (title: string) => screen.getByRole('article', { name: title });
 const tabIds = () => allTabs(useLayout.getState().main).map((t) => t.id);
 
-// happy-dom has no layout: the list's scroller gets a viewport so the virtualiser mounts its rows.
+// happy-dom has no layout: the list's scroller gets a viewport (tall enough for every fixture unless a test shrinks it)
+// so the virtualiser mounts its rows, and a measured line its height when a test gives lines one.
+let viewport = 4000;
+let lineHeight: number | null = null;
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
     get(this: HTMLElement) {
-      return this.hasAttribute('data-library-scroller') ? 4000 : 0;
+      if (this.hasAttribute('data-library-scroller')) return viewport;
+      return lineHeight !== null && this.hasAttribute('data-index') ? lineHeight : 0; // what the virtualiser measures a line by
     },
   });
 });
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   resetShellStores();
   resetLibrary();
   resetLibraryView();
@@ -132,6 +140,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   delete (window as { maws?: unknown }).maws;
   offs.splice(0).forEach((off) => off());
 });
@@ -302,6 +311,51 @@ describe('a row', () => {
   });
 });
 
+// The review of M4: the list mounts only what is near the viewport, so its one tab stop must be a mounted row whatever
+// the scroll, and a row holding the keyboard stays mounted while it scrolls away.
+describe('the tab stop across virtualization', () => {
+  const scrollTo = async (top: number) => {
+    const scroller = document.querySelector<HTMLElement>('[data-library-scroller]')!;
+    scroller.scrollTop = top;
+    await act(async () => void scroller.dispatchEvent(new Event('scroll')));
+  };
+  const stops = () => screen.getAllByRole('article').filter((a) => a.tabIndex === 0);
+  const startOf = (el: HTMLElement) => Number(/translateY\(([\d.]+)px\)/.exec(el.closest<HTMLElement>('[data-index]')!.style.transform)![1]);
+
+  beforeEach(() => {
+    viewport = 300;
+    lineHeight = 56;
+    rows = Array.from({ length: 80 }, (_, i) => row(i + 1, { title: `Note ${i + 1}`, updatedAt: NOW - (i + 1) * 60_000 }));
+  });
+  afterEach(() => {
+    viewport = 4000;
+    lineHeight = null;
+  });
+
+  it('scrolled past the stop row, the first row in view takes the tab stop', async () => {
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Note 1' });
+    expect(stops().map((a) => a.getAttribute('aria-label'))).toEqual(['Note 1']);
+    await scrollTo(2_000);
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Note 1' })).toBeNull());
+    const [stop] = stops();
+    expect(stops()).toHaveLength(1);
+    const inView = screen.getAllByRole('article').filter((a) => startOf(a) + 56 > 2_000).sort((a, b) => startOf(a) - startOf(b));
+    expect(stop).toBe(inView[0]);
+  });
+
+  it('a row holding the keyboard stays mounted, focused and the tab stop while the list scrolls away from it', async () => {
+    render(<Library />);
+    const second = await screen.findByRole('article', { name: 'Note 2' });
+    act(() => second.focus());
+    await scrollTo(3_000);
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Note 1' })).toBeNull());
+    expect(screen.getByRole('article', { name: 'Note 2' })).toBe(second);
+    expect(document.activeElement).toBe(second);
+    expect(stops()).toEqual([second]);
+  });
+});
+
 describe('the row actions', () => {
   // A submenu's item is clicked without moving the pointer there: happy-dom has no layout, so Radix's pointer grace
   // would read the move as leaving the submenu and close it first.
@@ -391,6 +445,77 @@ describe('the row actions', () => {
     render(<Library />);
     await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Duplicate' }));
     await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toContain('the store is read-only'));
+  });
+});
+
+// A sheet's answer arrives after the owner dismissed it and opened another: it settles its own request only, never the
+// sheet shown now (the review of M4: completions guarded by the dialog that asked).
+describe('a late answer to a dismissed sheet', () => {
+  const openMenu = async (user: ReturnType<typeof userEvent.setup>, title: string) => {
+    await user.click(within(await screen.findByRole('article', { name: title })).getByRole('button', { name: `Actions for ${title}` }));
+    return screen.findByRole('menu');
+  };
+  const dismissThenRename = async (user: ReturnType<typeof userEvent.setup>, dialog: string, confirm: string) => {
+    await user.click(within(await screen.findByRole('dialog', { name: dialog })).getByRole('button', { name: confirm }));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Rename…' }));
+    await screen.findByRole('dialog', { name: 'Rename artifact' });
+  };
+
+  it('a Delete that succeeds late leaves the Rename opened since', async () => {
+    const answer = deferred<unknown>();
+    answers['artifacts.delete'] = () => answer.promise;
+    const user = userEvent.setup();
+    render(<Library />);
+    await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Delete…' }));
+    await dismissThenRename(user, 'Delete “Launch plan”?', 'Delete');
+    await act(async () => answer.resolve(ok()));
+    expect(screen.getByRole('dialog', { name: 'Rename artifact' })).toBeTruthy();
+  });
+
+  it('a late designSystemInUse refusal does not replace the Rename opened since', async () => {
+    const answer = deferred<unknown>();
+    answers['artifacts.delete'] = () => answer.promise;
+    const user = userEvent.setup();
+    render(<Library />);
+    await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Delete…' }));
+    await dismissThenRename(user, 'Delete “Launch plan”?', 'Delete');
+    await act(async () =>
+      answer.resolve({ ok: false, error: { code: 'invalid_input', message: 'in use', issues: { reason: 'designSystemInUse', data: { artifactIds: [id(2)] } } } }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Rename artifact' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'This design system is in use' })).toBeNull();
+  });
+
+  it('a Rename, a New Space and a Space’s Delete that answer late leave the sheet opened since', async () => {
+    const user = userEvent.setup();
+    render(<Library />);
+    const pending: ReturnType<typeof deferred<unknown>>[] = [];
+    for (const name of ['artifacts.update', 'spaces.create', 'spaces.delete']) answers[name] = () => (pending.push(deferred<unknown>()), pending.at(-1)!.promise);
+
+    await user.click(within(await openMenu(user, 'Launch plan')).getByRole('menuitem', { name: 'Rename…' }));
+    await user.type(within(await screen.findByRole('dialog', { name: 'Rename artifact' })).getByRole('textbox', { name: 'Title' }), ' v2');
+    await dismissThenRename(user, 'Rename artifact', 'Rename');
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'New Space' }));
+    await user.type(within(await screen.findByRole('dialog', { name: 'New Space' })).getByRole('textbox', { name: 'Name' }), 'Late');
+    await dismissThenRename(user, 'New Space', 'Create');
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('radio', { name: 'By Space' }));
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Delete Space…' }));
+    await dismissThenRename(user, 'Delete the Space “Home”?', 'Delete');
+
+    const rename = screen.getByRole('dialog', { name: 'Rename artifact' });
+    await act(async () => {
+      pending[0].resolve(ok({ artifact: host(rows[0]) }));
+      pending[1].resolve(ok({ space: { id: id(0xa9), name: 'Late', createdAt: 1 } }));
+      pending[2].resolve(ok());
+    });
+    expect(screen.getByRole('dialog', { name: 'Rename artifact' })).toBe(rename);
   });
 });
 
