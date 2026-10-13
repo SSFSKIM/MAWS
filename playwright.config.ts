@@ -17,7 +17,8 @@ export default defineConfig({
   // E13 (inside C6's block, as E4a's): so does cua's primitive server spec, under `pnpm e2e:browser-cua` (E4c's browser
   // tools spec and E4d's live proof through them retired with the tools on 2026-10-08, P1 A-54).
   // cua board #90 (inside C6's block, as E13's): so does the Chrome-like top chrome's spec, under `pnpm e2e:browser-chrome`.
-  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4d start */ 'browser-comment.spec.ts' /* E4d end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */, /* E13 start */ 'browser-cua.spec.ts' /* E13 end */, /* cua #90 start */ 'browser-chrome.spec.ts' /* cua #90 end */],
+  // P3-B (inside C6's block, as cua #90's): so does the document editor's spec, under `pnpm e2e:document`.
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4d start */ 'browser-comment.spec.ts' /* E4d end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */, /* E13 start */ 'browser-cua.spec.ts' /* E13 end */, /* cua #90 start */ 'browser-chrome.spec.ts' /* cua #90 end */, /* P3-B start */ 'document-editor.spec.ts' /* P3-B end */],
   // end C6
   // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch),
   // and the live check against this checkout runs only when named under MAWS_PANEL_LIVE=1 (it skips itself otherwise).

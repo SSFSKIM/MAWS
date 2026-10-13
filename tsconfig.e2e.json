@@ -29,6 +29,7 @@
     "src/renderer/src/harness/code/api.ts",
     "src/renderer/src/harness/composer/api.ts",
     "src/renderer/src/harness/composer/editor-api.ts",
+    "src/renderer/src/harness/document/api.ts", // P3-B M3
     "src/renderer/src/harness/panel/api.ts",
     "src/renderer/src/harness/widgets/api.ts",
     "src/renderer/src/tools/agents/copy.ts",
