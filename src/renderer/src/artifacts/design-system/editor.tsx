@@ -4,16 +4,15 @@
 //
 // The tab owns the system's replica (`createState` opens it through the window's ArtifactHost, `dispose` closes it), so
 // the header's actions, which outlive the body (X32), never read the body's state. The body (DesignSystemBody) gets the
-// app's handlers: "Set as my default" writes settings 14, "Delete design system…" opens the delete sheet through a store
-// keyed by the tab, and a system with no law asks the agent to adopt it by adding the request to the shown session's
+// app's handlers: "Set as my default" writes settings 14, "Delete design system…" asks the showing's state for the delete
+// sheet (so a re-target or a disposal ends the request with the showing), and a system with no law asks the agent to adopt it by adding the request to the shown session's
 // message box (P3-G's composer queue, which never replaces a draft). `onShown` is called once the system is on screen
 // and the body is visible; L's surface records the view.
 import { useSyncExternalStore } from 'react';
-import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { usePageState } from '@artifacts/design-system/page/use-system';
 import { shownSession } from '../../panel/host';
-import { EditorHostScopeContext, type EditorHostScope } from '../../panel/editor-host';
+import { EditorHostScopeContext } from '../../panel/editor-host';
 import { writeSettings } from '../../settings-tab/parts';
 import { queueComposerAttachment } from '../../stores/composer';
 import { useLayout } from '../../stores/layout';
@@ -27,9 +26,11 @@ import { DesignSystemBody } from './DesignSystemBody';
 
 type Opening = { status: 'opening' } | { status: 'open'; handle: DocumentHandle } | { status: 'failed'; error: string };
 
-/** A tab's open system: its replica from the first showing until the surface stops showing it. */
+/** A tab's open system: its replica from the first showing until the surface stops showing it, and whether the owner
+ * asked to delete it (the header's action outlives the body, X32; the request ends with the showing). */
 export class OpenedSystem {
   private current: Opening = { status: 'opening' };
+  private deleteAsked = false;
   private readonly listeners = new Set<() => void>();
   private disposed = false;
 
@@ -49,6 +50,17 @@ export class OpenedSystem {
   }
 
   readonly get = (): Opening => this.current;
+  readonly deleting = (): boolean => this.deleteAsked;
+  requestDelete(): void {
+    if (this.disposed || this.deleteAsked) return;
+    this.deleteAsked = true;
+    this.changed();
+  }
+  endDelete(): void {
+    if (!this.deleteAsked) return;
+    this.deleteAsked = false;
+    this.changed();
+  }
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -57,26 +69,20 @@ export class OpenedSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.deleteAsked = false;
     if (this.current.status === 'open') this.current.handle.close();
     this.listeners.clear();
   }
 
   private set(next: Opening): void {
     this.current = next;
+    this.changed();
+  }
+
+  private changed(): void {
     for (const listener of [...this.listeners]) listener();
   }
 }
-
-// "Delete design system…" asks the tab's body to show its sheet: a flag per tab, outside any component (X32).
-const useDeleteRequests = create<{ open: ReadonlySet<string> }>()(() => ({ open: new Set() }));
-const keyOf = (scope: EditorHostScope) => `${scope.surface}:${scope.tabId}`;
-const setDeleteOpen = (key: string, on: boolean) =>
-  useDeleteRequests.setState((s) => {
-    const open = new Set(s.open);
-    if (on) open.add(key);
-    else open.delete(key);
-    return { open };
-  });
 
 export interface DesignSystemEditorDeps {
   host(): ArtifactHost;
@@ -100,17 +106,16 @@ function DesignSystemPanel({ artifactId, state, scope, visible, onShown }: Artif
   if (opening.status === 'failed') return <Quiet>{C.openFailed(opening.error)}</Quiet>;
   return (
     <EditorHostScopeContext.Provider value={scope}>
-      <OpenBody artifactId={artifactId} handle={opening.handle} host={state.host} scope={scope} visible={visible} onShown={onShown} />
+      <OpenBody artifactId={artifactId} handle={opening.handle} state={state} visible={visible} onShown={onShown} />
     </EditorHostScopeContext.Provider>
   );
 }
 
-function OpenBody(props: { artifactId: string; handle: DocumentHandle; host: ArtifactHost; scope: EditorHostScope; visible: boolean; onShown(): void }) {
-  const { artifactId, handle, host, scope, visible, onShown } = props;
-  const key = keyOf(scope);
+function OpenBody(props: { artifactId: string; handle: DocumentHandle; state: OpenedSystem; visible: boolean; onShown(): void }) {
+  const { artifactId, handle, state, visible, onShown } = props;
   const name = usePageState(handle.doc).system.meta?.name ?? C.untitled;
   const isDefault = useSettings((s) => s.state?.settings.artifacts.defaultDesignSystem === artifactId);
-  const deleting = useDeleteRequests((s) => s.open.has(key));
+  const deleting = useSyncExternalStore(state.subscribe, state.deleting);
   const session = useLayout((s) => shownSession(s.main));
   const askAdopt = {
     unavailable: session === null ? C.noSession : null,
@@ -125,24 +130,19 @@ function OpenBody(props: { artifactId: string; handle: DocumentHandle; host: Art
       <DesignSystemBody
         artifactId={artifactId}
         handle={handle}
-        host={host}
+        host={state.host}
         visible={visible}
         onShown={onShown}
         isDefault={isDefault}
         onSetDefault={() => void writeSettings({ artifacts: { defaultDesignSystem: artifactId } })}
-        onDelete={() => setDeleteOpen(key, true)}
+        onDelete={() => state.requestDelete()}
         askAdopt={askAdopt}
       />
-      {deleting && visible && <DeleteSystemSheet artifactId={artifactId} name={name} onClose={() => setDeleteOpen(key, false)} />}
+      {deleting && visible && <DeleteSystemSheet artifactId={artifactId} name={name} onClose={() => state.endDelete()} />}
     </>
   );
 }
 
 function Quiet({ children }: { children: string }) {
   return <div className="flex h-full items-center justify-center p-6 text-center text-ui text-fg-muted">{children}</div>;
-}
-
-// Tests: no tab asking for its delete sheet.
-export function resetDesignSystemEditors(): void {
-  useDeleteRequests.setState({ open: new Set() });
 }

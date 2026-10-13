@@ -22,8 +22,8 @@ import { useSettings } from '../../stores/settings';
 import { installFakeMain, ok } from '../../test-support/code';
 import { A, mainShowing } from '../../test-support/panel';
 import { resetShellStores } from '../../test-support/shell-stores';
-import { artifactEditorFor, resetArtifactEditors, type RegisteredArtifactEditor } from '../registry';
-import { createDesignSystemEditor, registerDesignSystemEditor, resetDesignSystemEditors, type OpenedSystem } from './editor';
+import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, type RegisteredArtifactEditor } from '../registry';
+import { createDesignSystemEditor, registerDesignSystemEditor, type OpenedSystem } from './editor';
 
 const DS = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
 const OTHER = '0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a';
@@ -75,7 +75,6 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetComposerStore();
-  resetDesignSystemEditors();
   useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
   useNotices.setState({ notices: [] });
 });
@@ -199,5 +198,49 @@ describe('the header’s app actions', () => {
     expect(queued[0]!.files).toEqual([]);
     expect(queued[0]!.text).toContain(`Adopt a law for the design system “Imported Harbor” (artifact ${DS})`);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The request is in the chat’s message box; send it when it reads right.']);
+  });
+});
+
+// M6 fix wave 1, I3 (the review's probe): the delete request belongs to one showing of one system (the tab's
+// `OpenedSystem`), so a panel re-targeted to another system through L's registry, or a showing disposed, ends it.
+describe('the delete request’s lifetime', () => {
+  const PANEL: EditorHostScope = { surface: 'panel', tabId: 'artifacts:ds-retarget' };
+  const named = (title: string) => fakeHost(async () => handleOf(systemDoc(`# ${title}\n`)));
+  afterEach(() => releaseArtifactEditorState(PANEL));
+
+  it('a re-target to another system in the same panel tab does not carry the first system’s delete sheet', async () => {
+    installFakeMain((_, input) => listed(input));
+    const hosts: Record<string, ArtifactHost> = { first: named('First'), second: named('Second') };
+    let next = 'first';
+    const editor = { ...createDesignSystemEditor({ host: () => hosts[next]! }) };
+    const Panel = editor.Panel;
+    const first = holdArtifactEditorState(PANEL, 'first', 'design_system', editor).state;
+    const view = render(<Panel artifactId="first" state={first} scope={PANEL} visible onShown={() => {}} />);
+    await act(async () => {});
+    act(() => editorHostOf(PANEL)!.actions!.find((a) => a.id === 'design-system.delete')!.onSelect());
+    expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
+    view.unmount();
+    next = 'second';
+    const second = holdArtifactEditorState(PANEL, 'second', 'design_system', editor).state; // the registry disposes the first
+    expect(second).not.toBe(first);
+    render(<Panel artifactId="second" state={second} scope={PANEL} visible onShown={() => {}} />);
+    await act(async () => {});
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(editorHostOf(PANEL)!.title).toBe('Second');
+  });
+
+  it('a disposed showing’s request is gone; a request made while hidden waits for the showing to be visible', async () => {
+    installFakeMain((_, input) => listed(input));
+    const editor = createDesignSystemEditor({ host: () => named('First') });
+    const state = holdArtifactEditorState(PANEL, 'first', 'design_system', editor).state;
+    const Panel = editor.Panel;
+    const view = render(<Panel artifactId="first" state={state} scope={PANEL} visible={false} onShown={() => {}} />);
+    await act(async () => {});
+    act(() => state.requestDelete());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    view.rerender(<Panel artifactId="first" state={state} scope={PANEL} visible onShown={() => {}} />);
+    expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
+    act(() => releaseArtifactEditorState(PANEL));
+    expect(state.deleting()).toBe(false);
   });
 });
