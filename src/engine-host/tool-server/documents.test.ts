@@ -1,7 +1,7 @@
 // The document tools through their `call` with an `McpToolContext` (A's pattern), over A's real store with the document
 // kind registered (M7's Proves of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; D7, D14; §4.4 [binding]).
 import * as awarenessProtocol from '@y/protocols/awareness';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DocIndex } from '@artifacts/document/block-index';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
@@ -96,6 +96,17 @@ describe('artifact_read of a document', () => {
     const ranged = json<{ markdown: string; next: string }>(await read({ artifact: id, from: 'p2', count: 2 }));
     expect(ranged.markdown.startsWith('The review is <c:t3>scheduled for Friday</c:t3>')).toBe(true);
     expect(ranged.next).toBe('l1');
+  });
+
+  // M9's fix wave (A's M7): a read reaches the session's host replica through A's `readAs`, opening no write frame
+  // (until then a `writeAs` that wrote nothing stood in for it).
+  it('reads on the session’s host replica without a write', async () => {
+    const id = await world.seeded();
+    const writes = vi.spyOn(world.service, 'writeAs');
+    const reads = vi.spyOn(world.service, 'readAs');
+    json(await read({ artifact: id, count: 1 }));
+    expect(writes).not.toHaveBeenCalled();
+    expect(reads).toHaveBeenCalled();
   });
 
   it('warms the replica the session’s batches are planned on: every block of every tab, in slices after the read', async () => {

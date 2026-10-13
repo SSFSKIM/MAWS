@@ -3,7 +3,7 @@
 //
 // - The doc a session's batches are written on is the session's host replica of the artifact (A's `writeAs` with the
 //   session as actor, which records the tool's op in the write's own savepoint, A's Decision Log 26c). A read reaches
-//   the same replica through a `writeAs` that writes nothing (`onSessionReplica`), so it warms the block index the
+//   the same replica through A's `readAs` (`onSessionReplica`), so it warms the block index the
 //   writer plans with: the range it renders at once, every other block in slices off the host's loop (`warmInSlices`).
 //   The replica lives as long as the document is loaded, which A keeps while the session's agent replica is attached.
 // - A session's views (`DocumentViews`): for each revision the session has seen of a replica (a read, its own write,
@@ -55,9 +55,8 @@ export class DocumentViews {
 
 /**
  * Runs `use` on the session's host replica of the artifact (a synchronous mirror of the live doc, the one its batches
- * are written on) inside a `writeAs` that writes nothing, and answers what `use` returned with the live revision. A
- * throw inside `use` is held and rethrown after the frame, which then stands with nothing written (a throw inside a
- * frame would evict the document). On a read-only store (no frame may open) `use` gets a scratch copy instead.
+ * are written on) through A's `readAs`, which opens no write frame and refuses an edit, and answers what `use`
+ * returned with the live revision. On a read-only store `use` gets a scratch copy instead.
  */
 export async function onSessionReplica<T>(store: ArtifactStore, artifactId: string, actor: Actor, use: (doc: Doc, revision: number) => T): Promise<T> {
   if (store.storage.readOnly) {
@@ -70,16 +69,7 @@ export async function onSessionReplica<T>(store: ArtifactStore, artifactId: stri
       doc.destroy();
     }
   }
-  const outcome: { value?: T; failure?: { error: unknown } } = {};
-  await store.service.writeAs(artifactId, actor, (doc) => {
-    try {
-      outcome.value = use(doc, store.service.revision(artifactId));
-    } catch (error) {
-      outcome.failure = { error };
-    }
-  });
-  if (outcome.failure) throw outcome.failure.error;
-  return outcome.value as T;
+  return store.service.readAs(artifactId, actor, (doc) => use(doc, store.service.revision(artifactId)));
 }
 
 const warming = new WeakSet<Doc>();
