@@ -5,6 +5,7 @@
 // and the banner; Make a copy; Compare by shift-click; the "See N new changes" pill; Show editors on a selection.
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { StrictMode, type ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -46,7 +47,11 @@ interface Mounted {
   agentWrites(edit: (agent: DocumentHandle) => void): Promise<void>;
 }
 
-async function setup(prepare?: (world: Pick<Mounted, 'host' | 'history' | 'agentWrites'>) => Promise<void> | void, options: ConstructorParameters<typeof MemoryHistory>[1] = {}): Promise<Mounted> {
+async function setup(
+  prepare?: (world: Pick<Mounted, 'host' | 'history' | 'agentWrites'>) => Promise<void> | void,
+  options: ConstructorParameters<typeof MemoryHistory>[1] = {},
+  wrap: (node: ReactNode) => ReactNode = (node) => node,
+): Promise<Mounted> {
   host = new MemoryDocumentHost();
   history = new MemoryHistory(host, { sessionTitles: { [SESSION]: 'Fix the build' }, ...options });
   host.write((doc) =>
@@ -78,7 +83,7 @@ async function setup(prepare?: (world: Pick<Mounted, 'host' | 'history' | 'agent
   await prepare?.({ host, history, agentWrites });
   const handle = await open(HUMAN);
   let editor: Editor | null = null;
-  render(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} />);
+  render(wrap(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} />));
   await until(() => editor !== null && editor.getText().length > 0, 'the editor to bind');
   return { host, history, agent, editor: () => editor!, agentWrites };
 }
@@ -189,6 +194,26 @@ describe('the preview', () => {
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && editor().isEditable, 'the live document');
     expect(editor().can().undo()).toBe(false); // nothing of the preview is undoable
+  });
+
+  it('keeps the editor read-only through a StrictMode remount while a version shows (editable from history state)', async () => {
+    const { editor, history: h } = await setup(
+      async ({ history: hist, agentWrites }) => {
+        hist.version('named', HUMAN, { label: 'Before' });
+        await agentWrites(agentAppends(' Later.'));
+      },
+      {},
+      (node) => <StrictMode>{node}</StrictMode>,
+    );
+    await openHistory();
+    click(row('Before'));
+    await previewing();
+    await new Promise((resolve) => setTimeout(resolve, 20)); // past the remount's deferred setOptions
+    expect(editor().isEditable).toBe(false);
+    expect(editor().view.dom.getAttribute('contenteditable')).toBe('false');
+    click(within(bar()).getByRole('button', { name: 'Back to document' }));
+    await until(() => editor().isEditable && editor().view.dom.getAttribute('contenteditable') === 'true', 'the live, editable document');
+    expect((await h.versions()).filter((v) => v.kind === 'auto')).toHaveLength(1); // one view-time version for the mount, StrictMode or not
   });
 
   it('labels the blocks a move or a retype re-inserted', async () => {
