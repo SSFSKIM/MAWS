@@ -1,0 +1,91 @@
+/* The Design System page's chrome (D14; Decision Log 13): the app's UI around the previews, so it reads the app's tokens
+   only. What shows the system (swatches, rulers, tiles, specimens) sits in a `[data-ds-scope]` and reads var(--ds-*);
+   the canon is in frames. No literal colour. */
+
+.dsp-page {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 8);
+  padding: calc(var(--space) * 6) calc(var(--space) * 6) calc(var(--space) * 16);
+  max-width: 1120px;
+  margin: 0 auto;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.dsp-intro { display: flex; flex-direction: column; gap: var(--space); }
+.dsp-title { margin: 0; font-size: 1.5em; font-weight: 600; }
+.dsp-problems { margin: 0; color: var(--danger); }
+.dsp-muted { color: var(--fg-muted); }
+.dsp-name { font-family: var(--font-mono); font-size: var(--text-code); color: var(--fg); }
+.dsp-alias { font-family: var(--font-mono); font-size: var(--text-code); color: var(--fg-faint); }
+.dsp-value { font-family: var(--font-mono); font-size: var(--text-code); overflow-wrap: anywhere; }
+
+.dsp-section { display: flex; flex-direction: column; gap: calc(var(--space) * 3); outline: none; scroll-margin-top: calc(var(--space) * 4); }
+.dsp-heading { margin: 0; font-size: 1.15em; font-weight: 600; padding-bottom: calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
+.dsp-subheading { margin: calc(var(--space) * 2) 0 0; font-size: var(--text-ui); font-weight: 600; }
+.dsp-summary { margin: 0; }
+
+.dsp-field { display: inline-flex; flex-direction: column; gap: 2px; }
+.dsp-field input {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+.dsp-field input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.dsp-field input[aria-invalid] { border-color: var(--danger); }
+.dsp-field input:disabled { color: var(--fg-muted); background: transparent; }
+.dsp-field-error { color: var(--danger); font-size: var(--text-ui-sm); max-width: 32ch; }
+
+/* Palette */
+.dsp-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: calc(var(--space) * 3); }
+.dsp-swatch { display: flex; gap: calc(var(--space) * 3); align-items: flex-start; padding: calc(var(--space) * 2); border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); }
+.dsp-chip { flex: none; width: 44px; height: 44px; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--border); }
+.dsp-swatch-text { display: flex; flex-direction: column; gap: var(--space); min-width: 0; }
+.dsp-swatch-edit { display: flex; gap: calc(var(--space) * 2); align-items: center; }
+.dsp-swatch-edit input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: none; }
+.dsp-badges { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 2); margin: 0; padding: 0; list-style: none; }
+.dsp-badge { display: flex; gap: calc(var(--space) * 2); align-items: baseline; padding: var(--space) calc(var(--space) * 2.5); border-radius: var(--radius-sm); background: var(--bg-raised); border: 1px solid var(--border); }
+.dsp-badge[data-passes="false"] { border-color: var(--danger); }
+.dsp-badge[data-passes="false"] .dsp-muted { color: var(--danger); }
+
+/* Type */
+.dsp-type-head, .dsp-type-row { display: grid; grid-template-columns: 160px 1fr 1fr; gap: calc(var(--space) * 4); }
+.dsp-type-head { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.dsp-type-row { padding: calc(var(--space) * 3) 0; border-top: 1px solid var(--border); align-items: start; }
+.dsp-type-name { display: flex; flex-direction: column; gap: var(--space); }
+.dsp-type-cell { display: flex; flex-direction: column; gap: calc(var(--space) * 2); min-width: 0; }
+.dsp-type-fields { display: flex; gap: calc(var(--space) * 2); }
+.dsp-specimen { overflow: hidden; padding: calc(var(--space) * 3); border-radius: var(--radius-sm); background: var(--ds-color-bg, var(--bg-raised)); color: var(--ds-color-text, var(--fg)); }
+.dsp-specimen p { margin: 0; }
+.dsp-specimen-deck p { zoom: 0.5; }
+
+/* Space, radius, shadow */
+.dsp-measures { display: flex; flex-direction: column; gap: calc(var(--space) * 6); }
+.dsp-rulers { display: flex; flex-direction: column; gap: calc(var(--space) * 2); }
+.dsp-ruler { display: grid; grid-template-columns: 120px 1fr auto auto; gap: calc(var(--space) * 3); align-items: center; }
+.dsp-ruler-bar { height: 12px; max-width: 100%; background: var(--ds-color-accent, var(--accent)); border-radius: 2px; }
+.dsp-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: calc(var(--space) * 5); }
+.dsp-tile-cell { display: flex; flex-direction: column; gap: calc(var(--space) * 1.5); }
+.dsp-tile { height: 72px; background: var(--ds-color-bg-raised, var(--bg-raised)); border: 1px solid var(--ds-color-border, var(--border)); }
+
+/* Canon */
+.dsp-canon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: calc(var(--space) * 4); }
+.dsp-canon-item { display: flex; flex-direction: column; gap: calc(var(--space) * 1.5); margin: 0; }
+.dsp-slide { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.dsp-slide iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; }
+.dsp-component-frame { width: 100%; height: 180px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.dsp-document-frame { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+/* Law */
+.dsp-law { font-size: var(--text-prose); line-height: var(--lh-prose); max-width: var(--measure); }
+
+/* Check */
+.dsp-violations, .dsp-manual { display: flex; flex-direction: column; gap: calc(var(--space) * 2); margin: 0; padding-left: calc(var(--space) * 5); }
+.dsp-violation > div { margin-top: 2px; }
