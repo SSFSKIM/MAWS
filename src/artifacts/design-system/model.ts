@@ -1,6 +1,8 @@
 // A design system's document model, format version 1 (D7 of docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md):
 // one Y.Doc per system with four root nodes, through the binding module only.
-//   `meta`   attributes: `formatVersion`, `name`, `origin`, `persona` (mirrored from the law for the library).
+//   `meta`   attributes: `formatVersion`, `origin`, and `name` only for a system whose law had no title at creation.
+//            Derived metadata is never stored (Decision Log 12): the persona and the titled name are read off the
+//            converged law, so replicas that edited the law concurrently cannot disagree about them.
 //   `tokens` one attribute per token, keyed by its path (`color.accent.$root`), holding the canonical token, and one per
 //            group's own properties, keyed `<path>/$group` (`/$group` for the file's root). A token is the unit of merge.
 //   `law`    the `DESIGN.md` source as text, edited by character diff so a concurrent edit elsewhere survives.
@@ -22,6 +24,7 @@ import { parseTokens, serializeTokens, validateTokenFile, type GroupProps, type 
 import type { KindAdapter } from '../host';
 
 export const FORMAT_VERSION = 1;
+const UNTITLED = 'Untitled design system';
 export const LAW_PATH = 'DESIGN.md';
 export const TOKENS_PATH = 'tokens.tokens.json';
 /** The files `readFiles` derives from the tokens: read by the agent, never sent back. */
@@ -104,18 +107,13 @@ const lawOf = (node: Node): string =>
     .filter((part): part is string => typeof part === 'string')
     .join('');
 
-function metaOf(node: Node): SystemMeta | null {
+/** The stored meta with the law's title and persona read off the (converged) law. */
+function metaOf(node: Node, law: string): SystemMeta | null {
   const formatVersion = node.getAttr('formatVersion');
   if (formatVersion === undefined) return null;
-  const persona = node.getAttr('persona') as string | undefined;
-  return { formatVersion: formatVersion as typeof FORMAT_VERSION, name: node.getAttr('name') as string, origin: node.getAttr('origin') as SystemOrigin, ...(persona ? { persona } : {}) };
-}
-
-function mirrorPersona(meta: Node, law: string): void {
-  const persona = parseLaw(law).persona;
-  if (persona) {
-    if (meta.getAttr('persona') !== persona) meta.setAttr('persona', persona);
-  } else if (meta.hasAttr('persona')) meta.deleteAttr('persona');
+  const { title, persona } = parseLaw(law);
+  const name = title ?? (node.getAttr('name') as string | undefined) ?? UNTITLED;
+  return { formatVersion: formatVersion as typeof FORMAT_VERSION, name, origin: node.getAttr('origin') as SystemOrigin, ...(persona ? { persona } : {}) };
 }
 
 // --- Reading ---------------------------------------------------------------------------------------------------------
@@ -124,7 +122,8 @@ export function readSystem(doc: Doc): SystemState {
   const r = roots(doc);
   const files: Record<string, string> = {};
   for (const key of [...r.files.attrKeys()].map(String).sort()) files[key] = r.files.getAttr(key) as string;
-  return { meta: metaOf(r.meta), tokens: tokenSetOf(r.tokens), law: lawOf(r.law), files };
+  const law = lawOf(r.law);
+  return { meta: metaOf(r.meta, law), tokens: tokenSetOf(r.tokens), law, files };
 }
 
 /**
@@ -162,6 +161,22 @@ function pathProblem(path: string, value: string | null): string | null {
   if (kind === 'stray') return 'not a canon path: layouts are layouts/<name>.html, components components/<name>.html or components/document.css';
   if (kind === null) return `not a design-system file; ${SYSTEM_PATHS}`;
   return null;
+}
+
+/**
+ * Where the entries could not be one token file: a token where a group is, or beneath another token. The serializer
+ * writes such a pair as two equal JSON keys, and a read keeps only one, so it is caught on the model, before any text.
+ */
+function hierarchyProblems(entries: ReadonlyMap<string, unknown>): string[] {
+  const tokens = [...entries.keys()].filter((key) => !key.endsWith(GROUP));
+  const groups = [...entries.keys()].filter((key) => key.endsWith(GROUP)).map((key) => key.slice(0, -GROUP.length));
+  const problems: string[] = [];
+  for (const path of tokens) {
+    const below = `${path}.`;
+    const inside = [...tokens.filter((other) => other.startsWith(below)), ...groups.filter((group) => group === path || group.startsWith(below))];
+    if (inside.length) problems.push(`the token ${path} and ${[...new Set(inside)].sort(comparePaths).join(', ')} cannot both exist: a token holds no tokens or groups`);
+  }
+  return problems;
 }
 
 /** A token file read and fully checked, or its problems named by token path. */
@@ -207,7 +222,8 @@ function canonProblems(result: Readonly<Record<string, string>>, written: Readon
  * Writes a whole system into `doc` (a create, a seeded default, an import), replacing whatever it held, in one
  * transaction; or refuses with every problem and writes nothing. Files in Claude's shape are converted (D12): the
  * tokens from Claude's list form, Claude's files kept under `sources/claude/`, no law, the origin `imported` from the
- * system's title. The name is `options.name`, else the law's or Claude's title. Returns the name and the import's
+ * system's title. The name is the law's title, read off the law on every read; a system whose law has no title stores
+ * `options.name`, else Claude's title, once. Returns the name and the import's
  * warnings.
  */
 export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, origin: SystemOrigin, options: SystemWriteOptions & { name?: string } = {}): { name: string; warnings: string[] } {
@@ -215,7 +231,7 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
   let set: TokenSet | null = null;
   let canon: Record<string, string> = {};
   let warnings: string[] = [];
-  let title: string | null = null;
+  let claudeTitle: string | null = null;
   const problems: FileProblem[] = [];
 
   if (isClaudeShape(files)) {
@@ -224,7 +240,7 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
       set = imported.tokens;
       canon = imported.sources;
       warnings = imported.warnings;
-      title = imported.title;
+      claudeTitle = imported.title;
       origin = { ...origin, route: 'imported', ...(imported.title && !origin.from ? { from: imported.title } : {}) };
     } catch (error) {
       if (!(error instanceof ClaudeShapeError)) throw error;
@@ -244,20 +260,19 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
       problems.push(...read.problems);
     }
     problems.push(...lawProblems(law));
-    title = parseLaw(law).title;
   }
   if (set) problems.push(...canonProblems(canon, Object.fromEntries(Object.entries(canon).filter(([path]) => canonKind(path) !== null)), set, options.parser));
   if (problems.length || !set) throw new SystemFilesError(problems);
 
   const tokens = set;
-  const name = options.name ?? title ?? 'Untitled design system';
+  const lawTitle = parseLaw(law).title;
+  const name = lawTitle ?? options.name ?? claudeTitle ?? UNTITLED;
   const r = roots(doc);
   transact(doc, () => {
     r.meta.clearAttrs();
     r.meta.setAttr('formatVersion', FORMAT_VERSION);
-    r.meta.setAttr('name', name);
     r.meta.setAttr('origin', plain(origin));
-    mirrorPersona(r.meta, law);
+    if (!lawTitle) r.meta.setAttr('name', name);
     r.tokens.clearAttrs();
     for (const [key, value] of entriesOf(tokens)) r.tokens.setAttr(key, plain(value));
     applyHunks(r.law, hunks(lawOf(r.law), law));
@@ -274,24 +289,36 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
 export function setToken(doc: Doc, path: string, token: Token | null): void {
   if (path.endsWith(GROUP)) throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: a token's name may not end with "${GROUP}"` }]);
   const node = roots(doc).tokens;
+  if (token) {
+    const keys = [...node.attrKeys()].map(String);
+    const holder = keys.find((key) => !key.endsWith(GROUP) && path.startsWith(`${key}.`));
+    const inside = keys.filter((key) => key !== path && (key === groupKey(path) || key.startsWith(`${path}.`)));
+    if (holder) throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: the token ${holder} cannot hold a token` }]);
+    if (inside.length) {
+      const names = [...new Set(inside.map((key) => (key.endsWith(GROUP) ? key.slice(0, -GROUP.length) : key)))].sort(comparePaths);
+      throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: ${names.join(', ')} already there; a token holds no tokens or groups` }]);
+    }
+  }
   transact(doc, () => (token ? node.setAttr(path, plain(token)) : node.deleteAttr(path)));
 }
 
-/** The law replaced by `text`, written as the character diff from the current law, and its persona mirrored. */
+/** The law replaced by `text`, written as the character diff from the current law. */
 export function setLaw(doc: Doc, text: string): void {
   const problems = lawProblems(text);
   if (problems.length) throw new SystemFilesError(problems);
-  const r = roots(doc);
-  transact(doc, () => {
-    applyHunks(r.law, hunks(lawOf(r.law), text));
-    mirrorPersona(r.meta, text);
-  });
+  const node = roots(doc).law;
+  transact(doc, () => applyHunks(node, hunks(lawOf(node), text)));
 }
 
-/** A canon file replaced whole, or removed with null. */
-export function setFile(doc: Doc, path: string, text: string | null): void {
+/** A canon file replaced whole, or removed with null; bounded as create and publish are (with a parser, checked too). */
+export function setFile(doc: Doc, path: string, text: string | null, options: SystemWriteOptions = {}): void {
   const problem = path === LAW_PATH || path === TOKENS_PATH ? `not a canon file; edit it with ${path === LAW_PATH ? 'setLaw' : 'setToken'}` : pathProblem(path, text);
   if (problem) throw new SystemFilesError([{ path, message: problem }]);
+  if (text !== null) {
+    const state = readSystem(doc);
+    const problems = canonProblems({ ...state.files, [path]: text }, { [path]: text }, state.tokens, options.parser);
+    if (problems.length) throw new SystemFilesError(problems);
+  }
   const node = roots(doc).files;
   transact(doc, () => (text === null ? node.deleteAttr(path) : node.setAttr(path, text)));
 }
@@ -346,20 +373,42 @@ function spliced(text: string, list: readonly Hunk[]): string {
 const collide = (a: Hunk, b: Hunk): boolean => (a.start === a.end || b.start === b.end ? a.start <= b.end && b.start <= a.end : a.start < b.end && b.start < a.end);
 const sameHunk = (a: Hunk, b: Hunk) => a.start === b.start && a.end === b.end && a.text === b.text;
 
+const delta = (hunk: Hunk) => hunk.text.length - (hunk.end - hunk.start);
+
 /**
- * The agent's base-to-sent hunks rebased over the human's base-to-live hunks: the hunks in live coordinates and the
- * law they make, or the agent's hunks that collide. A hunk both sides made identically is already in place.
+ * The agent's base-to-sent hunks rebased over the live doc's base-to-live hunks. Each agent hunk is grouped with the
+ * live hunks it collides with, transitively (a cluster). A cluster without live hunks shifts into live coordinates; a
+ * cluster with them is a collision, its base range returned, unless `force`: then the agent wins there, the cluster's
+ * whole range written as the agent's text, and every live hunk outside a cluster stays. A hunk both sides made
+ * identically is already in place.
  */
-function rebaseLaw(base: string, sent: string, live: string): { apply: Hunk[]; result: string } | { collisions: Hunk[] } {
+function rebaseLaw(base: string, sent: string, live: string, force: boolean): { apply: Hunk[]; result: string; collisions: Hunk[] } {
   const theirs = hunks(base, live);
   const mine = hunks(base, sent).filter((hunk) => !theirs.some((other) => sameHunk(hunk, other)));
-  const collisions = mine.filter((hunk) => theirs.some((other) => !sameHunk(hunk, other) && collide(hunk, other)));
-  if (collisions.length) return { collisions };
-  const apply = mine.map((hunk) => {
-    const shift = theirs.filter((other) => other.end <= hunk.start && !sameHunk(hunk, other)).reduce((sum, other) => sum + other.text.length - (other.end - other.start), 0);
-    return { start: hunk.start + shift, end: hunk.end + shift, text: hunk.text };
-  });
-  return { apply, result: spliced(live, apply) };
+  let clusters: { mine: Hunk[]; theirs: Hunk[] }[] = [];
+  for (const hunk of mine) {
+    const hits = theirs.filter((other) => collide(hunk, other));
+    const joined = clusters.filter((cluster) => cluster.theirs.some((other) => hits.includes(other)));
+    clusters = clusters.filter((cluster) => !joined.includes(cluster));
+    clusters.push({ mine: [...joined.flatMap((c) => c.mine), hunk], theirs: [...new Set([...joined.flatMap((c) => c.theirs), ...hits])] });
+  }
+  const spanOf = (cluster: { mine: Hunk[]; theirs: Hunk[] }): Hunk => {
+    const all = [...cluster.mine, ...cluster.theirs];
+    return { start: Math.min(...all.map((h) => h.start)), end: Math.max(...all.map((h) => h.end)), text: '' };
+  };
+  const collisions = clusters.filter((cluster) => cluster.theirs.length).map(spanOf);
+  if (collisions.length && !force) return { apply: [], result: live, collisions };
+  const apply = clusters
+    .map((cluster): Hunk => {
+      const span = spanOf(cluster);
+      // Live coordinates: every live hunk before the cluster moved it; the cluster's own are inside its range.
+      const shift = theirs.filter((other) => other.end <= span.start && !cluster.theirs.includes(other)).reduce((sum, other) => sum + delta(other), 0);
+      const local = cluster.mine.map((hunk) => ({ ...hunk, start: hunk.start - span.start, end: hunk.end - span.start }));
+      const text = spliced(base.slice(span.start, span.end), local);
+      return { start: span.start + shift, end: span.end + shift + cluster.theirs.reduce((sum, other) => sum + delta(other), 0), text };
+    })
+    .sort((a, b) => a.start - b.start);
+  return { apply, result: spliced(live, apply), collisions: [] };
 }
 
 const lineAt = (text: string, index: number) => text.slice(0, index).split('\n').length;
@@ -408,7 +457,9 @@ function describeKey(key: string): string {
  *   changed it too, to another value; the merged file must still validate.
  * - The law merges by hunks: the agent's hunks land unless one collides with a live change since the base.
  * - A canon file is replaced or removed whole, unless it changed live since the base.
- * Any conflict refuses the whole publish, naming each one, and writes nothing. `force` writes the sent files as sent.
+ * Any conflict refuses the whole publish, naming each one, and writes nothing. `force` makes the agent win on the units
+ * both sides changed (a token, a law hunk, a canon file); everything else still merges (Decision Log 12). A merged token
+ * file that cannot be held (a token where a group is) conflicts even under `force`: no winner makes it representable.
  * Files that cannot be held (a generated or read-only file, a path outside the system, an invalid token file, a limit)
  * throw `SystemFilesError` before anything is written, with or without `force`. One transaction writes everything.
  */
@@ -431,9 +482,9 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
   let lawHunks: Hunk[] | null = null;
   const lawText = sent[LAW_PATH];
   if (typeof lawText === 'string') {
-    const rebased = force ? { apply: hunks(state.law, lawText), result: lawText } : rebaseLaw(base[LAW_PATH] ?? '', lawText, state.law);
-    if ('collisions' in rebased) {
-      for (const hunk of rebased.collisions) conflicts.push({ path: LAW_PATH, detail: `${linesOf(base[LAW_PATH] ?? '', hunk)} of your read changed since, where you changed them too` });
+    const rebased = rebaseLaw(base[LAW_PATH] ?? '', lawText, state.law, force);
+    if (rebased.collisions.length) {
+      for (const span of rebased.collisions) conflicts.push({ path: LAW_PATH, detail: `${linesOf(base[LAW_PATH] ?? '', span)} of your read changed since, where you changed them too` });
     } else {
       problems.push(...lawProblems(rebased.result));
       if (rebased.apply.length) {
@@ -456,14 +507,12 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
       const sentValue = mine.get(key);
       const liveValue = theirs.get(key);
       if (same(sentValue, liveValue)) continue;
-      if (!force) {
-        if (same(sentValue, before.get(key))) continue; // the agent left it as it read it
-        if (!same(liveValue, before.get(key))) {
-          tokenConflicts.push(key);
-          continue;
-        }
+      if (same(sentValue, before.get(key))) continue; // the agent left it as it read it, even under force
+      if (!same(liveValue, before.get(key)) && !force) {
+        tokenConflicts.push(key);
+        continue;
       }
-      tokenWrites.set(key, sentValue ?? null);
+      tokenWrites.set(key, sentValue ?? null); // the agent's change; under force it wins a token both sides changed
     }
     for (const key of tokenConflicts.sort(comparePaths)) conflicts.push({ path: TOKENS_PATH, detail: `${describeKey(key)} changed since your read, and you changed it too` });
     if (!tokenConflicts.length && tokenWrites.size) {
@@ -473,8 +522,12 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
         else entries.delete(key);
       }
       merged = tokenSetOfEntries(entries);
-      const check = readTokenFile(serializeTokens(merged));
-      for (const problem of check.problems) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${problem.message}` });
+      // No winner makes these representable, so they conflict under force too; only a holdable file is serialized.
+      const shape = hierarchyProblems(entries);
+      for (const problem of shape) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${problem}` });
+      if (!shape.length) {
+        for (const problem of readTokenFile(serializeTokens(merged)).problems) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${problem.message}` });
+      }
       changed.push(TOKENS_PATH);
     }
   }
@@ -486,12 +539,10 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     const mine = sent[path] ?? undefined;
     const theirs = state.files[path];
     if (mine === theirs) continue;
-    if (!force) {
-      if (mine === base[path]) continue;
-      if (theirs !== base[path]) {
-        conflicts.push({ path, detail: theirs === undefined ? 'removed since your read' : base[path] === undefined ? 'created since your read' : 'changed since your read' });
-        continue;
-      }
+    if (mine === base[path]) continue; // sent as read: not the agent's change, even under force
+    if (theirs !== base[path] && !force) {
+      conflicts.push({ path, detail: theirs === undefined ? 'removed since your read' : base[path] === undefined ? 'created since your read' : 'changed since your read' });
+      continue;
     }
     canonWrites.set(path, mine ?? null);
     changed.push(path);
@@ -510,10 +561,7 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
 
   const r = roots(live);
   transact(live, () => {
-    if (lawHunks) {
-      applyHunks(r.law, lawHunks);
-      mirrorPersona(r.meta, lawOf(r.law));
-    }
+    if (lawHunks) applyHunks(r.law, lawHunks);
     for (const [key, value] of tokenWrites) {
       if (value) r.tokens.setAttr(key, plain(value));
       else r.tokens.deleteAttr(key);

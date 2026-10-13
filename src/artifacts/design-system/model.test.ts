@@ -21,6 +21,7 @@ import {
   writeSystem,
   type SystemOrigin,
 } from './model';
+import { parseLaw } from './law';
 import { officeTheme } from './office';
 import { parseTokens, serializeTokens, validateTokenFile, type Token } from './tokens';
 
@@ -149,6 +150,24 @@ describe('the document model: write, read, the file view (Acceptance 7)', () => 
     expect(tokens.getAttr('/$group')).toEqual(parseTokens(TOKENS).tokens!.groups.get(''));
     expect(tokens.hasAttr('color.bg/$group')).toBe(true);
     expect(doc.get('law').length).toBe(LAW.length);
+    // Derived metadata is computed from the law on read, never stored (Decision Log 12): a titled law stores no name.
+    expect(doc.get('meta').getAttrs()).toEqual({ formatVersion: 1, origin: { route: 'adopted', from: 'Harbor web', at: AT } });
+  });
+
+  it('reads the persona and the name off the converged law, so concurrent edits of the persona line agree on every replica', () => {
+    const { human, agent } = scene();
+    setLaw(human, LAW.replace('persona: quiet-editorial', 'persona: bold-poster'));
+    setLaw(agent, LAW.replace('persona: quiet-editorial', 'persona: quiet-gallery').replace('# Harbor', '# Harbor Press'));
+    sync(human, agent);
+    const law = readSystem(human).law;
+    expect(readSystem(agent).law).toBe(law);
+    for (const doc of [human, agent]) {
+      expect(readSystem(doc).meta!.persona).toBe(parseLaw(law).persona ?? undefined);
+      expect(readSystem(doc).meta!.name).toBe('Harbor Press');
+      expect(doc.get('meta').hasAttr('persona')).toBe(false);
+    }
+    setLaw(human, LAW.replace('persona: quiet-editorial\n', ''));
+    expect(readSystem(human).meta!.persona).toBeUndefined();
   });
 
   it('names the system after its law’s title when no name is given, and reads an empty doc as no system', () => {
@@ -164,6 +183,7 @@ describe('the document model: write, read, the file view (Acceptance 7)', () => 
     const system = readSystem(doc);
     expect(system.meta!.origin).toEqual({ route: 'imported', from: 'Tidewater', at: AT });
     expect(system.meta!.name).toBe('Tidewater');
+    expect(doc.get('meta').getAttr('name')).toBe('Tidewater'); // stored at creation: the system has no law to title it
     expect(system.law).toBe('');
     const out = readFiles(doc);
     expect(out['DESIGN.md']).toBeUndefined();
@@ -239,6 +259,23 @@ describe('the page’s edits: setToken, setLaw, setFile', () => {
     expect(readSystem(human).files).toEqual({ 'components/chip.html': CHIP.replace('Due Friday', 'Due Monday'), 'components/document.css': DOCUMENT_CSS });
     expect(() => setFile(human, 'tokens.css', 'x')).toThrow(/generated/);
     expect(() => setFile(human, 'DESIGN.md', 'x')).toThrow(SystemFilesError);
+  });
+
+  it('bounds setFile as create and publish are bounded: a file’s size and the canon’s count', () => {
+    const { human } = scene();
+    expect(() => setFile(human, 'components/big.html', `<div>${'x'.repeat(64 * 1024)}</div>`)).toThrow(/components\/big\.html/);
+    for (let i = 0; i < 61; i++) setFile(human, `components/c${i}.html`, CHIP); // 64 canon files with the scene's three
+    expect(() => setFile(human, 'components/one-more.html', CHIP)).toThrow(/at most 64/);
+    setFile(human, 'components/c0.html', CHIP.replace('Due', 'Done')); // replacing one keeps the count
+    expect(() => setFile(human, 'components/bad.html', '<div onclick="x()">x</div>', { parser })).toThrow(SystemFilesError);
+    expect(readSystem(human).files['components/big.html']).toBeUndefined();
+  });
+
+  it('refuses a token where the tokens hold a group, and a token beneath a token (the file could not hold both)', () => {
+    const { human } = scene();
+    expect(() => setToken(human, 'color.bg', color('#000000'))).toThrow(/color\.bg/);
+    expect(() => setToken(human, 'color.border.strong', color('#000000'))).toThrow(/color\.border/);
+    expect(tokenOf(human, 'color.bg')).toBeUndefined();
   });
 });
 
@@ -330,6 +367,7 @@ describe('publish: the agent’s change over the live doc (Acceptance 7, A’s l
     expect(publishSystem(agent, base, { 'DESIGN.md': LAW }, false)).toEqual({ changed: ['DESIGN.md'], conflicts: [] });
     sync(human, agent);
     expect(readSystem(human).law).toBe(LAW);
+    expect(readSystem(human).meta!.name).toBe('Harbor');
   });
 
   it('conflicts on a canon file by file: the human’s change to another file is kept, a file changed on both sides is refused', () => {
@@ -384,23 +422,60 @@ describe('publish: the agent’s change over the live doc (Acceptance 7, A’s l
     expect(stateVector(agent)).toEqual(before);
   });
 
-  it('with force, writes the sent files as sent over the other side’s changes', () => {
+  it('with force, the agent wins only on the units both sides changed, and everything else still merges', () => {
     const { human, agent, base } = scene();
     setToken(human, 'color.accent.$root', color('#0055aa'));
     setToken(human, 'color.bg.$root', color('#fafafa'));
-    setLaw(human, LAW.replace('Flat paper.', 'Flat grey paper.'));
+    setLaw(human, LAW.replace('Flat paper.', 'Flat grey paper.').replace('Plain words.', 'Plain, short words.'));
     setFile(human, 'components/chip.html', CHIP.replace('Due Friday', 'Due Monday'));
+    setFile(human, 'layouts/title.html', TITLE.replace('Lab safety', 'Lab rules'));
     sync(human, agent);
     const sentTokens = tokensWith(base['tokens.tokens.json']!, { 'color.accent.$root': color('#cc3300') });
-    const sent = { 'tokens.tokens.json': sentTokens, 'DESIGN.md': LAW.replace('Flat paper.', 'Flat white paper.'), 'components/chip.html': CHIP };
-    // The chip was sent as read: no conflict, but `force` writes it as sent over the human's change.
-    expect(publishSystem(agent, base, sent, false).conflicts.map((c) => c.path)).toEqual(['DESIGN.md', 'tokens.tokens.json']);
-    expect(publishSystem(agent, base, sent, true)).toEqual({ changed: ['DESIGN.md', 'tokens.tokens.json', 'components/chip.html'], conflicts: [] });
+    const sent = {
+      'tokens.tokens.json': sentTokens,
+      'DESIGN.md': LAW.replace('Flat paper.', 'Flat white paper.'),
+      'components/chip.html': CHIP, // sent as read: not the agent's change
+      'layouts/title.html': TITLE.replace('Lab safety', 'Lab hazards'),
+    };
+    expect(publishSystem(agent, base, sent, false).conflicts.map((c) => c.path)).toEqual(['DESIGN.md', 'tokens.tokens.json', 'layouts/title.html']);
+    expect(publishSystem(agent, base, sent, true)).toEqual({ changed: ['DESIGN.md', 'tokens.tokens.json', 'layouts/title.html'], conflicts: [] });
     sync(human, agent);
-    const out = readFiles(human);
-    expect(out['tokens.tokens.json']).toBe(sentTokens);
-    expect(out['DESIGN.md']).toBe(sent['DESIGN.md']);
-    expect(out['components/chip.html']).toBe(CHIP);
+    for (const doc of [human, agent]) {
+      expect(tokenOf(doc, 'color.accent.$root')).toEqual(color('#cc3300')); // colliding token: the agent's
+      expect(tokenOf(doc, 'color.bg.$root')).toEqual(color('#fafafa')); // a token the agent never touched: the human's
+      expect(readSystem(doc).law).toBe(LAW.replace('Flat paper.', 'Flat white paper.').replace('Plain words.', 'Plain, short words.'));
+      expect(readSystem(doc).files['components/chip.html']).toBe(CHIP.replace('Due Friday', 'Due Monday'));
+      expect(readSystem(doc).files['layouts/title.html']).toBe(TITLE.replace('Lab safety', 'Lab hazards'));
+    }
+  });
+
+  it('with force, the agent’s law hunk replaces every live change it collides with, and only those', () => {
+    const { human, agent, base } = scene();
+    // Live changes before, inside and after the agent's colliding hunk; the agent also changes a line after it.
+    setLaw(human, LAW.replace('warm paper.', 'warm, heavy paper.').replace('Two columns on wide pages.', 'Three columns on wide pages.').replace('None.', 'Nothing moves.'));
+    sync(human, agent);
+    const sent = { 'DESIGN.md': LAW.replace('Two columns on wide pages.', 'One column, always.').replace('Plain words.', 'Short words.') };
+    expect(publishSystem(agent, base, sent, false).conflicts).toHaveLength(1);
+    expect(publishSystem(agent, base, sent, true).changed).toEqual(['DESIGN.md']);
+    sync(human, agent);
+    const expected = LAW.replace('warm paper.', 'warm, heavy paper.').replace('Two columns on wide pages.', 'One column, always.').replace('Plain words.', 'Short words.').replace('None.', 'Nothing moves.');
+    expect(readSystem(agent).law).toBe(expected);
+    expect(readSystem(human).law).toBe(expected);
+  });
+
+  it('refuses a merge the token file cannot hold (a token beneath where the other side made a token), even with force', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.branch.light', color('#ddeeff'));
+    sync(human, agent);
+    const before = stateVector(agent);
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch': color('#112233') }) };
+    for (const force of [false, true]) {
+      const result = publishSystem(agent, base, sent, force);
+      expect(result.changed).toEqual([]);
+      expect(result.conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringMatching(/color\.branch\b.*color\.branch\.light|color\.branch\.light.*color\.branch\b/) }]);
+    }
+    expect(stateVector(agent)).toEqual(before);
+    expect(tokenOf(agent, 'color.branch.light')).toEqual(color('#ddeeff'));
   });
 
   it('writes only the tokens that change, so token-level authorship stays with whoever set each one', () => {
