@@ -524,6 +524,9 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - the bytes of create, uploadAsset and versionState wait for M5's base64 codec.
 
     So M6 and M7 e2e run in utility mode until then.
+15. 2026-10-13 (B needs the page size for its editor; proposed to the architect for X28): `generateTokensCss` derives three properties from `$extensions["dev.maws.page"]`, emitted in the document medium only. M4 adds them.
+    - `--ds-page-width` and `--ds-page-height` come from `size`: `letter` is 8.5in × 11in, `a4` is 210mm × 297mm, and the default is `letter`.
+    - `--ds-page-margin` comes from `margin`: a dimension or an alias, defaulting to 1in.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
