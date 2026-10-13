@@ -5,7 +5,7 @@
 // default permission mode, every permission allowed once through the request card where the person would see it.
 //
 //   S3 (items 5, 6, 10)  1 artifact_create, artifact_screenshot (main's real capture: the PNG's dominant colour is the
-//                          page's) and artifact_update; the row, the Deliverables tool, v2 with its version switch, the
+//                          page's) and artifact_publish (P3-A M6: E2's artifact_update retired into it); the row, the Deliverables tool, v2 with its version switch, the
 //                          record. 2 a comment picked through the pick overlay goes to a Side thread, which answers in the
 //                          Side pane and sums itself up in the parent. 3 Send to main steers the parent mid-turn.
 //                          4 `/btw` answers in the Side pane. One app and one parent across the four (serial).
@@ -110,16 +110,18 @@ const artifactPage = (rgb: readonly number[], version: number) =>
 // Prompts on E2's rules (the tools by their full names, the work done by the model itself, no investigation).
 const PROMPTS = {
   artifact:
-    'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file first. ' +
+    'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file unless a step says so. ' +
     'First call mcp__maws__artifact_create with id "p1-page", title "P1 page" and html_path "page-v1.html". ' +
     'Then call mcp__maws__artifact_screenshot with id "p1-page" and look at the image it returns. ' +
-    'Then call mcp__maws__artifact_update with id "p1-page" and html_path "page-v2.html". ' +
+    'Then read page-v2.html and call mcp__maws__artifact_publish with artifact "p1-page", baseRevision the revision artifact_create returned, and files {"index.html": the whole text of page-v2.html}. ' +
     'Then reply with one line: COLOUR: followed by the one-word name of the background colour you saw in the screenshot.',
-  // P2-E1 (M5): the thread edits the page it comments on and updates the parent's artifact, then answers
+  // P2-E1 (M5): the thread edits the page it comments on and updates the parent's artifact, then answers (P3-A M6: a read
+  // of the artifact, then a publish from the revision it returned)
   thread:
-    'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file first. ' +
+    'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file unless a step says so. ' +
     'First run the Bash command `sed -i \'\' \'s/version 2/commented/\' page-v2.html` in the foreground. ' +
-    'Then call mcp__maws__artifact_update with id "p1-page" and html_path "page-v2.html". ' +
+    'Then call mcp__maws__artifact_read with artifact "p1-page". ' +
+    'Then read page-v2.html and call mcp__maws__artifact_publish with artifact "p1-page", baseRevision the revision artifact_read returned, and files {"index.html": the whole text of page-v2.html}. ' +
     'Then reply with exactly one word: ANCHORED.',
   slow: 'Run the Bash command `sleep 25; echo SLEPT` yourself, in the foreground (never in the background, never through an agent), then reply with its output.',
   steer: 'When you reply, add the word STEER_SEEN at the end.',
@@ -517,8 +519,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     note(`case 1: maws artifact calls ${JSON.stringify(calls.map((c) => [c.name, c.args]))}; permissions allowed once through the card ${JSON.stringify(allowed)}`);
     const created = calls.find((c) => c.name === 'artifact_create');
     const shot = calls.find((c) => c.name === 'artifact_screenshot');
-    const updated = calls.find((c) => c.name === 'artifact_update');
-    expect([created, shot, updated].map((c) => c?.args.id), 'create, screenshot and update of "p1-page"').toEqual(['p1-page', 'p1-page', 'p1-page']);
+    const updated = calls.find((c) => c.name === 'artifact_publish');
+    expect([created?.args.id, shot?.args.id, updated?.args.artifact], 'create, screenshot and publish of "p1-page"').toEqual(['p1-page', 'p1-page', 'p1-page']);
     expect(calls.indexOf(created!) < calls.indexOf(shot!) && calls.indexOf(shot!) < calls.indexOf(updated!), 'in that order').toBe(true);
 
     // main's capture answered the engine: the image block decodes to a PNG of the page's colour
@@ -626,19 +628,19 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const summary = (await row.textContent())?.trim() ?? '';
       const turnsAfter = mainTurnsEnded(await events(l, parent)).length;
       const usersAfter = outUsers(sessionRows(l, parent)).length;
-      // the thread's artifact_update wrote the parent's record's next version (P2-E1 G4), none under the thread
+      // the thread's artifact_publish wrote the parent's record's next version (P2-E1 G4), none under the thread
       const threadRows = sessionRows(l, child);
-      const update = mcpCalls(threadRows).find((c) => c.name === 'artifact_update');
+      const update = mcpCalls(threadRows).find((c) => c.name === 'artifact_publish');
       const answer = update ? mcpResultOf(threadRows, update.requestId) : null;
       const updated = answer ? (JSON.parse((answer.content.find((b) => b.type === 'text') as { text: string }).text) as Record<string, unknown>) : null;
       const versions = versionsOf();
       const latest = versions.length > 0 ? readFileSync(versions.at(-1)!.path, 'utf8') : '';
       const viewer = viewerOf(l.panel);
-      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_update answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; the fork inherits the parent's --max-budget-usd (Q12), within the run's cap by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
+      note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_publish answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; the fork inherits the parent's --max-budget-usd (Q12), within the run's cap by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
       expect(reply).toContain('ANCHORED');
       await expect(card.locator('[data-kind="assistant_text"]').filter({ hasText: 'ANCHORED' }), 'the thread’s reply in the card').not.toHaveCount(0);
       expect(summary).toContain('ANCHORED');
-      expect(updated, 'artifact_update wrote the parent’s artifact').toMatchObject({ status: 'updated', id: 'p1-page', deliverableId: artifact!.deliverableId, version: versionsBefore + 1, ownerAppSessionId: parent });
+      expect(updated, 'artifact_publish wrote the parent’s artifact').toMatchObject({ status: 'published', id: 'p1-page', deliverableId: artifact!.deliverableId, version: versionsBefore + 1, ownerAppSessionId: parent });
       expect(versions, 'the parent’s record one version longer').toHaveLength(versionsBefore + 1);
       expect(latest).toContain('P1 live page, commented');
       expect(existsSync(join(l.sc.userData, 'deliverables', child)), 'no deliverable under the thread').toBe(false);

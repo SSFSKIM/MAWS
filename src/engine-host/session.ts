@@ -58,6 +58,7 @@ import type { EngineTransport, TransportItem, TransportProblem } from './transpo
 // P2-A start (2026-10-09; X17)
 import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import type { ObservedFactsRecorder, ObservedFactsService } from './observed-facts';
+import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
 
 export { HostHookRegistry } from './host-hooks';
@@ -118,6 +119,9 @@ export interface EngineSessionOptions {
   // P2-E1 (D10): a side thread's ancestors, nearest first, whose artifacts its artifact tools also resolve (main's
   // `artifactScopeOf`, sent beside the spec by `session.launch`; never stored). Absent or empty for any other session.
   artifactScope?: readonly AppSessionId[];
+  // P3-A (M6): the engine host's artifact store, which the artifact tools write through (null when it failed to open);
+  // its turn version is written at each of the session's turn ends. Absent, the artifact tools answer `unavailable`.
+  artifacts?: () => ArtifactStore | null;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -217,7 +221,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
@@ -949,6 +953,7 @@ export class EngineSession {
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
         if (this.processState === 'ready') void this.sampleContext();
         this.clearAndImplement.turnEnded(!event.isError && event.result === 'success');
+        this.maws.turnEnded(); // P3-A (M6): the turn's artifact edits become `turn` versions
       } else if (event.kind === 'command.lifecycle') {
         this.queue.onLifecycle(event);
         this.clearAndImplement.commandLifecycle(event.commandUuid, event.state);

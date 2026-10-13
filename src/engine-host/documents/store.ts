@@ -62,6 +62,9 @@ export interface CreateInput {
   projectId?: string;
   designSystemId?: string;
   content?: ByteContent;
+  // A Y kind's first content (an agent's create with files, M6): written by the creating actor in the savepoint of the
+  // entity row, so the artifact commits with it or not at all (Decision Log 40b). A throw takes both back.
+  initial?: (doc: Doc) => void;
 }
 
 // One X12 record as P3-L's cutover hands it to `importArtifact` (Decision Log 35f): `content` an html version's bytes and
@@ -274,30 +277,79 @@ export class ArtifactStore {
   }
 
   // The human's create or an agent's (`actor`; a session is linked `created`). Byte kinds take their first content and
-  // write it as an `import` version; Y kinds start empty.
+  // write it as an `import` version; Y kinds start empty, or with `initial` written in the entity's savepoint.
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
+    this.checkCreate(input, actor);
     const id = randomUUID();
     const at = this.now();
+    try {
+      if (input.initial) {
+        await this.service.writeAs(id, actor, input.initial, { prepare: () => this.insertInFrame(id, input, actor, at), inFrame: () => inFrame?.(toArtifact(this.entity(id)!)) });
+      } else {
+        await this.service.inBatch(() => {
+          this.insertInFrame(id, input, actor, at);
+          inFrame?.(toArtifact(this.entity(id)!));
+        });
+      }
+    } catch (error) {
+      if (!this.entity(id)) this.files.removeAll(id); // a fresh id: whatever its directory holds, no row names
+      throw error;
+    }
+    if (input.content) this.wroteBytes(actor, id);
+    this.emit(id, 'created');
+    return this.get(id)!;
+  }
+
+  // Several creates as one operation (an agent's `send_file`, M6): every entity row, link and content write in one
+  // savepoint, with `inFrame` (an op row) last, so the delivery commits whole or not at all; other operations sharing
+  // the batch are untouched by its failure. No `initial` here: a Y kind's first content is per document.
+  async createAll(inputs: CreateInput[], actor: Actor, inFrame?: InFrame<Artifact[]>): Promise<Artifact[]> {
+    const handles = new Set<string>();
+    for (const input of inputs) {
+      if (input.initial) throw new ArtifactStoreError('invalid', 'createAll writes no first content of a Y kind');
+      this.checkCreate(input, actor);
+      if (input.handle !== undefined && handles.has(input.handle)) throw new ArtifactStoreError('handleTaken', `the handle ${input.handle} is given twice`, { handle: input.handle });
+      if (input.handle !== undefined) handles.add(input.handle);
+    }
+    const ids = inputs.map(() => randomUUID());
+    const at = this.now();
+    try {
+      await this.service.inBatch(() => {
+        inputs.forEach((input, index) => this.insertInFrame(ids[index]!, input, actor, at));
+        inFrame?.(ids.map((id) => toArtifact(this.entity(id)!)));
+      });
+    } catch (error) {
+      for (const id of ids) if (!this.entity(id)) this.files.removeAll(id);
+      throw error;
+    }
+    inputs.forEach((input, index) => {
+      if (input.content) this.wroteBytes(actor, ids[index]!);
+      this.emit(ids[index]!, 'created');
+    });
+    return ids.map((id) => this.get(id)!);
+  }
+
+  // A create's checks, made before its first await (Decision Log 33).
+  private checkCreate(input: CreateInput, actor: Actor): void {
     if (input.handle !== undefined && !ARTIFACT_ID.test(input.handle)) throw new ArtifactStoreError('invalid', `the handle ${JSON.stringify(input.handle)} is not a valid artifact handle`);
     if (!isDocKind(input.kind) && !input.content) throw new ArtifactStoreError('invalid', `a ${input.kind} artifact is created with its content`);
     if (isDocKind(input.kind) && input.content) throw new ArtifactStoreError('invalid', `a ${input.kind} artifact starts empty`);
+    if (!isDocKind(input.kind) && input.initial) throw new ArtifactStoreError('invalid', `a ${input.kind} artifact has no document to start`);
     if (input.spaceId) this.requireSpace(input.spaceId);
     if (input.designSystemId) this.requireDesignSystem(input.designSystemId);
     if (input.handle && actor.kind === 'session' && this.resolve(input.handle, [actor.appSessionId])) {
       throw new ArtifactStoreError('handleTaken', `this session already has an artifact with the handle ${input.handle}`, { handle: input.handle });
     }
-    const key = actorKey(actor);
-    await this.service.inBatch(() => {
-      this.storage.actorInBatch(actor, at);
-      this.storage.db
-        .prepare('INSERT INTO artifacts (id, kind, title, handle, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
-        .run(id, input.kind, input.title, input.handle ?? null, input.spaceId ?? null, input.projectId ?? null, key, at, at, input.designSystemId ?? null, input.content && 'path' in input.content ? input.content.path : null, isDocKind(input.kind) ? bindingVersion : null);
-      if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
-      if (input.content) this.writeBytesInFrame(this.entity(id)!, actor, input.content, { kind: 'import' });
-      inFrame?.(toArtifact(this.entity(id)!));
-    });
-    this.emit(id, 'created');
-    return this.get(id)!;
+  }
+
+  // Inside a savepoint: a new artifact's entity row, its creator's link and a byte kind's first content.
+  private insertInFrame(id: string, input: CreateInput, actor: Actor, at: number): void {
+    this.storage.actorInBatch(actor, at);
+    this.storage.db
+      .prepare('INSERT INTO artifacts (id, kind, title, handle, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
+      .run(id, input.kind, input.title, input.handle ?? null, input.spaceId ?? null, input.projectId ?? null, actorKey(actor), at, at, input.designSystemId ?? null, input.content && 'path' in input.content ? input.content.path : null, isDocKind(input.kind) ? bindingVersion : null);
+    if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
+    if (input.content) this.writeBytesInFrame(this.entity(id)!, actor, input.content, { kind: 'import' });
   }
 
   async update(artifactId: string, change: ArtifactUpdate, inFrame?: InFrame<Artifact>): Promise<Artifact> {
@@ -524,6 +576,7 @@ export class ArtifactStore {
     const row = this.requireLive(artifactId);
     if (isDocKind(row.kind)) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact has no byte content`);
     const written = await this.writeBytes(row, actor, content, { kind: version.kind ?? 'auto', label: version.label }, inFrame);
+    this.wroteBytes(actor, artifactId);
     this.emit(artifactId, 'updated');
     return written;
   }
@@ -758,7 +811,9 @@ export class ArtifactStore {
 
   // The session's turn ended (Decision Log 23f, 26c): one `turn` version per Y-kind artifact the session committed an
   // edit to in the turn (a read, or a write that changed no document, makes none), summarised by the kind's
-  // `summarizeTurn` over its mutating tool calls' results (else "N edits"); its presence is cleared (23d).
+  // `summarizeTurn` over its mutating tool calls' results (else "N edits"); its presence is cleared (23d). A byte kind
+  // the session wrote gets its checkpoint the same way: the `auto` version of its latest write becomes the turn's
+  // (M6's fix wave; an `import` or a named version there already marks it).
   async endTurn(appSessionId: AppSessionId): Promise<void> {
     this.service.clearPresence(appSessionId);
     const wrote = this.turns.get(appSessionId);
@@ -767,12 +822,26 @@ export class ArtifactStore {
     const actor: Actor = { kind: 'session', appSessionId };
     for (const [artifactId, { commits, results }] of wrote) {
       const row = this.entity(artifactId);
-      if (commits === 0 || !row || row.deletedAt !== null || !isDocKind(row.kind)) continue;
+      if (commits === 0 || !row || row.deletedAt !== null) continue;
       const count = results.length > 0 ? results.length : commits;
       const summary = this.service.adapterFor(row.kind)?.summarizeTurn?.(results) ?? `${count} edit${count === 1 ? '' : 's'}`;
-      const id = await this.service.inBatch(() => this.versionInFrame(row, { kind: 'turn', actor, summary }));
+      const meta = { kind: 'turn' as const, actor, summary };
+      const id = await this.service.inBatch(() =>
+        isDocKind(row.kind)
+          ? this.versionInFrame(row, meta)
+          : this.versions.checkpoint(row.id, this.contentRef(row.id).revision, { ...meta, actor: actorKey(actor), at: this.now(), designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }),
+      );
       if (id !== null) this.emit(artifactId, 'updated');
     }
+  }
+
+  // What a repeated tool-use id answers (Decision Log 11), consulted before the call checks anything that may have moved
+  // since the original (a source file, a handle, the artifact): the original's result (waited for while it runs), or
+  // `found: false` for an op never applied. A stored row is read behind the read barrier (Decision Log 33).
+  async replayOf(opId: string | null): Promise<{ found: true; result: unknown } | { found: false }> {
+    if (!opId) return { found: false };
+    const running = await this.ops.replayRunning(opId);
+    return running.found ? running : this.readCommitted(() => this.ops.stored(opId));
   }
 
   // Runs `run` once per tool-use id (Decision Log 11, 26c; ops.ts). A mutating run records its op through `scope.record`
@@ -820,13 +889,28 @@ export class ArtifactStore {
     this.designSystemContext = provider;
   }
 
-  // The governing system's guide for a new artifact (M6's `artifact_create`), from D's provider; null without one.
-  async designSystemContextFor(artifactId: string): Promise<string | null> {
-    const row = this.entity(artifactId);
-    const systemId = row ? this.governingSystem(row) : null;
-    const system = systemId ? this.get(systemId) : null;
+  // The governing system's guide (M6's `artifact_create`), from D's provider; null without one. `target` is an artifact,
+  // or where a new one will be placed (no system or Space of its own: the owner's default governs). The system is chosen
+  // behind the read barrier, and so is the provider's answer (Decision Log 33): what the provider reads before its first
+  // suspension is held until the batch open at the end of that synchronous part commits, and a batch lost during it
+  // (opened and taken back before the provider suspended) fails the answer rather than reveal what it read. Reads a
+  // provider makes after a suspension are outside this boundary and need their own committed reads (`readCommitted`).
+  async designSystemContextFor(target: string | { designSystemId?: string | null; spaceId?: string | null }): Promise<string | null> {
+    const system = await this.readCommitted(() => {
+      const placement = typeof target === 'string' ? this.entity(target) : { designSystemId: target.designSystemId ?? null, spaceId: target.spaceId ?? null };
+      const systemId = placement ? this.governingSystem(placement) : null;
+      return systemId ? this.get(systemId) : null;
+    });
     if (!system || !this.designSystemContext) return null;
-    return this.designSystemContext(system);
+    const lost = this.service.stats.lostBatches;
+    const answering = this.designSystemContext(system);
+    const barrier = this.storage.batchOpen ? this.service.whenCommitted() : null; // the batch its first reads saw
+    barrier?.catch(() => {}); // awaited below, after the provider's own answer
+    const lostMeanwhile = this.service.stats.lostBatches !== lost;
+    const context = await answering;
+    if (barrier) await barrier;
+    if (lostMeanwhile) throw new Error('a batch the design system’s context was read from was lost; ask again');
+    return context;
   }
 
   close(): void {
@@ -901,6 +985,11 @@ export class ArtifactStore {
   private requireDesignSystem(artifactId: string): void {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null || row.kind !== 'design_system') throw new ArtifactStoreError('invalid', `${artifactId} is not a live design system`, { designSystemId: artifactId });
+  }
+
+  // A session's committed byte-kind write, counted toward its turn's checkpoint (endTurn).
+  private wroteBytes(actor: Actor, artifactId: string): void {
+    if (actor.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).commits += 1;
   }
 
   private turnEntry(appSessionId: string, artifactId: string): { commits: number; results: unknown[] } {

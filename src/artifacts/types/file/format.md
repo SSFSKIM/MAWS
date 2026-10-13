@@ -4,7 +4,7 @@ Any file on disk, referenced in place by its path. MAWS records the path and the
 
 ## Structure
 
-One file per artifact. Its versions are its deliveries: each `send_file` of the path records one.
+One file per artifact, delivered once: each `send_file` of a path delivers a new File artifact, and the earlier ones keep pointing at the same path.
 
 ## Limits
 
