@@ -340,6 +340,53 @@ describe('the linked-directory mirror (M2)', () => {
     expect(listed()).toEqual([]);
   });
 
+  it('keeps a file it cannot inspect owned and pending until it can, never dropping it as removed', async () => {
+    offs.push(
+      registerMirrorWriter('document', ({ doc }): MirrorOutput =>
+        doc!.get('root').toString().includes('v2') ? { files: { 'keep/one.txt': 'one' } } : { files: { 'keep/one.txt': 'one', 'locked/sub/file.txt': 'file' } },
+      ),
+    );
+    await startMirror();
+    const space = await linkedSpace();
+    const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+    await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+    await mirror!.flush();
+    expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'locked/sub/file.txt']);
+
+    chmodSync(out('locked'), 0o644); // no search permission: what is below it cannot be inspected
+    try {
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50));
+      await mirror!.flush();
+      expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'locked/sub/file.txt']);
+    } finally {
+      chmodSync(out('locked'), 0o755);
+    }
+    expect(read('locked', 'sub', 'file.txt')).toBe('file');
+    await store().update(doc.id, { pinned: true }); // a later change, once it can be inspected again
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, 'keep', 'keep/one.txt']);
+    expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt']);
+  });
+
+  it('cleans a directory unlinked while it was away from a mirror started without it, once it is back', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    mirror!.close();
+    const away = `${project}-away`;
+    renameSync(project, away);
+    await startMirror(); // its first load of the directory fails
+    await store().updateSpace(space.id, { linkedDir: null });
+    await mirror!.flush();
+    renameSync(away, project);
+    expect(listed()).toHaveLength(2);
+    await store().create({ kind: 'html', title: 'Elsewhere', content: html('z') }, agent); // any later change
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
   it('never trusts a manifest’s path out of its directory, and never follows a link inside it', async () => {
     const space = await linkedSpace();
     const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);

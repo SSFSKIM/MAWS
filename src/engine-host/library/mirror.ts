@@ -152,7 +152,7 @@ export class LibraryMirror {
     const { store } = this.documents;
     const { spaces, artifacts } = await store.readCommitted(() => ({ spaces: store.listSpaces(), artifacts: store.list() }));
     const linked = linkedDirs(spaces);
-    for (const dir of new Set([...this.manifests.keys(), ...this.unlinked])) if (!linked.has(dir)) this.unlinked.add(dir);
+    for (const dir of new Set([...this.manifests.keys(), ...this.unlinked, ...this.failing])) if (!linked.has(dir)) this.unlinked.add(dir); // a directory that failed its first load included: its manifest may name files
     for (const dir of linked.keys()) this.unlinked.delete(dir); // linked again: reconciled below as any linked one
     this.cleanUnlinked();
     for (const [dir, target] of linked) {
@@ -285,11 +285,11 @@ export class LibraryMirror {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
       }
-      if (!realDirsUnder(root, file)) {
-        this.log(`${artifactId}: ${target} lies under a link; not written`);
-        continue;
-      }
       try {
+        if (!realDirsUnder(root, file)) {
+          this.log(`${artifactId}: ${target} lies under a link; not written`);
+          continue;
+        }
         writeReadOnly(root, file, data);
       } catch (error) {
         failure ??= { error };
@@ -437,7 +437,7 @@ function manifestEntries(parsed: unknown): Record<string, ManifestEntry> {
 
 // True when `artifacts/` and every folder between it and `file` is a real directory or does not exist yet: never a link
 // (a linked directory is the owner's project, possibly a clone, and a link inside it must not carry a write or a
-// removal elsewhere).
+// removal elsewhere). A folder that cannot be inspected throws, so the caller fails rather than skipping.
 function realDirsUnder(root: string, file: string): boolean {
   let dir = root;
   for (const segment of ['', ...file.split('/').slice(0, -1)]) {
@@ -446,7 +446,8 @@ function realDirsUnder(root: string, file: string): boolean {
     try {
       stat = lstatSync(dir);
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ENOENT'; // missing: everything below it is made by the mirror
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; // missing: everything below it is the mirror's to make
+      throw error; // not inspectable (no permission): a failure of the write or removal, never a "no"
     }
     if (!stat.isDirectory()) return false;
   }
