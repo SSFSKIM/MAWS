@@ -1,5 +1,6 @@
-// The code blocks' highlighter (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): shiki with its JavaScript
-// regex engine and the transcript's two themes (github-light, github-dark; the transcript's
+// The code blocks' highlighter (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; moved beside the schema
+// in M6 so the editor's decorations and the HTML export share it, typechecked for main as the export is): shiki with
+// its JavaScript regex engine and the transcript's two themes (github-light, github-dark; the transcript's
 // `createTranscriptCodePlugin` is a Streamdown plugin, so this is its sibling, not an import of it), one highlighter per
 // language with its grammar loaded on first use, tokens cached by the full (language, code) pair. `null` first, then
 // `onReady` once the tokens exist.
@@ -25,6 +26,20 @@ export function languageOf(language: unknown): BundledLanguage | null {
   return languages.has(id) ? (id as BundledLanguage) : null;
 }
 
+function highlighterFor(language: BundledLanguage): Promise<Highlighter> {
+  let highlighter = highlighters.get(language);
+  if (!highlighter) {
+    highlighter = createHighlighter({ themes: Object.values(THEMES), langs: [language], engine }) as Promise<Highlighter>;
+    highlighters.set(language, highlighter);
+  }
+  return highlighter;
+}
+
+/** Tokens per line as `codeTokens` gives them, awaited (the exporters, M6, write highlighted code before returning). */
+export async function highlightCode(code: string, language: BundledLanguage): Promise<ThemedToken[][]> {
+  return (await highlighterFor(language)).codeToTokens(code, { lang: language, themes: THEMES }).tokens;
+}
+
 /** Tokens per line, each with its light colour and `--shiki-dark` in `htmlStyle`; null until they are ready. */
 export function codeTokens(code: string, language: BundledLanguage, onReady: () => void): ThemedToken[][] | null {
   const key = `${language}\u0000${code}`;
@@ -37,12 +52,7 @@ export function codeTokens(code: string, language: BundledLanguage, onReady: () 
   }
   const callbacks = new Set([onReady]);
   waiting.set(key, callbacks);
-  let highlighter = highlighters.get(language);
-  if (!highlighter) {
-    highlighter = createHighlighter({ themes: Object.values(THEMES), langs: [language], engine }) as Promise<Highlighter>;
-    highlighters.set(language, highlighter);
-  }
-  highlighter
+  highlighterFor(language)
     .then((h) => {
       cache.set(key, h.codeToTokens(code, { lang: language, themes: THEMES }).tokens);
       if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);

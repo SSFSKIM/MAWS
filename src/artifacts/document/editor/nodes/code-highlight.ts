@@ -6,7 +6,7 @@ import { Extension } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
-import { codeTokens, languageOf } from './shiki';
+import { codeTokens, languageOf } from '../../shiki';
 
 const key = new PluginKey<DecorationSet>('codeHighlight');
 const styleOf = (style: Record<string, string>): string =>

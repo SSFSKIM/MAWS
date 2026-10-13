@@ -140,7 +140,8 @@ const Diagram = Node.create({
   group: 'block',
   atom: true,
   addAttributes: () => ({ source: { default: '', parseHTML: (el: Attributed) => el.textContent ?? '', rendered: false } }),
-  parseHTML: () => [{ tag: 'pre[data-diagram]' }],
+  // above the code block's `pre` rule, which would otherwise take a pasted or imported diagram as code (M6)
+  parseHTML: () => [{ tag: 'pre[data-diagram]', priority: 60 }],
   renderHTML: ({ node, HTMLAttributes }) => ['pre', mergeAttributes({ 'data-diagram': '' }, HTMLAttributes), String(node.attrs.source)],
 });
 
@@ -152,10 +153,20 @@ const Chart = Node.create({
   atom: true,
   addAttributes: () => ({
     source: { default: '', parseHTML: data('data-source'), renderHTML: (a: Record<string, unknown>) => ({ 'data-source': a.source }) },
+    // a string spec rides as `data-spec`, any other value as its JSON in `data-spec-json`, so HTML (paste, the HTML
+    // export and import) gives the stored value back (M6; the dialect's `spec`/`spec-json`, Decision Log 17)
     spec: {
       default: null,
-      parseHTML: data('data-spec'),
-      renderHTML: (a: Record<string, unknown>) => (a.spec == null ? {} : { 'data-spec': typeof a.spec === 'string' ? a.spec : JSON.stringify(a.spec) }),
+      parseHTML: (el: Attributed) => {
+        const json = el.getAttribute('data-spec-json');
+        if (json === null) return el.getAttribute('data-spec');
+        try {
+          return JSON.parse(json) as unknown;
+        } catch {
+          return json;
+        }
+      },
+      renderHTML: (a: Record<string, unknown>) => (a.spec == null ? {} : typeof a.spec === 'string' ? { 'data-spec': a.spec } : { 'data-spec-json': JSON.stringify(a.spec) }),
     },
   }),
   parseHTML: () => [{ tag: 'div[data-chart]' }],
@@ -334,7 +345,14 @@ export const extensions = ({ generateID = (): string => nanoid8() }: { generateI
       return { ...parent, setLink: (attrs) => setLink(linkAttrs(attrs)), toggleLink: (attrs) => toggleLink(attrs && linkAttrs(attrs)) };
     },
   }),
-  Highlight.configure({ multicolor: true }),
+  // a `<mark>` without a colour reads as no colour (Tiptap's rule reads the empty inline style as `''`), M6
+  Highlight.configure({ multicolor: true }).extend({
+    addAttributes(this: { parent?: () => Attrs }) {
+      const parent = this.parent?.() ?? {};
+      const color = parent.color as Attrs & { parseHTML?: (el: Attributed) => unknown };
+      return { ...parent, color: { ...color, parseHTML: (el: Attributed) => color.parseHTML?.(el) || null } };
+    },
+  }),
   Comment,
   Blockquote.extend({ marks: A }),
   BulletList.extend({ marks: A, content: 'listItemGroup*' }),
