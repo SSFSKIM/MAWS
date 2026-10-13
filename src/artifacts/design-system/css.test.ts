@@ -1,3 +1,4 @@
+import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
 import { generateTokensCss } from './css';
 import complete from './fixtures/complete.tokens.json';
@@ -87,6 +88,34 @@ describe('tokens.css (Acceptance 2)', () => {
     expect(body['letter-spacing']).toBe('var(--ds-space-0)'); // a reference stays a reference
     const quote = Object.fromEntries(r.get('[data-ds-scope="s1"] .ds-type-quote')!);
     expect(quote['font-family']).toBe('"Iowan Old Style", serif'); // a literal family stays literal
+  });
+
+  it('keeps a class’s references through a whole-typography alias, so overriding the font or the spacing restyles it', () => {
+    const file = edited(
+      complete,
+      ['type/body/$value', '{type.base}'],
+      ['type/base', { $value: { fontFamily: '{font.body}', fontSize: { value: 16, unit: 'px' }, fontWeight: 400, lineHeight: 1.6, letterSpacing: '{space.0}' } }],
+      ['type/caption/$value', '{type.body}'], // two links: caption → body → base
+    );
+    const r = rules(generateTokensCss(set(file)));
+    for (const role of ['body', 'caption']) {
+      const declarations = Object.fromEntries(r.get(`:root .ds-type-${role}`)!);
+      expect(declarations['font-family']).toBe('var(--ds-font-body)');
+      expect(declarations['letter-spacing']).toBe('var(--ds-space-0)');
+    }
+    // Rendered: an override of the font and the spacing after the system restyles both aliased classes.
+    const window = new Window();
+    const { document } = window;
+    document.head.innerHTML = `<style>${generateTokensCss(set(file))}</style><style>:root { --ds-font-body: Override; --ds-space-0: 3px; }</style>`;
+    document.body.innerHTML = '<p class="ds-type-body">b</p><p class="ds-type-caption">c</p>';
+    for (const role of ['body', 'caption']) {
+      const style = window.getComputedStyle(document.querySelector(`.ds-type-${role}`)!);
+      expect(style.fontFamily).toBe('Override');
+      expect(style.letterSpacing).toBe('3px');
+    }
+    // An alias whose composite holds literals keeps the literals.
+    const literal = edited(complete, ['type/h3/$value', '{type.quote}']);
+    expect(Object.fromEntries(rules(generateTokensCss(set(literal))).get(':root .ds-type-h3')!)['font-family']).toBe('"Iowan Old Style", serif');
   });
 
   it('lets a system switch the Hangul rule off', () => {

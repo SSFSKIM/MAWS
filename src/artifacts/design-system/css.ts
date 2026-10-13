@@ -90,6 +90,22 @@ function declarations(token: ResolvedToken, medium: Medium, resolved: ResolvedTo
   ];
 }
 
+/**
+ * The composite a typography token's value is written as, followed through whole-token aliases (`type.body` →
+ * `{type.base}` → its `{fontFamily: "{font.body}", …}`), so a class reads the same custom properties its source does.
+ */
+function writtenComposite(token: ResolvedToken, resolved: ResolvedTokens): Record<string, unknown> {
+  let value = token.token.$value;
+  const seen = new Set<string>();
+  while (isAlias(value) && !seen.has(value)) {
+    seen.add(value);
+    const target = resolved.tokens.get(aliasPath(value));
+    if (target?.type !== 'typography') return {};
+    value = target.token.$value;
+  }
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 /** The stylesheet for `tokens` inside `scope`, at the medium's type scale. Byte-stable for equal input. */
 export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = {}): string {
   const { scope = ':root', medium = 'document' } = options;
@@ -117,7 +133,7 @@ export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = 
     const token = resolved.tokens.get(`type.${role}`);
     if (!token || token.type !== 'typography') continue;
     const [size, line, weight] = cssNamesOf(token.path, 'typography');
-    const raw = (typeof token.token.$value === 'object' && token.token.$value !== null ? token.token.$value : {}) as Record<string, unknown>;
+    const raw = writtenComposite(token, resolved);
     out.push(
       '',
       `${scope} .ds-type-${role} {`,

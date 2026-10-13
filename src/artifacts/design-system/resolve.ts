@@ -1,7 +1,8 @@
 // Resolution of a token set (DTCG 2025.10 §6.4, §6.7, §7): `$extends` materializes a group's inherited tokens, each
 // token's type is its own `$type`, else its alias target's, else the closest group's; aliases (`"{a.b}"`) and `$ref`
-// pointers are replaced by what they name, chained, inside composites and lists; cycles in either are refused with
-// every member named. The result holds only the tokens that resolved; `problems` names the rest.
+// pointers are replaced by what they name, chained, inside composites and lists; cycles (of aliases by token, of
+// pointers by the value location they name) are refused with every member named. The result holds only the tokens
+// that resolved; `problems` names the rest.
 import { comparePaths, splitPath } from './roles';
 import type { GroupProps, Token, TokenProblem, TokenSet } from './tokens';
 import { aliasPath, FAIL, isAlias, isPointer, normalizeValue, pointerSegments, type RefHandler, type ResolvedValueOf, type TokenType } from './values';
