@@ -18,6 +18,7 @@ import type { PaneBridge } from './panes';
 import { sendFileTool } from './send-file';
 import type { McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
+import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
 
 export function mawsTools(deps: {
   deliverables: DeliverableWriter; bridge: PaneBridge; capture: CaptureBridge; asks: AskTable; askCancelled: (ask: PendingAsk, reason: AskCancelReason) => void;
@@ -30,11 +31,15 @@ export function mawsTools(deps: {
   // P3-A end
 }): McpToolDefinition[] {
   const artifacts: ArtifactToolDeps = { artifacts: deps.artifacts, deliverables: deps.deliverables, artifactScope: deps.artifactScope, session: deps.session ?? new ArtifactSession(), log: deps.log };
+  // P3-B (M7): the document tools' session memory, sharing A's kinds-given-their-guide; A's create and read answer a
+  // document through P3-B's wrappers, every other kind as before
+  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided), log: deps.log };
   return [
     sendFileTool(artifacts), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
-    artifactCreateTool(artifacts), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
+    documentCreateTool(documents, artifactCreateTool(artifacts)), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
     // P3-A (M6)
-    artifactDescribeTypeTool(), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
+    artifactDescribeTypeTool(), documentReadTool(documents, artifactReadTool(artifacts)), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
     artifactExportTool({ ...artifacts, exporter: deps.exporter }),
+    ...documentTools(documents), // P3-B (M7)
   ];
 }

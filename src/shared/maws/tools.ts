@@ -16,6 +16,7 @@ import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { ARTIFACT_ID } from './artifact-id';
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
+import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 
 export { ARTIFACT_ID } from './artifact-id';
 
@@ -24,6 +25,8 @@ export const MAWS_TOOL_NAMES = [
   'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
   // P3-A (M6)
   'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
+  // P3-B (M7): the document tools (`./document-tools`: their schemas, descriptions, limits and refusals)
+  ...DOCUMENT_TOOL_NAMES,
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -413,6 +416,8 @@ export const MAWS_TOOLS = {
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
   // P3-A (M6) end
+  // P3-B (M7)
+  ...DOCUMENT_TOOLS,
 } as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
 
 export interface MawsToolListEntry {

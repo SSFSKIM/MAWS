@@ -73,8 +73,8 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     await flush();
     expect(rpcOf(unknown)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });
     expect(TOOL_ERRORS.unknownTool('echo_file')).toBe(
-      'unknown tool "echo_file"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export',
-    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired
+      'unknown tool "echo_file"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_edit, artifact_comments, artifact_reply, artifact_resolve',
+    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen
     expect(rpcOf(thrown)).toEqual({ jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'show_pane: disk on fire' }], isError: true } });
     expect(logs.join('\n')).toContain('disk on fire');
   });

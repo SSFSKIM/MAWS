@@ -19,8 +19,8 @@
 // `agentEditsAsSuggestions`, lands on the artifact's suggestion doc through A's suggestion service (A's M8). Without it
 // the batch is refused `unavailable` and nothing is written; the owner's setting is never bypassed by a direct write.
 //
-// These definitions stand alone until P3-A's artifact tools are on this branch; then `mawsTools` lists the four
-// tools after A's and wraps A's `artifact_read` and `artifact_create` with `withDocumentRead`/`withDocumentCreate`.
+// `mawsTools` lists the four tools after A's and wraps A's `artifact_read` and `artifact_create` with
+// `documentReadTool`/`documentCreateTool`, which answer a document and hand every other kind to A's tool.
 import { DocIndex } from '@artifacts/document/block-index';
 import { caretsOf } from '@artifacts/document/carets';
 import { EditError, type Op } from '@artifacts/document/edit-ops';
@@ -45,7 +45,6 @@ import {
   ArtifactReplyInputSchema,
   ArtifactResolveInputSchema,
   DOCUMENT_LIMITS,
-  DOCUMENT_TOOLS,
   DocumentCreateInputSchema,
   DocumentReadInputSchema,
   documentRefused,
@@ -66,7 +65,7 @@ import { documentAdapterOf } from '../documents/kinds/document';
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
-import { toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
+import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 
 const PRESENCE_EDITING_MS = 1_500; // D11: the agent's editing blocks stay outlined this long after its batch commits
 
@@ -171,10 +170,8 @@ function authorOf(actor: Actor, self: AppSessionId): CommentAuthor {
   return actor.appSessionId === self ? { by: 'this session' } : { by: 'another session', appSessionId: actor.appSessionId };
 }
 
-function definition(name: DocumentToolName, call: McpToolDefinition['call']): McpToolDefinition {
-  const { title, description, input, annotations } = DOCUMENT_TOOLS[name];
-  return { name, title, description, inputSchema: z.toJSONSchema(input) as Record<string, unknown>, annotations: { ...annotations, title }, call };
-}
+// A document tool as `tools/list` describes it (`MAWS_TOOLS`, which appends `DOCUMENT_TOOLS` after A's), served by `call`.
+const definition = (name: DocumentToolName, call: McpToolDefinition['call']): McpToolDefinition => defineMawsTool(name, call);
 
 // ── artifact_edit ────────────────────────────────────────────────────────────────────────────────────────────────
 

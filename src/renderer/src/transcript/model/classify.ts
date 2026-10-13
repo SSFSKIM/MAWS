@@ -90,6 +90,11 @@ const TABLE: Record<string, TableRow> = {
   [MAWS_TOOL_USE.artifact_list_assets]: standalone('other'),
   [MAWS_TOOL_USE.artifact_export]: standalone('other'),
   // E2 end
+  // P3-B (M7): a document's edit and its comment threads' calls are cells of their own, as the namespace's others are
+  [MAWS_TOOL_USE.artifact_edit]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_comments]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_reply]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_resolve]: standalone('other'),
   // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
   // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)
   [CUA_JS_TOOLS[0]]: standalone('mcp'),

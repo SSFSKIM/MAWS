@@ -99,6 +99,9 @@ describe('the maws server on an EngineSession (scripted)', () => {
       ['artifact_describe_type', { ...MAWS_TOOL_ANNOTATIONS, title: 'Describe artifact kind' }], ['artifact_read', { ...MAWS_TOOL_ANNOTATIONS, title: 'Read artifact' }],
       ['artifact_publish', { readOnlyHint: false, openWorldHint: false, title: 'Publish artifact' }], ['artifact_upload_asset', { readOnlyHint: false, openWorldHint: false, title: 'Upload artifact asset' }],
       ['artifact_list_assets', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifact assets' }], ['artifact_export', { readOnlyHint: false, openWorldHint: false, title: 'Export artifact' }],
+      // P3-B (M7): the document tools, appended after A's
+      ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }], ['artifact_comments', { ...MAWS_TOOL_ANNOTATIONS, title: 'List document comments' }],
+      ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }], ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);

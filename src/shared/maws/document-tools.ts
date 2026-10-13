@@ -2,11 +2,10 @@
 // docs/doperpowers/plans/2026-10-12-p3-co-work.md; D7 and D14 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md):
 // `artifact_edit`, `artifact_comments`, `artifact_reply` and `artifact_resolve`, the fields a document's
 // `artifact_read` adds, and a document's `artifact_create`, with their descriptions, the limits the tools enforce and
-// the refusals an agent can act on. Kept beside `./tools` until P3-A's artifact tools are on this branch; then
-// `./tools` appends these names and entries after A's (one block), and A's `artifact_read` and `artifact_create`
-// schemas take the document fields (`DOCUMENT_READ_FIELDS`, `content` for a document).
+// the refusals an agent can act on. `./tools` appends these names and entries after A's (its P3-B blocks); this file
+// imports only the leaf `./artifact-id`, so the two never import each other.
 import * as z from 'zod';
-import { ARTIFACT_ID } from './tools';
+import { ARTIFACT_ID } from './artifact-id';
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
 export type DocumentToolName = (typeof DOCUMENT_TOOL_NAMES)[number];

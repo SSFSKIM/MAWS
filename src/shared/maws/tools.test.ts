@@ -41,6 +41,8 @@ describe('X9: the maws server and its twelve tools', () => {
       'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
       // E4c's six browser tools left on 2026-10-08 (P1 A-54): none of them, and no other tool moved
       'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
+      // P3-B (M7): the document tools, appended after A's
+      'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
     ]);
     expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
@@ -84,6 +86,11 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_upload_asset', { readOnlyHint: false, openWorldHint: false, title: 'Upload artifact asset' }],
       ['artifact_list_assets', { readOnlyHint: true, openWorldHint: false, title: 'List artifact assets' }],
       ['artifact_export', { readOnlyHint: false, openWorldHint: false, title: 'Export artifact' }],
+      // P3-B (M7): the document tools; the three writers are not read-only
+      ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }],
+      ['artifact_comments', { readOnlyHint: true, openWorldHint: false, title: 'List document comments' }],
+      ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }],
+      ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });
