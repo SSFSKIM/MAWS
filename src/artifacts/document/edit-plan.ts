@@ -140,6 +140,8 @@ function mergeMarks(old: readonly PMCell[], neu: readonly PMCell[], hunks: reado
   return out;
 }
 
+let ranks: Map<string, number> | null = null;
+const markRank = (): Map<string, number> => (ranks ??= new Map(Object.keys(schemaFor().marks).map((name, i) => [name, i])));
 const markKey = (mark: Mark): string => JSON.stringify(mark.toJSON());
 const byJSON = (a: Mark, b: Mark): number => (markKey(a) < markKey(b) ? -1 : markKey(a) > markKey(b) ? 1 : 0);
 
@@ -148,7 +150,8 @@ const byJSON = (a: Mark, b: Mark): number => (markKey(a) < markKey(b) ? -1 : mar
  * equal however their overlapping marks were ordered or their text split (the plan against Yjs's read-back).
  */
 export function canonicalJSON(node: PMNode): unknown {
-  const marks = (list: readonly Mark[]) => (list.length ? [...list].sort((a, b) => a.type.rank - b.type.rank || byJSON(a, b)).map((mark) => mark.toJSON()) : undefined);
+  const rank = (mark: Mark) => markRank().get(mark.type.name) ?? 0;
+  const marks = (list: readonly Mark[]) => (list.length ? [...list].sort((a, b) => rank(a) - rank(b) || byJSON(a, b)).map((mark) => mark.toJSON()) : undefined);
   if (node.isTextblock) {
     const runs: Array<{ text?: string; node?: unknown; marks?: unknown }> = [];
     node.forEach((child) => {

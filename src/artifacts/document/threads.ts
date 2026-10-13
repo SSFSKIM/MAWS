@@ -201,7 +201,10 @@ export interface Extent {
  * Every live comment mark under `root`, in one walk: thread id → the first and last character carrying it. A mark
  * split across blocks spans from its first block to its last.
  */
-export function markExtents(root: Node): Map<string, Extent> {
+export const markExtents = (root: Node): Map<string, Extent> => markExtentsOf([root]);
+
+/** `markExtents` over several nodes in order (some top-level blocks of one body), as if they were one. */
+export function markExtentsOf(nodes: Iterable<Node>): Map<string, Extent> {
   const out = new Map<string, Extent>();
   const walk = (node: Node): void => {
     let index = 0;
@@ -224,7 +227,7 @@ export function markExtents(root: Node): Map<string, Extent> {
       }
     }
   };
-  walk(root);
+  for (const node of nodes) walk(node);
   return out;
 }
 
@@ -313,19 +316,27 @@ const sameSpot = (doc: Doc, json: unknown, spot: Spot): boolean => {
   return !!at && at.type === spot.node && at.index === spot.index;
 };
 
+/** Which threads and blocks a refresh or a strip reads: the threads, and per tab the top-level blocks carrying them. */
+export interface ThreadScope {
+  threads: ReadonlySet<string>;
+  blocks(tabId: string): Iterable<Node>;
+}
+
 /**
  * The host's anchor refresh (S5's A6, run at the per-update hook beside the id repair): splits, joins, type changes,
  * moves and cut-and-paste re-create text under new item ids, so a stored pair drifts. For every thread whose mark is
- * live and whose pair no longer brackets it, rewrite the pair, its block and its tab from the mark. One walk per tab;
- * one transaction, written only when something drifted. Returns the ids rewritten.
+ * live and whose pair no longer brackets it, rewrite the pair, its block and its tab from the mark. One walk per tab
+ * (with a `scope`, of only the blocks carrying the scope's threads); one transaction, written only when something
+ * drifted. Returns the ids rewritten.
  */
-export function refreshAnchors(doc: Doc, origin?: unknown): string[] {
+export function refreshAnchors(doc: Doc, origin?: unknown, scope?: ThreadScope): string[] {
   const drifted: Array<{ node: Node; tabId: string; anchor: ThreadAnchor; blockId: string | null; id: string }> = [];
   const seen = new Set<string>();
   for (const tab of listTabs(doc)) {
     const body = tabBody(doc, tab.id);
     if (!body) continue;
-    for (const [id, extent] of markExtents(body)) {
+    for (const [id, extent] of scope ? markExtentsOf(scope.blocks(tab.id)) : markExtents(body)) {
+      if (scope && !scope.threads.has(id)) continue;
       const node = threadNode(doc, id);
       if (!node || seen.has(id)) continue;
       seen.add(id);
@@ -352,9 +363,10 @@ export function refreshAnchors(doc: Doc, origin?: unknown): string[] {
 
 /**
  * Removes every comment mark whose thread is not in the threads map (a pasted or foreign mark, or a crash between the
- * mark and its thread). One transaction, written only when there is one. Returns the stripped thread ids.
+ * mark and its thread); with `blocks`, only in those top-level blocks of each tab. One transaction, written only when
+ * there is one. Returns the stripped thread ids.
  */
-export function stripMarklessComments(doc: Doc, origin?: unknown): string[] {
+export function stripMarklessComments(doc: Doc, origin?: unknown, blocks?: (tabId: string) => Iterable<Node>): string[] {
   const threads = threadsRoot(doc);
   const strays: Array<{ node: Node; index: number; length: number; key: string; id: string }> = [];
   const walk = (node: Node): void => {
@@ -375,8 +387,11 @@ export function stripMarklessComments(doc: Doc, origin?: unknown): string[] {
     }
   };
   for (const tab of listTabs(doc)) {
-    const body = tabBody(doc, tab.id);
-    if (body) walk(body);
+    if (blocks) for (const block of blocks(tab.id)) walk(block);
+    else {
+      const body = tabBody(doc, tab.id);
+      if (body) walk(body);
+    }
   }
   if (strays.length > 0) transact(doc, () => strays.forEach(({ node, index, length, key }) => node.format(index, length, { [key]: null })), origin);
   return [...new Set(strays.map((stray) => stray.id))];

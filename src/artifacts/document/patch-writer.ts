@@ -16,13 +16,13 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
 import * as delta from 'lib0/delta';
 import { transact, type Doc, type Node } from '../yjs';
-import { ContentString, ContentType, Item, YNode, findIndexSS } from '../yjs/document';
 import { pmnodeToDelta, ynodeToPmnode } from '../yjs/prosemirror';
 import type { Applied, ApplyOptions, Carry, Op, Slot } from './edit-ops';
 import { canonicalJSON, joinedCells, pmCells, planEdit, textblocksOf, type Plan, type RootAction } from './edit-plan';
 import { diffCells, equalMap, textOf } from './inline-diff';
 import { schemaFor } from './schema';
 import { sentenceHunks } from './sentence';
+import { deepSlotIds, itemAt, itemOf, slotKey, textblocksY } from './structs';
 
 export { EditError } from './edit-ops';
 export type { Applied, ApplyOptions, Carry, EditRefusal, Op, OpResult } from './edit-ops';
@@ -70,45 +70,8 @@ function fmtPatch(old: Fmt, want: Fmt): Fmt | null {
   return any ? patch : null;
 }
 
-const itemOf = (node: Node): Slot => [node._item!.id.client, node._item!.id.clock];
-const slotKey = (slot: Slot): string => `${slot[0]}:${slot[1]}`;
-
-/** Every visible slot's item id in document order, descending into child nodes (each node's own item first). */
-export function deepSlotIds(node: Node, out: Slot[] = []): Slot[] {
-  for (let item = node._start; item !== null; item = item.right) {
-    if (item.deleted || !item.countable) continue;
-    const content = item.content;
-    if (content instanceof ContentString) for (let k = 0; k < content.str.length; k++) out.push([item.id.client, item.id.clock + k]);
-    else if (content instanceof ContentType) {
-      out.push([item.id.client, item.id.clock]);
-      deepSlotIds(content.type as Node, out);
-    } else for (let k = 0; k < item.length; k++) out.push([item.id.client, item.id.clock + k]);
-  }
-  return out;
-}
-
-/** The textblock nodes under a Y node (the node itself if it is one). */
-export function textblocksY(node: Node): Node[] {
-  const schema = schemaFor();
-  const out: Node[] = [];
-  const walk = (at: Node): void => {
-    if (schema.nodes[at.name]?.isTextblock) out.push(at);
-    else for (const child of at.toArray()) if (child instanceof YNode) walk(child);
-  };
-  walk(node);
-  return out;
-}
-
 /** The slots of several textblocks as one sequence, a null between blocks (the joined cells' separator). */
 const joinedSlots = (blocks: Node[]): Array<Slot | null> => blocks.flatMap((block, k) => (k < blocks.length - 1 ? [...deepSlotIds(block), null] : deepSlotIds(block)));
-
-/** The item holding `slot` in `doc`, or null when the doc has no such struct. */
-export function itemAt(doc: Doc, slot: Slot): Item | null {
-  const structs = doc.store.clients.get(slot[0]);
-  if (!structs || slot[1] >= doc.store.getClock(slot[0])) return null;
-  const struct = structs[findIndexSS(structs, slot[1])];
-  return struct instanceof Item ? struct : null;
-}
 
 class YWriter {
   private readonly carries: Carry[] = [];
