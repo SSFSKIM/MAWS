@@ -80,6 +80,20 @@ async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
   return record;
 }
 
+// The durability barrier: the replica behind the editor under `scope` has nothing the host has not acknowledged (the
+// header's saved word is not one: it says Saving… only after edits have waited 500 ms).
+async function durable(scope: Locator): Promise<void> {
+  const unsaved = () =>
+    scope
+      .locator('.ds-doc .ProseMirror')
+      .first()
+      .evaluate((el) => {
+        const editor = (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { state(): { unsaved: number } } } }> } } }).editor;
+        return editor?.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.state().unsaved ?? -1;
+      });
+  await expect.poll(unsaved, { timeout: 10_000, message: 'every edit acknowledged by the host' }).toBe(0);
+}
+
 // Every text the header's saved word showed since this call, in order.
 async function watchSaved(page: Page, header: Locator): Promise<() => Promise<string[]>> {
   const handle = await header.elementHandle();
@@ -163,7 +177,7 @@ test('a document opens in a main tab and in the panel as two replicas; the heade
     await page.keyboard.press('End');
     await page.keyboard.type(' Doomed sentence.');
     await expect(panelText).toContainText('Doomed sentence.', { timeout: 10_000 });
-    await expect(mainHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+    await durable(main);
     await mainHeader.getByRole('button', { name: 'Version history' }).click();
     await rail.getByRole('button', { name: /^Version Before the cut/ }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
@@ -219,7 +233,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     await main.locator('.ds-doc .ProseMirror').click();
     await page.keyboard.type(words);
   }
-  await expect(mainHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+  await durable(main);
 
   // the header's Export menu reaches A's service, and the header says the file it wrote
   await mainHeader.getByRole('button', { name: 'Export' }).click();
@@ -501,8 +515,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(text).toHaveText('', { timeout: 10_000 });
   await text.click();
   await page.keyboard.type('Appendix figures for October.');
-  const panelHeader = page.locator('[data-region="panel"] [data-editor-header]');
-  await expect(panelHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+  await durable(record);
   const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Two tabs' });
 
   // after the version: the second tab deleted, a reply on the older thread, new text with a thread of its own
@@ -520,7 +533,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await page.keyboard.press('Enter');
   await page.keyboard.type('A later sentence for the board.');
   const newer = await commentOn(page, record, text, 1, 'later sentence');
-  await expect(panelHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+  await durable(record);
 
   // A's restore, artifact-wide
   const restored = await ok<{ versionId: number }>(page, 'artifacts.restore', { artifactId: id, versionId });
