@@ -198,7 +198,16 @@ IME and the real DOM input path (S4); clipboard and drag; Electron; large-docume
 artifact-wide restore (S3); comment marks through edits (S5); `SnapshotRenderer` (not needed for state-pair history);
 whether 2.0.0 final needs a normalization pass over 2.0.0-15 documents.
 
-### Questions for the architect (S1)
+### The architect's ruling (2026-10-12)
+(1) v14 accepted: `@y/y` 14.0.0-rc.28 and `@y/prosemirror` 2.0.0-15 pinned exactly, one `@y/y` forced by a pnpm
+override, the v14 binding code isolated in one module, S1's suite the gate for any re-pin, every document tagged with its
+binding version; the verdict returns to v13 only if S3, S4 or S7 finds a v14-only failure. (2) Provenance is v14's
+native attribution (encoded ContentMaps) persisted and merged by the host beside the update log, provided actor and time
+per id range survive compaction and thinning; X24 and X29 amended to that shape by the architect. (3) Suggestions are
+opt-in: direct edits stay the default; `mode: 'suggest'` on a write, and an artifact setting "agent edits as
+suggestions" (put to the owner). Pitfalls 1 and 8 go into P3-A's brief.
+
+### Questions for the architect (S1, answered above)
 1. Accept v14 with exact pins (a pnpm override forcing one `@y/y`), an upgrade being a deliberate re-pin with S1's suite
    re-run? Recommended: yes.
 2. Provenance as ContentMaps rather than custom `(clientID, clock range)` rows? Recommended: yes; X24/X29's `provenance`
