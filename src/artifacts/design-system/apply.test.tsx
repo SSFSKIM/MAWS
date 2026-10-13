@@ -1,0 +1,286 @@
+// D8 (M4): the apply-and-restyle API over a fake `ArtifactHost` whose replicas are real docs through the binding module.
+// The scope's style follows a live system and is shared by every consumer of one (system, medium, overrides); a
+// version ref is read once and never followed; overrides land after the system; the floor needs no store.
+import { act, cleanup, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ArtifactHost, DocumentHandle } from '../host';
+import { DEFAULT_SYSTEMS, HOUSE_KEY } from '../types/design_system/defaults';
+import { newDoc, stateV2, type Doc } from '../yjs';
+import {
+  DesignSystemHostContext,
+  DesignSystemMissing,
+  DesignSystemScope,
+  governingSystem,
+  openDesignSystem,
+  resolveDsVars,
+  useDesignSystem,
+  type DesignSystemRef,
+  type DesignSystemView,
+} from './apply';
+import complete from './fixtures/complete.tokens.json';
+import { setToken, writeSystem } from './model';
+import { parseTokens, serializeTokens, type Token } from './tokens';
+
+const AT = Date.UTC(2026, 9, 13);
+const TOKENS = serializeTokens(parseTokens(complete).tokens!);
+const color = (hex: string): Token => ({ $value: hex });
+const FACE = `@font-face { font-family: "Iowan Old Style"; font-weight: 400; src: url("assets/iowan.woff2") format("woff2"); }
+@font-face { font-family: "Iowan Old Style"; src: url("https://fonts.example/iowan.woff2"); }
+@font-face { font-family: "Not Ours"; src: url("assets/other.woff2"); }
+.ds-doc p { color: var(--ds-color-text); }
+`;
+
+/** A store of one system per id, opened as replicas that are the store's own docs, synced at once. */
+function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Array> = {}) {
+  const open = vi.fn(async (id: string): Promise<DocumentHandle> => {
+    const doc = systems[id];
+    if (!doc) throw new Error(`no artifact ${id}`);
+    return {
+      doc,
+      awareness: null as never,
+      state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1 }),
+      subscribe: () => () => {},
+      onRestored: () => () => {},
+      close: closed,
+    };
+  });
+  const closed = vi.fn();
+  const versionState = vi.fn(async (id: string, at: number | { seq: number }) => {
+    const bytes = versions[`${id}@${typeof at === 'number' ? at : at.seq}`];
+    if (!bytes) throw new Error('no such version');
+    return bytes;
+  });
+  const host: ArtifactHost = {
+    open,
+    assetUrl: (id, ref) => `maws-artifact://${id}/live/${ref}`,
+    export: async () => ({ path: '' }),
+    versionState,
+    attributions: async () => new Uint8Array(),
+    uploadAsset: async () => ({ assetId: '', ref: '' }),
+    identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
+  };
+  return { host, open, closed, versionState };
+}
+
+function systemDoc(files: Record<string, string> = {}): Doc {
+  const doc = newDoc();
+  writeSystem(doc, { 'tokens.tokens.json': TOKENS, ...files }, { route: 'derived', at: AT }, { name: 'Harbor' });
+  return doc;
+}
+
+const styles = () => [...document.head.querySelectorAll('style[data-ds-scope-style]')] as HTMLStyleElement[];
+const flush = () => act(async () => {});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe('governingSystem (D9)', () => {
+  const d = { owner: 'owner-ds', spaces: { s1: 'space-ds' }, house: 'house-ds' };
+  it('takes the artifact’s own system, then its Space’s, the owner’s, the house system, then the floor', () => {
+    expect(governingSystem({ designSystemId: 'own', spaceId: 's1' }, d)).toEqual({ id: 'own' });
+    expect(governingSystem({ spaceId: 's1' }, d)).toEqual({ id: 'space-ds' });
+    expect(governingSystem({ spaceId: 's2' }, d)).toEqual({ id: 'owner-ds' });
+    expect(governingSystem({}, { ...d, owner: null })).toEqual({ id: 'house-ds' });
+    expect(governingSystem({}, { owner: null, spaces: {}, house: null })).toEqual({ builtin: 'maws' });
+    expect(governingSystem({ spaceId: 'toString' }, { owner: null, spaces: {}, house: null })).toEqual({ builtin: 'maws' });
+  });
+  it('skips a deleted or missing id down the chain', () => {
+    const live = (id: string) => id !== 'space-ds' && id !== 'own';
+    expect(governingSystem({ designSystemId: 'own', spaceId: 's1' }, d, live)).toEqual({ id: 'owner-ds' });
+    expect(governingSystem({}, { owner: 'gone', spaces: {}, house: 'gone-too' }, () => false)).toEqual({ builtin: 'maws' });
+  });
+});
+
+describe('openDesignSystem (D8)', () => {
+  it('follows a live system: its tokens change and its listeners fire with every change, until closed', async () => {
+    const doc = systemDoc();
+    const { host, closed } = fakeHost({ a: doc });
+    const view = await openDesignSystem(host, { id: 'a' });
+    expect(view.name).toBe('Harbor');
+    const heard = vi.fn();
+    view.subscribe(heard);
+    setToken(doc, 'color.accent.$root', color('#123456'));
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(view.css(':root', 'document')).toContain('--ds-color-accent: #123456');
+    view.close();
+    setToken(doc, 'color.accent.$root', color('#654321'));
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a version ref once from the pinned state and never opens or follows the live system', async () => {
+    const doc = systemDoc();
+    const pinned = stateV2(doc);
+    setToken(doc, 'color.accent.$root', color('#123456'));
+    const { host, open, versionState } = fakeHost({ a: doc }, { 'a@7': pinned });
+    const view = await openDesignSystem(host, { id: 'a', versionSeq: 7 });
+    expect(versionState).toHaveBeenCalledWith('a', { seq: 7 });
+    expect(open).not.toHaveBeenCalled();
+    const heard = vi.fn();
+    view.subscribe(heard);
+    setToken(doc, 'color.accent.$root', color('#abcdef'));
+    expect(heard).not.toHaveBeenCalled();
+    expect(view.css(':root', 'document')).toContain('--ds-color-accent: #c9663f'); // the fixture's, as pinned
+  });
+
+  it('renders the floor from the bundled house system with no store', async () => {
+    const { host, open } = fakeHost({});
+    const view = await openDesignSystem(host, { builtin: 'maws' });
+    const house = DEFAULT_SYSTEMS.find((system) => system.key === HOUSE_KEY)!;
+    expect(view.name).toBe(house.name);
+    expect(view.css(':root', 'document')).toContain('--ds-color-accent:');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a system that is not there', async () => {
+    const { host } = fakeHost({ empty: newDoc() });
+    await expect(openDesignSystem(host, { id: 'nope' })).rejects.toBeInstanceOf(DesignSystemMissing);
+    await expect(openDesignSystem(host, { id: 'empty' })).rejects.toBeInstanceOf(DesignSystemMissing);
+    await expect(openDesignSystem(host, { id: 'nope', versionSeq: 3 })).rejects.toBeInstanceOf(DesignSystemMissing);
+  });
+
+  it('declares the system’s own faces, loaded from its assets, and no face that fetches elsewhere or names another family', async () => {
+    const doc = systemDoc({ 'components/document.css': FACE });
+    const { host } = fakeHost({ a: doc });
+    const css = (await openDesignSystem(host, { id: 'a' })).css('[data-ds-scope="x"]', 'document');
+    const faces = css.match(/@font-face \{[^}]*\}/g) ?? [];
+    expect(faces).toHaveLength(1);
+    expect(faces[0]).toContain('font-family: "Iowan Old Style";');
+    expect(faces[0]).toContain('font-weight: 400;');
+    expect(faces[0]).toMatch(/src: url\("maws-artifact\\3a \/\/a\/live\/assets\/iowan\.woff2"\) format\("woff2"\);/);
+    expect(css).not.toContain('fonts.example');
+    expect(css).not.toContain('Not Ours');
+  });
+});
+
+describe('<DesignSystemScope> (D8)', () => {
+  function Shown({ refs, overrides }: { refs: (DesignSystemRef | { builtin: 'maws' })[]; overrides?: Record<string, string> }) {
+    return (
+      <>
+        {refs.map((ref, i) => (
+          <DesignSystemScope key={i} system={ref} medium="document" overrides={overrides} className="consumer">
+            <p style={{ color: 'var(--ds-color-accent)' }}>text</p>
+          </DesignSystemScope>
+        ))}
+      </>
+    );
+  }
+
+  it('shares one style among the consumers of a live system, rewrites it when a token changes, and removes it with the last', async () => {
+    const doc = systemDoc();
+    const { host, open, closed } = fakeHost({ a: doc });
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Shown refs={[{ id: 'a' }, { id: 'a' }]} />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    const scopes = [...view.container.querySelectorAll('[data-ds-scope]')];
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]!.getAttribute('data-ds-scope')).toBe(scopes[1]!.getAttribute('data-ds-scope'));
+    expect(styles()).toHaveLength(1);
+    expect(open).toHaveBeenCalledTimes(1);
+    const p = view.container.querySelector('p')!;
+    expect(getComputedStyle(p).color).toBe('#c9663f');
+    act(() => setToken(doc, 'color.accent.$root', color('#123456')));
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
+    expect(getComputedStyle(p).color).toBe('#123456');
+    view.unmount();
+    await flush();
+    expect(styles()).toHaveLength(0);
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies overrides after the system, in a scope of their own; unsafe ones are dropped', async () => {
+    const doc = systemDoc();
+    const { host } = fakeHost({ a: doc });
+    const overrides = { '--ds-color-accent': '#ff0000', '--ds-color-bg': 'red} body { display: none', color: 'blue' };
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Shown refs={[{ id: 'a' }]} overrides={overrides} />
+        <Shown refs={[{ id: 'a' }]} />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    const [withOverrides, plain] = [...view.container.querySelectorAll('p')];
+    expect(getComputedStyle(withOverrides!).color).toBe('#ff0000');
+    expect(getComputedStyle(plain!).color).toBe('#c9663f');
+    expect(styles()).toHaveLength(2);
+    const text = styles().map((s) => s.textContent).find((t) => t!.includes('#ff0000'))!;
+    expect(text.lastIndexOf('--ds-color-accent: #ff0000')).toBeGreaterThan(text.indexOf('--ds-color-accent: #c9663f'));
+    expect(text).not.toContain('display: none');
+  });
+
+  it('never follows a version ref', async () => {
+    const doc = systemDoc();
+    const { host, open } = fakeHost({ a: doc }, { 'a@2': stateV2(doc) });
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Shown refs={[{ id: 'a', versionSeq: 2 }]} />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    act(() => setToken(doc, 'color.accent.$root', color('#123456')));
+    expect(getComputedStyle(view.container.querySelector('p')!).color).toBe('#c9663f');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('renders the floor without a host, and a plain div with no system', async () => {
+    const view = render(
+      <>
+        <Shown refs={[{ builtin: 'maws' }]} />
+        <DesignSystemScope system={null} medium="document" className="none">
+          <span />
+        </DesignSystemScope>
+      </>,
+    );
+    await flush();
+    expect(styles()).toHaveLength(1);
+    expect(view.container.querySelector('.none')!.hasAttribute('data-ds-scope')).toBe(false);
+  });
+});
+
+describe('useDesignSystem (D8)', () => {
+  it('loads, is ready with a snapshot that changes with the system, and is missing for a system not there', async () => {
+    const doc = systemDoc();
+    const { host } = fakeHost({ a: doc });
+    const seen: { status: string; view: DesignSystemView | null }[] = [];
+    function Probe({ id }: { id: string }) {
+      const result = useDesignSystem({ id });
+      seen.push(result);
+      return <span>{result.view ? result.view.css(':root', 'document').match(/--ds-color-accent: (#\w+)/)![1] : result.status}</span>;
+    }
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Probe id="a" />
+      </DesignSystemHostContext.Provider>,
+    );
+    expect(view.container.textContent).toBe('loading');
+    await flush();
+    expect(view.container.textContent).toBe('#c9663f');
+    const first = seen.at(-1)!.view;
+    act(() => setToken(doc, 'color.accent.$root', color('#123456')));
+    expect(view.container.textContent).toBe('#123456');
+    expect(seen.at(-1)!.view).not.toBe(first);
+    view.rerender(
+      <DesignSystemHostContext.Provider value={host}>
+        <Probe id="gone" />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    expect(view.container.textContent).toBe('missing');
+  });
+});
+
+describe('resolveDsVars (the export helper)', () => {
+  const tokens = parseTokens(complete).tokens!;
+  it('writes each --ds-* reference as its value at the medium’s scale, fallbacks resolved, other variables kept', () => {
+    expect(resolveDsVars('h1 { color: var(--ds-color-accent); font-size: var( --ds-type-title-size ); }', tokens, 'deck')).toBe('h1 { color: #c9663f; font-size: 96px; }');
+    expect(resolveDsVars('p { color: var(--ds-nope, var(--ds-color-text)); }', tokens, 'document')).toBe('p { color: #1f1e1b; }');
+    expect(resolveDsVars('p { color: var(--ds-nope); margin: var(--x, var(--ds-space-2)); }', tokens, 'document')).toBe('p { color: var(--ds-nope); margin: var(--x, 8px); }');
+    expect(resolveDsVars('@page { size: var(--ds-page-width) var(--ds-page-height); }', tokens, 'document')).toBe('@page { size: 8.5in 11in; }');
+  });
+});
+

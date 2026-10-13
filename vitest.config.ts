@@ -122,6 +122,7 @@ export default defineConfig({
             // E4a start: the Browser tool and its pane render from the browser store and a placement controller held in refs
             'src/renderer/src/tools/browser/**/*.test.tsx',
             // E4a end
+            'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

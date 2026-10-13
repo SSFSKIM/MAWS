@@ -157,34 +157,36 @@ const PRESENTATION_ATTRS = new Set([
 const OUTSIDE_ASSETS = 'points outside assets/; canon reads only its own assets/ files';
 
 /**
- * A canon file reads only its own `assets/`, or a fragment of itself. The path is judged as a server would see it:
- * percent-decoded until it stops changing (a double encoding included), `\\` read as `/`, the dot segments resolved;
- * it must still sit under `assets/`. A path that does not decode is refused.
+ * The asset a canon URL names, as `assets/<name>`, or null when it names none: canon reads only its own `assets/`. The
+ * path is judged as a server would see it: percent-decoded until it stops changing (a double encoding included), `\\`
+ * read as `/`, the dot segments resolved; it must still sit under `assets/`. A path that does not decode names none.
  */
-function localUrl(url: string): boolean {
-  if (url.startsWith('#')) return true;
+export function assetPathOf(url: string): string | null {
   let path = url.replace(/[?#].*$/, '');
   for (let i = 0; i < 4; i++) {
     let decoded: string;
     try {
       decoded = decodeURIComponent(path);
     } catch {
-      return false;
+      return null;
     }
     if (decoded === path) break;
     path = decoded;
   }
-  if (/%[0-9a-f]{2}/i.test(path)) return false; // still encoded after four passes
-  if (/^[\\/]/.test(path)) return false; // root-relative or protocol-relative: the origin's, not the system's
+  if (/%[0-9a-f]{2}/i.test(path)) return null; // still encoded after four passes
+  if (/^[\\/]/.test(path)) return null; // root-relative or protocol-relative: the origin's, not the system's
   const segments: string[] = [];
   for (const segment of path.replace(/\\/g, '/').split('/')) {
     if (segment === '' || segment === '.') continue;
     if (segment === '..') {
-      if (!segments.pop()) return false;
+      if (!segments.pop()) return null;
     } else segments.push(segment);
   }
-  return !/^[a-z][a-z0-9+.-]*:/i.test(path) && segments.length >= 2 && segments[0] === 'assets';
+  return !/^[a-z][a-z0-9+.-]*:/i.test(path) && segments.length >= 2 && segments[0] === 'assets' ? segments.join('/') : null;
 }
+
+/** A canon file reads only its own `assets/`, or a fragment of itself. */
+const localUrl = (url: string): boolean => url.startsWith('#') || assetPathOf(url) !== null;
 
 /** The problems of a declaration list: a custom property set, a foreign or unknown `var()`, a URL outside assets/. */
 function declarationProblems(style: readonly Declaration[], allowed: (name: string) => string | null): string[] {

@@ -47,5 +47,12 @@
     // reason as C8a's
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/test-support/relative-time.ts"
+  ],
+  // P3-D M4: the design system's React and DOM (the apply API's scopes, the page), typechecked by tsconfig.web.json
+  "exclude": [
+    "src/artifacts/design-system/apply.ts",
+    "src/artifacts/design-system/scope-style.ts",
+    "src/artifacts/design-system/page/**/*",
+    "src/artifacts/design-system/**/*.test.tsx"
   ]
 }
