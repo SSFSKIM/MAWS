@@ -6,7 +6,7 @@
 import { assetPathOf } from './canon';
 import { cssString, fontFamilyCss } from './css';
 import { stableHash } from './hash';
-import { parseStylesheet, urlsIn } from './css-read';
+import { parseStylesheet, urlsIn, type Declaration } from './css-read';
 import { resolveTokens } from './resolve';
 import type { TokenSet } from './tokens';
 
@@ -56,6 +56,42 @@ const FACE_DESCRIPTORS = new Set([
 const STRUCTURAL = /[{};<>\\]/;
 const unquote = (value: string) => value.trim().replace(/^(["'])(.*)\1$/s, '$2');
 
+/** One `@font-face` block of a system's `document.css` that a renderer may declare (`systemFaces`). */
+export interface SystemFace {
+  /** The authored family name, unquoted. */
+  family: string;
+  /** Its descriptors on the allowlist, as written. */
+  declarations: readonly Declaration[];
+  /** The assets its `src` loads, in order (`assets/<name>`). */
+  refs: readonly string[];
+}
+
+/**
+ * The `@font-face` blocks of a system's `document.css` that a renderer may declare: a face of a family the system's
+ * tokens set, with exactly one `font-family` and one `src` (a duplicate would make which one counts the engine's guess),
+ * every source one of the system's assets, its descriptors on the allowlist with nothing that could end the block or the
+ * element. A face loading anything else, or naming a family the system never sets, is left out.
+ */
+export function systemFaces(documentCss: string | undefined, tokens: TokenSet): SystemFace[] {
+  if (!documentCss) return [];
+  const families = systemFamilies(tokens);
+  const faces: SystemFace[] = [];
+  for (const node of parseStylesheet(documentCss).nodes) {
+    if (node.kind !== 'at' || node.name !== 'font-face' || node.within.length || !node.declarations) continue;
+    const declarations = node.declarations.filter((d) => FACE_DESCRIPTORS.has(d.property));
+    const named = declarations.filter((d) => d.property === 'font-family');
+    const sources = declarations.filter((d) => d.property === 'src');
+    if (named.length !== 1 || sources.length !== 1) continue;
+    const family = unquote(named[0]!.value);
+    if (!families.has(family.toLowerCase())) continue;
+    const refs = urlsIn(sources[0]!.value).map(assetPathOf);
+    if (!refs.length || refs.some((ref) => ref === null)) continue;
+    if (declarations.some((d) => STRUCTURAL.test(d.value))) continue; // nothing that could end the block or the element
+    faces.push({ family, declarations, refs: refs as string[] });
+  }
+  return faces;
+}
+
 /** A system's faces as a scope declares them: the blocks, and each authored family's private name (lower-cased → alias). */
 export interface SystemFaces {
   css: string;
@@ -63,11 +99,8 @@ export interface SystemFaces {
 }
 
 /**
- * The `@font-face` blocks of a system's `document.css` that a renderer may declare: a face of a family the system's
- * tokens set, with exactly one `font-family` and one `src` (a duplicate would make which one counts the engine's guess),
- * every source one of the system's assets (rewritten through `toUrl`), its descriptors on the allowlist with nothing that
- * could end the block or the element. A face loading anything else, or naming a family the system never sets, is left
- * out. Without `toUrl` (the built-in floor, which has no store), none.
+ * The system's faces (`systemFaces`) as CSS, every source rewritten through `toUrl`. Without `toUrl` (the built-in
+ * floor, which has no store), none.
  *
  * `aliased` declares each family under a private name, unique to the system, its revision of `document.css` and the
  * family (`ds-face-…`), and returns the names for the scope's family values to put first: a face is declared for the
@@ -77,19 +110,8 @@ export interface SystemFaces {
 export function fontFaces(documentCss: string | undefined, tokens: TokenSet, toUrl: AssetUrl | null, options: { aliased: boolean }): SystemFaces {
   const aliases = new Map<string, string>();
   if (!documentCss || !toUrl) return { css: '', aliases };
-  const families = systemFamilies(tokens);
   const faces: string[] = [];
-  for (const node of parseStylesheet(documentCss).nodes) {
-    if (node.kind !== 'at' || node.name !== 'font-face' || node.within.length || !node.declarations) continue;
-    const declarations = node.declarations.filter((d) => FACE_DESCRIPTORS.has(d.property));
-    const named = declarations.filter((d) => d.property === 'font-family');
-    const sources = declarations.filter((d) => d.property === 'src');
-    if (named.length !== 1 || sources.length !== 1) continue;
-    const family = unquote(named[0]!.value);
-    if (!families.has(family.toLowerCase())) continue;
-    const urls = urlsIn(sources[0]!.value);
-    if (!urls.length || urls.some((url) => assetPathOf(url) === null)) continue;
-    if (declarations.some((d) => STRUCTURAL.test(d.value))) continue; // nothing that could end the block or the element
+  for (const { family, declarations } of systemFaces(documentCss, tokens)) {
     let name = family;
     if (options.aliased) {
       const key = family.toLowerCase();

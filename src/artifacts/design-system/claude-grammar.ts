@@ -47,7 +47,7 @@ export interface ClaudeReading {
   colors: ClaudeColor[];
   /** Family key to its CSS stack. */
   families: Record<string, string>;
-  /** How many `type.fonts` entries (font files) the system lists. */
+  /** How many `type.fonts` entries (font files) the system lists that Claude reads. */
   fonts: number;
   styles: ClaudeStyle[];
   /** `spacing`, `radius`, `shadow` and the further families, in the order written. */
@@ -60,7 +60,9 @@ export const CLAUDE_KEY = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const LENGTH = /^-?(?:\d+\.?\d*|\.\d+)(?:px|rem|em|%)?$/;
 const PLAIN = /^[A-Za-z0-9 #%(),./+_-]{1,200}$/;
 const ALIAS = /^\{([^{}]+)\}$/;
-const CAPS = { themes: 8, colors: 600, families: 12, groups: 12, styles: 80, otherFamilies: 12, otherTokens: 60 } as const;
+const CAPS = { themes: 8, colors: 600, fonts: 4096, families: 12, groups: 12, styles: 80, otherFamilies: 12, otherTokens: 60 } as const;
+const WEIGHT = /^(\d{1,4})(?: (\d{1,4}))?$/;
+const FONT_STYLES = ['normal', 'italic', 'oblique'];
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
@@ -108,6 +110,21 @@ const balanced = (v: string) => {
   return depth === 0;
 };
 const isPlainValue = (v: unknown): boolean => (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && PLAIN.test(v) && balanced(v) && !/url\(|var\(/i.test(v));
+
+/** Why Claude's page cannot read a `type.fonts` entry (`{family, file, weight, style}`), or null when it can. */
+function fontProblem(font: unknown): string | null {
+  if (!isObject(font)) return 'not a font entry';
+  const family = text(font.family)?.trim();
+  if (!family || family.length > 200 || /[;{}<>\\()"']/.test(family)) return `family ${shown(font.family)} is not a bare family name`;
+  if (!text(font.file)?.trim()) return `file ${shown(font.file)} is not a path`;
+  if (font.weight !== undefined) {
+    const weight = WEIGHT.exec(String(font.weight));
+    const inRange = (v: string | undefined) => v === undefined || (Number(v) >= 1 && Number(v) <= 1000);
+    if (!weight || !inRange(weight[1]) || !inRange(weight[2])) return `weight ${shown(font.weight)} is not a weight or a range`;
+  }
+  if (font.style !== undefined && !FONT_STYLES.includes(String(font.style))) return `style ${shown(font.style)} is not normal, italic or oblique`;
+  return null;
+}
 
 function stackProblem(stack: unknown): string | null {
   if (typeof stack !== 'string' || !stack.trim()) return 'a stack is a CSS font-family string';
@@ -281,7 +298,14 @@ function readColors(family: Record<string, unknown>, reading: ClaudeReading, cla
 
 function readType(type: unknown, reading: ClaudeReading, drop: (m: string) => void) {
   if (!isObject(type)) return drop('type: must be {"fonts": [...], "families": {...}, "groups": [...]}');
-  if (Array.isArray(type.fonts)) reading.fonts = type.fonts.length;
+  if (Array.isArray(type.fonts)) {
+    if (type.fonts.length > CAPS.fonts) drop(`type.fonts: ${type.fonts.length} fonts; a system holds at most ${CAPS.fonts}`);
+    for (const [at, font] of type.fonts.slice(0, CAPS.fonts).entries()) {
+      const problem = fontProblem(font);
+      if (problem) drop(`type.fonts[${at}]: ${problem}`);
+      else reading.fonts++;
+    }
+  }
   if (isObject(type.families)) {
     const keys = Object.keys(type.families);
     if (keys.length > CAPS.families) {

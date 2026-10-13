@@ -177,13 +177,13 @@ describe('Claude’s shape: the import (Acceptance 6)', () => {
 });
 
 describe('Claude’s shape: the export (Acceptance 6)', () => {
-  const files = toClaude({ name: 'Test system', law: LAW, tokens: completeSet, assets: { 'assets/logo.svg': '<svg/>' } });
+  const files = toClaude({ name: 'Test system', law: LAW, tokens: completeSet, fonts: [{ family: 'Iowan Old Style', file: 'iowan.woff2', weight: '300 800', style: 'italic' }] });
   const tokens = JSON.parse(files['tokens.json']!) as Record<string, { tokens?: { name: string; value: unknown }[] } & Record<string, unknown>>;
 
-  it('writes tokens.json, README.md from the law, and the assets', () => {
-    expect(Object.keys(files).sort()).toEqual(['README.md', 'assets/logo.svg', 'tokens.json']);
+  it('writes tokens.json, with the faces given as type.fonts, and README.md from the law', () => {
+    expect(Object.keys(files).sort()).toEqual(['README.md', 'tokens.json']);
     expect(files['README.md']).toBe(LAW);
-    expect(files['assets/logo.svg']).toBe('<svg/>');
+    expect((tokens.type as { fonts: unknown }).fonts).toEqual([{ family: 'Iowan Old Style', file: 'iowan.woff2', weight: '300 800', style: 'italic' }]);
   });
 
   it('satisfies Claude’s grammar, in lists, never a DTCG map', () => {
@@ -210,7 +210,7 @@ describe('Claude’s shape: the export (Acceptance 6)', () => {
       ['highlight', expect.stringMatching(/^#[0-9a-f]{6}$/)],
     ]);
     const type = tokens.type as { fonts: unknown[]; families: Record<string, string>; groups: { name: string; styles: Record<string, unknown>[] }[] };
-    expect(type.fonts).toEqual([]);
+    expect(type.fonts).toHaveLength(1);
     expect(type.families).toEqual({ display: '"Iowan Old Style", Georgia, serif', body: 'Inter, "Apple SD Gothic Neo", sans-serif', mono: '"JetBrains Mono"', quote: '"Iowan Old Style", serif' });
     expect(type.groups.map((g) => [g.name, g.styles.map((s) => s.name)])).toEqual([
       ['Text', ['title', 'subtitle', 'h1', 'h2', 'h3', 'body', 'caption', 'quote', 'label']],
@@ -230,7 +230,7 @@ describe('Claude’s shape: the export (Acceptance 6)', () => {
   });
 
   it('round-trips: importing the export gives back the system’s values', () => {
-    const back = fromClaude(files);
+    const back = fromClaude(toClaude({ name: 'Test system', law: LAW, tokens: completeSet })); // no faces: an imported face is kept, not loaded
     expect(back.warnings).toEqual([]);
     const before = values(completeSet);
     const after = values(back.tokens);
@@ -258,13 +258,22 @@ describe('Claude’s grammar: validateClaudeTokens', () => {
       validateClaudeTokens({
         color: { brand: { $value: '#ff0000', $type: 'color' } },
         spacing: { tokens: [{ name: 'gap', value: 'var(--x)' }] },
-        type: { fonts: [], families: { Sans: 'a(b)' }, groups: [{ name: 'T', family: 'nope', styles: [{ name: 'x', fontSize: '12px', lineHeight: 12 }] }] },
+        type: {
+          fonts: [{ family: 'Inter', file: 'inter.woff2', weight: '100 900' }, { family: '"Inter"', file: 'a.woff2' }, { family: 'Inter' }, { family: 'Inter', file: 'a', weight: 'heavy' }, { family: 'Inter', file: 'a', weight: '0' }, { family: 'Inter', file: 'a', style: 'slanted' }],
+          families: { Sans: 'a(b)' },
+          groups: [{ name: 'T', family: 'nope', styles: [{ name: 'x', fontSize: '12px', lineHeight: 12 }] }],
+        },
         shadow: { tokens: [{ name: 'deep', value: '0 1px var(--c)' }] },
         zIndex: { tokens: [{ name: 'top', value: 'url(x)' }] },
       }),
     ).toEqual([
       'color: a name-to-value map (DTCG); Claude reads only {"tokens": [...]} lists',
       'spacing "gap": "var(--x)" is not a length',
+      'type.fonts[1]: family ""Inter"" is not a bare family name',
+      'type.fonts[2]: file undefined is not a path',
+      'type.fonts[3]: weight "heavy" is not a weight or a range',
+      'type.fonts[4]: weight "0" is not a weight or a range',
+      'type.fonts[5]: style "slanted" is not normal, italic or oblique',
       'type.families "Sans": a family key is lower-case',
       'type.families "Sans": a stack holds no ; { } < > \\ ( )',
       'type group "T": family "nope" is not in type.families',

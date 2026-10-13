@@ -4,7 +4,8 @@
 // under its family's group with Claude's name, each role aliases the token that plays it (matched by name, else filled
 // and named in a warning), and Claude's files are kept untouched under `sources/claude/`. No law is written (Decision
 // Log 22): the page offers the adopt route. `toClaude` writes a system back as Claude's `tokens.json` (lists only, colours
-// as hex, type as `fonts`, `families` and `groups`), `README.md` from the law, and the assets. Portable (§4.10).
+// as hex, type as `fonts`, `families` and `groups`) and `README.md` from the law; `export.ts` adds the faces' files and
+// the assets. Portable (§4.10).
 import { readClaudeTokens, validateClaudeTokens, type ClaudeReading, type ClaudeStyle } from './claude-grammar';
 import { contrastRatio, relativeLuminance, rgbToHex, round4, toSrgb, type ColorValue } from './color';
 import { parseBoxShadow, parseCssColor, parseFontStack, parseLength } from './css-read';
@@ -704,8 +705,16 @@ export interface ClaudeExportSource {
   /** `DESIGN.md`, written as `README.md`. */
   law: string;
   tokens: TokenSet;
-  /** The system's `assets/<name>` files, copied as they are. */
-  assets?: Readonly<Record<string, string>>;
+  /** Claude's `type.fonts`: the system's faces, each one file under `fonts/` (the caller writes the files). */
+  fonts?: readonly ClaudeFont[];
+}
+
+/** One `type.fonts` entry: `file` a bare name under `fonts/` (or a path), `weight` a descriptor ("400", "300 800"). */
+export interface ClaudeFont {
+  family: string;
+  file: string;
+  weight: string;
+  style: 'normal' | 'italic' | 'oblique';
 }
 
 const COLOR_USAGE: Record<string, string> = {
@@ -763,8 +772,9 @@ function writtenComposite(token: ResolvedToken, resolved: ReadonlyMap<string, Re
 const EXPORT_CAPS = { colors: 600, families: 12, otherFamilies: 12, otherTokens: 60, styles: 80 } as const;
 
 /**
- * A system as Claude's files: `tokens.json` in Claude's list grammar, `README.md` from the law, and the assets. Throws
- * `ClaudeShapeError` when Claude's grammar cannot hold the system (its caps), naming each reason.
+ * A system as Claude's text files: `tokens.json` in Claude's list grammar (its `type.fonts` the faces given) and
+ * `README.md` from the law. Throws `ClaudeShapeError` when Claude's grammar cannot hold the system (its caps), naming
+ * each reason.
  */
 export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const resolved = resolveTokens(system.tokens);
@@ -885,7 +895,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     name: system.name,
     version: 1,
     color: { themes: [light ? { id: 'light', name: 'Light' } : { id: 'dark', name: 'Dark' }], tokens: colors },
-    type: { fonts: [], families, groups: [{ name: 'Text', styles: text }, ...(deck.length ? [{ name: 'Deck', styles: deck }] : [])] },
+    type: { fonts: (system.fonts ?? []).map(({ family, file, weight, style }) => ({ family, file, weight, style })), families, groups: [{ name: 'Text', styles: text }, ...(deck.length ? [{ name: 'Deck', styles: deck }] : [])] },
     spacing: { tokens: spacing },
     radius: { tokens: radius },
     shadow: { tokens: shadow },
@@ -898,6 +908,5 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const files = dict<string>();
   files['tokens.json'] = `${JSON.stringify(json, null, 2)}\n`;
   files['README.md'] = system.law.trim() ? system.law : `# ${system.name}\n`;
-  for (const [path, content] of Object.entries(system.assets ?? {})) if (path.startsWith('assets/')) files[path] = content;
   return files;
 }
