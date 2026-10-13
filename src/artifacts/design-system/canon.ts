@@ -150,10 +150,41 @@ export interface CanonProblem {
 const FIXED_NAMES = new Set(ROLES.flatMap((role) => cssNamesOf(role.path, role.type)));
 const FORBIDDEN_TAGS = new Set([...OUTSIDE_TAGS, 'iframe', 'frame', 'frameset', 'object', 'embed', 'portal', 'applet']);
 const URL_ATTRS = new Set(['href', 'src', 'srcset', 'poster', 'data', 'action', 'formaction', 'xlink:href', 'background', 'cite', 'ping']);
+// SVG presentation attributes whose values are CSS (a `url()` paint, a `var()`): validated as the declarations they are.
+const PRESENTATION_ATTRS = new Set([
+  'fill', 'stroke', 'filter', 'clip-path', 'mask', 'marker-start', 'marker-mid', 'marker-end', 'cursor', 'color', 'stop-color', 'flood-color', 'lighting-color',
+]);
 const OUTSIDE_ASSETS = 'points outside assets/; canon reads only its own assets/ files';
 
-/** A canon file reads only its own `assets/` (no `..`), or a fragment of itself. */
-const localUrl = (url: string): boolean => url.startsWith('#') || (url.startsWith('assets/') && !url.split('/').includes('..'));
+/**
+ * A canon file reads only its own `assets/`, or a fragment of itself. The path is judged as a server would see it:
+ * percent-decoded until it stops changing (a double encoding included), `\\` read as `/`, the dot segments resolved;
+ * it must still sit under `assets/`. A path that does not decode is refused.
+ */
+function localUrl(url: string): boolean {
+  if (url.startsWith('#')) return true;
+  let path = url.replace(/[?#].*$/, '');
+  for (let i = 0; i < 4; i++) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(path);
+    } catch {
+      return false;
+    }
+    if (decoded === path) break;
+    path = decoded;
+  }
+  if (/%[0-9a-f]{2}/i.test(path)) return false; // still encoded after four passes
+  if (/^[\\/]/.test(path)) return false; // root-relative or protocol-relative: the origin's, not the system's
+  const segments: string[] = [];
+  for (const segment of path.replace(/\\/g, '/').split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (!segments.pop()) return false;
+    } else segments.push(segment);
+  }
+  return !/^[a-z][a-z0-9+.-]*:/i.test(path) && segments.length >= 2 && segments[0] === 'assets';
+}
 
 /** The problems of a declaration list: a custom property set, a foreign or unknown `var()`, a URL outside assets/. */
 function declarationProblems(style: readonly Declaration[], allowed: (name: string) => string | null): string[] {
@@ -195,6 +226,7 @@ function htmlProblems(kind: 'layout' | 'component', html: string, parser: HtmlPa
           if (!localUrl(url)) here.push(`srcset="${url}" ${OUTSIDE_ASSETS}`);
         }
       } else if (URL_ATTRS.has(lower) && !localUrl(value.trim())) here.push(`${name}="${value}" ${OUTSIDE_ASSETS}`);
+      else if (PRESENTATION_ATTRS.has(lower)) here.push(...declarationProblems([{ property: lower, value }], fixedOnly));
       else if (lower === 'data-ph' && !/^[a-z][a-z0-9_-]{0,63}$/.test(value)) {
         here.push(`data-ph="${value}" is not a placeholder role (${PLACEHOLDER_ROLES.join(', ')}, or a lower-case name)`);
       }
@@ -208,6 +240,22 @@ function htmlProblems(kind: 'layout' | 'component', html: string, parser: HtmlPa
 }
 
 const SELECTOR_ROOT = /^\.ds-doc(?![\w-])/;
+const SIBLING_OF_ROOT = 'selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it';
+
+/**
+ * Where a selector under `.ds-doc` leads: the first combinator after the root compound must be a descendant or child
+ * one, so the subject is `.ds-doc` itself or sits under it (siblings further down stay inside). Strings, attribute
+ * brackets and functional pseudo-classes are blanked first, so their contents are not read as combinators.
+ */
+function leavesRoot(selector: string): boolean {
+  let text = selector.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""').replace(/\[[^\]]*\]/g, '[]');
+  for (let previous = ''; previous !== text; ) {
+    previous = text;
+    text = text.replace(/\([^()]*\)/g, '()');
+  }
+  const after = text.replace(SELECTOR_ROOT, '').replace(/^[^\s>+~]*/, '').trimStart();
+  return after.startsWith('+') || after.startsWith('~');
+}
 const STATEMENTS_REFUSED: Record<string, string> = {
   import: '@import loads another stylesheet; document.css stands alone',
   namespace: '@namespace is not allowed in document.css',
@@ -238,7 +286,7 @@ function stylesheetProblems(css: string, names: ReadonlySet<string> | null): str
       const rest = selector.replace(SELECTOR_ROOT, '').replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '').replace(/\[[^\]]*\]/g, '');
       if (!SELECTOR_ROOT.test(selector) || /[.#]/.test(rest)) {
         out.push(`the selector "${selector}" must sit under .ds-doc and use element and attribute selectors only`);
-      }
+      } else if (leavesRoot(selector)) out.push(`the selector "${selector}" ${SIBLING_OF_ROOT}`);
     }
     out.push(...declarationProblems(node.declarations, known).map((p) => `${node.selector}: ${p}`));
   }

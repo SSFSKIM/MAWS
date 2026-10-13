@@ -152,3 +152,34 @@ describe('the canon: structural validation (D6)', () => {
     ]);
   });
 });
+
+describe('fix wave 1: the canon’s escapes', () => {
+  it('refuses a document.css selector whose subject is a sibling of the .ds-doc root', () => {
+    const problems = validateCanon(
+      { 'components/document.css': '.ds-doc + p { color: var(--ds-color-text) }\n.ds-doc ~ p, .ds-doc>p, .ds-doc  p + p, .ds-doc:hover, .ds-doc[data-x] ~ div, .ds-doc p ~ ul { }' },
+      parser,
+    );
+    expect(problems.map((p) => p.message)).toEqual([
+      'the selector ".ds-doc + p" selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it',
+      'the selector ".ds-doc ~ p" selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it',
+      'the selector ".ds-doc[data-x] ~ div" selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it',
+    ]);
+  });
+
+  it('checks SVG presentation attributes as declarations, and an asset path once decoded and normalized', () => {
+    const problems = validateCanon(
+      {
+        'components/icon.html':
+          '<svg fill="url(https://example.com/a.svg#paint)"><rect fill="url(#g)" mask="url(assets/m.svg#x)"></rect><image href="assets/%2e%2e/private.png"></image><image href="assets/%252e%252e/p.png"></image><image href="assets/./a/../b.png"></image><image href="assets/%zz.png"></image><image href="/assets/a.png"></image></svg>',
+      },
+      parser,
+    );
+    expect(problems.map((p) => p.message)).toEqual([
+      'svg: url(https://example.com/a.svg#paint) points outside assets/; canon reads only its own assets/ files',
+      'svg > image:nth-child(2): href="assets/%2e%2e/private.png" points outside assets/; canon reads only its own assets/ files',
+      'svg > image:nth-child(3): href="assets/%252e%252e/p.png" points outside assets/; canon reads only its own assets/ files',
+      'svg > image:nth-child(5): href="assets/%zz.png" points outside assets/; canon reads only its own assets/ files',
+      'svg > image:nth-child(6): href="/assets/a.png" points outside assets/; canon reads only its own assets/ files',
+    ]);
+  });
+});
