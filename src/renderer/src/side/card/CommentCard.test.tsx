@@ -331,7 +331,7 @@ describe('the frame’s card hooks (P3-B)', () => {
 
   it('tells the frame of each send as it sets out, then whether it went: Send to main, a refusal, a Side thread on Retry', async () => {
     const settled = vi.fn();
-    const onSending = vi.fn(() => settled);
+    const onSending = vi.fn<NonNullable<CardFrame['onSending']>>(() => settled);
     mount('anchored', { ...FRAME, onSending });
     pick();
     await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
