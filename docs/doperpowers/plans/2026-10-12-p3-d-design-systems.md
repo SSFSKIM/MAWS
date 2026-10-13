@@ -478,6 +478,21 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
    - **Noto Serif KR is bundled as full-Hangul WOFF2 subsets.** The set is 11,172 syllables plus KS X 1001 symbols, jamo, Basic Latin and punctuation, from notofonts/noto-cjk's Korean OTFs via pyftsubset. Regular is 1.81 MB and Bold 1.90 MB, 3.54 MB together. Rejected: the KS X 1001 set (1.13 MB), which fails on rarer syllables the owner types. The OFL text ships beside the fonts. Office names Batang as the East Asian minor face, and US Windows without Korean supplemental fonts substitutes.
    - M5 runs in a sibling worktree on disjoint files (`src/artifacts/types/design_system/`) while M2 and M3 run here. Its law-against-canon test waits for M2's `parseLaw` and `checkHardDonts`.
 10. 2026-10-12 (X32's final rule from G's M3, abf3c9b8, ledger §5; supersedes entry 5's detail): a registration lives as long as its tab; a remount of the same tab's body replaces it quietly; a mounted body withdraws only by passing a null or different scope to `useEditorHost`, and unmounting withdraws nothing; the host clears a scope only when the tab itself goes. The page keeps the hook in one stable body component; a retained `closeGuard` or action reads the tab's own state, never an unmounted component's; under 360 px the header folds every action and export into "More actions" (the page adds no menu of its own).
+11. 2026-10-13 (M2's decisions, folded from its report; the exported API is in its report).
+    - **The element stream.** It is `{tag, attrs, style (a declaration list), text, children, at}`. `at` is a selector-style locator that violations name.
+    - **Per-slide counts.** `accent-max` and `max-words` count per slide or component. Speaker notes are excluded.
+    - **`literal-color`.** It passes a literal that equals any token's colour. A law wanting every literal refused needs a new tag.
+    - **`contrast`.** In HTML, the text and ground pair is inherited down the tree. In a stylesheet, only rules that declare both are checked.
+    - **Canon slides and components.** They may `var()` only X28's fixed names (entry 3) and never declare a custom property. `href` falls under the assets-only rule.
+    - **D6 amended.** `components/document.css` may hold `@font-face` blocks whose URLs point under `assets/`, anywhere in the file.
+    - **D1 amended.** `$extensions["dev.maws.page"]` is validated as `{size: 'letter' | 'a4', margin?: dimension or alias}`.
+    - **Claude import.** Claude's tokens are kept under their own names, and each role aliases the token that plays it.
+      - A name written like a role's CSS name (`bg-raised`, `status-ok`) fills that role directly.
+      - Remaining roles are matched by name, else derived or given a neutral value, with one warning each.
+      - Only the first colour theme is read.
+      - `deck-<role>` type styles fold into that role's deck scale.
+    - **Claude export.** Colours are written as 8-digit hex, and translucent shadow colours as `rgb()`. Importing an export restores every role's value.
+    - **Modules.** The CSS reader is `css-read.ts` and Claude's grammar is `claude-grammar.ts`. The mapping in `claude.ts` is about 850 lines; its role tables may move out if it grows.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
