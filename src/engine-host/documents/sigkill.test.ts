@@ -2,7 +2,7 @@
 // rule). A Node child runs the real storage and document service and writes through an agent replica without waiting
 // for each write; it reports every ack's revision and the last token the ack covers. The parent kills it with SIGKILL
 // while writes are in flight, reopens the store, and checks every acknowledged token is there. The child is bundled
-// with esbuild (vite's own, already installed) since a forked Node cannot load the TypeScript sources.
+// with esbuild (a devDependency at vite's resolved version) since a forked Node cannot load the TypeScript sources.
 import { fork } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,7 @@ import { applyV1, applyV2, newDoc } from '@artifacts/yjs';
 import { SqliteDocumentStorage } from './storage';
 
 const ROOT = resolve(__dirname, '../../..');
+const WAIT_MS = 20_000; // the writer's 40 acks take well under a second
 let dir: string;
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -35,16 +36,25 @@ describe('the document service under SIGKILL', () => {
     child.stderr!.on('data', (chunk) => (stderr += String(chunk)));
     const acks: { token: number; revision: number }[] = [];
     const exited = new Promise<NodeJS.Signals | null>((done) => child.on('exit', (_code, signal) => done(signal)));
-    await new Promise<void>((done, fail) => {
-      child.on('message', (message) => {
-        acks.push(message as { token: number; revision: number });
-        if (acks.length === 40) {
-          child.kill('SIGKILL');
-          done();
-        }
+    try {
+      await new Promise<void>((done, fail) => {
+        child.on('message', (message) => {
+          acks.push(message as { token: number; revision: number });
+          if (acks.length === 40) {
+            child.kill('SIGKILL');
+            done();
+          }
+        });
+        child.on('exit', () => fail(new Error(`the writer exited before 40 acks: ${stderr}`)));
+        // Inside the test's own 30 s timeout, which would abandon this body without running the `finally`.
+        setTimeout(() => fail(new Error(`the writer sent ${acks.length} of 40 acks in ${WAIT_MS} ms: ${stderr}`)), WAIT_MS).unref();
       });
-      child.on('exit', () => fail(new Error(`the writer exited before 40 acks: ${stderr}`)));
-    });
+    } finally {
+      // Whatever ended the wait (40 acks, an early exit, the deadline), the writer is dead before the store is read or
+      // the directory removed.
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await exited;
+    }
     expect(await exited).toBe('SIGKILL');
 
     const last = acks.at(-1)!;
