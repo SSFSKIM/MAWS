@@ -7,10 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import { applyV2, newDoc } from '../yjs';
 import { applyEdit } from './patch-writer';
-import { attributedRuns, carriedBlocks, changeList, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
+import { attributedRuns, carriedBlocks, changeList, countChanges, diffBody, diffTabs, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
 import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body, markFormat, seededHub, textOf, yblock, type Version } from './history.fixture';
 import { schemaFor } from './schema';
-import { createDocument, tabBody } from './tabs';
+import { addTab, createDocument, deleteTab, renameTab, tabBody } from './tabs';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 
 interface Expectation {
@@ -311,5 +311,90 @@ describe('moved and retyped blocks', () => {
     // the moved text keeps the human as its author, so the preview credits the agent with no characters
     const runs = attributedRuns(render(before, after, hub.attributions()));
     expect(runs.filter((run) => run.kind === 'ins' && run.who === AGENT_1 && !run.node && run.text.length > 1)).toEqual([]);
+  });
+});
+
+// M5 fix wave 1 (the review's finding 1): a tab the later state no longer has is part of the comparison, inspectable
+// through the renderer as deleted text, and counted as one change; a rename counts as one too.
+describe('tabs between two versions', () => {
+  const paragraph = (id: string, text: string) => schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text }] }] });
+  function twoTabs() {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => {
+      createDocument(doc, { title: 'Main', id: 'main', body: paragraph('p1', 'Kept') });
+      addTab(doc, { title: 'Removed tab', id: 'removed', body: paragraph('p2', 'The agent deletes this whole tab') });
+    });
+    return { hub, before: hub.version('before', HUMAN), agent: hub.connect(AGENT_1) };
+  }
+
+  it('lists a deleted tab, draws its content as deleted by its deleter, and counts the deletion as one change', () => {
+    const { hub, before, agent } = twoTabs();
+    deleteTab(agent, 'removed');
+    const after = hub.version('after', AGENT_1);
+    const diff = openDiff({ prevState: before.state, nextState: after.state, attributions: hub.attributions() });
+    try {
+      expect(diffTabs(diff).map(({ id, title, change }) => ({ id, title, change }))).toEqual([
+        { id: 'main', title: 'Main', change: undefined },
+        { id: 'removed', title: 'Removed tab', change: 'removed' },
+      ]);
+      const removed = renderDiff(diffBody(diff, 'removed')!, diff.renderer);
+      expect(removed.textContent).toBe('The agent deletes this whole tab');
+      expect(attributedRuns(removed).filter((run) => run.kind === 'del' && run.who === AGENT_1).length).toBeGreaterThan(0);
+      expect(countChanges(diff)).toBe(1); // the deletion alone: not zero
+    } finally {
+      diff.destroy();
+    }
+  });
+
+  it('counts a renamed tab as one change and a new tab by its content', () => {
+    const { hub, before, agent } = twoTabs();
+    renameTab(agent, 'removed', 'Appendix');
+    addTab(agent, { title: 'Notes', id: 'notes', body: paragraph('p3', 'New notes') });
+    const after = hub.version('after', AGENT_1);
+    const diff = openDiff({ prevState: before.state, nextState: after.state, attributions: hub.attributions() });
+    try {
+      expect(diffTabs(diff).map(({ id, change, previousTitle }) => ({ id, change, previousTitle }))).toEqual([
+        { id: 'main', change: undefined, previousTitle: undefined },
+        { id: 'removed', change: 'renamed', previousTitle: 'Removed tab' },
+        { id: 'notes', change: 'added', previousTitle: undefined },
+      ]);
+      expect(countChanges(diff)).toBe(2); // the rename, and the new tab's paragraph
+    } finally {
+      diff.destroy();
+    }
+  });
+});
+
+// M5 fix wave 1 (the review's finding 2): Show editors names who changed a selected container's attributes.
+describe('Show editors on containers', () => {
+  const editorsOf = (hub: HistoryHub, id: string) => {
+    const doc = ynodeToPmnode(body(hub.host), schemaFor());
+    let range: { from: number; to: number } | null = null;
+    doc.descendants((node, pos) => {
+      if (!range && node.attrs.id === id) range = { from: pos + 1, to: pos + node.nodeSize - 1 };
+      return !range;
+    });
+    return showEditors({ doc, ...range!, liveRoot: body(hub.host), provenance: hub.attributions() });
+  };
+  const seeded = (json: object) => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON({ type: 'doc', content: [json] }) }));
+    return { hub, agent: hub.connect(AGENT_1) };
+  };
+
+  it('names the agent who checked the selected task', () => {
+    const { hub, agent } = seeded({ type: 'taskList', attrs: { id: 'tasks' }, content: [{ type: 'taskItem', attrs: { id: 'task1', checked: false }, content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Write the report' }] }] }] });
+    block(agent, 'task1').setAttr('checked', true);
+    const editors = editorsOf(hub, 'p1');
+    expect(editors.map((e) => e.who)).toEqual([AGENT_1, HUMAN]);
+    expect(editors[0].kinds).toEqual(['attrs:checked']);
+  });
+
+  it('names the agent who changed the selected callout’s tone', () => {
+    const { hub, agent } = seeded({ type: 'callout', attrs: { id: 'co1', tone: 'note' }, content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Mind the gap' }] }] });
+    block(agent, 'co1').setAttr('tone', 'warn');
+    const editors = editorsOf(hub, 'p1');
+    expect(editors.map((e) => e.who)).toEqual([AGENT_1, HUMAN]);
+    expect(editors[0].kinds).toEqual(['attrs:tone']);
   });
 });

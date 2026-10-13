@@ -6,9 +6,10 @@
 // on a node the diff inserts are not attribute changes. No DOM; the editor draws what this computes (editor/history).
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { applyV2, type Carry, type ContentMap, type Doc, type Node as YType } from '../yjs';
-import { YNode, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
+import { ContentType, YNode, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { attributedNodes, schemaFor } from './schema';
+import { TABS, listTabs, tabBody, type TabInfo } from './tabs';
 import { isCommentKey } from './threads';
 
 /** Two throwaway gc-off docs (the earlier state and the later one) and the renderer that draws their difference. */
@@ -16,6 +17,11 @@ export interface Diff {
   prevDoc: Doc;
   nextDoc: Doc;
   renderer: DiffRenderer;
+  /**
+   * The body of a tab only the earlier state has, as the later state deleted it (its content kept, marked deleted), so
+   * the renderer draws it as deleted by whoever deleted it; undefined for any other tab.
+   */
+  removedBody(tabId: string): YType | undefined;
   destroy(): void;
 }
 
@@ -30,20 +36,74 @@ export function openDiff({ prevState, nextState, attributions }: { prevState: Ui
   const nextDoc = newDocGcOff();
   applyV2(nextDoc, nextState);
   const renderer = createDiffRenderer(prevDoc, nextDoc, { attributions });
+  // A deleted tab's body is gone from `nextDoc` (the host collects deleted content), and drawn from `prevDoc` it reads
+  // as alive: the renderer takes a piece's status from its own item. Both states in one gc-off doc keep the body with
+  // its items deleted, which the renderer draws as deletions. Built on first use.
+  let both: Doc | null = null;
+  const removedBody = (tabId: string): YType | undefined => {
+    if (!prevState || tabBody(nextDoc, tabId) || !tabBody(prevDoc, tabId)) return undefined;
+    if (!both) {
+      both = newDocGcOff();
+      applyV2(both, prevState);
+      applyV2(both, nextState);
+    }
+    const tab = both.get(TABS)._map.get(tabId)?.content;
+    const body = tab instanceof ContentType ? (tab.type as YType)._map.get('body')?.content : undefined;
+    return body instanceof ContentType ? (body.type as YType) : undefined;
+  };
   return {
     prevDoc,
     nextDoc,
     renderer,
+    removedBody,
     destroy: () => {
       renderer.destroy();
       prevDoc.destroy();
       nextDoc.destroy();
+      (both as Doc | null)?.destroy();
     },
   };
 }
 
 /** A fragment of a diff's `nextDoc` rendered headless, as the preview draws it (what a test or the agent reads). */
 export const renderDiff = (ytype: YType, renderer: DiffRenderer, schema: Schema = schemaFor()): PMNode => ynodeToPmnode(ytype, schema, { renderer, attributedNodes });
+
+/** A tab of a comparison: the later state's tabs in order, then the tabs only the earlier state had. */
+export interface DiffTab extends TabInfo {
+  /** Since the earlier state: `added`, `removed` (only the earlier state has it), or `renamed` (`previousTitle`). */
+  change?: 'added' | 'removed' | 'renamed';
+  previousTitle?: string;
+}
+
+/** Every tab a comparison involves, a deleted one included so its content can be shown and restored. */
+export function diffTabs(diff: Pick<Diff, 'prevDoc' | 'nextDoc'>): DiffTab[] {
+  const before = new Map(listTabs(diff.prevDoc).map((tab) => [tab.id, tab]));
+  const after = listTabs(diff.nextDoc);
+  const kept = new Set(after.map((tab) => tab.id));
+  const tabs: DiffTab[] = after.map((tab) => {
+    const was = before.get(tab.id);
+    if (!was) return before.size === 0 ? tab : { ...tab, change: 'added' };
+    return was.title === tab.title ? tab : { ...tab, change: 'renamed', previousTitle: was.title };
+  });
+  for (const tab of before.values()) if (!kept.has(tab.id)) tabs.push({ ...tab, change: 'removed' });
+  return tabs;
+}
+
+/** The body to draw for a tab of a comparison: the later state's, or a removed tab's as deleted (`removedBody`). */
+export const diffBody = (diff: Diff, tabId: string): YType | undefined => tabBody(diff.nextDoc, tabId) ?? diff.removedBody(tabId);
+
+/**
+ * "N changes" of a whole comparison: the changes of every tab the later state has, and one for each tab removed or
+ * renamed (a new tab counts by its content, which reads as inserted).
+ */
+export function countChanges(diff: Diff): number {
+  let count = 0;
+  for (const tab of diffTabs(diff)) {
+    if (tab.change === 'removed' || tab.change === 'renamed') count += 1;
+    if (tab.change !== 'removed') count += changeList(renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer)).length;
+  }
+  return count;
+}
 
 export type RunKind = 'ins' | 'del' | 'fmt' | 'attrs';
 
@@ -98,10 +158,11 @@ export interface Run extends Mark {
 }
 
 // What "N changes" leaves out (parent Decision Log 29): a format run whose every key is a comment (a comment is not an
-// edit of the document), and an attribute mark on a node the diff inserts (its attributes came with it).
+// edit of the document), and an attribute mark on a node the diff inserts or deletes (its attributes came or went with
+// it).
 const counted = (mark: Mark, marks: readonly Mark[]): boolean => {
   if (mark.kind === 'fmt') return Object.keys(mark.byAttr ?? {}).some((key) => !isCommentKey(key));
-  if (mark.kind === 'attrs') return !marks.some((other) => other.kind === 'ins');
+  if (mark.kind === 'attrs') return !marks.some((other) => other.kind === 'ins' || other.kind === 'del');
   return true;
 };
 
@@ -193,7 +254,8 @@ const authorOf = (ranges: Ranges, who: 'insert' | 'delete'): Array<{ who: string
 
 /**
  * "Show editors" for the selection [from, to) of the live editor's document: who inserted the visible content in the
- * range, who formatted it, who deleted content inside it, who last set its blocks' attributes, each with their latest
+ * range, who formatted it, who deleted content inside it, who last set the attributes of its blocks, of the containers
+ * holding them (a task's checked state, a callout's tone) and of its inline nodes, each with their latest
  * time, newest first. Read from provenance alone, so it is the same before and after a compaction of the log; maps
  * ProseMirror to Yjs through the blocks' ids in `liveRoot` (the live tab body).
  */
@@ -203,8 +265,17 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
   const add = (ranges: Ranges, who: 'insert' | 'delete', kind: string) => {
     for (const hit of authorOf(ranges, who)) hits.push({ ...hit, kind });
   };
+  // a block's attributes (a heading's level, a task's checked state, a callout's tone): who last set each
+  const attributes = (ynode: YType) => {
+    for (const [key, item] of ynode._map) if (!item.deleted && key !== 'id') add(provenance.inserts.slice(item.id.client, item.id.clock, item.length), 'insert', `attrs:${key}`);
+  };
   doc.nodesBetween(from, to, (node, pos) => {
-    if (!node.isTextblock) return true;
+    if (!node.isTextblock) {
+      // a container holding the selection, or an atom block inside it
+      const container = byId.get(node.attrs.id as string);
+      if (container) attributes(container);
+      return true;
+    }
     const ynode = byId.get(node.attrs.id as string);
     if (!ynode) return false;
     const a = Math.max(from, pos + 1) - (pos + 1);
@@ -223,12 +294,12 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
         const s = Math.max(a, start) - start;
         const e = Math.min(b, end) - start;
         add(provenance.inserts.slice(client, clock + s, e - s), 'insert', 'ins');
+        // an inline node in range (an image's alt, a chip's value)
+        if (item.content instanceof ContentType) attributes(item.content.type as YType);
       }
       index = end;
     }
-    for (const [key, item] of ynode._map) {
-      if (!item.deleted && key !== 'id') add(provenance.inserts.slice(item.id.client, item.id.clock, item.length), 'insert', `attrs:${key}`);
-    }
+    attributes(ynode);
     return false;
   });
   const byWho = new Map<string, { who: string; at: number; kinds: Set<string> }>();
