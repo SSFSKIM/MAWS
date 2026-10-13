@@ -72,6 +72,14 @@ describe('Settings › Artifacts', () => {
     expect(select.selectedOptions[0]!.text).toBe('A deleted system · the house system applies');
   });
 
+  it('marks a Space’s deleted default with the next link of the chain, not the house, while the owner’s default is live', async () => {
+    await renderSection({ defaultDesignSystem: CLASSROOM, spaceDesignSystems: { [TEACHING]: GONE } }, [space(TEACHING, 'Teaching')]);
+    const teaching = screen.getByRole('combobox', { name: 'Design system for Teaching' }) as HTMLSelectElement;
+    expect(teaching.value).toBe(GONE);
+    expect(teaching.selectedOptions[0]!.text).toBe('A deleted system · the next default applies');
+    expect((screen.getByRole('combobox', { name: 'Default design system' }) as HTMLSelectElement).value).toBe(CLASSROOM);
+  });
+
   it('sets and clears a Space’s default, writing the Spaces’ record whole', async () => {
     await renderSection({ defaultDesignSystem: null, spaceDesignSystems: { [TEACHING]: CLASSROOM } }, [space(TEACHING, 'Teaching'), space(RESEARCH, 'Research')]);
     const row = screen.getByRole('group', { name: 'By Space' });

@@ -29,6 +29,7 @@ export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }
           none={ARTIFACTS.house}
           systems={rows}
           known={systems.value !== undefined}
+          missing={ARTIFACTS.missing}
           onChange={(id) => void writeSettings({ artifacts: { defaultDesignSystem: id } })}
         />
       </Setting>
@@ -55,14 +56,15 @@ function SpaceRow({ space, artifacts, systems, known }: { space: LibrarySpace; a
   return (
     <label className="flex min-w-0 items-center gap-2">
       <span className="min-w-0 flex-1 truncate text-fg">{space.name}</span>
-      <SystemSelect label={ARTIFACTS.spaceSystem(space.name)} value={artifacts.spaceDesignSystems[space.id] ?? null} none={ARTIFACTS.useMine} systems={systems} known={known} onChange={write} />
+      <SystemSelect label={ARTIFACTS.spaceSystem(space.name)} value={artifacts.spaceDesignSystems[space.id] ?? null} none={ARTIFACTS.useMine} systems={systems} known={known} missing={ARTIFACTS.missingSpace} onChange={write} />
     </label>
   );
 }
 
-function SystemSelect(props: { label: string; value: string | null; none: string; systems: LibraryRow[]; known: boolean; onChange(id: string | null): void }) {
-  const { label, value, none, systems, known, onChange } = props;
-  // A saved id the library does not list: a deleted system, marked once the list has answered (its id until then).
+function SystemSelect(props: { label: string; value: string | null; none: string; systems: LibraryRow[]; known: boolean; missing: string; onChange(id: string | null): void }) {
+  const { label, value, none, systems, known, missing, onChange } = props;
+  // A saved id the library does not list: a deleted system, marked once the list has answered (its id until then) with
+  // what applies instead, which is the chain's next link (the house for the owner's default, the owner's for a Space's).
   const unlisted = value !== null && !systems.some((system) => system.id === value);
   return (
     <select aria-label={label} value={value ?? NONE} onChange={(event) => onChange(event.target.value === NONE ? null : event.target.value)} className={`${INPUT} max-w-[260px]`}>
@@ -72,7 +74,7 @@ function SystemSelect(props: { label: string; value: string | null; none: string
           {system.title}
         </option>
       ))}
-      {unlisted && <option value={value}>{known ? ARTIFACTS.missing : value}</option>}
+      {unlisted && <option value={value}>{known ? missing : value}</option>}
     </select>
   );
 }

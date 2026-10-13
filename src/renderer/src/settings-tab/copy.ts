@@ -281,7 +281,8 @@ export const ARTIFACTS = {
   defaultSystem: 'Default design system',
   house: 'House system',
   defaultSystemNote: 'Documents, decks and designs that name no system of their own, in no Space with a default, use it. The house system is MAWS.',
-  missing: 'A deleted system · the house system applies',
+  missing: 'A deleted system · the house system applies', // the owner's default: the chain's next link is the house
+  missingSpace: 'A deleted system · the next default applies', // a Space's: yours first, then the house
   bySpace: 'By Space',
   bySpaceNote: 'A Space’s default comes before yours.',
   noSpaces: 'No Spaces yet. A Space can have its own default design system.',
