@@ -986,7 +986,11 @@ above, hunks merged across whitespace, a comment orphaned only when all its word
 the live mark, or replaced by a lookup in the latest retained version where the mark was live. A7. Restore keeps
 conversations (question 1).
 
-### Questions for the architect (S5)
+### Questions for the architect (S5) — answered 2026-10-12 (spec Decision Log 31)
+A1 to A6 accepted into §4.4; A7 (restore keeps conversations) accepted provisionally, pending the owner's answer
+because it changes §2 item 4. Q1: provisional, as A7. Q2: keep the pin on the new words, `answering` posting the edit.
+Q3: host refresh. Q4: ignore markers in `new` for now. Pitfall 8 (pnpm overrides belong in `pnpm-workspace.yaml`)
+recorded and sent to P3-A. S4 reconciles A5 with its own mark rule. The questions as asked:
 1. Restore and threads: S3's revert takes back replies and threads posted since the version. Recommended: restore
    reverts text, marks and statuses but never conversations (`restoreKeepingConversation`, one update); needs the
    owner's nod because §2 item 4 says threads are restored.
