@@ -53,7 +53,10 @@ export function checkUpdate(doc: Doc, update: Uint8Array): string | null {
       if (!exists(parent)) return `a parent that does not exist (${parent.client}:${parent.clock})`;
       // The doc's own struct wins over a re-sent copy in the update: it carries the deletion state.
       const target = parent.clock < store.getClock(parent.client) ? store.getItem(parent) : ownItemAt(items.get(parent.client), parent.clock);
-      if (target instanceof Y.Item && !target.deleted && !(target.content instanceof Y.ContentType)) return 'a parent that is not a type';
+      // A collected type travels as ContentDeleted, and one that arrives in this update is not flagged deleted until it
+      // integrates, so the content is checked as well as the flag.
+      const collected = target instanceof Y.Item && (target.deleted || target.content instanceof Y.ContentDeleted);
+      if (target instanceof Y.Item && !collected && !(target.content instanceof Y.ContentType)) return 'a parent that is not a type';
     }
   }
   let refused: string | null = null;

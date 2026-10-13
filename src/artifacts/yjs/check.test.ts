@@ -105,6 +105,27 @@ describe('checkUpdate', () => {
     expect(host.get('content').toString()).not.toContain('late text');
   });
 
+  it('accepts a merged update that brings a collected parent (ContentDeleted, not yet flagged deleted) with text under it', () => {
+    const base = newDoc();
+    base.get('content').push([new Y.Node('paragraph')]);
+    const baseState = diffV1(base);
+    const deleter = newDoc();
+    applyV1(deleter, baseState);
+    deleter.get('content').delete(0, 1);
+    const writer = newDoc();
+    applyV1(writer, baseState);
+    const writerBefore = stateVector(writer);
+    (writer.get('content').get(0) as Y.Node).insert(0, 'late text');
+    const merged = Y.mergeUpdates([diffV1(deleter), diffV1(writer, writerBefore)]);
+
+    expect(uncheckedLeavesPending(diffV1(newDoc()), merged)).toBe(false); // the integrator tombstones the text
+    const host = newDoc();
+    expect(checkUpdate(host, merged)).toBeNull();
+    applyV1(host, merged);
+    expect(hasPending(host)).toBe(false);
+    expect(host.get('content').toString()).not.toContain('late text');
+  });
+
   it('accepts text for a node whose ancestor was deleted and collected to a GC struct', () => {
     const base = newDoc();
     base.transact(() => {
