@@ -21,7 +21,8 @@ export const stateVector = (doc: Doc): Uint8Array => Y.encodeStateVector(doc);
 export const diffV1 = (doc: Doc, sv?: Uint8Array): Uint8Array => Y.encodeStateAsUpdate(doc, sv);
 export const applyV1 = (doc: Doc, update: Uint8Array, origin?: unknown): void => Y.applyUpdate(doc, update, origin);
 // Several V1 updates as one, applied in one transaction (the provider's release of a composition hold).
-export const mergeUpdates = (updates: Uint8Array[]): Uint8Array => Y.mergeUpdates(updates);
+// (The rc types it for `ArrayBuffer`-backed arrays only; a frame's payload is a structured-clone copy, never shared.)
+export const mergeUpdates = (updates: Uint8Array[]): Uint8Array => Y.mergeUpdates(updates as Uint8Array<ArrayBuffer>[]);
 export const stateV2 = (doc: Doc): Uint8Array => Y.encodeStateAsUpdateV2(doc);
 export const applyV2 = (doc: Doc, state: Uint8Array, origin?: unknown): void => Y.applyUpdateV2(doc, state, origin);
 

@@ -1,7 +1,7 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
 import { checkUpdate, hasPending } from './check';
-import { applyV1, diffV1, newDoc, stateVector } from './doc';
+import { applyV1, diffV1, mergeUpdates, newDoc, stateVector } from './doc';
 
 // Each bad shape is first applied unchecked to a scratch doc, to show it is one plain v14 would hold outside its log
 // (S2's v14 probes), then refused by the check against a fresh copy of the same host state.
@@ -116,7 +116,7 @@ describe('checkUpdate', () => {
     applyV1(writer, baseState);
     const writerBefore = stateVector(writer);
     (writer.get('content').get(0) as Y.Node).insert(0, 'late text');
-    const merged = Y.mergeUpdates([diffV1(deleter), diffV1(writer, writerBefore)]);
+    const merged = mergeUpdates([diffV1(deleter), diffV1(writer, writerBefore)]);
 
     expect(uncheckedLeavesPending(diffV1(newDoc()), merged)).toBe(false); // the integrator tombstones the text
     const host = newDoc();
