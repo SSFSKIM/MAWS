@@ -273,6 +273,23 @@ describe('the token file: the model', () => {
     expect(problemsAt(problems, 'type.h1').join()).toMatch(/dev\.maws\.deck.*fontSize/);
   });
 
+  it('reads the page extension (dev.maws.page: a size and a margin) and names a bad one by path', () => {
+    const good = edited(complete, ['$extensions/dev.maws.page', { margin: '{space.8}', size: 'letter' }]);
+    const result = validateTokenFile(good);
+    expect(result.problems).toEqual([]);
+    expect(result.tokens!.groups.get('')?.$extensions?.['dev.maws.page']).toEqual({ margin: '{space.8}', size: 'letter' });
+    expect(validateTokenFile(edited(complete, ['$extensions/dev.maws.page', { size: 'a4', margin: 72 }])).tokens!.groups.get('')?.$extensions?.['dev.maws.page']).toEqual({
+      margin: { value: 72, unit: 'px' },
+      size: 'a4',
+    });
+
+    const bad = (page: unknown) => problemsAt(validateTokenFile(edited(complete, ['$extensions/dev.maws.page', page])).problems, '');
+    expect(bad({ size: 'legal', margin: { value: 1, unit: 'in' } }).join('\n')).toMatch(/dev\.maws\.page.*size.*letter, a4[\s\S]*dev\.maws\.page.*margin/);
+    expect(bad({ margin: '{space.1}' }).join()).toMatch(/dev\.maws\.page.*needs "size"/);
+    expect(bad({ size: 'a4', orientation: 'landscape' }).join()).toMatch(/dev\.maws\.page.*unknown property "orientation"/);
+    expect(bad({ size: 'a4', margin: '{color.accent.$root}' }).join()).toMatch(/dev\.maws\.page.*margin/);
+  });
+
   it('names the CSS properties of each role exactly as the ledger fixes them', () => {
     const names = ROLES.flatMap((role) => cssNamesOf(role.path, role.type));
     expect(names).toEqual([

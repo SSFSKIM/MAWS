@@ -2,12 +2,17 @@
 // other key is preserved untouched). Read leniently and written canonically, like the values:
 //   - `dev.maws.office` on the file's root: the 12 DrawingML theme slots and the major and minor fonts (D4);
 //   - `dev.maws.deck` on a `type.<role>` token: the deck's larger scale for that role (D2);
-//   - `dev.maws.css` on the file's root: `wordBreak` for the type classes (D3; `keep-all` when absent).
+//   - `dev.maws.css` on the file's root: `wordBreak` for the type classes (D3; `keep-all` when absent);
+//   - `dev.maws.page` on the file's root: the documents' default page, `{size: 'letter' | 'a4', margin?: dimension}`
+//     (the spec's Decision Log 6; a document setting B's print path and DOCX section and C's PDF read, not a CSS name).
 import { FAIL, normalizeValue, type RefHandler } from './values';
 
 export const OFFICE_KEY = 'dev.maws.office';
 export const DECK_KEY = 'dev.maws.deck';
 export const CSS_KEY = 'dev.maws.css';
+export const PAGE_KEY = 'dev.maws.page';
+export const PAGE_SIZES = ['letter', 'a4'] as const;
+export type PageSize = (typeof PAGE_SIZES)[number];
 
 export const OFFICE_SLOTS = ['dk1', 'lt1', 'dk2', 'lt2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink'] as const;
 export type OfficeSlot = (typeof OFFICE_SLOTS)[number];
@@ -120,7 +125,30 @@ function css(raw: unknown, at: string, h: RefHandler): unknown {
   return failed ? FAIL : { ...raw };
 }
 
-const READERS: Record<string, (raw: unknown, at: string, h: RefHandler) => unknown> = { [OFFICE_KEY]: office, [DECK_KEY]: deck, [CSS_KEY]: css };
+/** `{size: 'letter' | 'a4', margin?: dimension | alias}`. */
+function page(raw: unknown, at: string, h: RefHandler): unknown {
+  if (!isObject(raw)) {
+    h.problem(`${at}: must be an object with "size" and optionally "margin"`);
+    return FAIL;
+  }
+  let failed = unknownKeys(raw, ['size', 'margin'], at, h);
+  const out: Record<string, unknown> = {};
+  if (!('size' in raw)) {
+    h.problem(`${at}: needs "size"`);
+    failed = true;
+  } else if (!(PAGE_SIZES as readonly unknown[]).includes(raw.size)) {
+    h.problem(`${at}.size: must be one of ${PAGE_SIZES.join(', ')}`);
+    failed = true;
+  } else out.size = raw.size;
+  if ('margin' in raw) {
+    const margin = normalizeValue('dimension', raw.margin, `${at}.margin`, h);
+    if (margin === FAIL) failed = true;
+    else out.margin = margin;
+  }
+  return failed ? FAIL : out;
+}
+
+const READERS: Record<string, (raw: unknown, at: string, h: RefHandler) => unknown> = { [OFFICE_KEY]: office, [DECK_KEY]: deck, [CSS_KEY]: css, [PAGE_KEY]: page };
 
 /**
  * Validates and canonicalizes MAWS's keys inside an `$extensions` object; every other key is kept as written. Keys are

@@ -3,7 +3,7 @@
 // group), `serializeTokens` writes it back in canonical form (a fixed point after one pass), `validateTokenFile` runs
 // the whole check (structure, values, references, the roles, the CSS names, the limits) and names every problem by its
 // path. Resolution (aliases, `$ref` pointers, `$extends`, `$type` inheritance) is `resolve.ts`'s.
-import { DECK_KEY, OFFICE_KEY, readExtensions } from './extensions';
+import { DECK_KEY, OFFICE_KEY, PAGE_KEY, readExtensions } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedTokens } from './resolve';
 import { comparePaths, cssNamesOf, ROLES, splitPath } from './roles';
 import { aliasPath, FAIL, isAlias, isPointer, isTokenType, KEEP, normalizeValue, pointerAsAlias, pointerSegments, type RefHandler, type TokenType } from './values';
@@ -394,6 +394,8 @@ export function validateTokenFile(input: unknown): { ok: boolean; tokens: TokenS
   };
   const office = set.groups.get('')?.$extensions?.[OFFICE_KEY] as { theme?: Record<string, unknown> } | undefined;
   for (const [slot, value] of Object.entries(office?.theme ?? {})) check('', value, 'color', `$extensions["${OFFICE_KEY}"].theme.${slot}`);
+  const page = set.groups.get('')?.$extensions?.[PAGE_KEY] as { margin?: unknown } | undefined;
+  if (page?.margin !== undefined) check('', page.margin, 'dimension', `$extensions["${PAGE_KEY}"].margin`);
   for (const [path, token] of set.tokens) {
     const deck = token.$extensions?.[DECK_KEY] as { fontSize?: unknown; lineHeight?: unknown } | undefined;
     if (deck?.fontSize !== undefined) check(path, deck.fontSize, 'dimension', `$extensions["${DECK_KEY}"].fontSize`);
