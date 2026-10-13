@@ -438,6 +438,40 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
    - **Defaults are data.** The defaults are a list of bundled directories under `src/artifacts/types/design_system/defaults/`, enumerated by one bundle module. Seeding, validation tests and the page read that list, never three hard-coded keys, so a fourth default is a new directory and one line.
    - **The house key is the only named default.** `maws` is the one key the code names, and only for the floor of D8 and D9.
    - **A per-school or per-teacher system is an ordinary artifact.** Nothing in the apply API, the chain or `artifacts.setDefaults` distinguishes a seeded system from an authored one.
+8. 2026-10-12 (M1's decisions, folded from its report). Where the published DTCG 2025.10 text differs from D1, M1 followed the published text.
+
+   **Where the code lives.** The core is five modules under `src/artifacts/design-system/`: `values.ts`, `resolve.ts`, `roles.ts`, `extensions.ts` and `tokens.ts`. `tokens.ts` re-exports the roles. All 13 DTCG types are accepted.
+
+   **Typography.** `letterSpacing` is a required field of the composite; an absent one is written as `0px`.
+
+   **Colour.** The `hex` field holds 6 digits; alpha is kept apart from it. An srgb `hex` is always recomputed from the components, and `alpha: 1` is dropped.
+
+   **References.**
+   - A group's base token is referenced as `{group.$root}`, never `{group}`.
+   - `$ref` takes all three of its forms: an alias, `$extends`, and a property pointer.
+
+   **Lenient reading** accepts more than D1 lists:
+   - `"12px"` and `"1rem"` strings;
+   - durations;
+   - CSS font-stack strings;
+   - `#rgb` and `#rgba`.
+
+   A numeric string such as `"700"` is refused as a font weight.
+
+   **The canonical writer** is its own JSON writer, because JS objects hoist integer-like keys such as `space."1"` to the front. Keys inside `$extensions` are sorted.
+
+   **`tokens.css`.**
+   - The custom properties carry resolved literal values.
+   - The type classes always read size, line and weight through `var(--ds-type-<role>-*)`. They read `font-family` and `letter-spacing` through `var()` only when the composite aliases a token that wrote a ledger name; otherwise they write the literal. No names beyond the ledger's are added for those two properties.
+   - An extra typography token writes its triple of properties but gets no class.
+   - Names and font strings are escaped, so no value can end a `<style>` element.
+
+   **Office mapping.**
+   - Font derivation skips generic families and system aliases such as `-apple-system`.
+   - Every derived slot is flattened onto `lt1`.
+   - A partial `dev.maws.office` extension is filled in slot by slot and face by face.
+
+   **Limits.** D12's limits of 512 tokens and 64 per group are enforced in `validateTokenFile`.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
