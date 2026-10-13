@@ -19,10 +19,15 @@
 // the doc and the other connections go on. Each content frame runs inside a savepoint of the batch: the kind's
 // `beforeApply` with the raw bytes, the apply, the forwarding edit it returned, `afterUpdate` (Decision Log 18 and 21).
 // If anything fails after the apply (a hook, or state the check let through left pending), the frame's rows are taken
-// back, nothing of it is sent, and the doc is evicted: dropped with its connections, reloaded by the next attach.
+// back, nothing of it is sent, and the doc is evicted: dropped with its connections, reloaded by the next attach. The
+// frame's own update gets its attribution row after `afterUpdate` returns, so authorship the hook carries (a move, a
+// retype) lands in it; the thread rows the hooks return are written in the same savepoint (Decision Log 23c, 25j).
+//
+// The artifact store (store.ts, M3) writes its own rows (entities, versions, ops) through `inBatch` and a write's
+// `inFrame`, inside the same batch, so they too commit before anything reveals them.
 import { MessageChannel } from 'node:worker_threads';
 import * as awarenessProtocol from '@y/protocols/awareness';
-import type { DocumentStorage, KindAdapter } from '@artifacts/host';
+import type { DocumentStorage, KindAdapter, ThreadChange } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
 import type { PortLike, Restored } from '@artifacts/provider/port';
 import {
@@ -30,6 +35,7 @@ import {
   applyV1,
   applyV2,
   attributionMap,
+  carryAttribution,
   checkUpdate,
   contentIdsOf,
   decodeMap,
@@ -45,6 +51,7 @@ import {
   stateVector,
   transact,
   wouldChange,
+  type Carry,
   type ContentMap,
   type Doc,
 } from '@artifacts/yjs';
@@ -100,7 +107,27 @@ interface HostDoc {
   restored: Restored | null; // the latest restore, re-announced after every step 2
   provenance: { merged: ContentMap | null; pending: ContentMap[] };
   lastApplied: Uint8Array | null; // the update the last apply integrated, if any
+  // While a frame's own update integrates, its attribution row waits until the kind's `afterUpdate` has returned (any
+  // carried authorship applies first, Decision Log 25j); written in the same savepoint.
+  deferAttribution: boolean;
+  pendingAttribution: { seq: number; at: number; map: ContentMap } | null;
   readonly loadMs: number;
+}
+
+// One artifact's rows in a commit: the revision they reached and who wrote them (the store's change feed, its version
+// scheduler and the turn versions read these).
+export interface Committed {
+  artifactId: string;
+  revision: number;
+  actors: Actor[];
+}
+
+// A host-originated write's companions inside its savepoint (Decision Log 11, 16): `afterWrite` writes through the same
+// host replica after the edit and its `afterUpdate` (a restore's `afterRestore`), its thread rows landing in the batch;
+// `inFrame` writes rows that must commit with the write or not at all (a version, an op), given the revision reached.
+export interface WriteOptions {
+  afterWrite?: (doc: Doc) => void | { threads?: ThreadChange };
+  inFrame?: (revision: number) => void;
 }
 
 export interface ServiceStats {
@@ -132,8 +159,11 @@ export class DocumentService {
   private readonly adapters = new Map<ArtifactKind, KindAdapter>();
   private readonly outbox: { conn: Connection; frame: Uint8Array }[] = [];
   private readonly dirty = new Map<string, number>(); // artifact → its revision, for the rows in the open batch
-  private readonly waiters: { revision: number; resolve: (revision: number) => void; reject: (error: Error) => void }[] = [];
-  private readonly committedListeners = new Set<(change: { artifactId: string; revision: number }) => void>();
+  private readonly dirtyActors = new Map<string, Map<string, Actor>>(); // artifact → who wrote its rows in the batch
+  private readonly waiters: { resolve: () => void; reject: (error: Error) => void }[] = [];
+  private readonly headDue = new Set<string>(); // heads to rewrite after the next commit (a version was written)
+  private readonly committedListeners = new Set<(change: Committed) => void>();
+  private readonly beforeCommitListeners = new Set<(artifactIds: string[]) => void>();
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flushScheduled = false;
@@ -165,9 +195,20 @@ export class DocumentService {
     this.adapters.set(adapter.kind, adapter);
   }
 
-  onCommitted(listener: (change: { artifactId: string; revision: number }) => void): () => void {
+  onCommitted(listener: (change: Committed) => void): () => void {
     this.committedListeners.add(listener);
     return () => this.committedListeners.delete(listener);
+  }
+
+  // Runs inside the open batch just before it commits, with the docs that have rows in it (the store stamps their
+  // entity rows' `updatedAt` in the same commit). A throw is logged and the batch still commits.
+  onBeforeCommit(listener: (artifactIds: string[]) => void): () => void {
+    this.beforeCommitListeners.add(listener);
+    return () => this.beforeCommitListeners.delete(listener);
+  }
+
+  adapterFor(kind: ArtifactKind): KindAdapter | undefined {
+    return this.adapters.get(kind);
   }
 
   // A replica's port to the doc, under `actor` (main's human for a renderer, the session for an agent replica).
@@ -205,24 +246,97 @@ export class DocumentService {
     return cache.merged;
   }
 
-  // A host-originated write (restore, the test writer; M3) through the host replica of `actor`: one transaction, so one
-  // log row credited to `actor`, then the kind's `afterUpdate`. Resolves with the revision after the commit.
-  writeAs(artifactId: string, actor: Actor, edit: (doc: Doc) => void): Promise<number> {
+  // A host-originated write (restore, the test writer, the store's copies) through the host replica of `actor`: one
+  // transaction, so one log row credited to `actor`, then the kind's `afterUpdate`, then `options` (WriteOptions), all in
+  // one savepoint. Resolves with the revision after the commit.
+  writeAs(artifactId: string, actor: Actor, edit: (doc: Doc) => void, options: WriteOptions = {}): Promise<number> {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
     const hostDoc = this.open(artifactId);
     const adapter = this.adapterOf(hostDoc);
     const failed = this.inFrame(hostDoc, () => {
-      hostDoc.lastApplied = null;
-      this.writeThrough(hostDoc, actor, edit);
-      const applied = hostDoc.lastApplied as Uint8Array | null;
-      if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => adapter.afterUpdate!(doc, { update: applied, actor }));
+      const applied = this.applyOwn(hostDoc, () => this.writeThrough(hostDoc, actor, edit));
+      this.afterUpdate(hostDoc, adapter, actor, applied);
+      if (options.afterWrite) {
+        const after: { outcome?: void | { threads?: ThreadChange } } = {};
+        this.writeThrough(hostDoc, actor, (doc) => (after.outcome = options.afterWrite!(doc)));
+        if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
+      }
+      options.inFrame?.(hostDoc.revision);
     });
     if (failed) return Promise.reject(new Error(`the write to ${artifactId} failed and the document was reset: ${failed}`));
+    const revision = hostDoc.revision;
     return new Promise((resolve, reject) => {
-      this.waiters.push({ revision: hostDoc.revision, resolve, reject });
+      this.waiters.push({ resolve: () => resolve(revision), reject });
       this.scheduleFlush();
     });
+  }
+
+  // Rows that are not a document's (entities, versions, ops, byte-kind writes) written inside a savepoint of the open
+  // batch, so they commit with the documents' rows of this turn and are revealed only after (Decision Log 11, 26). A
+  // throw takes back what `run` wrote. Resolves with `run`'s answer after the commit.
+  inBatch<T>(run: () => T): Promise<T> {
+    if (this.closed) return Promise.reject(new Error('the document service is closed'));
+    if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
+    let result: T;
+    try {
+      this.storage.beginFrame();
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    try {
+      result = run();
+      this.storage.endFrame();
+    } catch (error) {
+      try {
+        this.storage.abortFrame();
+      } catch (abortError) {
+        this.batchFailed(`the batch's rows could not be taken back (${abortError instanceof Error ? abortError.message : String(abortError)})`);
+      }
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve: () => resolve(result), reject });
+      this.scheduleFlush();
+    });
+  }
+
+  // The doc's state (V2) and the revision it is at: the live doc's when open, else read from the store without
+  // opening it.
+  readState(artifactId: string): { revision: number; state: Uint8Array } {
+    const hostDoc = this.docs.get(artifactId);
+    if (hostDoc) return { revision: hostDoc.revision, state: stateV2(hostDoc.doc) };
+    const doc = this.loadDoc(artifactId).doc;
+    try {
+      return { revision: this.storage.revision(artifactId), state: stateV2(doc) };
+    } finally {
+      doc.destroy();
+    }
+  }
+
+  // The live doc, opened if it is not (unloaded again at the end of a flush if no connection holds it). Read-only: a
+  // write goes through `writeAs`.
+  live(artifactId: string): Doc {
+    if (this.closed) throw new Error('the document service is closed');
+    const doc = this.open(artifactId).doc;
+    this.scheduleFlush();
+    return doc;
+  }
+
+  // The head is rewritten after the next commit (a version was written, Decision Log 8).
+  requestHead(artifactId: string): void {
+    this.headDue.add(artifactId);
+    this.scheduleFlush();
+  }
+
+  // Commits the open batch now (what it reveals is sent), so maintenance can run outside a batch.
+  commitNow(): void {
+    this.flush();
+  }
+
+  // Clears the presence of every replica the session holds (its turn ended, Decision Log 23d).
+  clearPresence(appSessionId: AppSessionId): void {
+    for (const [key, replica] of this.agentReplicas) if (key.startsWith(`${appSessionId}\u0000`)) replica.setPresence(null);
   }
 
   // A restore's announcement (Decision Log 16; M3 calls it once the restore's rows committed): `restored` goes to every
@@ -291,11 +405,7 @@ export class DocumentService {
     const existing = this.docs.get(artifactId);
     if (existing) return existing;
     const started = performance.now();
-    const doc = newDoc();
-    const stored = this.storage.load(artifactId);
-    if (stored.head) applyV2(doc, stored.head.state, LOAD);
-    for (const row of stored.updates) applyV1(doc, row.bytes, LOAD);
-    if (hasPending(doc)) this.log(`${artifactId} loads with pending state: its stored log has a hole`);
+    const { doc, stored } = this.loadDoc(artifactId);
     const bindings = new Map<number, string>();
     const hostClients = new Map<string, number>();
     for (const { clientId, actor, host } of stored.clients) {
@@ -317,6 +427,8 @@ export class DocumentService {
       restored: stored.restored,
       provenance: { merged: null, pending: [] },
       lastApplied: null,
+      deferAttribution: false,
+      pendingAttribution: null,
       loadMs: performance.now() - started,
     };
     hostDoc.awareness.setLocalState(null); // the host has no presence of its own
@@ -331,6 +443,16 @@ export class DocumentService {
     });
     this.docs.set(artifactId, hostDoc);
     return hostDoc;
+  }
+
+  // A doc built from the store: the head, then the log rows after it.
+  private loadDoc(artifactId: string): { doc: Doc; stored: ReturnType<DocumentStorage['load']> } {
+    const doc = newDoc();
+    const stored = this.storage.load(artifactId);
+    if (stored.head) applyV2(doc, stored.head.state, LOAD);
+    for (const row of stored.updates) applyV1(doc, row.bytes, LOAD);
+    if (hasPending(doc)) this.log(`${artifactId} loads with pending state: its stored log has a hole`);
+    return { doc, stored };
   }
 
   private adapterOf(hostDoc: HostDoc): KindAdapter | undefined {
@@ -399,14 +521,44 @@ export class DocumentService {
       }
     }
     const failed = this.inFrame(hostDoc, () => {
-      hostDoc.lastApplied = null;
-      applyV1(hostDoc.doc, update, conn);
-      const applied = hostDoc.lastApplied as Uint8Array | null;
+      const applied = this.applyOwn(hostDoc, () => applyV1(hostDoc.doc, update, conn));
       if (hasPending(hostDoc.doc)) throw new Error(`an update the check let through left state pending (connection ${conn.id})`);
       if (forward) this.writeThrough(hostDoc, conn.actor, forward);
-      if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, conn.actor, (doc) => adapter.afterUpdate!(doc, { update: applied, actor: conn.actor }));
+      this.afterUpdate(hostDoc, adapter, conn.actor, applied);
     });
     return failed === null;
+  }
+
+  // Applies a frame's own update (an incoming one, or a host-originated edit), holding back its attribution row; answers
+  // what it integrated, if anything.
+  private applyOwn(hostDoc: HostDoc, apply: () => void): Uint8Array | null {
+    hostDoc.lastApplied = null;
+    hostDoc.pendingAttribution = null;
+    hostDoc.deferAttribution = true;
+    try {
+      apply();
+    } finally {
+      hostDoc.deferAttribution = false;
+    }
+    return hostDoc.lastApplied as Uint8Array | null;
+  }
+
+  // The kind's `afterUpdate` on what the frame's own update integrated (through the actor's host replica), then that
+  // update's attribution row with any authorship the hook carried, and the hook's thread rows.
+  private afterUpdate(hostDoc: HostDoc, adapter: KindAdapter | undefined, actor: Actor, applied: Uint8Array | null): void {
+    const after: { outcome?: ReturnType<NonNullable<KindAdapter['afterUpdate']>> } = {};
+    if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => (after.outcome = adapter.afterUpdate!(doc, { update: applied, actor })));
+    this.attribute(hostDoc, after.outcome?.provenance);
+    if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
+  }
+
+  private attribute(hostDoc: HostDoc, carries?: Carry[]): void {
+    const pending = hostDoc.pendingAttribution;
+    if (!pending) return;
+    hostDoc.pendingAttribution = null;
+    const map = carries && carries.length > 0 ? carryAttribution(pending.map, this.provenance(hostDoc.id), carries) : pending.map;
+    this.storage.attributeInBatch({ artifactId: hostDoc.id, seq: pending.seq, at: pending.at, provenance: encodeMap(map) });
+    hostDoc.provenance.pending.push(map);
   }
 
   // Runs one frame's work inside a savepoint of the batch. On a throw the frame's rows are taken back and the doc is
@@ -486,13 +638,18 @@ export class DocumentService {
     const hostClient = writer.kind === 'replica' ? writer.doc.clientID : undefined;
     if (hostClient !== undefined && fresh.includes(hostClient)) hostDoc.hostClients.set(writer.key, hostClient);
     const map = attributionMap(ids, { insertActor: (client) => hostDoc.bindings.get(client) ?? writer.key, deleteActor: writer.key, at });
-    const seq = this.storage.appendInBatch({ artifactId: hostDoc.id, actor: writer.actor, at, update, provenance: encodeMap(map), bindClients: fresh, hostClient });
+    const deferred = hostDoc.deferAttribution && hostDoc.pendingAttribution === null;
+    const seq = this.storage.appendInBatch({ artifactId: hostDoc.id, actor: writer.actor, at, update, provenance: deferred ? undefined : encodeMap(map), bindClients: fresh, hostClient });
+    if (deferred) hostDoc.pendingAttribution = { seq, at, map };
+    else hostDoc.provenance.pending.push(map);
     hostDoc.revision = seq;
     hostDoc.tailRows += 1;
     hostDoc.tailBytes += update.length;
-    hostDoc.provenance.pending.push(map);
     hostDoc.lastApplied = update;
     this.dirty.set(hostDoc.id, seq);
+    const actors = this.dirtyActors.get(hostDoc.id) ?? new Map<string, Actor>();
+    actors.set(writer.key, writer.actor);
+    this.dirtyActors.set(hostDoc.id, actors);
     this.stats.rowsAppended += 1;
     const frame = encodeFrame({ type: 'update', update });
     for (const conn of hostDoc.conns) if (conn !== writer) this.queue(conn, frame);
@@ -513,14 +670,24 @@ export class DocumentService {
   private flush(): void {
     this.flushScheduled = false;
     if (this.closed) return;
+    if (this.dirty.size > 0) {
+      for (const listener of this.beforeCommitListeners) {
+        try {
+          listener([...this.dirty.keys()]);
+        } catch (error) {
+          this.log(`an onBeforeCommit listener threw: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
     try {
       this.storage.commit();
     } catch (error) {
       return this.batchFailed(`commit failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (this.dirty.size > 0) this.stats.commits += 1;
-    const committed = [...this.dirty];
+    const committed: Committed[] = [...this.dirty].map(([artifactId, revision]) => ({ artifactId, revision, actors: [...(this.dirtyActors.get(artifactId)?.values() ?? [])] }));
     this.dirty.clear();
+    this.dirtyActors.clear();
     for (const { conn, frame } of this.outbox.splice(0)) this.send(conn, frame);
     for (const hostDoc of this.docs.values()) {
       for (const conn of hostDoc.conns) {
@@ -529,30 +696,38 @@ export class DocumentService {
         this.send(conn, encodeFrame({ type: 'ack', frames: conn.received, revision: hostDoc.revision }));
       }
     }
-    for (const waiter of this.waiters.splice(0)) waiter.resolve(waiter.revision);
-    for (const [artifactId, revision] of committed) {
+    // Off the commit path: what this commit revealed is already sent; no batch is open until the listeners run.
+    for (const hostDoc of this.docs.values()) {
+      if (hostDoc.tailRows >= this.headTailRows || hostDoc.tailBytes >= this.headTailBytes || this.headDue.has(hostDoc.id)) this.rewriteHead(hostDoc);
+      this.headDue.delete(hostDoc.id);
+    }
+    for (const artifactId of this.headDue) this.rewriteHead(artifactId);
+    this.headDue.clear();
+    for (const waiter of this.waiters.splice(0)) waiter.resolve();
+    for (const change of committed) {
       for (const listener of this.committedListeners) {
         try {
-          listener({ artifactId, revision });
+          listener(change);
         } catch (error) {
           this.log(`an onCommitted listener threw: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }
-    // Off the commit path: what this commit revealed is already sent.
-    for (const hostDoc of [...this.docs.values()]) {
-      if (hostDoc.tailRows >= this.headTailRows || hostDoc.tailBytes >= this.headTailBytes) this.rewriteHead(hostDoc);
-      if (hostDoc.conns.size === 0) this.unload(hostDoc);
-    }
+    for (const hostDoc of [...this.docs.values()]) if (hostDoc.conns.size === 0) this.unload(hostDoc);
   }
 
-  private rewriteHead(hostDoc: HostDoc): void {
+  // The head checkpoint at the doc's committed revision (an open doc's live state, else read from the store).
+  private rewriteHead(target: HostDoc | string): void {
+    const artifactId = typeof target === 'string' ? target : target.id;
     try {
-      this.storage.writeHead(hostDoc.id, hostDoc.revision, stateV2(hostDoc.doc));
-      hostDoc.tailRows = 0;
-      hostDoc.tailBytes = 0;
+      const { revision, state } = typeof target === 'string' ? this.readState(target) : { revision: target.revision, state: stateV2(target.doc) };
+      this.storage.writeHead(artifactId, revision, state);
+      if (typeof target !== 'string') {
+        target.tailRows = 0;
+        target.tailBytes = 0;
+      }
     } catch (error) {
-      this.log(`the head of ${hostDoc.id} was not rewritten: ${error instanceof Error ? error.message : String(error)}`);
+      this.log(`the head of ${artifactId} was not rewritten: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -576,6 +751,8 @@ export class DocumentService {
     }
     this.outbox.length = 0;
     this.dirty.clear();
+    this.dirtyActors.clear();
+    this.headDue.clear();
     for (const waiter of this.waiters.splice(0)) waiter.reject(new Error('the artifact store failed to commit'));
     for (const hostDoc of [...this.docs.values()]) this.unload(hostDoc);
   }
