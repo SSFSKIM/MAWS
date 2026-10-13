@@ -159,6 +159,17 @@ describe('type changes (S4 1b)', () => {
 });
 
 describe('the atomic batch (S4 1c)', () => {
+  it('a batch that would leave a tab with more top-level blocks than `blocksPerTab` is refused before any write; one that does not grow it lands', () => {
+    const doc = seedDoc(); // 8 top-level blocks
+    const sv = stateVector(doc);
+    expect(refusal(() => applyEdit(doc, [{ op: 'insert', after: 'h1', markdown: 'One.' }, { op: 'replace_block', id: 'p4', markdown: 'A.\n\nB.' }], { blocksPerTab: 9 }))).toMatchObject({ reason: 'invalid', opIndex: 1 });
+    expect(stateVector(doc)).toEqual(sv);
+    applyEdit(doc, [{ op: 'insert', after: 'h1', markdown: 'One.' }], { blocksPerTab: 9 });
+    expect(order(doc)).toHaveLength(9);
+    applyEdit(doc, [{ op: 'replace_text', block: 'p1', old: 'two sentences', new: 'two clauses' }, { op: 'delete', id: 'p2' }, { op: 'insert', after: 'h1', markdown: 'Two.' }], { blocksPerTab: 8 }); // over the limit already, not growing
+    expect(order(doc)).toHaveLength(9);
+  });
+
   it('a target the human changed after the read refuses the whole batch, naming the block with its current text', () => {
     const host = seedDoc();
     const agent = replica(host);

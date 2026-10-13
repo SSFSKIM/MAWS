@@ -507,7 +507,13 @@ class Planner {
       }
     });
     this.opIndex = -1;
+    const limit = this.options.blocksPerTab;
     for (const [tabId, order] of this.orders) {
+      const before = this.index.tops(tabId).length;
+      if (limit !== undefined && order.length > limit && order.length > before) {
+        this.opIndex = this.orderOp.get(tabId) ?? -1;
+        this.invalid(`tab ${tabId} would hold ${order.length} top-level blocks; a tab takes at most ${limit}`);
+      }
       let match: ContentMatch | null = this.schema.topNodeType.contentMatch;
       for (const key of order) match = match?.matchType(this.current(key)!.type) ?? null;
       if (!match?.validEnd) {

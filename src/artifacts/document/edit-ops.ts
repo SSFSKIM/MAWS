@@ -53,6 +53,11 @@ export interface ApplyOptions {
   carets?: ReadonlyArray<{ blockId: string; pos?: number }>;
   /** Block ids a restore removed since the read: a target among them is refused as `removedByRestore`. */
   restoredAway?: ReadonlySet<string>;
+  /**
+   * At most this many top-level blocks per tab after the batch: a batch that would leave a tab with more, and more than
+   * it had, is refused `invalid` (the tools' limit; a tab already over it may still be edited without growing it).
+   */
+  blocksPerTab?: number;
   /** A thread the batch answers: it must exist; the answer is returned for the tool to post. */
   answering?: string;
   /** The transaction's origin. */
