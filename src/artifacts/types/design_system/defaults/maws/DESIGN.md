@@ -129,7 +129,7 @@ matters, a caption for materials. For a deck: title, content, figures, quote.
 - `layouts/quote.html`: a quoted voice with its attribution.
 - `components/todo.html`: the one action callout, the accent disc beside "To do".
 - `components/status.html`: the only status mark, a status-coloured disc beside its word.
-- `components/table.html`: the stage table, an ink rule under the head and hairlines between rows.
+- `components/table.html`: the stage table, an ink rule over it, a hairline under it, cells ruled by the dialect.
 - `components/document.css`: every document block under `.ds-doc` (headings, lists, quote, table, callouts).
 
 Placeholders are `data-ph="title"`, `subtitle`, `body` and `caption`, plus `figures`, this law's name for the row of

@@ -43,7 +43,8 @@ hairlines: the one shape every official page shares, and the reason it survives 
 ## 1. Palette, with usage rules
 
 - `color.bg` (white) is every page and slide ground.
-- `color.bg.raised` (light grey) is a table's head column or head row, and nothing else.
+- `color.bg.raised` (light grey) is a table's head column in a document and its head row on a slide (the slide
+  dialect paints rows, never cells), and nothing else.
 - `color.text` is all ink: body, headings, rules that bound a table, the signature line.
 - `color.text.muted` (7.0 : 1) is for the letterhead line, the date line, captions and the signer's title.
 - **`color.accent` is the accent role, and it is the ink** (an alias of `color.text`). It is used only reversed: an
@@ -131,7 +132,7 @@ line, slip, the reversed return date. For a packet: title, content, table, decis
 - `layouts/content.html`: a heading over a short list, set in sans.
 - `layouts/table.html`: a ruled table slide, the packet's main form, with a status column.
 - `layouts/decision.html`: a heading and the one reversed "Decision needed" band.
-- `components/fact-table.html`: the ruled label and value table with a grey head column.
+- `components/fact-table.html`: the ruled label and value table, labels in bold sans (grey in documents).
 - `components/action.html`: the one reversed block, "Return by Friday, October 23".
 - `components/status.html`: symbol and word, the only status form.
 - `components/signature.html`: the closing, the signature line, the name and title.
