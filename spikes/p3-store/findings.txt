@@ -1,0 +1,209 @@
+# P3-0 — The store spikes: findings
+
+Parent: docs/doperpowers/plans/2026-10-12-p3-co-work.md, child P3-0 (§5, §4.12), parent pin blob 8474a047 of that file at
+commit c73ba534. A spike: findings, never a merge. The spikes are research/p3-yjs-store.md §8 as amended by the spec's
+§4.12 and §4.2 to §4.5. The code here is throwaway; the parts marked "copy" are meant for P3-A, P3-B and P3-C.
+(Written as .txt, the protocol-probe convention: the harness refuses a subagent's .md write; the coordinator's ruling
+of 2026-10-12.)
+
+Status: S1 in (2026-10-12); S2 and S6 running; S3 to S5 and S7 follow.
+
+## Verdicts
+
+| Spike | Verdict |
+|---|---|
+| S1 | v14 (`@y/y` 14.0.0-rc.28 + `@y/prosemirror` 2.0.0-15, exact pins): every functional gate passes; API churn in `@y/prosemirror` is the one open risk, contained in one module |
+| S2 | pending |
+| S6 | pending |
+| S3 | pending |
+| S4 | pending |
+| S5 | pending |
+| S7 | pending |
+
+## How to run
+
+The spikes have their own package, installed apart from the root:
+`pnpm -C spikes/p3-store install --ignore-workspace`; S1's v14 stack is its own package:
+`pnpm -C spikes/p3-store/s1/v14 install --ignore-workspace`. A worktree without `node_modules` symlinks the main
+checkout's (Electron 44.4.5 and esbuild come from there). Heavy runs go through `/tmp/maws-review/waitload20.sh` and
+`/tmp/maws-review/with-slot.sh`. Every command below runs from the repository root. Run outputs are under each spike's
+`out/` (ignored by `.gitignore:3`; committed with `git add -f`).
+
+## Method
+
+Each spike was run by one worker under the P3-0 executor, who folds its section in here and re-runs the headline
+commands (noted "re-run by the executor"). "Verified" means run in this spike; "source" means code or docs read, not run.
+
+## S1 — Yjs v13 or v14
+
+**Verdict: v14 (`@y/y` 14.0.0-rc.28 with `@y/prosemirror` 2.0.0-15, pinned exactly).** Every functional gate passes;
+the data gate passes (no loss, no corrupt encoding, v14 reads v13 bytes); API stability does not: `@y/prosemirror`'s JS
+API broke twice in September 2026 and is still moving. Judged non-blocking because the API MAWS touches sits in one
+module and the persisted bytes are Yjs's binary format. Confidence: high on function, moderate on maturity.
+
+Method: Node 22 with happy-dom, real Tiptap 3.31.3 editors, replicas wired through y-protocols sync and awareness frames
+via a host hub that logs every update as `{seq, actor, at, bytes}` (the `artifact_updates` shape). No Electron run
+(the DOM input path and IME are S4's).
+
+### 1. Binding in Tiptap 3.31.3 (two editor replicas and an agent replica)
+- v14 26/26 checks, v13 25/25 on the same checks (verified: `node spikes/p3-store/s1/v14/s1-binding.mjs`,
+  `node spikes/p3-store/s1/v13/s1-binding.mjs`; `s1/out/v14-binding.txt`, `v13-binding.txt`): typing and splits sync;
+  paste gets fresh ids and strips foreign ones; `Y.UndoManager` scoped to the binding (A's undo removes only A's edit;
+  undo-all restores the original ids; redo); remote carets; the agent replica's caret from a Node-side relative position
+  renders; an `editing: {blocks}` awareness field reaches the editors.
+- The v14 custom extension is 54 code lines (`s1/v14/collab.mjs`, `YCollaboration`: `syncPlugin`, `yCursorPlugin`,
+  `yUndoPlugin`, undo and redo commands and keys, binding in a microtask). Schema hardening is 75 more lines
+  (`s1/v14/schema.mjs`, adapted from upstream's MIT `yhub-tiptap-demo/src/schema.js`): the four `y-attributed-*` marks,
+  marks allowed on containers, codeBlock admitting them, the `--attributed` variants, guards on TrailingNode, Link and
+  tables. No Tiptap fork.
+- v14 merges one concurrent case better (verified): both replicas offline press Enter at the start of the same
+  paragraph; v13 duplicates the paragraph and its id, v14 gives two empty paragraphs. A concurrent mid-paragraph split at
+  different offsets duplicates the tail on both (a split is "delete tail + insert node").
+
+### 2. UniqueID
+- Ids survive split (the first half keeps the id), paste (fresh ids) and undo on both versions (verified).
+- Pitfall (verified): UniqueID skips only transactions with v13's `y-sync$` meta; v14's binding marks remote changes
+  `y-sync-transaction`, so stock UniqueID on v14 writes ids into remote blocks from every peer. Fix without a fork:
+  `UniqueID.configure({filterTransaction: tr => !isBindingTransaction(tr)})` (`s1/v14/collab.mjs`), and name the extension
+  `collaboration` so UniqueID takes its collaborative path. Tiptap core's `Delete` extension also filters only `y-sync$`
+  (source: `@tiptap/core` dist line 5572): set `coreExtensionOptions.delete.filterTransaction` the same way.
+- The host's id repair stays required on both versions (writers that omit ids, concurrent splits; verified on v13's
+  concurrent-Enter duplicate).
+
+### 3. History from two stored full V2 states, attributed from the per-update log
+Fixture: human and agent edits in one paragraph, a heading level change, a bold format change, a code block's text and
+`language`, a table cell, a new paragraph, deletions.
+
+| | Expectations met | Code block | Attribute change | Format change | Times |
+|---|---|---|---|---|---|
+| v14 `DiffRenderer(prevDoc, nextDoc, {attributions})`, headless and in a read-only editor | 13/13 | yes | yes (`y-attributed-attrs` names `level`, `language`, author, time) | yes (`y-attributed-format`) | yes (`insertAt`/`deleteAt` from the log) |
+| v13 state-pair snapshot, PUD-shaped adapter, stock StarterKit | 8/13 | the whole block disappears (#189) | invisible (#177/#82) | invisible | no |
+| v13 with codeBlock `marks: 'ychange'` | 10/13 | yes (#189 is a schema fix) | invisible | invisible | no |
+
+- Verified: `node spikes/p3-store/s1/v14/s1-history.mjs` and `node spikes/p3-store/s1/v13/s1-history.mjs`
+  (`s1/out/v14-history.*`, `v13-history.*`); the v14 and v13 runs re-run by the executor with the same spans.
+- v14 attributions per update: `Y.createContentIdsFromUpdateV2(update)` → `Y.createContentMapFromContentIds(ids,
+  [insert actor, insertAt], [delete actor, deleteAt])`, merged with `Y.mergeContentMaps`.
+- `doc.check()` valid; rendering leaves both version docs byte-unchanged; history is left by
+  `configureYProsemirror({ytype: live, renderer: null})` and typing afterwards reaches the live doc. Headless render
+  5 ms; versions 793 B and 1,032 B; the window's ContentMap encodes to 313 B.
+- Of the five frozen v13 bugs v14 fixes #177/#82 and #189 (verified); #128 (null PUD) cannot occur (no PUD; source);
+  #72 is a restore question (S3).
+
+### 4. Suggestion mode for an agent edit (v14)
+- 18/19 checks (verified: `node spikes/p3-store/s1/v14/s1-suggest.mjs`; re-run by the executor, 18/19).
+- Topology: the host keeps the base doc and a suggestion doc (`gc:false, isSuggestionDoc:true`); the agent edits its
+  own replica of the suggestion doc; the human's editor shows `DiffRenderer(baseReplica, suggestionReplica,
+  {attributions})` in view mode. Four hunks render attributed to the agent, deletions struck; the owner's typing goes
+  to base; per-hunk accept and reject land in base and the suggestion doc converges; a second live proposal renders;
+  reject-all clears it.
+- The one failure: accepting a text-only range inside an inserted paragraph returns true but leaves pending structs in
+  the reviewer's base replica; accepting by the node range (`from-1 … to+1`) works. Accept buttons pass block ranges.
+- Accepted content keeps the agent's clientID, but the base log credits the accepting port: provenance must map a
+  suggestion doc's clientIDs to the suggester.
+- v13 equivalent (estimate, not built): a fork doc per proposal, a structural diff into a custom overlay, per-hunk Y
+  ops onto base; a home-grown DiffRenderer of about 1.5k to 3k lines, fragile on tables and attributes.
+
+### 5. The Node writer (no DOM)
+- v14 10/10, v13 7/7 (verified: `node spikes/p3-store/s1/v14/s1-writer.mjs`, `s1/v13/s1-writer.mjs`): markdown → PM
+  (`@tiptap/markdown`) → Y → PM → markdown byte-identical to the canonical markdown, ids on every block including table
+  cell paragraphs; `@tiptap/markdown` pads GFM tables, so the fixed point is `serialize(parse(x))`.
+- Agent edits as Y ops from its replica: a multi-hunk text edit, a word edit beside bold, italic, code and link keeping
+  the marks, a section inserted after a heading, a type change keeping the id. Update sizes 82, 235, 157 B (v13 73, 225,
+  149).
+- The v14 replacements (verified):
+
+| v13 | v14 |
+|---|---|
+| `prosemirrorToYXmlFragment` | `ynode.applyDelta(pmnodeToDelta(pmNode))`; a block: `parent.insert(i, [pmnodeToDelta(blockNode)])` |
+| `yXmlFragmentToProseMirrorRootNode` | `ynodeToPmnode(ynode, schema, {renderer?})` (with a renderer, a headless diff for the agent) |
+| `Y.XmlText` delta API | gone: text is inline in the unified `Y.Node`: `insert(i, text, format?)`, `delete(i, n)`, `format(i, n, {bold: {}})`, `setAttr`/`getAttr`, `toDelta()` |
+| change an element's type | a node's `name` is immutable: delete and re-insert under the same id |
+
+### 6. Encoding and storage
+- The one-way rule, run (verified: `node spikes/p3-store/s1/v14/s1-encoding.mjs`, `s1/out/encoding.json`): v14 reads v13
+  V1 and V2 bytes and renders identical PM JSON; a v14 editor bound to a v13 doc writes one normalization update (as
+  CAVEATS says); v13 decodes v14 bytes without throwing but `yXmlFragmentToProseMirrorRootNode` and a v13 Tiptap binding
+  throw (`TypeError … 'right'` in y-tiptap `createChildren`); the stale client writes nothing. Loud, not silent deletion.
+- The same 20k-op keystroke history, V2 state:
+
+| | gc on | gc off | V1 state | Update log | Replay 20k ops | Load |
+|---|---|---|---|---|---|---|
+| v13 | 94.7 KB | 92.7 KB | 224 KB | 558 KB | 250 ms | ~34 ms |
+| v14 | 98.1 KB (+3.6 %) | 97.1 KB | 301 KB (+34 %) | 623 KB (+12 %) | 557 ms | ~31 ms |
+
+- Keystroke cost, 500 blocks in happy-dom (`s1/v14/s1-perf.mjs`, `s1/out/perf.json`): v13 p50 0.42 / p95 0.94 ms; v14
+  p50 0.89 / p95 1.73 ms. A remote edit applied into the editor: v13 1.56 ms, v14 0.85 ms. Bundle, Tiptap external
+  (`s1/out/bundle-size.txt`): v13 41 KB gzip, v14 63 KB gzip.
+
+### 7. Maturity (registry and GitHub, read 2026-10-12)
+- `@y/y`: 14.0.0-16 (2025-12-10) → rc.0 (2026-02-25) → rc.28 (2026-09-29), about 28 rcs in 7 months, weekly March to
+  July, a gap rc.24 (07-15) to rc.25 (09-03). npm `latest` still points at rc.7; `beta` is rc.28. No stated 14.0.0
+  date. MIT.
+- `@y/prosemirror`: 2.0.0-4 (06-03) → -15 (10-11), 11 releases in 4 months. Breaking: -9 (09-07) the
+  AttributionManager→Renderer rename with `@y/y` rc.19 and a new positions API; -12 (09-21) `pmToFragment`/`fragmentToPm`
+  replaced by `ynodeToPmnode`/`pmnodeToDelta`; -15 how implied format attribution renders. 12 open issues, among them
+  #234 (V2 release checklist), #235 (open questions: undo while paused, cursors in suggestion mode), #261 (migration
+  guide), #245 (suggestion misattribution), #263, #272 (RangeError on a remote update), #205. MIT.
+- yjs's open 2026 issues are mostly UndoManager correctness (#811, #806, #809, #794) and affect v13 and v14 alike.
+- Who ships v14: BlockNote 0.55.0 (2026-09-22) on Tiptap 3.31.3 lists `@y/y ^14.0.0-rc.23` and `@y/prosemirror
+  ^2.0.0-6` as optional peers with a `@blocknote/core/y` entry (registry; source not read). Tiptap's Collaboration still
+  pins yjs ^13.
+
+### Verdict reasoning
+Gates: binding, UniqueID, undo and cursors pass; DiffRenderer with log-built attributions passes 13/13 where v13 does
+8 to 10; suggestion mode passes with one range pitfall; the Node writer passes; data passes; API stability fails
+literally. v14 still, because (1) the one-way risk is about data and the data passes; (2) the API MAWS touches is small
+(`syncPlugin`, `configureYProsemirror`, `DiffRenderer`, the ContentMap helpers, `pmnodeToDelta`/`ynodeToPmnode`, the
+mark names) and fits one module, so a re-pin edits that module, not documents; (3) a shipped editor runs this stack on
+the same Tiptap; (4) v13's gaps land on §2 item 4, the differentiator (attribute and format changes invisible, no
+times, a home-built suggestion engine). What would flip it: the architect reading "an API expected to break" as
+blocking; a v14-only failure in S3, S4 or S7 (IME under `y-sync-transaction`, large-document first sync); a wish for zero
+dependency churn before P4.
+
+Executor's note on the residual risk: the binary encoding is stable, but how `@y/prosemirror` maps ProseMirror into
+`Y.Node`s (mark storage keys such as `name--<hash>` for overlapping marks, the attributed variants) is binding-level
+and could change between prereleases; that would be a content normalization of stored documents, not an unreadable
+store. P3-A should keep S1's suite as the re-pin gate and store a binding-version tag per document.
+
+### Pitfalls (verified unless marked)
+1. UniqueID on v14 needs `filterTransaction`; filter core `Delete` too (source).
+2. Undo and redo commands set `tr.setMeta('preventDispatch', true)`, else "Applying a mismatched transaction".
+3. Bind after the EditorView constructor returns (a microtask): Tiptap's dispatch needs `editor.view`.
+4. A mark's `excludes` changes its Y storage key (`Code.extend({excludes})` stored `code--<hash>`); overlapping marks
+   (the `comment` mark) are stored as `name--<contenthash>` (source: CAVEATS). Writers produce marks through
+   `pmnodeToDelta` with the editor's exact schema: schema parity is also key parity.
+5. The `--attributed` variants carry every canonical attribute including the id; add them to UniqueID's `types`.
+6. Without a renderer, a remote node-attribute change logs a one-time `y-attributed-attrs … swallowed` warning; content
+   unaffected (`s1/v14/probe-attrs-warning.mjs`).
+7. Partial accept inside an inserted block leaves pending structs; accept by block range.
+8. An accepted suggestion is credited in the log to the accepting port; credit the suggester by clientID.
+9. `@y/prosemirror` declares `@y/y` a dependency, not a peer: dedupe to one copy (the guard is `__ $YJS14$ __`), pin
+   exact, install by version (the `latest` tags are stale).
+10. A v13 client must never open a P3 document (it throws).
+11. Concurrent mid-paragraph splits duplicate the tail on both versions.
+12. Upstream docs lag: `@y/y`'s README still documents v13 types.
+13. Awareness timers keep a Node process alive; scripts exit explicitly.
+
+### Copy
+- P3-A: `s1/lib/link.mjs` (the hub logging `{seq, actor, at, bytes}` per port); the attribution build in
+  `s1/v14/s1-history.mjs`; provenance persisted as encoded `Y.ContentMap`s (`Y.encodeContentMap`/`decodeContentMap`:
+  (client, clock range) → insert or delete actor and time; 313 B for the window above); the suggestion-doc topology and
+  its clientID crediting (`s1/v14/s1-suggest.mjs`).
+- P3-B: `s1/v14/collab.mjs`, `s1/v14/schema.mjs`, the headless diff via `ynodeToPmnode(…, {renderer})`, the writer mapping
+  in `s1/v14/s1-writer.mjs`.
+
+### Not tested in S1
+IME and the real DOM input path (S4); clipboard and drag; Electron; large-document first sync and scale (S7);
+artifact-wide restore (S3); comment marks through edits (S5); `SnapshotRenderer` (not needed for state-pair history);
+whether 2.0.0 final needs a normalization pass over 2.0.0-15 documents.
+
+### Questions for the architect (S1)
+1. Accept v14 with exact pins (a pnpm override forcing one `@y/y`), an upgrade being a deliberate re-pin with S1's suite
+   re-run? Recommended: yes.
+2. Provenance as ContentMaps rather than custom `(clientID, clock range)` rows? Recommended: yes; X24/X29's `provenance`
+   row shape becomes `(docId, seq, at, actor, contentMap bytes)` or a merged map per bucket.
+3. Suggestion docs: every agent edit a suggestion, or opt-in? Recommended: opt-in ("propose"), direct edits stay the
+   default as §2 item 2 assumes; a product call for the owner (a suggestion doc is gc-off and grows).
+4. Vendor `@y/prosemirror` at a pinned commit? Recommended only if upstream has not fixed the partial-accept gap before
+   P3-B lands.
