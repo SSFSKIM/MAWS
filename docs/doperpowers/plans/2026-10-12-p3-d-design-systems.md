@@ -605,7 +605,7 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - **The sheet's swatches** are bg, bg-raised, text, text-muted and accent. They are drawn from the resolved values `useDesignSystem` gives, not from a full `DesignSystemScope`. A scope would also load a system's faces (3.5 MB for `official`), which the CSP blocks until A's M7 (entry 23). `DesignSystemView` gains an optional `origin`, additive to X28.
     - **Seeding.** Each default is created with its files in one transaction, through A's create with `initial(doc)`. Assets cannot join that transaction, so a seeding record in the store's meta (`designSystems.seeding`, written through A's `storage.setMeta`) makes seeding resumable. An interrupted run finishes the remaining defaults at the next start, and a failed asset upload is logged and retried at the next start.
     - **The e2e case** replays a journal derived from E1's recorded blocking ask, with only the questions and answers rewritten.
-    - **Residue.** A system the owner picks and that is deleted before Submit is still sent by id. The agent's next call is refused, naming the missing system, so this goes to the tech-debt tracker.
+    - **Residue.** A system the owner picks and that is deleted before Submit is still sent by id. The chain skips a deleted id (D9), so the worst case is an agent told about a system that no longer exists. This goes to the tech-debt tracker.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
