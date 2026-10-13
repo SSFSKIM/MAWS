@@ -308,6 +308,30 @@ describe('resolveDsVars (the export helper)', () => {
     expect(resolveDsVars('p { color: var(--ds-color-accent); border: var(--ds-brand-x) solid var(--ds-color-text); }', tokens, 'deck', overrides)).toBe('p { color: #123456; border: 3px solid #1f1e1b; }');
     expect(resolveDsVars('p { color: var(--ds-nope, var(--ds-color-accent)); }', tokens, 'document', overrides)).toBe('p { color: #123456; }');
   });
+
+  // M6 fix wave 1, I1 (the review's probe): an override is resolved against the system's values with the overrides on
+  // top, following chains, so the output is literal; one in a cycle or with a reference that resolves to nothing is
+  // dropped, and its name keeps the system's value.
+  it('resolves references inside an override to literals, through chains and fallbacks', () => {
+    const css = 'p { color: var(--ds-color-accent); }';
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-color-text)' })).toBe('p { color: #1f1e1b; }');
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-brand)', '--ds-brand': 'var(--ds-color-status-ok)' })).toBe('p { color: #1f8f55; }');
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-nope, var(--ds-color-text))' })).toBe('p { color: #1f1e1b; }');
+    expect(resolveDsVars('p { box-shadow: var(--ds-x); }', tokens, 'document', { '--ds-x': '0 1px 2px var(--ds-color-text)' })).toBe('p { box-shadow: 0 1px 2px #1f1e1b; }');
+    // an override referring to another override sees the override, not the system's value
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-color-text)', '--ds-color-text': '#010203' })).toBe('p { color: #010203; }');
+  });
+
+  it('drops an override in a cycle or with an unresolvable reference, and the name keeps the system’s value', () => {
+    const css = 'p { color: var(--ds-color-accent); border-color: var(--ds-color-border); }';
+    const plain = resolveDsVars(css, tokens, 'document');
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-color-border)', '--ds-color-border': 'var(--ds-color-accent)' })).toBe(plain);
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-color-accent)' })).toBe(plain);
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--brand)' })).toBe(plain);
+    expect(resolveDsVars(css, tokens, 'document', { '--ds-color-accent': 'var(--ds-nope)' })).toBe(plain);
+    // a reference to a dropped override reads the system's value
+    expect(resolveDsVars('p { color: var(--ds-x); }', tokens, 'document', { '--ds-x': 'var(--ds-color-accent)', '--ds-color-accent': 'var(--brand)' })).toBe('p { color: #c9663f; }');
+  });
 });
 
 describe('lifetimes (fix wave 1)', () => {
