@@ -57,7 +57,9 @@
     "e2e:browser-chrome": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/browser-chrome.spec.ts",
     "e2e:p1-live": "MAWS_HARNESS=1 electron-vite build && playwright test e2e/p1-live.spec.ts",
     "e2e:document": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/document-editor.spec.ts",
-    "e2e:document-app": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document.spec.ts"
+    "e2e:document-app": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document.spec.ts",
+    "e2e:document-live": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document-live.spec.ts",
+    "e2e:document-scale": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts"
   },
   "dependencies": {
     "node-pty": "1.1.0",
