@@ -5,7 +5,7 @@
 // host can neither be fed nor emit anything outside X2. Nothing is thrown across the port: failures are `res` errors.
 import type { MessagePortMain } from 'electron';
 import { ipcError, IpcErrorSchema, type IpcError } from '../ipc/errors';
-import { HostHelloSchema, HostReadySchema, HostRequestSchema, type HostMessage, type HostRequest } from '../ipc/host-protocol';
+import { HostDocSchema, HostHelloSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostMessage, type HostRequest } from '../ipc/host-protocol';
 import {
   commands,
   HOST_EVENTS,
@@ -24,7 +24,8 @@ export type HostOn = <N extends CommandName>(name: N, handler: (input: CommandIn
 export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
 // E10: a register is handed the runtime's client hooks too (the engine host's connect burst, its bridges' fail-fast)
 // E4c: and the client's going (the browser bridge settles its pending requests on it)
-export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */>;
+// P3-A M4: and the document ports main posts on the parent port (`onDocPort`)
+export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */>;
 export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
@@ -135,7 +136,26 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
 
   const hasClient = () => port !== null && ready; // E10
   const onConnect = (hook: () => void) => void connectHooks.push(hook); // E10
-  register(on, emit, { onConnect, hasClient, onClientGone /* E4c */ });
+  // P3-A M4 start: one handler for the document ports, installed by the register
+  let docHandler: DocPortHandler | null = null;
+  const onDocPort = (handler: DocPortHandler) => {
+    if (docHandler) throw new Error('a document port handler is already installed');
+    docHandler = handler;
+  };
+  const docPort = (message: HostDoc, docPortEnd: MessagePortMain) => {
+    if (!docHandler) {
+      console.error(`[host] closed the port of document channel ${message.channel}: this host serves no documents`);
+      return docPortEnd.close();
+    }
+    try {
+      docHandler(message, docPortEnd);
+    } catch (error) {
+      console.error(`[host] closed the port of document channel ${message.channel}: its handler failed`, error);
+      docPortEnd.close();
+    }
+  };
+  // P3-A M4 end
+  register(on, emit, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */ });
 
   // E10 start
   const setReady = () => {
@@ -193,6 +213,8 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     onConnect,
     // E10 end
     onClientGone, // E4c
+    onDocPort, // P3-A M4
+    docPort, // P3-A M4
   };
 
   async function answer({ id, name, input }: HostRequest): Promise<HostMessage> {
@@ -222,20 +244,36 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
 // with main's hello is served at once; its events flow from main's `{t: 'ready'}` on that port (E10).
 export function runHost(hostVersion: string, register: HostRegister): void {
   const runtime = createHostRuntime(register);
-  let served = false;
-  process.parentPort.on('message', ({ data, ports }) => {
-    if (!HostHelloSchema.safeParse(data).success || ports.length !== 1) {
-      console.error('[host] ignored a parent-port message that is not a hello with one port');
-      return;
-    }
-    if (served) {
-      console.error('[host] ignored a second hello');
-      return;
-    }
-    served = true;
-    runtime.serve(ports[0]);
-  });
+  process.parentPort.on('message', parentPortListener(runtime));
   console.log(`[host] ${hostVersion} pid ${process.pid} waiting for main`);
+}
+
+// What a utility host does with a parent-port message: the first `hello` serves its port; P3-A M4: a `doc` message's
+// one port goes to the document port handler. Every port of a message it cannot use is closed, so no document channel is
+// left open with nobody on this end. Exported for its tests (`process.parentPort` exists only in a utility process).
+export function parentPortListener(runtime: Pick<HostRuntime, 'serve' | 'docPort'>): (event: { data: unknown; ports: MessagePortMain[] }) => void {
+  let served = false;
+  return ({ data, ports }) => {
+    if (HostHelloSchema.safeParse(data).success && ports.length === 1) {
+      if (served) {
+        console.error('[host] ignored a second hello');
+        return;
+      }
+      served = true;
+      runtime.serve(ports[0]);
+      return;
+    }
+    // P3-A M4 start
+    const doc = HostDocSchema.safeParse(data);
+    if (doc.success && ports.length === 1) return runtime.docPort(doc.data, ports[0]);
+    if (doc.success || (typeof data === 'object' && data !== null && (data as { t?: unknown }).t === 'doc')) {
+      console.error('[host] closed the ports of a doc message that is not one well-formed document with one port');
+      for (const port of ports) port.close();
+      return;
+    }
+    // P3-A M4 end
+    console.error('[host] ignored a parent-port message that is not a hello with one port');
+  };
 }
 
 // The answer to a host's `<namespace>.ping`.
@@ -250,3 +288,14 @@ export interface HostRuntime {
   onClientGone(hook: () => void): () => void;
 }
 // E4c end
+
+// P3-A M4 start (docs/doperpowers/plans/2026-10-12-p3-a-store.md, Decision Log 13): a document's port as main posts it on
+// the parent port, and the handler the engine host's register installs for it (`onDocPort`, once). A handler that
+// throws costs that port only: the runtime closes it. Detached mode (M5) reaches the same handler through its socket
+// channels.
+export type DocPortHandler = (message: HostDoc, port: MessagePortMain) => void;
+export interface HostRuntime {
+  onDocPort(handler: DocPortHandler): void;
+  docPort(message: HostDoc, port: MessagePortMain): void;
+}
+// P3-A M4 end

@@ -584,6 +584,81 @@ describe('PortProvider', () => {
     expect(a.awareness.getLocalState()).toEqual({ user: { name: 'You' } });
   });
 
+  // M4 (Decision Log 31c, parent 37's advisory): a renderer replica's cursor awareness goes out at most once per ~50 ms,
+  // the last state winning, so one frame per keystroke does not cost every other window a relay and a render.
+  describe('the awareness throttle', () => {
+    const awarenessFrames = (end: MemoryPort) => end.frames().filter((frame) => frame.type === 'awareness');
+    const stateIn = (frame: Frame, clientID: number) => {
+      const peer = new PortProvider(newDoc(), { log: quiet });
+      const [a, b] = MemoryPort.pair();
+      peer.connect(a);
+      b.postMessage(encodeFrame(frame));
+      a.deliver();
+      const state = peer.awareness.getStates().get(clientID);
+      peer.destroy();
+      return state;
+    };
+
+    it('sends the first change at once and coalesces the rest of the window into one frame carrying the latest state', () => {
+      vi.useFakeTimers();
+      try {
+        const [replicaEnd, hostEnd] = MemoryPort.pair();
+        const provider = new PortProvider(newDoc(), { log: quiet, awarenessThrottleMs: 50 });
+        provider.connect(replicaEnd);
+        hostEnd.inbox.splice(0);
+        provider.awareness.setLocalStateField('cursor', 1);
+        expect(awarenessFrames(hostEnd)).toHaveLength(1);
+        provider.awareness.setLocalStateField('cursor', 2);
+        provider.awareness.setLocalStateField('cursor', 3);
+        expect(awarenessFrames(hostEnd)).toHaveLength(1);
+        vi.advanceTimersByTime(50);
+        const frames = awarenessFrames(hostEnd);
+        expect(frames).toHaveLength(2);
+        expect(stateIn(frames[1], provider.doc.clientID)).toEqual({ cursor: 3 });
+        vi.advanceTimersByTime(200); // nothing pending: no frame
+        expect(awarenessFrames(hostEnd)).toHaveLength(2);
+        provider.awareness.setLocalStateField('cursor', 4); // a change after a quiet window goes at once
+        expect(awarenessFrames(hostEnd)).toHaveLength(3);
+        provider.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('drops a pending trailing frame at disconnect, the next connect sending the local state itself', () => {
+      vi.useFakeTimers();
+      try {
+        const [replicaEnd, hostEnd] = MemoryPort.pair();
+        const provider = new PortProvider(newDoc(), { log: quiet, awarenessThrottleMs: 50 });
+        provider.connect(replicaEnd);
+        provider.awareness.setLocalStateField('cursor', 1);
+        provider.awareness.setLocalStateField('cursor', 2);
+        hostEnd.close();
+        vi.advanceTimersByTime(100);
+        const [replicaEnd2, hostEnd2] = MemoryPort.pair();
+        provider.connect(replicaEnd2);
+        const frames = awarenessFrames(hostEnd2);
+        expect(frames).toHaveLength(1);
+        expect(stateIn(frames[0], provider.doc.clientID)).toEqual({ cursor: 2 });
+        vi.advanceTimersByTime(100);
+        expect(awarenessFrames(hostEnd2)).toHaveLength(1);
+        provider.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sends every change at once without the option (an agent replica in the host)', () => {
+      const [replicaEnd, hostEnd] = MemoryPort.pair();
+      const provider = new PortProvider(newDoc(), { log: quiet });
+      provider.connect(replicaEnd);
+      hostEnd.inbox.splice(0);
+      for (let i = 0; i < 3; i++) provider.awareness.setLocalStateField('cursor', i);
+      expect(awarenessFrames(hostEnd)).toHaveLength(3);
+      provider.destroy();
+    });
+  });
+
   it('notifies subscribers of every state change until they unsubscribe, and stops listening on destroy', () => {
     const doc = newDoc();
     const provider = new PortProvider(doc, { log: quiet });

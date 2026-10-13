@@ -880,6 +880,7 @@ function toArtifact(row: EntityRow): Artifact {
     pinned: row.pinned === 1,
     ...(row.designSystemId === null ? {} : { designSystemId: row.designSystemId }),
     ...(row.linkedPath === null ? {} : { linkedPath: row.linkedPath }),
+    agentEditsAsSuggestions: row.agentEditsAsSuggestions === 1,
   };
 }
 

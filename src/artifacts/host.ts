@@ -99,19 +99,28 @@ export interface KindAdapter {
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
 }
 
+// What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
+// reconnecting, `readOnly` is read-only): the provider's SaveState, and whether the store is read-only (a newer app
+// wrote it, Decision Log 12), in which case the host refuses every write.
+export interface DocumentState extends SaveState {
+  readOnly: boolean;
+}
+
 // An open document as an editor holds it: a replica kept in sync with the host over a port, reconnecting by itself.
 export interface DocumentHandle {
   readonly doc: Doc;
   readonly awareness: Awareness;
-  state(): SaveState;
-  subscribe(listener: (state: SaveState) => void): () => void;
+  state(): DocumentState;
+  subscribe(listener: (state: DocumentState) => void): () => void;
   // A restore this replica did not witness landed (Decision Log 16): drop undo history across it, say "Restored from …".
   onRestored(listener: (restored: Restored) => void): () => void;
+  // The composition hold (Decision Log 20, 25k): set at composition start, cleared when composing stops.
+  holdRemote(on: boolean): void;
   close(): void;
 }
 
 export interface ArtifactHost {
-  open(artifactId: string): Promise<DocumentHandle>;
+  open(artifactId: string): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   assetUrl(artifactId: string, ref: string): string;
   export(artifactId: string, format: string, version?: number): Promise<{ path: string }>;
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
