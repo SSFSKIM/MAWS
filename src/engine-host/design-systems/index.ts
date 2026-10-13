@@ -6,7 +6,7 @@
 import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { createDesignSystemAdapter } from '@artifacts/design-system/model';
 import { registerMirrorWriter } from '@artifacts/library/mirror';
-import { loadDefaultAssets } from '@artifacts/types/design_system/default-assets';
+import { loadBundledAssets } from './assets';
 import type { Documents } from '../documents';
 import { DesignSystemChain } from './chain';
 import { designSystemContext } from './context';
@@ -26,7 +26,7 @@ export interface DesignSystemsDeps {
   loadAssets?: SeedDeps['loadAssets'];
 }
 
-export function registerDesignSystems({ documents, log = (line) => console.error(`[design-systems] ${line}`), loadAssets = loadDefaultAssets }: DesignSystemsDeps): DesignSystems {
+export function registerDesignSystems({ documents, log = (line) => console.error(`[design-systems] ${line}`), loadAssets = loadBundledAssets }: DesignSystemsDeps): DesignSystems {
   const unregisterMirror = registerMirrorWriter('design_system', designSystemMirrorWriter);
   if (!documents) return { chain: null, seeded: Promise.resolve(), close: unregisterMirror };
   const { store, service } = documents;

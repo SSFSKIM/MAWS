@@ -1,11 +1,12 @@
 // Design systems in utility mode (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md; `pnpm e2e:design-systems`).
-// M6's first cases, through A's store and L's library on a scratch instance: a fresh store is seeded with the built-in
+// It reads the host's store file once (`pnpm e2e:design-systems` silences node:sqlite's ExperimentalWarning). M6's first cases, through A's store and L's library on a scratch instance: a fresh store is seeded with the built-in
 // systems, which open from the library as the Design System page in an artifact tab (L's registry); and the owner's
 // default chosen in Settings › Artifacts reaches the engine host (main's `artifacts.setDefaults`), so a document that
 // names no system is pinned to it when a version is written (Acceptance 12 over the settings). M7 adds the rest of the
 // group (Acceptance 9 to 14).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 
@@ -54,6 +55,16 @@ async function ready(): Promise<Page> {
 test('a fresh store holds the built-in systems, and one opens from the library as the Design System page', async () => {
   test.setTimeout(90_000);
   const page = await ready();
+  // `official` is seeded with its bundled faces, read from the build beside the engine-host chunk
+  const official = (await systems(page)).find((s) => s.title === 'Official')!;
+  const db = new DatabaseSync(join(launch!.userData, 'artifacts', 'store.sqlite'), { readOnly: true });
+  try {
+    const assets = db.prepare('SELECT name, size FROM artifact_assets WHERE artifactId = ? ORDER BY name').all(official.id) as { name: string; size: number }[];
+    expect(assets.map((a) => a.name)).toEqual(['NotoSerifKR-Bold-full.woff2', 'NotoSerifKR-Regular-full.woff2', 'OFL.txt']);
+    for (const asset of assets) expect(asset.size, asset.name).toBeGreaterThan(1000);
+  } finally {
+    db.close();
+  }
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   const library = page.locator('[data-library]');
   for (const title of BUILT_IN) await expect(library.getByRole('article', { name: title, exact: true })).toBeVisible({ timeout: 15_000 });
