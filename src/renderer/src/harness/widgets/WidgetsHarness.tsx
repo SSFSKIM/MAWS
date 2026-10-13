@@ -53,7 +53,7 @@ function RoutePane({ appSessionId }: { appSessionId: AppSessionId }) {
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   const [state] = useState(() => sessionInfoTool.createState({ appSessionId, session: record, instanceId: 'session-info:harness', params: undefined }));
   if (!record) return null;
-  const ctx: PanelToolContext = { appSessionId, session: record, status, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool };
+  const ctx: PanelToolContext = { appSessionId, session: record, status, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool, editorHost: { surface: 'panel', tabId: 'session-info:harness' } };
   const Info = sessionInfoTool.render;
   return (
     <aside className="flex min-w-0 flex-col gap-3">

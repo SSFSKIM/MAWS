@@ -28,6 +28,7 @@ import { useSettings } from '../../stores/settings';
 import { useHarnessTheme } from '../terminal/useHarnessTheme';
 import type { FakeSessionId, PanelHarnessApi } from './api';
 import { childProbes, childTranscriptTool } from './childTranscriptTool';
+import { editorProbe, editorTool } from './editorTool'; // P3-G
 import { FAKE_IDS, FAKE_RECORDS, fakeId, seedFakeSessions } from './fakeSessions';
 import { stubProbe, stubTool } from './stubTool';
 import { summaryProbes } from './summaryProbes';
@@ -63,6 +64,7 @@ function registerHarnessTools(): void {
     stubTool('harness-single', { title: 'Single', multiInstance: false, menu: false }), // C11: the single-instance probe, in place of Session info's stand-in (C11's real tool, registered above)
     stubTool('log', { title: 'Log', menu: false, pinnable: false }), // the transient case
     childTranscriptTool, // harness-only: C6's child transcript inside the region (R7, M4)
+    editorTool, // P3-G (M3): harness-only, registers a full X32 registration for the header's e2e
   ];
   for (const tool of tools) {
     if (disposers.has(tool.id) || panelHost.tools().some((t) => t.id === tool.id)) continue; // a real tool of that id wins
@@ -178,6 +180,7 @@ const api: PanelHarnessApi = {
     }),
   ...summaryProbes, // M2: setSession, setStatus, setDigest, loadTranscript, transcript
   child: childProbes, // M4: R7
+  editor: editorProbe, // P3-G (M3)
   // C9 start
   async ready() {
     const adopted = await (hydration ?? Promise.resolve([]));

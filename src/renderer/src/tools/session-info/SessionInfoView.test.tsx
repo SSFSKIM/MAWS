@@ -68,6 +68,7 @@ afterEach(() => {
 
 const ctxOf = (appSessionId: AppSessionId | null, visible = true): PanelToolContext => ({
   appSessionId, session: appSessionId ? record : null, status: null, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
+  editorHost: { surface: 'panel', tabId: 'session-info:test' },
 });
 const mount = (ctx: PanelToolContext) => {
   const View = sessionInfoTool.render;

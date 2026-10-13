@@ -1159,3 +1159,73 @@ test.describe('the floating session card (P3-G)', () => {
     });
   });
 });
+
+// ---- P3-G: the panel header and the editor host contract (the P3-G execution document, M3; acceptance 9 and 10) ---------
+
+test.describe('the panel header and X32 (P3-G)', () => {
+  test.use({ mawsEnv: HARNESS_ENV });
+
+  test('the header shows a tool’s title, and an editor’s registration with its handlers, updates, disposal and closeGuard', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const header = panel.region.locator('[data-editor-header]');
+    const title = header.locator('[data-header-title]');
+    const invoked = () => panel.page.evaluate(() => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.invoked());
+    const setEditor = (patch: Parameters<PanelHarnessApi['editor']['set']>[0]) =>
+      panel.page.evaluate((patch) => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.set(patch), patch);
+
+    await test.step('the summary, then a tool that registers nothing, keep their titles and the region’s controls', async () => {
+      await expect(title).toHaveText('Session overview');
+      await panel.call('addTool', 'harness-stub');
+      await expect(title).toHaveText('Stub');
+      for (const name of ['Float session over panel', 'Maximize right panel', 'Hide right panel']) await expect(header.getByRole('button', { name })).toBeVisible();
+    });
+
+    const editor = await panel.call('addTool', 'harness-editor');
+    await test.step('acceptance 9: the registration’s breadcrumb, saved state, count, actions and Export, each invoking its handler', async () => {
+      await panel.call('maximize', true); // room for the whole left side
+      await expect(title).toHaveText('Q3 brief');
+      await expect(header.locator('[data-header-breadcrumb]')).toHaveText('Docs/Planning/');
+      await expect(header.locator('[data-header-breadcrumb]')).toBeVisible();
+      await expect(header.getByText('Saving…')).toBeVisible();
+      await header.getByRole('button', { name: '3 open comments' }).click();
+      await header.getByRole('button', { name: 'Version history' }).click();
+      await header.getByRole('button', { name: 'Open in tab' }).click();
+      await header.getByRole('button', { name: 'Export' }).click();
+      await expect(panel.page.getByRole('menuitem')).toHaveText(['PDF', 'Word document']);
+      await panel.page.getByRole('menuitem', { name: 'PDF' }).click();
+      expect(await invoked()).toEqual(['comments', 'history', 'open-in-tab', 'export:pdf']);
+    });
+
+    await test.step('acceptance 9: an update to saved shows "All changes saved"; disposal returns the plain title', async () => {
+      await setEditor({ saved: 'saved' });
+      await expect(header.getByText('All changes saved')).toBeVisible();
+      await setEditor({ registered: false });
+      await expect(title).toHaveText('Editor');
+      await expect(header.getByText('All changes saved')).toHaveCount(0);
+      await expect(header.getByRole('button', { name: 'Export' })).toHaveCount(0);
+      await setEditor({ registered: true });
+      await expect(title).toHaveText('Q3 brief');
+    });
+
+    await test.step('the header at the panel’s narrowest: the left side truncates, the right side stays whole', async () => {
+      await panel.call('setWidth', 280); // restored from maximized too
+      await expect(header.getByRole('button', { name: 'Hide right panel' })).toBeInViewport();
+      const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(overflow, 'nothing spills past the header').toBeLessThanOrEqual(0);
+      await panel.call('setWidth', 380);
+    });
+
+    await test.step('acceptance 9: a closeGuard answering false keeps the tab open', async () => {
+      await setEditor({ allowClose: false });
+      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      expect(await panel.call('closeTab', editor), 'the guard vetoes').toBe(false);
+      expect(await panel.ids()).toContain(editor);
+      await expect(title).toHaveText('Q3 brief');
+      await setEditor({ allowClose: true });
+      await panel.tab(editor).getByRole('button', { name: 'Close Editor' }).click();
+      await expect.poll(() => panel.ids()).not.toContain(editor);
+      await expect(title).toHaveText('Stub');
+    });
+    panel.expectQuietConsole();
+  });
+});

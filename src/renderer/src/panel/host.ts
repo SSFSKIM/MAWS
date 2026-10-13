@@ -15,6 +15,7 @@ import { currentTabRetention } from '../keymap/actions-runtime';
 import { pinSelection, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
+import { askEditorHostClose, clearEditorHost } from './editor-host'; // P3-G
 import type { PanelHostProps } from './host-slot';
 import type { PanelTool, PanelToolInit } from './tool';
 
@@ -131,6 +132,7 @@ function disposeInstance(tabId: string): void {
   } catch (error) {
     console.error(`[panel] ${instance.tool.id} dispose failed`, error);
   }
+  clearEditorHost({ surface: 'panel', tabId }); // P3-G: a registration made outside React goes with its instance
   usePanelHost.setState((s) => {
     const titles = { ...s.titles };
     const focus = { ...s.focus };
@@ -140,6 +142,17 @@ function disposeInstance(tabId: string): void {
     closing.delete(tabId);
     return { titles, focus, closing, version: s.version + 1 };
   });
+}
+
+// The strip's label for a tab, which the header shows too for a tool that registers nothing (P3-G §D2.3): the tool's
+// title (a placeholder's tool id) and its `setTitle` suffix. A tab whose tool was unregistered while its veto kept it
+// reads the declaration it was created under.
+export function useTabLabel(tab: PanelTabRef): { tool: AnyTool | undefined; title: string; suffix: string | null } {
+  const registered = usePanelHost((s) => s.tools.get(tab.toolId));
+  const created = usePanelHost((s) => (s.version >= 0 ? instanceOf(tab.id)?.tool : undefined));
+  const tool = registered ?? created;
+  const suffix = usePanelHost((s) => s.titles[tab.id] ?? null);
+  return { tool, title: tool?.title ?? tab.toolId, suffix };
 }
 
 export function setTitle(tabId: string, suffix: string | null): void {
@@ -507,7 +520,9 @@ export const panelHost = {
     const closing = (async () => {
       let allowed = false;
       try {
-        allowed = await instance.tool.beforeClose(instance.state);
+        // P3-G (§D2.3): an editor's X32 closeGuard first; its veto stops before the tool is asked.
+        const editor = askEditorHostClose({ surface: 'panel', tabId });
+        allowed = (editor === null || (await editor)) && (await instance.tool.beforeClose(instance.state));
       } catch (error) {
         console.error(`[panel] ${instance.tool.id} beforeClose failed`, error);
       }

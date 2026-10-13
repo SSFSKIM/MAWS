@@ -13,6 +13,7 @@ import { useSummary } from '../stores/summary';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { resetPanelHost, shownSession } from '../panel/host';
+import { resetEditorHosts } from '../panel/editor-host'; // P3-G
 import { PanelHost } from '../panel/PanelHost';
 import type { PanelHostProps } from '../panel/host-slot';
 import type { PanelTool, PanelToolInit } from '../panel/tool';
@@ -143,6 +144,7 @@ export function spyLayout() {
 
 export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
   resetPanelHost();
+  resetEditorHosts(); // P3-G
   onChangeCalls.splice(0);
   useLayout.setState({
     ...ORIGINAL,

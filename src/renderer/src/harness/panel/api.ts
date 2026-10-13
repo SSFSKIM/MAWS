@@ -16,6 +16,19 @@ export interface PanelHarnessStubProbe {
   unregister(): void; // runs the registration's disposer
 }
 
+// P3-G (M3): the `harness-editor` tool's X32 registration, as `editor.set` changes it, and what the header invoked
+// (`history`, `open-in-tab`, `comments`, `export:pdf`, `export:docx`, in call order).
+export interface PanelHarnessEditorView {
+  registered: boolean; // false: the body renders without registering, so the header shows the tool's plain title
+  saved: 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'readonly' | null;
+  unresolved: number;
+  allowClose: boolean; // the registration's closeGuard answer
+}
+export interface PanelHarnessEditorProbe {
+  set(patch: Partial<PanelHarnessEditorView>): void;
+  invoked(): string[];
+}
+
 export interface PanelHarnessTab {
   id: string;
   toolId: string;
@@ -75,6 +88,7 @@ export interface PanelHarnessApi {
   // transcript over the loaded session's first child. release(n) steps the parent's player n events and resolves, two
   // frames later, with the child's row count; expandAll() expands the child's entry, then two frames.
   child: { release(n: number): Promise<number>; expandAll(): Promise<void>; metrics(): PanelChildMetrics };
+  editor: PanelHarnessEditorProbe; // P3-G (M3): the harness-editor tool's registration
   setWidth(px: 280 | 380 | 640): void; // the panel's width through C5's setPanel (restored and shown); C5's clamp applies
   collapseSidebar(on: boolean): void; // C5's sidebar column (the page's debug strip), so 640 renders as set in a window under 1420 px
   // C9 start: C9's page API, kept by the stand-in fold

@@ -9,6 +9,8 @@ import { useSlot } from '../app/slots';
 import { useChordHint } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
+import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope } from '../panel/editor-host'; // P3-G
+import { EditorHeader } from '../panel/PanelHeader'; // P3-G
 import { SessionPane } from '../session/SessionPane';
 import { cardSession } from '../shell/floating'; // P3-G
 import { useLayout } from '../stores/layout';
@@ -61,10 +63,32 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
         className="relative min-h-0 min-w-0 overflow-hidden"
         style={{ gridRow: 3, gridColumn: column }}
       >
-        {active ? <TabContent key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
+        {active ? <TabBody key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
       </div>
     </section>
   );
+}
+
+// P3-G (§D2.4, X32): the tab's body renders in its main-tab scope, and a body that registers there gets the pane
+// header's row above it (no region controls). The wrapper is always drawn, so a registration arriving never remounts the
+// body; with none, the row is absent and the content fills the panel as before.
+function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
+  const scope: EditorHostScope = { surface: 'main', tabId: tab.id };
+  return (
+    <EditorHostScopeContext.Provider value={scope}>
+      <div className="flex h-full min-h-0 flex-col">
+        <TabHeader scope={scope} />
+        <div className="relative min-h-0 flex-1">
+          <TabContent tab={tab} paneIndex={paneIndex} />
+        </div>
+      </div>
+    </EditorHostScopeContext.Provider>
+  );
+}
+
+function TabHeader({ scope }: { scope: EditorHostScope }) {
+  const registration = useEditorHostRegistration(scope);
+  return registration && <EditorHeader title={registration.title} registration={registration} />;
 }
 
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {

@@ -6,6 +6,7 @@ import type { ComponentType } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import type { EditorHostScope } from './editor-host';
 import type { panelHost } from './host';
 
 export interface PanelToolInit<P = void> {
@@ -28,6 +29,7 @@ export interface PanelToolContext {
   setTitle(suffix: string | null): void; // "Terminal · claude"
   close(): void; // panelHost.closeTab(instanceId): beforeClose, then dispose
   openTool: typeof panelHost.addTool; // a tool opening another
+  editorHost: EditorHostScope; // P3-G (X32): this tab's scope, `{surface: 'panel', tabId}`, for registerEditorHost outside React
 }
 
 export interface PanelTool<S, P = void> {
