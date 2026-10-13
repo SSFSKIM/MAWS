@@ -3,7 +3,7 @@
 // a deletion. The host's tool-use idempotency is A's `withOp` (M7's tool), not the writer's, so its check moves there.
 // Where the schema module differs from S4's, the expectation follows the schema: `comment` is allowed on a code block
 // (D2, parent Decision Log 31), so retyping a commented passage to code keeps its comment.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { contentIdsOf, idAt, onUpdate, stateVector, transact, type Node } from '../yjs';
 import { DocIndex } from './block-index';
 import { EditError, type EditRefusal, type Op } from './edit-ops';
@@ -68,6 +68,29 @@ describe('the ops (S4 1)', () => {
     expect(textOf(doc, 'c2p')).toBe('cell tdone typed ');
     applyEdit(doc, [{ op: 'replace_text', block: 'w1', old: 'wzero', new: 'wone' }]); // the last word, before the space
     expect(textOf(doc, 'w1')).toBe('The word is wone ');
+  });
+
+  // M9's review (the first batch after a read): an unscoped quote converts to ProseMirror only the blocks whose text holds
+  // it, never every block of the tab (a cold replica paid tens of milliseconds for that at 200 pages).
+  it('replace_text unscoped converts only the blocks whose text holds the quote', () => {
+    const doc = seedDoc();
+    DocIndex.of(doc).warm(); // every block's text known, none converted by it
+    const pm = vi.spyOn(DocIndex.prototype, 'pm');
+    applyEdit(doc, [{ op: 'replace_text', old: 'scheduled for Friday', new: 'moved to Monday' }]);
+    const converted = new Set(pm.mock.calls.map(([top]) => top));
+    pm.mockRestore();
+    expect(textOf(doc, 'p2')).toContain('moved to Monday');
+    expect(converted.size, 'top-level blocks converted').toBeLessThanOrEqual(1);
+  });
+
+  it('insert checks the tab’s shape without converting its untouched blocks', () => {
+    const doc = seedDoc();
+    DocIndex.of(doc).warm();
+    const pm = vi.spyOn(DocIndex.prototype, 'pm');
+    applyEdit(doc, [{ op: 'insert', after: 'h1', markdown: 'A new paragraph.' }]);
+    const converted = new Set(pm.mock.calls.map(([top]) => top));
+    pm.mockRestore();
+    expect(converted.size, 'top-level blocks converted').toBeLessThanOrEqual(1);
   });
 
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {

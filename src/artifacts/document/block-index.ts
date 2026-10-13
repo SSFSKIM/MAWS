@@ -22,6 +22,7 @@ export class TopBlock {
   pmCache: PMNode | null = null;
   mdCache: string | null = null;
   textCache: string | null = null;
+  rawTextCache: string | null = null;
   threadsCache: ReadonlySet<string> | null = null;
 
   constructor(
@@ -157,6 +158,28 @@ export class DocIndex {
       top.textCache = parts.filter(Boolean).join('\n');
     }
     return top.textCache;
+  }
+
+  /**
+   * The block's text strings joined as Yjs holds them, read without a ProseMirror conversion (M9: the first unscoped quote
+   * after a read, on a replica whose blocks were never converted, otherwise converted every block of the tab). For a
+   * prefilter only: the strings of nested blocks run together and attribute text is absent, so a word found here may
+   * not be in the block's text, and a quote naming an attribute is searched without it (`text` is the exact one).
+   */
+  rawText(top: TopBlock): string {
+    this.refresh();
+    if (top.rawTextCache === null) {
+      const parts: string[] = [];
+      const walk = (node: Node): void => {
+        for (const part of node.toArray()) {
+          if (typeof part === 'string') parts.push(part);
+          else if (part instanceof YNode) walk(part);
+        }
+      };
+      walk(top.node);
+      top.rawTextCache = parts.join('');
+    }
+    return top.rawTextCache;
   }
 
   /**
@@ -336,6 +359,7 @@ export class DocIndex {
     top.pmCache = null;
     top.mdCache = null;
     top.textCache = null;
+    top.rawTextCache = null;
     top.threadsCache = null;
   }
 

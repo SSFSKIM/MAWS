@@ -370,6 +370,20 @@ class Planner {
     return order;
   }
 
+  /** The block's node type as the batch leaves it (an untouched block's from its Yjs node, without converting it). */
+  private typeOf(key: string): NodeType {
+    const state = this.tops.get(key);
+    if (state) return state.pm!.type;
+    const top = this.byKey.get(key)!;
+    return this.schema.nodes[top.node.name] ?? this.index.pm(top).type;
+  }
+
+  /** The block is in the document as the batch leaves it so far (without converting it). */
+  private exists(key: string): boolean {
+    const state = this.tops.get(key);
+    return state ? state.pm !== null : this.byKey.has(key);
+  }
+
   private current(key: string): PMNode | null {
     const state = this.tops.get(key);
     if (state) return state.pm;
@@ -579,7 +593,7 @@ class Planner {
         this.invalid(`tab ${tabId} would hold ${order.length} top-level blocks; a tab takes at most ${limit}`);
       }
       let match: ContentMatch | null = this.schema.topNodeType.contentMatch;
-      for (const key of order) match = match?.matchType(this.current(key)!.type) ?? null;
+      for (const key of order) match = match?.matchType(this.typeOf(key)) ?? null;
       if (!match?.validEnd) {
         this.opIndex = this.orderOp.get(tabId) ?? -1;
         this.invalid(`tab ${tabId} would be invalid: ${order.length === 0 ? 'a tab holds at least one block' : 'its blocks do not fit the document'}`);
@@ -651,7 +665,7 @@ class Planner {
     const scope = op.block != null ? this.located(op.block) : null;
     if (scope && scope.path.length > 0) return this.replaceTextNested(op, scope, quote, replacement);
     const pool: Array<{ key: string; tabId: string }> = scope ? [scope] : this.index.tabIds().flatMap((tabId) => this.order(tabId).map((key) => ({ key, tabId })));
-    const live = pool.filter(({ key }) => this.current(key) !== null);
+    const live = pool.filter(({ key }) => this.exists(key)); // the blocks' text is searched before any is converted
     const markdownOf = (key: string): string => {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
       return top ? this.index.md(top) : this.md.block(this.current(key)!);
@@ -660,9 +674,14 @@ class Planner {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
       return top ? this.index.text(top) : this.current(key)!.textBetween(0, this.current(key)!.content.size, '\n');
     };
+    // the needle prefilter reads the blocks' Yjs text (no conversion), then each candidate's own text
+    const holds = (key: string, needle: string): boolean => {
+      const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
+      return top ? this.index.rawText(top).includes(needle) && this.index.text(top).includes(needle) : textOf(key).includes(needle);
+    };
     const search = (needle: string | null) =>
       live
-        .filter(({ key }) => !needle || textOf(key).includes(needle))
+        .filter(({ key }) => !needle || holds(key, needle))
         .map(({ key, tabId }) => {
           const markdown = markdownOf(key);
           return { key, tabId, markdown, n: occurrences(markdown, quote) };
