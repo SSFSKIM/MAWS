@@ -77,7 +77,9 @@ export function resolveTokens(set: TokenSet, broken: ReadonlySet<string> = new S
       return false;
     }
     state.set(path, 'visiting');
-    if (!extend(target, [...stack, path])) {
+    // The target is copied as it resolves: its own chain and every nested group's own $extends expanded first.
+    const subtree = [...set.groups.keys()].filter((group) => relative(group, target) !== null).sort(comparePaths);
+    if (!subtree.every((group) => extend(group, [...stack, path]))) {
       if (state.get(path) !== 'failed') {
         state.set(path, 'failed');
         problems.push({ path, message: `$extends: ${ref} cannot be extended (it has problems)` });
