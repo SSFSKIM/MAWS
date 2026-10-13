@@ -17,14 +17,17 @@
 // the same place; a version shown from it replaces the page's content in place, read-only (the editor's `editable`
 // follows the preview, Decision Log 22), with the preview's bar in place of the toolbar and the version's pinned
 // tokens on the page. "See N new changes", the "Restored from …" banner and Show editors (a right-click over a
-// selection) come with it. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
+// selection) come with it. M9 (the scale gate): the version is drawn by an editor of its own, read-only, bound to the
+// version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
+// never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { inHistory, type VersionView } from '../collab';
+import type { VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
-import type { Carry } from '../../yjs';
+import { isBindingTransaction, type Carry } from '../../yjs';
+import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
@@ -232,14 +235,20 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick() },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
       }),
-      editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content' } },
+      editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
-      // from history state, not `setEditable` alone: a StrictMode remount sets the surviving editor's options again
-      editable: preview === null,
     },
     [tabId, handle, host, artifactId],
   );
-  usePreview(editor, preview?.view ?? null, preview?.carried ?? NO_CARRIES, preview?.focus ?? null, handle, tabId, historyController);
+  // the preview's own editor while a version shows (null until it exists); the live one is never put on a version
+  const [previewEditor, setPreviewEditor] = useState<Editor | null>(null);
+  const shown = preview && previewEditor ? previewEditor : editor;
+  // the editor showed something else: every other preview's docs can go, once a closed preview's editor is gone too
+  useEffect(() => {
+    if (preview) return;
+    const timer = setTimeout(() => historyController?.applied(null), PREVIEW_GONE_MS);
+    return () => clearTimeout(timer);
+  }, [preview, historyController]);
 
   // Comment the selection: the thread and the mark, the passage drawn active, then the surface opens its card.
   useLayoutEffect(() => {
@@ -304,8 +313,22 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 
   return (
     <div className="doc-tab-editor" onKeyDown={onKeyDown}>
+      {preview?.view && (
+        <PreviewEditor
+          view={preview.view}
+          carried={preview.carried ?? NO_CARRIES}
+          focus={preview.focus}
+          handle={handle}
+          tabId={tabId}
+          artifactId={artifactId}
+          host={host}
+          renderDiagram={renderDiagram}
+          controller={historyController}
+          onEditor={setPreviewEditor}
+        />
+      )}
       {preview && historyController ? (
-        <HistoryBar editor={editor} preview={preview} controller={historyController} onBack={() => historyController.close()} />
+        <HistoryBar editor={shown} preview={preview} controller={historyController} onBack={() => historyController.close()} />
       ) : (
         <Toolbar
           editor={editor}
@@ -317,9 +340,11 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           mentions={mentions}
         />
       )}
-      {findOpen && <FindBar editor={editor} onClose={() => setFindOpen(false)} />}
+      {findOpen && <FindBar editor={shown} onClose={() => setFindOpen(false)} />}
       <PageFrame
-        editor={editor}
+        editor={shown}
+        live={editor}
+        previewEditor={preview ? previewEditor : null}
         handle={handle}
         author={author}
         comments={comments}
@@ -341,7 +366,10 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 // The page's scroll box and, over it, the comment surface's overlay with the editor's reach. The overlay re-renders at
 // most once a frame as the passages move (an edit, a scroll, a resize); the page does not.
 interface PageFrameProps {
+  /** The editor on screen: the preview's while a version shows, else the live one. */
   editor: Editor;
+  live: Editor;
+  previewEditor: Editor | null;
   handle: DocumentHandle;
   author: CommentAuthor;
   comments: DocumentComments | undefined;
@@ -354,8 +382,8 @@ interface PageFrameProps {
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
-  const editors = useShowEditors(editor, history, tabId, preview === null);
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
+  const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
   const pending = useRef<number | null>(null);
@@ -414,7 +442,10 @@ function PageFrame({ editor, handle, author, comments, tabId, preview, history, 
   const sheet = (
     <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
       <div className="ds-doc-page">
-        <EditorContent editor={editor} />
+        <div className="doc-live" hidden={previewEditor !== null}>
+          <EditorContent editor={live} />
+        </div>
+        {previewEditor && <EditorContent editor={previewEditor} />}
       </div>
     </div>
   );
@@ -479,17 +510,64 @@ function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string
   return { x: line.left - origin.left, y: line.top - origin.top, width: line.width, height: line.height };
 }
 
-// Puts the editor on the preview's view (or back on the live tab), labels its moved and retyped blocks, reaches the
-// change ↑ ↓ asked for there, and tells the controller what is shown so the docs of what is not can go.
-function usePreview(editor: Editor, view: VersionView | null, carried: ReadonlyMap<string, Carry['kind']>, focus: number | 'tab' | null, handle: DocumentHandle, tabId: string, controller: HistoryController | null) {
-  const shown = useRef<VersionView | null>(null);
+// The preview's own editor (M9): read-only, bound to the version's view from its creation (the binding's microtask),
+// put on another view when the preview changes (a comparison, Show changes), its moved and retyped blocks labelled and
+// the change ↑ ↓ asked for reached once it draws, the controller told what is shown. It never touches the live editor.
+const PREVIEW_GONE_MS = 10; // past Tiptap's deferred destruction of an unmounted editor (1 ms)
+
+interface PreviewEditorProps {
+  view: VersionView;
+  carried: ReadonlyMap<string, Carry['kind']>;
+  focus: number | 'tab' | null;
+  handle: DocumentHandle;
+  tabId: string;
+  artifactId: string;
+  host: EditorHost;
+  renderDiagram: DocumentEditorProps['renderDiagram'];
+  controller: HistoryController | null;
+  onEditor(editor: Editor | null): void;
+}
+
+function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor }: PreviewEditorProps) {
+  const editor = useEditor(
+    {
+      coreExtensionOptions,
+      extensions: editorExtensions({
+        collaboration: { ytype: tabBody(handle.doc, tabId) ?? null, awareness: null, user: null, hold: null, onRestored: null, version: view },
+        comments: { doc: handle.doc, tabId, onComment: () => false },
+        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
+      }),
+      editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'preview' } },
+      shouldRerenderOnTransaction: false,
+      editable: false,
+    },
+    [tabId, handle, host, artifactId],
+  );
+  useEffect(() => {
+    onEditor(editor);
+    return () => onEditor(null);
+  }, [editor, onEditor]);
   useEffect(() => {
     if (editor.isDestroyed) return;
-    if (view) editor.commands.showVersion(view);
-    else if (shown.current && inHistory(editor.state, tabBody(handle.doc, tabId) ?? null)) editor.commands.leaveHistory();
-    shown.current = view;
-    setCarried(editor, view ? carried : NO_CARRIES);
-    if (view && focus !== null) goToChange(editor, focus === 'tab' ? null : focus);
-    controller?.applied(view);
-  }, [editor, view, carried, focus, handle, tabId, controller]);
+    const sync = () => ySyncPluginKey.getState(editor.state) as { ytype?: unknown; renderer?: unknown } | undefined;
+    const bound = () => sync()?.ytype === view.ytype && (sync()?.renderer ?? null) === view.renderer;
+    // a view other than the one the editor is on (or being bound to at its creation)
+    if (sync()?.ytype != null && !bound()) editor.commands.showVersion(view);
+    setCarried(editor, carried);
+    const drawn = () => {
+      if (focus !== null) goToChange(editor, focus === 'tab' ? null : focus);
+      controller?.applied(view);
+    };
+    if (bound()) return void drawn();
+    const once = ({ transaction }: { transaction: { docChanged: boolean; getMeta(key: string): unknown } }) => {
+      if (!isBindingTransaction(transaction) || !bound()) return;
+      editor.off('transaction', once);
+      drawn();
+    };
+    editor.on('transaction', once);
+    return () => {
+      editor.off('transaction', once);
+    };
+  }, [editor, view, carried, focus, controller]);
+  return null;
 }

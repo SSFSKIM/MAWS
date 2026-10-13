@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
+import { isBindingTransaction } from '../../../yjs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
@@ -103,6 +104,8 @@ const agentAppends = (text: string) => (agent: DocumentHandle) => {
 };
 const previewing = async () => until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && !screen.queryByText('Loading the version…'), 'the preview');
 const liveText = (editor: Editor) => editor.state.doc.textContent;
+// M9 (the controller's fix wave, step 2): a version is shown in an editor of its own, beside the live one.
+const previewEditor = (): Editor | null => (document.querySelector('.ProseMirror[data-editor="preview"]') as unknown as { editor?: Editor } | null)?.editor ?? null;
 
 describe('the list', () => {
   it('groups by day, folds runs of automatic versions, colours author chips by --author-N and filters Named only', async () => {
@@ -161,6 +164,47 @@ describe('the list', () => {
 });
 
 describe('the preview', () => {
+  // M9 (the scale gate: the preview's enter and leave re-rendered the live tab through `@y/prosemirror`'s binding, 1.2 s
+  // and 0.9 s at 200 pages): the version is drawn in an editor of its own, read-only, while the live editor stays bound,
+  // hidden, its content and undo untouched, so leaving history only shows it again.
+  it('shows a version in an editor of its own: the live editor keeps its binding, its content and its undo across enter and leave', async () => {
+    const { editor } = await setup(async ({ history: h, agentWrites }) => {
+      h.version('named', HUMAN, { label: 'Before' });
+      await agentWrites(agentAppends(' Later.'));
+    });
+    const live = editor();
+    act(() => void live.chain().insertContentAt(endOf(live, 'p3'), ' Typed.').run());
+    expect(live.can().undo()).toBe(true);
+    const content = live.state.doc;
+    let rebound = 0;
+    live.on('transaction', ({ transaction }) => {
+      if (transaction.docChanged && isBindingTransaction(transaction)) rebound += 1;
+    });
+
+    await openHistory();
+    click(row('Before'));
+    await previewing();
+    const shown = previewEditor();
+    expect(shown).not.toBeNull();
+    expect(shown).not.toBe(live);
+    expect(shown!.isEditable).toBe(false);
+    expect(liveText(shown!)).not.toContain('Later.');
+    expect(live.view.dom.closest('[hidden]')).not.toBeNull(); // the live page hidden, not unbound
+    expect(shown!.can().undo()).toBe(false);
+    const before = shown!.state.doc;
+    act(() => void shown!.commands.insertContentAt(1, 'X'));
+    expect(shown!.state.doc).toBe(before); // a local change on the preview is refused
+
+    click(within(bar()).getByRole('button', { name: 'Back to document' }));
+    await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && previewEditor() === null, 'the live document');
+    expect(rebound).toBe(0);
+    expect(live.state.doc).toBe(content);
+    expect(live.view.dom.closest('[hidden]')).toBeNull();
+    expect(live.can().undo()).toBe(true);
+    act(() => void live.commands.undo());
+    await until(() => !liveText(live).includes('Typed.'), 'the typing undone');
+  });
+
   it('shows a version read-only with its changes in the authors’ colours, counts them and steps through them', async () => {
     const { editor } = await setup(async ({ history: h, agentWrites }) => {
       h.version('named', HUMAN, { label: 'Before' });
@@ -171,7 +215,7 @@ describe('the preview', () => {
     await openHistory();
     click(row('.*Two edits'));
     await previewing();
-    expect(editor().isEditable).toBe(false);
+    expect(previewEditor()!.isEditable).toBe(false); // M9: the version is the preview editor’s, not the live one’s
     expect(document.querySelector('.ProseMirror y-ins')?.textContent).toBe(' The agent adds this.');
     const run = document.querySelector<HTMLElement>('.ProseMirror .doc-change-ins')!;
     expect(run.textContent).toBe(' The agent adds this.');
@@ -189,14 +233,14 @@ describe('the preview', () => {
 
     act(() => void fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Show changes' })));
     await until(() => document.querySelector('.ProseMirror y-ins') === null, 'the plain version');
-    expect(liveText(editor())).toBe('first paragraph.The second paragraph. The agent adds this.The third paragraph.');
+    expect(liveText(previewEditor()!)).toBe('first paragraph.The second paragraph. The agent adds this.The third paragraph.');
 
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && editor().isEditable, 'the live document');
     expect(editor().can().undo()).toBe(false); // nothing of the preview is undoable
   });
 
-  it('keeps the editor read-only through a StrictMode remount while a version shows (editable from history state)', async () => {
+  it('keeps the preview read-only through a StrictMode remount while a version shows', async () => {
     const { editor, history: h } = await setup(
       async ({ history: hist, agentWrites }) => {
         hist.version('named', HUMAN, { label: 'Before' });
@@ -209,8 +253,8 @@ describe('the preview', () => {
     click(row('Before'));
     await previewing();
     await new Promise((resolve) => setTimeout(resolve, 20)); // past the remount's deferred setOptions
-    expect(editor().isEditable).toBe(false);
-    expect(editor().view.dom.getAttribute('contenteditable')).toBe('false');
+    expect(previewEditor()!.isEditable).toBe(false); // M9: the version is the preview editor’s, not the live one’s
+    expect(previewEditor()!.view.dom.getAttribute('contenteditable')).toBe('false');
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => editor().isEditable && editor().view.dom.getAttribute('contenteditable') === 'true', 'the live, editable document');
     expect((await h.versions()).filter((v) => v.kind === 'auto')).toHaveLength(1); // one view-time version for the mount, StrictMode or not
@@ -354,7 +398,7 @@ describe('the owner’s actions', () => {
 
   it('offers See N new changes after an agent changed the document since the last view, and opens that comparison', async () => {
     const t = { value: Date.now() - 60 * 60_000 };
-    const { history: h, editor } = await setup(
+    const { history: h } = await setup(
       async ({ history: hist, agentWrites }) => {
         hist.version('auto', HUMAN);
         await hist.markViewed();
@@ -372,7 +416,7 @@ describe('the owner’s actions', () => {
     await previewing();
     expect(within(bar()).getByText('Changes since you last looked')).toBeTruthy();
     await until(() => document.querySelectorAll('.ProseMirror y-ins').length === 2, 'the new changes');
-    expect(editor().isEditable).toBe(false);
+    expect(previewEditor()!.isEditable).toBe(false); // M9: the version is the preview editor’s, not the live one’s
     expect(screen.queryByRole('button', { name: /new changes/ })).toBeNull();
   });
 

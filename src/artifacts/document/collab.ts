@@ -6,9 +6,12 @@
 //
 // - The live binding: the sync plugin, bound to `ytype` a microtask after the view exists (S1 pitfall 3), the other
 //   replicas' cursors from awareness, and an UndoManager scoped to this binding's own changes.
-// - History mode: `showVersion` puts the same editor on a version's fragment through a DiffRenderer, read-only;
+// - History mode: `showVersion` puts an editor on a version's fragment through a DiffRenderer, read-only;
 //   `leaveHistory` goes back to the live fragment. While the binding is not on the live fragment, undo and redo refuse
 //   (they would edit the live doc behind the preview) and a filter refuses every local document change.
+// - A preview editor (M9: the scale gate; the editor's history preview): an editor configured with `version` binds to
+//   that version from its creation and is never the live tab's: no UndoManager on the live fragment, no cursor, no hold,
+//   no restore listener, so showing a version never re-binds (and re-renders) the live editor, which stays bound.
 // - A restore this replica did not make clears the UndoManager (Decision Log 16): an undo across it would revert it.
 // - The composition hold (Decision Log 33, 35): the provider buffers remote frames from compositionstart until
 //   `view.composing` is false again, so a remote change never ends an IME composition early (doubled jamo).
@@ -46,6 +49,8 @@ export interface CollaborationOptions {
   onRestored: ((listener: () => void) => () => void) | null;
   /** How the other replicas' cursors are drawn (the editor's, reading each replica's own state; editor/awareness.ts). */
   cursors: Pick<NonNullable<Parameters<typeof yCursorPlugin>[1]>, 'cursorBuilder' | 'selectionBuilder'> | null;
+  /** A preview editor's version, bound from its creation; `ytype` stays the live fragment it is never on. */
+  version: VersionView | null;
 }
 
 interface CollaborationStorage {
@@ -82,7 +87,7 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
   name: 'collaboration', // Tiptap's name: UniqueID takes its collaborative path (no ids written at create) for it
   priority: 1000,
 
-  addOptions: () => ({ ytype: null, awareness: null, user: null, hold: null, onRestored: null, cursors: null }),
+  addOptions: () => ({ ytype: null, awareness: null, user: null, hold: null, onRestored: null, cursors: null, version: null }),
   addStorage: () => ({ undoManager: null, scratch: null, history: null, offRestored: null }),
 
   addCommands() {
@@ -146,9 +151,10 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
   },
 
   addProseMirrorPlugins() {
-    const { ytype, awareness, user, hold, cursors } = this.options;
+    const { ytype, awareness, user, hold, cursors, version } = this.options;
     if (!ytype) return [];
     const storage = this.storage;
+    if (version) storage.history = version;
     // The StrictMode guard (Decision Log 22): the document's UndoManager is made once the editor's view is in the page
     // (Tiptap draws a new editor into a detached element and EditorContent moves it in, updating the view), and is
     // swapped into the undo plugin; until then the plugin holds one over a scratch doc of its own. A dev build's
@@ -194,11 +200,12 @@ export const Collaboration = Extension.create<CollaborationOptions, Collaboratio
       key: new PluginKey('collaborationBind'),
       view: (view) => {
         queueMicrotask(() => {
-          if (!view.isDestroyed) configureYProsemirror({ ytype, renderer: null })(view.state, view.dispatch);
+          if (!view.isDestroyed) configureYProsemirror(version ?? { ytype, renderer: null })(view.state, view.dispatch);
         });
         return {};
       },
     });
+    if (version) return [syncPlugin({ mapAttributionToMark: defaultMapAttributionToMark, attributedNodes }), bind, readOnlyHistory, yUndoPlugin(placeholder)];
     return [
       syncPlugin({ mapAttributionToMark: defaultMapAttributionToMark, attributedNodes }),
       bind,
