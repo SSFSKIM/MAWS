@@ -189,7 +189,7 @@ describe('an artifact in a main tab', () => {
   });
 
   it('a kind with no editor yet says so quietly with the row’s facts, and mounts the editor once one registers', async () => {
-    current = row({ kind: 'presentation', title: 'Q3 deck', lastEditor: { kind: 'session', appSessionId: S1 }, sessions: [{ appSessionId: S1, title: 'Deck builder', roles: ['created'], lastAt: NOW }], space: { id: '00000000-0000-4000-8000-000000000101', name: 'Research' }, project: { id: 'proj-1' as never, name: 'maws' } });
+    current = row({ kind: 'presentation', title: 'Q3 deck', lastEditor: { kind: 'session', appSessionId: 'app-s2' as AppSessionId }, lastEditorTitle: 'Deck reviewer', sessions: [{ appSessionId: S1, title: 'Deck builder', roles: ['created'], lastAt: NOW }], space: { id: '00000000-0000-4000-8000-000000000101', name: 'Research' }, project: { id: 'proj-1' as never, name: 'maws' } });
     render(<Shell />);
     act(() => openArtifactTab(A));
     expect(await screen.findByText('No editor for presentations yet')).toBeTruthy();
@@ -198,7 +198,7 @@ describe('an artifact in a main tab', () => {
     expect(body.textContent).toContain('Presentation');
     expect(body.textContent).toContain('in Research');
     expect(body.textContent).toContain('maws');
-    expect(body.textContent).toMatch(/Edited .+ by Deck builder/);
+    expect(body.textContent).toMatch(/Edited .+ by Deck reviewer/); // an editor that never linked it, by its title (DL 27f)
     expect(main.callsOf('artifacts.markViewed'), 'nothing of the content was shown').toEqual([]);
 
     const editor = testEditor();

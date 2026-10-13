@@ -70,9 +70,9 @@ const register: HostRegister = (on, emit, client) => {
   // the document ports main posts on the parent port; a store that failed to open answers `unavailable`.
   documents = openDocuments(userData);
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
+  const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
   const designSystems = registerDesignSystems({ documents }); // P3-D: the kind's adapter, its mirror writer, the create context and the seeded defaults
-  const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {

@@ -261,9 +261,10 @@ describe('a row', () => {
   it('shows its kind, title, Space, project, last editor and time, and the sessions that touched it', async () => {
     const sessions = [1, 2, 3, 4].map((n) => ({ appSessionId: S(n), title: `Session ${n}`, roles: n === 1 ? (['created', 'edited'] as const) : (['viewed'] as const), lastAt: NOW - n * HOUR }));
     rows = [
-      row(1, { title: 'Launch plan', space: { id: WORK, name: 'Work' }, project: { id: 'p1' as ProjectId, name: 'maws' }, lastEditor: { kind: 'session', appSessionId: S(1) }, lastEditedAt: NOW - 3 * 60_000, sessions: sessions.map((s) => ({ ...s, roles: [...s.roles] })) }),
+      row(1, { title: 'Launch plan', space: { id: WORK, name: 'Work' }, project: { id: 'p1' as ProjectId, name: 'maws' }, lastEditor: { kind: 'session', appSessionId: S(1) }, lastEditorTitle: 'Session 1', lastEditedAt: NOW - 3 * 60_000, sessions: sessions.map((s) => ({ ...s, roles: [...s.roles] })) }),
       row(2, { title: 'Mine', kind: 'html', lastEditor: { kind: 'human' }, lastEditedAt: NOW - 2 * HOUR }),
-      row(3, { title: 'Unknown session', lastEditor: { kind: 'session', appSessionId: S(9) }, sessions: [{ appSessionId: S(9), title: '', roles: ['created'], lastAt: NOW }] }),
+      row(3, { title: 'Unknown session', lastEditor: { kind: 'session', appSessionId: S(9) }, lastEditorTitle: '', sessions: [{ appSessionId: S(9), title: '', roles: ['created'], lastAt: NOW }] }),
+      row(4, { title: 'Unlinked editor', lastEditor: { kind: 'session', appSessionId: S(7) }, lastEditorTitle: 'Side quest', sessions: [] }), // DL 27f
     ];
     render(<Library />);
     const launch = await screen.findByRole('article', { name: 'Launch plan' });
@@ -278,6 +279,7 @@ describe('a row', () => {
     expect(within(article('Mine')).getByText('HTML page')).toBeTruthy();
     expect(within(article('Mine')).getByText(/Edited .* by You/)).toBeTruthy();
     expect(within(article('Unknown session')).getByText(/by Claude$/)).toBeTruthy();
+    expect(within(article('Unlinked editor')).getByText(/by Side quest$/)).toBeTruthy();
     expect(within(article('Unknown session')).getByRole('button', { name: 'Untitled session' })).toBeTruthy();
   });
 

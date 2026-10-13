@@ -44,7 +44,8 @@ function row(n: number, over: Partial<LibraryRow> = {}): LibraryRow {
 }
 
 const NOTES = row(1, { title: 'Launch notes' });
-const PAGE = row(2, { kind: 'html', title: 'Pricing page', lastEditor: { kind: 'session', appSessionId: A } });
+// last edited by a session that never linked it (a side thread's write): main names it by its title (DL 27f)
+const PAGE = row(2, { kind: 'html', title: 'Pricing page', lastEditor: { kind: 'session', appSessionId: 'app-side' as AppSessionId }, lastEditorTitle: 'Review the page' });
 const DECK = row(3, { kind: 'presentation', title: 'Q3 deck' });
 const SPEC = row(4, { title: 'Spec' });
 const CSV = row(5, { kind: 'file', title: 'data.csv' });
@@ -158,7 +159,7 @@ describe('the list', () => {
     expect(listed()).toEqual([NOTES.id, SPEC.id, DECK.id, PAGE.id, CSV.id]);
     expect(rowOf(1).textContent).toContain('Launch notes');
     expect(rowOf(1).textContent).toMatch(/Edited .+ by You/);
-    expect(rowOf(2).textContent).toMatch(/Edited .+ by Fix the dashboard/);
+    expect(rowOf(2).textContent).toMatch(/Edited .+ by Review the page/);
   });
 
   it('All lists every artifact in the library, and This session returns to the session’s', async () => {

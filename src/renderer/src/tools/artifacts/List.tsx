@@ -106,8 +106,7 @@ function Groups({ filter, scope, onOpen }: { filter: LibraryFilter; scope: Artif
 
 function ListRow({ row, onOpen }: { row: LibraryRow; onOpen(artifactId: string): void }) {
   const now = useNow();
-  const editor = row.lastEditor;
-  const by = actorDisplay(editor, editor.kind === 'session' ? row.sessions.find((s) => s.appSessionId === editor.appSessionId)?.title : undefined).name;
+  const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   return (
     <button
       type="button"
